@@ -18,7 +18,7 @@
       "is_partition": false,
       "options": null,
       "partition_bound": null,
-      "owner": "supabase_admin",
+      "owner": "supabase_realtime_admin",
       "comment": null,
       "columns": [
         {
@@ -83,7 +83,7 @@
           "grantable": false
         },
         {
-          "grantee": "supabase_admin",
+          "grantee": "supabase_realtime_admin",
           "privilege": "USAGE",
           "grantable": false
         }
@@ -104,7 +104,7 @@
       "is_partition": false,
       "options": null,
       "partition_bound": null,
-      "owner": "supabase_admin",
+      "owner": "supabase_realtime_admin",
       "comment": null,
       "columns": [
         {
@@ -223,7 +223,7 @@
           "grantable": false
         },
         {
-          "grantee": "supabase_admin",
+          "grantee": "supabase_realtime_admin",
           "privilege": "USAGE",
           "grantable": false
         }
@@ -244,7 +244,7 @@
       "is_partition": false,
       "options": null,
       "partition_bound": null,
-      "owner": "supabase_admin",
+      "owner": "supabase_realtime_admin",
       "comment": null,
       "columns": [
         {
@@ -327,7 +327,7 @@
           "grantable": false
         },
         {
-          "grantee": "supabase_admin",
+          "grantee": "supabase_realtime_admin",
           "privilege": "USAGE",
           "grantable": false
         }
@@ -340,7 +340,7 @@
     "type:realtime.action": {
       "schema": "realtime",
       "name": "action",
-      "owner": "supabase_admin",
+      "owner": "supabase_realtime_admin",
       "labels": [
         {
           "sort_order": 1,
@@ -371,7 +371,7 @@
           "grantable": false
         },
         {
-          "grantee": "supabase_admin",
+          "grantee": "supabase_realtime_admin",
           "privilege": "USAGE",
           "grantable": false
         }
@@ -381,7 +381,7 @@
     "type:realtime.equality_op": {
       "schema": "realtime",
       "name": "equality_op",
-      "owner": "supabase_admin",
+      "owner": "supabase_realtime_admin",
       "labels": [
         {
           "sort_order": 1,
@@ -420,7 +420,7 @@
           "grantable": false
         },
         {
-          "grantee": "supabase_admin",
+          "grantee": "supabase_realtime_admin",
           "privilege": "USAGE",
           "grantable": false
         }
@@ -594,6 +594,11 @@
           "grantee": "dashboard_user",
           "privilege": "EXECUTE",
           "grantable": false
+        },
+        {
+          "grantee": "supabase_realtime_admin",
+          "privilege": "EXECUTE",
+          "grantable": false
         }
       ],
       "security_labels": []
@@ -642,6 +647,11 @@
           "grantee": "dashboard_user",
           "privilege": "EXECUTE",
           "grantable": false
+        },
+        {
+          "grantee": "supabase_realtime_admin",
+          "privilege": "EXECUTE",
+          "grantable": false
         }
       ],
       "security_labels": []
@@ -688,6 +698,11 @@
         },
         {
           "grantee": "dashboard_user",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "supabase_realtime_admin",
           "privilege": "EXECUTE",
           "grantable": false
         }
@@ -1147,16 +1162,11 @@
       "sql_body": null,
       "definition": "CREATE OR REPLACE FUNCTION realtime.\"cast\"(val text, type_ regtype)\n RETURNS jsonb\n LANGUAGE plpgsql\n IMMUTABLE\nAS $function$\ndeclare\n  res jsonb;\nbegin\n  if type_::text = 'bytea' then\n    return to_jsonb(val);\n  end if;\n  execute format('select to_jsonb(%L::'|| type_::text || ')', val) into res;\n  return res;\nend\n$function$\n",
       "config": null,
-      "owner": "supabase_admin",
+      "owner": "supabase_realtime_admin",
       "comment": null,
       "privileges": [
         {
           "grantee": "PUBLIC",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "supabase_admin",
           "privilege": "EXECUTE",
           "grantable": false
         },
@@ -1177,11 +1187,6 @@
         },
         {
           "grantee": "service_role",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "dashboard_user",
           "privilege": "EXECUTE",
           "grantable": false
         },
@@ -1226,16 +1231,11 @@
       "sql_body": null,
       "definition": "CREATE OR REPLACE FUNCTION realtime.apply_rls(wal jsonb, max_record_bytes integer DEFAULT (1024 * 1024))\n RETURNS SETOF realtime.wal_rls\n LANGUAGE plpgsql\nAS $function$\ndeclare\n    -- Regclass of the table e.g. public.notes\n    entity_ regclass = (quote_ident(wal ->> 'schema') || '.' || quote_ident(wal ->> 'table'))::regclass;\n\n    -- I, U, D, T: insert, update ...\n    action realtime.action = (\n        case wal ->> 'action'\n            when 'I' then 'INSERT'\n            when 'U' then 'UPDATE'\n            when 'D' then 'DELETE'\n            else 'ERROR'\n        end\n    );\n\n    -- Is row level security enabled for the table\n    is_rls_enabled bool = relrowsecurity from pg_class where oid = entity_;\n\n    subscriptions realtime.subscription[] = array_agg(subs)\n        from\n            realtime.subscription subs\n        where\n            subs.entity = entity_\n            -- Filter by action early - only get subscriptions interested in this action\n            -- action_filter column can be: '*' (all), 'INSERT', 'UPDATE', or 'DELETE'\n            and (subs.action_filter = '*' or subs.action_filter = action::text);\n\n    -- Subscription vars\n    working_role regrole;\n    working_selected_columns text[];\n    claimed_role regrole;\n    claims jsonb;\n\n    subscription_id uuid;\n    subscription_has_access bool;\n    visible_to_subscription_ids uuid[] = '{}';\n\n    -- structured info for wal's columns\n    columns realtime.wal_column[];\n    -- previous identity values for update/delete\n    old_columns realtime.wal_column[];\n\n    error_record_exceeds_max_size boolean = octet_length(wal::text) > max_record_bytes;\n\n    -- Primary jsonb output for record\n    output jsonb;\n\n    -- Loop record for iterating unique roles (outer loop)\n    role_record record;\n    -- Loop record for iterating unique selected_columns within a role (inner loop)\n    cols_record record;\n    -- Subscription ids visible at the role level (before fanning out by selected_columns)\n    visible_role_sub_ids uuid[] = '{}';\n\nbegin\n    perform set_config('role', null, true);\n\n    columns =\n        array_agg(\n            (\n                x->>'name',\n                x->>'type',\n                x->>'typeoid',\n                realtime.cast(\n                    (x->'value') #>> '{}',\n                    coalesce(\n                        (x->>'typeoid')::regtype, -- null when wal2json version <= 2.4\n                        (x->>'type')::regtype\n                    )\n                ),\n                (pks ->> 'name') is not null,\n                true\n            )::realtime.wal_column\n        )\n        from\n            jsonb_array_elements(wal -> 'columns') x\n            left join jsonb_array_elements(wal -> 'pk') pks\n                on (x ->> 'name') = (pks ->> 'name');\n\n    old_columns =\n        array_agg(\n            (\n                x->>'name',\n                x->>'type',\n                x->>'typeoid',\n                realtime.cast(\n                    (x->'value') #>> '{}',\n                    coalesce(\n                        (x->>'typeoid')::regtype, -- null when wal2json version <= 2.4\n                        (x->>'type')::regtype\n                    )\n                ),\n                (pks ->> 'name') is not null,\n                true\n            )::realtime.wal_column\n        )\n        from\n            jsonb_array_elements(wal -> 'identity') x\n            left join jsonb_array_elements(wal -> 'pk') pks\n                on (x ->> 'name') = (pks ->> 'name');\n\n    for role_record in\n        select claims_role\n        from (select distinct claims_role from unnest(subscriptions)) t\n        order by claims_role::text\n    loop\n        working_role := role_record.claims_role;\n\n        -- Update `is_selectable` for columns and old_columns (once per role)\n        columns =\n            array_agg(\n                (\n                    c.name,\n                    c.type_name,\n                    c.type_oid,\n                    c.value,\n                    c.is_pkey,\n                    pg_catalog.has_column_privilege(working_role, entity_, c.name, 'SELECT')\n                )::realtime.wal_column\n            )\n            from\n                unnest(columns) c;\n\n        old_columns =\n                array_agg(\n                    (\n                        c.name,\n                        c.type_name,\n                        c.type_oid,\n                        c.value,\n                        c.is_pkey,\n                        pg_catalog.has_column_privilege(working_role, entity_, c.name, 'SELECT')\n                    )::realtime.wal_column\n                )\n                from\n                    unnest(old_columns) c;\n\n        if action <> 'DELETE' and count(1) = 0 from unnest(columns) c where c.is_pkey then\n            -- Fan out 400 error per distinct selected_columns for this role\n            for cols_record in\n                select selected_columns\n                from (select distinct selected_columns from unnest(subscriptions) s where s.claims_role = working_role) t\n                order by coalesce(array_to_string(selected_columns, ','), '')\n            loop\n                working_selected_columns := cols_record.selected_columns;\n                return next (\n                    jsonb_build_object(\n                        'schema', wal ->> 'schema',\n                        'table', wal ->> 'table',\n                        'type', action\n                    ),\n                    is_rls_enabled,\n                    (select array_agg(s.subscription_id) from unnest(subscriptions) as s where s.claims_role = working_role and (s.selected_columns is not distinct from working_selected_columns)),\n                    array['Error 400: Bad Request, no primary key']\n                )::realtime.wal_rls;\n            end loop;\n\n        -- The claims role does not have SELECT permission to the primary key of entity\n        elsif action <> 'DELETE' and sum(c.is_selectable::int) <> count(1) from unnest(columns) c where c.is_pkey then\n            -- Fan out 401 error per distinct selected_columns for this role\n            for cols_record in\n                select selected_columns\n                from (select distinct selected_columns from unnest(subscriptions) s where s.claims_role = working_role) t\n                order by coalesce(array_to_string(selected_columns, ','), '')\n            loop\n                working_selected_columns := cols_record.selected_columns;\n                return next (\n                    jsonb_build_object(\n                        'schema', wal ->> 'schema',\n                        'table', wal ->> 'table',\n                        'type', action\n                    ),\n                    is_rls_enabled,\n                    (select array_agg(s.subscription_id) from unnest(subscriptions) as s where s.claims_role = working_role and (s.selected_columns is not distinct from working_selected_columns)),\n                    array['Error 401: Unauthorized']\n                )::realtime.wal_rls;\n            end loop;\n\n        else\n            -- Create the prepared statement (once per role)\n            if is_rls_enabled and action <> 'DELETE' then\n                if (select 1 from pg_prepared_statements where name = 'walrus_rls_stmt' limit 1) > 0 then\n                    deallocate walrus_rls_stmt;\n                end if;\n                execute realtime.build_prepared_statement_sql('walrus_rls_stmt', entity_, columns);\n            end if;\n\n            -- Collect all visible subscription IDs for this role (filter check + RLS check)\n            visible_role_sub_ids = '{}';\n\n            for subscription_id, claims in (\n                    select\n                        subs.subscription_id,\n                        subs.claims\n                    from\n                        unnest(subscriptions) subs\n                    where\n                        subs.entity = entity_\n                        and subs.claims_role = working_role\n                        and (\n                            realtime.is_visible_through_filters(columns, subs.filters)\n                            or (\n                              action = 'DELETE'\n                              and realtime.is_visible_through_filters(old_columns, subs.filters)\n                            )\n                        )\n            ) loop\n\n                if not is_rls_enabled or action = 'DELETE' then\n                    visible_role_sub_ids = visible_role_sub_ids || subscription_id;\n                else\n                    -- Check if RLS allows the role to see the record\n                    perform\n                        -- Trim leading and trailing quotes from working_role because set_config\n                        -- doesn't recognize the role as valid if they are included\n                        set_config('role', trim(both '\"' from working_role::text), true),\n                        set_config('request.jwt.claims', claims::text, true);\n\n                    execute 'execute walrus_rls_stmt' into subscription_has_access;\n\n                    if subscription_has_access then\n                        visible_role_sub_ids = visible_role_sub_ids || subscription_id;\n                    end if;\n                end if;\n            end loop;\n\n            perform set_config('role', null, true);\n\n            -- Inner loop: per distinct selected_columns for this role\n            for cols_record in\n                select selected_columns\n                from (select distinct selected_columns from unnest(subscriptions) s where s.claims_role = working_role) t\n                order by coalesce(array_to_string(selected_columns, ','), '')\n            loop\n                working_selected_columns := cols_record.selected_columns;\n\n                output = jsonb_build_object(\n                    'schema', wal ->> 'schema',\n                    'table', wal ->> 'table',\n                    'type', action,\n                    'commit_timestamp', to_char(\n                        ((wal ->> 'timestamp')::timestamptz at time zone 'utc'),\n                        'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"'\n                    ),\n                    'columns', (\n                        select\n                            jsonb_agg(\n                                jsonb_build_object(\n                                    'name', pa.attname,\n                                    'type', pt.typname\n                                )\n                                order by pa.attnum asc\n                            )\n                        from\n                            pg_attribute pa\n                            join pg_type pt\n                                on pa.atttypid = pt.oid\n                            left join (\n                                select unnest(conkey) as pkey_attnum\n                                from pg_constraint\n                                where conrelid = entity_ and contype = 'p'\n                            ) pk on pk.pkey_attnum = pa.attnum\n                        where\n                            attrelid = entity_\n                            and attnum > 0\n                            and pg_catalog.has_column_privilege(working_role, entity_, pa.attname, 'SELECT')\n                            and (working_selected_columns is null or pa.attname = any(working_selected_columns) or pk.pkey_attnum is not null)\n                    )\n                )\n                -- Add \"record\" key for insert and update\n                || case\n                    when action in ('INSERT', 'UPDATE') then\n                        jsonb_build_object(\n                            'record',\n                            (\n                                select\n                                    jsonb_object_agg(\n                                        -- if unchanged toast, get column name and value from old record\n                                        coalesce((c).name, (oc).name),\n                                        case\n                                            when (c).name is null then (oc).value\n                                            else (c).value\n                                        end\n                                    )\n                                from\n                                    unnest(columns) c\n                                    full outer join unnest(old_columns) oc\n                                        on (c).name = (oc).name\n                                where\n                                    coalesce((c).is_selectable, (oc).is_selectable)\n                                    and (working_selected_columns is null or coalesce((c).name, (oc).name) = any(working_selected_columns) or coalesce((c).is_pkey, (oc).is_pkey))\n                                    and ( not error_record_exceeds_max_size or (octet_length((c).value::text) <= 64))\n                            )\n                        )\n                    else '{}'::jsonb\n                end\n                -- Add \"old_record\" key for update and delete\n                || case\n                    when action = 'UPDATE' then\n                        jsonb_build_object(\n                                'old_record',\n                                (\n                                    select jsonb_object_agg((c).name, (c).value)\n                                    from unnest(old_columns) c\n                                    where\n                                        (c).is_selectable\n                                        and (working_selected_columns is null or (c).name = any(working_selected_columns) or (c).is_pkey)\n                                        and ( not error_record_exceeds_max_size or (octet_length((c).value::text) <= 64))\n                                )\n                            )\n                    when action = 'DELETE' then\n                        jsonb_build_object(\n                            'old_record',\n                            (\n                                select jsonb_object_agg((c).name, (c).value)\n                                from unnest(old_columns) c\n                                where\n                                    (c).is_selectable\n                                    and (working_selected_columns is null or (c).name = any(working_selected_columns) or (c).is_pkey)\n                                    and ( not error_record_exceeds_max_size or (octet_length((c).value::text) <= 64))\n                                    and ( not is_rls_enabled or (c).is_pkey ) -- if RLS enabled, we can't secure deletes so filter to pkey\n                            )\n                        )\n                    else '{}'::jsonb\n                end;\n\n                -- Filter visible_role_sub_ids to those matching the current selected_columns group\n                visible_to_subscription_ids = coalesce(\n                    (\n                        select array_agg(s.subscription_id)\n                        from unnest(subscriptions) s\n                        where s.claims_role = working_role\n                          and (s.selected_columns is not distinct from working_selected_columns)\n                          and s.subscription_id = any(visible_role_sub_ids)\n                    ),\n                    '{}'::uuid[]\n                );\n\n                return next (\n                    output,\n                    is_rls_enabled,\n                    visible_to_subscription_ids,\n                    case\n                        when error_record_exceeds_max_size then array['Error 413: Payload Too Large']\n                        else '{}'\n                    end\n                )::realtime.wal_rls;\n            end loop;\n\n        end if;\n    end loop;\n\n    perform set_config('role', null, true);\nend;\n$function$\n",
       "config": null,
-      "owner": "supabase_admin",
+      "owner": "supabase_realtime_admin",
       "comment": null,
       "privileges": [
         {
           "grantee": "PUBLIC",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "supabase_admin",
           "privilege": "EXECUTE",
           "grantable": false
         },
@@ -1256,11 +1256,6 @@
         },
         {
           "grantee": "service_role",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "dashboard_user",
           "privilege": "EXECUTE",
           "grantable": false
         },
@@ -1317,7 +1312,7 @@
       "sql_body": null,
       "definition": "CREATE OR REPLACE FUNCTION realtime.broadcast_changes(topic_name text, event_name text, operation text, table_name text, table_schema text, new record, old record, level text DEFAULT 'ROW'::text)\n RETURNS void\n LANGUAGE plpgsql\nAS $function$\nDECLARE\n    -- Declare a variable to hold the JSONB representation of the row\n    row_data jsonb := '{}'::jsonb;\nBEGIN\n    IF level = 'STATEMENT' THEN\n        RAISE EXCEPTION 'function can only be triggered for each row, not for each statement';\n    END IF;\n    -- Check the operation type and handle accordingly\n    IF operation = 'INSERT' OR operation = 'UPDATE' OR operation = 'DELETE' THEN\n        row_data := jsonb_build_object('old_record', OLD, 'record', NEW, 'operation', operation, 'table', table_name, 'schema', table_schema);\n        PERFORM realtime.send (row_data, event_name, topic_name);\n    ELSE\n        RAISE EXCEPTION 'Unexpected operation type: %', operation;\n    END IF;\nEXCEPTION\n    WHEN OTHERS THEN\n        RAISE EXCEPTION 'Failed to process the row: %', SQLERRM;\nEND;\n\n$function$\n",
       "config": null,
-      "owner": "supabase_admin",
+      "owner": "supabase_realtime_admin",
       "comment": null,
       "privileges": [
         {
@@ -1326,17 +1321,7 @@
           "grantable": false
         },
         {
-          "grantee": "supabase_admin",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "dashboard_user",
+          "grantee": "supabase_realtime_admin",
           "privilege": "EXECUTE",
           "grantable": false
         }
@@ -1378,16 +1363,11 @@
       "sql_body": null,
       "definition": "CREATE OR REPLACE FUNCTION realtime.build_prepared_statement_sql(prepared_statement_name text, entity regclass, columns realtime.wal_column[])\n RETURNS text\n LANGUAGE sql\nAS $function$\n      /*\n      Builds a sql string that, if executed, creates a prepared statement to\n      tests retrive a row from *entity* by its primary key columns.\n      Example\n          select realtime.build_prepared_statement_sql('public.notes', '{\"id\"}'::text[], '{\"bigint\"}'::text[])\n      */\n          select\n      'prepare ' || prepared_statement_name || ' as\n          select\n              exists(\n                  select\n                      1\n                  from\n                      ' || entity || '\n                  where\n                      ' || string_agg(quote_ident(pkc.name) || '=' || quote_nullable(pkc.value #>> '{}') , ' and ') || '\n              )'\n          from\n              unnest(columns) pkc\n          where\n              pkc.is_pkey\n          group by\n              entity\n      $function$\n",
       "config": null,
-      "owner": "supabase_admin",
+      "owner": "supabase_realtime_admin",
       "comment": null,
       "privileges": [
         {
           "grantee": "PUBLIC",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "supabase_admin",
           "privilege": "EXECUTE",
           "grantable": false
         },
@@ -1408,11 +1388,6 @@
         },
         {
           "grantee": "service_role",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "dashboard_user",
           "privilege": "EXECUTE",
           "grantable": false
         },
@@ -1461,16 +1436,11 @@
       "sql_body": null,
       "definition": "CREATE OR REPLACE FUNCTION realtime.check_equality_op(op realtime.equality_op, type_ regtype, val_1 text, val_2 text)\n RETURNS boolean\n LANGUAGE plpgsql\n IMMUTABLE\nAS $function$\n      /*\n      Casts *val_1* and *val_2* as type *type_* and check the *op* condition for truthiness\n      */\n      declare\n          op_symbol text = (\n              case\n                  when op = 'eq' then '='\n                  when op = 'neq' then '!='\n                  when op = 'lt' then '<'\n                  when op = 'lte' then '<='\n                  when op = 'gt' then '>'\n                  when op = 'gte' then '>='\n                  when op = 'in' then '= any'\n                  else 'UNKNOWN OP'\n              end\n          );\n          res boolean;\n      begin\n          execute format(\n              'select %L::'|| type_::text || ' ' || op_symbol\n              || ' ( %L::'\n              || (\n                  case\n                      when op = 'in' then type_::text || '[]'\n                      else type_::text end\n              )\n              || ')', val_1, val_2) into res;\n          return res;\n      end;\n      $function$\n",
       "config": null,
-      "owner": "supabase_admin",
+      "owner": "supabase_realtime_admin",
       "comment": null,
       "privileges": [
         {
           "grantee": "PUBLIC",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "supabase_admin",
           "privilege": "EXECUTE",
           "grantable": false
         },
@@ -1491,11 +1461,6 @@
         },
         {
           "grantee": "service_role",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "dashboard_user",
           "privilege": "EXECUTE",
           "grantable": false
         },
@@ -1540,16 +1505,11 @@
       "sql_body": null,
       "definition": "CREATE OR REPLACE FUNCTION realtime.is_visible_through_filters(columns realtime.wal_column[], filters realtime.user_defined_filter[])\n RETURNS boolean\n LANGUAGE sql\n IMMUTABLE\nAS $function$\n    /*\n    Should the record be visible (true) or filtered out (false) after *filters* are applied\n    */\n        select\n            -- Default to allowed when no filters present\n            $2 is null -- no filters. this should not happen because subscriptions has a default\n            or array_length($2, 1) is null -- array length of an empty array is null\n            or bool_and(\n                coalesce(\n                    realtime.check_equality_op(\n                        op:=f.op,\n                        type_:=coalesce(\n                            col.type_oid::regtype, -- null when wal2json version <= 2.4\n                            col.type_name::regtype\n                        ),\n                        -- cast jsonb to text\n                        val_1:=col.value #>> '{}',\n                        val_2:=f.value\n                    ),\n                    false -- if null, filter does not match\n                )\n            )\n        from\n            unnest(filters) f\n            join unnest(columns) col\n                on f.column_name = col.name;\n    $function$\n",
       "config": null,
-      "owner": "supabase_admin",
+      "owner": "supabase_realtime_admin",
       "comment": null,
       "privileges": [
         {
           "grantee": "PUBLIC",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "supabase_admin",
           "privilege": "EXECUTE",
           "grantable": false
         },
@@ -1570,11 +1530,6 @@
         },
         {
           "grantee": "service_role",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "dashboard_user",
           "privilege": "EXECUTE",
           "grantable": false
         },
@@ -1650,7 +1605,7 @@
       "config": [
         "log_min_messages=fatal"
       ],
-      "owner": "supabase_admin",
+      "owner": "supabase_realtime_admin",
       "comment": null,
       "privileges": [
         {
@@ -1659,17 +1614,7 @@
           "grantable": false
         },
         {
-          "grantee": "supabase_admin",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "dashboard_user",
+          "grantee": "supabase_realtime_admin",
           "privilege": "EXECUTE",
           "grantable": false
         }
@@ -1707,16 +1652,11 @@
       "sql_body": null,
       "definition": "CREATE OR REPLACE FUNCTION realtime.quote_wal2json(entity regclass)\n RETURNS text\n LANGUAGE sql\n IMMUTABLE STRICT\nAS $function$\n  SELECT\n    realtime.wal2json_escape_identifier(nsp.nspname::text)\n    || '.'\n    || realtime.wal2json_escape_identifier(pc.relname::text)\n  FROM pg_class pc\n  JOIN pg_namespace nsp ON pc.relnamespace = nsp.oid\n  WHERE pc.oid = entity\n$function$\n",
       "config": null,
-      "owner": "supabase_admin",
+      "owner": "supabase_realtime_admin",
       "comment": null,
       "privileges": [
         {
           "grantee": "PUBLIC",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "supabase_admin",
           "privilege": "EXECUTE",
           "grantable": false
         },
@@ -1737,11 +1677,6 @@
         },
         {
           "grantee": "service_role",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "dashboard_user",
           "privilege": "EXECUTE",
           "grantable": false
         },
@@ -1790,7 +1725,7 @@
       "sql_body": null,
       "definition": "CREATE OR REPLACE FUNCTION realtime.send(payload jsonb, event text, topic text, private boolean DEFAULT true)\n RETURNS void\n LANGUAGE plpgsql\nAS $function$\nDECLARE\n  generated_id uuid;\n  final_payload jsonb;\nBEGIN\n  BEGIN\n    -- Generate a new UUID for the id\n    generated_id := gen_random_uuid();\n\n    -- Check if payload has an 'id' key, if not, add the generated UUID\n    IF payload ? 'id' THEN\n      final_payload := payload;\n    ELSE\n      final_payload := jsonb_set(payload, '{id}', to_jsonb(generated_id));\n    END IF;\n\n    -- Set the topic configuration\n    EXECUTE format('SET LOCAL realtime.topic TO %L', topic);\n\n    -- Attempt to insert the message\n    INSERT INTO realtime.messages (id, payload, event, topic, private, extension)\n    VALUES (generated_id, final_payload, event, topic, private, 'broadcast');\n  EXCEPTION\n    WHEN OTHERS THEN\n      -- Capture and notify the error\n      RAISE WARNING 'ErrorSendingBroadcastMessage: %', SQLERRM;\n  END;\nEND;\n$function$\n",
       "config": null,
-      "owner": "supabase_admin",
+      "owner": "supabase_realtime_admin",
       "comment": null,
       "privileges": [
         {
@@ -1799,17 +1734,7 @@
           "grantable": false
         },
         {
-          "grantee": "supabase_admin",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "dashboard_user",
+          "grantee": "supabase_realtime_admin",
           "privilege": "EXECUTE",
           "grantable": false
         }
@@ -1853,7 +1778,7 @@
       "sql_body": null,
       "definition": "CREATE OR REPLACE FUNCTION realtime.send_binary(payload bytea, event text, topic text, private boolean DEFAULT true)\n RETURNS void\n LANGUAGE plpgsql\nAS $function$\nDECLARE\n  generated_id uuid;\nBEGIN\n  BEGIN\n    generated_id := gen_random_uuid();\n\n    EXECUTE format('SET LOCAL realtime.topic TO %L', topic);\n\n    INSERT INTO realtime.messages (id, binary_payload, event, topic, private, extension)\n    VALUES (generated_id, payload, event, topic, private, 'broadcast');\n  EXCEPTION\n    WHEN OTHERS THEN\n      RAISE WARNING 'ErrorSendingBroadcastMessage: %', SQLERRM;\n  END;\nEND;\n$function$\n",
       "config": null,
-      "owner": "supabase_admin",
+      "owner": "supabase_realtime_admin",
       "comment": null,
       "privileges": [
         {
@@ -1862,17 +1787,7 @@
           "grantable": false
         },
         {
-          "grantee": "supabase_admin",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "dashboard_user",
+          "grantee": "supabase_realtime_admin",
           "privilege": "EXECUTE",
           "grantable": false
         }
@@ -1906,16 +1821,11 @@
       "sql_body": null,
       "definition": "CREATE OR REPLACE FUNCTION realtime.subscription_check_filters()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\ndeclare\n    col_names text[] = coalesce(\n            array_agg(c.column_name order by c.ordinal_position),\n            '{}'::text[]\n        )\n        from\n            information_schema.columns c\n        where\n            format('%I.%I', c.table_schema, c.table_name)::regclass = new.entity\n            and pg_catalog.has_column_privilege(\n                (new.claims ->> 'role'),\n                format('%I.%I', c.table_schema, c.table_name)::regclass,\n                c.column_name,\n                'SELECT'\n            );\n    table_col_names text[] = coalesce(\n            array_agg(pa.attname),\n            '{}'::text[]\n        )\n        from\n            pg_attribute pa\n        where\n            pa.attrelid = new.entity\n            and pa.attnum > 0;\n    filter realtime.user_defined_filter;\n    col_type regtype;\n    in_val jsonb;\n    selected_col text;\nbegin\n    for filter in select * from unnest(new.filters) loop\n        -- Filtered column is valid\n        if not filter.column_name = any(col_names) then\n            raise exception 'invalid column for filter %', filter.column_name;\n        end if;\n\n        -- Type is sanitized and safe for string interpolation\n        col_type = (\n            select atttypid::regtype\n            from pg_catalog.pg_attribute\n            where attrelid = new.entity\n                  and attname = filter.column_name\n        );\n        if col_type is null then\n            raise exception 'failed to lookup type for column %', filter.column_name;\n        end if;\n        if filter.op = 'in'::realtime.equality_op then\n            in_val = realtime.cast(filter.value, (col_type::text || '[]')::regtype);\n            if coalesce(jsonb_array_length(in_val), 0) > 100 then\n                raise exception 'too many values for `in` filter. Maximum 100';\n            end if;\n        else\n            -- raises an exception if value is not coercable to type\n            perform realtime.cast(filter.value, col_type);\n        end if;\n    end loop;\n\n    -- Validate that selected_columns reference columns the role can SELECT\n    if new.selected_columns is not null then\n        for selected_col in select * from unnest(new.selected_columns) loop\n            if not selected_col = any(col_names) then\n                raise exception 'invalid column for select %', selected_col;\n            end if;\n        end loop;\n    end if;\n\n    -- Apply consistent order to filters so the unique constraint on\n    -- (subscription_id, entity, filters) can't be tricked by a different filter order\n    new.filters = coalesce(\n        array_agg(f order by f.column_name, f.op, f.value),\n        '{}'\n    ) from unnest(new.filters) f;\n\n    -- Normalize selected_columns order so ARRAY['a','b'] and ARRAY['b','a'] are\n    -- treated as the same subscription group in apply_rls\n    new.selected_columns = (\n        select array_agg(c order by c)\n        from unnest(new.selected_columns) c\n    );\n\n    return new;\nend;\n$function$\n",
       "config": null,
-      "owner": "supabase_admin",
+      "owner": "supabase_realtime_admin",
       "comment": null,
       "privileges": [
         {
           "grantee": "PUBLIC",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "supabase_admin",
           "privilege": "EXECUTE",
           "grantable": false
         },
@@ -1936,11 +1846,6 @@
         },
         {
           "grantee": "service_role",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "dashboard_user",
           "privilege": "EXECUTE",
           "grantable": false
         },
@@ -1983,16 +1888,11 @@
       "sql_body": null,
       "definition": "CREATE OR REPLACE FUNCTION realtime.to_regrole(role_name text)\n RETURNS regrole\n LANGUAGE sql\n IMMUTABLE\nAS $function$ select role_name::regrole $function$\n",
       "config": null,
-      "owner": "supabase_admin",
+      "owner": "supabase_realtime_admin",
       "comment": null,
       "privileges": [
         {
           "grantee": "PUBLIC",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "supabase_admin",
           "privilege": "EXECUTE",
           "grantable": false
         },
@@ -2013,11 +1913,6 @@
         },
         {
           "grantee": "service_role",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "dashboard_user",
           "privilege": "EXECUTE",
           "grantable": false
         },
@@ -2065,16 +1960,6 @@
           "grantable": false
         },
         {
-          "grantee": "postgres",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
           "grantee": "supabase_realtime_admin",
           "privilege": "EXECUTE",
           "grantable": false
@@ -2113,7 +1998,7 @@
       "sql_body": null,
       "definition": "CREATE OR REPLACE FUNCTION realtime.wal2json_escape_identifier(name text)\n RETURNS text\n LANGUAGE sql\n IMMUTABLE STRICT\nAS $function$\n  -- Prefix `\\`, `,`, `.`, and any whitespace with `\\`\n  SELECT regexp_replace(name, '([\\\\,.[:space:]])', '\\\\\\1', 'g')\n$function$\n",
       "config": null,
-      "owner": "supabase_admin",
+      "owner": "supabase_realtime_admin",
       "comment": null,
       "privileges": [
         {
@@ -2122,17 +2007,7 @@
           "grantable": false
         },
         {
-          "grantee": "supabase_admin",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "dashboard_user",
+          "grantee": "supabase_realtime_admin",
           "privilege": "EXECUTE",
           "grantable": false
         }
@@ -2799,7 +2674,7 @@
       "parent_index_name": null,
       "definition": "CREATE UNIQUE INDEX schema_migrations_pkey ON realtime.schema_migrations USING btree (version)",
       "comment": null,
-      "owner": "supabase_admin"
+      "owner": "supabase_realtime_admin"
     },
     "index:realtime.subscription.pk_subscription": {
       "schema": "realtime",
@@ -2839,47 +2714,7 @@
       "parent_index_name": null,
       "definition": "CREATE UNIQUE INDEX pk_subscription ON realtime.subscription USING btree (id)",
       "comment": null,
-      "owner": "supabase_admin"
-    },
-    "index:realtime.subscription.ix_realtime_subscription_entity": {
-      "schema": "realtime",
-      "table_name": "subscription",
-      "name": "ix_realtime_subscription_entity",
-      "storage_params": [],
-      "statistics_target": [
-        -1
-      ],
-      "index_type": "btree",
-      "tablespace": null,
-      "is_unique": false,
-      "is_primary": false,
-      "is_exclusion": false,
-      "nulls_not_distinct": false,
-      "immediate": true,
-      "is_clustered": false,
-      "is_replica_identity": false,
-      "key_columns": [
-        4
-      ],
-      "column_collations": [
-        null
-      ],
-      "operator_classes": [
-        "default"
-      ],
-      "column_options": [
-        0
-      ],
-      "index_expressions": null,
-      "partial_predicate": null,
-      "table_relkind": "r",
-      "is_owned_by_constraint": false,
-      "is_partitioned_index": false,
-      "is_index_partition": false,
-      "parent_index_name": null,
-      "definition": "CREATE INDEX ix_realtime_subscription_entity ON realtime.subscription USING btree (entity)",
-      "comment": null,
-      "owner": "supabase_admin"
+      "owner": "supabase_realtime_admin"
     },
     "index:realtime.subscription.subscription_subscription_id_entity_filters_action_filter_selec": {
       "schema": "realtime",
@@ -2939,7 +2774,47 @@
       "parent_index_name": null,
       "definition": "CREATE UNIQUE INDEX subscription_subscription_id_entity_filters_action_filter_selec ON realtime.subscription USING btree (subscription_id, entity, filters, action_filter, COALESCE(selected_columns, '{}'::text[]))",
       "comment": null,
-      "owner": "supabase_admin"
+      "owner": "supabase_realtime_admin"
+    },
+    "index:realtime.subscription.ix_realtime_subscription_entity": {
+      "schema": "realtime",
+      "table_name": "subscription",
+      "name": "ix_realtime_subscription_entity",
+      "storage_params": [],
+      "statistics_target": [
+        -1
+      ],
+      "index_type": "btree",
+      "tablespace": null,
+      "is_unique": false,
+      "is_primary": false,
+      "is_exclusion": false,
+      "nulls_not_distinct": false,
+      "immediate": true,
+      "is_clustered": false,
+      "is_replica_identity": false,
+      "key_columns": [
+        4
+      ],
+      "column_collations": [
+        null
+      ],
+      "operator_classes": [
+        "default"
+      ],
+      "column_options": [
+        0
+      ],
+      "index_expressions": null,
+      "partial_predicate": null,
+      "table_relkind": "r",
+      "is_owned_by_constraint": false,
+      "is_partitioned_index": false,
+      "is_index_partition": false,
+      "parent_index_name": null,
+      "definition": "CREATE INDEX ix_realtime_subscription_entity ON realtime.subscription USING btree (entity)",
+      "comment": null,
+      "owner": "supabase_realtime_admin"
     }
   },
   "materializedViews": {},
@@ -2984,6 +2859,13 @@
       ],
       "comment": null,
       "members": [
+        {
+          "member": "supabase_realtime_admin",
+          "grantor": "supabase_admin",
+          "admin_option": false,
+          "inherit_option": false,
+          "set_option": true
+        },
         {
           "member": "authenticator",
           "grantor": "supabase_admin",
@@ -3134,6 +3016,13 @@
       ],
       "comment": null,
       "members": [
+        {
+          "member": "supabase_realtime_admin",
+          "grantor": "supabase_admin",
+          "admin_option": false,
+          "inherit_option": false,
+          "set_option": true
+        },
         {
           "member": "authenticator",
           "grantor": "supabase_admin",
@@ -4411,6 +4300,13 @@
       "config": null,
       "comment": null,
       "members": [
+        {
+          "member": "supabase_realtime_admin",
+          "grantor": "supabase_admin",
+          "admin_option": false,
+          "inherit_option": false,
+          "set_option": true
+        },
         {
           "member": "authenticator",
           "grantor": "supabase_admin",
@@ -6463,23 +6359,17 @@
       "name": "supabase_realtime_admin",
       "is_superuser": false,
       "can_inherit": false,
-      "can_create_roles": false,
+      "can_create_roles": true,
       "can_create_databases": false,
-      "can_login": false,
-      "can_replicate": false,
+      "can_login": true,
+      "can_replicate": true,
       "connection_limit": -1,
       "can_bypass_rls": false,
-      "config": null,
-      "comment": null,
-      "members": [
-        {
-          "member": "postgres",
-          "grantor": "supabase_admin",
-          "admin_option": false,
-          "inherit_option": true,
-          "set_option": true
-        }
+      "config": [
+        "search_path=public, extensions, realtime"
       ],
+      "comment": null,
+      "members": [],
       "default_privileges": [
         {
           "in_schema": null,
@@ -6885,6 +6775,16 @@
           "grantee": "supabase_admin",
           "privilege": "USAGE",
           "grantable": false
+        },
+        {
+          "grantee": "supabase_realtime_admin",
+          "privilege": "CREATE",
+          "grantable": false
+        },
+        {
+          "grantee": "supabase_realtime_admin",
+          "privilege": "USAGE",
+          "grantable": false
         }
       ],
       "security_labels": []
@@ -6943,6 +6843,11 @@
           "grantee": "dashboard_user",
           "privilege": "USAGE",
           "grantable": false
+        },
+        {
+          "grantee": "supabase_realtime_admin",
+          "privilege": "USAGE",
+          "grantable": false
         }
       ],
       "security_labels": []
@@ -6984,6 +6889,11 @@
         },
         {
           "grantee": "dashboard_user",
+          "privilege": "USAGE",
+          "grantable": false
+        },
+        {
+          "grantee": "supabase_realtime_admin",
           "privilege": "USAGE",
           "grantable": false
         }
@@ -7123,6 +7033,16 @@
           "grantee": "service_role",
           "privilege": "USAGE",
           "grantable": false
+        },
+        {
+          "grantee": "supabase_realtime_admin",
+          "privilege": "CREATE",
+          "grantable": false
+        },
+        {
+          "grantee": "supabase_realtime_admin",
+          "privilege": "USAGE",
+          "grantable": false
         }
       ],
       "security_labels": []
@@ -7148,7 +7068,22 @@
           "grantable": false
         },
         {
+          "grantee": "postgres",
+          "privilege": "USAGE",
+          "grantable": false
+        },
+        {
           "grantee": "anon",
+          "privilege": "USAGE",
+          "grantable": false
+        },
+        {
+          "grantee": "anon",
+          "privilege": "USAGE",
+          "grantable": false
+        },
+        {
+          "grantee": "authenticated",
           "privilege": "USAGE",
           "grantable": false
         },
@@ -7163,9 +7098,24 @@
           "grantable": false
         },
         {
+          "grantee": "service_role",
+          "privilege": "USAGE",
+          "grantable": false
+        },
+        {
           "grantee": "supabase_realtime_admin",
           "privilege": "CREATE",
           "grantable": false
+        },
+        {
+          "grantee": "supabase_realtime_admin",
+          "privilege": "CREATE",
+          "grantable": true
+        },
+        {
+          "grantee": "supabase_realtime_admin",
+          "privilege": "USAGE",
+          "grantable": true
         },
         {
           "grantee": "supabase_realtime_admin",
@@ -9450,6 +9400,54 @@
           "privilege": "UPDATE",
           "grantable": false,
           "columns": null
+        },
+        {
+          "grantee": "supabase_realtime_admin",
+          "privilege": "DELETE",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "supabase_realtime_admin",
+          "privilege": "INSERT",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "supabase_realtime_admin",
+          "privilege": "MAINTAIN",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "supabase_realtime_admin",
+          "privilege": "REFERENCES",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "supabase_realtime_admin",
+          "privilege": "SELECT",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "supabase_realtime_admin",
+          "privilege": "TRIGGER",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "supabase_realtime_admin",
+          "privilege": "TRUNCATE",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "supabase_realtime_admin",
+          "privilege": "UPDATE",
+          "grantable": false,
+          "columns": null
         }
       ],
       "security_labels": []
@@ -9721,43 +9719,13 @@
       "privileges": [
         {
           "grantee": "postgres",
-          "privilege": "DELETE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "postgres",
           "privilege": "INSERT",
           "grantable": false,
           "columns": null
         },
         {
           "grantee": "postgres",
-          "privilege": "MAINTAIN",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "REFERENCES",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "postgres",
           "privilege": "SELECT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "TRIGGER",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "TRUNCATE",
           "grantable": false,
           "columns": null
         },
@@ -9817,54 +9785,6 @@
         },
         {
           "grantee": "service_role",
-          "privilege": "UPDATE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "DELETE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "INSERT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "MAINTAIN",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "REFERENCES",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "SELECT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "TRIGGER",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "TRUNCATE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
           "privilege": "UPDATE",
           "grantable": false,
           "columns": null
@@ -9937,7 +9857,7 @@
       "options": null,
       "partition_bound": null,
       "partition_by": null,
-      "owner": "supabase_admin",
+      "owner": "supabase_realtime_admin",
       "comment": null,
       "parent_schema": null,
       "parent_name": null,
@@ -10011,105 +9931,15 @@
           "on_delete": null,
           "match_type": null,
           "check_expression": null,
-          "owner": "supabase_admin",
+          "owner": "supabase_realtime_admin",
           "definition": "PRIMARY KEY (version)",
           "comment": null
         }
       ],
       "privileges": [
         {
-          "grantee": "supabase_admin",
-          "privilege": "DELETE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_admin",
-          "privilege": "INSERT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_admin",
-          "privilege": "MAINTAIN",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_admin",
-          "privilege": "REFERENCES",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_admin",
-          "privilege": "SELECT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_admin",
-          "privilege": "TRIGGER",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_admin",
-          "privilege": "TRUNCATE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_admin",
-          "privilege": "UPDATE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "DELETE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "INSERT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "MAINTAIN",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "REFERENCES",
-          "grantable": false,
-          "columns": null
-        },
-        {
           "grantee": "postgres",
           "privilege": "SELECT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "TRIGGER",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "TRUNCATE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "UPDATE",
           "grantable": false,
           "columns": null
         },
@@ -10128,54 +9958,6 @@
         {
           "grantee": "service_role",
           "privilege": "SELECT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "DELETE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "INSERT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "MAINTAIN",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "REFERENCES",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "SELECT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "TRIGGER",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "TRUNCATE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "UPDATE",
           "grantable": false,
           "columns": null
         },
@@ -10247,7 +10029,7 @@
       "options": null,
       "partition_bound": null,
       "partition_by": null,
-      "owner": "supabase_admin",
+      "owner": "supabase_realtime_admin",
       "comment": null,
       "parent_schema": null,
       "parent_name": null,
@@ -10454,7 +10236,7 @@
           "on_delete": null,
           "match_type": null,
           "check_expression": null,
-          "owner": "supabase_admin",
+          "owner": "supabase_realtime_admin",
           "definition": "PRIMARY KEY (id)",
           "comment": null
         },
@@ -10487,105 +10269,15 @@
           "on_delete": null,
           "match_type": null,
           "check_expression": "(action_filter = ANY (ARRAY['*'::text, 'INSERT'::text, 'UPDATE'::text, 'DELETE'::text]))",
-          "owner": "supabase_admin",
+          "owner": "supabase_realtime_admin",
           "definition": "CHECK (action_filter = ANY (ARRAY['*'::text, 'INSERT'::text, 'UPDATE'::text, 'DELETE'::text]))",
           "comment": null
         }
       ],
       "privileges": [
         {
-          "grantee": "supabase_admin",
-          "privilege": "DELETE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_admin",
-          "privilege": "INSERT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_admin",
-          "privilege": "MAINTAIN",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_admin",
-          "privilege": "REFERENCES",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_admin",
-          "privilege": "SELECT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_admin",
-          "privilege": "TRIGGER",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_admin",
-          "privilege": "TRUNCATE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_admin",
-          "privilege": "UPDATE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "DELETE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "INSERT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "MAINTAIN",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "REFERENCES",
-          "grantable": false,
-          "columns": null
-        },
-        {
           "grantee": "postgres",
           "privilege": "SELECT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "TRIGGER",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "TRUNCATE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "UPDATE",
           "grantable": false,
           "columns": null
         },
@@ -10604,54 +10296,6 @@
         {
           "grantee": "service_role",
           "privilege": "SELECT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "DELETE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "INSERT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "MAINTAIN",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "REFERENCES",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "SELECT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "TRIGGER",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "TRUNCATE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "UPDATE",
           "grantable": false,
           "columns": null
         },
@@ -10731,7 +10375,7 @@
       "parent_table_schema": null,
       "parent_table_name": null,
       "is_on_partitioned_table": false,
-      "owner": "supabase_admin",
+      "owner": "supabase_realtime_admin",
       "definition": "CREATE TRIGGER tr_check_filters BEFORE INSERT OR UPDATE ON realtime.subscription FOR EACH ROW EXECUTE FUNCTION realtime.subscription_check_filters()",
       "comment": null
     }
@@ -10851,6 +10495,16 @@
       "deptype": "n"
     },
     {
+      "dependent_stable_id": "acl:procedure:auth.email()::grantee:supabase_realtime_admin",
+      "referenced_stable_id": "procedure:auth.email()",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:auth.email()::grantee:supabase_realtime_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
+      "deptype": "n"
+    },
+    {
       "dependent_stable_id": "acl:procedure:auth.role()::grantee:dashboard_user",
       "referenced_stable_id": "procedure:auth.role()",
       "deptype": "n"
@@ -10881,6 +10535,16 @@
       "deptype": "n"
     },
     {
+      "dependent_stable_id": "acl:procedure:auth.role()::grantee:supabase_realtime_admin",
+      "referenced_stable_id": "procedure:auth.role()",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:auth.role()::grantee:supabase_realtime_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
+      "deptype": "n"
+    },
+    {
       "dependent_stable_id": "acl:procedure:auth.uid()::grantee:dashboard_user",
       "referenced_stable_id": "procedure:auth.uid()",
       "deptype": "n"
@@ -10908,6 +10572,16 @@
     {
       "dependent_stable_id": "acl:procedure:auth.uid()::grantee:supabase_auth_admin",
       "referenced_stable_id": "role:supabase_auth_admin",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:auth.uid()::grantee:supabase_realtime_admin",
+      "referenced_stable_id": "procedure:auth.uid()",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:auth.uid()::grantee:supabase_realtime_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
@@ -11191,16 +10865,6 @@
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "acl:procedure:realtime.\"cast\"(text,regtype)::grantee:dashboard_user",
-      "referenced_stable_id": "procedure:realtime.\"cast\"(text,regtype)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.\"cast\"(text,regtype)::grantee:dashboard_user",
-      "referenced_stable_id": "role:dashboard_user",
-      "deptype": "n"
-    },
-    {
       "dependent_stable_id": "acl:procedure:realtime.\"cast\"(text,regtype)::grantee:postgres",
       "referenced_stable_id": "procedure:realtime.\"cast\"(text,regtype)",
       "deptype": "n"
@@ -11228,16 +10892,6 @@
     {
       "dependent_stable_id": "acl:procedure:realtime.\"cast\"(text,regtype)::grantee:service_role",
       "referenced_stable_id": "role:service_role",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.\"cast\"(text,regtype)::grantee:supabase_admin",
-      "referenced_stable_id": "procedure:realtime.\"cast\"(text,regtype)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.\"cast\"(text,regtype)::grantee:supabase_admin",
-      "referenced_stable_id": "role:supabase_admin",
       "deptype": "n"
     },
     {
@@ -11271,16 +10925,6 @@
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "acl:procedure:realtime.apply_rls(jsonb,integer)::grantee:dashboard_user",
-      "referenced_stable_id": "procedure:realtime.apply_rls(jsonb,integer)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.apply_rls(jsonb,integer)::grantee:dashboard_user",
-      "referenced_stable_id": "role:dashboard_user",
-      "deptype": "n"
-    },
-    {
       "dependent_stable_id": "acl:procedure:realtime.apply_rls(jsonb,integer)::grantee:postgres",
       "referenced_stable_id": "procedure:realtime.apply_rls(jsonb,integer)",
       "deptype": "n"
@@ -11311,16 +10955,6 @@
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "acl:procedure:realtime.apply_rls(jsonb,integer)::grantee:supabase_admin",
-      "referenced_stable_id": "procedure:realtime.apply_rls(jsonb,integer)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.apply_rls(jsonb,integer)::grantee:supabase_admin",
-      "referenced_stable_id": "role:supabase_admin",
-      "deptype": "n"
-    },
-    {
       "dependent_stable_id": "acl:procedure:realtime.apply_rls(jsonb,integer)::grantee:supabase_realtime_admin",
       "referenced_stable_id": "procedure:realtime.apply_rls(jsonb,integer)",
       "deptype": "n"
@@ -11328,46 +10962,6 @@
     {
       "dependent_stable_id": "acl:procedure:realtime.apply_rls(jsonb,integer)::grantee:supabase_realtime_admin",
       "referenced_stable_id": "role:supabase_realtime_admin",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.broadcast_changes(text,text,text,text,text,record,record,text)::grantee:dashboard_user",
-      "referenced_stable_id": "procedure:realtime.broadcast_changes(text,text,text,text,text,record,record,text)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.broadcast_changes(text,text,text,text,text,record,record,text)::grantee:dashboard_user",
-      "referenced_stable_id": "role:dashboard_user",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.broadcast_changes(text,text,text,text,text,record,record,text)::grantee:postgres",
-      "referenced_stable_id": "procedure:realtime.broadcast_changes(text,text,text,text,text,record,record,text)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.broadcast_changes(text,text,text,text,text,record,record,text)::grantee:postgres",
-      "referenced_stable_id": "role:postgres",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.broadcast_changes(text,text,text,text,text,record,record,text)::grantee:PUBLIC",
-      "referenced_stable_id": "procedure:realtime.broadcast_changes(text,text,text,text,text,record,record,text)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.broadcast_changes(text,text,text,text,text,record,record,text)::grantee:PUBLIC",
-      "referenced_stable_id": "role:PUBLIC",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.broadcast_changes(text,text,text,text,text,record,record,text)::grantee:supabase_admin",
-      "referenced_stable_id": "procedure:realtime.broadcast_changes(text,text,text,text,text,record,record,text)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.broadcast_changes(text,text,text,text,text,record,record,text)::grantee:supabase_admin",
-      "referenced_stable_id": "role:supabase_admin",
       "deptype": "n"
     },
     {
@@ -11388,16 +10982,6 @@
     {
       "dependent_stable_id": "acl:procedure:realtime.build_prepared_statement_sql(text,regclass,realtime.wal_column[])::grantee:authenticated",
       "referenced_stable_id": "role:authenticated",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.build_prepared_statement_sql(text,regclass,realtime.wal_column[])::grantee:dashboard_user",
-      "referenced_stable_id": "procedure:realtime.build_prepared_statement_sql(text,regclass,realtime.wal_column[])",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.build_prepared_statement_sql(text,regclass,realtime.wal_column[])::grantee:dashboard_user",
-      "referenced_stable_id": "role:dashboard_user",
       "deptype": "n"
     },
     {
@@ -11431,16 +11015,6 @@
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "acl:procedure:realtime.build_prepared_statement_sql(text,regclass,realtime.wal_column[])::grantee:supabase_admin",
-      "referenced_stable_id": "procedure:realtime.build_prepared_statement_sql(text,regclass,realtime.wal_column[])",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.build_prepared_statement_sql(text,regclass,realtime.wal_column[])::grantee:supabase_admin",
-      "referenced_stable_id": "role:supabase_admin",
-      "deptype": "n"
-    },
-    {
       "dependent_stable_id": "acl:procedure:realtime.build_prepared_statement_sql(text,regclass,realtime.wal_column[])::grantee:supabase_realtime_admin",
       "referenced_stable_id": "procedure:realtime.build_prepared_statement_sql(text,regclass,realtime.wal_column[])",
       "deptype": "n"
@@ -11468,16 +11042,6 @@
     {
       "dependent_stable_id": "acl:procedure:realtime.check_equality_op(realtime.equality_op,regtype,text,text)::grantee:authenticated",
       "referenced_stable_id": "role:authenticated",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.check_equality_op(realtime.equality_op,regtype,text,text)::grantee:dashboard_user",
-      "referenced_stable_id": "procedure:realtime.check_equality_op(realtime.equality_op,regtype,text,text)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.check_equality_op(realtime.equality_op,regtype,text,text)::grantee:dashboard_user",
-      "referenced_stable_id": "role:dashboard_user",
       "deptype": "n"
     },
     {
@@ -11511,16 +11075,6 @@
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "acl:procedure:realtime.check_equality_op(realtime.equality_op,regtype,text,text)::grantee:supabase_admin",
-      "referenced_stable_id": "procedure:realtime.check_equality_op(realtime.equality_op,regtype,text,text)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.check_equality_op(realtime.equality_op,regtype,text,text)::grantee:supabase_admin",
-      "referenced_stable_id": "role:supabase_admin",
-      "deptype": "n"
-    },
-    {
       "dependent_stable_id": "acl:procedure:realtime.check_equality_op(realtime.equality_op,regtype,text,text)::grantee:supabase_realtime_admin",
       "referenced_stable_id": "procedure:realtime.check_equality_op(realtime.equality_op,regtype,text,text)",
       "deptype": "n"
@@ -11548,16 +11102,6 @@
     {
       "dependent_stable_id": "acl:procedure:realtime.is_visible_through_filters(realtime.wal_column[],realtime.user_defined_filter[])::grantee:authenticated",
       "referenced_stable_id": "role:authenticated",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.is_visible_through_filters(realtime.wal_column[],realtime.user_defined_filter[])::grantee:dashboard_user",
-      "referenced_stable_id": "procedure:realtime.is_visible_through_filters(realtime.wal_column[],realtime.user_defined_filter[])",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.is_visible_through_filters(realtime.wal_column[],realtime.user_defined_filter[])::grantee:dashboard_user",
-      "referenced_stable_id": "role:dashboard_user",
       "deptype": "n"
     },
     {
@@ -11591,16 +11135,6 @@
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "acl:procedure:realtime.is_visible_through_filters(realtime.wal_column[],realtime.user_defined_filter[])::grantee:supabase_admin",
-      "referenced_stable_id": "procedure:realtime.is_visible_through_filters(realtime.wal_column[],realtime.user_defined_filter[])",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.is_visible_through_filters(realtime.wal_column[],realtime.user_defined_filter[])::grantee:supabase_admin",
-      "referenced_stable_id": "role:supabase_admin",
-      "deptype": "n"
-    },
-    {
       "dependent_stable_id": "acl:procedure:realtime.is_visible_through_filters(realtime.wal_column[],realtime.user_defined_filter[])::grantee:supabase_realtime_admin",
       "referenced_stable_id": "procedure:realtime.is_visible_through_filters(realtime.wal_column[],realtime.user_defined_filter[])",
       "deptype": "n"
@@ -11608,46 +11142,6 @@
     {
       "dependent_stable_id": "acl:procedure:realtime.is_visible_through_filters(realtime.wal_column[],realtime.user_defined_filter[])::grantee:supabase_realtime_admin",
       "referenced_stable_id": "role:supabase_realtime_admin",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.list_changes(name,name,integer,integer)::grantee:dashboard_user",
-      "referenced_stable_id": "procedure:realtime.list_changes(name,name,integer,integer)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.list_changes(name,name,integer,integer)::grantee:dashboard_user",
-      "referenced_stable_id": "role:dashboard_user",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.list_changes(name,name,integer,integer)::grantee:postgres",
-      "referenced_stable_id": "procedure:realtime.list_changes(name,name,integer,integer)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.list_changes(name,name,integer,integer)::grantee:postgres",
-      "referenced_stable_id": "role:postgres",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.list_changes(name,name,integer,integer)::grantee:PUBLIC",
-      "referenced_stable_id": "procedure:realtime.list_changes(name,name,integer,integer)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.list_changes(name,name,integer,integer)::grantee:PUBLIC",
-      "referenced_stable_id": "role:PUBLIC",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.list_changes(name,name,integer,integer)::grantee:supabase_admin",
-      "referenced_stable_id": "procedure:realtime.list_changes(name,name,integer,integer)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.list_changes(name,name,integer,integer)::grantee:supabase_admin",
-      "referenced_stable_id": "role:supabase_admin",
       "deptype": "n"
     },
     {
@@ -11668,16 +11162,6 @@
     {
       "dependent_stable_id": "acl:procedure:realtime.quote_wal2json(regclass)::grantee:authenticated",
       "referenced_stable_id": "role:authenticated",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.quote_wal2json(regclass)::grantee:dashboard_user",
-      "referenced_stable_id": "procedure:realtime.quote_wal2json(regclass)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.quote_wal2json(regclass)::grantee:dashboard_user",
-      "referenced_stable_id": "role:dashboard_user",
       "deptype": "n"
     },
     {
@@ -11711,16 +11195,6 @@
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "acl:procedure:realtime.quote_wal2json(regclass)::grantee:supabase_admin",
-      "referenced_stable_id": "procedure:realtime.quote_wal2json(regclass)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.quote_wal2json(regclass)::grantee:supabase_admin",
-      "referenced_stable_id": "role:supabase_admin",
-      "deptype": "n"
-    },
-    {
       "dependent_stable_id": "acl:procedure:realtime.quote_wal2json(regclass)::grantee:supabase_realtime_admin",
       "referenced_stable_id": "procedure:realtime.quote_wal2json(regclass)",
       "deptype": "n"
@@ -11728,86 +11202,6 @@
     {
       "dependent_stable_id": "acl:procedure:realtime.quote_wal2json(regclass)::grantee:supabase_realtime_admin",
       "referenced_stable_id": "role:supabase_realtime_admin",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.send_binary(bytea,text,text,boolean)::grantee:dashboard_user",
-      "referenced_stable_id": "procedure:realtime.send_binary(bytea,text,text,boolean)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.send_binary(bytea,text,text,boolean)::grantee:dashboard_user",
-      "referenced_stable_id": "role:dashboard_user",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.send_binary(bytea,text,text,boolean)::grantee:postgres",
-      "referenced_stable_id": "procedure:realtime.send_binary(bytea,text,text,boolean)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.send_binary(bytea,text,text,boolean)::grantee:postgres",
-      "referenced_stable_id": "role:postgres",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.send_binary(bytea,text,text,boolean)::grantee:PUBLIC",
-      "referenced_stable_id": "procedure:realtime.send_binary(bytea,text,text,boolean)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.send_binary(bytea,text,text,boolean)::grantee:PUBLIC",
-      "referenced_stable_id": "role:PUBLIC",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.send_binary(bytea,text,text,boolean)::grantee:supabase_admin",
-      "referenced_stable_id": "procedure:realtime.send_binary(bytea,text,text,boolean)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.send_binary(bytea,text,text,boolean)::grantee:supabase_admin",
-      "referenced_stable_id": "role:supabase_admin",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.send(jsonb,text,text,boolean)::grantee:dashboard_user",
-      "referenced_stable_id": "procedure:realtime.send(jsonb,text,text,boolean)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.send(jsonb,text,text,boolean)::grantee:dashboard_user",
-      "referenced_stable_id": "role:dashboard_user",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.send(jsonb,text,text,boolean)::grantee:postgres",
-      "referenced_stable_id": "procedure:realtime.send(jsonb,text,text,boolean)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.send(jsonb,text,text,boolean)::grantee:postgres",
-      "referenced_stable_id": "role:postgres",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.send(jsonb,text,text,boolean)::grantee:PUBLIC",
-      "referenced_stable_id": "procedure:realtime.send(jsonb,text,text,boolean)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.send(jsonb,text,text,boolean)::grantee:PUBLIC",
-      "referenced_stable_id": "role:PUBLIC",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.send(jsonb,text,text,boolean)::grantee:supabase_admin",
-      "referenced_stable_id": "procedure:realtime.send(jsonb,text,text,boolean)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.send(jsonb,text,text,boolean)::grantee:supabase_admin",
-      "referenced_stable_id": "role:supabase_admin",
       "deptype": "n"
     },
     {
@@ -11828,16 +11222,6 @@
     {
       "dependent_stable_id": "acl:procedure:realtime.subscription_check_filters()::grantee:authenticated",
       "referenced_stable_id": "role:authenticated",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.subscription_check_filters()::grantee:dashboard_user",
-      "referenced_stable_id": "procedure:realtime.subscription_check_filters()",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.subscription_check_filters()::grantee:dashboard_user",
-      "referenced_stable_id": "role:dashboard_user",
       "deptype": "n"
     },
     {
@@ -11871,16 +11255,6 @@
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "acl:procedure:realtime.subscription_check_filters()::grantee:supabase_admin",
-      "referenced_stable_id": "procedure:realtime.subscription_check_filters()",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.subscription_check_filters()::grantee:supabase_admin",
-      "referenced_stable_id": "role:supabase_admin",
-      "deptype": "n"
-    },
-    {
       "dependent_stable_id": "acl:procedure:realtime.subscription_check_filters()::grantee:supabase_realtime_admin",
       "referenced_stable_id": "procedure:realtime.subscription_check_filters()",
       "deptype": "n"
@@ -11908,16 +11282,6 @@
     {
       "dependent_stable_id": "acl:procedure:realtime.to_regrole(text)::grantee:authenticated",
       "referenced_stable_id": "role:authenticated",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.to_regrole(text)::grantee:dashboard_user",
-      "referenced_stable_id": "procedure:realtime.to_regrole(text)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.to_regrole(text)::grantee:dashboard_user",
-      "referenced_stable_id": "role:dashboard_user",
       "deptype": "n"
     },
     {
@@ -11951,16 +11315,6 @@
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "acl:procedure:realtime.to_regrole(text)::grantee:supabase_admin",
-      "referenced_stable_id": "procedure:realtime.to_regrole(text)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.to_regrole(text)::grantee:supabase_admin",
-      "referenced_stable_id": "role:supabase_admin",
-      "deptype": "n"
-    },
-    {
       "dependent_stable_id": "acl:procedure:realtime.to_regrole(text)::grantee:supabase_realtime_admin",
       "referenced_stable_id": "procedure:realtime.to_regrole(text)",
       "deptype": "n"
@@ -11971,83 +11325,23 @@
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "acl:procedure:realtime.topic()::grantee:dashboard_user",
-      "referenced_stable_id": "procedure:realtime.topic()",
+      "dependent_stable_id": "acl:schema:_realtime::grantee:supabase_admin",
+      "referenced_stable_id": "role:supabase_admin",
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "acl:procedure:realtime.topic()::grantee:dashboard_user",
-      "referenced_stable_id": "role:dashboard_user",
+      "dependent_stable_id": "acl:schema:_realtime::grantee:supabase_admin",
+      "referenced_stable_id": "schema:_realtime",
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "acl:procedure:realtime.topic()::grantee:postgres",
-      "referenced_stable_id": "procedure:realtime.topic()",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.topic()::grantee:postgres",
-      "referenced_stable_id": "role:postgres",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.topic()::grantee:PUBLIC",
-      "referenced_stable_id": "procedure:realtime.topic()",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.topic()::grantee:PUBLIC",
-      "referenced_stable_id": "role:PUBLIC",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.topic()::grantee:supabase_realtime_admin",
-      "referenced_stable_id": "procedure:realtime.topic()",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.topic()::grantee:supabase_realtime_admin",
+      "dependent_stable_id": "acl:schema:_realtime::grantee:supabase_realtime_admin",
       "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "acl:procedure:realtime.wal2json_escape_identifier(text)::grantee:dashboard_user",
-      "referenced_stable_id": "procedure:realtime.wal2json_escape_identifier(text)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.wal2json_escape_identifier(text)::grantee:dashboard_user",
-      "referenced_stable_id": "role:dashboard_user",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.wal2json_escape_identifier(text)::grantee:postgres",
-      "referenced_stable_id": "procedure:realtime.wal2json_escape_identifier(text)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.wal2json_escape_identifier(text)::grantee:postgres",
-      "referenced_stable_id": "role:postgres",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.wal2json_escape_identifier(text)::grantee:PUBLIC",
-      "referenced_stable_id": "procedure:realtime.wal2json_escape_identifier(text)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.wal2json_escape_identifier(text)::grantee:PUBLIC",
-      "referenced_stable_id": "role:PUBLIC",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.wal2json_escape_identifier(text)::grantee:supabase_admin",
-      "referenced_stable_id": "procedure:realtime.wal2json_escape_identifier(text)",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:procedure:realtime.wal2json_escape_identifier(text)::grantee:supabase_admin",
-      "referenced_stable_id": "role:supabase_admin",
+      "dependent_stable_id": "acl:schema:_realtime::grantee:supabase_realtime_admin",
+      "referenced_stable_id": "schema:_realtime",
       "deptype": "n"
     },
     {
@@ -12121,6 +11415,16 @@
       "deptype": "n"
     },
     {
+      "dependent_stable_id": "acl:schema:auth::grantee:supabase_realtime_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:schema:auth::grantee:supabase_realtime_admin",
+      "referenced_stable_id": "schema:auth",
+      "deptype": "n"
+    },
+    {
       "dependent_stable_id": "acl:schema:extensions::grantee:anon",
       "referenced_stable_id": "role:anon",
       "deptype": "n"
@@ -12167,6 +11471,16 @@
     },
     {
       "dependent_stable_id": "acl:schema:extensions::grantee:service_role",
+      "referenced_stable_id": "schema:extensions",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:schema:extensions::grantee:supabase_realtime_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:schema:extensions::grantee:supabase_realtime_admin",
       "referenced_stable_id": "schema:extensions",
       "deptype": "n"
     },
@@ -12327,6 +11641,16 @@
     },
     {
       "dependent_stable_id": "acl:schema:public::grantee:service_role",
+      "referenced_stable_id": "schema:public",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:schema:public::grantee:supabase_realtime_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:schema:public::grantee:supabase_realtime_admin",
       "referenced_stable_id": "schema:public",
       "deptype": "n"
     },
@@ -12591,16 +11915,6 @@
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "acl:sequence:realtime.subscription_id_seq::grantee:dashboard_user",
-      "referenced_stable_id": "role:dashboard_user",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:sequence:realtime.subscription_id_seq::grantee:dashboard_user",
-      "referenced_stable_id": "sequence:realtime.subscription_id_seq",
-      "deptype": "n"
-    },
-    {
       "dependent_stable_id": "acl:sequence:realtime.subscription_id_seq::grantee:postgres",
       "referenced_stable_id": "role:postgres",
       "deptype": "n"
@@ -12617,16 +11931,6 @@
     },
     {
       "dependent_stable_id": "acl:sequence:realtime.subscription_id_seq::grantee:service_role",
-      "referenced_stable_id": "sequence:realtime.subscription_id_seq",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:sequence:realtime.subscription_id_seq::grantee:supabase_admin",
-      "referenced_stable_id": "role:supabase_admin",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:sequence:realtime.subscription_id_seq::grantee:supabase_admin",
       "referenced_stable_id": "sequence:realtime.subscription_id_seq",
       "deptype": "n"
     },
@@ -12821,6 +12125,16 @@
       "deptype": "n"
     },
     {
+      "dependent_stable_id": "acl:table:public.test_tenant::grantee:supabase_realtime_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:table:public.test_tenant::grantee:supabase_realtime_admin",
+      "referenced_stable_id": "table:public.test_tenant",
+      "deptype": "n"
+    },
+    {
       "dependent_stable_id": "acl:table:realtime.messages::grantee:anon",
       "referenced_stable_id": "role:anon",
       "deptype": "n"
@@ -12837,16 +12151,6 @@
     },
     {
       "dependent_stable_id": "acl:table:realtime.messages::grantee:authenticated",
-      "referenced_stable_id": "table:realtime.messages",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:table:realtime.messages::grantee:dashboard_user",
-      "referenced_stable_id": "role:dashboard_user",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:table:realtime.messages::grantee:dashboard_user",
       "referenced_stable_id": "table:realtime.messages",
       "deptype": "n"
     },
@@ -12901,16 +12205,6 @@
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "acl:table:realtime.schema_migrations::grantee:dashboard_user",
-      "referenced_stable_id": "role:dashboard_user",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:table:realtime.schema_migrations::grantee:dashboard_user",
-      "referenced_stable_id": "table:realtime.schema_migrations",
-      "deptype": "n"
-    },
-    {
       "dependent_stable_id": "acl:table:realtime.schema_migrations::grantee:postgres",
       "referenced_stable_id": "role:postgres",
       "deptype": "n"
@@ -12927,16 +12221,6 @@
     },
     {
       "dependent_stable_id": "acl:table:realtime.schema_migrations::grantee:service_role",
-      "referenced_stable_id": "table:realtime.schema_migrations",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:table:realtime.schema_migrations::grantee:supabase_admin",
-      "referenced_stable_id": "role:supabase_admin",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:table:realtime.schema_migrations::grantee:supabase_admin",
       "referenced_stable_id": "table:realtime.schema_migrations",
       "deptype": "n"
     },
@@ -12971,16 +12255,6 @@
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "acl:table:realtime.subscription::grantee:dashboard_user",
-      "referenced_stable_id": "role:dashboard_user",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:table:realtime.subscription::grantee:dashboard_user",
-      "referenced_stable_id": "table:realtime.subscription",
-      "deptype": "n"
-    },
-    {
       "dependent_stable_id": "acl:table:realtime.subscription::grantee:postgres",
       "referenced_stable_id": "role:postgres",
       "deptype": "n"
@@ -12997,16 +12271,6 @@
     },
     {
       "dependent_stable_id": "acl:table:realtime.subscription::grantee:service_role",
-      "referenced_stable_id": "table:realtime.subscription",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:table:realtime.subscription::grantee:supabase_admin",
-      "referenced_stable_id": "role:supabase_admin",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:table:realtime.subscription::grantee:supabase_admin",
       "referenced_stable_id": "table:realtime.subscription",
       "deptype": "n"
     },
@@ -13188,12 +12452,12 @@
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages.payload",
-      "deptype": "n"
+      "deptype": "a"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages.payload",
-      "deptype": "a"
+      "deptype": "n"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_pkey",
@@ -14836,6 +14100,16 @@
       "deptype": "n"
     },
     {
+      "dependent_stable_id": "membership:anon->supabase_realtime_admin",
+      "referenced_stable_id": "role:anon",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "membership:anon->supabase_realtime_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
+      "deptype": "n"
+    },
+    {
       "dependent_stable_id": "membership:authenticated->authenticator",
       "referenced_stable_id": "role:authenticated",
       "deptype": "n"
@@ -14853,6 +14127,16 @@
     {
       "dependent_stable_id": "membership:authenticated->postgres",
       "referenced_stable_id": "role:postgres",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "membership:authenticated->supabase_realtime_admin",
+      "referenced_stable_id": "role:authenticated",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "membership:authenticated->supabase_realtime_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
@@ -15006,6 +14290,16 @@
       "deptype": "n"
     },
     {
+      "dependent_stable_id": "membership:service_role->supabase_realtime_admin",
+      "referenced_stable_id": "role:service_role",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "membership:service_role->supabase_realtime_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
+      "deptype": "n"
+    },
+    {
       "dependent_stable_id": "membership:supabase_privileged_role->postgres",
       "referenced_stable_id": "role:postgres",
       "deptype": "n"
@@ -15023,16 +14317,6 @@
     {
       "dependent_stable_id": "membership:supabase_privileged_role->supabase_etl_admin",
       "referenced_stable_id": "role:supabase_privileged_role",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "membership:supabase_realtime_admin->postgres",
-      "referenced_stable_id": "role:postgres",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "membership:supabase_realtime_admin->postgres",
-      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
@@ -15682,7 +14966,7 @@
     },
     {
       "dependent_stable_id": "procedure:realtime.\"cast\"(text,regtype)",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
@@ -15697,7 +14981,7 @@
     },
     {
       "dependent_stable_id": "procedure:realtime.apply_rls(jsonb,integer)",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
@@ -15717,7 +15001,7 @@
     },
     {
       "dependent_stable_id": "procedure:realtime.broadcast_changes(text,text,text,text,text,record,record,text)",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
@@ -15727,7 +15011,7 @@
     },
     {
       "dependent_stable_id": "procedure:realtime.build_prepared_statement_sql(text,regclass,realtime.wal_column[])",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
@@ -15747,7 +15031,7 @@
     },
     {
       "dependent_stable_id": "procedure:realtime.check_equality_op(realtime.equality_op,regtype,text,text)",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
@@ -15762,7 +15046,7 @@
     },
     {
       "dependent_stable_id": "procedure:realtime.is_visible_through_filters(realtime.wal_column[],realtime.user_defined_filter[])",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
@@ -15782,7 +15066,7 @@
     },
     {
       "dependent_stable_id": "procedure:realtime.list_changes(name,name,integer,integer)",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
@@ -15792,7 +15076,7 @@
     },
     {
       "dependent_stable_id": "procedure:realtime.quote_wal2json(regclass)",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
@@ -15807,7 +15091,7 @@
     },
     {
       "dependent_stable_id": "procedure:realtime.send_binary(bytea,text,text,boolean)",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
@@ -15822,7 +15106,7 @@
     },
     {
       "dependent_stable_id": "procedure:realtime.send(jsonb,text,text,boolean)",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
@@ -15837,7 +15121,7 @@
     },
     {
       "dependent_stable_id": "procedure:realtime.subscription_check_filters()",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
@@ -15847,7 +15131,7 @@
     },
     {
       "dependent_stable_id": "procedure:realtime.to_regrole(text)",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
@@ -15867,7 +15151,7 @@
     },
     {
       "dependent_stable_id": "procedure:realtime.wal2json_escape_identifier(text)",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
@@ -16087,7 +15371,7 @@
     },
     {
       "dependent_stable_id": "sequence:realtime.subscription_id_seq",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
@@ -16167,7 +15451,7 @@
     },
     {
       "dependent_stable_id": "table:realtime.schema_migrations",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
@@ -16177,7 +15461,7 @@
     },
     {
       "dependent_stable_id": "table:realtime.subscription",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
@@ -16202,7 +15486,7 @@
     },
     {
       "dependent_stable_id": "trigger:realtime.subscription.tr_check_filters",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
@@ -16252,12 +15536,12 @@
     },
     {
       "dependent_stable_id": "type:realtime._action",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
       "dependent_stable_id": "type:realtime._equality_op",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
@@ -16267,32 +15551,32 @@
     },
     {
       "dependent_stable_id": "type:realtime._schema_migrations",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
       "dependent_stable_id": "type:realtime._subscription",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
       "dependent_stable_id": "type:realtime._user_defined_filter",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
       "dependent_stable_id": "type:realtime._wal_column",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
       "dependent_stable_id": "type:realtime._wal_rls",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
       "dependent_stable_id": "type:realtime.action",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
@@ -16302,7 +15586,7 @@
     },
     {
       "dependent_stable_id": "type:realtime.equality_op",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
@@ -16312,7 +15596,7 @@
     },
     {
       "dependent_stable_id": "type:realtime.user_defined_filter",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
@@ -16327,7 +15611,7 @@
     },
     {
       "dependent_stable_id": "type:realtime.wal_column",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
@@ -16337,7 +15621,7 @@
     },
     {
       "dependent_stable_id": "type:realtime.wal_rls",
-      "referenced_stable_id": "role:supabase_admin",
+      "referenced_stable_id": "role:supabase_realtime_admin",
       "deptype": "n"
     },
     {
@@ -16356,22 +15640,22 @@
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "unknown:pg_class.16853",
+      "dependent_stable_id": "unknown:pg_class.16861",
       "referenced_stable_id": "column:realtime.messages.extension",
       "deptype": "a"
     },
     {
-      "dependent_stable_id": "unknown:pg_class.16853",
+      "dependent_stable_id": "unknown:pg_class.16861",
       "referenced_stable_id": "column:realtime.messages.inserted_at",
       "deptype": "a"
     },
     {
-      "dependent_stable_id": "unknown:pg_class.16853",
+      "dependent_stable_id": "unknown:pg_class.16861",
       "referenced_stable_id": "column:realtime.messages.private",
       "deptype": "a"
     },
     {
-      "dependent_stable_id": "unknown:pg_class.16853",
+      "dependent_stable_id": "unknown:pg_class.16861",
       "referenced_stable_id": "column:realtime.messages.topic",
       "deptype": "a"
     },
