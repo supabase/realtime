@@ -3,8 +3,8 @@ ARG OTP_VERSION=27.3
 ARG DEBIAN_VERSION=bookworm-20250929-slim
 ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
 ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
-# @supabase/pg-delta@1.0.0-alpha.24
-ARG PG_DELTA_COMMIT=102ef99ae5aabb29510d48b39fbb8ecee34f5458
+# @supabase/pg-delta@1.0.0-alpha.27
+ARG PG_DELTA_COMMIT=31acf903129afea60b4f304f72e109698fc96dc5
 
 FROM debian:${DEBIAN_VERSION} AS pgdelta-builder
 ARG PG_DELTA_COMMIT
