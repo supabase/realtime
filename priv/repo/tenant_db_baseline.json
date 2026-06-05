@@ -1785,10 +1785,10 @@
       "all_argument_types": [],
       "argument_modes": null,
       "argument_defaults": "true",
-      "source_code": "\nDECLARE\n  generated_id uuid;\n  final_payload jsonb;\nBEGIN\n  BEGIN\n    -- Generate a new UUID for the id\n    generated_id := gen_random_uuid();\n\n    -- Check if payload has an 'id' key, if not, add the generated UUID\n    IF payload ? 'id' THEN\n      final_payload := payload;\n    ELSE\n      final_payload := jsonb_set(payload, '{id}', to_jsonb(generated_id));\n    END IF;\n\n    -- Set the topic configuration\n    EXECUTE format('SET LOCAL realtime.topic TO %L', topic);\n\n    -- Attempt to insert the message\n    INSERT INTO realtime.messages (id, payload, event, topic, private, extension)\n    VALUES (generated_id, final_payload, event, topic, private, 'broadcast');\n  EXCEPTION\n    WHEN OTHERS THEN\n      -- Capture and notify the error\n      RAISE WARNING 'ErrorSendingBroadcastMessage: %', SQLERRM;\n  END;\nEND;\n",
+      "source_code": "\nDECLARE\n  generated_id uuid;\n  final_payload jsonb;\nBEGIN\n  BEGIN\n    generated_id := gen_random_uuid();\n\n    -- Check if payload has an 'id' key, if not, add the generated UUID\n    IF payload ? 'id' THEN\n      final_payload := payload;\n    ELSE\n      final_payload := jsonb_set(payload, '{id}', to_jsonb(generated_id));\n    END IF;\n\n    -- Set the topic configuration\n    EXECUTE format('SET LOCAL realtime.topic TO %L', topic);\n\n    INSERT INTO realtime.messages (id, payload, event, topic, private, extension)\n    VALUES (generated_id, final_payload, event, topic, private, 'broadcast');\n  EXCEPTION\n    WHEN OTHERS THEN\n      RAISE WARNING 'WarnSendingBroadcastMessage: %', SQLERRM;\n  END;\nEND;\n",
       "binary_path": null,
       "sql_body": null,
-      "definition": "CREATE OR REPLACE FUNCTION realtime.send(payload jsonb, event text, topic text, private boolean DEFAULT true)\n RETURNS void\n LANGUAGE plpgsql\nAS $function$\nDECLARE\n  generated_id uuid;\n  final_payload jsonb;\nBEGIN\n  BEGIN\n    -- Generate a new UUID for the id\n    generated_id := gen_random_uuid();\n\n    -- Check if payload has an 'id' key, if not, add the generated UUID\n    IF payload ? 'id' THEN\n      final_payload := payload;\n    ELSE\n      final_payload := jsonb_set(payload, '{id}', to_jsonb(generated_id));\n    END IF;\n\n    -- Set the topic configuration\n    EXECUTE format('SET LOCAL realtime.topic TO %L', topic);\n\n    -- Attempt to insert the message\n    INSERT INTO realtime.messages (id, payload, event, topic, private, extension)\n    VALUES (generated_id, final_payload, event, topic, private, 'broadcast');\n  EXCEPTION\n    WHEN OTHERS THEN\n      -- Capture and notify the error\n      RAISE WARNING 'ErrorSendingBroadcastMessage: %', SQLERRM;\n  END;\nEND;\n$function$\n",
+      "definition": "CREATE OR REPLACE FUNCTION realtime.send(payload jsonb, event text, topic text, private boolean DEFAULT true)\n RETURNS void\n LANGUAGE plpgsql\nAS $function$\nDECLARE\n  generated_id uuid;\n  final_payload jsonb;\nBEGIN\n  BEGIN\n    generated_id := gen_random_uuid();\n\n    -- Check if payload has an 'id' key, if not, add the generated UUID\n    IF payload ? 'id' THEN\n      final_payload := payload;\n    ELSE\n      final_payload := jsonb_set(payload, '{id}', to_jsonb(generated_id));\n    END IF;\n\n    -- Set the topic configuration\n    EXECUTE format('SET LOCAL realtime.topic TO %L', topic);\n\n    INSERT INTO realtime.messages (id, payload, event, topic, private, extension)\n    VALUES (generated_id, final_payload, event, topic, private, 'broadcast');\n  EXCEPTION\n    WHEN OTHERS THEN\n      RAISE WARNING 'WarnSendingBroadcastMessage: %', SQLERRM;\n  END;\nEND;\n$function$\n",
       "config": null,
       "owner": "supabase_admin",
       "comment": null,
@@ -1848,10 +1848,10 @@
       "all_argument_types": [],
       "argument_modes": null,
       "argument_defaults": "true",
-      "source_code": "\nDECLARE\n  generated_id uuid;\nBEGIN\n  BEGIN\n    generated_id := gen_random_uuid();\n\n    EXECUTE format('SET LOCAL realtime.topic TO %L', topic);\n\n    INSERT INTO realtime.messages (id, binary_payload, event, topic, private, extension)\n    VALUES (generated_id, payload, event, topic, private, 'broadcast');\n  EXCEPTION\n    WHEN OTHERS THEN\n      RAISE WARNING 'ErrorSendingBroadcastMessage: %', SQLERRM;\n  END;\nEND;\n",
+      "source_code": "\nDECLARE\n  generated_id uuid;\nBEGIN\n  BEGIN\n    generated_id := gen_random_uuid();\n\n    EXECUTE format('SET LOCAL realtime.topic TO %L', topic);\n\n    INSERT INTO realtime.messages (id, binary_payload, event, topic, private, extension)\n    VALUES (generated_id, payload, event, topic, private, 'broadcast');\n  EXCEPTION\n    WHEN OTHERS THEN\n      RAISE WARNING 'WarnSendingBroadcastMessage: %', SQLERRM;\n  END;\nEND;\n",
       "binary_path": null,
       "sql_body": null,
-      "definition": "CREATE OR REPLACE FUNCTION realtime.send_binary(payload bytea, event text, topic text, private boolean DEFAULT true)\n RETURNS void\n LANGUAGE plpgsql\nAS $function$\nDECLARE\n  generated_id uuid;\nBEGIN\n  BEGIN\n    generated_id := gen_random_uuid();\n\n    EXECUTE format('SET LOCAL realtime.topic TO %L', topic);\n\n    INSERT INTO realtime.messages (id, binary_payload, event, topic, private, extension)\n    VALUES (generated_id, payload, event, topic, private, 'broadcast');\n  EXCEPTION\n    WHEN OTHERS THEN\n      RAISE WARNING 'ErrorSendingBroadcastMessage: %', SQLERRM;\n  END;\nEND;\n$function$\n",
+      "definition": "CREATE OR REPLACE FUNCTION realtime.send_binary(payload bytea, event text, topic text, private boolean DEFAULT true)\n RETURNS void\n LANGUAGE plpgsql\nAS $function$\nDECLARE\n  generated_id uuid;\nBEGIN\n  BEGIN\n    generated_id := gen_random_uuid();\n\n    EXECUTE format('SET LOCAL realtime.topic TO %L', topic);\n\n    INSERT INTO realtime.messages (id, binary_payload, event, topic, private, extension)\n    VALUES (generated_id, payload, event, topic, private, 'broadcast');\n  EXCEPTION\n    WHEN OTHERS THEN\n      RAISE WARNING 'WarnSendingBroadcastMessage: %', SQLERRM;\n  END;\nEND;\n$function$\n",
       "config": null,
       "owner": "supabase_admin",
       "comment": null,
@@ -13178,22 +13178,22 @@
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages.binary_payload",
-      "deptype": "n"
+      "deptype": "a"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages.binary_payload",
-      "deptype": "a"
-    },
-    {
-      "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
-      "referenced_stable_id": "column:realtime.messages.payload",
       "deptype": "n"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages.payload",
       "deptype": "a"
+    },
+    {
+      "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
+      "referenced_stable_id": "column:realtime.messages.payload",
+      "deptype": "n"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_pkey",
@@ -15943,12 +15943,12 @@
     {
       "dependent_stable_id": "publication:supabase_realtime",
       "referenced_stable_id": "table:public.test_tenant",
-      "deptype": "n"
+      "deptype": "a"
     },
     {
       "dependent_stable_id": "publication:supabase_realtime",
       "referenced_stable_id": "table:public.test_tenant",
-      "deptype": "a"
+      "deptype": "n"
     },
     {
       "dependent_stable_id": "rule:extensions.pg_stat_statements_info.\"_RETURN\"",
@@ -16356,22 +16356,22 @@
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "unknown:pg_class.16853",
+      "dependent_stable_id": "unknown:pg_class.16857",
       "referenced_stable_id": "column:realtime.messages.extension",
       "deptype": "a"
     },
     {
-      "dependent_stable_id": "unknown:pg_class.16853",
+      "dependent_stable_id": "unknown:pg_class.16857",
       "referenced_stable_id": "column:realtime.messages.inserted_at",
       "deptype": "a"
     },
     {
-      "dependent_stable_id": "unknown:pg_class.16853",
+      "dependent_stable_id": "unknown:pg_class.16857",
       "referenced_stable_id": "column:realtime.messages.private",
       "deptype": "a"
     },
     {
-      "dependent_stable_id": "unknown:pg_class.16853",
+      "dependent_stable_id": "unknown:pg_class.16857",
       "referenced_stable_id": "column:realtime.messages.topic",
       "deptype": "a"
     },
