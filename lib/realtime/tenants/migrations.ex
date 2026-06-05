@@ -88,7 +88,8 @@ defmodule Realtime.Tenants.Migrations do
     AddBinaryPayloadToMessages,
     AddSelectColumnsToSubscriptions,
     Wal2jsonEscapeSpecialChars,
-    AddSendBinaryFunction
+    AddSendBinaryFunction,
+    RenameBroadcastSendWarning
   }
 
   @migrations [
@@ -164,7 +165,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_260_514_120_000, AddBinaryPayloadToMessages},
     {20_260_527_120_000, AddSelectColumnsToSubscriptions},
     {20_260_528_120_000, Wal2jsonEscapeSpecialChars},
-    {20_260_603_120_000, AddSendBinaryFunction}
+    {20_260_603_120_000, AddSendBinaryFunction},
+    {20_260_605_120_000, RenameBroadcastSendWarning}
   ]
 
   defstruct [:tenant_external_id, :settings, migrations_ran: 0]
