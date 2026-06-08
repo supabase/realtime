@@ -244,7 +244,7 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
         role: claims.role
       })
 
-    Realtime.Tenants.Migrations.create_partitions(local_db_conn)
+    Realtime.Tenants.create_messages_partitions(local_db_conn)
     create_rls_policies(local_db_conn, context.policies, %{topic: topic})
 
     {:ok, node} = Clustered.start()

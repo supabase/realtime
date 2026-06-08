@@ -24,7 +24,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   }
   """
   @application_name "realtime_dashboard_tenant_migrations"
-  @query_timeout 30_000
+  @query_timeout 60_000
   @schema_migrations_query "SELECT version, inserted_at FROM realtime.schema_migrations ORDER BY version DESC"
 
   @impl true
@@ -410,7 +410,12 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
           "sql"
         ]
 
-        case System.cmd(path, args, stderr_to_stdout: true) do
+        env = [
+          {"PGDELTA_CONNECTION_TIMEOUT_MS", Integer.to_string(@query_timeout)},
+          {"PGDELTA_CONNECT_TIMEOUT_MS", Integer.to_string(@query_timeout)}
+        ]
+
+        case System.cmd(path, args, stderr_to_stdout: true, env: env) do
           {output, 0} ->
             {:ok, %{status: :no_changes, sql: output}}
 

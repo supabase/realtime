@@ -176,6 +176,8 @@ defmodule Realtime.Tenants.Migrations do
           settings: map()
         }
 
+  def migrations(), do: @migrations
+
   @doc """
   Run migrations for the given tenant.
   """
@@ -283,57 +285,4 @@ defmodule Realtime.Tenants.Migrations do
   defp error_code(%Postgrex.Error{postgres: %{code: code}}), do: code
   defp error_code(%DBConnection.ConnectionError{}), do: :connection_error
   defp error_code(_), do: :other
-
-  @doc """
-  Create partitions for `realtime.messages` on tenant database.
-
-  Accepts either an existing tenant database connection or a `Tenant`.
-  """
-  @spec create_partitions(Tenant.t()) :: :ok | {:error, term()}
-  def create_partitions(%Tenant{} = tenant) do
-    case Database.connect(tenant, "realtime_health_check") do
-      {:ok, conn} ->
-        result = create_partitions(conn)
-        GenServer.stop(conn)
-        result
-
-      {:error, error} ->
-        log_error("PartitionCreationFailed", error)
-        {:error, error}
-    end
-  end
-
-  @spec create_partitions(pid()) :: :ok
-  def create_partitions(db_conn_pid) do
-    Logger.info("Creating partitions for realtime.messages")
-    today = Date.utc_today()
-    yesterday = Date.add(today, -1)
-    future = Date.add(today, 3)
-
-    dates = Date.range(yesterday, future)
-
-    Enum.each(dates, fn date ->
-      partition_name = "messages_#{date |> Date.to_iso8601() |> String.replace("-", "_")}"
-      start_timestamp = Date.to_string(date)
-      end_timestamp = Date.to_string(Date.add(date, 1))
-
-      Database.transaction(db_conn_pid, fn conn ->
-        query = """
-        CREATE TABLE IF NOT EXISTS realtime.#{partition_name}
-        PARTITION OF realtime.messages
-        FOR VALUES FROM ('#{start_timestamp}') TO ('#{end_timestamp}');
-        """
-
-        case Postgrex.query(conn, query, []) do
-          {:ok, _} -> Logger.debug("Partition #{partition_name} created")
-          {:error, %Postgrex.Error{postgres: %{code: :duplicate_table}}} -> :ok
-          {:error, error} -> log_error("PartitionCreationFailed", error)
-        end
-      end)
-    end)
-
-    :ok
-  end
-
-  def migrations(), do: @migrations
 end

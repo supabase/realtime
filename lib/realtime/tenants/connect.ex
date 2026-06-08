@@ -280,7 +280,7 @@ defmodule Realtime.Tenants.Connect do
 
     case Piper.run(pipes, state) do
       {:ok, acc} ->
-        {:noreply, acc, {:continue, :run_migrations}}
+        {:noreply, acc, {:continue, :provision_tenant}}
 
       {:error, :tenant_not_found} ->
         {:stop, {:shutdown, :tenant_not_found}, state}
@@ -294,12 +294,12 @@ defmodule Realtime.Tenants.Connect do
     end
   end
 
-  def handle_continue(:run_migrations, state) do
+  def handle_continue(:provision_tenant, state) do
     %{tenant: tenant, db_conn_pid: db_conn_pid} = state
-    Logger.warning("Tenant #{tenant.external_id} is initializing: #{inspect(node())}")
+    Logger.info("Tenant #{tenant.external_id} is initializing: #{inspect(node())}")
 
     with res when res in [:ok, :noop] <- Migrations.run_migrations(tenant),
-         :ok <- Migrations.create_partitions(db_conn_pid) do
+         :ok <- Tenants.create_messages_partitions(db_conn_pid) do
       {:noreply, state, {:continue, :start_replication}}
     else
       error ->

@@ -48,7 +48,7 @@ defmodule Generators do
   @spec message_fixture(Realtime.Api.Tenant.t()) :: any()
   def message_fixture(tenant, override \\ %{}) do
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
-    Realtime.Tenants.Migrations.create_partitions(db_conn)
+    Realtime.Tenants.create_messages_partitions(db_conn)
 
     create_attrs = %{
       "topic" => random_string(),

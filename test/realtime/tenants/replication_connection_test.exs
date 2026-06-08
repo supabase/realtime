@@ -535,7 +535,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
       assert :ok = Endpoint.subscribe(tenant_topic)
 
-      Realtime.Tenants.Migrations.create_partitions(db_conn)
+      Realtime.Tenants.create_messages_partitions(db_conn)
 
       binary = <<0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0xFF>>
       event = "INSERT"
@@ -567,7 +567,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
           tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
           assert :ok = Endpoint.subscribe(tenant_topic)
 
-          Realtime.Tenants.Migrations.create_partitions(db_conn)
+          Realtime.Tenants.create_messages_partitions(db_conn)
 
           binary = :binary.copy(<<0>>, tenant.max_payload_size_in_kb * 1000 + 1000)
           event = "INSERT"
@@ -594,7 +594,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
       assert :ok = Endpoint.subscribe(tenant_topic)
 
-      Realtime.Tenants.Migrations.create_partitions(db_conn)
+      Realtime.Tenants.create_messages_partitions(db_conn)
 
       event = "INSERT"
 
@@ -614,7 +614,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     end
 
     test "rejects insert with both payload and binary_payload set", %{db_conn: db_conn} do
-      Realtime.Tenants.Migrations.create_partitions(db_conn)
+      Realtime.Tenants.create_messages_partitions(db_conn)
 
       assert {:error, %Postgrex.Error{postgres: %{code: :check_violation, constraint: "messages_payload_exclusive"}}} =
                Postgrex.query(
