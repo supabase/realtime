@@ -74,6 +74,7 @@ Forum.Muster.members(scope)                 # [node]
 Forum.Muster.local_members(scope, group)    # [pid]
 Forum.Muster.local_member?(scope, group, pid)
 Forum.Muster.local_member_count(scope, group)
+Forum.Muster.dump(scope)                     # prints a state snapshot, returns :ok
 ```
 
 Start it under supervision with a scope name (use a different scope from any Census on the same node):
@@ -238,3 +239,40 @@ Stale entries do not cause incorrect broadcasts because broadcasters always rout
 ### Network partition
 
 If A and B can no longer reach each other, they each detect peer `:DOWN`, rebalance independently, and route to whoever they can see. When the partition heals, the rejoin runs through discovery → rebalance and the two sub-clusters merge. Broadcasts during the split are delivered to the sub-cluster the sender can see — Muster does not perform anti-entropy beyond this, so a broadcast during a partition won't reach the other side after the heal.
+
+## Observability
+
+Muster logs its lifecycle on two tiers, all prefixed `Muster[node|scope]`:
+
+* **`info`** — the rare, cluster-level events: rebalance start (old → new members + view hash), a one-line rebalance summary (groups held, groups moved, routers re-snapshotted), every `:status` transition (`:rebalancing → :converging → :ready`), and node up / peer down. These are safe to leave on; they fire only on real change.
+* **`debug`** — the per-group churn: each claim decision (occupied locally, dispatched to a router, reclaimed from cooldown/queue, parked behind in-flight work), `:occupied` RPC results, a group entering cooldown, cooldown expiry (queued or reclaimed), and each vacant flush / batch acknowledgement.
+
+Bump the level to watch the per-group flow while playing:
+
+```elixir
+Logger.configure(level: :debug)
+```
+
+When Muster is embedded in a host app (e.g. Realtime), that app's Logger setup prints these lines. The standalone `forum` app ships with `config :logger, backends: []`, so if you're playing *inside* `forum/` (`iex -S mix`) attach a console handler first:
+
+```elixir
+:logger.add_handler(:console, :logger_std_h, %{config: %{type: :standard_io}})
+:logger.set_primary_config(:level, :debug)
+```
+
+For a point-in-time snapshot, `Forum.Muster.dump(scope)` prints the lifecycle status, view hash, ring members, peers, each peer's last-announced view hash, the per-group state machine, and the router-role occupancy table (`group => [source_node]`), then returns `:ok`:
+
+```
+iex> Forum.Muster.dump(:topics)
+Muster :topics @ :node1@host
+  status:       :ready
+  view_hash:    123456789
+  members:      [:node1@host, :node2@host]
+  ...
+group_states:
+  :occupied (2): ["room:1", "room:2"]
+occupancy (as router):
+  "room:1" => [:node1@host]
+```
+
+Node up/down and group vacancy are also emitted as `:telemetry` events (`[:forum, scope, :node, :up | :down]`, `[:forum, scope, :group, :vacant]`) if you'd rather attach a handler than read logs.
