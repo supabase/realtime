@@ -18,6 +18,7 @@ defmodule Forum.Muster do
           {:partitions, pos_integer()}
           | {:vacancy_cooldown_ms, non_neg_integer()}
           | {:vacant_flush_interval_ms, pos_integer()}
+          | {:view_heartbeat_interval_ms, pos_integer()}
           | {:rpc_timeout_ms, timeout()}
           | {:message_module, module()}
 
@@ -51,6 +52,10 @@ defmodule Forum.Muster do
   * `:vacant_flush_interval_ms` — how often the queued vacancies are flushed to
     their router nodes in per-router batches (default: 5_000). A failed
     batch re-queues its groups, so this also bounds the retry cadence.
+  * `:view_heartbeat_interval_ms` — how often each node re-announces its current
+    cluster-view hash to peers (default: 10_000). This is the readiness-barrier
+    backstop: it heals a dropped view announcement without a membership change,
+    bounding the worst-case "router floods instead of targeting" window.
   * `:rpc_timeout_ms` — timeout for router-node RPCs (default: 5_000).
   * `:message_module` — module implementing `Forum.Adapter` (default:
     `Forum.Adapter.ErlDist`).
@@ -76,6 +81,14 @@ defmodule Forum.Muster do
     if flush_interval != nil and not (is_integer(flush_interval) and flush_interval > 0) do
       raise ArgumentError,
             "expected :vacant_flush_interval_ms to be a positive integer, got: #{inspect(flush_interval)}"
+    end
+
+    heartbeat_interval = Keyword.get(opts, :view_heartbeat_interval_ms)
+
+    if heartbeat_interval != nil and
+         not (is_integer(heartbeat_interval) and heartbeat_interval > 0) do
+      raise ArgumentError,
+            "expected :view_heartbeat_interval_ms to be a positive integer, got: #{inspect(heartbeat_interval)}"
     end
 
     Forum.Supervisor.start_link(Forum.Muster.Scope, scope, partitions, opts)
@@ -121,22 +134,23 @@ defmodule Forum.Muster do
   @doc """
   Returns the router node for `group` in `scope`.
 
-  * `{:ok, node}` — cluster view is stable; route to `node`.
-  * `{:rebalancing, [node]}` — the local Scope is settling a membership
-    change. The router mapping is in flux; callers using their own
-    transport should fan out to every node in the list rather than
-    targeting a single router.
+  * `{:ok, node}` — our ring is settled (`:converging` or `:ready`); route to
+    `node`. (If the chosen router's own table isn't complete yet it will fall
+    back to flooding — see `can_decide?/2`.)
+  * `{:rebalancing, [node]}` — the local Scope's ring is in flux. The router
+    mapping is unreliable; callers using their own transport should fan out to
+    every node in the list rather than targeting a single router.
   """
   @spec router(atom, group) :: {:ok, node} | {:rebalancing, [node]}
   def router(scope, group) when is_atom(scope) do
     case :persistent_term.get({Forum.Muster, scope, :status}) do
-      :stable ->
-        # ExHashRing.Ring.find_node already returns {:ok, node}.
-        ExHashRing.Ring.find_node(ring_name(scope), group)
-
       :rebalancing ->
         {:ok, members} = ExHashRing.Ring.get_nodes(ring_name(scope))
         {:rebalancing, members}
+
+      _converging_or_ready ->
+        # ExHashRing.Ring.find_node already returns {:ok, node}.
+        ExHashRing.Ring.find_node(ring_name(scope), group)
     end
   end
 
@@ -145,6 +159,33 @@ defmodule Forum.Muster do
   def members(scope) when is_atom(scope) do
     {:ok, ns} = ExHashRing.Ring.get_nodes(ring_name(scope))
     ns
+  end
+
+  @doc """
+  Returns the current cluster-view hash for `scope`.
+
+  Senders tag each broadcast with this so the router can tell whether it
+  agrees about cluster membership (see `can_decide?/2`).
+  """
+  @spec view_hash(atom) :: non_neg_integer
+  def view_hash(scope) when is_atom(scope) do
+    :persistent_term.get({Forum.Muster, scope, :view_hash})
+  end
+
+  @doc """
+  Whether this node, as the router for a broadcast tagged `sender_view_hash`,
+  can confidently decide its fan-out targets from the occupancy table.
+
+  Returns `false` unless this node is `:ready` (every member's latest announced
+  view agrees with ours, so our occupancy table is complete) AND it agrees with
+  the sender about cluster membership. `:ready` already implies the ring is
+  settled, so it subsumes the old `:stable` check. When false, the caller
+  should fan out to all nodes instead of trusting `Scope.occupancy/2`.
+  """
+  @spec can_decide?(atom, non_neg_integer) :: boolean
+  def can_decide?(scope, sender_view_hash) when is_atom(scope) do
+    :persistent_term.get({Forum.Muster, scope, :status}) == :ready and
+      :persistent_term.get({Forum.Muster, scope, :view_hash}) == sender_view_hash
   end
 
   defp ring_name(scope), do: :"#{scope}_muster_ring"
