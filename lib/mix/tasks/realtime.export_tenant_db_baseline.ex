@@ -24,6 +24,7 @@ defmodule Mix.Tasks.Realtime.ExportTenantDbBaseline do
   use Mix.Task
 
   @baseline_path "priv/repo/tenant_db_baseline.json"
+  @catalog_filter ~s({"*/schema": "realtime"})
 
   @impl Mix.Task
   def run(args) do
@@ -36,7 +37,7 @@ defmodule Mix.Tasks.Realtime.ExportTenantDbBaseline do
     Mix.shell().info("[export_tenant_db_baseline] pgdelta: #{pgdelta}")
 
     output = Path.expand(@baseline_path, File.cwd!())
-    args = ["catalog-export", "--target", url, "--output", output]
+    args = ["catalog-export", "--target", url, "--output", output, "--filter", @catalog_filter]
 
     case System.cmd(pgdelta, args, stderr_to_stdout: true) do
       {output_str, 0} ->
