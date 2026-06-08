@@ -91,6 +91,7 @@ defmodule Realtime.Tenants.Migrations do
     AddSelectColumnsToSubscriptions,
     Wal2jsonEscapeSpecialChars,
     AddSendBinaryFunction,
+    SubscriptionCheckFiltersFixPermissions,
     SetupSupabaseRealtimeAdmin
   }
 
@@ -169,6 +170,7 @@ defmodule Realtime.Tenants.Migrations do
     {20_260_527_120_000, AddSelectColumnsToSubscriptions},
     {20_260_528_120_000, Wal2jsonEscapeSpecialChars},
     {20_260_603_120_000, AddSendBinaryFunction},
+    {20_260_604_110_000, SubscriptionCheckFiltersFixPermissions},
     {20_260_604_120_000, SetupSupabaseRealtimeAdmin}
   ]
 
