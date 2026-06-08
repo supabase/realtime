@@ -127,13 +127,16 @@ A periodic **vacant flush** (every `:vacant_flush_interval_ms`, default 5 s) the
 
 Each Muster scope runs one `ExHashRing.Ring` process (linked to the scope's Scope GenServer). The ring stores the member set and provides ETS-backed lookups; mutations bump a generation counter and keep the previous generation accessible for delta computation.
 
-A small `persistent_term` key tracks whether the cluster view is in flux:
+Two `persistent_term` keys track the cluster view (all cheap, lock-free reads):
 
 ```
-{Forum.Muster, scope, :status} = :stable | :rebalancing
+{Forum.Muster, scope, :status}    = :rebalancing | :converging | :ready
+{Forum.Muster, scope, :view_hash} = phash2(sorted member list)
 ```
 
-Reads are cheap (atom-value persistent_term) and `Muster.router/2` consults the ring only when status is `:stable`; when `:rebalancing` it returns the full member list so callers can fan out.
+`:status` is a lifecycle tri-state: **`:rebalancing`** (our ring is in flux) → **`:converging`** (ring adopted, still waiting for peers to agree on our view) → **`:ready`** (every peer agrees; our occupancy table can be trusted as a router). The three reachable states replace what would otherwise be a `:stable`/`:rebalancing` flag plus a separate `:ready` boolean — since "ready" already implies "not rebalancing," one ordered value captures the lifecycle without a redundant key.
+
+`Muster.router/2` returns the full member list to fan out only while `:rebalancing`; in `:converging`/`:ready` it routes to the ring's node. `Muster.can_decide?/2` (router side) trusts the occupancy table only in `:ready` (which subsumes the ring-settled check) with `:view_hash` agreement. `:view_hash` and `:status` drive the router-readiness barrier (see below).
 
 ### Trigger
 
@@ -148,15 +151,38 @@ A rebalance starts on every node whenever its view of the cluster changes:
 2. Flip `:status` to `:rebalancing`. From this point, `Muster.router/2` returns `{:rebalancing, members}` for all groups; broadcasters fan out to every member.
 3. **Normalize in-flight pending states.** A `:vacant_queued` entry is left untouched — we don't hold the group (so it isn't announced), but the next flush after the ring update re-routes it to the group's *current* router, which drains any stale entry the old router still holds. A `{:vacant_flushing, []}` entry (a batch RPC in flight, no waiters) is rewritten back to `:vacant_queued` so the next flush re-sends to the post-rebalance router; the in-flight worker's late result is dropped. A `{:vacant_flushing, waiters}` entry (a claim arrived while the batch was in flight) is rewritten to `{:occupied_pending, waiters}` so the rebalance re-announces it and settles the waiters. `:occupied_pending` claims are kept and carried through; they are settled with `:ok` (step 7) once the new router has been told (callers parked on `Muster.join/3` are **not** cancelled).
 4. Call `ExHashRing.Ring.set_nodes/2` with the new member list. The ring atomically swaps to a new generation; the prior generation is retained for one cycle.
-5. **Compute the delta**: for each `:occupied`, `:cooldown`, or `:occupied_pending` group, ask the ring for both the new router (`find_node/2`) and the previous router (`find_historical_node/3` with `back: 1`). Only groups whose router actually changed are in the announce-set. With consistent hashing this is typically ~1/N of the candidate groups instead of ~all of them.
-6. For each `{new_router, groups}` pair, send **one** `:receive_node_state` RPC bundling all groups for that destination (groups whose new router is this node are written to the local occupancy table directly). The receiver clears its prior entries for our node and inserts the fresh list.
-7. Settle the `:occupied_pending` claims whose router changed: reply `:ok` to their parked waiters and move them to `:occupied`. The new router has just been told via `:receive_node_state`, so the claim is satisfied.
-8. Walk our own occupancy table and drop entries for groups we are no longer the router for (those entries will be re-announced to us by the original source nodes during their own rebalances).
-9. Flip `:status` back to `:stable`.
+5. **Find the moved groups and affected routers.** For each `:occupied`, `:cooldown`, or `:occupied_pending` group, ask the ring for both the new router (`find_node/2`) and the previous router (`find_historical_node/3` with `back: 1`). The groups whose router *changed* are the *moved* set; the distinct new routers of those groups are the *affected* routers. With consistent hashing the moved set is typically ~1/N of the candidate groups.
+6. **Send each affected router a full snapshot.** For every affected router, send **one** `:receive_node_state` RPC carrying *all* groups we hold routed to it — not just the moved ones (groups routed to this node are written to the local occupancy table directly). The receiver clears its prior entries for our node and inserts the list, so the snapshot **must** be complete: `:receive_node_state` wipes all of our rows before inserting, so sending only the moved groups would silently drop unchanged groups that still route there. A router that gained nothing is left untouched — its existing rows for us are still correct, and any group that moved *away* from it is cleared by its own `drop_stale_router_entries` (step 9).
+7. **Announce our view to every member for the readiness barrier (hybrid).** Each affected router learns our view from the `:receive_node_state` RPC itself: the RPC carries `view_hash`, and after committing the occupancy data the receiver's `receive_node_state` notifies its own Scope — so the snapshot doubles as the view announcement, with the data committed before the view is recorded. Members that received *no* snapshot have nothing to fold the announcement into, so they get a cheap async `{:rebalance_marker, node(), view_hash}` send instead — that is how their barrier learns "this source holds nothing for me" vs. "this source has not arrived yet". This keeps the RPC count at ~the announce-set size (not N per node) while still signalling every member. See the readiness barrier below.
+8. Settle the `:occupied_pending` claims whose router changed: reply `:ok` to their parked waiters and move them to `:occupied`. The new router has just been told via `:receive_node_state`, so the claim is satisfied.
+9. Walk our own occupancy table and drop entries for groups we are no longer the router for (those entries will be re-announced to us by the original source nodes during their own rebalances).
+10. Leave `:rebalancing` by recomputing `:status` from peer agreement — `:ready` if every member's latest view already matches ours (single-node clusters land here immediately), otherwise `:converging`.
 
 ### What callers see during the rebalance window
 
 `Muster.router/2` returns `{:rebalancing, members}` for the entire duration.
+
+### Router-readiness barrier
+
+The `:rebalancing` status is *local* to each node and only protects senders on that node. It does not cover this ordering: node A finishes its rebalance and goes `:stable` while node B is still mid-rebalance, so a group that re-hashed onto a fresh router C is routed there by A before B has announced it to C. A and C *agree* on membership, and C is `:stable` — yet C's occupancy table is incomplete. Neither a membership-agreement check nor C's own status catches this, because the lag is in a *third* node's announcement.
+
+The barrier closes it. Each broadcast is tagged with the sender's `:view_hash`. On the router, the fan-out path calls `Muster.can_decide?/2` before trusting the occupancy table:
+
+```elixir
+Muster.can_decide?(scope, sender_view_hash)
+#  status == :ready          — ring settled AND every member agrees with our view
+#  and view_hash == sender's — and the sender agrees with us on the node set
+```
+
+If either clause is false the router **cannot decide its targets and falls back to fanning out to all nodes** (the real connected cluster, not the ring's member view — a freshly-restarted Scope's ring is just `[node()]`). The two checks are complementary: the `:view_hash` comparison catches sender/router *disagreement* (and the Scope-restart window, where a restarted router's view shrinks to `[node()]` and so mismatches), while `:ready` (vs. `:converging`) catches the *convergence* gap above — membership agreement holds, but not every holder has re-announced yet. `:ready` subsumes the old separate "not rebalancing" check, since the ring is necessarily settled by the time we reach it.
+
+`:status == :ready` is derived from `member_views`, a map of **each peer's most-recently-announced view hash**. A peer announces its view by finishing its own rebalance — either via its data-carrying `:receive_node_state` RPC (which echoes the sender's view) or, for a member that sent no snapshot, via a cheap async `{:rebalance_marker, source, view_hash}` (step 7). The handshake (`:muster_discover`/`_ack`) also piggybacks each side's view, so a node seeds `member_views` immediately — important after a Scope restart, where it would otherwise be empty. We are `:ready` once every member's latest view equals ours; otherwise `:converging`.
+
+The map is **latest-wins and never reset**, which is what makes the barrier converge. An announcement that arrives *before* the receiver has adopted that view is simply stored as that peer's latest view rather than discarded; the moment the receiver catches up to the same view, the agreement check passes. (An earlier set-and-reset design dropped such early announcements and could leave a router permanently stuck not-ready until the next membership change.) The degraded state is the safe one: any disagreement or missing entry keeps the node in `:converging`, so it floods (never misses) and self-corrects as announcements arrive.
+
+There is no readiness *timeout* — `:converging` is a fully-functional safe state (the node still routes as a sender and floods as a router), not a blocking wait, so there's nothing to time out. To bound the worst case, each node re-announces its current view to every member every `:view_heartbeat_interval_ms` (default 10 s). The event-driven path (rebalance announcements + the discovery handshake) normally converges in milliseconds; the heartbeat is the backstop that heals a dropped announcement *without* needing a membership change, turning a theoretical "stuck flooding forever" into "stuck for at most one heartbeat." It's idempotent with `member_views` (latest-wins), so a redundant heartbeat costs only a small message per member.
+
+Because `:view_hash` is content-derived (`phash2` of the sorted node set) rather than a counter, it survives Scope restarts unchanged — a restarted router recomputes the same hash once it re-converges, and mismatches in the meantime.
 
 
 ### Cost of a rolling deploy
@@ -189,7 +215,7 @@ In addition to the retry, two event-driven cleanups still apply:
 
 If any `:receive_node_state` call raises or returns `{:error, _}`, `do_rebalance/2` re-raises. **Scope crashes.** The supervisor restarts it. Scope's `init/1`:
 
-* Resets the member list to `[node()]` and the `:status` persistent_term to `:stable` (forgetting the cluster view).
+* Resets the member list to `[node()]`, the `:status` persistent_term to `:ready`, and `:view_hash` to `phash2([node()])` (forgetting the cluster view). A sender that still holds the pre-crash multi-node `:view_hash` will mismatch this single-node hash, so `can_decide?/2` returns false and broadcasts to the restarted router fan out to all nodes until it re-converges.
 * Walks the Partition entries (which survive Scope's death because they live in `:public, :named_table` ETS owned by the Supervisor) and rebuilds `group_states` by marking every locally-held group as `:occupied`.
 * Re-broadcasts the discovery message; peers respond; `recompute_members` runs again.
 

@@ -22,6 +22,9 @@ defmodule Forum.MusterTest do
       # Long by default so the periodic flush never fires mid-test; tests that
       # exercise the flush drive it deterministically via trigger_flush/1.
       vacant_flush_interval_ms: Map.get(ctx, :flush_ms, 60_000),
+      # Same: long so the view heartbeat never fires mid-test; the heartbeat
+      # test drives it deterministically via trigger_view_heartbeat/1.
+      view_heartbeat_interval_ms: Map.get(ctx, :heartbeat_ms, 60_000),
       rpc_timeout_ms: Map.get(ctx, :rpc_timeout, 500),
       message_module: RecordingAdapter
     ]
@@ -49,7 +52,7 @@ defmodule Forum.MusterTest do
   end
 
   defp set_rebalancing(scope, flag) do
-    status = if flag, do: :rebalancing, else: :stable
+    status = if flag, do: :rebalancing, else: :ready
     :persistent_term.put({Forum.Muster, scope, :status}, status)
   end
 
@@ -75,6 +78,10 @@ defmodule Forum.MusterTest do
 
   defp trigger_flush(scope) do
     Kernel.send(Forum.Supervisor.name(scope), :flush_vacant)
+  end
+
+  defp trigger_view_heartbeat(scope) do
+    Kernel.send(Forum.Supervisor.name(scope), :view_heartbeat)
   end
 
   defp group_states(scope) do
@@ -112,7 +119,7 @@ defmodule Forum.MusterTest do
   defp announce_for_group?(events, group) do
     Enum.any?(events, fn
       {:adapter_event,
-       {:call, _, _, Forum.Muster.Scope, :receive_node_state, [_scope, _src, groups]}} ->
+       {:call, _, _, Forum.Muster.Scope, :receive_node_state, [_scope, _src, groups | _]}} ->
         group in groups
 
       _ ->
@@ -152,6 +159,12 @@ defmodule Forum.MusterTest do
     test "raises on invalid vacant_flush_interval_ms", %{scope: scope} do
       assert_raise ArgumentError, ~r/expected :vacant_flush_interval_ms/, fn ->
         Muster.start_link(scope, vacant_flush_interval_ms: 0)
+      end
+    end
+
+    test "raises on invalid view_heartbeat_interval_ms", %{scope: scope} do
+      assert_raise ArgumentError, ~r/expected :view_heartbeat_interval_ms/, fn ->
+        Muster.start_link(scope, view_heartbeat_interval_ms: 0)
       end
     end
 
@@ -220,11 +233,11 @@ defmodule Forum.MusterTest do
       assert Scope.occupancy(scope, :rg3) == [:src_b@nowhere]
     end
 
-    test "receive_node_state/3 replaces all rows for a source", %{scope: scope} do
+    test "receive_node_state/4 replaces all rows for a source", %{scope: scope} do
       # Seed something the snapshot should clear.
       :ok = Scope.occupied(scope, :stale_g, :src@nowhere)
 
-      assert :ok = Scope.receive_node_state(scope, :src@nowhere, [:fresh_a, :fresh_b])
+      assert :ok = Scope.receive_node_state(scope, :src@nowhere, [:fresh_a, :fresh_b], 0)
 
       refute :src@nowhere in Scope.occupancy(scope, :stale_g)
       assert :src@nowhere in Scope.occupancy(scope, :fresh_a)
@@ -618,7 +631,7 @@ defmodule Forum.MusterTest do
 
       assert_receive {:adapter_event,
                       {:call, ^scope, target, Forum.Muster.Scope, :receive_node_state,
-                       [^scope, src, groups]}},
+                       [^scope, src, groups | _]}},
                      500
 
       assert target == @fake_node
@@ -641,7 +654,7 @@ defmodule Forum.MusterTest do
 
       assert_receive {:adapter_event,
                       {:call, ^scope, @fake_node, Forum.Muster.Scope, :receive_node_state,
-                       [^scope, _src, groups]}},
+                       [^scope, _src, groups | _]}},
                      500
 
       assert g in groups
@@ -802,7 +815,7 @@ defmodule Forum.MusterTest do
 
       receive do
         {:adapter_event,
-         {:call, _scope, ^target, Forum.Muster.Scope, :receive_node_state, [_s, _src, groups]}} ->
+         {:call, _scope, ^target, Forum.Muster.Scope, :receive_node_state, [_s, _src, groups | _]}} ->
           if group in groups, do: true, else: do_receive_announce_for(target, group, deadline)
 
         {:adapter_event, _} ->
@@ -840,15 +853,306 @@ defmodule Forum.MusterTest do
       start_ms = System.monotonic_time(:millisecond)
       trigger_rebalance(scope, members)
 
-      # Poll persistent_term :status until it flips back to :stable.
+      # Poll persistent_term :status until it leaves :rebalancing (the fake
+      # peers never announce, so it settles on :converging, not :ready).
       Stream.repeatedly(fn -> :persistent_term.get({Forum.Muster, scope, :status}) end)
-      |> Stream.take_while(&(&1 != :stable))
+      |> Stream.take_while(&(&1 == :rebalancing))
       |> Enum.each(fn _ -> Process.sleep(5) end)
 
       duration_ms = System.monotonic_time(:millisecond) - start_ms
 
       assert duration_ms < 400,
              "expected parallel rebalance ~200ms, got #{duration_ms}ms (sequential would be ~600ms)"
+    end
+  end
+
+  describe "rebalance occupancy snapshot completeness" do
+    setup %{scope: scope, base_opts: opts} do
+      start_supervised!(spec(scope, opts))
+      :ok
+    end
+
+    # This node holds two groups, both routed to :x@nowhere AFTER the rebalance.
+    # g1's router does not change (x before and after); g2's router changes
+    # (z -> x). Because receive_node_state wipes ALL of this source's rows on x
+    # before inserting the snapshot, the snapshot to x must be a FULL snapshot
+    # of every group we hold routed to x — both g1 and g2 — or x would silently
+    # drop {g1, node()}.
+    test "snapshot to a router that gains a group includes the groups already routed there",
+         %{scope: scope} do
+      members_old = Enum.sort([node(), :x@nowhere, :z@nowhere])
+      members_new = Enum.sort([node(), :x@nowhere])
+
+      # g1: x both before and after (router UNCHANGED).
+      g1 = find_group_flipping_router(members_old, :x@nowhere, members_new, :x@nowhere)
+      # g2: z before, x after (router CHANGES onto x).
+      g2 = find_group_flipping_router(members_old, :z@nowhere, members_new, :x@nowhere)
+
+      assert g1 && g2 && g1 != g2
+
+      # Establish the old 3-node membership, then hold both groups locally.
+      trigger_rebalance(scope, members_old)
+
+      p1 = spawn_link(fn -> Process.sleep(:infinity) end)
+      p2 = spawn_link(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, g1, p1)
+      assert :ok = Muster.join(scope, g2, p2)
+
+      _ = drain_adapter_events()
+
+      # Drop :z@nowhere. g2 moves onto x; g1 stays on x.
+      trigger_rebalance(scope, members_new)
+
+      assert_receive {:adapter_event,
+                      {:call, ^scope, :x@nowhere, Forum.Muster.Scope, :receive_node_state,
+                       [^scope, src, groups | _]}},
+                     500
+
+      assert src == node()
+      assert g2 in groups, "the moved group must be announced to its new router"
+
+      assert g1 in groups,
+             "the unchanged group still routed to x must be re-announced, " <>
+               "else the source-wide wipe on x drops {g1, node()}"
+    end
+
+    test "a router that gains nothing is not sent a snapshot", %{scope: scope} do
+      # Add a node: groups only ever move *to* the new node, never onto the
+      # pre-existing node(). So the unrelated remote router that gains nothing
+      # must receive no receive_node_state call.
+      members_old = Enum.sort([node(), :keep@nowhere])
+      members_new = Enum.sort([node(), :keep@nowhere, :new@nowhere])
+
+      # A group that stays on :keep@nowhere across the change.
+      g = find_group_flipping_router(members_old, :keep@nowhere, members_new, :keep@nowhere)
+      assert g
+
+      trigger_rebalance(scope, members_old)
+      pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, g, pid)
+      _ = drain_adapter_events()
+
+      trigger_rebalance(scope, members_new)
+      Process.sleep(100)
+
+      refute Enum.any?(drain_adapter_events(), fn
+               {:adapter_event,
+                {:call, _, :keep@nowhere, Forum.Muster.Scope, :receive_node_state, _}} ->
+                 true
+
+               _ ->
+                 false
+             end)
+    end
+  end
+
+  describe "router-readiness barrier" do
+    setup %{scope: scope, base_opts: opts} do
+      start_supervised!(spec(scope, opts))
+      :ok
+    end
+
+    defp send_marker(scope, source, members) do
+      Kernel.send(
+        Forum.Supervisor.name(scope),
+        {:rebalance_marker, source, :erlang.phash2(Enum.sort(members))}
+      )
+    end
+
+    defp ready?(scope), do: :persistent_term.get({Forum.Muster, scope, :status}) == :ready
+
+    # trigger_rebalance is an async send; a synchronous :status call after it
+    # flushes the Scope mailbox (FIFO), guaranteeing do_rebalance has run.
+    defp rebalance_sync(scope, members) do
+      trigger_rebalance(scope, members)
+      GenServer.call(Forum.Supervisor.name(scope), :status)
+    end
+
+    test "a single-node cluster is ready and can_decide? for its own view", %{scope: scope} do
+      assert ready?(scope)
+      assert Muster.can_decide?(scope, Muster.view_hash(scope))
+    end
+
+    test "can_decide? is false when the sender's view hash disagrees", %{scope: scope} do
+      refute Muster.can_decide?(scope, Muster.view_hash(scope) + 1)
+    end
+
+    test "rebalance clears readiness until every peer's marker arrives", %{scope: scope} do
+      members = Enum.sort([node(), :a@nowhere, :b@nowhere])
+      rebalance_sync(scope, members)
+
+      # status flips back to :stable, but the barrier is not satisfied yet.
+      assert Muster.router(scope, :g) |> elem(0) == :ok
+      refute ready?(scope)
+      refute Muster.can_decide?(scope, Muster.view_hash(scope))
+
+      send_marker(scope, :a@nowhere, members)
+      refute_ready(scope)
+
+      send_marker(scope, :b@nowhere, members)
+      assert_ready(scope)
+      assert Muster.can_decide?(scope, Muster.view_hash(scope))
+    end
+
+    test "view_hash updates on rebalance and markers for it are honored", %{scope: scope} do
+      h0 = Muster.view_hash(scope)
+      members = Enum.sort([node(), :a@nowhere])
+      rebalance_sync(scope, members)
+      h1 = Muster.view_hash(scope)
+
+      assert h1 != h0
+      assert h1 == :erlang.phash2(members)
+
+      send_marker(scope, :a@nowhere, members)
+      assert_ready(scope)
+    end
+
+    test "a marker for a different view does not count toward readiness", %{scope: scope} do
+      members = Enum.sort([node(), :a@nowhere, :b@nowhere])
+      rebalance_sync(scope, members)
+
+      # a announces a stale view; it's recorded but disagrees with ours.
+      send_marker(scope, :a@nowhere, [node(), :a@nowhere])
+      send_marker(scope, :b@nowhere, members)
+      refute_ready(scope)
+
+      # a re-announces the current view → now everyone agrees.
+      send_marker(scope, :a@nowhere, members)
+      assert_ready(scope)
+    end
+
+    test "an announcement received before we adopt its view is retained (no lost marker)",
+         %{scope: scope} do
+      members = Enum.sort([node(), :a@nowhere, :b@nowhere])
+
+      # Both peers announce the NEW view while we are still single-node and
+      # have not adopted it. The old set+reset+discard barrier would drop these
+      # (wrong current view, source not yet a member) and leave us permanently
+      # stuck not-ready; latest-view-map retains them.
+      send_marker(scope, :a@nowhere, members)
+      send_marker(scope, :b@nowhere, members)
+      GenServer.call(Forum.Supervisor.name(scope), :status)
+
+      rebalance_sync(scope, members)
+
+      # Retained announcements satisfy the barrier immediately on adoption.
+      assert_ready(scope)
+    end
+
+    test "view heartbeat re-announces our current view to every member", %{scope: scope} do
+      members = Enum.sort([node(), :a@nowhere, :b@nowhere])
+      rebalance_sync(scope, members)
+      vh = Muster.view_hash(scope)
+      _ = drain_adapter_events()
+
+      trigger_view_heartbeat(scope)
+      GenServer.call(Forum.Supervisor.name(scope), :status)
+
+      heartbeat_targets =
+        drain_adapter_events()
+        |> Enum.flat_map(fn
+          {:adapter_event, {:send, ^scope, target, {:rebalance_marker, src, ^vh}}}
+          when src == node() ->
+            [target]
+
+          _ ->
+            []
+        end)
+        |> Enum.sort()
+
+      assert heartbeat_targets == [:a@nowhere, :b@nowhere]
+    end
+
+    test "members with no snapshot get an async marker", %{scope: scope} do
+      # No groups held, so no member is an affected router: every remote member
+      # gets the cheap async marker.
+      members = Enum.sort([node(), :a@nowhere, :b@nowhere])
+      _ = drain_adapter_events()
+      trigger_rebalance(scope, members)
+      Process.sleep(50)
+
+      marker_targets =
+        drain_adapter_events()
+        |> Enum.flat_map(fn
+          {:adapter_event, {:send, ^scope, target, {:rebalance_marker, src, _hash}}}
+          when src == node() ->
+            [target]
+
+          _ ->
+            []
+        end)
+        |> Enum.sort()
+
+      assert marker_targets == [:a@nowhere, :b@nowhere]
+    end
+
+    test "receive_node_state self-marks its source (the RPC is the marker)", %{scope: scope} do
+      members = Enum.sort([node(), :src@nowhere])
+      rebalance_sync(scope, members)
+      refute ready?(scope)
+
+      # A data snapshot from the only peer marks it ready — no separate
+      # :rebalance_marker message involved.
+      assert :ok = Scope.receive_node_state(scope, :src@nowhere, [], Muster.view_hash(scope))
+      assert_ready(scope)
+    end
+
+    test "a router that receives a snapshot is not also sent a separate marker",
+         %{scope: scope} do
+      members_old = Enum.sort([node(), :x@nowhere, :z@nowhere])
+      members_new = Enum.sort([node(), :x@nowhere])
+      g = find_group_flipping_router(members_old, :z@nowhere, members_new, :x@nowhere)
+      assert g
+
+      trigger_rebalance(scope, members_old)
+      pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, g, pid)
+      _ = drain_adapter_events()
+
+      trigger_rebalance(scope, members_new)
+      Process.sleep(50)
+      events = drain_adapter_events()
+
+      # x is an affected router: it gets the snapshot RPC (which carries the marker)...
+      assert Enum.any?(events, fn
+               {:adapter_event,
+                {:call, ^scope, :x@nowhere, Forum.Muster.Scope, :receive_node_state, _}} ->
+                 true
+
+               _ ->
+                 false
+             end)
+
+      # ...and is NOT also sent a redundant async marker.
+      refute Enum.any?(events, fn
+               {:adapter_event, {:send, ^scope, :x@nowhere, {:rebalance_marker, _, _}}} -> true
+               _ -> false
+             end)
+    end
+
+    defp assert_ready(scope, timeout \\ 500) do
+      deadline = System.monotonic_time(:millisecond) + timeout
+      do_wait_ready(scope, true, deadline)
+    end
+
+    defp refute_ready(scope) do
+      # Give any in-flight marker a chance to (wrongly) flip readiness.
+      Process.sleep(20)
+      refute ready?(scope)
+    end
+
+    defp do_wait_ready(scope, expected, deadline) do
+      cond do
+        ready?(scope) == expected ->
+          :ok
+
+        System.monotonic_time(:millisecond) >= deadline ->
+          flunk("readiness did not reach #{expected} in time")
+
+        true ->
+          Process.sleep(5)
+          do_wait_ready(scope, expected, deadline)
+      end
     end
   end
 end
