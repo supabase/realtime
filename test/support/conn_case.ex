@@ -26,6 +26,7 @@ defmodule RealtimeWeb.ConnCase do
       import Phoenix.ConnTest
       import Plug.Conn
       import Realtime.DataCase
+      import TestHelpers
 
       alias RealtimeWeb.Router.Helpers, as: Routes
 

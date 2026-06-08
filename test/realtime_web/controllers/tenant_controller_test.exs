@@ -572,20 +572,27 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert response(conn, 403) == ""
     end
 
-    test "runs migrations", %{conn: conn} do
+    test "triggers migrations without blocking and self heals eventually", %{conn: conn} do
       tenant = Containers.checkout_tenant(run_migrations: false)
 
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
       assert {:error, _} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
 
       conn = get(conn, ~p"/api/tenants/#{tenant.external_id}/health")
-      data = json_response(conn, 200)["data"]
-      Process.sleep(1000)
+
+      assert %{"healthy" => false, "db_connected" => false, "replication_connected" => false, "connected_cluster" => 0} =
+               json_response(conn, 200)["data"]
+
+      assert eventually(fn ->
+               match?({:ok, %{healthy: true}}, Realtime.Tenants.health_check(tenant.external_id))
+             end)
 
       assert {:ok, %{rows: []}} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
 
+      conn = get(conn, ~p"/api/tenants/#{tenant.external_id}/health")
+
       assert %{"healthy" => true, "db_connected" => false, "replication_connected" => false, "connected_cluster" => 0} =
-               data
+               json_response(conn, 200)["data"]
     end
 
     test "sets appropriate observability metadata", %{conn: conn, tenant: tenant} do

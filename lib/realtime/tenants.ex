@@ -95,11 +95,12 @@ defmodule Realtime.Tenants do
 
       connected_cluster when is_integer(connected_cluster) ->
         tenant = Cache.get_tenant_by_external_id(external_id)
-        migrations = Migrations.run_migrations(tenant)
+        healthy = not Migrations.run_migrations?(tenant)
+        healthy || Migrations.run_migrations_async(tenant)
 
         {:ok,
          %{
-           healthy: migrations in [:ok, :noop],
+           healthy: healthy,
            db_connected: false,
            replication_connected: false,
            connected_cluster: connected_cluster,
@@ -506,15 +507,6 @@ defmodule Realtime.Tenants do
 
   def tenant_topic(external_id, sub_topic, true),
     do: "#{external_id}:#{sub_topic}"
-
-  @doc """
-  Checks if migrations for a given tenant need to run.
-  """
-  @spec run_migrations?(Tenant.t() | integer()) :: boolean()
-  def run_migrations?(%Tenant{} = tenant), do: run_migrations?(tenant.migrations_ran)
-
-  def run_migrations?(migrations_ran) when is_integer(migrations_ran),
-    do: migrations_ran < Enum.count(Migrations.migrations())
 
   @doc """
   Returns the region of the tenant based on its extensions.
