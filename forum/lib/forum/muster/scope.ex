@@ -22,6 +22,7 @@ defmodule Forum.Muster.Scope do
   @default_vacancy_cooldown_ms 30_000
   @default_vacant_flush_interval_ms 5_000
   @default_rpc_timeout_ms 5_000
+  @default_view_heartbeat_interval_ms 10_000
   @default_ring_replicas 128
   @ring_depth 2
 
@@ -39,6 +40,7 @@ defmodule Forum.Muster.Scope do
             message_module: module,
             vacancy_cooldown_ms: non_neg_integer,
             vacant_flush_interval_ms: pos_integer,
+            view_heartbeat_interval_ms: pos_integer,
             rpc_timeout_ms: timeout,
             recently_vacant_table: atom,
             occupancy_table: atom,
@@ -46,6 +48,7 @@ defmodule Forum.Muster.Scope do
             peers: %{pid => reference},
             cooldown_timers: %{Forum.group() => reference},
             group_states: %{Forum.group() => group_state},
+            member_views: %{node => non_neg_integer},
             telemetry_handler_id: term
           }
     defstruct [
@@ -53,6 +56,7 @@ defmodule Forum.Muster.Scope do
       :message_module,
       :vacancy_cooldown_ms,
       :vacant_flush_interval_ms,
+      :view_heartbeat_interval_ms,
       :rpc_timeout_ms,
       :recently_vacant_table,
       :occupancy_table,
@@ -60,7 +64,14 @@ defmodule Forum.Muster.Scope do
       members: [],
       peers: %{},
       cooldown_timers: %{},
-      group_states: %{}
+      group_states: %{},
+      # Barrier bookkeeping: each peer's most-recently-announced cluster-view
+      # hash (via a :rebalance_marker, or seeded on the discovery handshake).
+      # Latest-wins, never reset — so an announcement that arrives before we
+      # adopt that view is retained, not discarded. We are "ready" — and our
+      # occupancy table can be trusted as a router — once every member's
+      # latest view agrees with ours.
+      member_views: %{}
     ]
   end
 
@@ -100,9 +111,19 @@ defmodule Forum.Muster.Scope do
     :ok
   end
 
-  @doc "Remote: source_node gives us a full-state snapshot of its groups."
-  @spec receive_node_state(atom, node, [Forum.group()]) :: :ok
-  def receive_node_state(scope, source_node, groups) do
+  @doc """
+  Remote: source_node gives us a full-state snapshot of its groups for the
+  cluster view identified by `view_hash`.
+
+  The snapshot doubles as source_node's rebalance marker for that view: after
+  committing the occupancy data we notify the local Scope so its readiness
+  barrier counts this source. Because the data is written to ETS *before* the
+  marker is sent, a router that later observes `:ready` has this source's
+  occupancy in place. We run in the adapter's RPC worker (not in Scope), so the
+  marker is sent to Scope by its registered name.
+  """
+  @spec receive_node_state(atom, node, [Forum.group()], non_neg_integer) :: :ok
+  def receive_node_state(scope, source_node, groups, view_hash) do
     table = occupancy_table_name(scope)
     # match_delete + inserts are not atomic with respect to readers; a
     # concurrent :fanout_request scan during this window could miss some
@@ -111,6 +132,7 @@ defmodule Forum.Muster.Scope do
     # state.
     :ets.match_delete(table, {{:_, source_node}})
     Enum.each(groups, fn group -> :ets.insert(table, {{group, source_node}}) end)
+    Kernel.send(Forum.Supervisor.name(scope), {:rebalance_marker, source_node, view_hash})
     :ok
   end
 
@@ -126,6 +148,9 @@ defmodule Forum.Muster.Scope do
     vacant_flush_interval_ms =
       Keyword.get(opts, :vacant_flush_interval_ms, @default_vacant_flush_interval_ms)
 
+    view_heartbeat_interval_ms =
+      Keyword.get(opts, :view_heartbeat_interval_ms, @default_view_heartbeat_interval_ms)
+
     rpc_timeout_ms = Keyword.get(opts, :rpc_timeout_ms, @default_rpc_timeout_ms)
     message_module = Keyword.get(opts, :message_module, Forum.Adapter.ErlDist)
 
@@ -137,6 +162,11 @@ defmodule Forum.Muster.Scope do
     if not (is_integer(vacant_flush_interval_ms) and vacant_flush_interval_ms > 0) do
       raise ArgumentError,
             "expected :vacant_flush_interval_ms to be a positive integer, got: #{inspect(vacant_flush_interval_ms)}"
+    end
+
+    if not (is_integer(view_heartbeat_interval_ms) and view_heartbeat_interval_ms > 0) do
+      raise ArgumentError,
+            "expected :view_heartbeat_interval_ms to be a positive integer, got: #{inspect(view_heartbeat_interval_ms)}"
     end
 
     :ok = :net_kernel.monitor_nodes(true)
@@ -174,7 +204,13 @@ defmodule Forum.Muster.Scope do
 
     {:ok, _} = Ring.set_nodes(ring_name(scope), [node()])
 
-    :persistent_term.put({Forum.Muster, scope, :status}, :stable)
+    # Lifecycle tri-state: :rebalancing (my ring is in flux — senders flood) →
+    # :converging (ring adopted, still waiting for peers to agree on my view) →
+    # :ready (all peers agree; my occupancy table can be trusted as a router).
+    # A single-node cluster has no peers to hear from, so it starts :ready.
+    :persistent_term.put({Forum.Muster, scope, :status}, :ready)
+    # Cluster-view hash senders tag broadcasts with; router compares against its own.
+    :persistent_term.put({Forum.Muster, scope, :view_hash}, :erlang.phash2([node()]))
 
     telemetry_handler_id = {__MODULE__, scope, self()}
 
@@ -193,6 +229,7 @@ defmodule Forum.Muster.Scope do
       message_module: message_module,
       vacancy_cooldown_ms: vacancy_cooldown_ms,
       vacant_flush_interval_ms: vacant_flush_interval_ms,
+      view_heartbeat_interval_ms: view_heartbeat_interval_ms,
       rpc_timeout_ms: rpc_timeout_ms,
       recently_vacant_table: recently_vacant_table,
       occupancy_table: occupancy_table,
@@ -207,8 +244,9 @@ defmodule Forum.Muster.Scope do
 
   @impl true
   def handle_continue(:discover, state) do
-    state.message_module.broadcast(state.scope, {:muster_discover, self()})
+    state.message_module.broadcast(state.scope, {:muster_discover, self(), own_view_hash(state)})
     schedule_vacant_flush(state)
+    schedule_view_heartbeat(state)
     {:noreply, state}
   end
 
@@ -248,13 +286,23 @@ defmodule Forum.Muster.Scope do
   ## handle_info
 
   # Peer discovery (the receiver of a discover replies with an ack and registers the peer).
+  # The handshake piggybacks each side's current view hash so member_views is
+  # seeded immediately — important after a Scope restart, where it would
+  # otherwise be empty until the next membership change.
   @impl true
-  def handle_info({:muster_discover, peer}, %State{} = state) do
-    state.message_module.send(state.scope, node(peer), {:muster_discover_ack, self()})
+  def handle_info({:muster_discover, peer, view_hash}, %State{} = state) do
+    state.message_module.send(
+      state.scope,
+      node(peer),
+      {:muster_discover_ack, self(), own_view_hash(state)}
+    )
+
+    state = put_member_view(state, node(peer), view_hash)
     {:noreply, register_peer(state, peer)}
   end
 
-  def handle_info({:muster_discover_ack, peer}, %State{} = state) do
+  def handle_info({:muster_discover_ack, peer, view_hash}, %State{} = state) do
+    state = put_member_view(state, node(peer), view_hash)
     {:noreply, register_peer(state, peer)}
   end
 
@@ -263,12 +311,21 @@ defmodule Forum.Muster.Scope do
 
   def handle_info({:nodeup, node}, state) do
     :telemetry.execute([:forum, state.scope, :node, :up], %{}, %{node: node})
-    state.message_module.send(state.scope, node, {:muster_discover, self()})
+    state.message_module.send(state.scope, node, {:muster_discover, self(), own_view_hash(state)})
     {:noreply, state}
   end
 
   # Net split / disconnect — wait for the peer's monitor DOWN.
   def handle_info({:nodedown, _node}, state), do: {:noreply, state}
+
+  # A peer announced the cluster view it has finished rebalancing into. Record
+  # it as that peer's latest view (latest-wins). We do NOT gate on it matching
+  # our current view: storing it means an announcement that arrives before we
+  # adopt that view is retained, so once we catch up the agreement check in
+  # ready?/1 sees it. Readiness is then "every member's latest view == ours".
+  def handle_info({:rebalance_marker, source, view_hash}, %State{} = state) do
+    {:noreply, update_status(put_member_view(state, source, view_hash))}
+  end
 
   # Peer scope crashed/disconnected — drop occupancy entries owned by that node
   # and rebalance.
@@ -315,6 +372,18 @@ defmodule Forum.Muster.Scope do
   def handle_info(:flush_vacant, state) do
     state = flush_vacant(state)
     schedule_vacant_flush(state)
+    {:noreply, state}
+  end
+
+  # Periodic re-announce of our current view to every member. The event-driven
+  # path (rebalance announcements + the discovery handshake) normally converges
+  # member_views in milliseconds; this heartbeat is the backstop that heals a
+  # dropped announcement without needing a membership change, bounding the
+  # worst-case "stuck flooding as a router" window to one interval. Idempotent
+  # with member_views (latest-wins), so a redundant heartbeat is harmless.
+  def handle_info(:view_heartbeat, state) do
+    announce_view(state)
+    schedule_view_heartbeat(state)
     {:noreply, state}
   end
 
@@ -577,6 +646,26 @@ defmodule Forum.Muster.Scope do
     :ok
   end
 
+  defp schedule_view_heartbeat(state) do
+    Process.send_after(self(), :view_heartbeat, state.view_heartbeat_interval_ms)
+    :ok
+  end
+
+  # Re-announce our current view to every other member (latest-wins on their
+  # side). Sent even when we're already :ready, because a peer may be the one
+  # missing our announcement.
+  defp announce_view(state) do
+    view_hash = own_view_hash(state)
+
+    Enum.each(state.members, fn member ->
+      if member != node() do
+        state.message_module.send(state.scope, member, {:rebalance_marker, node(), view_hash})
+      end
+    end)
+
+    :ok
+  end
+
   defp cancel_cooldown(state, group) do
     {timer_ref, new_timers} = Map.pop(state.cooldown_timers, group)
     if timer_ref, do: Process.cancel_timer(timer_ref)
@@ -638,7 +727,13 @@ defmodule Forum.Muster.Scope do
     #    window, get_nodes/1 returns the current ring (still old generation
     #    until set_nodes returns), which is also fine — fan-out to either
     #    member set is safe.
+    # :rebalancing means our ring is in flux; senders fan out to all members
+    # until we settle. Bump the cluster-view hash too. member_views is NOT
+    # reset — peers' already-announced views (possibly for this very view, if
+    # they got here first) stay and are re-evaluated against the new hash by
+    # update_status at the end.
     :persistent_term.put({Forum.Muster, state.scope, :status}, :rebalancing)
+    :persistent_term.put({Forum.Muster, state.scope, :view_hash}, :erlang.phash2(new_members))
 
     # 2) Normalize in-flight pending states (see normalize_pending_for_rebalance):
     #    in-flight vacant batches fall back to :vacant_queued (or :occupied_pending
@@ -651,31 +746,47 @@ defmodule Forum.Muster.Scope do
     #    (back: 1) = OLD routers.
     {:ok, _} = Ring.set_nodes(ring, new_members)
 
-    # 4) Delta announce-set: groups in :occupied, :cooldown, or
-    #    :occupied_pending whose router actually changed. :cooldown
-    #    groups must be included even though the Partition count is 0,
-    #    because the old router still believes we hold them and the new
-    #    router needs to know to expect a future :vacant.
+    # 4) Announce-set. Candidates are groups we hold: :occupied, :cooldown, or
+    #    :occupied_pending. :cooldown groups must be included even though the
+    #    Partition count is 0, because the old router still believes we hold
+    #    them and the new router needs to know to expect a future :vacant.
     #    :occupied_pending must be included so callers parked on Scope's
-    #    GenServer.call get :ok once the new router has been told —
-    #    instead of being cancelled with :rebalance_in_progress.
+    #    GenServer.call get :ok once the new router has been told — instead of
+    #    being cancelled with :rebalance_in_progress.
     candidates =
       for {group, gs} <- state.group_states,
           gs in [:occupied, :cooldown] or match?({:occupied_pending, _}, gs),
           do: group
 
-    groups_to_reannounce =
-      Enum.filter(candidates, fn group ->
-        {:ok, new_dest} = Ring.find_node(ring, group)
-        {:ok, old_dest} = Ring.find_historical_node(ring, group, 1)
-        new_dest != old_dest
+    new_router =
+      Map.new(candidates, fn group ->
+        {:ok, n} = Ring.find_node(ring, group)
+        {group, n}
       end)
 
-    by_router =
-      Enum.group_by(groups_to_reannounce, fn group ->
-        {:ok, n} = Ring.find_node(ring, group)
-        n
+    # Groups whose router actually changed. Used to settle parked claims, and
+    # to decide which routers need a refreshed snapshot at all.
+    groups_to_reannounce =
+      Enum.filter(candidates, fn group ->
+        {:ok, old_dest} = Ring.find_historical_node(ring, group, 1)
+        Map.fetch!(new_router, group) != old_dest
       end)
+
+    # Routers that gained at least one moved group. Each gets a FULL snapshot
+    # of every group we hold routed to it — not just the moved ones — because
+    # receive_node_state wipes all of this source's rows before inserting.
+    # Sending only the moved groups would drop unchanged groups that still
+    # route there (the entry would never be re-added until natural churn).
+    # Routers with no moved group are left untouched: their existing rows for
+    # us are still correct, and any group that moved *away* from them is
+    # cleared by their own drop_stale_router_entries.
+    changed_routers =
+      groups_to_reannounce |> Enum.map(&Map.fetch!(new_router, &1)) |> MapSet.new()
+
+    by_router =
+      candidates
+      |> Enum.group_by(&Map.fetch!(new_router, &1))
+      |> Map.take(MapSet.to_list(changed_routers))
 
     # Local self-target: synchronous ETS inserts in the Scope process.
     # Remote targets: one Task per destination, awaited in parallel so the
@@ -694,6 +805,7 @@ defmodule Forum.Muster.Scope do
     message_module = state.message_module
     scope = state.scope
     rpc_timeout = state.rpc_timeout_ms
+    view_hash = :erlang.phash2(new_members)
 
     tasks =
       Enum.map(remote_targets, fn {router_node, groups} ->
@@ -704,7 +816,7 @@ defmodule Forum.Muster.Scope do
               router_node,
               __MODULE__,
               :receive_node_state,
-              [scope, node(), groups],
+              [scope, node(), groups, view_hash],
               rpc_timeout
             )
           end)
@@ -727,6 +839,18 @@ defmodule Forum.Muster.Scope do
       end
     end)
 
+    # Marker hybrid: members that received a data snapshot are marked by the
+    # receive_node_state RPC itself (it carries view_hash and notifies the
+    # receiver's Scope) — no separate signal, no double-contact. Every other
+    # member has nothing to fold a marker into, so it gets a cheap async marker
+    # instead; that is how its barrier learns "this source holds nothing for
+    # me" rather than "this source has not arrived yet". Self never needs one.
+    snapshot_targets = Enum.map(remote_targets, fn {router_node, _} -> router_node end)
+
+    Enum.each(new_members -- [node() | snapshot_targets], fn member ->
+      message_module.send(scope, member, {:rebalance_marker, node(), view_hash})
+    end)
+
     # 5) Settle :occupied_pending claims whose router changed. The
     #    rebalance just informed the new router via :receive_node_state,
     #    so the parked callers can be unblocked with :ok. Their original
@@ -738,12 +862,44 @@ defmodule Forum.Muster.Scope do
 
     drop_stale_router_entries(state)
 
-    # 6) Flip back to :stable. If rebalance raised above, we skip this and
-    #    supervisor restart re-initializes :status to :stable. Until restart,
-    #    callers observing :rebalancing fan out to every member — safe.
-    :persistent_term.put({Forum.Muster, state.scope, :status}, :stable)
+    state = %{state | members: new_members}
 
-    %{state | members: new_members}
+    # 6) Leave :rebalancing for :ready or :converging based on peer agreement.
+    #    A single-node cluster has no peers to hear from, so it lands on :ready
+    #    immediately; a multi-node cluster stays :converging until peer
+    #    announcements arrive (handle_info({:rebalance_marker, ...})). If
+    #    rebalance raised above we skip this and supervisor restart
+    #    re-initializes :status — until then callers observing :rebalancing fan
+    #    out to every member, which is safe.
+    update_status(state)
+  end
+
+  # Recompute the lifecycle status from member_views vs. current membership and
+  # publish it (only when it actually changes, to avoid redundant
+  # persistent_term writes during a burst of announcements). Only ever sets
+  # :ready or :converging — :rebalancing is owned by do_rebalance.
+  defp update_status(state) do
+    status = if ready?(state), do: :ready, else: :converging
+    key = {Forum.Muster, state.scope, :status}
+    if :persistent_term.get(key, nil) != status, do: :persistent_term.put(key, status)
+    state
+  end
+
+  # Ready once every member (other than ourselves) has announced a view that
+  # agrees with ours. A member with no entry yet, or one whose latest view
+  # differs, keeps us not-ready — the safe direction (the router floods).
+  defp ready?(state) do
+    own = own_view_hash(state)
+
+    Enum.all?(state.members, fn member ->
+      member == node() or Map.get(state.member_views, member) == own
+    end)
+  end
+
+  defp own_view_hash(state), do: :erlang.phash2(state.members)
+
+  defp put_member_view(state, source, view_hash) do
+    %{state | member_views: Map.put(state.member_views, source, view_hash)}
   end
 
   defp drop_stale_router_entries(state) do
