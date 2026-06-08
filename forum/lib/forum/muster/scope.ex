@@ -139,7 +139,7 @@ defmodule Forum.Muster.Scope do
   ## GenServer lifecycle
 
   @spec start_link(atom, Keyword.t()) :: GenServer.on_start()
-  def start_link(scope, opts \\ []), do: GenServer.start_link(__MODULE__, [scope, opts])
+  def start_link(scope, opts \\ []), do: GenServer.start_link(__MODULE__, [scope, opts], name: Forum.Supervisor.name(scope))
 
   @impl true
   def init([scope, opts]) do
@@ -283,6 +283,36 @@ defmodule Forum.Muster.Scope do
     {:reply, reply, state}
   end
 
+  # Full snapshot for `Forum.Muster.dump/1` — everything :status returns plus
+  # the persistent_term lifecycle fields, the per-peer view bookkeeping, the
+  # ring's current node set, and the router-role occupancy table folded into
+  # %{group => [source_node]}.
+  def handle_call(:dump, _from, state) do
+    occupancy =
+      state.occupancy_table
+      |> :ets.tab2list()
+      |> Enum.reduce(%{}, fn {{group, src}}, acc ->
+        Map.update(acc, group, [src], &[src | &1])
+      end)
+
+    {:ok, ring_nodes} = Ring.get_nodes(ring_name(state.scope))
+
+    reply = %{
+      scope: state.scope,
+      status: :persistent_term.get({Forum.Muster, state.scope, :status}, nil),
+      view_hash: :persistent_term.get({Forum.Muster, state.scope, :view_hash}, nil),
+      members: state.members,
+      ring_nodes: ring_nodes,
+      peers: Map.keys(state.peers) |> Enum.map(&node/1),
+      member_views: state.member_views,
+      group_states: state.group_states,
+      cooldown: :ets.tab2list(state.recently_vacant_table) |> Enum.map(&elem(&1, 0)),
+      occupancy: occupancy
+    }
+
+    {:reply, reply, state}
+  end
+
   ## handle_info
 
   # Peer discovery (the receiver of a discover replies with an ack and registers the peer).
@@ -310,6 +340,10 @@ defmodule Forum.Muster.Scope do
   def handle_info({:nodeup, node}, state) when node == node(), do: {:noreply, state}
 
   def handle_info({:nodeup, node}, state) do
+    Logger.info(
+      "Muster[#{node()}|#{state.scope}] node up: #{inspect(node)} — reaching out to pair"
+    )
+
     :telemetry.execute([:forum, state.scope, :node, :up], %{}, %{node: node})
     state.message_module.send(state.scope, node, {:muster_discover, self(), own_view_hash(state)})
     {:noreply, state}
@@ -332,6 +366,10 @@ defmodule Forum.Muster.Scope do
   def handle_info({:DOWN, ref, :process, pid, _reason}, %State{} = state) do
     case Map.pop(state.peers, pid) do
       {^ref, new_peers} ->
+        Logger.info(
+          "Muster[#{node()}|#{state.scope}] peer down: #{inspect(node(pid))} — dropping its occupancy and rebalancing"
+        )
+
         :ets.match_delete(state.occupancy_table, {{:_, node(pid)}})
         :telemetry.execute([:forum, state.scope, :node, :down], %{}, %{node: node(pid)})
 
@@ -415,21 +453,39 @@ defmodule Forum.Muster.Scope do
         router_node = router_from_state(state, group)
 
         if router_node == node() do
+          Logger.debug(
+            "Muster[#{node()}|#{state.scope}] claim #{inspect(group)}: local router, occupied"
+          )
+
           :ets.insert(state.occupancy_table, {{group, node()}})
           {:reply, :ok, put_group_state(state, group, :occupied)}
         else
+          Logger.debug(
+            "Muster[#{node()}|#{state.scope}] claim #{inspect(group)}: dispatching :occupied to router #{inspect(router_node)}"
+          )
+
           dispatch_rpc(:occupied, group, router_node, state)
           {:noreply, put_group_state(state, group, {:occupied_pending, [from]})}
         end
 
       :occupied ->
+        Logger.debug("Muster[#{node()}|#{state.scope}] claim #{inspect(group)}: already occupied")
+
         {:reply, :ok, state}
 
       :cooldown ->
+        Logger.debug(
+          "Muster[#{node()}|#{state.scope}] claim #{inspect(group)}: reclaim from cooldown (no RPC)"
+        )
+
         state = cancel_cooldown(state, group)
         {:reply, :ok, put_group_state(state, group, :occupied)}
 
       {:occupied_pending, waiters} ->
+        Logger.debug(
+          "Muster[#{node()}|#{state.scope}] claim #{inspect(group)}: parked behind in-flight :occupied (#{length(waiters) + 1} waiter(s))"
+        )
+
         {:noreply, put_group_state(state, group, {:occupied_pending, [from | waiters]})}
 
       :vacant_queued ->
@@ -438,9 +494,17 @@ defmodule Forum.Muster.Scope do
         router_node = router_from_state(state, group)
 
         if router_node == node() do
+          Logger.debug(
+            "Muster[#{node()}|#{state.scope}] claim #{inspect(group)}: reclaim from vacant_queued, local router"
+          )
+
           :ets.insert(state.occupancy_table, {{group, node()}})
           {:reply, :ok, put_group_state(state, group, :occupied)}
         else
+          Logger.debug(
+            "Muster[#{node()}|#{state.scope}] claim #{inspect(group)}: reclaim from vacant_queued, dispatching :occupied to router #{inspect(router_node)}"
+          )
+
           dispatch_rpc(:occupied, group, router_node, state)
           {:noreply, put_group_state(state, group, {:occupied_pending, [from]})}
         end
@@ -448,6 +512,10 @@ defmodule Forum.Muster.Scope do
       {:vacant_flushing, waiters} ->
         # A batch vacant RPC covering this group is in flight. Park the caller;
         # handle_vacant_batch_done re-claims the group once the batch settles.
+        Logger.debug(
+          "Muster[#{node()}|#{state.scope}] claim #{inspect(group)}: parked behind in-flight vacant flush (#{length(waiters) + 1} waiter(s))"
+        )
+
         {:noreply, put_group_state(state, group, {:vacant_flushing, [from | waiters]})}
     end
   end
@@ -455,6 +523,10 @@ defmodule Forum.Muster.Scope do
   defp handle_local_vacant(group, state) do
     case Map.get(state.group_states, group) do
       :occupied ->
+        Logger.debug(
+          "Muster[#{node()}|#{state.scope}] #{inspect(group)} vacant locally, entering cooldown (#{state.vacancy_cooldown_ms}ms)"
+        )
+
         :ets.insert(state.recently_vacant_table, {group})
         ref = Process.send_after(self(), {:vacancy_expired, group}, state.vacancy_cooldown_ms)
 
@@ -486,11 +558,19 @@ defmodule Forum.Muster.Scope do
         if count > 0 do
           # FIXME This should not happen. We should probably raise
           # Defensive — a claim should have moved us out of :cooldown already.
+          Logger.debug(
+            "Muster[#{node()}|#{state.scope}] cooldown expired for #{inspect(group)} but #{count} local member(s) present, reclaiming"
+          )
+
           {:noreply, put_group_state(state, group, :occupied)}
         else
           # Cooldown elapsed and still empty. Queue the vacancy; the periodic
           # flush groups all queued vacancies by current router, sends one
           # batched RPC per router, and re-queues any that fail.
+          Logger.debug(
+            "Muster[#{node()}|#{state.scope}] cooldown expired for #{inspect(group)}, queued for vacant flush"
+          )
+
           {:noreply, put_group_state(state, group, :vacant_queued)}
         end
 
@@ -504,10 +584,18 @@ defmodule Forum.Muster.Scope do
       {:occupied_pending, waiters} ->
         case result do
           :ok ->
+            Logger.debug(
+              "Muster[#{node()}|#{state.scope}] :occupied confirmed for #{inspect(group)}, replying :ok to #{length(waiters)} waiter(s)"
+            )
+
             Enum.each(waiters, fn from -> GenServer.reply(from, :ok) end)
             {:noreply, put_group_state(state, group, :occupied)}
 
           _ ->
+            Logger.debug(
+              "Muster[#{node()}|#{state.scope}] :occupied RPC failed for #{inspect(group)}: #{inspect(result)}, replying error to #{length(waiters)} waiter(s)"
+            )
+
             Enum.each(waiters, fn from -> GenServer.reply(from, {:error, :rpc_failed}) end)
             {:noreply, delete_group_state(state, group)}
         end
@@ -526,7 +614,11 @@ defmodule Forum.Muster.Scope do
   defp handle_vacant_batch_done(groups, result, state) do
     success? = not match?({:error, _}, result)
 
-    if not success? do
+    if success? do
+      Logger.debug(
+        "Muster[#{node()}|#{state.scope}] vacant batch of #{length(groups)} group(s) acknowledged by router"
+      )
+    else
       Logger.warning(
         "Muster[#{node()}|#{state.scope}] vacant batch RPC failed for #{length(groups)} group(s): #{inspect(result)} — re-queuing"
       )
@@ -570,8 +662,13 @@ defmodule Forum.Muster.Scope do
         state
 
       _ ->
-        queued
-        |> Enum.group_by(&router_from_state(state, &1))
+        by_router = Enum.group_by(queued, &router_from_state(state, &1))
+
+        Logger.debug(
+          "Muster[#{node()}|#{state.scope}] flushing #{length(queued)} vacant group(s) across #{map_size(by_router)} router(s)"
+        )
+
+        by_router
         |> Enum.reduce(state, fn {router_node, groups}, st ->
           if router_node == node() do
             Enum.each(groups, fn g -> :ets.delete(st.occupancy_table, {g, node()}) end)
@@ -722,6 +819,10 @@ defmodule Forum.Muster.Scope do
   defp do_rebalance(state, new_members) do
     ring = ring_name(state.scope)
 
+    Logger.info(
+      "Muster[#{node()}|#{state.scope}] rebalance start: members #{inspect(state.members)} -> #{inspect(new_members)} (view_hash #{:erlang.phash2(new_members)})"
+    )
+
     # 1) Flip status to :rebalancing BEFORE updating the ring. Callers reading
     #    router/2 see :rebalancing and fan out to all members. During the
     #    window, get_nodes/1 returns the current ring (still old generation
@@ -782,6 +883,10 @@ defmodule Forum.Muster.Scope do
     # cleared by their own drop_stale_router_entries.
     changed_routers =
       groups_to_reannounce |> Enum.map(&Map.fetch!(new_router, &1)) |> MapSet.new()
+
+    Logger.info(
+      "Muster[#{node()}|#{state.scope}] rebalance: #{length(candidates)} group(s) held, #{length(groups_to_reannounce)} moved, snapshotting #{MapSet.size(changed_routers)} router(s): #{inspect(MapSet.to_list(changed_routers))}"
+    )
 
     by_router =
       candidates
@@ -881,7 +986,16 @@ defmodule Forum.Muster.Scope do
   defp update_status(state) do
     status = if ready?(state), do: :ready, else: :converging
     key = {Forum.Muster, state.scope, :status}
-    if :persistent_term.get(key, nil) != status, do: :persistent_term.put(key, status)
+    previous = :persistent_term.get(key, nil)
+
+    if previous != status do
+      :persistent_term.put(key, status)
+
+      Logger.info(
+        "Muster[#{node()}|#{state.scope}] status #{inspect(previous)} -> #{inspect(status)} (members #{inspect(state.members)})"
+      )
+    end
+
     state
   end
 

@@ -213,4 +213,62 @@ defmodule Forum.Muster do
   catch
     :exit, reason -> {:error, {:scope_exit, reason}}
   end
+
+  @doc """
+  Prints a human-readable snapshot of `scope`'s Muster state and returns `:ok`.
+
+  Handy from IEx while playing with a cluster: shows the lifecycle status, the
+  cluster-view hash, the ring members, known peers, each peer's last-announced
+  view hash, the per-group state machine, and the router-role occupancy table
+  (`group => [source_node]`). Pair it with `Logger.configure(level: :debug)` to
+  also watch the per-group churn scroll by.
+  """
+  @spec dump(atom) :: :ok
+  def dump(scope) when is_atom(scope) do
+    snapshot = GenServer.call(Forum.Supervisor.name(scope), :dump)
+    IO.puts(format_dump(snapshot))
+  end
+
+  defp format_dump(s) do
+    grouped =
+      Enum.group_by(s.group_states, fn {_g, st} -> group_state_label(st) end, &elem(&1, 0))
+
+    group_lines =
+      if grouped == %{} do
+        ["  (none)"]
+      else
+        Enum.map(grouped, fn {label, groups} ->
+          "  #{label} (#{length(groups)}): #{inspect(Enum.sort(groups))}"
+        end)
+      end
+
+    occupancy_lines =
+      if s.occupancy == %{} do
+        ["  (empty)"]
+      else
+        Enum.map(s.occupancy, fn {group, nodes} ->
+          "  #{inspect(group)} => #{inspect(Enum.sort(nodes))}"
+        end)
+      end
+
+    [
+      "Muster #{inspect(s.scope)} @ #{inspect(node())}",
+      "  status:       #{inspect(s.status)}",
+      "  view_hash:    #{inspect(s.view_hash)}",
+      "  members:      #{inspect(s.members)}",
+      "  ring_nodes:   #{inspect(s.ring_nodes)}",
+      "  peers:        #{inspect(s.peers)}",
+      "  member_views: #{inspect(s.member_views)}",
+      "  cooldown:     #{inspect(Enum.sort(s.cooldown))}",
+      "group_states:" | group_lines
+    ]
+    |> Kernel.++(["occupancy (as router):" | occupancy_lines])
+    |> Enum.join("\n")
+  end
+
+  defp group_state_label(:occupied), do: ":occupied"
+  defp group_state_label(:cooldown), do: ":cooldown"
+  defp group_state_label(:vacant_queued), do: ":vacant_queued"
+  defp group_state_label({:occupied_pending, _}), do: ":occupied_pending"
+  defp group_state_label({:vacant_flushing, _}), do: ":vacant_flushing"
 end
