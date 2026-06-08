@@ -88,7 +88,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_260_514_120_000, __MODULE__.AddBinaryPayloadToMessages},
     {20_260_527_120_000, __MODULE__.AddSelectColumnsToSubscriptions},
     {20_260_528_120_000, __MODULE__.Wal2jsonEscapeSpecialChars},
-    {20_260_603_120_000, __MODULE__.AddSendBinaryFunction}
+    {20_260_603_120_000, __MODULE__.AddSendBinaryFunction},
+    {20_260_605_120_000, __MODULE__.RenameBroadcastSendWarning}
   ]
 
   defstruct [:tenant_external_id, :settings, migrations_ran: 0]
