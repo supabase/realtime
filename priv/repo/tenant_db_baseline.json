@@ -1537,12 +1537,12 @@
         {
           "grantee": "supabase_realtime_admin",
           "privilege": "USAGE",
-          "grantable": true
+          "grantable": false
         },
         {
           "grantee": "supabase_realtime_admin",
           "privilege": "USAGE",
-          "grantable": false
+          "grantable": true
         }
       ],
       "security_labels": []
