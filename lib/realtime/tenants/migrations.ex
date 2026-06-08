@@ -86,13 +86,12 @@ defmodule Realtime.Tenants.Migrations do
     FilterActionPostgresChanges,
     FixByteaDoubleEncodingInCast,
     ListChangesWithSlotCount,
-    SubscriptionCheckFiltersUsePgAttribute,
     AddBinaryPayloadToMessages,
     AddSelectColumnsToSubscriptions,
     Wal2jsonEscapeSpecialChars,
     AddSendBinaryFunction,
     RenameBroadcastSendWarning,
-    SubscriptionCheckFiltersFixPermissions,
+    SubscriptionCheckFiltersUsePgAttribute,
     SetupSupabaseRealtimeAdmin
   }
 
@@ -166,13 +165,12 @@ defmodule Realtime.Tenants.Migrations do
     {20_251_120_215_549, FilterActionPostgresChanges},
     {20_260_218_120_000, FixByteaDoubleEncodingInCast},
     {20_260_326_120_000, ListChangesWithSlotCount},
-    {20_260_506_120_000, SubscriptionCheckFiltersUsePgAttribute},
     {20_260_514_120_000, AddBinaryPayloadToMessages},
     {20_260_527_120_000, AddSelectColumnsToSubscriptions},
     {20_260_528_120_000, Wal2jsonEscapeSpecialChars},
     {20_260_603_120_000, AddSendBinaryFunction},
-    {20_260_604_110_000, SubscriptionCheckFiltersFixPermissions},
     {20_260_605_120_000, RenameBroadcastSendWarning},
+    {20_260_606_110_000, SubscriptionCheckFiltersUsePgAttribute},
     {20_260_606_120_000, SetupSupabaseRealtimeAdmin}
   ]
 

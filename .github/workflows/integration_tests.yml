@@ -44,7 +44,7 @@ jobs:
           - postgres: pg14
             postgres_image: supabase/postgres:14.1.0.82
             db_user: supabase_admin
-          # missing supautils.policy_grants
+          # test before supautils.policy_grants added all necessary grants
           - postgres: pg15
             postgres_image: supabase/postgres:15.1.0.1
             db_user: supabase_admin

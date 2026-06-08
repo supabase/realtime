@@ -1,4 +1,4 @@
-defmodule Realtime.Tenants.Migrations.SubscriptionCheckFiltersFixPermissions do
+defmodule Realtime.Tenants.Migrations.SubscriptionCheckFiltersUsePgAttribute do
   @moduledoc false
 
   use Ecto.Migration
