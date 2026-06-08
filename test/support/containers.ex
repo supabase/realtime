@@ -147,6 +147,12 @@ defmodule Containers do
          port <- Container.port(container) do
       tenant = repo_run(mode, fn -> Generators.tenant_fixture(%{port: port, migrations_ran: 0}) end)
 
+      # TODO: REAL-818 - remove when Project Migrations v2 is done
+      Realtime.FeatureFlags.Cache.update_cache(%Realtime.Api.FeatureFlag{
+        name: "use_supabase_realtime_admin",
+        enabled: true
+      })
+
       run_migrations? = Keyword.get(opts, :run_migrations, false)
 
       {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
@@ -154,11 +160,7 @@ defmodule Containers do
       {:ok, conn} = Database.connect_db(settings)
 
       try do
-        Postgrex.transaction(conn, fn db_conn ->
-          Postgrex.query!(db_conn, "DROP SCHEMA IF EXISTS realtime CASCADE", [])
-          Postgrex.query!(db_conn, "CREATE SCHEMA IF NOT EXISTS realtime", [])
-        end)
-
+        reset_realtime_schema!(settings)
         storage_up!(tenant)
 
         RateCounterHelper.stop(tenant.external_id)
@@ -214,11 +216,27 @@ defmodule Containers do
   defp repo_run(:unboxed, fun), do: Ecto.Adapters.SQL.Sandbox.unboxed_run(Realtime.Repo, fun)
   defp repo_run(:sandbox, fun), do: fun.()
 
+  defp reset_realtime_schema!(settings) do
+    {:ok, admin_conn} =
+      Postgrex.start_link(
+        hostname: settings.hostname,
+        port: settings.port,
+        database: settings.database,
+        username: "supabase_admin",
+        password: settings.password
+      )
+
+    Postgrex.query!(admin_conn, "DROP PUBLICATION IF EXISTS supabase_realtime_test", [])
+    Postgrex.query!(admin_conn, "DROP SCHEMA IF EXISTS realtime CASCADE", [])
+    Postgrex.query!(admin_conn, "CREATE SCHEMA realtime", [])
+    Postgrex.query!(admin_conn, "GRANT USAGE ON SCHEMA realtime TO postgres, anon, authenticated, service_role", [])
+    Postgrex.query!(admin_conn, "GRANT ALL ON SCHEMA realtime TO supabase_realtime_admin WITH GRANT OPTION", [])
+  end
+
   def stop_containers() do
     {list, 0} = System.cmd("docker", ["ps", "-a", "--format", "{{.Names}}", "--filter", "name=realtime-test-*"])
-    names = list |> String.trim() |> String.split("\n")
 
-    for name <- names do
+    for name <- String.split(list, "\n", trim: true) do
       System.cmd("docker", ["rm", "-f", name])
     end
   end
@@ -293,7 +311,8 @@ defmodule Containers do
   end
 
   defp docker_run!(name, port) do
-    initdb = Path.expand("../../dev/postgres/zz-supabase-schema.sql", __DIR__)
+    initdb_sh = Path.expand("../../dev/postgres/za-permit-supabase-admin.sh", __DIR__)
+    initdb_sql = Path.expand("../../dev/postgres/zb-supabase-schema.sql", __DIR__)
 
     {_, 0} =
       System.cmd("docker", [
@@ -307,7 +326,9 @@ defmodule Containers do
         "-e",
         "POSTGRES_PASSWORD=postgres",
         "-v",
-        "#{initdb}:/docker-entrypoint-initdb.d/zz-supabase-schema.sql",
+        "#{initdb_sh}:/docker-entrypoint-initdb.d/za-permit-supabase-admin.sh",
+        "-v",
+        "#{initdb_sql}:/docker-entrypoint-initdb.d/zb-supabase-schema.sql",
         "-p",
         "#{port}:5432",
         image(),

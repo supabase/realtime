@@ -127,14 +127,18 @@ defmodule Realtime.Tenants do
       end_timestamp = Date.to_string(Date.add(date, 1))
 
       Database.transaction(db_conn_pid, fn conn ->
-        query = """
+        create = """
         CREATE TABLE IF NOT EXISTS realtime.#{partition_name}
         PARTITION OF realtime.messages
         FOR VALUES FROM ('#{start_timestamp}') TO ('#{end_timestamp}');
         """
 
-        case Postgrex.query(conn, query, []) do
-          {:ok, _} -> Logger.debug("Partition #{partition_name} created")
+        alter_owner = "ALTER TABLE realtime.#{partition_name} OWNER TO supabase_realtime_admin"
+
+        with {:ok, _} <- Postgrex.query(conn, create, []),
+             {:ok, _} <- Postgrex.query(conn, alter_owner, []) do
+          Logger.debug("Partition #{partition_name} created")
+        else
           {:error, %Postgrex.Error{postgres: %{code: :duplicate_table}}} -> :ok
           {:error, error} -> log_error("PartitionCreationFailed", error)
         end
@@ -511,7 +515,14 @@ defmodule Realtime.Tenants do
   Checks if migrations for a given tenant need to run.
   """
   @spec run_migrations?(Tenant.t() | integer()) :: boolean()
-  def run_migrations?(%Tenant{} = tenant), do: run_migrations?(tenant.migrations_ran)
+  def run_migrations?(%Tenant{} = tenant) do
+    available_migrations =
+      tenant.external_id
+      |> Migrations.migrations()
+      |> Enum.count()
+
+    tenant.migrations_ran < available_migrations
+  end
 
   def run_migrations?(migrations_ran) when is_integer(migrations_ran),
     do: migrations_ran < Enum.count(Migrations.migrations())

@@ -1,10 +1,16 @@
 defmodule Realtime.Tenants.MigrationsTest do
-  alias Realtime.Tenants.Cache
   # Can't use async: true because Cachex does not work well with Ecto Sandbox
   use Realtime.DataCase, async: false
   use Mimic
 
+  alias Realtime.Api
+  alias Realtime.Tenants.Cache
   alias Realtime.Tenants.Migrations
+
+  setup do
+    Cachex.clear(Realtime.FeatureFlags.Cache)
+    :ok
+  end
 
   describe "run_migrations/1" do
     test "migrations for a given tenant only run once" do
@@ -32,6 +38,46 @@ defmodule Realtime.Tenants.MigrationsTest do
     test "migrations do not run if tenant has migrations_ran at the count of all migrations" do
       tenant = tenant_fixture(%{migrations_ran: Enum.count(Migrations.migrations())})
       assert Migrations.run_migrations(tenant) == :noop
+    end
+  end
+
+  describe "migrations/1" do
+    test "excludes SetupSupabaseRealtimeAdmin when the feature flag is disabled" do
+      {:ok, _} = Api.upsert_feature_flag(%{name: "use_supabase_realtime_admin", enabled: false})
+
+      modules = Enum.map(Migrations.migrations(), fn {_v, m} -> m end)
+      refute Migrations.SetupSupabaseRealtimeAdmin in modules
+    end
+
+    test "excludes SetupSupabaseRealtimeAdmin when the tenant override is disabled" do
+      tenant = Containers.checkout_tenant()
+      {:ok, _} = Api.upsert_feature_flag(%{name: "use_supabase_realtime_admin", enabled: true})
+      {:ok, _} = Realtime.FeatureFlags.set_tenant_flag("use_supabase_realtime_admin", tenant.external_id, false)
+
+      Process.sleep(100)
+      Cache.invalidate_tenant_cache(tenant.external_id)
+
+      modules = Enum.map(Migrations.migrations(tenant.external_id), fn {_v, m} -> m end)
+      refute Migrations.SetupSupabaseRealtimeAdmin in modules
+    end
+
+    test "includes SetupSupabaseRealtimeAdmin when the feature flag is enabled" do
+      {:ok, _} = Api.upsert_feature_flag(%{name: "use_supabase_realtime_admin", enabled: true})
+
+      modules = Enum.map(Migrations.migrations(), fn {_v, m} -> m end)
+      assert Migrations.SetupSupabaseRealtimeAdmin in modules
+    end
+
+    test "includes SetupSupabaseRealtimeAdmin when the tenant override is enabled" do
+      tenant = Containers.checkout_tenant()
+      {:ok, _} = Api.upsert_feature_flag(%{name: "use_supabase_realtime_admin", enabled: false})
+      {:ok, _} = Realtime.FeatureFlags.set_tenant_flag("use_supabase_realtime_admin", tenant.external_id, true)
+
+      Process.sleep(100)
+      Cache.invalidate_tenant_cache(tenant.external_id)
+
+      modules = Enum.map(Migrations.migrations(tenant.external_id), fn {_v, m} -> m end)
+      assert Migrations.SetupSupabaseRealtimeAdmin in modules
     end
   end
 

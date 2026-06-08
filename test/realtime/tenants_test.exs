@@ -38,7 +38,8 @@ defmodule Realtime.TenantsTest do
       tenant = tenant_fixture(%{migrations_ran: 0})
       assert Tenants.run_migrations?(tenant)
 
-      tenant = tenant_fixture(%{migrations_ran: Enum.count(Migrations.migrations()) - 1})
+      migrations = Enum.count(Migrations.migrations(tenant.external_id))
+      tenant = tenant_fixture(%{migrations_ran: migrations - 1})
       assert Tenants.run_migrations?(tenant)
     end
 
@@ -59,7 +60,7 @@ defmodule Realtime.TenantsTest do
             "settings" => %{
               "db_host" => "127.0.0.1",
               "db_name" => "postgres",
-              "db_user" => "supabase_admin",
+              "db_user" => "supabase_realtime_admin",
               "db_password" => "postgres",
               "db_port" => "#{port()}",
               "poll_interval" => 100,
