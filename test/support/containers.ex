@@ -3,6 +3,7 @@ defmodule Containers do
   alias Realtime.Tenants.Connect
   alias Containers.Container
   alias Realtime.Database
+  alias Realtime.Tenants
   alias Realtime.Tenants.Migrations
 
   use GenServer
@@ -104,7 +105,7 @@ defmodule Containers do
 
     Migrations.run_migrations(tenant)
     {:ok, pid} = Database.connect(tenant, "realtime_test", :stop)
-    :ok = Migrations.create_partitions(pid)
+    :ok = Tenants.create_messages_partitions(pid)
     Process.exit(pid, :normal)
 
     tenant
@@ -187,7 +188,7 @@ defmodule Containers do
         if run_migrations? do
           case run_migrations(tenant) do
             {:ok, count} ->
-              :ok = Migrations.create_partitions(conn)
+              :ok = Tenants.create_messages_partitions(conn)
 
               {:ok, tenant} =
                 repo_run(mode, fn ->

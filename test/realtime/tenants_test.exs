@@ -3,6 +3,7 @@ defmodule Realtime.TenantsTest do
   alias Realtime.Tenants.Migrations
   use Realtime.DataCase, async: false
 
+  alias Realtime.Database
   alias Realtime.GenCounter
   alias Realtime.Tenants
   doctest Realtime.Tenants
@@ -92,6 +93,23 @@ defmodule Realtime.TenantsTest do
 
       {:ok, tenant} = Realtime.Api.create_tenant(attrs)
       assert Tenants.region(tenant) == nil
+    end
+  end
+
+  describe "create_messages_partitions/1" do
+    test "running twice keeps the same partitions" do
+      tenant = Containers.checkout_tenant(run_migrations: true)
+      {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+
+      assert :ok = Tenants.create_messages_partitions(conn)
+      assert :ok = Tenants.create_messages_partitions(conn)
+
+      assert {:ok, %{rows: [[5]]}} =
+               Postgrex.query(
+                 conn,
+                 "SELECT count(*) FROM pg_inherits WHERE inhparent = 'realtime.messages'::regclass",
+                 []
+               )
     end
   end
 end

@@ -91,6 +91,7 @@ defmodule Realtime.Tenants.Migrations do
     AddSelectColumnsToSubscriptions,
     Wal2jsonEscapeSpecialChars,
     AddSendBinaryFunction,
+    RenameBroadcastSendWarning,
     SubscriptionCheckFiltersFixPermissions,
     SetupSupabaseRealtimeAdmin
   }
@@ -171,7 +172,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_260_528_120_000, Wal2jsonEscapeSpecialChars},
     {20_260_603_120_000, AddSendBinaryFunction},
     {20_260_604_110_000, SubscriptionCheckFiltersFixPermissions},
-    {20_260_604_120_000, SetupSupabaseRealtimeAdmin}
+    {20_260_605_120_000, RenameBroadcastSendWarning},
+    {20_260_606_120_000, SetupSupabaseRealtimeAdmin}
   ]
 
   defstruct [:tenant_external_id, :settings, migrations_ran: 0]
@@ -288,61 +290,6 @@ defmodule Realtime.Tenants.Migrations do
   defp error_code(%Postgrex.Error{postgres: %{code: code}}), do: code
   defp error_code(%DBConnection.ConnectionError{}), do: :connection_error
   defp error_code(_), do: :other
-
-  @doc """
-  Create partitions for `realtime.messages` on tenant database.
-
-  Accepts either an existing tenant database connection or a `Tenant`.
-  """
-  @spec create_partitions(Tenant.t()) :: :ok | {:error, term()}
-  def create_partitions(%Tenant{} = tenant) do
-    case Database.connect(tenant, "realtime_health_check") do
-      {:ok, conn} ->
-        result = create_partitions(conn)
-        GenServer.stop(conn)
-        result
-
-      {:error, error} ->
-        log_error("PartitionCreationFailed", error)
-        {:error, error}
-    end
-  end
-
-  @spec create_partitions(pid()) :: :ok
-  def create_partitions(db_conn_pid) do
-    Logger.info("Creating partitions for realtime.messages")
-    today = Date.utc_today()
-    yesterday = Date.add(today, -1)
-    future = Date.add(today, 3)
-
-    dates = Date.range(yesterday, future)
-
-    Enum.each(dates, fn date ->
-      partition_name = "messages_#{date |> Date.to_iso8601() |> String.replace("-", "_")}"
-      start_timestamp = Date.to_string(date)
-      end_timestamp = Date.to_string(Date.add(date, 1))
-
-      Database.transaction(db_conn_pid, fn conn ->
-        create = """
-        CREATE TABLE IF NOT EXISTS realtime.#{partition_name}
-        PARTITION OF realtime.messages
-        FOR VALUES FROM ('#{start_timestamp}') TO ('#{end_timestamp}')
-        """
-
-        alter_owner = "ALTER TABLE realtime.#{partition_name} OWNER TO supabase_realtime_admin"
-
-        with {:ok, _} <- Postgrex.query(conn, create, []),
-             {:ok, _} <- Postgrex.query(conn, alter_owner, []) do
-          Logger.debug("Partition #{partition_name} created")
-        else
-          {:error, %Postgrex.Error{postgres: %{code: :duplicate_table}}} -> :ok
-          {:error, error} -> log_error("PartitionCreationFailed", error)
-        end
-      end)
-    end)
-
-    :ok
-  end
 
   @doc """
   Returns the migrations to run.

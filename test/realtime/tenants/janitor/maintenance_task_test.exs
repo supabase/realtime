@@ -14,37 +14,61 @@ defmodule Realtime.Tenants.Janitor.MaintenanceTaskTest do
     %{tenant: tenant}
   end
 
-  test "cleans messages older than 72 hours and creates partitions", %{tenant: tenant} do
-    {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+  describe "run/1" do
+    setup %{tenant: tenant} do
+      {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
 
-    utc_now = NaiveDateTime.utc_now()
-    limit = NaiveDateTime.add(utc_now, -72, :hour)
+      date_start = Date.utc_today() |> Date.add(-10)
+      date_end = Date.utc_today()
+      create_messages_partitions(conn, date_start, date_end)
 
-    date_start = Date.utc_today() |> Date.add(-10)
-    date_end = Date.utc_today()
-    create_messages_partitions(conn, date_start, date_end)
+      %{conn: conn}
+    end
 
-    messages =
-      for days <- -5..0 do
-        inserted_at = NaiveDateTime.add(utc_now, days, :day)
-        message_fixture(tenant, %{inserted_at: inserted_at})
-      end
-      |> MapSet.new()
+    test "cleans messages older than 72 hours", %{tenant: tenant, conn: conn} do
+      utc_now = NaiveDateTime.utc_now()
+      limit = NaiveDateTime.add(utc_now, -72, :hour)
 
-    to_keep =
-      messages
-      |> Enum.reject(&(NaiveDateTime.compare(NaiveDateTime.beginning_of_day(limit), &1.inserted_at) == :gt))
-      |> MapSet.new()
+      messages =
+        for days <- -5..0 do
+          inserted_at = NaiveDateTime.add(utc_now, days, :day)
+          message_fixture(tenant, %{inserted_at: inserted_at})
+        end
+        |> MapSet.new()
 
-    assert MaintenanceTask.run(tenant.external_id) == :ok
+      to_keep =
+        messages
+        |> Enum.reject(&(NaiveDateTime.compare(NaiveDateTime.beginning_of_day(limit), &1.inserted_at) == :gt))
+        |> MapSet.new()
 
-    {:ok, res} = Repo.all(conn, from(m in Message), Message)
+      assert MaintenanceTask.run(tenant.external_id) == :ok
 
-    verify_partitions(conn)
+      {:ok, res} = Repo.all(conn, from(m in Message), Message)
+      current = MapSet.new(res)
 
-    current = MapSet.new(res)
+      assert MapSet.difference(current, to_keep) |> MapSet.size() == 0
+    end
 
-    assert MapSet.difference(current, to_keep) |> MapSet.size() == 0
+    test "creates the current messages partitions and drops the old ones", %{tenant: tenant, conn: conn} do
+      assert MaintenanceTask.run(tenant.external_id) == :ok
+
+      today = Date.utc_today()
+      dates = Date.range(Date.add(today, -3), Date.add(today, 3))
+
+      %{rows: rows} =
+        Postgrex.query!(
+          conn,
+          "SELECT tablename from pg_catalog.pg_tables where schemaname = 'realtime' and tablename like 'messages_%'",
+          []
+        )
+
+      partitions = MapSet.new(rows, fn [name] -> name end)
+
+      expected_names =
+        MapSet.new(dates, fn date -> "messages_#{date |> Date.to_iso8601() |> String.replace("-", "_")}" end)
+
+      assert MapSet.equal?(partitions, expected_names)
+    end
   end
 
   test "exits if fails to remove old messages" do
@@ -81,26 +105,5 @@ defmodule Realtime.Tenants.Janitor.MaintenanceTaskTest do
     ref = t.ref
     assert_receive {:EXIT, ^pid, :killed}
     assert_receive {:DOWN, ^ref, :process, ^pid, :killed}
-  end
-
-  defp verify_partitions(conn) do
-    today = Date.utc_today()
-    yesterday = Date.add(today, -3)
-    future = Date.add(today, 3)
-    dates = Date.range(yesterday, future)
-
-    %{rows: rows} =
-      Postgrex.query!(
-        conn,
-        "SELECT tablename from pg_catalog.pg_tables where schemaname = 'realtime' and tablename like 'messages_%'",
-        []
-      )
-
-    partitions = MapSet.new(rows, fn [name] -> name end)
-
-    expected_names =
-      MapSet.new(dates, fn date -> "messages_#{date |> Date.to_iso8601() |> String.replace("-", "_")}" end)
-
-    assert MapSet.equal?(partitions, expected_names)
   end
 end
