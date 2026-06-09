@@ -254,13 +254,11 @@ defmodule Realtime.Tenants.Authorization do
             Message.changeset(%Message{}, %{topic: authorization_context.topic, extension: ext})
           end)
 
-        with {:ok, messages} <- Repo.insert_all_entries(transaction_conn, changesets, Message) do
-          messages_by_extension = Map.new(messages, &{&1.extension, &1.id})
-
-          set_conn_config(transaction_conn, authorization_context)
-
-          policies = check_read_policies(transaction_conn, authorization_context, messages_by_extension, policies)
-
+        with {:ok, messages} <- Repo.insert_all_entries(transaction_conn, changesets, Message),
+             messages_by_extension = Map.new(messages, &{&1.extension, &1.id}),
+             _ = set_conn_config(transaction_conn, authorization_context),
+             {:ok, policies} <-
+               check_read_policies(transaction_conn, authorization_context, messages_by_extension, policies) do
           Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
           policies
         else
@@ -311,13 +309,14 @@ defmodule Realtime.Tenants.Authorization do
     with {:ok, res} <- Repo.all(conn, query, Message) do
       returned_ids = MapSet.new(res, & &1.id)
 
-      Enum.reduce(@all_extensions, policies, fn extension, acc ->
-        can? =
-          Map.has_key?(messages_by_extension, extension) and
-            MapSet.member?(returned_ids, messages_by_extension[extension])
+      {:ok,
+       Enum.reduce(@all_extensions, policies, fn extension, acc ->
+         can? =
+           Map.has_key?(messages_by_extension, extension) and
+             MapSet.member?(returned_ids, messages_by_extension[extension])
 
-        Policies.update_policies(acc, extension, :read, can?)
-      end)
+         Policies.update_policies(acc, extension, :read, can?)
+       end)}
     end
   end
 
