@@ -267,35 +267,49 @@ defmodule Forum.MusterTest do
       :ok
     end
 
-    test "occupied/3 inserts a {group, source_node} row", %{scope: scope} do
-      assert :ok = Scope.occupied(scope, :rg1, :src@nowhere)
+    test "occupied/4 inserts a {group, source_node} row", %{scope: scope} do
+      assert :ok = Scope.occupied(scope, :rg1, :src@nowhere, 1)
       assert :src@nowhere in Scope.occupancy(scope, :rg1)
     end
 
-    test "vacant_batch/3 deletes multiple {group, source_node} rows", %{scope: scope} do
-      :ok = Scope.occupied(scope, :rg2a, :src@nowhere)
-      :ok = Scope.occupied(scope, :rg2b, :src@nowhere)
+    test "vacant_batch/4 deletes multiple {group, source_node} rows", %{scope: scope} do
+      :ok = Scope.occupied(scope, :rg2a, :src@nowhere, 1)
+      :ok = Scope.occupied(scope, :rg2b, :src@nowhere, 1)
       assert :src@nowhere in Scope.occupancy(scope, :rg2a)
       assert :src@nowhere in Scope.occupancy(scope, :rg2b)
 
-      assert :ok = Scope.vacant_batch(scope, [:rg2a, :rg2b], :src@nowhere)
+      assert :ok = Scope.vacant_batch(scope, [:rg2a, :rg2b], :src@nowhere, 2)
       refute :src@nowhere in Scope.occupancy(scope, :rg2a)
       refute :src@nowhere in Scope.occupancy(scope, :rg2b)
     end
 
-    test "vacant_batch/3 only deletes rows for the given source", %{scope: scope} do
-      :ok = Scope.occupied(scope, :rg3, :src_a@nowhere)
-      :ok = Scope.occupied(scope, :rg3, :src_b@nowhere)
+    test "vacant_batch/4 only deletes rows for the given source", %{scope: scope} do
+      :ok = Scope.occupied(scope, :rg3, :src_a@nowhere, 1)
+      :ok = Scope.occupied(scope, :rg3, :src_b@nowhere, 1)
 
-      assert :ok = Scope.vacant_batch(scope, [:rg3], :src_a@nowhere)
+      assert :ok = Scope.vacant_batch(scope, [:rg3], :src_a@nowhere, 2)
       assert Scope.occupancy(scope, :rg3) == [:src_b@nowhere]
     end
 
-    test "receive_node_state/4 replaces all rows for a source", %{scope: scope} do
-      # Seed something the snapshot should clear.
-      :ok = Scope.occupied(scope, :stale_g, :src@nowhere)
+    test "vacant_batch/4 with a stale (lower) seq does NOT delete a newer occupied",
+         %{scope: scope} do
+      # The core of the timeout race: a re-claim wrote a fresh, higher-seq
+      # occupied; a stale vacant DELETE (lower seq) arrives late and must be
+      # ignored so it cannot clobber the live entry.
+      :ok = Scope.occupied(scope, :race_g, :src@nowhere, 10)
+      assert :ok = Scope.vacant_batch(scope, [:race_g], :src@nowhere, 5)
+      assert :src@nowhere in Scope.occupancy(scope, :race_g)
 
-      assert :ok = Scope.receive_node_state(scope, :src@nowhere, [:fresh_a, :fresh_b], 0)
+      # A vacant at or above the stored seq still deletes (the real vacancy).
+      assert :ok = Scope.vacant_batch(scope, [:race_g], :src@nowhere, 10)
+      refute :src@nowhere in Scope.occupancy(scope, :race_g)
+    end
+
+    test "receive_node_state/5 replaces all rows for a source", %{scope: scope} do
+      # Seed something the snapshot should clear.
+      :ok = Scope.occupied(scope, :stale_g, :src@nowhere, 1)
+
+      assert :ok = Scope.receive_node_state(scope, :src@nowhere, [:fresh_a, :fresh_b], 0, 2)
 
       refute :src@nowhere in Scope.occupancy(scope, :stale_g)
       assert :src@nowhere in Scope.occupancy(scope, :fresh_a)
@@ -303,13 +317,13 @@ defmodule Forum.MusterTest do
     end
 
     test "writes from different sources don't interfere", %{scope: scope} do
-      :ok = Scope.occupied(scope, :shared, :src_a@nowhere)
-      :ok = Scope.occupied(scope, :shared, :src_b@nowhere)
+      :ok = Scope.occupied(scope, :shared, :src_a@nowhere, 1)
+      :ok = Scope.occupied(scope, :shared, :src_b@nowhere, 1)
 
       assert Enum.sort(Scope.occupancy(scope, :shared)) ==
                [:src_a@nowhere, :src_b@nowhere]
 
-      :ok = Scope.vacant_batch(scope, [:shared], :src_a@nowhere)
+      :ok = Scope.vacant_batch(scope, [:shared], :src_a@nowhere, 2)
       assert Scope.occupancy(scope, :shared) == [:src_b@nowhere]
     end
 
@@ -319,7 +333,7 @@ defmodule Forum.MusterTest do
       # :status responds promptly.
       tasks =
         for i <- 1..200 do
-          Task.async(fn -> Scope.occupied(scope, :"hot_#{i}", :src@nowhere) end)
+          Task.async(fn -> Scope.occupied(scope, :"hot_#{i}", :src@nowhere, 1) end)
         end
 
       Task.await_many(tasks, 5_000)
@@ -401,7 +415,7 @@ defmodule Forum.MusterTest do
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
       assert :ok = Muster.join(scope, g, pid)
 
-      assert [[^scope, @fake_node, Scope, :occupied, [^scope, ^g, _], _]] = drain_calls()
+      assert [[^scope, @fake_node, Scope, :occupied, [^scope, ^g, _, _], _]] = drain_calls()
 
       assert Muster.local_member_count(scope, g) == 1
     end
@@ -447,7 +461,10 @@ defmodule Forum.MusterTest do
       assert Enum.all?(results, &(&1 == :ok))
 
       call_count =
-        Enum.count(drain_calls(), &match?([^scope, _, Scope, :occupied, [^scope, ^g, _], _], &1))
+        Enum.count(
+          drain_calls(),
+          &match?([^scope, _, Scope, :occupied, [^scope, ^g, _, _], _], &1)
+        )
 
       assert call_count == 1
     end
@@ -473,7 +490,7 @@ defmodule Forum.MusterTest do
       stub_call(:ok)
       assert :ok = Muster.join(scope, g, pid)
 
-      assert [[^scope, @fake_node, Scope, :occupied, [^scope, ^g, _], _]] = drain_calls()
+      assert [[^scope, @fake_node, Scope, :occupied, [^scope, ^g, _, _], _]] = drain_calls()
 
       assert Muster.local_member_count(scope, g) == 1
     end
@@ -552,9 +569,9 @@ defmodule Forum.MusterTest do
       # The flush sends one batched vacant RPC to the router.
       trigger_flush(scope)
 
-      [^scope, @fake_node, Scope, :vacant_batch, [^scope, groups, src], _] =
+      [^scope, @fake_node, Scope, :vacant_batch, [^scope, groups, src, _], _] =
         assert_call(fn
-          [^scope, @fake_node, Scope, :vacant_batch, [^scope, _, _], _] -> true
+          [^scope, @fake_node, Scope, :vacant_batch, [^scope, _, _, _], _] -> true
           _ -> false
         end)
 
@@ -575,7 +592,7 @@ defmodule Forum.MusterTest do
       trigger_flush(scope)
 
       assert_call(fn
-        [^scope, @fake_node, Scope, :vacant_batch, [^scope, _, _], _] -> true
+        [^scope, @fake_node, Scope, :vacant_batch, [^scope, _, _, _], _] -> true
         _ -> false
       end)
 
@@ -587,7 +604,7 @@ defmodule Forum.MusterTest do
       trigger_flush(scope)
 
       assert_call(fn
-        [^scope, @fake_node, Scope, :vacant_batch, [^scope, _, _], _] -> true
+        [^scope, @fake_node, Scope, :vacant_batch, [^scope, _, _, _], _] -> true
         _ -> false
       end)
 
@@ -610,9 +627,9 @@ defmodule Forum.MusterTest do
       _ = drain_calls()
       trigger_flush(scope)
 
-      [^scope, @fake_node, Scope, :vacant_batch, [^scope, groups, _], _] =
+      [^scope, @fake_node, Scope, :vacant_batch, [^scope, groups, _, _], _] =
         assert_call(fn
-          [^scope, @fake_node, Scope, :vacant_batch, [^scope, _, _], _] -> true
+          [^scope, @fake_node, Scope, :vacant_batch, [^scope, _, _, _], _] -> true
           _ -> false
         end)
 
@@ -753,8 +770,7 @@ defmodule Forum.MusterTest do
 
       trigger_flush(scope)
 
-      assert {:vacant_flushing, _} =
-               wait_for_group_state(scope, g, &match?({:vacant_flushing, _}, &1))
+      assert :vacant_flushing = wait_for_group_state(scope, g, :vacant_flushing)
 
       _ = drain_calls()
 
@@ -765,6 +781,69 @@ defmodule Forum.MusterTest do
 
       # The in-flight batch was normalized back to :vacant_queued for a later flush.
       assert :vacant_queued = wait_for_group_state(scope, g, :vacant_queued)
+    end
+
+    # A re-join arriving while a vacant batch is in flight must NOT park behind
+    # the batch: it re-claims immediately by dispatching :occupied. That
+    # :occupied is dispatched after the batch, so it carries a higher seq and the
+    # router's guard makes its INSERT win over the in-flight (lower-seq) DELETE
+    # regardless of arrival order. Because the group moves straight to
+    # :occupied_pending with a worker in flight, it can never wedge across a
+    # rebalance (an earlier design parked the caller in :vacant_flushing and
+    # could leave it with no worker to settle it when the router didn't move).
+    test "re-join during an in-flight vacant flush re-claims immediately",
+         %{scope: scope} do
+      inject_fake_remote(scope)
+      members_3 = [node(), @fake_node, :third@nowhere]
+
+      # Router stays @fake_node across the rebalance — the formerly-wedging path.
+      g = find_group_flipping_router([node(), @fake_node], @fake_node, members_3, @fake_node)
+
+      pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, g, pid)
+      assert :ok = Muster.leave(scope, g, pid)
+      assert :vacant_queued = wait_for_group_state(scope, g, :vacant_queued)
+
+      # Hold every RPC so the vacant batch is still in flight when we re-join and
+      # the re-claim's :occupied is still in flight across the rebalance.
+      stub_call(
+        {:fn,
+         fn ->
+           Process.sleep(2_000)
+           :ok
+         end}
+      )
+
+      trigger_flush(scope)
+      assert :vacant_flushing = wait_for_group_state(scope, g, :vacant_flushing)
+      _ = drain_calls()
+
+      # Re-join while the batch is in flight → straight to :occupied_pending
+      # (not parked in :vacant_flushing).
+      rejoin =
+        Task.async(fn ->
+          Muster.join(scope, g, spawn_link(fn -> Process.sleep(:infinity) end))
+        end)
+
+      assert {:occupied_pending, [_]} =
+               wait_for_group_state(scope, g, &match?({:occupied_pending, [_]}, &1))
+
+      # The :occupied was dispatched immediately to the (current) router.
+      assert {:ok, _} =
+               wait_call(
+                 fn
+                   [_s, @fake_node, Scope, :occupied, [_, ^g, _, _], _] -> true
+                   _ -> false
+                 end,
+                 3_000
+               )
+
+      # Rebalance with the router unchanged: :occupied_pending is left for the
+      # in-flight :occupied worker to settle (the formerly-wedging case).
+      trigger_rebalance(scope, members_3)
+
+      assert :ok = Task.await(rejoin, 10_000)
+      assert :occupied = wait_for_group_state(scope, g, :occupied, 5_000)
     end
 
     # rpc_timeout sets the inner Task.await bound during parallel rebalance
@@ -1136,7 +1215,7 @@ defmodule Forum.MusterTest do
 
       # A data snapshot from the only peer marks it ready — no separate
       # :rebalance_marker message involved.
-      assert :ok = Scope.receive_node_state(scope, :src@nowhere, [], Muster.view_hash(scope))
+      assert :ok = Scope.receive_node_state(scope, :src@nowhere, [], Muster.view_hash(scope), 1)
       assert_ready(scope)
     end
 
