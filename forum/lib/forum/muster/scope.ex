@@ -16,6 +16,7 @@ defmodule Forum.Muster.Scope do
   #     router's occupancy table from accumulating stale entries.
   use GenServer
   require Logger
+  require Snabbkaffe
 
   alias ExHashRing.Ring
 
@@ -846,6 +847,14 @@ defmodule Forum.Muster.Scope do
       "Muster[#{node()}|#{state.scope}] rebalance start: members #{inspect(state.members)} -> #{inspect(new_members)} (view_hash #{:erlang.phash2(new_members)})"
     )
 
+    Snabbkaffe.tp(:muster_rebalance_start, %{
+      scope: state.scope,
+      node: node(),
+      from: state.members,
+      to: new_members,
+      view_hash: :erlang.phash2(new_members)
+    })
+
     # 1) Flip status to :rebalancing BEFORE updating the ring. Callers reading
     #    router/2 see :rebalancing and fan out to all members. During the
     #    window, get_nodes/1 returns the current ring (still old generation
@@ -1018,6 +1027,15 @@ defmodule Forum.Muster.Scope do
 
     if previous != status do
       :persistent_term.put(key, status)
+
+      Snabbkaffe.tp(:muster_status_change, %{
+        scope: state.scope,
+        node: node(),
+        from: previous,
+        to: status,
+        members: state.members,
+        view_hash: own_view_hash(state)
+      })
 
       Logger.info(
         "Muster[#{node()}|#{state.scope}] status #{inspect(previous)} -> #{inspect(status)} (members #{inspect(state.members)})"
