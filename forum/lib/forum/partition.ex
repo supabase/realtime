@@ -1,4 +1,4 @@
-defmodule Beacon.Partition do
+defmodule Forum.Partition do
   @moduledoc false
 
   use GenServer
@@ -10,38 +10,38 @@ defmodule Beacon.Partition do
             name: atom,
             scope: atom,
             entries_table: atom,
-            monitors: %{{Beacon.group(), pid} => reference}
+            monitors: %{{Forum.group(), pid} => reference}
           }
     defstruct [:name, :scope, :entries_table, monitors: %{}]
   end
 
-  @spec join(atom, Beacon.group(), pid) :: :ok
+  @spec join(atom, Forum.group(), pid) :: :ok
   def join(partition_name, group, pid), do: GenServer.call(partition_name, {:join, group, pid})
 
-  @spec leave(atom, Beacon.group(), pid) :: :ok
+  @spec leave(atom, Forum.group(), pid) :: :ok
   def leave(partition_name, group, pid), do: GenServer.call(partition_name, {:leave, group, pid})
 
-  @spec members(atom, Beacon.group()) :: [pid]
+  @spec members(atom, Forum.group()) :: [pid]
   def members(partition_name, group) do
     partition_name
-    |> Beacon.Supervisor.partition_entries_table()
+    |> Forum.Supervisor.partition_entries_table()
     |> :ets.select([{{{group, :"$1"}}, [], [:"$1"]}])
   end
 
-  @spec member_count(atom, Beacon.group()) :: non_neg_integer
+  @spec member_count(atom, Forum.group()) :: non_neg_integer
   def member_count(partition_name, group), do: :ets.lookup_element(partition_name, group, 2, 0)
 
-  @spec member_counts(atom) :: %{Beacon.group() => non_neg_integer}
+  @spec member_counts(atom) :: %{Forum.group() => non_neg_integer}
   def member_counts(partition_name) do
     partition_name
     |> :ets.tab2list()
     |> Map.new()
   end
 
-  @spec member?(atom, Beacon.group(), pid) :: boolean
+  @spec member?(atom, Forum.group(), pid) :: boolean
   def member?(partition_name, group, pid) do
     partition_name
-    |> Beacon.Supervisor.partition_entries_table()
+    |> Forum.Supervisor.partition_entries_table()
     |> :ets.lookup({group, pid})
     |> case do
       [{{^group, ^pid}}] -> true
@@ -49,7 +49,7 @@ defmodule Beacon.Partition do
     end
   end
 
-  @spec groups(atom) :: [Beacon.group()]
+  @spec groups(atom) :: [Forum.group()]
   def groups(partition_name), do: :ets.select(partition_name, [{{:"$1", :_}, [], [:"$1"]}])
 
   @spec group_count(atom) :: non_neg_integer
@@ -87,14 +87,14 @@ defmodule Beacon.Partition do
   end
 
   @impl true
-  @spec handle_call({:join, Beacon.group(), pid}, GenServer.from(), State.t()) ::
+  @spec handle_call({:join, Forum.group(), pid}, GenServer.from(), State.t()) ::
           {:reply, :ok, State.t()}
   def handle_call({:join, group, pid}, _from, state) do
     if :ets.insert_new(state.entries_table, {{group, pid}}) do
       case :ets.lookup_element(state.name, group, 2, 0) do
         0 ->
           :ets.insert(state.name, {group, 1})
-          :telemetry.execute([:beacon, state.scope, :group, :occupied], %{}, %{group: group})
+          :telemetry.execute([:forum, state.scope, :group, :occupied], %{}, %{group: group})
 
         count when count > 0 ->
           :ets.insert(state.name, {group, count + 1})
@@ -114,7 +114,7 @@ defmodule Beacon.Partition do
   end
 
   @impl true
-  @spec handle_info({{:DOWN, Beacon.group()}, reference, :process, pid, term}, State.t()) ::
+  @spec handle_info({{:DOWN, Forum.group()}, reference, :process, pid, term}, State.t()) ::
           {:noreply, State.t()}
   def handle_info({{:DOWN, group}, _ref, :process, pid, _reason}, state) do
     state = remove(group, pid, state)
@@ -132,7 +132,7 @@ defmodule Beacon.Partition do
         case :ets.lookup_element(state.name, group, 2, 0) do
           1 ->
             :ets.delete(state.name, group)
-            :telemetry.execute([:beacon, state.scope, :group, :vacant], %{}, %{group: group})
+            :telemetry.execute([:forum, state.scope, :group, :vacant], %{}, %{group: group})
 
           count when count > 1 ->
             :ets.update_counter(state.name, group, {2, -1})
@@ -140,7 +140,7 @@ defmodule Beacon.Partition do
 
       [] ->
         Logger.warning(
-          "Beacon[#{node()}|#{state.scope}] Trying to remove an unknown process #{inspect(pid)}"
+          "Forum[#{node()}|#{state.scope}] Trying to remove an unknown process #{inspect(pid)}"
         )
 
         :ok

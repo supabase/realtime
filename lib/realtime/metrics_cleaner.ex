@@ -6,11 +6,11 @@ defmodule Realtime.MetricsCleaner do
 
   defstruct [:check_ref, :interval]
 
-  def handle_beacon_event([:beacon, :users, :group, :vacant], _, %{group: tenant_id}, vacant_websockets) do
+  def handle_forum_event([:forum, :users, :group, :vacant], _, %{group: tenant_id}, vacant_websockets) do
     :ets.insert(vacant_websockets, {tenant_id, DateTime.to_unix(DateTime.utc_now(), :second)})
   end
 
-  def handle_beacon_event([:beacon, :users, :group, :occupied], _, %{group: tenant_id}, vacant_websockets) do
+  def handle_forum_event([:forum, :users, :group, :occupied], _, %{group: tenant_id}, vacant_websockets) do
     :ets.delete(vacant_websockets, tenant_id)
   end
 
@@ -46,8 +46,8 @@ defmodule Realtime.MetricsCleaner do
     :ok =
       :telemetry.attach_many(
         [self(), :vacant_websockets],
-        [[:beacon, :users, :group, :occupied], [:beacon, :users, :group, :vacant]],
-        &__MODULE__.handle_beacon_event/4,
+        [[:forum, :users, :group, :occupied], [:forum, :users, :group, :vacant]],
+        &__MODULE__.handle_forum_event/4,
         vacant_websockets
       )
 

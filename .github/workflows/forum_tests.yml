@@ -1,13 +1,13 @@
-name: Beacon Tests
+name: Forum Tests
 defaults:
   run:
     shell: bash
-    working-directory: ./beacon
+    working-directory: ./forum
 on:
   pull_request:
     paths:
-      - "beacon/**"
-      - ".github/workflows/beacon_tests.yml"
+      - "forum/**"
+      - ".github/workflows/forum_tests.yml"
 
   push:
     branches:
@@ -37,9 +37,9 @@ jobs:
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: |
-            beacon/deps
-            beacon/_build
-          key: ${{ github.workflow }}-${{ runner.os }}-mix-${{ steps.beam.outputs.elixir-version }}-${{ steps.beam.outputs.otp-version }}-${{ hashFiles('beacon/mix.lock') }}
+            forum/deps
+            forum/_build
+          key: ${{ github.workflow }}-${{ runner.os }}-mix-${{ steps.beam.outputs.elixir-version }}-${{ steps.beam.outputs.otp-version }}-${{ hashFiles('forum/mix.lock') }}
           restore-keys: |
             ${{ github.workflow }}-${{ runner.os }}-mix-${{ steps.beam.outputs.elixir-version }}-${{ steps.beam.outputs.otp-version }}-
       - name: Install dependencies

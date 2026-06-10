@@ -1,14 +1,15 @@
 defmodule Realtime.PromEx.Plugins.TenantTest do
   use Realtime.DataCase, async: false
 
+  alias Forum.Census
+  alias Realtime.GenCounter
   alias Realtime.PromEx.Plugins.Tenant
   alias Realtime.PromEx.Plugins.TenantGlobal
+  alias Realtime.RateCounter
   alias Realtime.Rpc
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies
-  alias Realtime.RateCounter
-  alias Realtime.GenCounter
 
   defmodule MetricsTest do
     use PromEx, otp_app: :realtime_test_phoenix
@@ -28,7 +29,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
               defmodule FakeUserCounter do
                 def fake_add(external_id) do
                   pid = spawn(fn -> Process.sleep(2000) end)
-                  :ok = Beacon.join(:users, external_id, pid)
+                  :ok = Census.join(:users, external_id, pid)
                 end
 
                 def fake_db_event(external_id) do
@@ -99,10 +100,10 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       tenant: %{external_id: external_id},
       node: node
     } do
-      :ok = Beacon.join(:users, external_id, self())
+      :ok = Census.join(:users, external_id, self())
       # Add bad tenant id
       bad_tenant_id = random_string()
-      :ok = Beacon.join(:users, bad_tenant_id, self())
+      :ok = Census.join(:users, bad_tenant_id, self())
 
       _ = Rpc.call(node, FakeUserCounter, :fake_add, [external_id])
 
@@ -415,7 +416,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
   describe "execute_global_connection_metrics/0" do
     test "emits global connection counts without a tenant tag" do
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
-      :ok = Beacon.join(:users, "global-test-tenant", pid)
+      :ok = Census.join(:users, "global-test-tenant", pid)
 
       TenantGlobal.execute_global_connection_metrics()
 

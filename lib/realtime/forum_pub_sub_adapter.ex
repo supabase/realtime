@@ -1,9 +1,9 @@
-defmodule Realtime.BeaconPubSubAdapter do
-  @moduledoc "Beacon adapter to use PubSub"
+defmodule Realtime.ForumPubSubAdapter do
+  @moduledoc "Forum adapter to use PubSub"
 
   import Kernel, except: [send: 2]
 
-  @behaviour Beacon.Adapter
+  @behaviour Forum.Adapter
 
   @impl true
   def register(scope) do
@@ -29,5 +29,5 @@ defmodule Realtime.BeaconPubSubAdapter do
     Phoenix.PubSub.direct_broadcast(node, Realtime.PubSub, topic(scope), message)
   end
 
-  defp topic(scope), do: "beacon:#{scope}"
+  defp topic(scope), do: "forum:#{scope}"
 end
