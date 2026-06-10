@@ -18,7 +18,7 @@ const program = new Command()
   .option("--publishable-key <key>", "Project publishable (anon) key")
   .option("--secret-key <key>", "Project secret (service role) key")
   .option("--db-password <password>", "Database password (required for staging/prod)")
-  .option("--env <env>", "Environment: local | staging | prod | production (default: prod)", "prod")
+  .option("--env <env>", "Environment: local | staging | development | prod | production (default: prod)", "prod")
   .option("--domain <domain>", "Email domain for the test user", "example.com")
   .option("--port <port>", "Override URL port (useful for local)")
   .option("--url <url>", "Override project URL (e.g. http://127.0.0.1:54321)")
@@ -35,7 +35,7 @@ const ANON_KEY: string = opts.publishableKey;
 const SERVICE_KEY: string = opts.secretKey;
 const dbPassword: string = opts.dbPassword ?? "";
 const { project, domain: EMAIL_DOMAIN, port, json: JSON_OUTPUT, test: TEST_FILTER, otel: OTEL_ARG, otelToken: OTEL_API_TOKEN, url: URL_ARG, dbUrl: DB_URL_ARG, debug: DEBUG } = opts;
-const env: string = opts.env === "production" ? "prod" : opts.env;
+const env: string = opts.env === "production" ? "prod" : opts.env === "development" ? "staging" : opts.env;
 
 const TEST_CATEGORIES = TEST_FILTER
   ? TEST_FILTER.split(",").map((s: string) => s.trim().toLowerCase())
