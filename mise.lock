@@ -43,3 +43,35 @@ url = "https://nodejs.org/dist/v24.14.1/node-v24.14.1-win-x64.zip"
 [[tools."npm:@supabase/pg-delta"]]
 version = "1.0.0-alpha.27"
 backend = "npm:@supabase/pg-delta"
+
+[[tools.supabase]]
+version = "2.105.0"
+backend = "aqua:supabase/cli"
+
+[tools.supabase."platforms.linux-arm64"]
+checksum = "sha256:7e090059cdd28e2a6233298f2ff7b7c819e0fac040b975561c80ca5b8a583b56"
+url = "https://github.com/supabase/cli/releases/download/v2.105.0/supabase_linux_arm64.tar.gz"
+
+[tools.supabase."platforms.linux-arm64-musl"]
+checksum = "sha256:7e090059cdd28e2a6233298f2ff7b7c819e0fac040b975561c80ca5b8a583b56"
+url = "https://github.com/supabase/cli/releases/download/v2.105.0/supabase_linux_arm64.tar.gz"
+
+[tools.supabase."platforms.linux-x64"]
+checksum = "sha256:11ac4410c11e8b03f0cc7fd9316d68146695b0e06115a0663364b07e7feb6db8"
+url = "https://github.com/supabase/cli/releases/download/v2.105.0/supabase_linux_amd64.tar.gz"
+
+[tools.supabase."platforms.linux-x64-musl"]
+checksum = "sha256:11ac4410c11e8b03f0cc7fd9316d68146695b0e06115a0663364b07e7feb6db8"
+url = "https://github.com/supabase/cli/releases/download/v2.105.0/supabase_linux_amd64.tar.gz"
+
+[tools.supabase."platforms.macos-arm64"]
+checksum = "sha256:930ffe5ce66c97917c43c6e1c712825b628c9665caaae5a6db109f816d50192d"
+url = "https://github.com/supabase/cli/releases/download/v2.105.0/supabase_darwin_arm64.tar.gz"
+
+[tools.supabase."platforms.macos-x64"]
+checksum = "sha256:c0af429bd5748ef03642e2d755c6a2d07fb52dd733b5ba592aeff598a36e585f"
+url = "https://github.com/supabase/cli/releases/download/v2.105.0/supabase_darwin_amd64.tar.gz"
+
+[tools.supabase."platforms.windows-x64"]
+checksum = "sha256:f4c11bb8b3c34fcf5ab6dd41cb1e9403416c7c319d668f24b3769f004bd24824"
+url = "https://github.com/supabase/cli/releases/download/v2.105.0/supabase_windows_amd64.tar.gz"
