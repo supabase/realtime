@@ -412,6 +412,31 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
       refute_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 200
     end
 
+    test "cancels a pending retry when tables vanish so it can't recreate the slot", %{args: args} do
+      tenant_id = args["id"]
+
+      expect(Replications, :drop_replication_slot, fn _conn, _slot -> {:ok, :dropped} end)
+
+      pid = start_link_supervised!({Poller, args})
+
+      # First poll happens with the default non-empty stub.
+      assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 500
+
+      # Simulate a retry already scheduled from a prior list_changes/5 error.
+      :sys.replace_state(pid, fn state ->
+        %{state | retry_ref: Process.send_after(pid, :retry, 50), retry_count: 3}
+      end)
+
+      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> %{} end)
+      reject(&Replications.list_changes/5)
+
+      send(pid, :check_oids)
+
+      # retry_ref is cancelled/cleared and retry_count reset; no :retry fires.
+      assert %{retry_ref: nil, retry_count: 0} = :sys.get_state(pid)
+      refute_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 200
+    end
+
     test "resumes polling when tables appear via :check_oids", %{args: args} do
       tenant_id = args["id"]
 

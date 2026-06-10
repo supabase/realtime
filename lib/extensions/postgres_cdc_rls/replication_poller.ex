@@ -6,11 +6,12 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   ## Lifecycle
 
-  On start the poller connects to the tenant's database, calls
-  `Replications.prepare_replication/2` to create the temporary slot, and fetches
-  the publication's tables via `Subscriptions.fetch_publication_tables/2`. If the
-  publication has tables, it kicks off the poll loop; if not, it stays idle and
-  waits for tables to appear.
+  On start the poller connects to the tenant's database and fetches the
+  publication's tables via `Subscriptions.fetch_publication_tables/2`. Only if
+  the publication has tables does it call `Replications.prepare_replication/2`
+  to create the temporary slot and kick off the poll loop; if the publication is
+  empty it stays idle without creating a slot (an unconsumed slot would retain
+  WAL) and waits for tables to appear.
 
   ## Poll loop
 
@@ -247,6 +248,10 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
       {n, 0} when n > 0 ->
         cancel_timer(state.poll_ref)
+        # Cancel any pending :retry too: a retry left over from a prior
+        # list_changes/5 error would otherwise fire after the slot is dropped and
+        # re-run prepare_replication/1, recreating work (and possibly the slot).
+        cancel_timer(state.retry_ref)
 
         case Replications.drop_replication_slot(conn, state.slot_name) do
           {:error, reason} when reason != :slot_not_found ->
@@ -257,7 +262,16 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
           _ ->
             cancel_timer(state.check_oid_ref)
-            {:noreply, %{state | oids: new_oids, poll_ref: nil, check_oid_ref: schedule_check_oids()}}
+
+            {:noreply,
+             %{
+               state
+               | oids: new_oids,
+                 poll_ref: nil,
+                 retry_ref: nil,
+                 retry_count: 0,
+                 check_oid_ref: schedule_check_oids()
+             }}
         end
 
       _ ->
@@ -283,26 +297,37 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
            slot_name: slot_name,
            tenant_id: tenant_id,
            publication: publication,
+           oids: oids,
            check_oid_ref: check_oid_ref
          } = state
        ) do
-    case Replications.prepare_replication(conn, slot_name) do
-      {:ok, _} ->
-        oids = Subscriptions.fetch_publication_tables(conn, publication)
-        if map_size(oids) > 0, do: send(self(), :poll)
+    # Reuse oids when a caller (e.g. :check_oids) already fetched them; otherwise
+    # fetch once here so we never create a slot for an empty publication.
+    oids = if map_size(oids) > 0, do: oids, else: Subscriptions.fetch_publication_tables(conn, publication)
 
-        cancel_timer(check_oid_ref)
-        {:noreply, %{state | oids: oids, check_oid_ref: schedule_check_oids()}}
+    if map_size(oids) > 0 do
+      case Replications.prepare_replication(conn, slot_name) do
+        {:ok, _} ->
+          send(self(), :poll)
 
-      {:error, error} ->
-        log_error("PoolingReplicationPreparationError", error)
+          cancel_timer(check_oid_ref)
+          {:noreply, %{state | oids: oids, check_oid_ref: schedule_check_oids()}}
 
-        Realtime.Telemetry.execute([:realtime, :replication, :poller, :prepare, :exception], %{}, %{
-          tenant: tenant_id,
-          reason: error
-        })
+        {:error, error} ->
+          log_error("PoolingReplicationPreparationError", error)
 
-        retry_or_stop(state, error)
+          Realtime.Telemetry.execute([:realtime, :replication, :poller, :prepare, :exception], %{}, %{
+            tenant: tenant_id,
+            reason: error
+          })
+
+          retry_or_stop(state, error)
+      end
+    else
+      # Empty publication: don't create a slot (it would retain WAL with nothing
+      # to consume it). Wait for :check_oids to observe tables appearing.
+      cancel_timer(check_oid_ref)
+      {:noreply, %{state | oids: oids, check_oid_ref: schedule_check_oids()}}
     end
   end
 
