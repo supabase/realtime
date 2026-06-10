@@ -28,6 +28,7 @@ defmodule Forum.MixProject do
     [
       {:telemetry, "~> 1.3"},
       {:ex_hash_ring, "~> 6.0"},
+      {:mimic, "~> 1.0", only: :test},
       {:mix_test_watch, "~> 1.0", only: [:dev, :test], runtime: false}
     ]
   end

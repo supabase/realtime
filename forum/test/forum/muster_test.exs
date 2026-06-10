@@ -1,20 +1,30 @@
 defmodule Forum.MusterTest do
-  # Cannot be async: the RecordingAdapter writes test pids to persistent_term
-  # keyed by scope, and the injection of fake remote members manipulates
-  # global state.
+  # Cannot be async: Mimic runs in global mode here (the RPC workers Muster
+  # spawns are arbitrary processes, so stubs must apply cluster-wide), and the
+  # injection of fake remote members manipulates global ring/state.
   use ExUnit.Case, async: false
+  use Mimic
 
   alias Forum.Muster
   alias Forum.Muster.Scope
-  alias Forum.RecordingAdapter
+  alias Forum.Adapter.ErlDist
 
   @fake_node :fake@nowhere
+
+  setup :set_mimic_global
 
   setup ctx do
     scope = :"muster_test_#{System.unique_integer([:positive])}"
 
-    on_exit(fn -> RecordingAdapter.reset(scope) end)
-    RecordingAdapter.configure(scope, test_pid: self(), call_response: :ok)
+    # Default transport stubs. `call/6` (the RPC primitive) returns :ok; tests
+    # re-stub it to inject failures or holds. `send/3` is a no-op — its targets
+    # are always fake remote nodes — but it is stubbed so its invocations are
+    # recorded and inspectable via `Mimic.calls/3`. `register/1` and
+    # `broadcast/*` are left un-stubbed: they pass through to the real
+    # ErlDist (register actually names the Scope process; broadcast is a no-op
+    # with no connected nodes).
+    stub_call(:ok)
+    stub(ErlDist, :send, fn _scope, _node, _message -> :ok end)
 
     base_opts = [
       partitions: 2,
@@ -26,10 +36,23 @@ defmodule Forum.MusterTest do
       # test drives it deterministically via trigger_view_heartbeat/1.
       view_heartbeat_interval_ms: Map.get(ctx, :heartbeat_ms, 60_000),
       rpc_timeout_ms: Map.get(ctx, :rpc_timeout, 500),
-      message_module: RecordingAdapter
+      message_module: ErlDist
     ]
 
     %{scope: scope, base_opts: base_opts}
+  end
+
+  # Stub the RPC transport `ErlDist.call/6`. `response` mirrors the old
+  # RecordingAdapter contract:
+  #   * `:ok` / `{:error, term}` — returned directly.
+  #   * `{:fn, fun}` — `fun` is invoked synchronously in the calling (worker)
+  #     process, letting tests inject sleeps or arbitrary logic.
+  defp stub_call({:fn, fun}) do
+    stub(ErlDist, :call, fn _scope, _node, _module, _function, _args, _timeout -> fun.() end)
+  end
+
+  defp stub_call(response) do
+    stub(ErlDist, :call, fn _scope, _node, _module, _function, _args, _timeout -> response end)
   end
 
   defp spec(scope, opts) do
@@ -68,11 +91,45 @@ defmodule Forum.MusterTest do
     end)
   end
 
-  defp drain_adapter_events do
-    receive do
-      {:adapter_event, _} = msg -> [msg | drain_adapter_events()]
-    after
-      0 -> []
+  # Drain and return the ErlDist.call/6 invocations recorded since the last
+  # drain, each as the 6-element argument list
+  # `[scope, node, module, function, args, timeout]`. `Mimic.calls/3` is
+  # consuming, so this behaves like the old `drain_adapter_events`.
+  defp drain_calls, do: Mimic.calls(ErlDist, :call, 6)
+
+  # Drain and return the ErlDist.send/3 invocations recorded since the last
+  # drain, each as `[scope, node, message]`.
+  defp drain_sends, do: Mimic.calls(ErlDist, :send, 3)
+
+  # Poll the drained call log (accumulating across the consuming drains) until a
+  # recorded ErlDist.call/6 whose argument list satisfies `pred` appears. Used
+  # for RPCs dispatched asynchronously (via the Scope mailbox / spawned worker).
+  defp wait_call(pred, timeout) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+    do_wait_call(pred, deadline, [])
+  end
+
+  defp do_wait_call(pred, deadline, acc) do
+    acc = acc ++ drain_calls()
+
+    case Enum.find(acc, pred) do
+      nil ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          :timeout
+        else
+          Process.sleep(5)
+          do_wait_call(pred, deadline, acc)
+        end
+
+      call ->
+        {:ok, call}
+    end
+  end
+
+  defp assert_call(pred, timeout \\ 1_000) do
+    case wait_call(pred, timeout) do
+      {:ok, call} -> call
+      :timeout -> flunk("no ErlDist.call/6 matching the predicate within #{timeout}ms")
     end
   end
 
@@ -116,10 +173,11 @@ defmodule Forum.MusterTest do
   defp match_state?(pred, actual) when is_function(pred, 1), do: pred.(actual)
   defp match_state?(expected, actual), do: expected == actual
 
-  defp announce_for_group?(events, group) do
-    Enum.any?(events, fn
-      {:adapter_event,
-       {:call, _, _, Forum.Muster.Scope, :receive_node_state, [_scope, _src, groups | _]}} ->
+  # True if any recorded call announced `group` to its new router via
+  # Scope.receive_node_state.
+  defp announced?(calls, group) do
+    Enum.any?(calls, fn
+      [_scope, _target, Scope, :receive_node_state, [_s, _src, groups | _], _timeout] ->
         group in groups
 
       _ ->
@@ -292,11 +350,10 @@ defmodule Forum.MusterTest do
 
     test "join does not fire RPC when router is self", %{scope: scope} do
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
-      _ = drain_adapter_events()
+      _ = drain_calls()
       assert :ok = Muster.join(scope, :g1, pid)
-      events = drain_adapter_events()
 
-      refute Enum.any?(events, &match?({:adapter_event, {:call, _, _, _, _, _}}, &1))
+      assert drain_calls() == []
     end
 
     test "subsequent joins skip Scope entirely", %{scope: scope} do
@@ -339,13 +396,12 @@ defmodule Forum.MusterTest do
 
     test "first join dispatches a single occupied RPC and waits for reply",
          %{scope: scope, remote_group: g} do
-      _ = drain_adapter_events()
+      _ = drain_calls()
 
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
       assert :ok = Muster.join(scope, g, pid)
 
-      assert_received {:adapter_event,
-                       {:call, ^scope, @fake_node, Forum.Muster.Scope, :occupied, [^scope, ^g, _]}}
+      assert [[^scope, @fake_node, Scope, :occupied, [^scope, ^g, _], _]] = drain_calls()
 
       assert Muster.local_member_count(scope, g) == 1
     end
@@ -355,27 +411,26 @@ defmodule Forum.MusterTest do
       pid2 = spawn_link(fn -> Process.sleep(:infinity) end)
 
       assert :ok = Muster.join(scope, g, pid1)
-      _ = drain_adapter_events()
+      _ = drain_calls()
 
       assert :ok = Muster.join(scope, g, pid2)
 
-      refute_received {:adapter_event, {:call, _, _, _, _, _}}
+      assert drain_calls() == []
     end
 
     @tag rpc_timeout: 5_000
     test "concurrent joins dedup to a single RPC", %{scope: scope, remote_group: g} do
-      _ = drain_adapter_events()
+      _ = drain_calls()
       test_pid = self()
       hold_ms = 200
 
-      RecordingAdapter.configure(scope,
-        call_response:
-          {:fn,
-           fn ->
-             Kernel.send(test_pid, :rpc_started)
-             Process.sleep(hold_ms)
-             :ok
-           end}
+      stub_call(
+        {:fn,
+         fn ->
+           Kernel.send(test_pid, :rpc_started)
+           Process.sleep(hold_ms)
+           :ok
+         end}
       )
 
       callers =
@@ -391,23 +446,15 @@ defmodule Forum.MusterTest do
       results = Enum.map(callers, &Task.await(&1, 5_000))
       assert Enum.all?(results, &(&1 == :ok))
 
-      events = drain_adapter_events()
-
       call_count =
-        Enum.count(events, fn
-          {:adapter_event, {:call, _, _, Forum.Muster.Scope, :occupied, [_scope, ^g, _]}} ->
-            true
-
-          _ ->
-            false
-        end)
+        Enum.count(drain_calls(), &match?([^scope, _, Scope, :occupied, [^scope, ^g, _], _], &1))
 
       assert call_count == 1
     end
 
     test "RPC failure returns :rpc_failed and does not insert into partition",
          %{scope: scope, remote_group: g} do
-      RecordingAdapter.configure(scope, call_response: {:error, :noconnection})
+      stub_call({:error, :noconnection})
 
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
       assert {:error, :rpc_failed} = Muster.join(scope, g, pid)
@@ -417,17 +464,16 @@ defmodule Forum.MusterTest do
 
     test "next join retries the RPC after a previous failure",
          %{scope: scope, remote_group: g} do
-      RecordingAdapter.configure(scope, call_response: {:error, :noconnection})
+      stub_call({:error, :noconnection})
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
       assert {:error, :rpc_failed} = Muster.join(scope, g, pid)
 
-      _ = drain_adapter_events()
+      _ = drain_calls()
 
-      RecordingAdapter.configure(scope, call_response: :ok)
+      stub_call(:ok)
       assert :ok = Muster.join(scope, g, pid)
 
-      assert_received {:adapter_event,
-                       {:call, ^scope, @fake_node, Forum.Muster.Scope, :occupied, [^scope, ^g, _]}}
+      assert [[^scope, @fake_node, Scope, :occupied, [^scope, ^g, _], _]] = drain_calls()
 
       assert Muster.local_member_count(scope, g) == 1
     end
@@ -437,14 +483,13 @@ defmodule Forum.MusterTest do
          %{scope: scope, remote_group: g} do
       test_pid = self()
 
-      RecordingAdapter.configure(scope,
-        call_response:
-          {:fn,
-           fn ->
-             Kernel.send(test_pid, :rpc_started)
-             Process.sleep(500)
-             :ok
-           end}
+      stub_call(
+        {:fn,
+         fn ->
+           Kernel.send(test_pid, :rpc_started)
+           Process.sleep(500)
+           :ok
+         end}
       )
 
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
@@ -483,16 +528,14 @@ defmodule Forum.MusterTest do
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
 
       assert :ok = Muster.join(scope, g, pid)
-      _ = drain_adapter_events()
+      _ = drain_calls()
 
       assert :ok = Muster.leave(scope, g, pid)
       # Wait briefly to let telemetry → scope cast settle, then re-join.
       Process.sleep(20)
       assert :ok = Muster.join(scope, g, pid)
 
-      events = drain_adapter_events()
-
-      refute Enum.any?(events, &match?({:adapter_event, {:call, _, _, _, _, _}}, &1))
+      assert drain_calls() == []
     end
 
     test "leave then wait past cooldown queues a vacancy, flushed as a batch RPC",
@@ -500,7 +543,7 @@ defmodule Forum.MusterTest do
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
 
       assert :ok = Muster.join(scope, g, pid)
-      _ = drain_adapter_events()
+      _ = drain_calls()
       assert :ok = Muster.leave(scope, g, pid)
 
       # After cooldown the group is queued — no RPC has been sent yet.
@@ -509,10 +552,11 @@ defmodule Forum.MusterTest do
       # The flush sends one batched vacant RPC to the router.
       trigger_flush(scope)
 
-      assert_receive {:adapter_event,
-                      {:call, ^scope, @fake_node, Forum.Muster.Scope, :vacant_batch,
-                       [^scope, groups, src]}},
-                     1_000
+      [^scope, @fake_node, Scope, :vacant_batch, [^scope, groups, src], _] =
+        assert_call(fn
+          [^scope, @fake_node, Scope, :vacant_batch, [^scope, _, _], _] -> true
+          _ -> false
+        end)
 
       assert g in groups
       assert src == node()
@@ -526,26 +570,26 @@ defmodule Forum.MusterTest do
       assert :vacant_queued = wait_for_group_state(scope, g, :vacant_queued)
 
       # Fail the batch: the group must return to :vacant_queued (the retry).
-      RecordingAdapter.configure(scope, call_response: {:error, :noconnection})
-      _ = drain_adapter_events()
+      stub_call({:error, :noconnection})
+      _ = drain_calls()
       trigger_flush(scope)
 
-      assert_receive {:adapter_event,
-                      {:call, ^scope, @fake_node, Forum.Muster.Scope, :vacant_batch,
-                       [^scope, _, _]}},
-                     1_000
+      assert_call(fn
+        [^scope, @fake_node, Scope, :vacant_batch, [^scope, _, _], _] -> true
+        _ -> false
+      end)
 
       assert :vacant_queued = wait_for_group_state(scope, g, :vacant_queued)
 
       # Now let it succeed: the group is dropped from the state machine.
-      RecordingAdapter.configure(scope, call_response: :ok)
-      _ = drain_adapter_events()
+      stub_call(:ok)
+      _ = drain_calls()
       trigger_flush(scope)
 
-      assert_receive {:adapter_event,
-                      {:call, ^scope, @fake_node, Forum.Muster.Scope, :vacant_batch,
-                       [^scope, _, _]}},
-                     1_000
+      assert_call(fn
+        [^scope, @fake_node, Scope, :vacant_batch, [^scope, _, _], _] -> true
+        _ -> false
+      end)
 
       assert nil == wait_for_group_state(scope, g, &is_nil/1)
     end
@@ -563,25 +607,23 @@ defmodule Forum.MusterTest do
       assert :vacant_queued = wait_for_group_state(scope, g1, :vacant_queued)
       assert :vacant_queued = wait_for_group_state(scope, g2, :vacant_queued)
 
-      _ = drain_adapter_events()
+      _ = drain_calls()
       trigger_flush(scope)
 
-      assert_receive {:adapter_event,
-                      {:call, ^scope, @fake_node, Forum.Muster.Scope, :vacant_batch,
-                       [^scope, groups, _]}},
-                     1_000
+      [^scope, @fake_node, Scope, :vacant_batch, [^scope, groups, _], _] =
+        assert_call(fn
+          [^scope, @fake_node, Scope, :vacant_batch, [^scope, _, _], _] -> true
+          _ -> false
+        end)
 
       assert g1 in groups
       assert g2 in groups
 
-      # The single assert_receive above consumed the one batch call; no others.
+      # The assert_call above consumed the one batch call; no others follow.
       remaining =
         Enum.count(
-          drain_adapter_events(),
-          &match?(
-            {:adapter_event, {:call, _, @fake_node, Forum.Muster.Scope, :vacant_batch, _}},
-            &1
-          )
+          drain_calls(),
+          &match?([_, @fake_node, Scope, :vacant_batch, _, _], &1)
         )
 
       assert remaining == 0
@@ -626,13 +668,17 @@ defmodule Forum.MusterTest do
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
       assert :ok = Muster.join(scope, g, pid)
 
-      _ = drain_adapter_events()
+      _ = drain_calls()
       trigger_rebalance(scope, [node(), @fake_node])
 
-      assert_receive {:adapter_event,
-                      {:call, ^scope, target, Forum.Muster.Scope, :receive_node_state,
-                       [^scope, src, groups | _]}},
-                     500
+      [^scope, target, Scope, :receive_node_state, [^scope, src, groups | _], _] =
+        assert_call(
+          fn
+            [^scope, _, Scope, :receive_node_state, [^scope, _, _ | _], _] -> true
+            _ -> false
+          end,
+          500
+        )
 
       assert target == @fake_node
       assert src == node()
@@ -648,14 +694,18 @@ defmodule Forum.MusterTest do
 
       # Let the telemetry → Scope cast settle so group_states[g] == :cooldown.
       Process.sleep(20)
-      _ = drain_adapter_events()
+      _ = drain_calls()
 
       trigger_rebalance(scope, [node(), @fake_node])
 
-      assert_receive {:adapter_event,
-                      {:call, ^scope, @fake_node, Forum.Muster.Scope, :receive_node_state,
-                       [^scope, _src, groups | _]}},
-                     500
+      [^scope, @fake_node, Scope, :receive_node_state, [^scope, _src, groups | _], _] =
+        assert_call(
+          fn
+            [^scope, @fake_node, Scope, :receive_node_state, [^scope, _, _ | _], _] -> true
+            _ -> false
+          end,
+          500
+        )
 
       assert g in groups
     end
@@ -672,12 +722,12 @@ defmodule Forum.MusterTest do
       # long; we never flush it here). We don't hold the group, so it must not
       # be announced via :receive_node_state.
       assert :vacant_queued = wait_for_group_state(scope, g, :vacant_queued)
-      _ = drain_adapter_events()
+      _ = drain_calls()
 
       trigger_rebalance(scope, [node(), :fake2@nowhere])
 
       Process.sleep(100)
-      refute announce_for_group?(drain_adapter_events(), g)
+      refute announced?(drain_calls(), g)
     end
 
     test ":vacant_flushing groups are NOT announced on rebalance", %{scope: scope} do
@@ -693,13 +743,12 @@ defmodule Forum.MusterTest do
       # rebalance. (g is the only group and is excluded from the announce-set,
       # so the rebalance itself issues no :receive_node_state calls — the held
       # response only stalls the vacant batch worker.)
-      RecordingAdapter.configure(scope,
-        call_response:
-          {:fn,
-           fn ->
-             Process.sleep(2_000)
-             :ok
-           end}
+      stub_call(
+        {:fn,
+         fn ->
+           Process.sleep(2_000)
+           :ok
+         end}
       )
 
       trigger_flush(scope)
@@ -707,20 +756,20 @@ defmodule Forum.MusterTest do
       assert {:vacant_flushing, _} =
                wait_for_group_state(scope, g, &match?({:vacant_flushing, _}, &1))
 
-      _ = drain_adapter_events()
+      _ = drain_calls()
 
       trigger_rebalance(scope, [node(), :fake2@nowhere])
 
       Process.sleep(100)
-      refute announce_for_group?(drain_adapter_events(), g)
+      refute announced?(drain_calls(), g)
 
       # The in-flight batch was normalized back to :vacant_queued for a later flush.
       assert :vacant_queued = wait_for_group_state(scope, g, :vacant_queued)
     end
 
     # rpc_timeout sets the inner Task.await bound during parallel rebalance
-    # (`rpc_timeout + 1s`). The RecordingAdapter's hold below sleeps 2_000ms,
-    # so we need rpc_timeout large enough that the await window covers it.
+    # (`rpc_timeout + 1s`). The held RPC below sleeps 2_000ms, so we need
+    # rpc_timeout large enough that the await window covers it.
     @tag rpc_timeout: 5_000
     test ":occupied_pending claims survive rebalance (caller gets :ok)",
          %{scope: scope} do
@@ -746,14 +795,13 @@ defmodule Forum.MusterTest do
       # Hold the initial :occupied RPC indefinitely. The rebalance fires
       # while we're stuck and should settle the waiter via
       # :receive_node_state to :third@nowhere.
-      RecordingAdapter.configure(scope,
-        call_response:
-          {:fn,
-           fn ->
-             Kernel.send(hold, {:rpc_held, ref})
-             Process.sleep(2_000)
-             :ok
-           end}
+      stub_call(
+        {:fn,
+         fn ->
+           Kernel.send(hold, {:rpc_held, ref})
+           Process.sleep(2_000)
+           :ok
+         end}
       )
 
       task =
@@ -773,7 +821,7 @@ defmodule Forum.MusterTest do
 
       # The new router must have received :receive_node_state with g.
       received_announce =
-        receive_announce_for(:third@nowhere, g, 1_000)
+        received_announce_for?(:third@nowhere, g, 1_000)
 
       assert received_announce,
              "expected :receive_node_state to :third@nowhere with #{inspect(g)}"
@@ -805,24 +853,22 @@ defmodule Forum.MusterTest do
       result
     end
 
-    defp receive_announce_for(target, group, timeout) do
-      deadline = System.monotonic_time(:millisecond) + timeout
-      do_receive_announce_for(target, group, deadline)
-    end
+    # Poll the recorded call log for a :receive_node_state announcement of
+    # `group` to `target`. Returns true if one arrives within `timeout`.
+    defp received_announce_for?(target, group, timeout) do
+      match?(
+        {:ok, _},
+        wait_call(
+          fn
+            [_scope, ^target, Scope, :receive_node_state, [_s, _src, groups | _], _] ->
+              group in groups
 
-    defp do_receive_announce_for(target, group, deadline) do
-      remaining = max(deadline - System.monotonic_time(:millisecond), 0)
-
-      receive do
-        {:adapter_event,
-         {:call, _scope, ^target, Forum.Muster.Scope, :receive_node_state, [_s, _src, groups | _]}} ->
-          if group in groups, do: true, else: do_receive_announce_for(target, group, deadline)
-
-        {:adapter_event, _} ->
-          do_receive_announce_for(target, group, deadline)
-      after
-        remaining -> false
-      end
+            _ ->
+              false
+          end,
+          timeout
+        )
+      )
     end
 
     # Rebalance with three remote destinations, each sleeping 200ms inside
@@ -839,13 +885,12 @@ defmodule Forum.MusterTest do
       assert :ok = Muster.join(scope, :rb_slow, pid)
 
       # Every remote :receive_node_state RPC sleeps 200ms then returns :ok.
-      RecordingAdapter.configure(scope,
-        call_response:
-          {:fn,
-           fn ->
-             Process.sleep(200)
-             :ok
-           end}
+      stub_call(
+        {:fn,
+         fn ->
+           Process.sleep(200)
+           :ok
+         end}
       )
 
       members = [node(), :fake_a@nowhere, :fake_b@nowhere, :fake_c@nowhere]
@@ -898,15 +943,19 @@ defmodule Forum.MusterTest do
       assert :ok = Muster.join(scope, g1, p1)
       assert :ok = Muster.join(scope, g2, p2)
 
-      _ = drain_adapter_events()
+      _ = drain_calls()
 
       # Drop :z@nowhere. g2 moves onto x; g1 stays on x.
       trigger_rebalance(scope, members_new)
 
-      assert_receive {:adapter_event,
-                      {:call, ^scope, :x@nowhere, Forum.Muster.Scope, :receive_node_state,
-                       [^scope, src, groups | _]}},
-                     500
+      [^scope, :x@nowhere, Scope, :receive_node_state, [^scope, src, groups | _], _] =
+        assert_call(
+          fn
+            [^scope, :x@nowhere, Scope, :receive_node_state, [^scope, _, _ | _], _] -> true
+            _ -> false
+          end,
+          500
+        )
 
       assert src == node()
       assert g2 in groups, "the moved group must be announced to its new router"
@@ -930,18 +979,14 @@ defmodule Forum.MusterTest do
       trigger_rebalance(scope, members_old)
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
       assert :ok = Muster.join(scope, g, pid)
-      _ = drain_adapter_events()
+      _ = drain_calls()
 
       trigger_rebalance(scope, members_new)
       Process.sleep(100)
 
-      refute Enum.any?(drain_adapter_events(), fn
-               {:adapter_event,
-                {:call, _, :keep@nowhere, Forum.Muster.Scope, :receive_node_state, _}} ->
-                 true
-
-               _ ->
-                 false
+      refute Enum.any?(drain_calls(), fn
+               [_, :keep@nowhere, Scope, :receive_node_state, _, _] -> true
+               _ -> false
              end)
     end
   end
@@ -1043,16 +1088,15 @@ defmodule Forum.MusterTest do
       members = Enum.sort([node(), :a@nowhere, :b@nowhere])
       rebalance_sync(scope, members)
       vh = Muster.view_hash(scope)
-      _ = drain_adapter_events()
+      _ = drain_sends()
 
       trigger_view_heartbeat(scope)
       GenServer.call(Forum.Supervisor.name(scope), :status)
 
       heartbeat_targets =
-        drain_adapter_events()
+        drain_sends()
         |> Enum.flat_map(fn
-          {:adapter_event, {:send, ^scope, target, {:rebalance_marker, src, ^vh}}}
-          when src == node() ->
+          [^scope, target, {:rebalance_marker, src, ^vh}] when src == node() ->
             [target]
 
           _ ->
@@ -1067,15 +1111,14 @@ defmodule Forum.MusterTest do
       # No groups held, so no member is an affected router: every remote member
       # gets the cheap async marker.
       members = Enum.sort([node(), :a@nowhere, :b@nowhere])
-      _ = drain_adapter_events()
+      _ = drain_sends()
       trigger_rebalance(scope, members)
       Process.sleep(50)
 
       marker_targets =
-        drain_adapter_events()
+        drain_sends()
         |> Enum.flat_map(fn
-          {:adapter_event, {:send, ^scope, target, {:rebalance_marker, src, _hash}}}
-          when src == node() ->
+          [^scope, target, {:rebalance_marker, src, _hash}] when src == node() ->
             [target]
 
           _ ->
@@ -1107,25 +1150,23 @@ defmodule Forum.MusterTest do
       trigger_rebalance(scope, members_old)
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
       assert :ok = Muster.join(scope, g, pid)
-      _ = drain_adapter_events()
+      _ = drain_calls()
+      _ = drain_sends()
 
       trigger_rebalance(scope, members_new)
       Process.sleep(50)
-      events = drain_adapter_events()
+      calls = drain_calls()
+      sends = drain_sends()
 
       # x is an affected router: it gets the snapshot RPC (which carries the marker)...
-      assert Enum.any?(events, fn
-               {:adapter_event,
-                {:call, ^scope, :x@nowhere, Forum.Muster.Scope, :receive_node_state, _}} ->
-                 true
-
-               _ ->
-                 false
+      assert Enum.any?(calls, fn
+               [^scope, :x@nowhere, Scope, :receive_node_state, _, _] -> true
+               _ -> false
              end)
 
       # ...and is NOT also sent a redundant async marker.
-      refute Enum.any?(events, fn
-               {:adapter_event, {:send, ^scope, :x@nowhere, {:rebalance_marker, _, _}}} -> true
+      refute Enum.any?(sends, fn
+               [^scope, :x@nowhere, {:rebalance_marker, _, _}] -> true
                _ -> false
              end)
     end
