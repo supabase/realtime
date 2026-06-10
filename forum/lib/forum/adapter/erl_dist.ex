@@ -10,6 +10,7 @@ defmodule Forum.Adapter.ErlDist do
     if Process.whereis(Forum.Supervisor.name(scope)) == nil do
       Process.register(self(), Forum.Supervisor.name(scope))
     end
+
     :ok
   end
 

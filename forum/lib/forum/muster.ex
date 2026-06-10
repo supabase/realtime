@@ -270,5 +270,5 @@ defmodule Forum.Muster do
   defp group_state_label(:cooldown), do: ":cooldown"
   defp group_state_label(:vacant_queued), do: ":vacant_queued"
   defp group_state_label({:occupied_pending, _}), do: ":occupied_pending"
-  defp group_state_label({:vacant_flushing, _}), do: ":vacant_flushing"
+  defp group_state_label(:vacant_flushing), do: ":vacant_flushing"
 end
