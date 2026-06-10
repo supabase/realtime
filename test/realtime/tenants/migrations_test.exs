@@ -41,6 +41,39 @@ defmodule Realtime.Tenants.MigrationsTest do
     end
   end
 
+  describe "run_migrations_async/1" do
+    test "returns immediately and runs migrations in the background" do
+      tenant = Containers.checkout_tenant()
+
+      assert Migrations.run_migrations_async(tenant) == :ok
+
+      assert eventually(fn ->
+               Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran ==
+                 Enum.count(Migrations.migrations())
+             end)
+    end
+
+    test "does not run if tenant has migrations_ran equal to count of all migrations" do
+      tenant = tenant_fixture(%{migrations_ran: Enum.count(Migrations.migrations())})
+      assert Migrations.run_migrations_async(tenant) == :noop
+    end
+  end
+
+  describe "run_migrations?/1" do
+    test "returns true if migrations_ran is lower than existing migrations" do
+      tenant = tenant_fixture(%{migrations_ran: 0})
+      assert Migrations.run_migrations?(tenant)
+
+      tenant = tenant_fixture(%{migrations_ran: Enum.count(Migrations.migrations()) - 1})
+      assert Migrations.run_migrations?(tenant)
+    end
+
+    test "returns false if migrations_ran is count of all migrations" do
+      tenant = tenant_fixture(%{migrations_ran: Enum.count(Migrations.migrations())})
+      refute Migrations.run_migrations?(tenant)
+    end
+  end
+
   describe "migrations/1" do
     test "excludes SetupSupabaseRealtimeAdmin when the feature flag is disabled" do
       {:ok, _} = Api.upsert_feature_flag(%{name: "use_supabase_realtime_admin", enabled: false})

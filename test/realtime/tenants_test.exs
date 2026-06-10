@@ -1,6 +1,5 @@
 defmodule Realtime.TenantsTest do
   # async: false due to cache usage
-  alias Realtime.Tenants.Migrations
   use Realtime.DataCase, async: false
 
   alias Realtime.Database
@@ -30,22 +29,6 @@ defmodule Realtime.TenantsTest do
 
       [tenant_events] = Enum.filter(limits, fn e -> e.limiter == Tenants.events_per_second_key(tenant) end)
       assert tenant_events.counter == 9
-    end
-  end
-
-  describe "run_migrations?/1" do
-    test "returns true if migrations_ran is lower than existing migrations" do
-      tenant = tenant_fixture(%{migrations_ran: 0})
-      assert Tenants.run_migrations?(tenant)
-
-      migrations = Enum.count(Migrations.migrations(tenant.external_id))
-      tenant = tenant_fixture(%{migrations_ran: migrations - 1})
-      assert Tenants.run_migrations?(tenant)
-    end
-
-    test "returns false if migrations_ran is count of all migrations" do
-      tenant = tenant_fixture(%{migrations_ran: Enum.count(Migrations.migrations())})
-      refute Tenants.run_migrations?(tenant)
     end
   end
 
