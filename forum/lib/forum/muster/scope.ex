@@ -148,13 +148,23 @@ defmodule Forum.Muster.Scope do
   @spec receive_node_state(atom, node, [Forum.group()], non_neg_integer, integer) :: :ok
   def receive_node_state(scope, source_node, groups, view_hash, seq) do
     table = occupancy_table_name(scope)
-    # match_delete + inserts are not atomic with respect to readers; a
-    # concurrent :fanout_request scan during this window could miss some
-    # groups for this source. Muster broadcasts are best-effort, so a single
-    # missed delivery is acceptable. Subsequent broadcasts use the fresh
-    # state.
-    :ets.match_delete(table, {{:_, source_node}, :_})
+    # Insert the snapshot first, then delete only rows stamped older than it.
+    # This keeps the failure direction to false positives, never false
+    # negatives: held groups are overwritten in place (the :set key
+    # {group, source_node} is never momentarily absent), and groups the
+    # snapshot dropped linger as harmless extra-delivery targets until the
+    # guarded select_delete removes them. A concurrent :fanout_request scan
+    # during the window therefore sees a *superset* of the source's groups —
+    # an over-delivery (acceptable for best-effort Muster) rather than a
+    # missed delivery.
+    #
+    # The guard is strict `<`: the rows we just inserted carry exactly `seq`,
+    # so they survive, and a newer `occupied` re-claim racing this snapshot
+    # (higher seq) is never clobbered. `seq` is the source's monotonic
+    # snapshot stamp, strictly above any earlier occupied/vacant for these
+    # groups, so every truly-stale row for this source is `< seq`.
     Enum.each(groups, fn group -> :ets.insert(table, {{group, source_node}, seq}) end)
+    :ets.select_delete(table, [{{{:_, source_node}, :"$1"}, [{:<, :"$1", seq}], [true]}])
     Kernel.send(Forum.Supervisor.name(scope), {:rebalance_marker, source_node, view_hash})
     :ok
   end
