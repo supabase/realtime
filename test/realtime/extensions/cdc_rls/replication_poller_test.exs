@@ -468,6 +468,54 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
       assert_receive {:DOWN, ^ref, :process, ^pid, {:shutdown, :drop_replication_slot_failed}}, 1000
     end
+
+    test "refreshes oids without touching the slot when the publication stays non-empty", %{args: args} do
+      tenant_id = args["id"]
+
+      # While the publication keeps having tables the slot must never be dropped
+      # or recreated; :check_oids only refreshes the oid map in place.
+      reject(&Replications.drop_replication_slot/2)
+
+      pid = start_link_supervised!({Poller, args})
+
+      # First poll happens with the default non-empty stub.
+      assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 500
+
+      # Publication still has tables but the oid set changed (e.g. a table was added).
+      new_oids = %{{"public", "test"} => [1234], {"public", "other"} => [5678]}
+      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> new_oids end)
+
+      send(pid, :check_oids)
+
+      # oids map is refreshed in place and the periodic check stays armed.
+      state = :sys.get_state(pid)
+      assert state.oids == new_oids
+      assert is_reference(state.check_oid_ref)
+    end
+
+    test "arms the periodic :check_oids timer when polling starts", %{args: args} do
+      tenant_id = args["id"]
+
+      pid = start_link_supervised!({Poller, args})
+
+      assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 500
+
+      assert is_reference(:sys.get_state(pid).check_oid_ref)
+    end
+
+    test "arms the periodic :check_oids timer even when the publication is empty", %{args: args} do
+      tenant_id = args["id"]
+
+      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> %{} end)
+      reject(&Replications.list_changes/5)
+
+      pid = start_link_supervised!({Poller, args})
+
+      refute_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 200
+
+      # Even idle (no slot), the poller must keep checking for tables to appear.
+      assert is_reference(:sys.get_state(pid).check_oid_ref)
+    end
   end
 
   @columns [
