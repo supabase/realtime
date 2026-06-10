@@ -33,7 +33,7 @@ defmodule Forum.Muster.Scope do
             | :cooldown
             | :vacant_queued
             | {:occupied_pending, [GenServer.from()]}
-            | {:vacant_flushing, [GenServer.from()]}
+            | :vacant_flushing
 
     @type t :: %__MODULE__{
             scope: atom,
@@ -80,7 +80,7 @@ defmodule Forum.Muster.Scope do
   @doc "Returns the list of nodes (as known by the local router state) holding `group`."
   @spec occupancy(atom, Forum.group()) :: [node]
   def occupancy(scope, group) do
-    :ets.select(occupancy_table_name(scope), [{{{group, :"$1"}}, [], [:"$1"]}])
+    :ets.select(occupancy_table_name(scope), [{{{group, :"$1"}, :_}, [], [:"$1"]}])
   end
 
   ## Remote entry points
@@ -96,18 +96,41 @@ defmodule Forum.Muster.Scope do
   # sources own disjoint keys, and the source's own Scope serializes
   # :occupied vs. :vacant_batch per group.
 
+  # Occupancy rows are versioned: each row is {{group, source_node}, seq} where
+  # `seq` is a per-source monotonic stamp (:erlang.unique_integer([:monotonic]))
+  # assigned by the source at *dispatch* time. Seqs are only ever compared for
+  # the same {group, source} key, so they always come from one source's VM and
+  # are totally ordered there. The versioning closes a race that bare
+  # delete/insert could not: a `vacant_batch` whose RPC timed out is not
+  # cancelled by :erpc, so its DELETE may land on the router *after* the source
+  # has already re-claimed the group with a fresh `occupied` INSERT. Because the
+  # re-claim is dispatched after the vacant worker exited, its seq is strictly
+  # higher, and `vacant_batch` below refuses to delete a row stamped newer than
+  # itself — so the stale DELETE can no longer clobber a live entry.
+
   @doc "Remote: source_node tells us it now holds local members of `group`."
-  @spec occupied(atom, Forum.group(), node) :: :ok
-  def occupied(scope, group, source_node) do
-    :ets.insert(occupancy_table_name(scope), {{group, source_node}})
+  @spec occupied(atom, Forum.group(), node, integer) :: :ok
+  def occupied(scope, group, source_node, seq) do
+    # Unconditional overwrite is safe: the source never has two `occupied` RPCs
+    # in flight for the same group (the state machine moves it to
+    # :occupied_pending and dedups further claims), so this never writes a stale
+    # seq over a newer one. It only ever races a strictly-older `vacant_batch`,
+    # which the guard below handles.
+    :ets.insert(occupancy_table_name(scope), {{group, source_node}, seq})
     :ok
   end
 
   @doc "Remote: source_node tells us its last local members of `groups` left."
-  @spec vacant_batch(atom, [Forum.group()], node) :: :ok
-  def vacant_batch(scope, groups, source_node) do
+  @spec vacant_batch(atom, [Forum.group()], node, integer) :: :ok
+  def vacant_batch(scope, groups, source_node, seq) do
     table = occupancy_table_name(scope)
-    Enum.each(groups, fn group -> :ets.delete(table, {group, source_node}) end)
+    # Delete each row only if it is stamped no newer than this batch — i.e. a
+    # later `occupied`/snapshot for the same key (higher seq) survives a stale,
+    # late-arriving vacant DELETE. Atomic per row via select_delete's guard.
+    Enum.each(groups, fn group ->
+      :ets.select_delete(table, [{{{group, source_node}, :"$1"}, [{:"=<", :"$1", seq}], [true]}])
+    end)
+
     :ok
   end
 
@@ -122,16 +145,16 @@ defmodule Forum.Muster.Scope do
   occupancy in place. We run in the adapter's RPC worker (not in Scope), so the
   marker is sent to Scope by its registered name.
   """
-  @spec receive_node_state(atom, node, [Forum.group()], non_neg_integer) :: :ok
-  def receive_node_state(scope, source_node, groups, view_hash) do
+  @spec receive_node_state(atom, node, [Forum.group()], non_neg_integer, integer) :: :ok
+  def receive_node_state(scope, source_node, groups, view_hash, seq) do
     table = occupancy_table_name(scope)
     # match_delete + inserts are not atomic with respect to readers; a
     # concurrent :fanout_request scan during this window could miss some
     # groups for this source. Muster broadcasts are best-effort, so a single
     # missed delivery is acceptable. Subsequent broadcasts use the fresh
     # state.
-    :ets.match_delete(table, {{:_, source_node}})
-    Enum.each(groups, fn group -> :ets.insert(table, {{group, source_node}}) end)
+    :ets.match_delete(table, {{:_, source_node}, :_})
+    Enum.each(groups, fn group -> :ets.insert(table, {{group, source_node}, seq}) end)
     Kernel.send(Forum.Supervisor.name(scope), {:rebalance_marker, source_node, view_hash})
     :ok
   end
@@ -139,7 +162,8 @@ defmodule Forum.Muster.Scope do
   ## GenServer lifecycle
 
   @spec start_link(atom, Keyword.t()) :: GenServer.on_start()
-  def start_link(scope, opts \\ []), do: GenServer.start_link(__MODULE__, [scope, opts], name: Forum.Supervisor.name(scope))
+  def start_link(scope, opts \\ []),
+    do: GenServer.start_link(__MODULE__, [scope, opts], name: Forum.Supervisor.name(scope))
 
   @impl true
   def init([scope, opts]) do
@@ -180,7 +204,7 @@ defmodule Forum.Muster.Scope do
       ])
 
     # :public so :erpc workers running our remote entry points
-    # (occupied/3, vacant_batch/3, receive_node_state/3) can write directly,
+    # (occupied/4, vacant_batch/4, receive_node_state/5) can write directly,
     # bypassing Scope's mailbox. write_concurrency: true makes those
     # concurrent writes scale across schedulers.
     occupancy_table =
@@ -291,7 +315,7 @@ defmodule Forum.Muster.Scope do
     occupancy =
       state.occupancy_table
       |> :ets.tab2list()
-      |> Enum.reduce(%{}, fn {{group, src}}, acc ->
+      |> Enum.reduce(%{}, fn {{group, src}, _seq}, acc ->
         Map.update(acc, group, [src], &[src | &1])
       end)
 
@@ -370,7 +394,7 @@ defmodule Forum.Muster.Scope do
           "Muster[#{node()}|#{state.scope}] peer down: #{inspect(node(pid))} — dropping its occupancy and rebalancing"
         )
 
-        :ets.match_delete(state.occupancy_table, {{:_, node(pid)}})
+        :ets.match_delete(state.occupancy_table, {{:_, node(pid)}, :_})
         :telemetry.execute([:forum, state.scope, :node, :down], %{}, %{node: node(pid)})
 
         state = %{state | peers: new_peers}
@@ -457,7 +481,7 @@ defmodule Forum.Muster.Scope do
             "Muster[#{node()}|#{state.scope}] claim #{inspect(group)}: local router, occupied"
           )
 
-          :ets.insert(state.occupancy_table, {{group, node()}})
+          :ets.insert(state.occupancy_table, {{group, node()}, next_seq()})
           {:reply, :ok, put_group_state(state, group, :occupied)}
         else
           Logger.debug(
@@ -488,35 +512,33 @@ defmodule Forum.Muster.Scope do
 
         {:noreply, put_group_state(state, group, {:occupied_pending, [from | waiters]})}
 
-      :vacant_queued ->
-        # Queued for a vacant flush but nothing is in flight yet. Reclaim now,
-        # with no risk of racing a vacant RPC against this :occupied.
+      vacant when vacant in [:vacant_queued, :vacant_flushing] ->
+        # Reclaim a group we were releasing. For :vacant_queued nothing is in
+        # flight. For :vacant_flushing a vacant batch DELETE is in flight, but we
+        # do NOT wait for it: the :occupied we dispatch now is dispatched after
+        # that batch, so next_seq/0 gives it a strictly higher seq, and the
+        # router's seq guard makes the INSERT win over the racing (lower-seq)
+        # DELETE regardless of arrival order (see the versioning note above
+        # occupied/4). The in-flight batch's eventual :vacant_batch_done lands in
+        # handle_vacant_batch_done's catch-all (state is no longer
+        # :vacant_flushing) and is dropped.
         router_node = router_from_state(state, group)
 
         if router_node == node() do
           Logger.debug(
-            "Muster[#{node()}|#{state.scope}] claim #{inspect(group)}: reclaim from vacant_queued, local router"
+            "Muster[#{node()}|#{state.scope}] claim #{inspect(group)}: reclaim from #{vacant}, local router"
           )
 
-          :ets.insert(state.occupancy_table, {{group, node()}})
+          :ets.insert(state.occupancy_table, {{group, node()}, next_seq()})
           {:reply, :ok, put_group_state(state, group, :occupied)}
         else
           Logger.debug(
-            "Muster[#{node()}|#{state.scope}] claim #{inspect(group)}: reclaim from vacant_queued, dispatching :occupied to router #{inspect(router_node)}"
+            "Muster[#{node()}|#{state.scope}] claim #{inspect(group)}: reclaim from #{vacant}, dispatching :occupied to router #{inspect(router_node)}"
           )
 
           dispatch_rpc(:occupied, group, router_node, state)
           {:noreply, put_group_state(state, group, {:occupied_pending, [from]})}
         end
-
-      {:vacant_flushing, waiters} ->
-        # A batch vacant RPC covering this group is in flight. Park the caller;
-        # handle_vacant_batch_done re-claims the group once the batch settles.
-        Logger.debug(
-          "Muster[#{node()}|#{state.scope}] claim #{inspect(group)}: parked behind in-flight vacant flush (#{length(waiters) + 1} waiter(s))"
-        )
-
-        {:noreply, put_group_state(state, group, {:vacant_flushing, [from | waiters]})}
     end
   end
 
@@ -608,9 +630,11 @@ defmodule Forum.Muster.Scope do
 
   # Result of one batched :vacant flush. For each group still in
   # :vacant_flushing: on success drop it; on failure re-queue it so the next
-  # flush retries (this is what drains stale router entries). If claims
-  # arrived during the batch (waiters present), re-claim the group regardless
-  # of the vacant result — we hold local members again.
+  # flush retries (this is what drains stale router entries). A group that was
+  # re-claimed while the batch was in flight is no longer :vacant_flushing
+  # (handle_claim moved it straight to :occupied/:occupied_pending), so it falls
+  # through the catch-all here — the seq guard already kept the in-flight
+  # DELETE from clobbering its fresh :occupied INSERT.
   defp handle_vacant_batch_done(groups, result, state) do
     success? = not match?({:error, _}, result)
 
@@ -626,25 +650,14 @@ defmodule Forum.Muster.Scope do
 
     Enum.reduce(groups, state, fn group, st ->
       case Map.get(st.group_states, group) do
-        {:vacant_flushing, []} ->
+        :vacant_flushing ->
           if success?,
             do: delete_group_state(st, group),
             else: put_group_state(st, group, :vacant_queued)
 
-        {:vacant_flushing, waiters} ->
-          router_node = router_from_state(st, group)
-
-          if router_node == node() do
-            :ets.insert(st.occupancy_table, {{group, node()}})
-            Enum.each(waiters, fn from -> GenServer.reply(from, :ok) end)
-            put_group_state(st, group, :occupied)
-          else
-            dispatch_rpc(:occupied, group, router_node, st)
-            put_group_state(st, group, {:occupied_pending, waiters})
-          end
-
         _ ->
-          # Out-of-band (rebalance moved this group out of :vacant_flushing). Drop.
+          # Re-claimed before the batch returned (now :occupied/:occupied_pending),
+          # or moved out of :vacant_flushing by a rebalance. Drop.
           st
       end
     end)
@@ -675,7 +688,7 @@ defmodule Forum.Muster.Scope do
             Enum.reduce(groups, st, fn g, s -> delete_group_state(s, g) end)
           else
             dispatch_vacant_batch(groups, router_node, st)
-            Enum.reduce(groups, st, fn g, s -> put_group_state(s, g, {:vacant_flushing, []}) end)
+            Enum.reduce(groups, st, fn g, s -> put_group_state(s, g, :vacant_flushing) end)
           end
         end)
     end
@@ -686,7 +699,7 @@ defmodule Forum.Muster.Scope do
       state,
       router_node,
       :occupied,
-      [state.scope, group, node()],
+      [state.scope, group, node(), next_seq()],
       {:occupied_done, group}
     )
   end
@@ -696,7 +709,7 @@ defmodule Forum.Muster.Scope do
       state,
       router_node,
       :vacant_batch,
-      [state.scope, groups, node()],
+      [state.scope, groups, node(), next_seq()],
       {:vacant_batch_done, groups}
     )
   end
@@ -837,9 +850,9 @@ defmodule Forum.Muster.Scope do
     :persistent_term.put({Forum.Muster, state.scope, :view_hash}, :erlang.phash2(new_members))
 
     # 2) Normalize in-flight pending states (see normalize_pending_for_rebalance):
-    #    in-flight vacant batches fall back to :vacant_queued (or :occupied_pending
-    #    if claims arrived); plain :vacant_queued is left alone and re-routed by
-    #    the next flush.
+    #    an in-flight vacant batch (:vacant_flushing) falls back to
+    #    :vacant_queued and is re-routed by the next flush; plain :vacant_queued
+    #    is left alone and re-routed too.
     state = normalize_pending_for_rebalance(state)
 
     # 3) Atomically replace the node set; this bumps the ring's generation.
@@ -901,9 +914,14 @@ defmodule Forum.Muster.Scope do
     {local_groups, remote_targets} =
       Enum.split_with(by_router, fn {dest, _} -> dest == node() end)
 
+    # One seq for this whole snapshot round — dispatched now, so it is strictly
+    # higher than any earlier occupied/vacant for these groups and wins over a
+    # late, stale vacant DELETE at any receiver.
+    snapshot_seq = next_seq()
+
     Enum.each(local_groups, fn {_, groups} ->
       Enum.each(groups, fn group ->
-        :ets.insert(state.occupancy_table, {{group, node()}})
+        :ets.insert(state.occupancy_table, {{group, node()}, snapshot_seq})
       end)
     end)
 
@@ -921,7 +939,7 @@ defmodule Forum.Muster.Scope do
               router_node,
               __MODULE__,
               :receive_node_state,
-              [scope, node(), groups, view_hash],
+              [scope, node(), groups, view_hash, snapshot_seq],
               rpc_timeout
             )
           end)
@@ -1020,7 +1038,7 @@ defmodule Forum.Muster.Scope do
     ring = ring_name(state.scope)
 
     state.occupancy_table
-    |> :ets.select([{{{:"$1", :"$2"}}, [], [{{:"$1", :"$2"}}]}])
+    |> :ets.select([{{{:"$1", :"$2"}, :_}, [], [{{:"$1", :"$2"}}]}])
     |> Enum.each(fn {group, n} ->
       {:ok, current} = Ring.find_node(ring, group)
 
@@ -1044,21 +1062,15 @@ defmodule Forum.Muster.Scope do
   # *current* router — which drains any stale entry the old router
   # still holds.
   #
-  # {:vacant_flushing, []} (a batch RPC in flight, no waiters) is rewritten to
-  # :vacant_queued so the next flush re-sends to the post-rebalance router;
-  # the in-flight worker's result lands in handle_vacant_batch_done's catch-all
-  # and is dropped.
-  #
-  # {:vacant_flushing, waiters} (a claim arrived while the batch was in flight)
-  # is rewritten to :occupied_pending so the rebalance announces + settles it
-  # like any other pending claim — we hold local members again.
+  # :vacant_flushing (a batch RPC in flight) is rewritten to :vacant_queued so
+  # the next flush re-sends to the post-rebalance router; the in-flight worker's
+  # result lands in handle_vacant_batch_done's catch-all and is dropped. A group
+  # is never announced while a vacant DELETE for it may still be in flight, and
+  # the next flush re-routes it correctly.
   defp normalize_pending_for_rebalance(state) do
     Enum.reduce(state.group_states, state, fn
-      {group, {:vacant_flushing, []}}, st ->
+      {group, :vacant_flushing}, st ->
         put_group_state(st, group, :vacant_queued)
-
-      {group, {:vacant_flushing, waiters}}, st ->
-        put_group_state(st, group, {:occupied_pending, waiters})
 
       _, st ->
         st
@@ -1091,10 +1103,17 @@ defmodule Forum.Muster.Scope do
     # ourselves. Walk the partitions (which may have entries left over from a
     # previous incarnation of Scope) and mark them :occupied locally.
     Enum.reduce(local_groups(state), state, fn group, st ->
-      :ets.insert(st.occupancy_table, {{group, node()}})
+      :ets.insert(st.occupancy_table, {{group, node()}, next_seq()})
       put_group_state(st, group, :occupied)
     end)
   end
+
+  # Per-source monotonic occupancy stamp. VM-global and strictly increasing, so
+  # it reflects dispatch order on this node and survives Scope restarts. Only
+  # ever compared at a router for the same {group, source} key, all of whose
+  # writes originate on this node — so the comparison is always within one VM's
+  # sequence. See the occupancy-row versioning note above occupied/4.
+  defp next_seq, do: :erlang.unique_integer([:monotonic])
 
   ## Names
 
