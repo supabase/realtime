@@ -311,7 +311,20 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
           send(self(), :poll)
 
           cancel_timer(check_oid_ref)
-          {:noreply, %{state | oids: oids, check_oid_ref: schedule_check_oids()}}
+          # A successful prepare ends the failure streak: drop any pending retry and
+          # reset the backoff/retry_count so the next :poll error starts fresh rather
+          # than inheriting an inflated backoff or prematurely hitting @max_retries.
+          cancel_timer(state.retry_ref)
+
+          {:noreply,
+           %{
+             state
+             | oids: oids,
+               check_oid_ref: schedule_check_oids(),
+               retry_ref: nil,
+               retry_count: 0,
+               backoff: Backoff.reset(state.backoff)
+           }}
 
         {:error, error} ->
           log_error("PoolingReplicationPreparationError", error)

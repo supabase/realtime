@@ -454,6 +454,32 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
       assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 1000
     end
 
+    test "a successful prepare resets a prior failure streak", %{args: args} do
+      tenant_id = args["id"]
+
+      # Start idle (empty publication) so no slot exists yet.
+      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> %{} end)
+
+      pid = start_link_supervised!({Poller, args})
+
+      refute_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 200
+
+      # Simulate a leftover failure streak from earlier prepare/list_changes errors:
+      # a pending :retry and an inflated retry_count.
+      :sys.replace_state(pid, fn state ->
+        %{state | retry_ref: Process.send_after(pid, :retry, 60_000), retry_count: 5}
+      end)
+
+      # Tables appear: :check_oids re-runs prepare_replication, which succeeds and
+      # must wipe the failure streak.
+      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> %{{"public", "test"} => [1234]} end)
+      send(pid, :check_oids)
+
+      assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 1000
+
+      assert %{retry_ref: nil, retry_count: 0} = :sys.get_state(pid)
+    end
+
     test "shuts down when slot drop fails so the temp slot is released with the connection",
          %{args: args} do
       pid = start_supervised!({Poller, args}, restart: :temporary)
