@@ -180,6 +180,22 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
       assert :ets.tab2list(args["subscribers_nodes_table"]) == []
     end
 
+    test "keeps subscribers and oids when :check_oids fetch errors", %{pid: pid, args: args} do
+      old_oids = :sys.get_state(pid).oids
+      :ets.insert(args["subscribers_pids_table"], {self(), UUID.uuid1(), make_ref(), node()})
+
+      # A fetch error must not be mistaken for a publication change: subscribers stay
+      # put and no re-subscribe is triggered.
+      stub(Subscriptions, :fetch_publication_tables, fn _conn, _publication -> {:error, :boom} end)
+
+      send(pid, :check_oids)
+      state = :sys.get_state(pid)
+
+      refute_receive :postgres_subscribe, 200
+      assert state.oids == old_oids
+      assert match?([{_, _, _, _}], :ets.tab2list(args["subscribers_pids_table"]))
+    end
+
     test "logs error when subscription deletion fails during check_delete_queue", %{
       pid: pid,
       args: args,

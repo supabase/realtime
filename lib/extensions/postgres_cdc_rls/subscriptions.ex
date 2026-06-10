@@ -168,12 +168,14 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   end
 
   @spec fetch_publication_tables(conn(), String.t()) ::
-          %{
-            {<<_::1>>} => [integer()],
-            {String.t()} => [integer()],
-            {String.t(), String.t()} => [integer()]
-          }
-          | %{}
+          {:ok,
+           %{
+             {<<_::1>>} => [integer()],
+             {String.t()} => [integer()],
+             {String.t(), String.t()} => [integer()]
+           }
+           | %{}}
+          | {:error, term()}
   def fetch_publication_tables(conn, publication) do
     sql = "select
     schemaname, tablename, format('%I.%I', schemaname, tablename)::regclass as oid
@@ -181,16 +183,25 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
     case query(conn, sql, [publication]) do
       {:ok, %{columns: ["schemaname", "tablename", "oid"], rows: rows}} ->
-        Enum.reduce(rows, %{}, fn [schema, table, oid], acc ->
-          Map.put(acc, {schema, table}, [oid])
-          |> Map.update({schema}, [oid], &[oid | &1])
-          |> Map.update({"*"}, [oid], &[oid | &1])
-        end)
-        |> Enum.reduce(%{}, fn {k, v}, acc -> Map.put(acc, k, Enum.sort(v)) end)
+        oids =
+          Enum.reduce(rows, %{}, fn [schema, table, oid], acc ->
+            Map.put(acc, {schema, table}, [oid])
+            |> Map.update({schema}, [oid], &[oid | &1])
+            |> Map.update({"*"}, [oid], &[oid | &1])
+          end)
+          |> Enum.reduce(%{}, fn {k, v}, acc -> Map.put(acc, k, Enum.sort(v)) end)
 
-      _ ->
-        %{}
+        {:ok, oids}
+
+      {:error, reason} ->
+        {:error, reason}
+
+      other ->
+        {:error, {:unexpected_result, other}}
     end
+  catch
+    :exit, reason ->
+      {:error, {:exit, reason}}
   end
 
   @doc """

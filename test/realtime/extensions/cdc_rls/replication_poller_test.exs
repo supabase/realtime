@@ -64,7 +64,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
       # Default to a publication with tables so the poller actually polls.
       # Tests that need an empty publication override this stub explicitly.
-      stub(Subscriptions, :fetch_publication_tables, fn _, _ -> %{{"public", "test"} => [1234]} end)
+      stub(Subscriptions, :fetch_publication_tables, fn _, _ -> {:ok, %{{"public", "test"} => [1234]}} end)
 
       %{args: args, tenant: tenant}
     end
@@ -93,6 +93,22 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
       ref = Process.monitor(pid)
 
       # Drive the retry count to the limit, then trigger one more failing prepare
+      :sys.replace_state(pid, fn state -> %{state | retry_count: 6} end)
+      send(pid, :retry)
+
+      assert_receive {:DOWN, ^ref, :process, ^pid, {:shutdown, :max_retries_reached}}, 1000
+    end
+
+    test "a fetch error on the prepare path goes through the retry machinery", %{args: args} do
+      # Start idle so no slot or poll loop is running.
+      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> {:ok, %{}} end)
+
+      pid = start_supervised!({Poller, args}, restart: :temporary)
+      ref = Process.monitor(pid)
+
+      # A fetch error while preparing is treated like a prepare failure: at the retry
+      # limit, one more failing prepare stops the poller.
+      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> {:error, :boom} end)
       :sys.replace_state(pid, fn state -> %{state | retry_count: 6} end)
       send(pid, :retry)
 
@@ -384,7 +400,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
     test "does not poll WAL when publication has no tables", %{args: args} do
       tenant_id = args["id"]
 
-      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> %{} end)
+      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> {:ok, %{}} end)
       reject(&Replications.list_changes/5)
 
       start_link_supervised!({Poller, args})
@@ -402,7 +418,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
       # First poll happens with the default non-empty stub.
       assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 500
 
-      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> %{} end)
+      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> {:ok, %{}} end)
       reject(&Replications.list_changes/5)
 
       send(pid, :check_oids)
@@ -427,7 +443,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
         %{state | retry_ref: Process.send_after(pid, :retry, 50), retry_count: 3}
       end)
 
-      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> %{} end)
+      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> {:ok, %{}} end)
       reject(&Replications.list_changes/5)
 
       send(pid, :check_oids)
@@ -440,7 +456,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
     test "resumes polling when tables appear via :check_oids", %{args: args} do
       tenant_id = args["id"]
 
-      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> %{} end)
+      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> {:ok, %{}} end)
 
       pid = start_link_supervised!({Poller, args})
 
@@ -448,7 +464,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
       # Tables are added to the publication. Next :check_oids should trigger
       # prepare_replication + an initial poll.
-      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> %{{"public", "test"} => [1234]} end)
+      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> {:ok, %{{"public", "test"} => [1234]}} end)
       send(pid, :check_oids)
 
       assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 1000
@@ -458,7 +474,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
       tenant_id = args["id"]
 
       # Start idle (empty publication) so no slot exists yet.
-      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> %{} end)
+      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> {:ok, %{}} end)
 
       pid = start_link_supervised!({Poller, args})
 
@@ -472,7 +488,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
       # Tables appear: :check_oids re-runs prepare_replication, which succeeds and
       # must wipe the failure streak.
-      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> %{{"public", "test"} => [1234]} end)
+      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> {:ok, %{{"public", "test"} => [1234]}} end)
       send(pid, :check_oids)
 
       assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 1000
@@ -486,7 +502,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
       assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, _}, 500
 
-      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> %{} end)
+      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> {:ok, %{}} end)
       expect(Replications, :drop_replication_slot, fn _, _ -> {:error, :boom} end)
 
       ref = Process.monitor(pid)
@@ -509,13 +525,34 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
       # Publication still has tables but the oid set changed (e.g. a table was added).
       new_oids = %{{"public", "test"} => [1234], {"public", "other"} => [5678]}
-      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> new_oids end)
+      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> {:ok, new_oids} end)
 
       send(pid, :check_oids)
 
       # oids map is refreshed in place and the periodic check stays armed.
       state = :sys.get_state(pid)
       assert state.oids == new_oids
+      assert is_reference(state.check_oid_ref)
+    end
+
+    test "keeps oids and the slot when :check_oids fetch errors", %{args: args} do
+      tenant_id = args["id"]
+
+      # A fetch error must never be mistaken for an emptied publication, so the slot
+      # is left intact and the oid map is preserved.
+      reject(&Replications.drop_replication_slot/2)
+
+      pid = start_link_supervised!({Poller, args})
+
+      assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 500
+
+      old_oids = :sys.get_state(pid).oids
+
+      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> {:error, :boom} end)
+      send(pid, :check_oids)
+
+      state = :sys.get_state(pid)
+      assert state.oids == old_oids
       assert is_reference(state.check_oid_ref)
     end
 
@@ -532,7 +569,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
     test "arms the periodic :check_oids timer even when the publication is empty", %{args: args} do
       tenant_id = args["id"]
 
-      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> %{} end)
+      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> {:ok, %{}} end)
       reject(&Replications.list_changes/5)
 
       pid = start_link_supervised!({Poller, args})

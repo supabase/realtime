@@ -238,9 +238,19 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     prepare_replication(state)
   end
 
-  def handle_info(:check_oids, %{conn: conn, publication: publication, oids: old_oids} = state) do
-    new_oids = Subscriptions.fetch_publication_tables(conn, publication)
+  def handle_info(:check_oids, %{conn: conn, publication: publication} = state) do
+    case Subscriptions.fetch_publication_tables(conn, publication) do
+      {:ok, new_oids} ->
+        check_oids(new_oids, state)
 
+      {:error, reason} ->
+        log_error("CheckOidsError", reason)
+        cancel_timer(state.check_oid_ref)
+        {:noreply, %{state | check_oid_ref: schedule_check_oids()}}
+    end
+  end
+
+  defp check_oids(new_oids, %{conn: conn, oids: old_oids} = state) do
     case {map_size(old_oids), map_size(new_oids)} do
       {0, n} when n > 0 ->
         # prepare_replication/1 cancels check_oid_ref and reschedules it on success.
@@ -300,45 +310,43 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
            check_oid_ref: check_oid_ref
          } = state
        ) do
-    # Always fetch fresh publication information
-    oids = Subscriptions.fetch_publication_tables(conn, publication)
+    # Always fetch fresh publication information. An empty publication fails the
+    # map_size guard and falls through to the idle branch in `else`.
+    with {:ok, oids} when map_size(oids) > 0 <- Subscriptions.fetch_publication_tables(conn, publication),
+         {:ok, _} <- Replications.prepare_replication(conn, slot_name) do
+      send(self(), :poll)
 
-    if map_size(oids) > 0 do
-      case Replications.prepare_replication(conn, slot_name) do
-        {:ok, _} ->
-          send(self(), :poll)
-
-          cancel_timer(check_oid_ref)
-          # A successful prepare ends the failure streak: drop any pending retry and
-          # reset the backoff/retry_count so the next :poll error starts fresh rather
-          # than inheriting an inflated backoff or prematurely hitting @max_retries.
-          cancel_timer(state.retry_ref)
-
-          {:noreply,
-           %{
-             state
-             | oids: oids,
-               check_oid_ref: schedule_check_oids(),
-               retry_ref: nil,
-               retry_count: 0,
-               backoff: Backoff.reset(state.backoff)
-           }}
-
-        {:error, error} ->
-          log_error("PoolingReplicationPreparationError", error)
-
-          Realtime.Telemetry.execute([:realtime, :replication, :poller, :prepare, :exception], %{}, %{
-            tenant: tenant_id,
-            reason: error
-          })
-
-          retry_or_stop(state, error)
-      end
-    else
-      # Empty publication: don't create a slot (it would retain WAL with nothing
-      # to consume it). Wait for :check_oids to observe tables appearing.
       cancel_timer(check_oid_ref)
-      {:noreply, %{state | oids: oids, check_oid_ref: schedule_check_oids()}}
+      # A successful prepare ends the failure streak: drop any pending retry and
+      # reset the backoff/retry_count so the next :poll error starts fresh rather
+      # than inheriting an inflated backoff or prematurely hitting @max_retries.
+      cancel_timer(state.retry_ref)
+
+      {:noreply,
+       %{
+         state
+         | oids: oids,
+           check_oid_ref: schedule_check_oids(),
+           retry_ref: nil,
+           retry_count: 0,
+           backoff: Backoff.reset(state.backoff)
+       }}
+    else
+      {:ok, oids} ->
+        # Empty publication: don't create a slot (it would retain WAL with nothing
+        # to consume it). Wait for :check_oids to observe tables appearing.
+        cancel_timer(check_oid_ref)
+        {:noreply, %{state | oids: oids, check_oid_ref: schedule_check_oids()}}
+
+      {:error, error} ->
+        log_error("PoolingReplicationPreparationError", error)
+
+        Realtime.Telemetry.execute([:realtime, :replication, :poller, :prepare, :exception], %{}, %{
+          tenant: tenant_id,
+          reason: error
+        })
+
+        retry_or_stop(state, error)
     end
   end
 
