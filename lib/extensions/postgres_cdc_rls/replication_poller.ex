@@ -297,13 +297,11 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
            slot_name: slot_name,
            tenant_id: tenant_id,
            publication: publication,
-           oids: oids,
            check_oid_ref: check_oid_ref
          } = state
        ) do
-    # Reuse oids when a caller (e.g. :check_oids) already fetched them; otherwise
-    # fetch once here so we never create a slot for an empty publication.
-    oids = if map_size(oids) > 0, do: oids, else: Subscriptions.fetch_publication_tables(conn, publication)
+    # Always fetch fresh publication information
+    oids = Subscriptions.fetch_publication_tables(conn, publication)
 
     if map_size(oids) > 0 do
       case Replications.prepare_replication(conn, slot_name) do
