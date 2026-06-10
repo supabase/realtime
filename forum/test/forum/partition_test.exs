@@ -1,12 +1,12 @@
-defmodule Beacon.PartitionTest do
+defmodule Forum.PartitionTest do
   use ExUnit.Case, async: true
-  alias Beacon.Partition
+  alias Forum.Partition
 
   @scope __MODULE__
 
   setup do
-    partition_name = Beacon.Supervisor.partition_name(@scope, System.unique_integer([:positive]))
-    entries_table = Beacon.Supervisor.partition_entries_table(partition_name)
+    partition_name = Forum.Supervisor.partition_name(@scope, System.unique_integer([:positive]))
+    entries_table = Forum.Supervisor.partition_entries_table(partition_name)
 
     ^partition_name =
       :ets.new(partition_name, [:set, :public, :named_table, read_concurrency: true])
@@ -25,8 +25,8 @@ defmodule Beacon.PartitionTest do
 
     ref =
       :telemetry_test.attach_event_handlers(self(), [
-        [:beacon, @scope, :group, :occupied],
-        [:beacon, @scope, :group, :vacant]
+        [:forum, @scope, :group, :occupied],
+        [:forum, @scope, :group, :vacant]
       ])
 
     {:ok, partition_name: partition_name, partition_pid: pid, ref: ref}
@@ -53,7 +53,7 @@ defmodule Beacon.PartitionTest do
     assert Partition.member?(partition, :group9, pid)
     assert Partition.member_count(partition, :group9) == 1
     assert pid in Partition.members(partition, :group9)
-    assert_receive {[:beacon, @scope, :group, :occupied], ^ref, %{}, %{group: :group9}}
+    assert_receive {[:forum, @scope, :group, :occupied], ^ref, %{}, %{group: :group9}}
 
     refute_receive {_, ^ref, _, _}
   end
@@ -69,7 +69,7 @@ defmodule Beacon.PartitionTest do
     assert Partition.member_count(partition, :group1) == 1
     assert pid in Partition.members(partition, :group1)
 
-    assert_receive {[:beacon, @scope, :group, :occupied], ^ref, %{}, %{group: :group1}}
+    assert_receive {[:forum, @scope, :group, :occupied], ^ref, %{}, %{group: :group1}}
     refute_receive {_, ^ref, _, _}
   end
 
@@ -80,7 +80,7 @@ defmodule Beacon.PartitionTest do
     Partition.join(partition, :group1, pid1)
     Partition.join(partition, :group1, pid2)
 
-    assert_receive {[:beacon, @scope, :group, :occupied], ^ref, %{}, %{group: :group1}}
+    assert_receive {[:forum, @scope, :group, :occupied], ^ref, %{}, %{group: :group1}}
 
     refute_receive {_, ^ref, _, _}
   end
@@ -93,9 +93,9 @@ defmodule Beacon.PartitionTest do
 
     Partition.leave(partition, :group1, pid)
     refute Partition.member?(partition, :group1, pid)
-    assert_receive {[:beacon, @scope, :group, :occupied], ^ref, %{}, %{group: :group1}}
+    assert_receive {[:forum, @scope, :group, :occupied], ^ref, %{}, %{group: :group1}}
 
-    assert_receive {[:beacon, @scope, :group, :vacant], ^ref, %{}, %{group: :group1}}
+    assert_receive {[:forum, @scope, :group, :vacant], ^ref, %{}, %{group: :group1}}
 
     refute_receive {_, ^ref, _, _}
   end
@@ -107,7 +107,7 @@ defmodule Beacon.PartitionTest do
     Partition.join(partition, :group1, pid1)
     Partition.join(partition, :group1, pid2)
 
-    assert_receive {[:beacon, @scope, :group, :occupied], ^ref, %{}, %{group: :group1}}
+    assert_receive {[:forum, @scope, :group, :occupied], ^ref, %{}, %{group: :group1}}
     refute_receive {_, ^ref, _, _}
 
     Partition.leave(partition, :group1, pid1)
@@ -116,7 +116,7 @@ defmodule Beacon.PartitionTest do
 
     Partition.leave(partition, :group1, pid2)
 
-    assert_receive {[:beacon, @scope, :group, :vacant], ^ref, %{}, %{group: :group1}}
+    assert_receive {[:forum, @scope, :group, :vacant], ^ref, %{}, %{group: :group1}}
     refute_receive {_, ^ref, _, _}
   end
 
@@ -130,9 +130,9 @@ defmodule Beacon.PartitionTest do
     Partition.leave(partition, :group1, pid)
     Partition.leave(partition, :group1, pid)
     refute Partition.member?(partition, :group1, pid)
-    assert_receive {[:beacon, @scope, :group, :occupied], ^ref, %{}, %{group: :group1}}
+    assert_receive {[:forum, @scope, :group, :occupied], ^ref, %{}, %{group: :group1}}
 
-    assert_receive {[:beacon, @scope, :group, :vacant], ^ref, %{}, %{group: :group1}}
+    assert_receive {[:forum, @scope, :group, :vacant], ^ref, %{}, %{group: :group1}}
 
     refute_receive {_, ^ref, _, _}
   end
@@ -217,7 +217,7 @@ defmodule Beacon.PartitionTest do
       id: :recover,
       start:
         {Partition, :start_link,
-         [@scope, partition, Beacon.Supervisor.partition_entries_table(partition)]},
+         [@scope, partition, Forum.Supervisor.partition_entries_table(partition)]},
       type: :supervisor
     }
 

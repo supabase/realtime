@@ -1,6 +1,6 @@
-defmodule Beacon.Adapter do
+defmodule Forum.Adapter do
   @moduledoc """
-  Behaviour module for Beacon messaging adapters.
+  Behaviour module for Forum messaging adapters.
   """
 
   @doc "Register the current process to receive messages for the given scope"

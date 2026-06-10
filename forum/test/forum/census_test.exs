@@ -1,5 +1,6 @@
-defmodule BeaconTest do
+defmodule Forum.CensusTest do
   use ExUnit.Case, async: true
+  alias Forum.Census
 
   setup do
     scope = :"test_scope#{System.unique_integer([:positive])}"
@@ -10,36 +11,36 @@ defmodule BeaconTest do
   defp spec(scope, opts) do
     %{
       id: scope,
-      start: {Beacon, :start_link, [scope, opts]},
+      start: {Census, :start_link, [scope, opts]},
       type: :supervisor
     }
   end
 
   describe "start_link/2" do
-    test "starts beacon with default partitions", %{scope: scope} do
-      pid = start_supervised!({Beacon, [scope, []]})
+    test "starts forum with default partitions", %{scope: scope} do
+      pid = start_supervised!({Census, [scope, []]})
       assert Process.alive?(pid)
-      assert is_list(Beacon.Supervisor.partitions(scope))
-      assert length(Beacon.Supervisor.partitions(scope)) == System.schedulers_online()
+      assert is_list(Forum.Supervisor.partitions(scope))
+      assert length(Forum.Supervisor.partitions(scope)) == System.schedulers_online()
     end
 
-    test "starts beacon with custom partition count", %{scope: scope} do
+    test "starts forum with custom partition count", %{scope: scope} do
       pid = start_supervised!(spec(scope, partitions: 3))
       assert Process.alive?(pid)
-      assert length(Beacon.Supervisor.partitions(scope)) == 3
+      assert length(Forum.Supervisor.partitions(scope)) == 3
     end
 
     test "raises on invalid partition count", %{scope: scope} do
       assert_raise ArgumentError, ~r/expected :partitions to be a positive integer/, fn ->
-        Beacon.start_link(scope, partitions: 0)
+        Census.start_link(scope, partitions: 0)
       end
 
       assert_raise ArgumentError, ~r/expected :partitions to be a positive integer/, fn ->
-        Beacon.start_link(scope, partitions: -1)
+        Census.start_link(scope, partitions: -1)
       end
 
       assert_raise ArgumentError, ~r/expected :partitions to be a positive integer/, fn ->
-        Beacon.start_link(scope, partitions: :invalid)
+        Census.start_link(scope, partitions: :invalid)
       end
     end
 
@@ -47,19 +48,19 @@ defmodule BeaconTest do
       assert_raise ArgumentError,
                    ~r/expected :broadcast_interval_in_ms to be a positive integer/,
                    fn ->
-                     Beacon.start_link(scope, broadcast_interval_in_ms: 0)
+                     Census.start_link(scope, broadcast_interval_in_ms: 0)
                    end
 
       assert_raise ArgumentError,
                    ~r/expected :broadcast_interval_in_ms to be a positive integer/,
                    fn ->
-                     Beacon.start_link(scope, broadcast_interval_in_ms: -1)
+                     Census.start_link(scope, broadcast_interval_in_ms: -1)
                    end
 
       assert_raise ArgumentError,
                    ~r/expected :broadcast_interval_in_ms to be a positive integer/,
                    fn ->
-                     Beacon.start_link(scope, broadcast_interval_in_ms: :invalid)
+                     Census.start_link(scope, broadcast_interval_in_ms: :invalid)
                    end
     end
   end
@@ -72,34 +73,34 @@ defmodule BeaconTest do
 
     test "can join a group", %{scope: scope} do
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
-      assert :ok = Beacon.join(scope, :group1, pid)
-      assert Beacon.local_member?(scope, :group1, pid)
+      assert :ok = Census.join(scope, :group1, pid)
+      assert Census.local_member?(scope, :group1, pid)
     end
 
     test "can leave a group", %{scope: scope} do
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
-      assert :ok = Beacon.join(scope, :group1, pid)
-      assert Beacon.local_member?(scope, :group1, pid)
+      assert :ok = Census.join(scope, :group1, pid)
+      assert Census.local_member?(scope, :group1, pid)
 
-      assert :ok = Beacon.leave(scope, :group1, pid)
-      refute Beacon.local_member?(scope, :group1, pid)
+      assert :ok = Census.leave(scope, :group1, pid)
+      refute Census.local_member?(scope, :group1, pid)
     end
 
     test "joining same group twice is idempotent", %{scope: scope} do
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
-      assert :ok = Beacon.join(scope, :group1, pid)
-      assert :ok = Beacon.join(scope, :group1, pid)
-      assert Beacon.local_member_count(scope, :group1) == 1
+      assert :ok = Census.join(scope, :group1, pid)
+      assert :ok = Census.join(scope, :group1, pid)
+      assert Census.local_member_count(scope, :group1) == 1
     end
 
     test "multiple processes can join same group", %{scope: scope} do
       pid1 = spawn_link(fn -> Process.sleep(:infinity) end)
       pid2 = spawn_link(fn -> Process.sleep(:infinity) end)
 
-      assert :ok = Beacon.join(scope, :group1, pid1)
-      assert :ok = Beacon.join(scope, :group1, pid2)
+      assert :ok = Census.join(scope, :group1, pid1)
+      assert :ok = Census.join(scope, :group1, pid2)
 
-      members = Beacon.local_members(scope, :group1)
+      members = Census.local_members(scope, :group1)
       assert length(members) == 2
       assert pid1 in members
       assert pid2 in members
@@ -108,23 +109,23 @@ defmodule BeaconTest do
     test "process can join multiple groups", %{scope: scope} do
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
 
-      assert :ok = Beacon.join(scope, :group1, pid)
-      assert :ok = Beacon.join(scope, :group2, pid)
+      assert :ok = Census.join(scope, :group1, pid)
+      assert :ok = Census.join(scope, :group2, pid)
 
-      assert Beacon.local_member?(scope, :group1, pid)
-      assert Beacon.local_member?(scope, :group2, pid)
+      assert Census.local_member?(scope, :group1, pid)
+      assert Census.local_member?(scope, :group2, pid)
     end
 
     test "automatically removes member when process dies", %{scope: scope} do
       pid = spawn(fn -> Process.sleep(:infinity) end)
-      assert :ok = Beacon.join(scope, :group1, pid)
-      assert Beacon.local_member?(scope, :group1, pid)
+      assert :ok = Census.join(scope, :group1, pid)
+      assert Census.local_member?(scope, :group1, pid)
 
       Process.exit(pid, :kill)
       Process.sleep(50)
 
-      refute Beacon.local_member?(scope, :group1, pid)
-      assert Beacon.local_member_count(scope, :group1) == 0
+      refute Census.local_member?(scope, :group1, pid)
+      assert Census.local_member_count(scope, :group1) == 0
     end
   end
 
@@ -135,7 +136,7 @@ defmodule BeaconTest do
     end
 
     test "returns empty list for non-existent group", %{scope: scope} do
-      assert Beacon.local_members(scope, :nonexistent) == []
+      assert Census.local_members(scope, :nonexistent) == []
     end
 
     test "returns all members of a group", %{scope: scope} do
@@ -143,11 +144,11 @@ defmodule BeaconTest do
       pid2 = spawn_link(fn -> Process.sleep(:infinity) end)
       pid3 = spawn_link(fn -> Process.sleep(:infinity) end)
 
-      Beacon.join(scope, :group1, pid1)
-      Beacon.join(scope, :group1, pid2)
-      Beacon.join(scope, :group2, pid3)
+      Census.join(scope, :group1, pid1)
+      Census.join(scope, :group1, pid2)
+      Census.join(scope, :group2, pid3)
 
-      members = Beacon.local_members(scope, :group1)
+      members = Census.local_members(scope, :group1)
       assert length(members) == 2
       assert pid1 in members
       assert pid2 in members
@@ -162,23 +163,23 @@ defmodule BeaconTest do
     end
 
     test "returns 0 for non-existent group", %{scope: scope} do
-      assert Beacon.local_member_count(scope, :nonexistent) == 0
+      assert Census.local_member_count(scope, :nonexistent) == 0
     end
 
     test "returns correct count", %{scope: scope} do
       pid1 = spawn_link(fn -> Process.sleep(:infinity) end)
       pid2 = spawn_link(fn -> Process.sleep(:infinity) end)
 
-      assert Beacon.local_member_count(scope, :group1) == 0
+      assert Census.local_member_count(scope, :group1) == 0
 
-      Beacon.join(scope, :group1, pid1)
-      assert Beacon.local_member_count(scope, :group1) == 1
+      Census.join(scope, :group1, pid1)
+      assert Census.local_member_count(scope, :group1) == 1
 
-      Beacon.join(scope, :group1, pid2)
-      assert Beacon.local_member_count(scope, :group1) == 2
+      Census.join(scope, :group1, pid2)
+      assert Census.local_member_count(scope, :group1) == 2
 
-      Beacon.leave(scope, :group1, pid1)
-      assert Beacon.local_member_count(scope, :group1) == 1
+      Census.leave(scope, :group1, pid1)
+      assert Census.local_member_count(scope, :group1) == 1
     end
   end
 
@@ -189,7 +190,7 @@ defmodule BeaconTest do
     end
 
     test "returns empty map when no groups exist", %{scope: scope} do
-      assert Beacon.local_member_counts(scope) == %{}
+      assert Census.local_member_counts(scope) == %{}
     end
 
     test "returns counts for all groups", %{scope: scope} do
@@ -197,11 +198,11 @@ defmodule BeaconTest do
       pid2 = spawn_link(fn -> Process.sleep(:infinity) end)
       pid3 = spawn_link(fn -> Process.sleep(:infinity) end)
 
-      Beacon.join(scope, :group1, pid1)
-      Beacon.join(scope, :group1, pid2)
-      Beacon.join(scope, :group2, pid3)
+      Census.join(scope, :group1, pid1)
+      Census.join(scope, :group1, pid2)
+      Census.join(scope, :group2, pid3)
 
-      assert Beacon.local_member_counts(scope) == %{
+      assert Census.local_member_counts(scope) == %{
                group1: 2,
                group2: 1
              }
@@ -216,22 +217,22 @@ defmodule BeaconTest do
 
     test "returns false for non-member", %{scope: scope} do
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
-      refute Beacon.local_member?(scope, :group1, pid)
+      refute Census.local_member?(scope, :group1, pid)
     end
 
     test "returns true for member", %{scope: scope} do
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
-      Beacon.join(scope, :group1, pid)
-      assert Beacon.local_member?(scope, :group1, pid)
+      Census.join(scope, :group1, pid)
+      assert Census.local_member?(scope, :group1, pid)
     end
 
     test "returns false after leaving", %{scope: scope} do
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
 
-      Beacon.join(scope, :group1, pid)
-      Beacon.leave(scope, :group1, pid)
+      Census.join(scope, :group1, pid)
+      Census.leave(scope, :group1, pid)
 
-      refute Beacon.local_member?(scope, :group1, pid)
+      refute Census.local_member?(scope, :group1, pid)
     end
   end
 
@@ -242,18 +243,18 @@ defmodule BeaconTest do
     end
 
     test "returns empty list when no groups exist", %{scope: scope} do
-      assert Beacon.local_groups(scope) == []
+      assert Census.local_groups(scope) == []
     end
 
     test "returns all groups with members", %{scope: scope} do
       pid1 = spawn_link(fn -> Process.sleep(:infinity) end)
       pid2 = spawn_link(fn -> Process.sleep(:infinity) end)
 
-      Beacon.join(scope, :group1, pid1)
-      Beacon.join(scope, :group2, pid2)
-      Beacon.join(scope, :group3, pid1)
+      Census.join(scope, :group1, pid1)
+      Census.join(scope, :group2, pid2)
+      Census.join(scope, :group3, pid1)
 
-      groups = Beacon.local_groups(scope)
+      groups = Census.local_groups(scope)
       assert :group1 in groups
       assert :group2 in groups
       assert :group3 in groups
@@ -262,11 +263,11 @@ defmodule BeaconTest do
 
     test "removes group from list when last member leaves", %{scope: scope} do
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
-      Beacon.join(scope, :group1, pid)
-      assert :group1 in Beacon.local_groups(scope)
+      Census.join(scope, :group1, pid)
+      assert :group1 in Census.local_groups(scope)
 
-      Beacon.leave(scope, :group1, pid)
-      refute :group1 in Beacon.local_groups(scope)
+      Census.leave(scope, :group1, pid)
+      refute :group1 in Census.local_groups(scope)
     end
   end
 
@@ -277,19 +278,19 @@ defmodule BeaconTest do
     end
 
     test "returns 0 when no groups exist", %{scope: scope} do
-      assert Beacon.local_group_count(scope) == 0
+      assert Census.local_group_count(scope) == 0
     end
 
     test "returns correct count of groups", %{scope: scope} do
       pid1 = spawn_link(fn -> Process.sleep(:infinity) end)
       pid2 = spawn_link(fn -> Process.sleep(:infinity) end)
-      Beacon.join(scope, :group1, pid1)
-      Beacon.join(scope, :group2, pid2)
-      Beacon.join(scope, :group3, pid2)
-      Beacon.join(scope, :group3, pid1)
-      assert Beacon.local_group_count(scope) == 3
-      Beacon.leave(scope, :group2, pid2)
-      assert Beacon.local_group_count(scope) == 2
+      Census.join(scope, :group1, pid1)
+      Census.join(scope, :group2, pid2)
+      Census.join(scope, :group3, pid2)
+      Census.join(scope, :group3, pid1)
+      assert Census.local_group_count(scope) == 3
+      Census.leave(scope, :group2, pid2)
+      assert Census.local_group_count(scope) == 2
     end
   end
 
@@ -303,10 +304,10 @@ defmodule BeaconTest do
       pid1 = spawn_link(fn -> Process.sleep(:infinity) end)
       pid2 = spawn_link(fn -> Process.sleep(:infinity) end)
 
-      Beacon.join(scope, :group1, pid1)
-      Beacon.join(scope, :group1, pid2)
+      Census.join(scope, :group1, pid1)
+      Census.join(scope, :group1, pid2)
 
-      counts = Beacon.member_counts(scope)
+      counts = Census.member_counts(scope)
       assert counts[:group1] == 2
     end
   end
@@ -322,21 +323,21 @@ defmodule BeaconTest do
       pids = for _ <- 1..20, do: spawn_link(fn -> Process.sleep(:infinity) end)
 
       Enum.each(pids, fn pid ->
-        Beacon.join(scope, pid, pid)
+        Census.join(scope, pid, pid)
       end)
 
       # Check that multiple partitions are being used
-      partition_names = Beacon.Supervisor.partitions(scope)
+      partition_names = Forum.Supervisor.partitions(scope)
 
       Enum.map(partition_names, fn partition_name ->
-        assert Beacon.Partition.member_counts(partition_name) > 1
+        assert Forum.Partition.member_counts(partition_name) > 1
       end)
     end
 
     test "same group always maps to same partition", %{scope: scope} do
-      partition1 = Beacon.Supervisor.partition(scope, :my_group)
-      partition2 = Beacon.Supervisor.partition(scope, :my_group)
-      partition3 = Beacon.Supervisor.partition(scope, :my_group)
+      partition1 = Forum.Supervisor.partition(scope, :my_group)
+      partition2 = Forum.Supervisor.partition(scope, :my_group)
+      partition3 = Forum.Supervisor.partition(scope, :my_group)
 
       assert partition1 == partition2
       assert partition2 == partition3
@@ -347,13 +348,13 @@ defmodule BeaconTest do
               defmodule PeerAux do
                 def start(scope) do
                   spawn(fn ->
-                    {:ok, _} = Beacon.start_link(scope, broadcast_interval_in_ms: 50)
+                    {:ok, _} = Census.start_link(scope, broadcast_interval_in_ms: 50)
 
                     pid1 = spawn_link(fn -> Process.sleep(:infinity) end)
                     pid2 = spawn_link(fn -> Process.sleep(:infinity) end)
-                    Beacon.join(scope, :group1, pid1)
-                    Beacon.join(scope, :group2, pid2)
-                    Beacon.join(scope, :group3, pid2)
+                    Census.join(scope, :group1, pid1)
+                    Census.join(scope, :group2, pid2)
+                    Census.join(scope, :group3, pid2)
 
                     Process.sleep(:infinity)
                   end)
@@ -369,8 +370,8 @@ defmodule BeaconTest do
 
       ref =
         :telemetry_test.attach_event_handlers(self(), [
-          [:beacon, scope, :node, :up],
-          [:beacon, scope, :node, :down]
+          [:census, scope, :node, :up],
+          [:census, scope, :node, :down]
         ])
 
       %{scope: scope, supervisor_pid: supervisor_pid, peer: peer, node: node, telemetry_ref: ref}
@@ -379,50 +380,50 @@ defmodule BeaconTest do
     test "node up", %{scope: scope, peer: peer, node: node, telemetry_ref: telemetry_ref} do
       pid1 = spawn_link(fn -> Process.sleep(:infinity) end)
       pid2 = spawn_link(fn -> Process.sleep(:infinity) end)
-      Beacon.join(scope, :group1, pid1)
-      Beacon.join(scope, :group1, pid2)
-      Beacon.join(scope, :group2, pid2)
+      Census.join(scope, :group1, pid1)
+      Census.join(scope, :group1, pid2)
+      Census.join(scope, :group2, pid2)
 
       true = Node.connect(node)
       :peer.call(peer, PeerAux, :start, [scope])
 
-      assert_receive {[:beacon, ^scope, :node, :up], ^telemetry_ref, %{}, %{node: ^node}}
+      assert_receive {[:census, ^scope, :node, :up], ^telemetry_ref, %{}, %{node: ^node}}
 
       # Wait for at least one broadcast interval
       Process.sleep(150)
-      assert Beacon.group_count(scope) == 3
-      groups = Beacon.groups(scope)
+      assert Census.group_count(scope) == 3
+      groups = Census.groups(scope)
 
       assert length(groups) == 3
       assert :group1 in groups
       assert :group2 in groups
       assert :group3 in groups
 
-      assert Beacon.member_counts(scope) == %{group1: 3, group2: 2, group3: 1}
-      assert Beacon.member_count(scope, :group1) == 3
-      assert Beacon.member_count(scope, :group3, node) == 1
-      assert Beacon.member_count(scope, :group1, node()) == 2
+      assert Census.member_counts(scope) == %{group1: 3, group2: 2, group3: 1}
+      assert Census.member_count(scope, :group1) == 3
+      assert Census.member_count(scope, :group3, node) == 1
+      assert Census.member_count(scope, :group1, node()) == 2
     end
 
     test "node down", %{scope: scope, peer: peer, node: node, telemetry_ref: telemetry_ref} do
       pid1 = spawn_link(fn -> Process.sleep(:infinity) end)
       pid2 = spawn_link(fn -> Process.sleep(:infinity) end)
-      Beacon.join(scope, :group1, pid1)
-      Beacon.join(scope, :group1, pid2)
-      Beacon.join(scope, :group2, pid2)
+      Census.join(scope, :group1, pid1)
+      Census.join(scope, :group1, pid2)
+      Census.join(scope, :group2, pid2)
 
       true = Node.connect(node)
       :peer.call(peer, PeerAux, :start, [scope])
-      assert_receive {[:beacon, ^scope, :node, :up], ^telemetry_ref, %{}, %{node: ^node}}
+      assert_receive {[:census, ^scope, :node, :up], ^telemetry_ref, %{}, %{node: ^node}}
       # Wait for remote scope to communicate with local
       Process.sleep(150)
 
       true = Node.disconnect(node)
 
-      assert_receive {[:beacon, ^scope, :node, :down], ^telemetry_ref, %{}, %{node: ^node}}
+      assert_receive {[:census, ^scope, :node, :down], ^telemetry_ref, %{}, %{node: ^node}}
 
-      assert Beacon.member_counts(scope) == %{group1: 2, group2: 1}
-      assert Beacon.member_count(scope, :group1) == 2
+      assert Census.member_counts(scope) == %{group1: 2, group2: 1}
+      assert Census.member_count(scope, :group1) == 2
     end
 
     test "scope restart can recover", %{
@@ -434,21 +435,21 @@ defmodule BeaconTest do
     } do
       pid1 = spawn_link(fn -> Process.sleep(:infinity) end)
       pid2 = spawn_link(fn -> Process.sleep(:infinity) end)
-      Beacon.join(scope, :group1, pid1)
-      Beacon.join(scope, :group1, pid2)
-      Beacon.join(scope, :group2, pid2)
+      Census.join(scope, :group1, pid1)
+      Census.join(scope, :group1, pid2)
+      Census.join(scope, :group2, pid2)
 
       true = Node.connect(node)
       :peer.call(peer, PeerAux, :start, [scope])
-      assert_receive {[:beacon, ^scope, :node, :up], ^telemetry_ref, %{}, %{node: ^node}}
+      assert_receive {[:census, ^scope, :node, :up], ^telemetry_ref, %{}, %{node: ^node}}
 
       # Wait for remote scope to communicate with local
       Process.sleep(150)
 
       [
-        {1, _, :worker, [Beacon.Partition]},
-        {0, _, :worker, [Beacon.Partition]},
-        {:scope, scope_pid, :worker, [Beacon.Scope]}
+        {1, _, :worker, [Forum.Partition]},
+        {0, _, :worker, [Forum.Partition]},
+        {:scope, scope_pid, :worker, [Forum.Census.Scope]}
       ] = Supervisor.which_children(supervisor_pid)
 
       # Restart the scope process
@@ -457,13 +458,13 @@ defmodule BeaconTest do
       assert_receive {:DOWN, _ref, :process, ^scope_pid, :killed}
       # Wait for recovery and communication
       Process.sleep(200)
-      assert Beacon.group_count(scope) == 3
-      groups = Beacon.groups(scope)
+      assert Census.group_count(scope) == 3
+      groups = Census.groups(scope)
       assert length(groups) == 3
       assert :group1 in groups
       assert :group2 in groups
       assert :group3 in groups
-      assert Beacon.member_counts(scope) == %{group1: 3, group2: 2, group3: 1}
+      assert Census.member_counts(scope) == %{group1: 3, group2: 2, group3: 1}
     end
   end
 end

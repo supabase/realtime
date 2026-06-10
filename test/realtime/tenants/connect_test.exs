@@ -150,7 +150,7 @@ defmodule Realtime.Tenants.ConnectTest do
         "settings" => %{
           "db_host" => "127.0.0.1",
           "db_name" => "postgres",
-          "db_user" => "supabase_admin",
+          "db_user" => "supabase_realtime_admin",
           "db_password" => "postgres",
           "poll_interval" => 100,
           "poll_max_changes" => 100,
@@ -338,9 +338,9 @@ defmodule Realtime.Tenants.ConnectTest do
       {:ok, db_conn} = Connect.lookup_or_start_connection(external_id, check_connected_user_interval: 10)
       region = Tenants.region(tenant)
       assert {_pid, %{conn: ^db_conn, region: ^region}} = :syn.lookup(Connect, external_id)
-      Beacon.leave(:users, external_id, self())
+      Forum.Census.leave(:users, external_id, self())
       Process.sleep(1000)
-      refute Beacon.local_member?(:users, external_id, self())
+      refute Forum.Census.local_member?(:users, external_id, self())
       refute Process.alive?(db_conn)
       Connect.shutdown(external_id)
     end
@@ -359,7 +359,7 @@ defmodule Realtime.Tenants.ConnectTest do
         "settings" => %{
           "db_host" => "127.0.0.1",
           "db_name" => "postgres",
-          "db_user" => "supabase_admin",
+          "db_user" => "supabase_realtime_admin",
           "db_password" => "postgres",
           "poll_interval" => 100,
           "poll_max_changes" => 100,
@@ -385,7 +385,7 @@ defmodule Realtime.Tenants.ConnectTest do
         "settings" => %{
           "db_host" => "127.0.0.1",
           "db_name" => "postgres",
-          "db_user" => "supabase_admin",
+          "db_user" => "supabase_realtime_admin",
           "db_password" => "postgres",
           "poll_interval" => 100,
           "poll_max_changes" => 100,
@@ -547,7 +547,7 @@ defmodule Realtime.Tenants.ConnectTest do
           replication_slot_opts =
             %PostgresReplication{
               connection_opts: opts,
-              table: :all,
+              table: "test",
               output_plugin: "pgoutput",
               output_plugin_options: [proto_version: "1", publication_names: "test_#{i}_publication"],
               handler_module: Replication.TestHandler,
@@ -596,7 +596,7 @@ defmodule Realtime.Tenants.ConnectTest do
         "settings" => %{
           "db_host" => "127.0.0.1",
           "db_name" => "postgres",
-          "db_user" => "supabase_admin",
+          "db_user" => "supabase_realtime_admin",
           "db_password" => "postgres",
           "poll_interval" => 100,
           "poll_max_changes" => 100,
@@ -644,7 +644,7 @@ defmodule Realtime.Tenants.ConnectTest do
         "settings" => %{
           "db_host" => "127.0.0.1",
           "db_name" => "postgres",
-          "db_user" => "supabase_admin",
+          "db_user" => "supabase_realtime_admin",
           "db_password" => "postgres",
           "poll_interval" => 100,
           "poll_max_changes" => 100,

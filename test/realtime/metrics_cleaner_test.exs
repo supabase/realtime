@@ -3,6 +3,7 @@ defmodule Realtime.MetricsCleanerTest do
 
   alias Realtime.MetricsCleaner
   alias Realtime.Tenants.Connect
+  alias Forum.Census
 
   describe "metrics cleanup - vacant websockets" do
     test "cleans up metrics for users that have been disconnected" do
@@ -28,9 +29,9 @@ defmodule Realtime.MetricsCleanerTest do
       pid2 = spawn_link(fn -> Process.sleep(:infinity) end)
       pid3 = spawn_link(fn -> Process.sleep(:infinity) end)
 
-      Beacon.join(:users, "occupied-tenant", pid1)
-      Beacon.join(:users, "vacant-tenant1", pid2)
-      Beacon.join(:users, "vacant-tenant2", pid3)
+      Census.join(:users, "occupied-tenant", pid1)
+      Census.join(:users, "vacant-tenant1", pid2)
+      Census.join(:users, "vacant-tenant2", pid3)
 
       metrics = Realtime.TenantPromEx.get_metrics() |> IO.iodata_to_binary()
 
@@ -43,8 +44,8 @@ defmodule Realtime.MetricsCleanerTest do
       )
 
       # Now let's disconnect vacant tenants
-      Beacon.leave(:users, "vacant-tenant1", pid2)
-      Beacon.leave(:users, "vacant-tenant2", pid3)
+      Census.leave(:users, "vacant-tenant1", pid2)
+      Census.leave(:users, "vacant-tenant2", pid3)
 
       # Wait for clean up to run
       Process.sleep(200)
@@ -76,7 +77,7 @@ defmodule Realtime.MetricsCleanerTest do
 
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
 
-      Beacon.join(:users, "reconnect-tenant", pid)
+      Census.join(:users, "reconnect-tenant", pid)
 
       metrics = Realtime.TenantPromEx.get_metrics() |> IO.iodata_to_binary()
       assert String.contains?(metrics, "tenant=\"reconnect-tenant\"")
@@ -86,12 +87,12 @@ defmodule Realtime.MetricsCleanerTest do
       )
 
       # Disconnect
-      Beacon.leave(:users, "reconnect-tenant", pid)
+      Census.leave(:users, "reconnect-tenant", pid)
       Process.sleep(500)
 
       # Reconnect before threshold
       pid2 = spawn_link(fn -> Process.sleep(:infinity) end)
-      Beacon.join(:users, "reconnect-tenant", pid2)
+      Census.join(:users, "reconnect-tenant", pid2)
 
       # Wait for cleanup to run
       Process.sleep(2200)
@@ -210,12 +211,12 @@ defmodule Realtime.MetricsCleanerTest do
     end
   end
 
-  describe "handle_beacon_event/4" do
+  describe "handle_forum_event/4" do
     test "inserts and deletes from ETS table" do
-      table = :ets.new(:test_beacon, [:set, :public])
+      table = :ets.new(:test_forum, [:set, :public])
 
-      MetricsCleaner.handle_beacon_event(
-        [:beacon, :users, :group, :vacant],
+      MetricsCleaner.handle_forum_event(
+        [:forum, :users, :group, :vacant],
         %{},
         %{group: "test-tenant"},
         table
@@ -223,8 +224,8 @@ defmodule Realtime.MetricsCleanerTest do
 
       assert [{"test-tenant", _timestamp}] = :ets.lookup(table, "test-tenant")
 
-      MetricsCleaner.handle_beacon_event(
-        [:beacon, :users, :group, :occupied],
+      MetricsCleaner.handle_forum_event(
+        [:forum, :users, :group, :occupied],
         %{},
         %{group: "test-tenant"},
         table

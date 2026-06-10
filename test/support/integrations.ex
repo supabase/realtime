@@ -79,9 +79,10 @@ defmodule Integrations do
         primary key ("id"));
         """,
         "grant all on table public.test to anon;",
-        "grant all on table public.test to supabase_admin;",
+        "grant all on table public.test to supabase_realtime_admin;",
         "grant all on table public.test to authenticated;",
-        "create publication #{publication} for all tables",
+        # `for all tables` requires superuser
+        "create publication #{publication} for table public.test",
         """
         DO $$
         DECLARE

@@ -96,7 +96,7 @@ defmodule Realtime.Tenants do
       connected_cluster when is_integer(connected_cluster) ->
         tenant = Cache.get_tenant_by_external_id(external_id)
         healthy = not Migrations.run_migrations?(tenant)
-        healthy || Migrations.run_migrations_async(tenant)
+        if not healthy, do: Migrations.run_migrations_async(tenant)
 
         {:ok,
          %{
@@ -128,14 +128,18 @@ defmodule Realtime.Tenants do
       end_timestamp = Date.to_string(Date.add(date, 1))
 
       Database.transaction(db_conn_pid, fn conn ->
-        query = """
+        create = """
         CREATE TABLE IF NOT EXISTS realtime.#{partition_name}
         PARTITION OF realtime.messages
         FOR VALUES FROM ('#{start_timestamp}') TO ('#{end_timestamp}');
         """
 
-        case Postgrex.query(conn, query, []) do
-          {:ok, _} -> Logger.debug("Partition #{partition_name} created")
+        alter_owner = "ALTER TABLE realtime.#{partition_name} OWNER TO supabase_realtime_admin"
+
+        with {:ok, _} <- Postgrex.query(conn, create, []),
+             {:ok, _} <- Postgrex.query(conn, alter_owner, []) do
+          Logger.debug("Partition #{partition_name} created")
+        else
           {:error, %Postgrex.Error{postgres: %{code: :duplicate_table}}} -> :ok
           {:error, error} -> log_error("PartitionCreationFailed", error)
         end

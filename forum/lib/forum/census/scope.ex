@@ -1,13 +1,14 @@
-defmodule Beacon.Scope do
+defmodule Forum.Census.Scope do
   @moduledoc false
-  # Responsible to discover and keep track of all Beacon peers in the cluster
+  # Responsible to discover and keep track of all Forum peers in the cluster
 
   use GenServer
   require Logger
+  alias Forum.Census
 
   @default_broadcast_interval 5_000
 
-  @spec member_counts(atom) :: %{Beacon.group() => non_neg_integer}
+  @spec member_counts(atom) :: %{Forum.group() => non_neg_integer}
   def member_counts(scope) do
     scope
     |> table_name()
@@ -17,7 +18,7 @@ defmodule Beacon.Scope do
     end)
   end
 
-  @spec member_count(atom, Beacon.group()) :: non_neg_integer
+  @spec member_count(atom, Forum.group()) :: non_neg_integer
   def member_count(scope, group) do
     scope
     |> table_name()
@@ -25,7 +26,7 @@ defmodule Beacon.Scope do
     |> Enum.sum()
   end
 
-  @spec member_count(atom, Beacon.group(), node) :: non_neg_integer
+  @spec member_count(atom, Forum.group(), node) :: non_neg_integer
   def member_count(scope, group, node) do
     case :ets.lookup(table_name(scope), node) do
       [{^node, member_counts}] -> Map.get(member_counts, group, 0)
@@ -33,7 +34,7 @@ defmodule Beacon.Scope do
     end
   end
 
-  @spec groups(atom) :: MapSet.t(Beacon.group())
+  @spec groups(atom) :: MapSet.t(Forum.group())
   def groups(scope) do
     scope
     |> table_name()
@@ -46,9 +47,9 @@ defmodule Beacon.Scope do
     end)
   end
 
-  @typep member_counts :: %{Beacon.group() => non_neg_integer}
+  @typep member_counts :: %{Forum.group() => non_neg_integer}
 
-  defp table_name(scope), do: :"#{scope}_beacon_peer_counts"
+  defp table_name(scope), do: :"#{scope}_forum_peer_counts"
 
   defmodule State do
     @moduledoc false
@@ -81,9 +82,9 @@ defmodule Beacon.Scope do
     broadcast_interval =
       Keyword.get(opts, :broadcast_interval_in_ms, @default_broadcast_interval)
 
-    message_module = Keyword.get(opts, :message_module, Beacon.Adapter.ErlDist)
+    message_module = Keyword.get(opts, :message_module, Forum.Adapter.ErlDist)
 
-    Logger.info("Beacon[#{node()}|#{scope}] Starting")
+    Logger.info("Forum[#{node()}|#{scope}] Starting")
 
     :ok = message_module.register(scope)
 
@@ -117,25 +118,25 @@ defmodule Beacon.Scope do
   # A remote peer is discovering us
   def handle_info({:discover, peer}, %State{} = state) do
     Logger.info(
-      "Beacon[#{node()}|#{state.scope}] Received DISCOVER request from node #{node(peer)}"
+      "Forum[#{node()}|#{state.scope}] Received DISCOVER request from node #{node(peer)}"
     )
 
     state.message_module.send(
       state.scope,
       node(peer),
-      {:sync, self(), Beacon.local_member_counts(state.scope)}
+      {:sync, self(), Census.local_member_counts(state.scope)}
     )
 
     # We don't do anything if we already know about this peer
     if Map.has_key?(state.peers, peer) do
       Logger.debug(
-        "Beacon[#{node()}|#{state.scope}] already know peer #{inspect(peer)} from node #{node(peer)}"
+        "Forum[#{node()}|#{state.scope}] already know peer #{inspect(peer)} from node #{node(peer)}"
       )
 
       {:noreply, state}
     else
       Logger.debug(
-        "Beacon[#{node()}|#{state.scope}] discovered peer #{inspect(peer)} from node #{node(peer)}"
+        "Forum[#{node()}|#{state.scope}] discovered peer #{inspect(peer)} from node #{node(peer)}"
       )
 
       ref = Process.monitor(peer)
@@ -161,7 +162,7 @@ defmodule Beacon.Scope do
     state.message_module.broadcast(
       state.scope,
       nodes,
-      {:sync, self(), Beacon.local_member_counts(state.scope)}
+      {:sync, self(), Census.local_member_counts(state.scope)}
     )
 
     Process.send_after(self(), :broadcast_counts, state.broadcast_interval)
@@ -173,10 +174,10 @@ defmodule Beacon.Scope do
 
   # Send a discover message to the node that just connected
   def handle_info({:nodeup, node}, state) do
-    :telemetry.execute([:beacon, state.scope, :node, :up], %{}, %{node: node})
+    :telemetry.execute([:census, state.scope, :node, :up], %{}, %{node: node})
 
     Logger.info(
-      "Beacon[#{node()}|#{state.scope}] Node #{node} has joined the cluster, sending discover message"
+      "Forum[#{node()}|#{state.scope}] Node #{node} has joined the cluster, sending discover message"
     )
 
     state.message_module.send(state.scope, node, {:discover, self()})
@@ -190,7 +191,7 @@ defmodule Beacon.Scope do
   # We forget about it and remove its member counts
   def handle_info({:DOWN, ref, :process, peer, reason}, %State{} = state) do
     Logger.info(
-      "Beacon[#{node()}|#{state.scope}] Scope process is DOWN on node #{node(peer)}: #{inspect(reason)}"
+      "Forum[#{node()}|#{state.scope}] Scope process is DOWN on node #{node(peer)}: #{inspect(reason)}"
     )
 
     case Map.pop(state.peers, peer) do
@@ -199,7 +200,7 @@ defmodule Beacon.Scope do
 
       {^ref, new_peers} ->
         :ets.delete(state.peer_counts_table, node(peer))
-        :telemetry.execute([:beacon, state.scope, :node, :down], %{}, %{node: node(peer)})
+        :telemetry.execute([:census, state.scope, :node, :down], %{}, %{node: node(peer)})
         {:noreply, %State{state | peers: new_peers}}
     end
   end

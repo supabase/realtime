@@ -7,6 +7,7 @@ defmodule Realtime.Tenants.Migrations do
   use Realtime.Logs
 
   alias Realtime.Database
+  alias Realtime.FeatureFlags
   alias Realtime.Registry.Unique
   alias Realtime.Repo
   alias Realtime.Api.Tenant
@@ -15,81 +16,85 @@ defmodule Realtime.Tenants.Migrations do
   alias Realtime.GenRpc
   alias Realtime.Telemetry
 
+  alias Realtime.Tenants.Migrations
+
   @migrations [
-    {20_211_116_024_918, __MODULE__.CreateRealtimeSubscriptionTable},
-    {20_211_116_045_059, __MODULE__.CreateRealtimeCheckFiltersTrigger},
-    {20_211_116_050_929, __MODULE__.CreateRealtimeQuoteWal2jsonFunction},
-    {20_211_116_051_442, __MODULE__.CreateRealtimeCheckEqualityOpFunction},
-    {20_211_116_212_300, __MODULE__.CreateRealtimeBuildPreparedStatementSqlFunction},
-    {20_211_116_213_355, __MODULE__.CreateRealtimeCastFunction},
-    {20_211_116_213_934, __MODULE__.CreateRealtimeIsVisibleThroughFiltersFunction},
-    {20_211_116_214_523, __MODULE__.CreateRealtimeApplyRlsFunction},
-    {20_211_122_062_447, __MODULE__.GrantRealtimeUsageToAuthenticatedRole},
-    {20_211_124_070_109, __MODULE__.EnableRealtimeApplyRlsFunctionPostgrest9Compatibility},
-    {20_211_202_204_204, __MODULE__.UpdateRealtimeSubscriptionCheckFiltersFunctionSecurity},
-    {20_211_202_204_605, __MODULE__.UpdateRealtimeBuildPreparedStatementSqlFunctionForCompatibilityWithAllTypes},
-    {20_211_210_212_804, __MODULE__.EnableGenericSubscriptionClaims},
-    {20_211_228_014_915, __MODULE__.AddWalPayloadOnErrorsInApplyRlsFunction},
-    {20_220_107_221_237, __MODULE__.UpdateChangeTimestampToIso8601ZuluFormat},
-    {20_220_228_202_821, __MODULE__.UpdateSubscriptionCheckFiltersFunctionDynamicTableName},
-    {20_220_312_004_840, __MODULE__.UpdateApplyRlsFunctionToApplyIso8601},
-    {20_220_603_231_003, __MODULE__.AddQuotedRegtypesSupport},
-    {20_220_603_232_444, __MODULE__.AddOutputForDataLessThanEqual64BytesWhenPayloadTooLarge},
-    {20_220_615_214_548, __MODULE__.AddQuotedRegtypesBackwardCompatibilitySupport},
-    {20_220_712_093_339, __MODULE__.RecreateRealtimeBuildPreparedStatementSqlFunction},
-    {20_220_908_172_859, __MODULE__.NullPassesFiltersRecreateIsVisibleThroughFilters},
-    {20_220_916_233_421, __MODULE__.UpdateApplyRlsFunctionToPassThroughDeleteEventsOnFilter},
-    {20_230_119_133_233, __MODULE__.MillisecondPrecisionForWalrus},
-    {20_230_128_025_114, __MODULE__.AddInOpToFilters},
-    {20_230_128_025_212, __MODULE__.EnableFilteringOnDeleteRecord},
-    {20_230_227_211_149, __MODULE__.UpdateSubscriptionCheckFiltersForInFilterNonTextTypes},
-    {20_230_228_184_745, __MODULE__.ConvertCommitTimestampToUtc},
-    {20_230_308_225_145, __MODULE__.OutputFullRecordWhenUnchangedToast},
-    {20_230_328_144_023, __MODULE__.CreateListChangesFunction},
-    {20_231_018_144_023, __MODULE__.CreateChannels},
-    {20_231_204_144_023, __MODULE__.SetRequiredGrants},
-    {20_231_204_144_024, __MODULE__.CreateRlsHelperFunctions},
-    {20_231_204_144_025, __MODULE__.EnableChannelsRls},
-    {20_240_108_234_812, __MODULE__.AddChannelsColumnForWriteCheck},
-    {20_240_109_165_339, __MODULE__.AddUpdateGrantToChannels},
-    {20_240_227_174_441, __MODULE__.AddBroadcastsPoliciesTable},
-    {20_240_311_171_622, __MODULE__.AddInsertAndDeleteGrantToChannels},
-    {20_240_321_100_241, __MODULE__.AddPresencesPoliciesTable},
-    {20_240_401_105_812, __MODULE__.CreateRealtimeAdminAndMoveOwnership},
-    {20_240_418_121_054, __MODULE__.RemoveCheckColumns},
-    {20_240_523_004_032, __MODULE__.RedefineAuthorizationTables},
-    {20_240_618_124_746, __MODULE__.FixWalrusRoleHandling},
-    {20_240_801_235_015, __MODULE__.UnloggedMessagesTable},
-    {20_240_805_133_720, __MODULE__.LoggedMessagesTable},
-    {20_240_827_160_934, __MODULE__.FilterDeletePostgresChanges},
-    {20_240_919_163_303, __MODULE__.AddPayloadToMessages},
-    {20_240_919_163_305, __MODULE__.ChangeMessagesIdType},
-    {20_241_019_105_805, __MODULE__.UuidAutoGeneration},
-    {20_241_030_150_047, __MODULE__.MessagesPartitioning},
-    {20_241_108_114_728, __MODULE__.MessagesUsingUuid},
-    {20_241_121_104_152, __MODULE__.FixSendFunction},
-    {20_241_130_184_212, __MODULE__.RecreateEntityIndexUsingBtree},
-    {20_241_220_035_512, __MODULE__.FixSendFunctionPartitionCreation},
-    {20_241_220_123_912, __MODULE__.RealtimeSendHandleExceptionsRemovePartitionCreation},
-    {20_241_224_161_212, __MODULE__.RealtimeSendSetsConfig},
-    {20_250_107_150_512, __MODULE__.RealtimeSubscriptionUnlogged},
-    {20_250_110_162_412, __MODULE__.RealtimeSubscriptionLogged},
-    {20_250_123_174_212, __MODULE__.RemoveUnusedPublications},
-    {20_250_128_220_012, __MODULE__.RealtimeSendSetsTopicConfig},
-    {20_250_506_224_012, __MODULE__.SubscriptionIndexBridgingDisabled},
-    {20_250_523_164_012, __MODULE__.RunSubscriptionIndexBridgingDisabled},
-    {20_250_714_121_412, __MODULE__.BroadcastSendErrorLogging},
-    {20_250_905_041_441, __MODULE__.CreateMessagesReplayIndex},
-    {20_251_103_001_201, __MODULE__.BroadcastSendIncludePayloadId},
-    {20_251_120_212_548, __MODULE__.AddActionToSubscriptions},
-    {20_251_120_215_549, __MODULE__.FilterActionPostgresChanges},
-    {20_260_218_120_000, __MODULE__.FixByteaDoubleEncodingInCast},
-    {20_260_326_120_000, __MODULE__.ListChangesWithSlotCount},
-    {20_260_514_120_000, __MODULE__.AddBinaryPayloadToMessages},
-    {20_260_527_120_000, __MODULE__.AddSelectColumnsToSubscriptions},
-    {20_260_528_120_000, __MODULE__.Wal2jsonEscapeSpecialChars},
-    {20_260_603_120_000, __MODULE__.AddSendBinaryFunction},
-    {20_260_605_120_000, __MODULE__.RenameBroadcastSendWarning}
+    {20_211_116_024_918, Migrations.CreateRealtimeSubscriptionTable},
+    {20_211_116_045_059, Migrations.CreateRealtimeCheckFiltersTrigger},
+    {20_211_116_050_929, Migrations.CreateRealtimeQuoteWal2jsonFunction},
+    {20_211_116_051_442, Migrations.CreateRealtimeCheckEqualityOpFunction},
+    {20_211_116_212_300, Migrations.CreateRealtimeBuildPreparedStatementSqlFunction},
+    {20_211_116_213_355, Migrations.CreateRealtimeCastFunction},
+    {20_211_116_213_934, Migrations.CreateRealtimeIsVisibleThroughFiltersFunction},
+    {20_211_116_214_523, Migrations.CreateRealtimeApplyRlsFunction},
+    {20_211_122_062_447, Migrations.GrantRealtimeUsageToAuthenticatedRole},
+    {20_211_124_070_109, Migrations.EnableRealtimeApplyRlsFunctionPostgrest9Compatibility},
+    {20_211_202_204_204, Migrations.UpdateRealtimeSubscriptionCheckFiltersFunctionSecurity},
+    {20_211_202_204_605, Migrations.UpdateRealtimeBuildPreparedStatementSqlFunctionForCompatibilityWithAllTypes},
+    {20_211_210_212_804, Migrations.EnableGenericSubscriptionClaims},
+    {20_211_228_014_915, Migrations.AddWalPayloadOnErrorsInApplyRlsFunction},
+    {20_220_107_221_237, Migrations.UpdateChangeTimestampToIso8601ZuluFormat},
+    {20_220_228_202_821, Migrations.UpdateSubscriptionCheckFiltersFunctionDynamicTableName},
+    {20_220_312_004_840, Migrations.UpdateApplyRlsFunctionToApplyIso8601},
+    {20_220_603_231_003, Migrations.AddQuotedRegtypesSupport},
+    {20_220_603_232_444, Migrations.AddOutputForDataLessThanEqual64BytesWhenPayloadTooLarge},
+    {20_220_615_214_548, Migrations.AddQuotedRegtypesBackwardCompatibilitySupport},
+    {20_220_712_093_339, Migrations.RecreateRealtimeBuildPreparedStatementSqlFunction},
+    {20_220_908_172_859, Migrations.NullPassesFiltersRecreateIsVisibleThroughFilters},
+    {20_220_916_233_421, Migrations.UpdateApplyRlsFunctionToPassThroughDeleteEventsOnFilter},
+    {20_230_119_133_233, Migrations.MillisecondPrecisionForWalrus},
+    {20_230_128_025_114, Migrations.AddInOpToFilters},
+    {20_230_128_025_212, Migrations.EnableFilteringOnDeleteRecord},
+    {20_230_227_211_149, Migrations.UpdateSubscriptionCheckFiltersForInFilterNonTextTypes},
+    {20_230_228_184_745, Migrations.ConvertCommitTimestampToUtc},
+    {20_230_308_225_145, Migrations.OutputFullRecordWhenUnchangedToast},
+    {20_230_328_144_023, Migrations.CreateListChangesFunction},
+    {20_231_018_144_023, Migrations.CreateChannels},
+    {20_231_204_144_023, Migrations.SetRequiredGrants},
+    {20_231_204_144_024, Migrations.CreateRlsHelperFunctions},
+    {20_231_204_144_025, Migrations.EnableChannelsRls},
+    {20_240_108_234_812, Migrations.AddChannelsColumnForWriteCheck},
+    {20_240_109_165_339, Migrations.AddUpdateGrantToChannels},
+    {20_240_227_174_441, Migrations.AddBroadcastsPoliciesTable},
+    {20_240_311_171_622, Migrations.AddInsertAndDeleteGrantToChannels},
+    {20_240_321_100_241, Migrations.AddPresencesPoliciesTable},
+    {20_240_401_105_812, Migrations.CreateRealtimeAdminAndMoveOwnership},
+    {20_240_418_121_054, Migrations.RemoveCheckColumns},
+    {20_240_523_004_032, Migrations.RedefineAuthorizationTables},
+    {20_240_618_124_746, Migrations.FixWalrusRoleHandling},
+    {20_240_801_235_015, Migrations.UnloggedMessagesTable},
+    {20_240_805_133_720, Migrations.LoggedMessagesTable},
+    {20_240_827_160_934, Migrations.FilterDeletePostgresChanges},
+    {20_240_919_163_303, Migrations.AddPayloadToMessages},
+    {20_240_919_163_305, Migrations.ChangeMessagesIdType},
+    {20_241_019_105_805, Migrations.UuidAutoGeneration},
+    {20_241_030_150_047, Migrations.MessagesPartitioning},
+    {20_241_108_114_728, Migrations.MessagesUsingUuid},
+    {20_241_121_104_152, Migrations.FixSendFunction},
+    {20_241_130_184_212, Migrations.RecreateEntityIndexUsingBtree},
+    {20_241_220_035_512, Migrations.FixSendFunctionPartitionCreation},
+    {20_241_220_123_912, Migrations.RealtimeSendHandleExceptionsRemovePartitionCreation},
+    {20_241_224_161_212, Migrations.RealtimeSendSetsConfig},
+    {20_250_107_150_512, Migrations.RealtimeSubscriptionUnlogged},
+    {20_250_110_162_412, Migrations.RealtimeSubscriptionLogged},
+    {20_250_123_174_212, Migrations.RemoveUnusedPublications},
+    {20_250_128_220_012, Migrations.RealtimeSendSetsTopicConfig},
+    {20_250_506_224_012, Migrations.SubscriptionIndexBridgingDisabled},
+    {20_250_523_164_012, Migrations.RunSubscriptionIndexBridgingDisabled},
+    {20_250_714_121_412, Migrations.BroadcastSendErrorLogging},
+    {20_250_905_041_441, Migrations.CreateMessagesReplayIndex},
+    {20_251_103_001_201, Migrations.BroadcastSendIncludePayloadId},
+    {20_251_120_212_548, Migrations.AddActionToSubscriptions},
+    {20_251_120_215_549, Migrations.FilterActionPostgresChanges},
+    {20_260_218_120_000, Migrations.FixByteaDoubleEncodingInCast},
+    {20_260_326_120_000, Migrations.ListChangesWithSlotCount},
+    {20_260_514_120_000, Migrations.AddBinaryPayloadToMessages},
+    {20_260_527_120_000, Migrations.AddSelectColumnsToSubscriptions},
+    {20_260_528_120_000, Migrations.Wal2jsonEscapeSpecialChars},
+    {20_260_603_120_000, Migrations.AddSendBinaryFunction},
+    {20_260_605_120_000, Migrations.RenameBroadcastSendWarning},
+    {20_260_606_110_000, Migrations.SubscriptionCheckFiltersUsePgAttribute},
+    {20_260_606_120_000, Migrations.SetupSupabaseRealtimeAdmin}
   ]
 
   defstruct [:tenant_external_id, :settings, migrations_ran: 0]
@@ -99,16 +104,21 @@ defmodule Realtime.Tenants.Migrations do
           settings: map()
         }
 
-  def migrations(), do: @migrations
-
   @doc """
   Checks if migrations for a given tenant need to run.
   """
   @spec run_migrations?(Tenant.t() | integer()) :: boolean()
-  def run_migrations?(%Tenant{} = tenant), do: run_migrations?(tenant.migrations_ran)
+  def run_migrations?(%Tenant{} = tenant) do
+    available_migrations =
+      tenant.external_id
+      |> migrations()
+      |> Enum.count()
+
+    tenant.migrations_ran < available_migrations
+  end
 
   def run_migrations?(migrations_ran) when is_integer(migrations_ran),
-    do: migrations_ran < Enum.count(@migrations)
+    do: migrations_ran < Enum.count(migrations())
 
   @doc """
   Run migrations for the given tenant, blocking until they complete.
@@ -178,7 +188,7 @@ defmodule Realtime.Tenants.Migrations do
       :ok ->
         Task.Supervisor.async_nolink(__MODULE__.TaskSupervisor, Api, :update_migrations_ran, [
           tenant_external_id,
-          Enum.count(@migrations)
+          Enum.count(migrations(tenant_external_id))
         ])
 
         :ignore
@@ -211,7 +221,7 @@ defmodule Realtime.Tenants.Migrations do
 
         try do
           opts = [all: true, prefix: "realtime", dynamic_repo: repo]
-          result = Ecto.Migrator.run(Repo, @migrations, :up, opts)
+          result = Ecto.Migrator.run(Repo, migrations(tenant_external_id), :up, opts)
           Telemetry.stop(event, start_time, Map.put(metadata, :migrations_executed, length(result)))
         rescue
           error ->
@@ -235,4 +245,23 @@ defmodule Realtime.Tenants.Migrations do
   defp error_code(%Postgrex.Error{postgres: %{code: code}}), do: code
   defp error_code(%DBConnection.ConnectionError{}), do: :connection_error
   defp error_code(_), do: :other
+
+  @doc """
+  Returns the migrations to run.
+  """
+  @spec migrations(String.t() | nil) :: [{pos_integer(), module()}]
+  def migrations(tenant_external_id \\ nil) do
+    Enum.filter(@migrations, fn {_version, module} -> migration_enabled?(module, tenant_external_id) end)
+  end
+
+  defp migration_enabled?(Migrations.SetupSupabaseRealtimeAdmin, nil = _tenant_external_id) do
+    FeatureFlags.enabled?("use_supabase_realtime_admin")
+  end
+
+  defp migration_enabled?(Migrations.SetupSupabaseRealtimeAdmin, tenant_external_id)
+       when is_binary(tenant_external_id) do
+    FeatureFlags.enabled?("use_supabase_realtime_admin", tenant_external_id)
+  end
+
+  defp migration_enabled?(_migration, _tenant_external_id), do: true
 end

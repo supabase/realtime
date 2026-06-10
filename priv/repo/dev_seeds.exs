@@ -5,6 +5,7 @@ alias Realtime.Tenants
 
 tenant_name = "realtime-dev"
 default_db_host = "127.0.0.1"
+publication = "supabase_realtime"
 
 {:ok, tenant} =
   Repo.transaction(fn ->
@@ -26,7 +27,7 @@ default_db_host = "127.0.0.1"
             "settings" => %{
               "db_name" => System.get_env("DB_NAME", "postgres"),
               "db_host" => System.get_env("DB_HOST", default_db_host),
-              "db_user" => System.get_env("DB_USER", "supabase_admin"),
+              "db_user" => System.get_env("DB_USER", "supabase_realtime_admin"),
               "db_password" => System.get_env("DB_PASSWORD", "postgres"),
               "db_port" => System.get_env("DB_PORT", "5433"),
               "region" => "us-east-1",
@@ -43,19 +44,17 @@ default_db_host = "127.0.0.1"
   end)
 
 # Reset Tenant DB
-{:ok, settings} = Database.from_tenant(tenant, "realtime_migrations", :stop)
-settings = %{settings | max_restarts: 0, ssl: false}
-{:ok, tenant_conn} = Database.connect_db(settings)
-publication = "supabase_realtime"
+{:ok, settings} = Database.from_tenant(tenant, "realtime_seeds", :stop)
+{:ok, admin_conn} = Database.connect_db(%{settings | username: "supabase_admin", max_restarts: 0, ssl: false})
 
-Postgrex.transaction(tenant_conn, fn db_conn ->
+Postgrex.transaction(admin_conn, fn db_conn ->
   [
+    "grant usage on schema realtime to postgres, anon, authenticated, service_role",
+    "grant all on schema realtime to supabase_realtime_admin with grant option",
     "drop publication if exists #{publication}",
-    "drop table if exists public.test_tenant;",
-    "create table public.test_tenant ( id SERIAL PRIMARY KEY, details text );",
-    "grant all on table public.test_tenant to anon;",
-    "grant all on table public.test_tenant to supabase_admin;",
-    "grant all on table public.test_tenant to authenticated;",
+    "drop table if exists public.test_tenant",
+    "create table public.test_tenant ( id SERIAL PRIMARY KEY, details text )",
+    "grant all on table public.test_tenant to anon, authenticated, supabase_realtime_admin",
     "create publication #{publication} for table public.test_tenant"
   ]
   |> Enum.each(&Postgrex.query!(db_conn, &1))
@@ -66,5 +65,3 @@ case Tenants.Migrations.run_migrations(tenant) do
   :noop -> :ok
   _ -> raise "Running Migrations failed"
 end
-
-Tenants.Migrations.run_migrations(tenant)

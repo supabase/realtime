@@ -1,16 +1,16 @@
-defmodule Beacon.Supervisor do
+defmodule Forum.Supervisor do
   @moduledoc false
   use Supervisor
 
-  def name(scope), do: :"#{scope}_beacon"
-  def supervisor_name(scope), do: :"#{scope}_beacon_supervisor"
-  def partition_name(scope, partition), do: :"#{scope}_beacon_partition_#{partition}"
+  def name(scope), do: :"#{scope}_forum"
+  def supervisor_name(scope), do: :"#{scope}_forum_supervisor"
+  def partition_name(scope, partition), do: :"#{scope}_forum_partition_#{partition}"
   def partition_entries_table(partition_name), do: :"#{partition_name}_entries"
 
-  @spec partition(atom, Scope.group()) :: atom
+  @spec partition(atom, Forum.group()) :: atom
   def partition(scope, group) do
     case :persistent_term.get(scope, :unknown) do
-      :unknown -> raise "Beacon for scope #{inspect(scope)} is not started"
+      :unknown -> raise "Forum for scope #{inspect(scope)} is not started"
       partition_names -> elem(partition_names, :erlang.phash2(group, tuple_size(partition_names)))
     end
   end
@@ -18,19 +18,19 @@ defmodule Beacon.Supervisor do
   @spec partitions(atom) :: [atom]
   def partitions(scope) do
     case :persistent_term.get(scope, :unknown) do
-      :unknown -> raise "Beacon for scope #{inspect(scope)} is not started"
+      :unknown -> raise "Forum for scope #{inspect(scope)} is not started"
       partition_names -> Tuple.to_list(partition_names)
     end
   end
 
-  @spec start_link(atom, pos_integer(), Keyword.t()) :: Supervisor.on_start()
-  def start_link(scope, partitions, opts \\ []) do
-    args = [scope, partitions, opts]
+  @spec start_link(module, atom, pos_integer(), Keyword.t()) :: Supervisor.on_start()
+  def start_link(module, scope, partitions, opts \\ []) do
+    args = [module, scope, partitions, opts]
     Supervisor.start_link(__MODULE__, args, name: supervisor_name(scope))
   end
 
   @impl true
-  def init([scope, partitions, opts]) do
+  def init([module, scope, partitions, opts]) do
     children =
       for i <- 0..(partitions - 1) do
         partition_name = partition_name(scope, i)
@@ -44,7 +44,7 @@ defmodule Beacon.Supervisor do
 
         %{
           id: i,
-          start: {Beacon.Partition, :start_link, [scope, partition_name, partition_entries_table]}
+          start: {Forum.Partition, :start_link, [scope, partition_name, partition_entries_table]}
         }
       end
 
@@ -53,7 +53,7 @@ defmodule Beacon.Supervisor do
     :persistent_term.put(scope, List.to_tuple(partition_names))
 
     children = [
-      %{id: :scope, start: {Beacon.Scope, :start_link, [scope, opts]}} | children
+      %{id: :scope, start: {module, :start_link, [scope, opts]}} | children
     ]
 
     Supervisor.init(children, strategy: :one_for_one)

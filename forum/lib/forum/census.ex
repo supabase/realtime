@@ -1,35 +1,31 @@
-defmodule Beacon do
-  @moduledoc """
-  Distributed process group membership tracking.
-  """
+defmodule Forum.Census do
+  alias Forum.Partition
+  alias Forum.Census.Scope
 
-  alias Beacon.Partition
-  alias Beacon.Scope
-
-  @type group :: any
+  @type group :: Forum.group()
   @type start_option ::
           {:partitions, pos_integer()} | {:broadcast_interval_in_ms, non_neg_integer()}
 
-  @doc "Returns a supervisor child specification for a Beacon scope"
+  @doc "Returns a supervisor child specification for a Forum scope"
   def child_spec([scope]) when is_atom(scope), do: child_spec([scope, []])
   def child_spec(scope) when is_atom(scope), do: child_spec([scope, []])
 
   def child_spec([scope, opts]) when is_atom(scope) and is_list(opts) do
     %{
-      id: Beacon,
+      id: Forum,
       start: {__MODULE__, :start_link, [scope, opts]},
       type: :supervisor
     }
   end
 
   @doc """
-  Starts the Beacon supervision tree for `scope`.
+  Starts the Forum supervision tree for `scope`.
 
   Options:
 
   * `:partitions` - number of partitions to use (default: number of schedulers online)
   * `:broadcast_interval_in_ms`: - interval in milliseconds to broadcast membership counts to other nodes (default: 5000 ms)
-  * `:message_module` - module implementing `Beacon.Adapter` behaviour (default: `Beacon.Adapter.ErlDist`)
+  * `:message_module` - module implementing `Forum.Adapter` behaviour (default: `Forum.Adapter.ErlDist`)
   """
   @spec start_link(atom, [start_option]) :: Supervisor.on_start()
   def start_link(scope, opts \\ []) when is_atom(scope) do
@@ -47,7 +43,7 @@ defmodule Beacon do
             "expected :broadcast_interval_in_ms to be a positive integer, got: #{inspect(broadcast_interval_in_ms)}"
     end
 
-    Beacon.Supervisor.start_link(scope, partitions, opts)
+    Forum.Supervisor.start_link(Forum.Census.Scope, scope, partitions, opts)
   end
 
   @doc "Join pid to group in scope"
@@ -55,13 +51,13 @@ defmodule Beacon do
   def join(_scope, _group, pid) when is_pid(pid) and node(pid) != node(), do: {:error, :not_local}
 
   def join(scope, group, pid) when is_atom(scope) and is_pid(pid) do
-    Partition.join(Beacon.Supervisor.partition(scope, group), group, pid)
+    Partition.join(Forum.Supervisor.partition(scope, group), group, pid)
   end
 
   @doc "Leave pid from group in scope"
   @spec leave(atom, group, pid) :: :ok
   def leave(scope, group, pid) when is_atom(scope) and is_pid(pid) do
-    Partition.leave(Beacon.Supervisor.partition(scope, group), group, pid)
+    Partition.leave(Forum.Supervisor.partition(scope, group), group, pid)
   end
 
   @doc "Get total members count per group in scope"
@@ -88,19 +84,19 @@ defmodule Beacon do
   @doc "Get local members of group in scope"
   @spec local_members(atom, group) :: [pid]
   def local_members(scope, group) when is_atom(scope) do
-    Partition.members(Beacon.Supervisor.partition(scope, group), group)
+    Partition.members(Forum.Supervisor.partition(scope, group), group)
   end
 
   @doc "Get local member count of group in scope"
   @spec local_member_count(atom, group) :: non_neg_integer
   def local_member_count(scope, group) when is_atom(scope) do
-    Partition.member_count(Beacon.Supervisor.partition(scope, group), group)
+    Partition.member_count(Forum.Supervisor.partition(scope, group), group)
   end
 
   @doc "Get local members count per group in scope"
   @spec local_member_counts(atom) :: %{group => non_neg_integer}
   def local_member_counts(scope) when is_atom(scope) do
-    Enum.reduce(Beacon.Supervisor.partitions(scope), %{}, fn partition_name, acc ->
+    Enum.reduce(Forum.Supervisor.partitions(scope), %{}, fn partition_name, acc ->
       Map.merge(acc, Partition.member_counts(partition_name))
     end)
   end
@@ -108,13 +104,13 @@ defmodule Beacon do
   @doc "Check if pid is a local member of group in scope"
   @spec local_member?(atom, group, pid) :: boolean
   def local_member?(scope, group, pid) when is_atom(scope) and is_pid(pid) do
-    Partition.member?(Beacon.Supervisor.partition(scope, group), group, pid)
+    Partition.member?(Forum.Supervisor.partition(scope, group), group, pid)
   end
 
   @doc "Get all local groups in scope"
   @spec local_groups(atom) :: [group]
   def local_groups(scope) when is_atom(scope) do
-    Enum.flat_map(Beacon.Supervisor.partitions(scope), fn partition_name ->
+    Enum.flat_map(Forum.Supervisor.partitions(scope), fn partition_name ->
       Partition.groups(partition_name)
     end)
   end
@@ -122,7 +118,7 @@ defmodule Beacon do
   @doc "Get local group count in scope"
   @spec local_group_count(atom) :: non_neg_integer
   def local_group_count(scope) when is_atom(scope) do
-    Enum.sum_by(Beacon.Supervisor.partitions(scope), fn partition_name ->
+    Enum.sum_by(Forum.Supervisor.partitions(scope), fn partition_name ->
       Partition.group_count(partition_name)
     end)
   end
