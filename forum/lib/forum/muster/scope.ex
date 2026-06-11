@@ -16,7 +16,7 @@ defmodule Forum.Muster.Scope do
   #     router's occupancy table from accumulating stale entries.
   use GenServer
   require Logger
-  require Snabbkaffe
+  use Snabbkaffe
 
   alias ExHashRing.Ring
 
@@ -49,7 +49,8 @@ defmodule Forum.Muster.Scope do
             peers: %{pid => reference},
             cooldown_timers: %{Forum.group() => reference},
             group_states: %{Forum.group() => group_state},
-            member_views: %{node => non_neg_integer},
+            member_views: %{node => {non_neg_integer, integer}},
+            view_seq: integer,
             telemetry_handler_id: term
           }
     defstruct [
@@ -66,13 +67,23 @@ defmodule Forum.Muster.Scope do
       peers: %{},
       cooldown_timers: %{},
       group_states: %{},
-      # Barrier bookkeeping: each peer's most-recently-announced cluster-view
-      # hash (via a :rebalance_marker, or seeded on the discovery handshake).
-      # Latest-wins, never reset — so an announcement that arrives before we
-      # adopt that view is retained, not discarded. We are "ready" — and our
+      # Barrier bookkeeping: each peer's most-recently-announced
+      # {cluster-view hash, seq watermark} (via a :rebalance_marker, or seeded
+      # on the discovery handshake). Newest-seq-wins, never reset — so an
+      # announcement that arrives before we adopt that view is retained, and a
+      # stale announcement arriving late (markers travel on more than one
+      # channel) cannot regress a newer one. We are "ready" — and our
       # occupancy table can be trusted as a router — once every member's
-      # latest view agrees with ours.
-      member_views: %{}
+      # latest view agrees with ours. The watermark is the seq of the peer's
+      # last announce round: occupancy rows it wrote up to that round carry a
+      # seq at or below it, rows it dispatched afterwards carry a higher one
+      # (see drop_stale_router_entries).
+      member_views: %{},
+      # Our own announce watermark, sent alongside every view announcement:
+      # the seq of our last snapshot round (or of init's re-announce). All
+      # occupancy rows we dispatched up to that announcement carry a seq at or
+      # below this value.
+      view_seq: 0
     ]
   end
 
@@ -118,6 +129,18 @@ defmodule Forum.Muster.Scope do
     # seq over a newer one. It only ever races a strictly-older `vacant_batch`,
     # which the guard below handles.
     :ets.insert(occupancy_table_name(scope), {{group, source_node}, seq})
+
+    # Emitted AFTER the insert, so a forced ordering on this event implies the
+    # row is committed (muster_distributed_test.exs races it against a stale
+    # vacant DELETE).
+    tp(:muster_occupied, %{
+      scope: scope,
+      node: node(),
+      group: group,
+      source: source_node,
+      seq: seq
+    })
+
     :ok
   end
 
@@ -125,12 +148,27 @@ defmodule Forum.Muster.Scope do
   @spec vacant_batch(atom, [Forum.group()], node, integer) :: :ok
   def vacant_batch(scope, groups, source_node, seq) do
     table = occupancy_table_name(scope)
+
     # Delete each row only if it is stamped no newer than this batch — i.e. a
     # later `occupied`/snapshot for the same key (higher seq) survives a stale,
     # late-arriving vacant DELETE. Atomic per row via select_delete's guard.
-    Enum.each(groups, fn group ->
-      :ets.select_delete(table, [{{{group, source_node}, :"$1"}, [{:"=<", :"$1", seq}], [true]}])
-    end)
+    #
+    # The span's :start event fires BEFORE the deletes (so a forced ordering on
+    # it parks this RPC worker, delaying the whole batch) and its complete
+    # event fires after they are applied.
+    tp_span(:muster_vacant_batch, %{
+      scope: scope,
+      node: node(),
+      groups: groups,
+      source: source_node,
+      seq: seq
+    }) do
+      Enum.each(groups, fn group ->
+        :ets.select_delete(table, [
+          {{{group, source_node}, :"$1"}, [{:"=<", :"$1", seq}], [true]}
+        ])
+      end)
+    end
 
     :ok
   end
@@ -166,7 +204,16 @@ defmodule Forum.Muster.Scope do
     # groups, so every truly-stale row for this source is `< seq`.
     Enum.each(groups, fn group -> :ets.insert(table, {{group, source_node}, seq}) end)
     :ets.select_delete(table, [{{{:_, source_node}, :"$1"}, [{:<, :"$1", seq}], [true]}])
-    Kernel.send(Forum.Supervisor.name(scope), {:rebalance_marker, source_node, view_hash})
+    Kernel.send(Forum.Supervisor.name(scope), {:rebalance_marker, source_node, view_hash, seq})
+
+    tp(:muster_node_state_received, %{
+      scope: scope,
+      node: node(),
+      source: source_node,
+      view_hash: view_hash,
+      groups: groups
+    })
+
     :ok
   end
 
@@ -273,13 +320,20 @@ defmodule Forum.Muster.Scope do
     }
 
     state = reannounce_local_groups_at_init(state)
+    # Above the seqs of the rows just re-announced, so receivers may judge
+    # them once this watermark is announced.
+    state = %{state | view_seq: next_seq()}
 
     {:ok, state, {:continue, :discover}}
   end
 
   @impl true
   def handle_continue(:discover, state) do
-    state.message_module.broadcast(state.scope, {:muster_discover, self(), own_view_hash(state)})
+    state.message_module.broadcast(
+      state.scope,
+      {:muster_discover, self(), own_view_hash(state), state.view_seq}
+    )
+
     schedule_vacant_flush(state)
     schedule_view_heartbeat(state)
     {:noreply, state}
@@ -351,23 +405,23 @@ defmodule Forum.Muster.Scope do
   ## handle_info
 
   # Peer discovery (the receiver of a discover replies with an ack and registers the peer).
-  # The handshake piggybacks each side's current view hash so member_views is
-  # seeded immediately — important after a Scope restart, where it would
-  # otherwise be empty until the next membership change.
+  # The handshake piggybacks each side's current view hash and announce
+  # watermark so member_views is seeded immediately — important after a Scope
+  # restart, where it would otherwise be empty until the next membership change.
   @impl true
-  def handle_info({:muster_discover, peer, view_hash}, %State{} = state) do
+  def handle_info({:muster_discover, peer, view_hash, seq}, %State{} = state) do
     state.message_module.send(
       state.scope,
       node(peer),
-      {:muster_discover_ack, self(), own_view_hash(state)}
+      {:muster_discover_ack, self(), own_view_hash(state), state.view_seq}
     )
 
-    state = put_member_view(state, node(peer), view_hash)
+    state = put_member_view(state, node(peer), view_hash, seq)
     {:noreply, register_peer(state, peer)}
   end
 
-  def handle_info({:muster_discover_ack, peer, view_hash}, %State{} = state) do
-    state = put_member_view(state, node(peer), view_hash)
+  def handle_info({:muster_discover_ack, peer, view_hash, seq}, %State{} = state) do
+    state = put_member_view(state, node(peer), view_hash, seq)
     {:noreply, register_peer(state, peer)}
   end
 
@@ -380,20 +434,27 @@ defmodule Forum.Muster.Scope do
     )
 
     :telemetry.execute([:forum, state.scope, :node, :up], %{}, %{node: node})
-    state.message_module.send(state.scope, node, {:muster_discover, self(), own_view_hash(state)})
+
+    state.message_module.send(
+      state.scope,
+      node,
+      {:muster_discover, self(), own_view_hash(state), state.view_seq}
+    )
+
     {:noreply, state}
   end
 
   # Net split / disconnect — wait for the peer's monitor DOWN.
   def handle_info({:nodedown, _node}, state), do: {:noreply, state}
 
-  # A peer announced the cluster view it has finished rebalancing into. Record
-  # it as that peer's latest view (latest-wins). We do NOT gate on it matching
-  # our current view: storing it means an announcement that arrives before we
-  # adopt that view is retained, so once we catch up the agreement check in
-  # ready?/1 sees it. Readiness is then "every member's latest view == ours".
-  def handle_info({:rebalance_marker, source, view_hash}, %State{} = state) do
-    {:noreply, update_status(put_member_view(state, source, view_hash))}
+  # A peer announced the cluster view it has finished rebalancing into, plus
+  # its announce watermark. Record it as that peer's latest view
+  # (newest-seq-wins). We do NOT gate on it matching our current view: storing
+  # it means an announcement that arrives before we adopt that view is
+  # retained, so once we catch up the agreement check in ready?/1 sees it.
+  # Readiness is then "every member's latest view == ours".
+  def handle_info({:rebalance_marker, source, view_hash, seq}, %State{} = state) do
+    {:noreply, update_status(put_member_view(state, source, view_hash, seq))}
   end
 
   # Peer scope crashed/disconnected — drop occupancy entries owned by that node
@@ -772,15 +833,20 @@ defmodule Forum.Muster.Scope do
     :ok
   end
 
-  # Re-announce our current view to every other member (latest-wins on their
-  # side). Sent even when we're already :ready, because a peer may be the one
-  # missing our announcement.
+  # Re-announce our current view to every other member (newest-seq-wins on
+  # their side; re-sending our current watermark is idempotent). Sent even
+  # when we're already :ready, because a peer may be the one missing our
+  # announcement.
   defp announce_view(state) do
     view_hash = own_view_hash(state)
 
     Enum.each(state.members, fn member ->
       if member != node() do
-        state.message_module.send(state.scope, member, {:rebalance_marker, node(), view_hash})
+        state.message_module.send(
+          state.scope,
+          member,
+          {:rebalance_marker, node(), view_hash, state.view_seq}
+        )
       end
     end)
 
@@ -794,11 +860,16 @@ defmodule Forum.Muster.Scope do
     %{state | cooldown_timers: new_timers}
   end
 
+  # Both emit :muster_group_state so trace-based tests can synchronize on
+  # per-group state-machine transitions (state: nil = forgotten) instead of
+  # polling the :status call.
   defp put_group_state(state, group, value) do
+    tp(:muster_group_state, %{scope: state.scope, node: node(), group: group, state: value})
     %{state | group_states: Map.put(state.group_states, group, value)}
   end
 
   defp delete_group_state(state, group) do
+    tp(:muster_group_state, %{scope: state.scope, node: node(), group: group, state: nil})
     %{state | group_states: Map.delete(state.group_states, group)}
   end
 
@@ -820,6 +891,13 @@ defmodule Forum.Muster.Scope do
 
       true ->
         ref = Process.monitor(peer)
+
+        tp(:muster_peer_registered, %{
+          scope: state.scope,
+          node: node(),
+          peer: node(peer)
+        })
+
         peers = Map.put(state.peers, peer, ref)
         recompute_members(%{state | peers: peers})
     end
@@ -847,7 +925,7 @@ defmodule Forum.Muster.Scope do
       "Muster[#{node()}|#{state.scope}] rebalance start: members #{inspect(state.members)} -> #{inspect(new_members)} (view_hash #{:erlang.phash2(new_members)})"
     )
 
-    Snabbkaffe.tp(:muster_rebalance_start, %{
+    tp(:muster_rebalance_start, %{
       scope: state.scope,
       node: node(),
       from: state.members,
@@ -990,7 +1068,7 @@ defmodule Forum.Muster.Scope do
     snapshot_targets = Enum.map(remote_targets, fn {router_node, _} -> router_node end)
 
     Enum.each(new_members -- [node() | snapshot_targets], fn member ->
-      message_module.send(scope, member, {:rebalance_marker, node(), view_hash})
+      message_module.send(scope, member, {:rebalance_marker, node(), view_hash, snapshot_seq})
     end)
 
     # 5) Settle :occupied_pending claims whose router changed. The
@@ -1002,9 +1080,12 @@ defmodule Forum.Muster.Scope do
     #    then.
     state = settle_pending_after_rebalance(state, MapSet.new(groups_to_reannounce))
 
-    drop_stale_router_entries(state)
+    # Adopt the new view (and this round's announce watermark) before judging
+    # stale entries, so drop_stale_router_entries compares each source's
+    # announced view against the view the ring now implements.
+    state = %{state | members: new_members, view_seq: snapshot_seq}
 
-    state = %{state | members: new_members}
+    drop_stale_router_entries(state)
 
     # 6) Leave :rebalancing for :ready or :converging based on peer agreement.
     #    A single-node cluster has no peers to hear from, so it lands on :ready
@@ -1028,7 +1109,7 @@ defmodule Forum.Muster.Scope do
     if previous != status do
       :persistent_term.put(key, status)
 
-      Snabbkaffe.tp(:muster_status_change, %{
+      tp(:muster_status_change, %{
         scope: state.scope,
         node: node(),
         from: previous,
@@ -1040,6 +1121,12 @@ defmodule Forum.Muster.Scope do
       Logger.info(
         "Muster[#{node()}|#{state.scope}] status #{inspect(previous)} -> #{inspect(status)} (members #{inspect(state.members)})"
       )
+
+      # Most stale rows cannot be GC'd during the rebalance itself: peers have
+      # typically not yet announced the new view, so the source-agreement
+      # guard in drop_stale_router_entries skips their rows. Re-run the sweep
+      # once every member has agreed — now every member's rows are judgeable.
+      if status == :ready, do: drop_stale_router_entries(state)
     end
 
     state
@@ -1052,28 +1139,90 @@ defmodule Forum.Muster.Scope do
     own = own_view_hash(state)
 
     Enum.all?(state.members, fn member ->
-      member == node() or Map.get(state.member_views, member) == own
+      member == node() or match?({^own, _}, Map.get(state.member_views, member))
     end)
   end
 
   defp own_view_hash(state), do: :erlang.phash2(state.members)
 
-  defp put_member_view(state, source, view_hash) do
-    %{state | member_views: Map.put(state.member_views, source, view_hash)}
+  # Newest-seq-wins: seqs are per-source monotonic dispatch stamps, so the
+  # entry with the highest seq is the source's causally-latest announcement
+  # even when markers arrive out of order (they travel both as async dist
+  # sends and inside :receive_node_state RPCs).
+  defp put_member_view(state, source, view_hash, seq) do
+    case Map.get(state.member_views, source) do
+      {_hash, newer} when newer > seq ->
+        state
+
+      _ ->
+        %{state | member_views: Map.put(state.member_views, source, {view_hash, seq})}
+    end
   end
 
+  # GC of router-role occupancy rows for groups that no longer route to us.
+  #
+  # A row may only be judged under our ring if its source demonstrably shares
+  # the view the ring implements; otherwise deleting it can lose data:
+  #
+  #   * The source's announced view (member_views) must equal ours. A source
+  #     still on another view may have legitimately announced the row's group
+  #     to us under a view we have not adopted (or have already left) —
+  #     consistent-hashing monotonicity only protects rows when both sides
+  #     judge under comparable views, and it does not hold at all when our
+  #     ring transiently contains a node the source never saw.
+  #   * The row's seq must not exceed the watermark carried by that
+  #     announcement. Snapshot data is committed straight to ETS by the RPC
+  #     worker while the matching marker waits in our mailbox — so the table
+  #     can be AHEAD of member_views. A row stamped above the watermark is
+  #     from an announce round we have not processed yet (e.g. a re-snapshot
+  #     healing this exact group after an ephemeral node's churn) and must
+  #     not be judged under the older view.
+  #
+  # Skipped rows are harmless (a non-router's rows are never consulted; at
+  # worst they are memory) and are re-judged on the :ready transition, when
+  # every member has agreed on our view.
+  #
+  # Our own rows are always judgeable (we trivially share our own view) and
+  # must stay in the sweep: a group that moved away — or was vacated while
+  # routed elsewhere (flush_vacant only deletes locally when we are the
+  # router) — leaves a self row nothing else cleans up.
   defp drop_stale_router_entries(state) do
     ring = ring_name(state.scope)
+    own = own_view_hash(state)
 
     state.occupancy_table
-    |> :ets.select([{{{:"$1", :"$2"}, :_}, [], [{{:"$1", :"$2"}}]}])
-    |> Enum.each(fn {group, n} ->
-      {:ok, current} = Ring.find_node(ring, group)
-
-      if current != node() do
+    |> :ets.select([{{{:"$1", :"$2"}, :"$3"}, [], [{{:"$1", :"$2", :"$3"}}]}])
+    |> Enum.each(fn {group, n, row_seq} ->
+      # Agreement first: it is a map lookup, and at rebalance time most
+      # sources have not announced the new view yet — their rows are skipped
+      # without paying for the ring lookup.
+      if source_agrees?(state, n, row_seq, own) and router_under_ring(ring, group) != node() do
         :ets.delete(state.occupancy_table, {group, n})
+
+        # Emitted AFTER the delete, so a block_until on this event implies the
+        # row is gone.
+        tp(:muster_drop_stale_entry, %{
+          scope: state.scope,
+          node: node(),
+          group: group,
+          source: n
+        })
       end
     end)
+  end
+
+  defp router_under_ring(ring, group) do
+    {:ok, n} = Ring.find_node(ring, group)
+    n
+  end
+
+  defp source_agrees?(_state, source, _row_seq, _own) when source == node(), do: true
+
+  defp source_agrees?(state, source, row_seq, own) do
+    case Map.get(state.member_views, source) do
+      {^own, watermark} -> row_seq <= watermark
+      _ -> false
+    end
   end
 
   defp local_groups(state) do
