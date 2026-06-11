@@ -153,13 +153,13 @@ defmodule RealtimeWeb.Router do
   end
 
   defp check_auth(conn, [secret_key, blocklist_key]) do
-    secret = Application.fetch_env!(:realtime, secret_key)
+    secrets = :realtime |> Application.fetch_env!(secret_key) |> List.wrap()
     blocklist = Application.get_env(:realtime, blocklist_key, [])
 
     with ["Bearer " <> token] <- get_req_header(conn, "authorization"),
          token <- Regex.replace(~r/\s|\n/, URI.decode(token), ""),
          false <- token in blocklist,
-         {:ok, _claims} <- authorize(token, secret, nil) do
+         {:ok, _claims} <- authorize_any(token, secrets) do
       conn
     else
       _ ->
@@ -167,6 +167,15 @@ defmodule RealtimeWeb.Router do
         |> send_resp(403, "")
         |> halt()
     end
+  end
+
+  defp authorize_any(token, secrets) do
+    Enum.find_value(secrets, {:error, :unauthorized}, fn secret ->
+      case authorize(token, secret, nil) do
+        {:ok, claims} -> {:ok, claims}
+        _ -> nil
+      end
+    end)
   end
 
   defp dashboard_auth(conn, _opts) do
