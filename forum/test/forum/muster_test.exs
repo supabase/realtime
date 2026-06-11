@@ -1079,7 +1079,8 @@ defmodule Forum.MusterTest do
     defp send_marker(scope, source, members) do
       Kernel.send(
         Forum.Supervisor.name(scope),
-        {:rebalance_marker, source, :erlang.phash2(Enum.sort(members))}
+        {:rebalance_marker, source, :erlang.phash2(Enum.sort(members)),
+         :erlang.unique_integer([:monotonic])}
       )
     end
 
@@ -1175,7 +1176,7 @@ defmodule Forum.MusterTest do
       heartbeat_targets =
         drain_sends()
         |> Enum.flat_map(fn
-          [^scope, target, {:rebalance_marker, src, ^vh}] when src == node() ->
+          [^scope, target, {:rebalance_marker, src, ^vh, _seq}] when src == node() ->
             [target]
 
           _ ->
@@ -1197,7 +1198,7 @@ defmodule Forum.MusterTest do
       marker_targets =
         drain_sends()
         |> Enum.flat_map(fn
-          [^scope, target, {:rebalance_marker, src, _hash}] when src == node() ->
+          [^scope, target, {:rebalance_marker, src, _hash, _seq}] when src == node() ->
             [target]
 
           _ ->
@@ -1245,7 +1246,7 @@ defmodule Forum.MusterTest do
 
       # ...and is NOT also sent a redundant async marker.
       refute Enum.any?(sends, fn
-               [^scope, :x@nowhere, {:rebalance_marker, _, _}] -> true
+               [^scope, :x@nowhere, {:rebalance_marker, _, _, _}] -> true
                _ -> false
              end)
     end

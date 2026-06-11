@@ -237,6 +237,24 @@ defmodule Snabbkaffe do
   end
 
   @doc """
+  `block_until/3` waiting for `n_events` events matching `pattern` (mirrors
+  Erlang's `?block_until({Predicate, NEvents}, ...)` form). Events already in
+  the collected trace count towards `n_events`, which makes it the right tool
+  for waiting on the Nth occurrence of a recurring event (e.g. a node becoming
+  `:ready` for the same view a second time, after churn). Returns
+  `{:ok, [event]}` or `{:timeout, [partial]}`.
+  """
+  defmacro block_until(pattern, n_events, timeout, back_in_time) do
+    quote do
+      :snabbkaffe.block_until(
+        {unquote(matcher(pattern)), unquote(n_events)},
+        unquote(timeout),
+        unquote(back_in_time)
+      )
+    end
+  end
+
+  @doc """
   Subscribe to an event matching `pattern`, run `action_fun`, then wait (up to
   `timeout`) for the event. Returns `{action_return, {:ok, event} | :timeout}`.
   """
@@ -311,16 +329,26 @@ defmodule Snabbkaffe do
   ##
 
   @doc """
-  Delay events matching `continue_pattern` until an event matching
-  `delayed_pattern` has been emitted, enforcing an ordering between them.
+  Delay events matching `delayed_pattern` until an event matching
+  `continue_pattern` has been emitted, enforcing an ordering between them.
   """
   defmacro force_ordering(continue_pattern, delayed_pattern) do
-    build_force_ordering(continue_pattern, delayed_pattern, true)
+    build_force_ordering(continue_pattern, 1, delayed_pattern, true)
   end
 
   @doc "`force_ordering/2` with a `guard` expression over (delayed, continue)."
   defmacro force_ordering(continue_pattern, delayed_pattern, guard) do
-    build_force_ordering(continue_pattern, delayed_pattern, guard)
+    build_force_ordering(continue_pattern, 1, delayed_pattern, guard)
+  end
+
+  @doc """
+  `force_ordering/3` releasing only after `n_events` events matching
+  `continue_pattern` have been emitted (mirrors Erlang's
+  `?force_ordering(CONTINUE, N_EVENTS, DELAYED, GUARD)`). Events already in
+  the collected trace count towards `n_events`.
+  """
+  defmacro force_ordering(continue_pattern, n_events, delayed_pattern, guard) do
+    build_force_ordering(continue_pattern, n_events, delayed_pattern, guard)
   end
 
   @doc """
@@ -479,13 +507,13 @@ defmodule Snabbkaffe do
     end
   end
 
-  # ?force_ordering(CONTINUE, N, DELAYED, GUARD): hold back the CONTINUE event until
-  # the DELAYED one has fired. Note the matcher argument order (delayed first).
-  defp build_force_ordering(continue_pattern, delayed_pattern, guard) do
+  # ?force_ordering(CONTINUE, N, DELAYED, GUARD): hold back DELAYED events until
+  # N CONTINUE events have fired. Note the matcher argument order (delayed first).
+  defp build_force_ordering(continue_pattern, n_events, delayed_pattern, guard) do
     quote do
       :snabbkaffe_nemesis.force_ordering(
         unquote(matcher(delayed_pattern)),
-        1,
+        unquote(n_events),
         unquote(matcher2(delayed_pattern, continue_pattern, guard))
       )
     end

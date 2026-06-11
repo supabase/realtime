@@ -156,9 +156,9 @@ A rebalance starts on every node whenever its view of the cluster changes:
 4. Call `ExHashRing.Ring.set_nodes/2` with the new member list. The ring atomically swaps to a new generation; the prior generation is retained for one cycle.
 5. **Find the moved groups and affected routers.** For each `:occupied`, `:cooldown`, or `:occupied_pending` group, ask the ring for both the new router (`find_node/2`) and the previous router (`find_historical_node/3` with `back: 1`). The groups whose router *changed* are the *moved* set; the distinct new routers of those groups are the *affected* routers. With consistent hashing the moved set is typically ~1/N of the candidate groups.
 6. **Send each affected router a full snapshot.** For every affected router, send **one** `:receive_node_state` RPC carrying *all* groups we hold routed to it — not just the moved ones (groups routed to this node are written to the local occupancy table directly). The receiver replaces its entries for our node with the list, so the snapshot **must** be complete: `:receive_node_state` inserts the snapshot then deletes any older row of ours not in it, so sending only the moved groups would silently drop unchanged groups that still route there. (The insert-then-delete order — guarded by the snapshot's monotonic seq — keeps a concurrent reader on the *superset*, so the window over-delivers rather than missing a held group.) A router that gained nothing is left untouched — its existing rows for us are still correct, and any group that moved *away* from it is cleared by its own `drop_stale_router_entries` (step 9).
-7. **Announce our view to every member for the readiness barrier (hybrid).** Each affected router learns our view from the `:receive_node_state` RPC itself: the RPC carries `view_hash`, and after committing the occupancy data the receiver's `receive_node_state` notifies its own Scope — so the snapshot doubles as the view announcement, with the data committed before the view is recorded. Members that received *no* snapshot have nothing to fold the announcement into, so they get a cheap async `{:rebalance_marker, node(), view_hash}` send instead — that is how their barrier learns "this source holds nothing for me" vs. "this source has not arrived yet". This keeps the RPC count at ~the announce-set size (not N per node) while still signalling every member. See the readiness barrier below.
+7. **Announce our view to every member for the readiness barrier (hybrid).** Each affected router learns our view from the `:receive_node_state` RPC itself: the RPC carries `view_hash` and this round's seq (the *announce watermark*), and after committing the occupancy data the receiver's `receive_node_state` notifies its own Scope — so the snapshot doubles as the view announcement, with the data committed before the view is recorded. Members that received *no* snapshot have nothing to fold the announcement into, so they get a cheap async `{:rebalance_marker, node(), view_hash, seq}` send instead — that is how their barrier learns "this source holds nothing for me" vs. "this source has not arrived yet". This keeps the RPC count at ~the announce-set size (not N per node) while still signalling every member. See the readiness barrier below.
 8. Settle the `:occupied_pending` claims whose router changed: reply `:ok` to their parked waiters and move them to `:occupied`. The new router has just been told via `:receive_node_state`, so the claim is satisfied.
-9. Walk our own occupancy table and drop entries for groups we are no longer the router for (those entries will be re-announced to us by the original source nodes during their own rebalances).
+9. Walk our own occupancy table and drop entries for groups we are no longer the router for (those entries will be re-announced to us by the original source nodes during their own rebalances). A foreign source's entry is only dropped if that source *demonstrably agrees* with the view being judged under — see "Stale router entries" below; rows that can't be judged yet are left in place and re-swept on the `:converging → :ready` transition, when every member has agreed.
 10. Leave `:rebalancing` by recomputing `:status` from peer agreement — `:ready` if every member's latest view already matches ours (single-node clusters land here immediately), otherwise `:converging`.
 
 ### What callers see during the rebalance window
@@ -179,11 +179,11 @@ Muster.can_decide?(scope, sender_view_hash)
 
 If either clause is false the router **cannot decide its targets and falls back to fanning out to all nodes** (the real connected cluster, not the ring's member view — a freshly-restarted Scope's ring is just `[node()]`). The two checks are complementary: the `:view_hash` comparison catches sender/router *disagreement* (and the Scope-restart window, where a restarted router's view shrinks to `[node()]` and so mismatches), while `:ready` (vs. `:converging`) catches the *convergence* gap above — membership agreement holds, but not every holder has re-announced yet. `:ready` subsumes the old separate "not rebalancing" check, since the ring is necessarily settled by the time we reach it.
 
-`:status == :ready` is derived from `member_views`, a map of **each peer's most-recently-announced view hash**. A peer announces its view by finishing its own rebalance — either via its data-carrying `:receive_node_state` RPC (which echoes the sender's view) or, for a member that sent no snapshot, via a cheap async `{:rebalance_marker, source, view_hash}` (step 7). The handshake (`:muster_discover`/`_ack`) also piggybacks each side's view, so a node seeds `member_views` immediately — important after a Scope restart, where it would otherwise be empty. We are `:ready` once every member's latest view equals ours; otherwise `:converging`.
+`:status == :ready` is derived from `member_views`, a map of **each peer's most-recently-announced `{view hash, announce watermark}`**. A peer announces its view by finishing its own rebalance — either via its data-carrying `:receive_node_state` RPC (which echoes the sender's view and that round's seq) or, for a member that sent no snapshot, via a cheap async `{:rebalance_marker, source, view_hash, seq}` (step 7). The handshake (`:muster_discover`/`_ack`) also piggybacks each side's view and watermark, so a node seeds `member_views` immediately — important after a Scope restart, where it would otherwise be empty. We are `:ready` once every member's latest view equals ours; otherwise `:converging`.
 
-The map is **latest-wins and never reset**, which is what makes the barrier converge. An announcement that arrives *before* the receiver has adopted that view is simply stored as that peer's latest view rather than discarded; the moment the receiver catches up to the same view, the agreement check passes. (An earlier set-and-reset design dropped such early announcements and could leave a router permanently stuck not-ready until the next membership change.) The degraded state is the safe one: any disagreement or missing entry keeps the node in `:converging`, so it floods (never misses) and self-corrects as announcements arrive.
+The map is **newest-seq-wins and never reset**, which is what makes the barrier converge. An announcement that arrives *before* the receiver has adopted that view is simply stored as that peer's latest view rather than discarded; the moment the receiver catches up to the same view, the agreement check passes. (An earlier set-and-reset design dropped such early announcements and could leave a router permanently stuck not-ready until the next membership change.) Picking the newest *seq* rather than the latest *arrival* matters because announcements travel on two channels (async dist sends and `:receive_node_state` RPCs), so an older marker can overtake a newer one — the seq comparison makes that reordering harmless. The degraded state is the safe one: any disagreement or missing entry keeps the node in `:converging`, so it floods (never misses) and self-corrects as announcements arrive.
 
-There is no readiness *timeout* — `:converging` is a fully-functional safe state (the node still routes as a sender and floods as a router), not a blocking wait, so there's nothing to time out. To bound the worst case, each node re-announces its current view to every member every `:view_heartbeat_interval_ms` (default 10 s). The event-driven path (rebalance announcements + the discovery handshake) normally converges in milliseconds; the heartbeat is the backstop that heals a dropped announcement *without* needing a membership change, turning a theoretical "stuck flooding forever" into "stuck for at most one heartbeat." It's idempotent with `member_views` (latest-wins), so a redundant heartbeat costs only a small message per member.
+There is no readiness *timeout* — `:converging` is a fully-functional safe state (the node still routes as a sender and floods as a router), not a blocking wait, so there's nothing to time out. To bound the worst case, each node re-announces its current view to every member every `:view_heartbeat_interval_ms` (default 10 s). The event-driven path (rebalance announcements + the discovery handshake) normally converges in milliseconds; the heartbeat is the backstop that heals a dropped announcement *without* needing a membership change, turning a theoretical "stuck flooding forever" into "stuck for at most one heartbeat." It's idempotent with `member_views` (newest-seq-wins; the heartbeat re-sends the current watermark), so a redundant heartbeat costs only a small message per member.
 
 Because `:view_hash` is content-derived (`phash2` of the sorted node set) rather than a counter, it survives Scope restarts unchanged — a restarted router recomputes the same hash once it re-converges, and mismatches in the meantime.
 
@@ -214,7 +214,7 @@ In addition to the retry, two event-driven cleanups still apply:
 * If the source node leaves the cluster, the router's `:DOWN` handler clears all entries keyed by that node.
 * A rebalance that moves a group's routing away from the old router triggers `drop_stale_router_entries` there.
 
-**Occupancy rows are versioned to make this race-free.** A timed-out `:vacant_batch` is a particular hazard: `:erpc.call` does **not** cancel the remote execution on timeout, so a DELETE can still land on the router *after* the source has re-claimed the group (because a join arrived) with a fresh `:occupied` INSERT — silently clobbering a live entry that nothing periodically re-asserts. To prevent this, every occupancy row is stored as `{{group, source_node}, seq}`, where `seq` is a per-source monotonic stamp (`:erlang.unique_integer([:monotonic])`) assigned by the source **at dispatch time**. A re-claim's `:occupied` is dispatched *after* the `vacant_batch` it races (the join arrives later), so `next_seq` gives it a strictly higher `seq`; the router's `vacant_batch` deletes a row only if its `seq` is **no newer** than the row's (an atomic `select_delete` guard), so the stale, lower-`seq` DELETE is ignored. Seqs are only ever compared for the same `{group, source}` key — whose writes all originate on one node — so the comparison is always within a single VM's monotonic sequence and survives Scope restarts.
+**Occupancy rows are versioned to make this race-free.** A timed-out `:vacant_batch` is a particular hazard: `:erpc.call` does **not** cancel the remote execution on timeout, so a DELETE can still land on the router *after* the source has re-claimed the group (because a join arrived) with a fresh `:occupied` INSERT — silently clobbering a live entry that nothing periodically re-asserts. To prevent this, every occupancy row is stored as `{{group, source_node}, seq}`, where `seq` is a per-source monotonic stamp (`:erlang.unique_integer([:monotonic])`) assigned by the source **at dispatch time**. A re-claim's `:occupied` is dispatched *after* the `vacant_batch` it races (the join arrives later), so `next_seq` gives it a strictly higher `seq`; the router's `vacant_batch` deletes a row only if its `seq` is **no newer** than the row's (an atomic `select_delete` guard), so the stale, lower-`seq` DELETE is ignored. Seqs are only ever compared for the same `{group, source}` key — whose writes all originate on one node — so the comparison is always within a single VM's monotonic sequence and survives Scope restarts. (`test/forum/muster_distributed_test.exs` forces exactly this arrival order on a real router with snabbkaffe — the stale DELETE applied strictly after the re-claim's INSERT — and asserts the row survives.)
 
 ### Rebalance RPC failure
 
@@ -224,7 +224,7 @@ If any `:receive_node_state` call raises or returns `{:error, _}`, `do_rebalance
 * Walks the Partition entries (which survive Scope's death because they live in `:public, :named_table` ETS owned by the Supervisor) and rebuilds `group_states` by marking every locally-held group as `:occupied`.
 * Re-broadcasts the discovery message; peers respond; `recompute_members` runs again.
 
-The supervisor restart strategy ensures the cluster eventually re-converges. During the restart window — between the crash and `init/1` running — the `:status` persistent_term is left at `:rebalancing`, so `Muster.router/2` returns `{:rebalancing, members}` and callers correctly fan out.
+The supervisor restart strategy ensures the cluster eventually re-converges. During the restart window — between the crash and `init/1` running — the `:status` persistent_term is left at `:rebalancing`, so `Muster.router/2` returns `{:rebalancing, members}` and callers correctly fan out. (`test/forum/muster_distributed_test.exs` exercises this whole pipeline by `inject_crash`ing the first snapshot a source sends to a fresh router and asserting the crashed Scope restarts, re-announces, and the cluster converges with the row in place.)
 
 ### Scope crash for other reasons
 
@@ -234,11 +234,18 @@ Same recovery path: Partition data is preserved (ETS is owned by the Supervisor,
 
 Whenever cluster membership changes and a group's router shifts from B to C, B briefly holds a stale `{group, source}` entry. Three things clean it up:
 
-* B's own rebalance does `drop_stale_router_entries`, removing any entry whose group is no longer routed to B.
+* B's own `drop_stale_router_entries` sweep — run at each rebalance and again on the `:converging → :ready` transition — removes entries whose group is no longer routed to B.
 * If B is removed from the cluster (the cause of the rebalance), the entries die with B's Scope process.
 * The source node's periodic vacant flush re-sends queued vacancies to the *current* router, so a vacancy that was never delivered (or was delivered to a node that has since stopped being the router) is eventually applied where it matters.
 
 Stale entries do not cause incorrect broadcasts because broadcasters always route via the *current* router.
+
+**The sweep is guarded — a row is only judged under a view its source has agreed to.** `drop_stale_router_entries` deletes a foreign source's row only when (a) that source's last-announced view (`member_views`) equals the view our ring currently implements, and (b) the row's seq is at or below that announcement's watermark. Without the guard, two ordering races lose data permanently:
+
+* *Asymmetric views.* Our ring can transiently contain a node the source never saw (e.g. an ephemeral joiner we registered before its death propagated). Judged under that ring, the source's group may hash to the phantom node — but the source never re-announces it anywhere else, so deleting the row leaves a permanent hole. Consistent-hashing monotonicity protects *subset* views (a group that routes to us in the source's view also routes to us in any subset of it containing us — which is why plain joins are safe in any interleaving), but it says nothing once the views are not nested. The view-agreement check (a) restores the comparison to a single shared view.
+* *Data ahead of markers.* Snapshot data is committed straight to the occupancy ETS by the RPC worker while the matching announcement waits in the Scope mailbox — so the table can be ahead of `member_views`. A row stamped above the source's watermark belongs to an announce round we have not processed yet (e.g. a re-snapshot healing a group after an ephemeral node's churn) and must not be judged under the older view; check (b) skips it.
+
+Rows the guard skips are harmless — a non-router's rows are never consulted, so they cost only memory — and they are re-judged on the `:ready` transition, by which point every member has announced agreement with our view and the sweep can collect everything genuinely stale. (`test/forum/muster_distributed_test.exs` forces both races with snabbkaffe and asserts the snapshot survives.)
 
 ### Network partition
 
@@ -280,3 +287,96 @@ occupancy (as router):
 ```
 
 Node up/down and group vacancy are also emitted as `:telemetry` events (`[:forum, scope, :node, :up | :down]`, `[:forum, scope, :group, :vacant]`) if you'd rather attach a handler than read logs.
+
+## Trace-based testing (`Snabbkaffe`)
+
+Concurrent code is awkward to test with mocks and `Process.sleep`. The
+[snabbkaffe](https://github.com/kafka4beam/snabbkaffe) library instead lets you
+assert on the *trace* of events a system emitted, and to block until a specific
+event happens. Snabbkaffe is a BEAM library, but its instrumentation ships as
+Erlang `-include` macros that Elixir can't use, so `lib/snabbkaffe.ex` provides
+the Elixir macro counterparts (the `Snabbkaffe` module).
+
+**Trace points are discarded outside `:test`.** A `tp/2` call compiles to a real
+collector call in `MIX_ENV=test` and to `_ = data; :ok` everywhere else (the data
+expression is still evaluated, matching snabbkaffe's prod semantics). So you can
+sprinkle them through `lib/` code at near-zero production cost:
+
+```elixir
+defmodule Forum.Muster do
+  use Snabbkaffe
+
+  # ... somewhere in the rebalance path:
+  tp(:muster_rebalance_done, %{scope: scope, members: members})
+end
+```
+
+In a test, `check_trace/2` runs an action, collects the trace, and hands it to a
+check function (which passes unless it raises — use ordinary `assert`):
+
+```elixir
+use Snabbkaffe
+
+test "rebalance converges" do
+  check_trace(
+    fn ->
+      add_node(:node2)
+      block_until(%{:"$kind" => :muster_rebalance_done}, 1000)
+    end,
+    fn trace ->
+      assert [%{members: members}] = of_kind(:muster_rebalance_done, trace)
+      assert :node2 in members
+    end
+  )
+end
+```
+
+`Forum.Muster.Scope` emits trace points you can build assertions on:
+
+* `:muster_rebalance_start` — `%{scope, node, from, to, view_hash}`.
+* `:muster_status_change` — `%{scope, node, from, to, members, view_hash}`, on
+  every `:rebalancing → :converging → :ready` transition.
+* `:muster_peer_registered` — `%{scope, node, peer}`, when discovery pairs a peer.
+* `:muster_node_state_received` — `%{scope, node, source, view_hash, groups}`,
+  after a `:receive_node_state` snapshot has been committed on the receiver.
+* `:muster_occupied` — `%{scope, node, group, source, seq}`, after an
+  `:occupied` INSERT has been committed on the router.
+* `:muster_vacant_batch` — a `tp_span/3` around the router-side batched DELETE
+  (match `:"$span"` of `:start` / `{:complete, _}`); the `:start` event fires
+  before the deletes, so forcing an ordering on it parks the whole batch.
+* `:muster_drop_stale_entry` — `%{scope, node, group, source}`, per row the
+  stale-entry sweep actually deletes (emitted after the delete, so blocking on
+  it implies the row is gone).
+* `:muster_group_state` — `%{scope, node, group, state}`, on every per-group
+  state-machine transition on the source node (`state: nil` means the group
+  was forgotten). Lets tests `block_until` a group reaches e.g.
+  `:vacant_queued` instead of polling.
+
+All are discarded outside `:test`.
+
+### Distributed traces
+
+The collector runs on the node that calls `check_trace`. To capture trace points
+emitted on *other* nodes (e.g. `:peer` nodes in `muster_distributed_test.exs`),
+tell each remote node to forward its events to the collector:
+
+```elixir
+:snabbkaffe.forward_trace(remote_node)
+```
+
+Attach it **before** the remote work starts so no event is missed — a remote
+`tp` emitted before forwarding is wired up goes nowhere. With forwarding on, a
+single `check_trace` sees events from the whole cluster, which is how the
+distributed test asserts that *every* node re-converges to `:ready` (matching on
+the final `view_hash`) after a node joins. The remote nodes only need snabbkaffe
+on their code path — no collector of their own.
+
+Available macros: trace points `tp/2,3` and `tp_span/3,4`; running/checking with
+`check_trace/2,3`; collector lifecycle `start_trace/0`, `stop/0`,
+`collect_trace/0,1`; synchronisation `block_until/1,2,3`, `wait_async_action/2,3`,
+`retry/3`; trace querying `of_kind/2`, `projection/2`, `find_pairs/3,4`,
+`causality/3,4`, `strict_causality/3,4`; fault injection `force_ordering/2,3`,
+`inject_crash/2,3`; plus `give_or_take/3` and the `match_event/1` predicate
+builder. Patterns are ordinary Elixir patterns (snabbkaffe's `?match_event`
+becomes `match?/2`); the event's kind lives under the `:"$kind"` key, so prefer
+`of_kind/2` for filtering. See the `Snabbkaffe` moduledoc for details.

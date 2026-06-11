@@ -219,7 +219,8 @@ defmodule Forum.Muster do
 
   Handy from IEx while playing with a cluster: shows the lifecycle status, the
   cluster-view hash, the ring members, known peers, each peer's last-announced
-  view hash, the per-group state machine, and the router-role occupancy table
+  `{view hash, announce watermark}`, the per-group state machine, and the
+  router-role occupancy table
   (`group => [source_node]`). Pair it with `Logger.configure(level: :debug)` to
   also watch the per-group churn scroll by.
   """
