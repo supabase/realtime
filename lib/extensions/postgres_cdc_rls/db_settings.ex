@@ -17,10 +17,17 @@ defmodule Extensions.PostgresCdcRls.DbSettings do
     [
       {"region", &is_binary/1, false},
       {"db_host", &is_binary/1, true},
+      {"db_port", &is_binary/1, true},
       {"db_name", &is_binary/1, true},
       {"db_user", &is_binary/1, true},
-      {"db_port", &is_binary/1, true},
       {"db_password", &is_binary/1, true}
+    ]
+  end
+
+  def optional do
+    [
+      {"db_user_realtime", &is_binary/1, true},
+      {"db_pass_realtime", &is_binary/1, true}
     ]
   end
 end

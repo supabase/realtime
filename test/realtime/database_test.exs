@@ -8,6 +8,19 @@ defmodule Realtime.DatabaseTest do
   doctest Realtime.Database
   def handle_telemetry(event, metadata, content, pid: pid), do: send(pid, {event, metadata, content})
 
+  defp encrypted_settings(extra \\ %{}) do
+    Map.merge(
+      %{
+        "db_host" => Realtime.Crypto.encrypt!("127.0.0.1"),
+        "db_port" => Realtime.Crypto.encrypt!("5432"),
+        "db_name" => Realtime.Crypto.encrypt!("postgres"),
+        "db_user" => Realtime.Crypto.encrypt!("supabase_admin"),
+        "db_password" => Realtime.Crypto.encrypt!("super-pass")
+      },
+      extra
+    )
+  end
+
   setup do
     tenant = Containers.checkout_tenant()
     :telemetry.attach(__MODULE__, [:realtime, :database, :transaction], &__MODULE__.handle_telemetry/4, pid: self())
@@ -283,7 +296,7 @@ defmodule Realtime.DatabaseTest do
       {:ok, ip_version} = Database.detect_ip_version("127.0.0.1")
       socket_options = [ip_version]
       settings = Realtime.PostgresCdc.filter_settings("postgres_cdc_rls", tenant.extensions)
-      username = System.get_env("DB_USER", "supabase_realtime_admin")
+      username = System.get_env("DB_USER_REALTIME", "supabase_realtime_admin")
       {:ok, settings} = Database.from_settings(settings, application_name, backoff)
       port = settings.port
 
@@ -304,8 +317,8 @@ defmodule Realtime.DatabaseTest do
     end
 
     test "defaults ssl to true when ssl_enforced is not set" do
-      assert Database.default_ssl_param(%{}) == true
-      assert Database.default_ssl_param(%{"other" => "value"}) == true
+      assert Database.default_ssl_param(%{})
+      assert Database.default_ssl_param(%{"other" => "value"})
     end
 
     test "handles SSL properties", %{tenant: tenant} do
@@ -320,7 +333,34 @@ defmodule Realtime.DatabaseTest do
       settings = Realtime.PostgresCdc.filter_settings("postgres_cdc_rls", tenant.extensions)
       settings = Map.put(settings, "ssl_enforced", false)
       {:ok, settings} = Database.from_settings(settings, application_name, backoff)
-      assert settings.ssl == false
+      refute settings.ssl
+    end
+
+    test "runtime connections use db_user_realtime when present" do
+      settings =
+        encrypted_settings(%{
+          "db_user_realtime" => Realtime.Crypto.encrypt!("supabase_realtime_admin"),
+          "db_pass_realtime" => Realtime.Crypto.encrypt!("realtime-pass")
+        })
+
+      assert {:ok, %{username: "supabase_realtime_admin", password: "realtime-pass"}} =
+               Database.from_settings(settings, "realtime_connect", :stop)
+    end
+
+    test "runtime connections fall back to db_user when db_user_realtime is absent" do
+      assert {:ok, %{username: "supabase_admin", password: "super-pass"}} =
+               Database.from_settings(encrypted_settings(), "realtime_connect", :stop)
+    end
+
+    test "realtime_migrations always uses db_user even when db_user_realtime is set" do
+      settings =
+        encrypted_settings(%{
+          "db_user_realtime" => Realtime.Crypto.encrypt!("supabase_realtime_admin"),
+          "db_pass_realtime" => Realtime.Crypto.encrypt!("realtime-pass")
+        })
+
+      assert {:ok, %{username: "supabase_admin", password: "super-pass"}} =
+               Database.from_settings(settings, "realtime_migrations", :stop)
     end
   end
 
