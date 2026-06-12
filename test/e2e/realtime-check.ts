@@ -319,7 +319,7 @@ async function setup(): Promise<{ userId: string; testUser: { email: string; pas
     let stepStart = performance.now();
     log(kleur.dim("setup: truncating existing tables"));
     await Promise.allSettled([
-      sql`TRUNCATE TABLE IF EXISTS public.pg_changes, public.dummy, public.authorization, public.broadcast_changes, public.replay_check`.then(
+      sql`TRUNCATE TABLE public.pg_changes, public.dummy, public.authorization, public.broadcast_changes, public.replay_check`.then(
         () => log(kleur.dim("setup:   truncate ok")),
         (e: unknown) => log(kleur.dim(`setup:   truncate skipped (${e instanceof Error ? e.message : String(e)})`))
       ),
