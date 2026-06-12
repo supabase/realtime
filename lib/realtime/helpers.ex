@@ -2,9 +2,9 @@ defmodule Realtime.Helpers do
   @moduledoc """
   This module includes helper functions for different contexts that can't be union in one module.
   """
-  @spec cancel_timer(reference() | nil) :: non_neg_integer() | false | :ok | nil
-  def cancel_timer(nil), do: nil
-  def cancel_timer(ref), do: Process.cancel_timer(ref)
+  @spec cancel_timer(reference() | nil) :: :ok
+  def cancel_timer(ref) when is_reference(ref), do: Process.cancel_timer(ref, info: false)
+  def cancel_timer(_), do: :ok
 
   @doc """
   Takes the first N items from the queue and returns the list of items and the new queue.

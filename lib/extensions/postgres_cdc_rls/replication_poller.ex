@@ -1,7 +1,45 @@
 defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   @moduledoc """
-  Polls the write ahead log, applies row level sucurity policies for each subscriber
-  and broadcast records to the `MessageDispatcher`.
+  Polls the write-ahead log via a temporary logical replication slot, applies row
+  level security policies for each subscriber, and broadcasts records to the
+  `MessageDispatcher`.
+
+  ## Lifecycle
+
+  On start the poller connects to the tenant's database and fetches the
+  publication's tables via `Subscriptions.fetch_publication_tables/2`. Only if
+  the publication has tables does it call `Replications.prepare_replication/2`
+  to create the temporary slot and kick off the poll loop; if the publication is
+  empty it stays idle without creating a slot (an unconsumed slot would retain
+  WAL) and waits for tables to appear.
+
+  ## Poll loop
+
+  Each `:poll` calls `Replications.list_changes/5`, which drains the slot and
+  fans changes out to subscriber nodes. Reschedule cadence depends on activity:
+
+    * rows processed → poll again immediately
+    * raw slot changes present but nothing for subscribers → poll after `poll_interval_ms` (+ jitter)
+    * fully idle → back off to `poll_interval_ms * @idle_multiplier`.
+
+  When the publication is empty, `:poll` is a no-op — there are no tables to
+  decode, so the slot is not advanced.
+
+  ## Reacting to publication changes
+
+  Every `@check_oids_interval` ms the poller re-fetches the publication's oids:
+
+    * tables appear (empty → non-empty): re-run `prepare_replication/1` to
+      recreate the slot if it was dropped, then resume polling.
+    * tables vanish (non-empty → empty): cancel pending polls and drop the
+      replication slot via `Replications.drop_replication_slot/2`. If the drop
+      fails for any reason other than `:slot_not_found`, the poller stops with
+      `{:shutdown, :drop_replication_slot_failed}`; because the slot is
+      temporary, Postgres releases it automatically when the DB connection
+      ends.
+
+  This mirrors `SubscriptionManager`'s own `:check_oids` loop, which manages
+  subscriptions when the publication's tables change.
   """
 
   use GenServer
@@ -9,6 +47,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   @idle_multiplier 5
   @max_retries 6
+  @check_oids_interval 60_000
 
   # Column order returned by realtime.list_changes/4 (see Replications.list_changes/5
   # and the SQL function in
@@ -23,6 +62,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   alias Extensions.PostgresCdcRls.MessageDispatcher
   alias Extensions.PostgresCdcRls.Replications
+  alias Extensions.PostgresCdcRls.Subscriptions
 
   alias Realtime.Adapters.Changes.DeletedRecord
   alias Realtime.Adapters.Changes.NewRecord
@@ -62,7 +102,9 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       tenant_id: tenant_id,
       rate_counter_args: rate_counter_args,
       subscribers_nodes_table: args["subscribers_nodes_table"],
-      start_time: start_time
+      start_time: start_time,
+      oids: %{},
+      check_oid_ref: nil
     }
 
     {:ok, _} = Registry.register(__MODULE__.Registry, tenant_id, %{})
@@ -99,6 +141,11 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   end
 
   @impl true
+  def handle_info(:poll, %{oids: oids, poll_ref: poll_ref} = state) when map_size(oids) == 0 do
+    cancel_timer(poll_ref)
+    {:noreply, %{state | poll_ref: nil}}
+  end
+
   def handle_info(
         :poll,
         %{
@@ -190,6 +237,58 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     prepare_replication(state)
   end
 
+  def handle_info(:check_oids, %{conn: conn, publication: publication} = state) do
+    case Subscriptions.fetch_publication_tables(conn, publication) do
+      {:ok, new_oids} ->
+        check_oids(new_oids, state)
+
+      {:error, reason} ->
+        log_error("CheckOidsError", reason)
+        cancel_timer(state.check_oid_ref)
+        {:noreply, %{state | check_oid_ref: schedule_check_oids()}}
+    end
+  end
+
+  defp check_oids(new_oids, %{conn: conn, oids: old_oids} = state) do
+    case {map_size(old_oids), map_size(new_oids)} do
+      {0, n} when n > 0 ->
+        # prepare_replication/1 cancels check_oid_ref and reschedules it on success.
+        prepare_replication(%{state | oids: new_oids})
+
+      {n, 0} when n > 0 ->
+        cancel_timer(state.poll_ref)
+        # Cancel any pending :retry too: a retry left over from a prior
+        # list_changes/5 error would otherwise fire after the slot is dropped and
+        # re-run prepare_replication/1, recreating work (and possibly the slot).
+        cancel_timer(state.retry_ref)
+
+        case Replications.drop_replication_slot(conn, state.slot_name) do
+          {:error, reason} when reason != :slot_not_found ->
+            # The slot is a temporary logical replication slot tied to this connection,
+            # so stopping the process releases it without leaking WAL.
+            log_error("DropReplicationSlotFailed", reason)
+            {:stop, {:shutdown, :drop_replication_slot_failed}, state}
+
+          _ ->
+            cancel_timer(state.check_oid_ref)
+
+            {:noreply,
+             %{
+               state
+               | oids: new_oids,
+                 poll_ref: nil,
+                 retry_ref: nil,
+                 retry_count: 0,
+                 check_oid_ref: schedule_check_oids()
+             }}
+        end
+
+      _ ->
+        cancel_timer(state.check_oid_ref)
+        {:noreply, %{state | oids: new_oids, check_oid_ref: schedule_check_oids()}}
+    end
+  end
+
   def slot_name_suffix do
     case Application.get_env(:realtime, :slot_name_suffix) do
       nil -> ""
@@ -201,11 +300,42 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   defp convert_errors(_), do: nil
 
-  defp prepare_replication(%{conn: conn, slot_name: slot_name, tenant_id: tenant_id} = state) do
-    case Replications.prepare_replication(conn, slot_name) do
-      {:ok, _} ->
-        send(self(), :poll)
-        {:noreply, state}
+  defp prepare_replication(
+         %{
+           conn: conn,
+           slot_name: slot_name,
+           tenant_id: tenant_id,
+           publication: publication,
+           check_oid_ref: check_oid_ref
+         } = state
+       ) do
+    # Always fetch fresh publication information. An empty publication fails the
+    # map_size guard and falls through to the idle branch in `else`.
+    with {:ok, oids} when map_size(oids) > 0 <- Subscriptions.fetch_publication_tables(conn, publication),
+         {:ok, _} <- Replications.prepare_replication(conn, slot_name) do
+      send(self(), :poll)
+
+      cancel_timer(check_oid_ref)
+      # A successful prepare ends the failure streak: drop any pending retry and
+      # reset the backoff/retry_count so the next :poll error starts fresh rather
+      # than inheriting an inflated backoff or prematurely hitting @max_retries.
+      cancel_timer(state.retry_ref)
+
+      {:noreply,
+       %{
+         state
+         | oids: oids,
+           check_oid_ref: schedule_check_oids(),
+           retry_ref: nil,
+           retry_count: 0,
+           backoff: Backoff.reset(state.backoff)
+       }}
+    else
+      {:ok, oids} ->
+        # Empty publication: don't create a slot (it would retain WAL with nothing
+        # to consume it). Wait for :check_oids to observe tables appearing.
+        cancel_timer(check_oid_ref)
+        {:noreply, %{state | oids: oids, check_oid_ref: schedule_check_oids()}}
 
       {:error, error} ->
         log_error("PoolingReplicationPreparationError", error)
@@ -233,6 +363,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     retry_ref = Process.send_after(self(), :retry, timeout)
     {:noreply, %{state | backoff: backoff, retry_ref: retry_ref, retry_count: retry_count + 1}}
   end
+
+  defp schedule_check_oids, do: Process.send_after(self(), :check_oids, @check_oids_interval)
 
   defp record_list_changes_telemetry(time, tenant_id) do
     Realtime.Telemetry.execute(

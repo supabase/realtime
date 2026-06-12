@@ -49,6 +49,20 @@ defmodule Extensions.PostgresCdcRls.Replications do
     end
   end
 
+  @spec drop_replication_slot(pid(), String.t()) ::
+          {:ok, :dropped} | {:error, :slot_not_found | Postgrex.Error.t()}
+  def drop_replication_slot(conn, slot_name) do
+    case query(
+           conn,
+           "select pg_drop_replication_slot(slot_name) from pg_replication_slots where slot_name = $1",
+           [slot_name]
+         ) do
+      {:ok, %Postgrex.Result{num_rows: 0}} -> {:error, :slot_not_found}
+      {:ok, _} -> {:ok, :dropped}
+      {:error, error} -> {:error, error}
+    end
+  end
+
   @spec get_pg_stat_activity_diff(pid(), integer()) ::
           {:ok, integer()} | {:error, Postgrex.Error.t()}
   def get_pg_stat_activity_diff(conn, db_pid) do

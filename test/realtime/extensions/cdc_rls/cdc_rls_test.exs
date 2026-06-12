@@ -8,6 +8,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
   setup :set_mimic_global
 
   alias Extensions.PostgresCdcRls
+  alias Extensions.PostgresCdcRls.ReplicationPoller
   alias Extensions.PostgresCdcRls.Subscriptions
   alias PostgresCdcRls.SubscriptionManager
   alias Postgrex
@@ -105,6 +106,77 @@ defmodule Realtime.Extensions.CdcRlsTest do
       send(subscriber_manager_pid, :check_oids)
       %{oids: oids3} = :sys.get_state(subscriber_manager_pid)
       assert !Map.equal?(oids2, oids3)
+    end
+
+    test "Replication poller toggles slot when publication tables come and go", %{tenant: tenant} do
+      # setup/0 already received the "ready" event, which fires only after the poller's init/1
+      # (and its Registry.register) has run. :sys.get_state below then blocks until the poller
+      # finishes handle_continue and has its slot prepared.
+      [{poller_pid, _}] = Registry.lookup(ReplicationPoller.Registry, tenant.external_id)
+
+      # Use the SubscriptionManager pub connection to drive publication state from the test —
+      # the poller's own conn is owned by the poller process.
+      {:ok, _manager_pid, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+
+      %{oids: initial_oids, slot_name: slot_name} = :sys.get_state(poller_pid)
+      refute initial_oids == %{}
+
+      assert %Postgrex.Result{rows: [[1]]} =
+               Postgrex.query!(conn, "SELECT count(*)::int FROM pg_replication_slots WHERE slot_name = $1", [slot_name])
+
+      # Drop the publication: poller should drop its slot and clear oids.
+      Postgrex.query!(conn, "drop publication if exists supabase_realtime_test", [])
+      send(poller_pid, :check_oids)
+      %{oids: oids_after_drop, poll_ref: poll_ref_after_drop} = :sys.get_state(poller_pid)
+      assert oids_after_drop == %{}
+      assert poll_ref_after_drop == nil
+
+      assert %Postgrex.Result{rows: [[0]]} =
+               Postgrex.query!(conn, "SELECT count(*)::int FROM pg_replication_slots WHERE slot_name = $1", [slot_name])
+
+      # Re-create the publication: poller should recreate the slot and repopulate oids.
+      # Use an explicit table (not FOR ALL TABLES, which requires superuser).
+      Postgrex.query!(conn, "create publication supabase_realtime_test for table public.test", [])
+      send(poller_pid, :check_oids)
+      %{oids: oids_after_create} = :sys.get_state(poller_pid)
+      refute oids_after_create == %{}
+
+      assert %Postgrex.Result{rows: [[1]]} =
+               Postgrex.query!(conn, "SELECT count(*)::int FROM pg_replication_slots WHERE slot_name = $1", [slot_name])
+    end
+
+    test "Replication poller toggles slot when tables are removed from the publication", %{tenant: tenant} do
+      [{poller_pid, _}] = Registry.lookup(ReplicationPoller.Registry, tenant.external_id)
+      {:ok, _manager_pid, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+
+      %{oids: initial_oids, slot_name: slot_name} = :sys.get_state(poller_pid)
+      refute initial_oids == %{}
+
+      assert %Postgrex.Result{rows: [[1]]} =
+               Postgrex.query!(conn, "SELECT count(*)::int FROM pg_replication_slots WHERE slot_name = $1", [slot_name])
+
+      # Publication still exists but has no tables (recreated without FOR ALL TABLES
+      # since you can't ALTER ... DROP TABLE on a FOR ALL TABLES publication).
+      Postgrex.query!(conn, "drop publication if exists supabase_realtime_test", [])
+      Postgrex.query!(conn, "create publication supabase_realtime_test", [])
+
+      send(poller_pid, :check_oids)
+      %{oids: oids_after_empty, poll_ref: poll_ref_after_empty} = :sys.get_state(poller_pid)
+      assert oids_after_empty == %{}
+      assert poll_ref_after_empty == nil
+
+      assert %Postgrex.Result{rows: [[0]]} =
+               Postgrex.query!(conn, "SELECT count(*)::int FROM pg_replication_slots WHERE slot_name = $1", [slot_name])
+
+      # Add a table back to the publication: poller should recreate the slot and repopulate oids.
+      Postgrex.query!(conn, "alter publication supabase_realtime_test add table public.test", [])
+
+      send(poller_pid, :check_oids)
+      %{oids: oids_after_add} = :sys.get_state(poller_pid)
+      refute oids_after_add == %{}
+
+      assert %Postgrex.Result{rows: [[1]]} =
+               Postgrex.query!(conn, "SELECT count(*)::int FROM pg_replication_slots WHERE slot_name = $1", [slot_name])
     end
 
     test "Stop tenant supervisor", %{tenant: tenant} do

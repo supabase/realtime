@@ -84,17 +84,17 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     extension = Realtime.PostgresCdc.filter_settings("postgres_cdc_rls", tenant.extensions)
     extension = Map.merge(extension, %{"subs_pool_size" => Map.get(extension, "subcriber_pool_size", 4)})
 
+    publication = extension["publication"]
+
     with {:ok, subscription_manager_settings} <- Database.from_settings(extension, "realtime_subscription_manager"),
          {:ok, subscription_manager_pub_settings} <-
            Database.from_settings(extension, "realtime_subscription_manager_pub"),
          {:ok, conn} <- Database.connect_db(subscription_manager_settings),
-         {:ok, conn_pub} <- Database.connect_db(subscription_manager_pub_settings) do
+         {:ok, conn_pub} <- Database.connect_db(subscription_manager_pub_settings),
+         {:ok, oids} <- Subscriptions.fetch_publication_tables(conn, publication) do
       Subscriptions.delete_all_if_table_exists(conn)
 
       Rls.update_meta(id, self(), conn_pub)
-
-      publication = extension["publication"]
-      oids = Subscriptions.fetch_publication_tables(conn, publication)
 
       check_region_interval = Map.get(args, :check_region_interval, rebalance_check_interval_in_ms())
       send_region_check_message(check_region_interval)
@@ -145,10 +145,10 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
 
     oids =
       case Subscriptions.fetch_publication_tables(conn, publication) do
-        ^old_oids ->
+        {:ok, ^old_oids} ->
           old_oids
 
-        new_oids ->
+        {:ok, new_oids} ->
           Logger.warning("Found new oids #{inspect(new_oids, pretty: true)}")
 
           Subscriptions.delete_all(conn)
@@ -163,6 +163,12 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
           :ets.delete_all_objects(state.subscribers_nodes_table)
 
           new_oids
+
+        {:error, reason} ->
+          # A fetch error must not be mistaken for a publication change: keep the
+          # current oids and subscribers untouched, just reschedule the next check.
+          log_error("CheckOidsError", reason)
+          old_oids
       end
 
     {:noreply, %{state | oids: oids, check_oid_ref: check_oids()}}
