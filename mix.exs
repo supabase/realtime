@@ -4,7 +4,7 @@ defmodule Realtime.MixProject do
   def project do
     [
       app: :realtime,
-      version: "2.106.0",
+      version: "2.107.0",
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
