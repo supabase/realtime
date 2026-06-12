@@ -18,9 +18,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   Each `:poll` calls `Replications.list_changes/5`, which drains the slot and
   fans changes out to subscriber nodes. Reschedule cadence depends on activity:
 
-    * rows processed → poll again immediately,
-    * raw slot changes present but nothing for subscribers → poll after
-      `poll_interval_ms` (+ jitter),
+    * rows processed → poll again immediately
+    * raw slot changes present but nothing for subscribers → poll after `poll_interval_ms` (+ jitter)
     * fully idle → back off to `poll_interval_ms * @idle_multiplier`.
 
   When the publication is empty, `:poll` is a no-op — there are no tables to
