@@ -1001,6 +1001,7 @@ async function runBroadcastChangesTests(_testUser: { email: string; password: st
         .on("broadcast", { event: "INSERT" }, (res) => (result = res));
 
       const subscribeMs = await openChannel(channel);
+      await sleep(100);
       await supabase.from("broadcast_changes").insert({ value, id, topic: testTopic });
       const { latencyMs: eventMs } = await waitFor(() => result, "INSERT event");
 
@@ -1030,6 +1031,7 @@ async function runBroadcastChangesTests(_testUser: { email: string; password: st
         .on("broadcast", { event: "UPDATE" }, (res) => (result = res));
 
       const subscribeMs = await openChannel(channel);
+      await sleep(100);
       await supabase.from("broadcast_changes").insert({ value: originalValue, id, topic: testTopic });
       await supabase.from("broadcast_changes").update({ value: updatedValue }).eq("id", id);
       const { latencyMs: eventMs } = await waitFor(() => result, "UPDATE event");
@@ -1060,6 +1062,7 @@ async function runBroadcastChangesTests(_testUser: { email: string; password: st
         .on("broadcast", { event: "DELETE" }, (res) => (result = res));
 
       const subscribeMs = await openChannel(channel);
+      await sleep(100);
       await supabase.from("broadcast_changes").insert({ value, id, topic: testTopic });
       await supabase.from("broadcast_changes").delete().eq("id", id);
       const { latencyMs: eventMs } = await waitFor(() => result, "DELETE event");
