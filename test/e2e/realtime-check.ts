@@ -1001,7 +1001,7 @@ async function runBroadcastChangesTests(_testUser: { email: string; password: st
         .on("broadcast", { event: "INSERT" }, (res) => (result = res));
 
       const subscribeMs = await openChannel(channel);
-      await sleep(100);
+      await sleep(500);
       await supabase.from("broadcast_changes").insert({ value, id, topic: testTopic });
       const { latencyMs: eventMs } = await waitFor(() => result, "INSERT event");
 
