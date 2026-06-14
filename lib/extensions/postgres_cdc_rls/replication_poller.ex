@@ -252,10 +252,12 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   defp check_oids(new_oids, %{conn: conn, oids: old_oids} = state) do
     case {map_size(old_oids), map_size(new_oids)} do
       {0, n} when n > 0 ->
+        Logger.info("ReplicationPoller's publication went from 0 to #{n} tables, starting replication")
         # prepare_replication/1 cancels check_oid_ref and reschedules it on success.
         prepare_replication(%{state | oids: new_oids})
 
       {n, 0} when n > 0 ->
+        Logger.info("ReplicationPoller's publication went from #{n} to 0 tables, stopping replication")
         cancel_timer(state.poll_ref)
         # Cancel any pending :retry too: a retry left over from a prior
         # list_changes/5 error would otherwise fire after the slot is dropped and
