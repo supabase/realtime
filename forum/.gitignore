@@ -21,3 +21,4 @@ forum-*.tar
 
 # Temporary files, for example, from tests.
 /tmp/
+snabbkaffe/
