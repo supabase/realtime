@@ -40,6 +40,7 @@ defmodule Peer do
     extra_config = Keyword.get(opts, :extra_config, [])
     name = Keyword.get(opts, :name, :peer.random_name())
     aux_mod = Keyword.get(opts, :aux_mod, nil)
+    args = Keyword.get(opts, :args, [])
 
     true = :erlang.set_cookie(:cookie)
 
@@ -53,7 +54,8 @@ defmodule Peer do
                name: name,
                host: ~c"127.0.0.1",
                longnames: true,
-               connection: :standard_io
+               connection: :standard_io,
+               args: args
              }
            ]}
       })
