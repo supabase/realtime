@@ -16,10 +16,14 @@ defmodule Forum.MusterDistributedTest do
   @aux_mod (quote do
               defmodule MusterPeerAux do
                 # Start Muster and keep it alive (the supervisor links to this
-                # long-lived process, mirroring the Census peer pattern).
-                def start(scope) do
+                # long-lived process, mirroring the Census peer pattern). Extra
+                # opts are merged over the defaults so a test can, e.g., shrink
+                # the view-heartbeat interval on this peer.
+                def start(scope, opts \\ []) do
+                  opts = Keyword.merge([vacant_flush_interval_ms: 100], opts)
+
                   spawn(fn ->
-                    {:ok, _} = Forum.Muster.start_link(scope, vacant_flush_interval_ms: 100)
+                    {:ok, _} = Forum.Muster.start_link(scope, opts)
                     Process.sleep(:infinity)
                   end)
                 end
@@ -32,6 +36,20 @@ defmodule Forum.MusterDistributedTest do
                 def status(scope) do
                   :persistent_term.get({Forum.Muster, scope, :status})
                 end
+
+                # Advance this VM's global monotonic counter by `n`. The
+                # occupancy/announce seqs are :erlang.unique_integer([:monotonic]),
+                # which starts from the SAME base on every fresh VM, so burning a
+                # large amount here makes this incarnation's announce watermark
+                # deterministically higher than a same-named restart will ever
+                # reach — forcing the cross-incarnation seq regression.
+                def burn(n) do
+                  Enum.each(1..n, fn _ -> :erlang.unique_integer([:monotonic]) end)
+                  :ok
+                end
+
+                # The VM's current monotonic counter value.
+                def current_seq, do: :erlang.unique_integer([:monotonic])
               end
             end)
 
@@ -40,6 +58,13 @@ defmodule Forum.MusterDistributedTest do
   end
 
   defp start_remote_muster(peer, scope), do: :peer.call(peer, MusterPeerAux, :start, [scope])
+
+  # Start Muster on a peer with a fast view heartbeat, so the heartbeat backstop
+  # gets many chances to heal during a test (used by the restart-regression test
+  # to prove the heartbeat cannot heal the stuck node).
+  defp start_remote_muster_fast_heartbeat(peer, scope) do
+    :peer.call(peer, MusterPeerAux, :start, [scope, [view_heartbeat_interval_ms: 200]])
+  end
 
   defp status(scope), do: :persistent_term.get({Forum.Muster, scope, :status})
   defp remote_status(peer, scope), do: :peer.call(peer, MusterPeerAux, :status, [scope])
@@ -217,27 +242,100 @@ defmodule Forum.MusterDistributedTest do
       %{scope: scope}
     end
 
-    # Probes whether a node's drop_stale_router_entries can delete occupancy
-    # rows another node snapshotted to it (via receive_node_state), assuming
-    # full connectivity (every node eventually discovers every live node) and
-    # varying only the ORDER in which nodes process events. Two phases:
-    #
-    # Phase 1 — the "joiner still discovering peers" interleaving. T (this
-    # node, settled with O) registers the joiner C first, rebalances to
-    # {C, O, T} and pushes its snapshot to C; only then is C allowed to run
-    # its own rebalances, whose first pass uses a partial 2-node view. The
-    # interleaving is forced with snabbkaffe (no rebalance may start on C
-    # until T's snapshot has been committed on C). This turns out to be SAFE,
-    # by consistent-hashing monotonicity: a group that routes to C in the
-    # final view also routes to C in every SUBSET view containing C, and a
-    # joiner's intermediate views are always subsets of the final view — so
-    # the drop never judges a snapshotted row as "not mine". The phase
-    # asserts the row survives all the way to :ready.
-    #
-    # Phase 2 — an ephemeral node D joins (fully connected, everyone sees it)
-    # and dies shortly after. Now ordering matters, because C transiently
-    # holds a view {C, D, O, T} that is NOT a subset of the final view, and
-    # the only thing that repopulates C afterwards is a one-shot heal:
+    # Both tests probe whether a node's drop_stale_router_entries can delete
+    # occupancy rows another node snapshotted to it (via receive_node_state),
+    # assuming full connectivity (every node eventually discovers every live
+    # node) and varying only the ORDER in which nodes process events.
+
+    # The "joiner still discovering peers" interleaving. T (this node, settled
+    # with O) registers the joiner C first, rebalances to {C, O, T} and pushes
+    # its snapshot to C; only then is C allowed to run its own rebalances,
+    # whose first pass uses a partial 2-node view. The interleaving is forced
+    # with snabbkaffe (no rebalance may start on C until T's snapshot has been
+    # committed on C). This turns out to be SAFE, by consistent-hashing
+    # monotonicity: a group that routes to C in the final view also routes to C
+    # in every SUBSET view containing C, and a joiner's intermediate views are
+    # always subsets of the final view — so the drop never judges a snapshotted
+    # row as "not mine". The test asserts the row survives all the way to
+    # :ready.
+    test "a snapshotted row survives a joiner still discovering peers", %{scope: scope} do
+      t_node = node()
+
+      check_trace(
+        fn ->
+          # Settled 2-node cluster {T, O}.
+          {:ok, p_o, o_node} = Peer.start(aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(o_node)
+          start_remote_muster(p_o, scope)
+          await_ready([t_node, o_node])
+
+          c_name = ~c"muster_race_c_#{System.unique_integer([:positive])}"
+          c_node = :"#{c_name}@127.0.0.1"
+          final_members = Enum.sort([t_node, o_node, c_node])
+          # The victim group must route to C in the final view {C, O, T}.
+          group = pick_group([{final_members, c_node}])
+
+          # T holds the group; the pre-join router knows it by the time join
+          # returns (the RPC-before-Partition.join invariant).
+          member = spawn(fn -> Process.sleep(:infinity) end)
+          :ok = Muster.join(scope, group, member)
+          {:ok, r1} = Muster.router(scope, group)
+          assert t_node in occupancy_on(r1, scope, group)
+
+          # No rebalance may start on C until T's snapshot has been committed
+          # into C's occupancy table — the worst-case ordering for the join.
+          force_ordering(
+            %{:"$kind" => :muster_node_state_received, node: ^c_node, source: ^t_node},
+            %{:"$kind" => :muster_rebalance_start, node: ^c_node}
+          )
+
+          {:ok, p_c, ^c_node} = Peer.start(name: c_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(c_node)
+          start_remote_muster(p_c, scope)
+
+          await_ready(final_members)
+
+          # Monotonicity holds: C's intermediate rebalances did not touch the
+          # snapshotted row.
+          assert {:ok, ^c_node} = Muster.router(scope, group)
+          assert t_node in occupancy_on(c_node, scope, group)
+
+          %{
+            group: group,
+            c_node: c_node,
+            t_node: t_node,
+            occupancy: occupancy_on(c_node, scope, group)
+          }
+        end,
+        fn result, trace ->
+          # T snapshotted C exactly once: the join snapshot.
+          snapshots =
+            of_kind(:muster_node_state_received, trace)
+            |> Enum.filter(&(&1.node == result.c_node and &1.source == result.t_node))
+
+          assert length(snapshots) == 1
+
+          # The forced, worst-case join must not delete T's row on C.
+          drops =
+            of_kind(:muster_drop_stale_entry, trace)
+            |> Enum.filter(
+              &(&1.node == result.c_node and &1.group == result.group and
+                  &1.source == result.t_node)
+            )
+
+          assert drops == []
+
+          # INVARIANT: once the cluster is :ready, the router's occupancy
+          # table lists every source node that holds the group.
+          assert result.t_node in result.occupancy
+        end
+      )
+    end
+
+    # An ephemeral node D joins (fully connected, everyone sees it) and dies
+    # shortly after. Now ordering matters, because C transiently holds a view
+    # {C, D, O, T} that is NOT a subset of the final view, and the only thing
+    # that repopulates C afterwards is a one-shot heal:
     #
     #   * T registers D and hands the group to D (snapshot to D). On D's
     #     death T rebalances back to {C, O, T}; the group moves D -> C, so T
@@ -256,8 +354,7 @@ defmodule Forum.MusterDistributedTest do
     # {C, D, O, T} marker was the last one processed, the healed row's seq is
     # above that announcement's watermark. Either way C must converge back to
     # :ready with the row intact.
-    test "rows snapshotted to the router survive joins and an ephemeral node's churn",
-         %{scope: scope} do
+    test "a snapshotted row survives an ephemeral node's churn", %{scope: scope} do
       t_node = node()
 
       check_trace(
@@ -285,26 +382,18 @@ defmodule Forum.MusterDistributedTest do
           {:ok, r1} = Muster.router(scope, group)
           assert t_node in occupancy_on(r1, scope, group)
 
-          # --- Phase 1: forced join interleaving --------------------------
-          # No rebalance may start on C until T's snapshot has been committed
-          # into C's occupancy table — the worst-case ordering for the join.
-          force_ordering(
-            %{:"$kind" => :muster_node_state_received, node: ^c_node, source: ^t_node},
-            %{:"$kind" => :muster_rebalance_start, node: ^c_node}
-          )
-
+          # Settle C into the cluster: T snapshots the group to C as it
+          # rebalances to {C, O, T}. (The forced join interleaving has its own
+          # test above; here we only need C settled with the row.)
           {:ok, p_c, ^c_node} = Peer.start(name: c_name, aux_mod: @aux_mod)
           :ok = :snabbkaffe.forward_trace(c_node)
           start_remote_muster(p_c, scope)
 
           await_ready(final_members)
-
-          # Monotonicity holds: C's intermediate rebalances did not touch the
-          # snapshotted row.
           assert {:ok, ^c_node} = Muster.router(scope, group)
           assert t_node in occupancy_on(c_node, scope, group)
 
-          # --- Phase 2: ephemeral node, unlucky ordering -------------------
+          # --- ephemeral node, unlucky ordering ----------------------------
           stale_view = Enum.sort([d_node | final_members])
 
           # Hold C's rebalance into the D-containing view until a SECOND
@@ -370,17 +459,16 @@ defmodule Forum.MusterDistributedTest do
           }
         end,
         fn result, trace ->
-          # T snapshotted C exactly twice: the join snapshot (phase 1) and the
-          # post-D-death heal (phase 2) — proving the heal really fired and
-          # raced C's stale rebalance.
+          # T snapshotted C exactly twice: the join snapshot and the
+          # post-D-death heal — proving the heal really fired and raced C's
+          # stale rebalance.
           snapshots =
             of_kind(:muster_node_state_received, trace)
             |> Enum.filter(&(&1.node == result.c_node and &1.source == result.t_node))
 
           assert length(snapshots) == 2
 
-          # No wrongful drops: neither the (forced, worst-case) join in
-          # phase 1 nor the stale {C, D, O, T} rebalance in phase 2 may
+          # No wrongful drops: the stale {C, D, O, T} rebalance must not
           # delete T's row on C.
           drops =
             of_kind(:muster_drop_stale_entry, trace)
@@ -995,6 +1083,619 @@ defmodule Forum.MusterDistributedTest do
                    |> Enum.filter(&(&1.node == result.r_node and &1.source == result.t_node))
 
           assert result.group in groups
+        end
+      )
+    end
+  end
+
+  describe "cascading joins — a second node joins before the first rebalance converges" do
+    setup do
+      scope = :"muster_cascade_#{System.unique_integer([:positive])}"
+      start_supervised!(spec(scope, vacant_flush_interval_ms: 100))
+      %{scope: scope}
+    end
+
+    # The rolling-deploy shape: C joins, and D joins while the cluster is
+    # still :converging on the C view — the holder must re-hand its group to
+    # the FINAL router, and the cluster must converge on the final view only.
+    #
+    # The overlap is forced deterministically: R's rebalance into the 3-node
+    # view is parked, D is started, and only then is R released. T therefore
+    # runs its second rebalance straight out of :converging, never having
+    # been :ready, and must re-hand its group from the intermediate router C
+    # to the final router D. The victim group is picked from ring math:
+    # routed to C in {T, R, C} and to D in {T, R, C, D}, so the router moves
+    # on BOTH joins.
+    #
+    # Note the barrier's exact (and intended) semantics here: the HOLDER, T,
+    # must never go :ready for the intermediate view (R's announcement of it
+    # cannot exist before T has already adopted the 4-node view). The parked
+    # laggard R, however, MAY transiently go :ready for the stale view after
+    # release — its queued hash3 markers from T and C are mutually consistent,
+    # and the data for that view was committed before they were sent — until
+    # the higher-seq hash4 markers supersede them (newest-seq-wins). That
+    # stale agreement is safe: any sender already on the final view carries a
+    # mismatching hash, so R floods for it. What the barrier guarantees is
+    # that every node's LAST word is :ready for the final view.
+    test "the held group lands on the final router and the intermediate view is never trusted",
+         %{scope: scope} do
+      t_node = node()
+
+      check_trace(
+        fn ->
+          # Settled 2-node cluster {T, R}.
+          {:ok, p_r, r_node} = Peer.start(aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(r_node)
+          start_remote_muster(p_r, scope)
+          await_ready([t_node, r_node])
+
+          c_name = ~c"muster_cascade_c_#{System.unique_integer([:positive])}"
+          c_node = :"#{c_name}@127.0.0.1"
+          d_name = ~c"muster_cascade_d_#{System.unique_integer([:positive])}"
+          d_node = :"#{d_name}@127.0.0.1"
+          view3 = Enum.sort([t_node, r_node, c_node])
+          view4 = Enum.sort([t_node, r_node, c_node, d_node])
+          hash3 = :erlang.phash2(view3)
+          hash4 = :erlang.phash2(view4)
+
+          # The group's router moves on EVERY membership change: R -> C -> D.
+          # Pinning the initial router to R (not T) keeps T a pure source, so
+          # the only rows ever swept for the group are the two superseded
+          # routers' (R's and C's).
+          group =
+            pick_group([{[t_node, r_node], r_node}, {view3, c_node}, {view4, d_node}])
+
+          :ok = Muster.join(scope, group, spawn(fn -> Process.sleep(:infinity) end))
+          assert {:ok, ^r_node} = Muster.router(scope, group)
+          assert t_node in occupancy_on(r_node, scope, group)
+
+          # Park R's rebalance into the 3-node view until the test emits the
+          # release event: with R never announcing that view, no node can
+          # reach :ready for it, so D's join below is guaranteed to land
+          # mid-convergence.
+          force_ordering(
+            %{:"$kind" => :test_release_r},
+            %{:"$kind" => :muster_rebalance_start, node: ^r_node, to: ^view3}
+          )
+
+          {:ok, p_c, ^c_node} = Peer.start(name: c_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(c_node)
+          start_remote_muster(p_c, scope)
+
+          # R has registered C (so its parked rebalance is the view3 one), and
+          # T's first rebalance handed the group to the intermediate router C.
+          assert {:ok, _} =
+                   block_until(
+                     %{:"$kind" => :muster_peer_registered, node: ^r_node, peer: ^c_node},
+                     10_000
+                   )
+
+          assert {:ok, %{groups: snap_c}} =
+                   block_until(
+                     %{:"$kind" => :muster_node_state_received, node: ^c_node, source: ^t_node},
+                     10_000
+                   )
+
+          assert group in snap_c
+
+          # SECOND join, while everyone is still :converging on the C view.
+          {:ok, p_d, ^d_node} = Peer.start(name: d_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(d_node)
+          start_remote_muster(p_d, scope)
+
+          # T rebalances again — straight out of :converging — and re-hands
+          # the group to the final router D.
+          assert {:ok, %{groups: snap_d}} =
+                   block_until(
+                     %{:"$kind" => :muster_node_state_received, node: ^d_node, source: ^t_node},
+                     15_000
+                   )
+
+          assert group in snap_d
+
+          # The overlap state: T has already adopted the 4-node view but
+          # cannot be :ready (R, still parked, has announced neither view).
+          # Polling, not block_until: D's snapshot event fires while T is
+          # still inside do_rebalance (:rebalancing), and the :converging it
+          # then lands on is carried over from the first rebalance, so no new
+          # status event is emitted.
+          wait_until(fn ->
+            Muster.view_hash(scope) == hash4 and status(scope) == :converging
+          end)
+
+          refute Muster.can_decide?(scope, hash4)
+
+          # Release R: it finishes the stale view3 rebalance, then processes
+          # the queued discovery from D and rebalances into view4 — and the
+          # whole cluster converges on the FINAL view only.
+          tp(:test_release_r, %{})
+          await_ready(view4)
+
+          assert {:ok, ^d_node} = Muster.router(scope, group)
+          assert t_node in occupancy_on(d_node, scope, group)
+          assert Muster.can_decide?(scope, hash4)
+
+          # Both superseded routers' rows are judged stale once their source
+          # demonstrably agrees on the view, and swept (the drop events fire
+          # after the deletes).
+          for n <- [r_node, c_node] do
+            assert {:ok, _} =
+                     block_until(
+                       %{
+                         :"$kind" => :muster_drop_stale_entry,
+                         node: ^n,
+                         group: ^group,
+                         source: ^t_node
+                       },
+                       10_000
+                     )
+
+            assert occupancy_on(n, scope, group) == []
+          end
+
+          %{
+            group: group,
+            t_node: t_node,
+            r_node: r_node,
+            c_node: c_node,
+            d_node: d_node,
+            hash3: hash3,
+            hash4: hash4,
+            view4: view4
+          }
+        end,
+        fn result, trace ->
+          status_changes = of_kind(:muster_status_change, trace)
+
+          # The holder NEVER trusted the intermediate 3-node view: T did not
+          # emit :ready for its hash (only the released laggard R may, see the
+          # note above the test).
+          assert [] =
+                   Enum.filter(
+                     status_changes,
+                     &(&1.node == result.t_node and &1.to == :ready and
+                         &1.view_hash == result.hash3)
+                   )
+
+          # Every node reached :ready for the final view, and that is every
+          # node's LAST status word — a transient stale :ready (R's) must have
+          # been superseded, never the other way around.
+          last_status =
+            status_changes
+            |> Enum.group_by(& &1.node)
+            |> Map.new(fn {n, events} -> {n, List.last(events)} end)
+
+          assert Enum.sort(Map.keys(last_status)) == result.view4
+
+          for {_n, e} <- last_status do
+            assert e.to == :ready
+            assert e.view_hash == result.hash4
+          end
+
+          # The group was snapshotted exactly twice — to the intermediate
+          # router C, then to the final router D, in that order.
+          assert [%{node: c}, %{node: d}] =
+                   of_kind(:muster_node_state_received, trace)
+                   |> Enum.filter(&(&1.source == result.t_node and result.group in &1.groups))
+
+          assert c == result.c_node
+          assert d == result.d_node
+
+          # Both superseded routers — R (pre-join) and C (intermediate) —
+          # swept their stale row exactly once; the final router D never
+          # dropped it.
+          drops =
+            of_kind(:muster_drop_stale_entry, trace)
+            |> Enum.filter(&(&1.group == result.group and &1.source == result.t_node))
+
+          assert Enum.sort(Enum.map(drops, & &1.node)) ==
+                   Enum.sort([result.r_node, result.c_node])
+        end
+      )
+    end
+  end
+
+  describe "node death — groups rebalance onto the remaining nodes" do
+    setup do
+      scope = :"muster_death_#{System.unique_integer([:positive])}"
+      start_supervised!(spec(scope, vacant_flush_interval_ms: 100))
+      %{scope: scope}
+    end
+
+    # README "Trigger" + "Vacant-time RPC failure" cleanup: when a node leaves
+    # the cluster, every survivor sees its Scope's monitor DOWN, wipes the
+    # occupancy rows keyed by the dead node, recomputes the ring over the
+    # remaining members, re-announces its held groups to their new routers,
+    # and converges back to :ready. The three victim groups are picked from
+    # ring math so each documents one facet:
+    #   g_t    held by T, routed to D before / S after — T must re-tell S
+    #   g_s    held by S, routed to D before / T after — S must re-tell T
+    #   g_dead held by D alone, routed to T throughout — T's :DOWN wipe must
+    #          clear the {g_dead, D} row (nothing else ever cleans a dead
+    #          source's rows; D can't flush a vacancy, it's gone)
+    test "a dead node's routed groups move to survivors and its source rows are wiped",
+         %{scope: scope} do
+      t_node = node()
+
+      check_trace(
+        fn ->
+          # Settled 2-node cluster {T, S} (S = the surviving peer).
+          {:ok, p_s, s_node} = Peer.start(aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(s_node)
+          start_remote_muster(p_s, scope)
+          view2 = Enum.sort([t_node, s_node])
+          await_ready(view2)
+
+          # D's name is fixed upfront so the victim groups can be picked
+          # before it boots.
+          d_name = ~c"muster_death_d_#{System.unique_integer([:positive])}"
+          d_node = :"#{d_name}@127.0.0.1"
+          view3 = Enum.sort([t_node, s_node, d_node])
+          g_t = pick_group([{view3, d_node}, {view2, s_node}])
+          g_s = pick_group([{view3, d_node}, {view2, t_node}])
+          g_dead = pick_group([{view3, t_node}, {view2, t_node}])
+
+          {:ok, p_d, ^d_node} = Peer.start(name: d_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(d_node)
+          start_remote_muster(p_d, scope)
+          await_ready(view3)
+
+          :ok = Muster.join(scope, g_t, spawn(fn -> Process.sleep(:infinity) end))
+          :ok = :peer.call(p_s, MusterPeerAux, :join, [scope, g_s])
+          :ok = :peer.call(p_d, MusterPeerAux, :join, [scope, g_dead])
+
+          # Every router knows its group (join/3 only returns :ok once the
+          # router has been told).
+          assert t_node in occupancy_on(d_node, scope, g_t)
+          assert s_node in occupancy_on(d_node, scope, g_s)
+          assert d_node in occupancy_on(t_node, scope, g_dead)
+
+          # Kill the node. Both survivors must detect the DOWN, rebalance to
+          # {T, S} and re-converge — their SECOND :ready at view2, hence nth: 2.
+          :ok = stop_supervised({:peer, d_name})
+          await_ready(view2, nth: 2)
+
+          # The survivors agree the cluster is just {T, S}...
+          assert Muster.members(scope) == view2
+          assert :erpc.call(s_node, Muster, :members, [scope]) == view2
+
+          # ...the groups whose router died moved onto survivors, and the new
+          # routers were re-told by the holders...
+          assert {:ok, ^s_node} = Muster.router(scope, g_t)
+          assert t_node in occupancy_on(s_node, scope, g_t)
+          assert {:ok, ^t_node} = Muster.router(scope, g_s)
+          assert s_node in occupancy_on(t_node, scope, g_s)
+
+          # ...and the dead node survives nowhere as a source: the group only
+          # it held is gone, and no occupancy row on any survivor lists it.
+          assert occupancy_on(t_node, scope, g_dead) == []
+          assert occupancy_on(s_node, scope, g_dead) == []
+
+          dumps = [
+            {t_node, GenServer.call(Forum.Supervisor.name(scope), :dump)},
+            {s_node, :erpc.call(s_node, GenServer, :call, [Forum.Supervisor.name(scope), :dump])}
+          ]
+
+          for {n, dump} <- dumps, {group, sources} <- dump.occupancy do
+            refute d_node in sources,
+                   "#{inspect(n)} still lists the dead node as a source of #{inspect(group)}"
+          end
+
+          # The cluster is fully functional: a fresh join for the group the
+          # dead node used to hold succeeds against its current router.
+          assert :ok = Muster.join(scope, g_dead, spawn(fn -> Process.sleep(:infinity) end))
+
+          %{
+            g_t: g_t,
+            g_s: g_s,
+            t_node: t_node,
+            s_node: s_node,
+            view2: view2,
+            view3: view3
+          }
+        end,
+        fn result, trace ->
+          # Each survivor rebalanced view3 -> view2 exactly once (the `from`
+          # match excludes the original 1 -> 2 node formation rebalances).
+          for n <- [result.t_node, result.s_node] do
+            assert [_] =
+                     of_kind(:muster_rebalance_start, trace)
+                     |> Enum.filter(
+                       &(&1.node == n and &1.from == result.view3 and &1.to == result.view2)
+                     )
+          end
+
+          # The post-death snapshots really carried the moved groups: T
+          # re-told S about g_t, and S re-told T about g_s.
+          assert of_kind(:muster_node_state_received, trace)
+                 |> Enum.any?(
+                   &(&1.node == result.s_node and &1.source == result.t_node and
+                       result.g_t in &1.groups)
+                 )
+
+          assert of_kind(:muster_node_state_received, trace)
+                 |> Enum.any?(
+                   &(&1.node == result.t_node and &1.source == result.s_node and
+                       result.g_s in &1.groups)
+                 )
+        end
+      )
+    end
+  end
+
+  describe "network partition — split rebalances independently, heal re-merges" do
+    setup do
+      scope = :"muster_split_#{System.unique_integer([:positive])}"
+      start_supervised!(spec(scope, vacant_flush_interval_ms: 100))
+      %{scope: scope}
+    end
+
+    # README "Network partition": nodes that lose sight of each other detect
+    # the peer DOWN, rebalance independently, and route to whoever they can
+    # see; on heal, discovery -> rebalance merges the sub-clusters. Here the
+    # split is between the two PEERS while T stays connected to both — the
+    # asymmetric case, harsher than a clean split: each peer's view {T, self}
+    # and T's view {T, A, B} disagree, so the readiness barrier must keep
+    # EVERY node in :converging (routers flood, never trust occupancy) until
+    # the heal, and the stale-entry sweeps run during the split must not
+    # delete T's snapshotted rows (T never agreed to the split views).
+    test "peers that lose sight of each other rebalance apart and re-converge on heal",
+         %{scope: scope} do
+      t_node = node()
+
+      check_trace(
+        fn ->
+          # Both peers run with -connect_all false: their globals neither
+          # auto-mesh (the test wires the A<->B connection explicitly) nor
+          # report the deliberate disconnect to T's global, whose
+          # prevent_overlapping_partitions logic would otherwise tear down
+          # T's own links to "fix" the partial connectivity.
+          args = [~c"-connect_all", ~c"false"]
+
+          {:ok, p_a, a_node} = Peer.start(aux_mod: @aux_mod, args: args)
+          :ok = :snabbkaffe.forward_trace(a_node)
+          start_remote_muster(p_a, scope)
+          await_ready([t_node, a_node])
+
+          {:ok, p_b, b_node} = Peer.start(aux_mod: @aux_mod, args: args)
+          true = :erpc.call(b_node, Node, :connect, [a_node])
+          :ok = :snabbkaffe.forward_trace(b_node)
+          start_remote_muster(p_b, scope)
+
+          view3 = Enum.sort([t_node, a_node, b_node])
+          hash3 = :erlang.phash2(view3)
+          await_ready(view3)
+
+          # T holds one group routed to each peer.
+          g_a = group_routed_to(scope, a_node)
+          g_b = group_routed_to(scope, b_node)
+          :ok = Muster.join(scope, g_a, spawn(fn -> Process.sleep(:infinity) end))
+          :ok = Muster.join(scope, g_b, spawn(fn -> Process.sleep(:infinity) end))
+          assert t_node in occupancy_on(a_node, scope, g_a)
+          assert t_node in occupancy_on(b_node, scope, g_b)
+
+          # Split A <-/-> B. Each peer sees the other's Scope DOWN and
+          # rebalances down to {T, self}; T keeps the 3-node view nobody
+          # agrees with any more. (Polling, not block_until: whether a peer's
+          # earlier formation passed through the same {T, self} view — and so
+          # how many matching trace events exist — is timing-dependent.)
+          true = :erpc.call(a_node, Node, :disconnect, [b_node])
+
+          wait_until(fn ->
+            :erpc.call(a_node, Muster, :members, [scope]) == Enum.sort([t_node, a_node]) and
+              :erpc.call(b_node, Muster, :members, [scope]) == Enum.sort([t_node, b_node]) and
+              :erpc.call(a_node, MusterPeerAux, :status, [scope]) == :converging and
+              :erpc.call(b_node, MusterPeerAux, :status, [scope]) == :converging and
+              status(scope) == :converging
+          end)
+
+          # Nobody trusts an occupancy table while views disagree — routers
+          # flood (over-deliver, never miss)...
+          refute Muster.can_decide?(scope, hash3)
+          refute :erpc.call(a_node, Muster, :can_decide?, [scope, hash3])
+          refute :erpc.call(b_node, Muster, :can_decide?, [scope, hash3])
+
+          # ...but senders still route against their own settled ring.
+          assert {:ok, ^a_node} = Muster.router(scope, g_a)
+
+          # Heal. nodeup fires on both peers, discovery re-pairs them, every
+          # node rebalances back into the 3-node view and re-converges — the
+          # SECOND :ready at view3, hence nth: 2.
+          true = :erpc.call(a_node, Node, :connect, [b_node])
+          await_ready(view3, nth: 2, timeout: 20_000)
+
+          # The snapshotted rows survived the whole split/heal cycle, and the
+          # merged cluster trusts its tables again.
+          assert t_node in occupancy_on(a_node, scope, g_a)
+          assert t_node in occupancy_on(b_node, scope, g_b)
+          assert Muster.can_decide?(scope, hash3)
+          assert :erpc.call(a_node, Muster, :members, [scope]) == view3
+          assert :erpc.call(b_node, Muster, :members, [scope]) == view3
+
+          %{g_a: g_a, g_b: g_b, t_node: t_node}
+        end,
+        fn result, trace ->
+          # The sweeps run during the split never judged T's rows under a view
+          # T hadn't agreed to: neither group was dropped anywhere.
+          drops =
+            of_kind(:muster_drop_stale_entry, trace)
+            |> Enum.filter(&(&1.source == result.t_node and &1.group in [result.g_a, result.g_b]))
+
+          assert drops == []
+        end
+      )
+    end
+  end
+
+  describe "node restart with the same name — announce-watermark seq regression" do
+    setup do
+      scope = :"muster_restart_#{System.unique_integer([:positive])}"
+      # Small heartbeat so the "stuck despite the heartbeat backstop" proof is
+      # quick: if anything could heal the stuck node, a 200ms heartbeat would.
+      start_supervised!(
+        spec(scope, vacant_flush_interval_ms: 100, view_heartbeat_interval_ms: 200)
+      )
+
+      %{scope: scope}
+    end
+
+    # LIVENESS BUG (no existing coverage): the readiness barrier's member_views
+    # map is "newest-seq-wins and never reset" (README "the barrier converges"),
+    # keyed by the per-source announce watermark — a
+    # :erlang.unique_integer([:monotonic]) seq. That counter starts from the
+    # SAME base on every fresh VM, so a node that restarts under the SAME node
+    # name (an ordinary pod restart) comes back with a LOWER seq than the
+    # watermark a peer still holds from the dead incarnation. Nothing clears a
+    # departed peer's member_views entry (the :DOWN handler drops occupancy
+    # rows, not member_views), so put_member_view permanently rejects the
+    # restarted node's fresh announcements — and the view heartbeat, carrying
+    # the same regressed seq, is rejected too. The peer is stuck :converging
+    # forever for any view that differs from the stale one: it floods as a
+    # router instead of targeting, and never heals.
+    #
+    # The regression is forced deterministically by burning the global
+    # monotonic counter on S's first incarnation so its stored watermark is far
+    # above anything a fresh same-named restart reaches. View divergence is
+    # forced with a throwaway node Z (joins so S announces the HIGH watermark
+    # for {T,S,Z}, then dies before S restarts, so the final view is {T,S} —
+    # different from the stale {T,S,Z} entry T keeps).
+    test "a same-named restart's lower seq leaves the peer stuck :converging forever",
+         %{scope: scope} do
+      t_node = node()
+
+      check_trace(
+        fn ->
+          s_name = ~c"muster_restart_s_#{System.unique_integer([:positive])}"
+          s_node = :"#{s_name}@127.0.0.1"
+
+          # --- {T, S} forms and converges (S incarnation #1) ---------------
+          {:ok, p_s, ^s_node} = Peer.start(name: s_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(s_node)
+          start_remote_muster_fast_heartbeat(p_s, scope)
+          await_ready([t_node, s_node])
+
+          # Burn the global monotonic counter on S so its NEXT rebalance stamps
+          # an announce watermark ~100M above the fresh-VM base. A same-named
+          # restart starts from that base and never climbs anywhere near it
+          # before re-announcing, so its seq is guaranteed lower.
+          :ok = :peer.call(p_s, MusterPeerAux, :burn, [100_000_000])
+
+          # --- Z joins -> {T, S, Z}: S re-announces with the HIGH watermark --
+          z_name = ~c"muster_restart_z_#{System.unique_integer([:positive])}"
+          {:ok, p_z, z_node} = Peer.start(name: z_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(z_node)
+          start_remote_muster_fast_heartbeat(p_z, scope)
+
+          view_tsz = Enum.sort([t_node, s_node, z_node])
+          hash_tsz = :erlang.phash2(view_tsz)
+          await_ready(view_tsz)
+
+          # T now holds S's HIGH watermark for the {T,S,Z} view. Capture it.
+          dump_tsz = GenServer.call(Forum.Supervisor.name(scope), :dump)
+          {^hash_tsz, stale_seq} = dump_tsz.member_views[s_node]
+
+          # --- Kill S (incarnation #1) then Z, so the final view is {T,S} ----
+          # which differs from the stale {T,S,Z} entry T will keep.
+          :ok = stop_supervised({:peer, s_name})
+          wait_until(fn -> Muster.members(scope) == Enum.sort([t_node, z_node]) end)
+
+          :ok = stop_supervised({:peer, z_name})
+          wait_until(fn -> Muster.members(scope) == [t_node] end)
+
+          # T kept the stale entry across both deaths (nothing clears it).
+          dump_alone = GenServer.call(Forum.Supervisor.name(scope), :dump)
+          assert dump_alone.member_views[s_node] == {hash_tsz, stale_seq}
+
+          # --- S restarts under the SAME name (incarnation #2, fresh VM) -----
+          tp(:test_s_rejoined, %{})
+          {:ok, p_s2, ^s_node} = Peer.start(name: s_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(s_node)
+          start_remote_muster_fast_heartbeat(p_s2, scope)
+
+          view_ts = Enum.sort([t_node, s_node])
+          hash_ts = :erlang.phash2(view_ts)
+
+          # S (fresh) converges to :ready for {T,S}: it has no stale entry for T,
+          # so it accepts T's announcements. Wait via the trace so we don't race
+          # S's ring/Scope startup with an :erpc into it. nth: 2 because S's
+          # incarnation #1 (same node name -> same hash) already emitted :ready
+          # for {T,S} at the original formation; we want the post-restart one.
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_status_change,
+                       to: :ready,
+                       node: ^s_node,
+                       view_hash: ^hash_ts
+                     },
+                     2,
+                     15_000,
+                     :infinity
+                   )
+
+          assert :erpc.call(s_node, Muster, :members, [scope]) == view_ts
+
+          # T learns S is a member again (rebalances {T} -> {T,S})...
+          wait_until(fn -> Muster.members(scope) == view_ts end)
+
+          # ...but S's fresh announce seq is LOWER than the watermark T still
+          # holds, so newest-seq-wins rejects every announcement. Prove the
+          # regression with real values (no hard-coded base).
+          s2_seq = :peer.call(p_s2, MusterPeerAux, :current_seq, [])
+          assert s2_seq < stale_seq
+
+          # THE BUG: T is stuck :converging and cannot trust its occupancy
+          # table for the live cluster — it floods as a router forever. The
+          # 200ms heartbeat fires many times over the next second and heals
+          # nothing, because every heartbeat marker carries the same low seq.
+          Process.sleep(1_000)
+
+          assert status(scope) == :converging
+          refute Muster.can_decide?(scope, hash_ts)
+
+          # And T's member_views[S] is byte-for-byte the stale entry from
+          # incarnation #1 — T ignored every fresh announcement.
+          dump_final = GenServer.call(Forum.Supervisor.name(scope), :dump)
+          assert dump_final.member_views[s_node] == {hash_tsz, stale_seq}
+
+          %{
+            t_node: t_node,
+            s_node: s_node,
+            hash_ts: hash_ts,
+            stale_seq: stale_seq,
+            s2_seq: s2_seq
+          }
+        end,
+        fn result, trace ->
+          rejoin_at = Enum.find_index(trace, &(&1[:"$kind"] == :test_s_rejoined))
+          assert rejoin_at
+
+          status_changes = of_kind(:muster_status_change, trace)
+
+          # The restarted S DID announce + converge to :ready for the final
+          # {T,S} view (so the cluster genuinely converged — except T).
+          assert Enum.any?(
+                   status_changes,
+                   &(&1.node == result.s_node and &1.to == :ready and
+                       &1.view_hash == result.hash_ts)
+                 )
+
+          # But T NEVER reached :ready for the live {T,S} view after the rejoin
+          # — it is permanently stuck :converging. (T was :ready for {T,S} only
+          # at the original formation, before the rejoin marker.)
+          t_ready_after_rejoin =
+            trace
+            |> Enum.with_index()
+            |> Enum.any?(fn {e, idx} ->
+              e[:"$kind"] == :muster_status_change and e[:node] == result.t_node and
+                e[:to] == :ready and e[:view_hash] == result.hash_ts and idx > rejoin_at
+            end)
+
+          refute t_ready_after_rejoin,
+                 "T reached :ready for the live view after the restart — the bug is fixed?"
+
+          # The mechanism: the restart's seq regressed below the stale watermark.
+          assert result.s2_seq < result.stale_seq
         end
       )
     end
