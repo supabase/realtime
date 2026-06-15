@@ -61,6 +61,10 @@ defmodule Realtime.Tenants.SingleBroadcast do
           any(),
           content_type()
         ) :: :ok | {:error, term()} | {:error, atom(), String.t()}
+  def broadcast(_auth_params, %Tenant{suspend: true}, _topic, _event, _private, _payload, _content_type) do
+    {:error, :forbidden, "Tenant is suspended"}
+  end
+
   def broadcast(auth_params, %Tenant{} = tenant, topic, event, private, payload, content_type) do
     with %Ecto.Changeset{valid?: true} <- validate_message(topic, event, private, payload, content_type, tenant),
          events_per_second_rate = Tenants.events_per_second_rate(tenant),

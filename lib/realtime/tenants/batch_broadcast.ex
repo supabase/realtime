@@ -48,6 +48,10 @@ defmodule Realtime.Tenants.BatchBroadcast do
     broadcast(auth_params, %Tenant{} = tenant, messages, super_user)
   end
 
+  def broadcast(_auth_params, %Tenant{suspend: true}, _messages, _super_user) do
+    {:error, :forbidden, "Tenant is suspended"}
+  end
+
   def broadcast(auth_params, %Tenant{} = tenant, messages, super_user) do
     with %Ecto.Changeset{valid?: true} = changeset <- changeset(%__MODULE__{}, messages, tenant),
          %Ecto.Changeset{changes: %{messages: messages}} = changeset,
