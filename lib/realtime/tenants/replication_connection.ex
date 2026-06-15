@@ -36,7 +36,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
   alias RealtimeWeb.Socket.UserBroadcast
   alias RealtimeWeb.TenantBroadcaster
 
-  @default_query_timeout 30_000
+  @default_query_timeout :timer.minutes(4)
 
   @type t :: %__MODULE__{
           tenant_id: String.t(),
