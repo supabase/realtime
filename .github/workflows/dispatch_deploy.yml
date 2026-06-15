@@ -20,13 +20,20 @@ jobs:
   dispatch:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
+      - name: Fetch target repo
+        id: target
+        env:
+          TARGET_REPO: ${{ secrets.DEPLOY_TARGET_REPO }}
+        run: echo "name=${TARGET_REPO##*/}" >> "$GITHUB_OUTPUT"
+
       - name: Generate GitHub App token
         id: app-token
         uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
         with:
-          app-id: ${{ secrets.GH_APP_MANAGER_ID }}
+          client-id: ${{ secrets.GH_APP_MANAGER_ID }}
           private-key: ${{ secrets.GH_APP_MANAGER_PRIVATE_KEY }}
           owner: supabase
+          repositories: ${{ steps.target.outputs.name }}
 
       - name: Dispatch version update
         env:
