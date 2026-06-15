@@ -110,6 +110,7 @@ defmodule Realtime.Integration.RtChannel.BillableEventsTest do
 
       # Join events
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+
       # Broadcast event
       payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
 
@@ -120,7 +121,7 @@ defmodule Realtime.Integration.RtChannel.BillableEventsTest do
         assert_receive %Message{topic: ^topic, event: "broadcast", payload: ^payload}
       end
 
-      refute_receive _any
+      refute_receive %Message{topic: ^topic, event: "broadcast"}
 
       # Wait for RateCounter to run
       RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)

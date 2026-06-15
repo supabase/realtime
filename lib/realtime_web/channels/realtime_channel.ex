@@ -115,6 +115,8 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       RealtimeWeb.Endpoint.subscribe(tenant_topic, metadata: metadata)
       RealtimeWeb.Endpoint.subscribe("realtime:operations:" <> tenant_id, metadata: metadata)
+      RealtimeWeb.Endpoint.subscribe(Connect.syn_topic(tenant_id))
+      send(self(), :notify_replication_ready)
 
       is_new_api = new_api?(params)
       presence_enabled? = socket.assigns.presence_enabled?
@@ -144,7 +146,8 @@ defmodule RealtimeWeb.RealtimeChannel do
         self_broadcast: Join.self_broadcast?(join),
         tenant_topic: tenant_topic,
         channel_name: sub_topic,
-        presence_enabled?: presence_enabled?
+        presence_enabled?: presence_enabled?,
+        replication_ready_notified?: false
       }
 
       socket =
@@ -300,6 +303,20 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     {:noreply, assign(socket, %{pg_sub_ref: pg_sub_ref})}
   end
+
+  def handle_info(:notify_replication_ready, %{assigns: %{tenant: tenant_id}} = socket) do
+    case Connect.replication_status(tenant_id) do
+      {:ok, _replication_conn} -> {:noreply, push_replication_ready(socket)}
+      {:error, :not_connected} -> {:noreply, socket}
+    end
+  end
+
+  def handle_info(%{event: "ready", payload: %{replication_conn: pid}}, socket)
+      when is_pid(pid) do
+    {:noreply, push_replication_ready(socket)}
+  end
+
+  def handle_info(%{topic: "connect:" <> _}, socket), do: {:noreply, socket}
 
   def handle_info(_msg, %{assigns: %{policies: %Policies{broadcast: %BroadcastPolicies{read: false}}}} = socket) do
     Logger.warning("Broadcast message ignored")
@@ -735,6 +752,14 @@ defmodule RealtimeWeb.RealtimeChannel do
     push_system_message("system", socket, "error", message, channel_name)
     maybe_log_warning(socket, "ChannelShutdown", message)
     {:stop, :normal, socket}
+  end
+
+  defp push_replication_ready(%{assigns: %{replication_ready_notified?: true}} = socket), do: socket
+
+  defp push_replication_ready(%{assigns: %{tenant: tenant_id, channel_name: channel_name}} = socket) do
+    RealtimeWeb.Endpoint.unsubscribe(Connect.syn_topic(tenant_id))
+    push_system_message("broadcast", socket, "ok", "Replication connection established", channel_name)
+    assign(socket, :replication_ready_notified?, true)
   end
 
   defp push_system_message(extension, socket, status, error, channel_name)

@@ -193,6 +193,13 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
 
+      assert_receive %Message{
+                       event: "system",
+                       topic: ^realtime_topic,
+                       payload: %{"message" => "Replication connection established"}
+                     },
+                     2000
+
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => new_token})
 
       refute_receive %Message{}
@@ -311,6 +318,13 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
+
+      assert_receive %Message{
+                       event: "system",
+                       topic: ^realtime_topic,
+                       payload: %{"message" => "Replication connection established"}
+                     },
+                     2000
 
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{
         "access_token" => "sb_publishable_-fake_key"
