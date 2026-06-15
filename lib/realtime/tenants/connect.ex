@@ -36,6 +36,7 @@ defmodule Realtime.Tenants.Connect do
           db_conn_pid: pid(),
           replication_connection_pid: pid(),
           replication_connection_reference: reference(),
+          replication_start_task: reference() | nil,
           backoff: Backoff.t(),
           replication_recovery_started_at: non_neg_integer() | nil,
           check_connected_user_interval: non_neg_integer(),
@@ -49,6 +50,7 @@ defmodule Realtime.Tenants.Connect do
             db_conn_pid: nil,
             replication_connection_pid: nil,
             replication_connection_reference: nil,
+            replication_start_task: nil,
             backoff: nil,
             replication_recovery_started_at: nil,
             check_connected_user_interval: nil,
@@ -313,15 +315,7 @@ defmodule Realtime.Tenants.Connect do
   end
 
   def handle_continue(:start_replication, state) do
-    case start_replication_connection(state) do
-      {:ok, state} ->
-        {:noreply, state, {:continue, :setup_connected_user_events}}
-
-      {:error, error} ->
-        log_error("StartReplicationFailed", error)
-        state = open_replication_recovery(state)
-        {:noreply, state, {:continue, :setup_connected_user_events}}
-    end
+    {:noreply, async_start_replication_connection(state), {:continue, :setup_connected_user_events}}
   end
 
   def handle_continue(:setup_connected_user_events, state) do
@@ -402,6 +396,48 @@ defmodule Realtime.Tenants.Connect do
     {:noreply, open_replication_recovery(state)}
   end
 
+  # Handle the result of the async replication connection start task
+  def handle_info({replication_start_task, result}, %{replication_start_task: replication_start_task} = state) do
+    Process.demonitor(replication_start_task, [:flush])
+    state = %{state | replication_start_task: nil}
+
+    case result do
+      {:ok, replication_connection_pid} ->
+        update_syn_replication_conn(state.tenant_id, replication_connection_pid)
+        replication_connection_reference = Process.monitor(replication_connection_pid)
+
+        {:noreply,
+         %{
+           state
+           | replication_connection_pid: replication_connection_pid,
+             replication_connection_reference: replication_connection_reference,
+             backoff: Backoff.reset(state.backoff),
+             replication_recovery_started_at: nil
+         }}
+
+      {:error, :max_wal_senders_reached} ->
+        log_error("ReplicationMaxWalSendersReached", "Tenant database has reached the maximum number of WAL senders")
+        {:noreply, open_replication_recovery(state)}
+
+      {:error, :replication_connection_timeout} ->
+        log_error("ReplicationConnectionTimeout", "Replication connection timed out during initialization")
+        {:noreply, open_replication_recovery(state)}
+
+      {:error, error} ->
+        log_error("StartReplicationFailed", error)
+        {:noreply, open_replication_recovery(state)}
+    end
+  end
+
+  # Handle a crash of the async replication connection start task
+  def handle_info(
+        {:DOWN, replication_start_task, :process, _, reason},
+        %{replication_start_task: replication_start_task} = state
+      ) do
+    log_error("StartReplicationFailed", reason)
+    {:noreply, open_replication_recovery(%{state | replication_start_task: nil})}
+  end
+
   @replication_connection_query "SELECT 1 from pg_stat_activity where application_name='realtime_replication_connection'"
   @max_replication_recovery_ms :timer.hours(2)
   def handle_info(:recover_replication_connection, %{replication_recovery_started_at: nil} = state) do
@@ -409,33 +445,35 @@ defmodule Realtime.Tenants.Connect do
   end
 
   def handle_info(:recover_replication_connection, state) do
-    %{backoff: backoff, db_conn_pid: db_conn_pid, replication_recovery_started_at: started_at} = state
+    %{db_conn_pid: db_conn_pid, replication_recovery_started_at: started_at} = state
     elapsed = System.monotonic_time(:millisecond) - started_at
 
-    if elapsed > @max_replication_recovery_ms do
-      log_warning(
-        "ReplicationRecoveryWindowExceeded",
-        "Replication recovery window exceeded after #{elapsed}ms, terminating connection"
-      )
+    cond do
+      elapsed > @max_replication_recovery_ms ->
+        log_warning(
+          "ReplicationRecoveryWindowExceeded",
+          "Replication recovery window exceeded after #{elapsed}ms, terminating connection"
+        )
 
-      {:stop, :shutdown, state}
-    else
-      with {:query, {:ok, %{num_rows: 0}}} <- {:query, Postgrex.query(db_conn_pid, @replication_connection_query, [])},
-           {:start, {:ok, state}} <- {:start, start_replication_connection(state)} do
-        {:noreply, %{state | backoff: Backoff.reset(backoff), replication_recovery_started_at: nil}}
-      else
-        {:query, {:ok, %{num_rows: _}}} ->
-          Logger.info("Waiting for old walsender to exit")
-          {:noreply, schedule_replication_retry(state)}
+        {:stop, :shutdown, state}
 
-        {:query, {:error, error}} ->
-          log_error("ReplicationConnectionRecoveryFailed", "DB check failed during recovery: #{inspect(error)}")
-          {:noreply, schedule_replication_retry(state)}
+      # A start is already in flight, don't start another one
+      is_reference(state.replication_start_task) ->
+        {:noreply, state}
 
-        {:start, {:error, error}} ->
-          log_error("ReplicationConnectionRecoveryFailed", "Replication connection recovery failed: #{inspect(error)}")
-          {:noreply, schedule_replication_retry(state)}
-      end
+      true ->
+        case Postgrex.query(db_conn_pid, @replication_connection_query, []) do
+          {:ok, %{num_rows: 0}} ->
+            {:noreply, async_start_replication_connection(state)}
+
+          {:ok, %{num_rows: _}} ->
+            Logger.info("Waiting for old walsender to exit")
+            {:noreply, schedule_replication_retry(state)}
+
+          {:error, error} ->
+            log_error("ReplicationConnectionRecoveryFailed", "DB check failed during recovery: #{inspect(error)}")
+            {:noreply, schedule_replication_retry(state)}
+        end
     end
   end
 
@@ -520,36 +558,19 @@ defmodule Realtime.Tenants.Connect do
     :syn.update_registry(__MODULE__, tenant_id, fn _pid, meta -> %{meta | replication_conn: pid} end)
   end
 
-  defp start_replication_connection(state) do
-    %{tenant: tenant, tenant_id: tenant_id} = state
+  # Starts the replication connection off-process so Connect stays responsive to its mailbox
+  # while Postgrex.ReplicationConnection performs its (up to ~30s) synchronous connect.
+  # The resulting process is supervised by its own DynamicSupervisor and monitors `connect_pid`,
+  # so it self-cleans if Connect dies while the start is in flight. `connect_pid` must be captured
+  # here (the Connect process) and not inside the task, which would pass the task's pid.
+  defp async_start_replication_connection(%{tenant: tenant} = state) do
+    connect_pid = self()
 
-    with {:ok, replication_connection_pid} <- ReplicationConnection.start(tenant, self()),
-         {:ok, _} <- update_syn_replication_conn(tenant_id, replication_connection_pid) do
-      replication_connection_reference = Process.monitor(replication_connection_pid)
+    %Task{ref: ref} =
+      Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn ->
+        ReplicationConnection.start(tenant, connect_pid)
+      end)
 
-      state = %{
-        state
-        | replication_connection_pid: replication_connection_pid,
-          replication_connection_reference: replication_connection_reference
-      }
-
-      {:ok, state}
-    else
-      {:error, :max_wal_senders_reached} ->
-        log_error("ReplicationMaxWalSendersReached", "Tenant database has reached the maximum number of WAL senders")
-        {:error, :max_wal_senders_reached}
-
-      {:error, :replication_connection_timeout} ->
-        log_error("ReplicationConnectionTimeout", "Replication connection timed out during initialization")
-        {:error, :replication_connection_timeout}
-
-      {:error, error} ->
-        log_error("StartReplicationFailed", error)
-        {:error, error}
-    end
-  rescue
-    error ->
-      log_error("StartReplicationFailed", error)
-      {:error, error}
+    %{state | replication_start_task: ref}
   end
 end

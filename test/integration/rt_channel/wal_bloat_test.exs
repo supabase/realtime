@@ -83,9 +83,11 @@ defmodule Realtime.Integration.RtChannel.WalBloatTest do
 
       {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       original_connect_pid = Connect.whereis(tenant.external_id)
-      original_replication_pid = ReplicationConnection.whereis(tenant.external_id)
+      # Replication now starts asynchronously, so wait for the slot to be active before
+      # reading the replication pid (it would otherwise race and return nil).
       await_replication_slot_active(db_conn, 30, 500)
       original_db_pid = active_replication_slot_pid!(db_conn)
+      original_replication_pid = ReplicationConnection.whereis(tenant.external_id)
 
       replication_ref = Process.monitor(original_replication_pid)
 
