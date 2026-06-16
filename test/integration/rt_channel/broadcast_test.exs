@@ -14,6 +14,7 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
   alias Realtime.Database
   alias Realtime.Integration.WebsocketClient
   alias Realtime.Tenants.Connect
+  alias Realtime.Tenants.ReplicationConnection
 
   @moduletag :capture_log
 
@@ -272,6 +273,8 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
 
+      assert ReplicationConnection.ready?(tenant.external_id)
+
       value = random_string()
       Postgrex.query!(db_conn, "INSERT INTO #{table_name} (details) VALUES ($1)", [value])
 
@@ -399,6 +402,8 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
 
       value = random_string()
       event = random_string()
+
+      assert ReplicationConnection.ready?(tenant.external_id)
 
       Postgrex.query!(
         db_conn,
