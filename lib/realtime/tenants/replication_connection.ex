@@ -298,6 +298,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
   end
 
   def handle_result(results, %__MODULE__{step: :start_replication_slot} = state) do
+    dbg(results)
     error = Enum.find(results, fn res -> match?(%Postgrex.Error{}, res) end)
 
     if error do
@@ -310,7 +311,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
       } = state
 
       Logger.info(
-        "Starting stream replication for slot #{replication_slot_name} using publication #{publication_name} and protocol version #{proto_version}"
+        "#{inspect(self())} Starting stream replication for slot #{replication_slot_name} using publication #{publication_name} and protocol version #{proto_version}"
       )
 
       query =
