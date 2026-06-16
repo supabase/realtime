@@ -306,9 +306,7 @@ defmodule Realtime.RateCounterTest do
       # 1-second tick: add 10 events → avg should be ~10 events/second
       id_1s = {:domain, :metric, Ecto.UUID.generate()}
       args_1s = %Args{id: id_1s, opts: [tick: 1_000, max_bucket_len: 1]}
-      {:ok, pid} = RateCounter.new(args_1s)
-      # wait for init to complete
-      :sys.get_state(pid)
+      RateCounterHelper.new!(args_1s)
 
       GenCounter.add(id_1s, 10)
       {:ok, state_1s} = RateCounterHelper.tick!(args_1s)
@@ -317,9 +315,7 @@ defmodule Realtime.RateCounterTest do
       # 5-second tick: add 50 events (= 10 per second) → avg should also be ~10 events/second
       id_5s = {:domain, :metric, Ecto.UUID.generate()}
       args_5s = %Args{id: id_5s, opts: [tick: 5_000, max_bucket_len: 1]}
-      {:ok, pid} = RateCounter.new(args_5s)
-      # wait for init to complete
-      :sys.get_state(pid)
+      RateCounterHelper.new!(args_5s)
 
       GenCounter.add(id_5s, 50)
       {:ok, state_5s} = RateCounterHelper.tick!(args_5s)
@@ -344,9 +340,7 @@ defmodule Realtime.RateCounterTest do
         ]
       }
 
-      {:ok, pid} = RateCounter.new(args)
-      # wait for init to complete
-      :sys.get_state(pid)
+      RateCounterHelper.new!(args)
 
       # 60 events over a 5-second tick = 12 events/second, above the 10/s limit
       log =

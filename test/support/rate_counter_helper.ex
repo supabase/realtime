@@ -1,6 +1,21 @@
 defmodule RateCounterHelper do
   alias Realtime.RateCounter
 
+  @spec new!(RateCounter.Args.t()) :: pid()
+  def new!(args) do
+    {:ok, _} = RateCounter.new(args)
+    [{pid, _}] = Registry.lookup(Realtime.Registry.Unique, {RateCounter, :rate_counter, args.id})
+    await_initial_tick(pid)
+    pid
+  end
+
+  defp await_initial_tick(pid) do
+    case :sys.get_state(pid) do
+      %RateCounter{bucket: []} -> await_initial_tick(pid)
+      state -> state
+    end
+  end
+
   @spec stop(term()) :: :ok
   def stop(tenant_id) do
     keys =
