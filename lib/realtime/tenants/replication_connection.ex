@@ -32,6 +32,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
   alias Realtime.Telemetry
   alias Realtime.Tenants
   alias Realtime.Tenants.Cache
+  alias Realtime.Tenants.Connect
   alias RealtimeWeb.RealtimeChannel
   alias RealtimeWeb.Socket.UserBroadcast
   alias RealtimeWeb.TenantBroadcaster
@@ -124,6 +125,26 @@ defmodule Realtime.Tenants.ReplicationConnection do
       [{pid, _}] -> pid
       [] -> nil
     end
+  end
+
+  def ready?(tenant_id) do
+    RealtimeWeb.Endpoint.subscribe(Connect.syn_topic(tenant_id))
+    # We do a lookup after subscribing because we could've missed a message while subscribing
+    case Connect.replication_status(tenant_id) do
+      {:ok, _} ->
+        true
+
+      _ ->
+        # Wait for up to 5 seconds for the ready event
+        receive do
+          %{event: "ready", payload: %{replication_conn: conn}} when is_pid(conn) ->
+            true
+        after
+          5_000 -> false
+        end
+    end
+  after
+    RealtimeWeb.Endpoint.unsubscribe(Connect.syn_topic(tenant_id))
   end
 
   @spec health_check(pid(), timeout()) :: :ok | no_return()

@@ -192,15 +192,7 @@ defmodule Realtime.Integration.MeasureTrafficTest do
       # Wait for join to complete
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 1000
 
-      Enum.reduce_while(1..30, nil, fn _, _ ->
-        if ReplicationConnection.whereis(tenant.external_id),
-          do: {:halt, :ok},
-          else:
-            (
-              Process.sleep(500)
-              {:cont, nil}
-            )
-      end)
+      assert ReplicationConnection.ready?(tenant.external_id)
 
       for _ <- 1..5 do
         event = random_string()

@@ -481,6 +481,8 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
       value = random_string()
       event = random_string()
 
+      assert ReplicationConnection.ready?(tenant.external_id)
+
       Postgrex.query!(
         db_conn,
         "SELECT realtime.send (json_build_object ('value', $1 :: text)::jsonb, $2 :: text, $3 :: text, FALSE::bool);",
