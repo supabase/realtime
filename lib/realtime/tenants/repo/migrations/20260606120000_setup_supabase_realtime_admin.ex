@@ -7,21 +7,19 @@ defmodule Realtime.Tenants.Migrations.SetupSupabaseRealtimeAdmin do
     execute("""
     DO $$
     BEGIN
-      IF (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) THEN
-        ALTER ROLE supabase_realtime_admin WITH NOINHERIT CREATEROLE LOGIN REPLICATION;
-        ALTER ROLE supabase_realtime_admin SET search_path = public, extensions, realtime;
-        GRANT CREATE ON DATABASE postgres TO supabase_realtime_admin;
-        IF current_setting('server_version_num')::int >= 150000 THEN
-          EXECUTE 'GRANT SET ON PARAMETER log_min_messages TO supabase_realtime_admin';
-        END IF;
-        GRANT anon, authenticated, service_role TO supabase_realtime_admin;
-        GRANT CREATE, USAGE ON SCHEMA public TO supabase_realtime_admin;
-        GRANT USAGE ON SCHEMA extensions TO supabase_realtime_admin;
-        GRANT USAGE ON SCHEMA auth TO supabase_realtime_admin;
-        GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA auth TO supabase_realtime_admin;
-        GRANT USAGE ON SCHEMA realtime TO postgres, anon, authenticated, service_role;
-        GRANT ALL ON SCHEMA realtime TO supabase_realtime_admin WITH GRANT OPTION;
+      ALTER ROLE supabase_realtime_admin WITH NOINHERIT CREATEROLE LOGIN REPLICATION;
+      ALTER ROLE supabase_realtime_admin SET search_path = public, extensions, realtime;
+      GRANT CREATE ON DATABASE postgres TO supabase_realtime_admin;
+      IF current_setting('server_version_num')::int >= 150000 THEN
+        EXECUTE 'GRANT SET ON PARAMETER log_min_messages TO supabase_realtime_admin';
       END IF;
+      GRANT anon, authenticated, service_role TO supabase_realtime_admin;
+      GRANT CREATE, USAGE ON SCHEMA public TO supabase_realtime_admin;
+      GRANT USAGE ON SCHEMA extensions TO supabase_realtime_admin;
+      GRANT USAGE ON SCHEMA auth TO supabase_realtime_admin;
+      GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA auth TO supabase_realtime_admin;
+      GRANT USAGE ON SCHEMA realtime TO postgres, anon, authenticated, service_role;
+      GRANT ALL ON SCHEMA realtime TO supabase_realtime_admin WITH GRANT OPTION;
     END $$;
     """)
 
@@ -66,12 +64,10 @@ defmodule Realtime.Tenants.Migrations.SetupSupabaseRealtimeAdmin do
     execute("""
     DO $$
     BEGIN
-      IF (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) THEN
-        IF current_setting('supautils.policy_grants', true) LIKE '%realtime.subscription%' THEN
-          REVOKE supabase_realtime_admin FROM postgres;
-        ELSE
-          GRANT supabase_realtime_admin TO postgres;
-        END IF;
+      IF current_setting('supautils.policy_grants', true) LIKE '%realtime.subscription%' THEN
+        REVOKE supabase_realtime_admin FROM postgres;
+      ELSE
+        GRANT supabase_realtime_admin TO postgres;
       END IF;
     END $$;
     """)
