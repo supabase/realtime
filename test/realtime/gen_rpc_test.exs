@@ -193,6 +193,20 @@ defmodule Realtime.GenRpcTest do
       refute_receive _any
     end
 
+    test "abcast to registered process on the local node" do
+      name =
+        System.unique_integer()
+        |> to_string()
+        |> String.to_atom()
+
+      :erlang.register(name, self())
+
+      assert GenRpc.abcast([node()], name, "a message", []) == :ok
+
+      assert_receive "a message"
+      refute_receive _any
+    end
+
     @tag extra_config: [{:gen_rpc, :tcp_server_port, 9999}]
     test "tcp error" do
       Logger.put_process_level(self(), :debug)
@@ -204,7 +218,7 @@ defmodule Realtime.GenRpcTest do
           Process.sleep(100)
         end)
 
-      assert log =~ "[error] event=connect_to_remote_server"
+      assert log =~ "failed_to_connect_server"
 
       refute_receive _any
     end
@@ -251,7 +265,7 @@ defmodule Realtime.GenRpcTest do
           Process.sleep(100)
         end)
 
-      assert log =~ "[error] event=connect_to_remote_server"
+      assert log =~ "failed_to_connect_server"
 
       refute_receive _any
     end
@@ -280,7 +294,7 @@ defmodule Realtime.GenRpcTest do
           Process.sleep(100)
         end)
 
-      assert log =~ "[error] event=connect_to_remote_server"
+      assert log =~ "failed_to_connect_server"
 
       assert_receive :sent
       refute_receive _any

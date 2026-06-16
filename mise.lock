@@ -8,6 +8,9 @@ backend = "core:elixir"
 version = "27.3.4.10"
 backend = "core:erlang"
 
+[tools.erlang."platforms.macos-arm64"]
+checksum = "blake3:0d27e4815676201f374d135c1a9a8ee7d41535c3477509be9836232c57afddab"
+
 [[tools.node]]
 version = "24.14.1"
 backend = "core:node"
