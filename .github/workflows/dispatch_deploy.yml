@@ -24,7 +24,10 @@ jobs:
         id: target
         env:
           TARGET_REPO: ${{ secrets.DEPLOY_TARGET_REPO }}
-        run: echo "name=${TARGET_REPO##*/}" >> "$GITHUB_OUTPUT"
+        run: |
+          name="${TARGET_REPO##*/}"
+          echo "::add-mask::${name}"
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
 
       - name: Generate GitHub App token
         id: app-token
