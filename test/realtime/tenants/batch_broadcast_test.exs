@@ -494,6 +494,16 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       assert {:error, :tenant_not_found} = BatchBroadcast.broadcast(nil, nil, messages, false)
     end
 
+    test "does not broadcast when tenant is suspended", %{tenant: tenant} do
+      tenant = %{tenant | suspend: true}
+      messages = %{messages: [%{topic: "topic1", payload: %{"data" => "test"}, event: "event1"}]}
+
+      reject(&TenantBroadcaster.pubsub_broadcast/5)
+
+      assert {:error, :forbidden, "Tenant is suspended"} = BatchBroadcast.broadcast(nil, tenant, messages, false)
+      assert calls(&TenantBroadcaster.pubsub_broadcast/5) == []
+    end
+
     test "gracefully handles database connection errors for private messages", %{tenant: tenant} do
       topic = random_string()
       sub = random_string()

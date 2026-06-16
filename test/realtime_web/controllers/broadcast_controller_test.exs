@@ -172,6 +172,25 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     end
   end
 
+  describe "suspended tenant" do
+    test "returns 403 and does not broadcast when tenant is suspended", %{conn: conn, tenant: tenant} do
+      Realtime.Tenants.Cache.update_cache(%{tenant | suspend: true})
+
+      reject(&TenantBroadcaster.pubsub_broadcast/5)
+
+      conn =
+        post(conn, Routes.broadcast_path(conn, :broadcast), %{
+          "messages" => [
+            %{"topic" => "sub_topic", "payload" => %{"data" => "data"}, "event" => "event"}
+          ]
+        })
+
+      assert conn.status == 403
+      assert conn.resp_body == Jason.encode!(%{message: "Tenant is suspended"})
+      assert calls(&TenantBroadcaster.pubsub_broadcast/5) == []
+    end
+  end
+
   describe "too many requests" do
     test "batch will exceed rate limit", %{conn: conn, tenant: tenant} do
       requests_rate = Tenants.requests_per_second_rate(tenant)
