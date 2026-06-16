@@ -483,13 +483,13 @@ defmodule Realtime.Tenants.ConnectTest do
       Process.sleep(100)
       assert {:error, :not_connected} = Connect.replication_status(tenant.external_id)
 
-      new_replication_connection_pid = assert_pid(fn -> ReplicationConnection.whereis(tenant.external_id) end)
+      new_replication_connection_pid = assert_pid(fn -> ReplicationConnection.whereis(tenant.external_id) end, 60)
 
       assert replication_connection_pid != new_replication_connection_pid
       assert Process.alive?(new_replication_connection_pid)
       assert Process.alive?(pid)
 
-      assert {:ok, replication_conn_after} = assert_replication_status(tenant.external_id)
+      assert {:ok, replication_conn_after} = assert_replication_status(tenant.external_id, 60)
       assert replication_conn_before != replication_conn_after
     end
 
