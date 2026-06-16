@@ -32,7 +32,7 @@ defmodule RealtimeWeb.FallbackController do
   end
 
   def call(conn, {:error, status, message}) when is_atom(status) and is_binary(message) do
-    log_error("UnprocessableEntity", message)
+    if status == :unprocessable_entity, do: log_error("UnprocessableEntity", message)
 
     conn
     |> put_status(status)
