@@ -69,12 +69,22 @@ defmodule Containers do
         {:reply, {:ok, name, port}, %{state | existing_containers: rest}}
 
       [] ->
-        [port | ports] = state.ports
-        name = "realtime-test-#{random_string(12)}"
-
-        docker_run!(name, port)
-
+        {name, port, ports} = start_available_container(state.ports)
         {:reply, {:ok, name, port}, %{state | ports: ports}}
+    end
+  end
+
+  defp start_available_container(ports, attempts \\ 5)
+
+  defp start_available_container([], _attempts), do: raise("Containers: no ports left to start a container")
+  defp start_available_container(_ports, 0), do: raise("Containers: exhausted retries starting a container")
+
+  defp start_available_container([port | ports], attempts) do
+    name = "realtime-test-#{random_string(12)}"
+
+    case docker_run(name, port) do
+      {_, 0} -> {name, port, ports}
+      {_output, _code} -> start_available_container(ports, attempts - 1)
     end
   end
 
@@ -311,11 +321,16 @@ defmodule Containers do
   end
 
   defp docker_run!(name, port) do
+    {_, 0} = docker_run(name, port)
+  end
+
+  defp docker_run(name, port) do
     initdb_sh = Path.expand("../../dev/postgres/za-permit-supabase-admin.sh", __DIR__)
     initdb_sql = Path.expand("../../dev/postgres/zb-supabase-schema.sql", __DIR__)
 
-    {_, 0} =
-      System.cmd("docker", [
+    System.cmd(
+      "docker",
+      [
         "run",
         "-d",
         "--rm",
@@ -341,6 +356,8 @@ defmodule Containers do
         "max_wal_size=32MB",
         "-c",
         "max_slot_wal_keep_size=32MB"
-      ])
+      ],
+      stderr_to_stdout: true
+    )
   end
 end
