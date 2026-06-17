@@ -402,7 +402,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   defp server_version_major(db_conn) do
     case Postgrex.query(db_conn, "SHOW server_version_num", [], timeout: @query_timeout) do
       {:ok, %{rows: [[num]]}} ->
-        div(String.to_integer(num), 10000)
+        div(String.to_integer(num), 10_000)
 
       {:error, reason} ->
         log_warning("TenantMigrationsServerVersionFailed", reason)

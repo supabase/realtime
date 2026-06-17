@@ -93,7 +93,7 @@ defmodule Mix.Tasks.Realtime.ExportTenantDbCatalog do
 
     %{rows: [[num]]} = Postgrex.query!(conn, "SHOW server_version_num", [])
     GenServer.stop(conn)
-    div(String.to_integer(num), 10000)
+    div(String.to_integer(num), 10_000)
   end
 
   defp validate_snapshot!(path) do
