@@ -1,17 +1,21 @@
-defmodule Mix.Tasks.Realtime.ExportTenantDbBaseline do
-  @shortdoc "Regenerate priv/repo/tenant_db_baseline.json"
+defmodule Mix.Tasks.Realtime.ExportTenantDbCatalog do
+  @shortdoc "Regenerate priv/repo/tenant_db_catalog_17.json"
 
   @moduledoc """
-  Writes the baseline catalog snapshot at `priv/repo/tenant_db_baseline.json`
-  used by `RealtimeWeb.Dashboard.TenantMigrations` to detect drifted DB state.
+  Writes the catalog snapshot at `priv/repo/tenant_db_catalog_17.json` used by
+  `RealtimeWeb.Dashboard.TenantMigrations` to detect drifted DB state.
+
+  pg-delta requires Postgres 15+, so the snapshot is generated against PG17 and
+  the dashboard reconciles every tenant against it. The major version is kept in
+  the filename so other versions can be added later if needed.
 
   Usage:
 
-      mix realtime.export_tenant_db_baseline
-      mix realtime.export_tenant_db_baseline --pgdelta-path /path/to/pgdelta
+      mix realtime.export_tenant_db_catalog
+      mix realtime.export_tenant_db_catalog --pgdelta-path /path/to/pgdelta
 
   The target tenant DB is expected to already have all tenant migrations applied,
-  so make sure the it is in a good state before generating it:
+  so make sure it is in a good state before generating it:
 
       mise task run db-rm
       mise task run db-start
@@ -23,7 +27,7 @@ defmodule Mix.Tasks.Realtime.ExportTenantDbBaseline do
   """
   use Mix.Task
 
-  @baseline_path "priv/repo/tenant_db_baseline.json"
+  @catalog_path "priv/repo/tenant_db_catalog_17.json"
   @catalog_filter ~s({"*/schema": "realtime"})
 
   @impl Mix.Task
@@ -31,12 +35,12 @@ defmodule Mix.Tasks.Realtime.ExportTenantDbBaseline do
     {opts, _, _} = OptionParser.parse(args, strict: [pgdelta_path: :string])
 
     url = build_url_from_env()
-    Mix.shell().info("[export_tenant_db_baseline] target: #{redact(url)}")
+    Mix.shell().info("[export_tenant_db_catalog] target: #{redact(url)}")
 
     pgdelta = pgdelta_bin!(opts[:pgdelta_path])
-    Mix.shell().info("[export_tenant_db_baseline] pgdelta: #{pgdelta}")
+    Mix.shell().info("[export_tenant_db_catalog] pgdelta: #{pgdelta}")
 
-    output = Path.expand(@baseline_path, File.cwd!())
+    output = Path.expand(@catalog_path, File.cwd!())
     args = ["catalog-export", "--target", url, "--output", output, "--filter", @catalog_filter]
 
     case System.cmd(pgdelta, args, stderr_to_stdout: true) do
@@ -71,7 +75,7 @@ defmodule Mix.Tasks.Realtime.ExportTenantDbBaseline do
          {:ok, _} <- Jason.decode(content) do
       :ok
     else
-      _ -> Mix.raise("baseline snapshot at #{path} is invalid")
+      _ -> Mix.raise("catalog snapshot at #{path} is invalid")
     end
   end
 
