@@ -20,7 +20,13 @@ defmodule Mix.Tasks.Openapi.Export do
 
     output = Keyword.get(opts, :output, @default_output)
 
-    Mix.Task.run("app.start")
+    # Compile and load the app metadata, but do NOT start it. The spec is
+    # derived from the router and compiled modules, so booting the supervision
+    # tree — which would require a database connection and the runtime secrets
+    # in config/runtime.exs — is unnecessary and would make the export fail in
+    # a bare CI environment.
+    Mix.Task.run("compile")
+    _ = Application.load(:realtime)
 
     spec =
       RealtimeWeb.ApiSpec.spec()
