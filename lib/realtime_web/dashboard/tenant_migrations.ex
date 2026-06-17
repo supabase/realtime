@@ -414,7 +414,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
         args = [
           "plan",
           "--source",
-          postgres_url(settings),
+          postgres_url(%{settings | username: "supabase_admin"}),
           "--target",
           catalog,
           "--filter",
