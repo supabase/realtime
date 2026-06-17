@@ -8,8 +8,8 @@ defmodule RealtimeWeb.Channels.Payloads.Presence do
   alias RealtimeWeb.Channels.Payloads.FlexibleBoolean
 
   embedded_schema do
-    field :enabled, FlexibleBoolean, default: true
-    field :key, :any, default: UUID.uuid1(), virtual: true
+    field :enabled, FlexibleBoolean, default: false
+    field :key, :any, virtual: true
   end
 
   def changeset(presence, attrs) do

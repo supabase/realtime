@@ -53,27 +53,23 @@ defmodule RealtimeWeb.RealtimeChannel do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
     Logger.put_process_level(self(), log_level)
 
-    presence_enabled? =
-      case get_in(params, ["config", "presence", "enabled"]) do
-        enabled when is_boolean(enabled) -> enabled
-        _ -> false
+    join =
+      case Join.validate(params) do
+        {:ok, join} ->
+          join
+
+        {:error, :invalid_join_payload, errors} ->
+          log_params = params |> Map.put("access_token", "<redacted>") |> Map.put("user_token", "<redacted>")
+          log_error(socket, "InvalidJoinPayload", %{changeset_errors: errors, params: log_params})
+          %Join{} |> Join.changeset(params) |> Ecto.Changeset.apply_changes()
       end
 
     socket =
       socket
       |> assign_access_token(params)
-      |> assign(:private?, !!params["config"]["private"])
+      |> assign(:private?, Join.private?(join))
       |> assign(:policies, nil)
-      |> assign(:presence_enabled?, presence_enabled?)
-
-    case Join.validate(params) do
-      {:ok, _join} ->
-        nil
-
-      {:error, :invalid_join_payload, errors} ->
-        log_params = params |> Map.put("access_token", "<redacted>") |> Map.put("user_token", "<redacted>")
-        log_error(socket, "InvalidJoinPayload", %{changeset_errors: errors, params: log_params})
-    end
+      |> assign(:presence_enabled?, Join.presence_enabled?(join))
 
     with :ok <- SignalHandler.shutdown_in_progress?(),
          {:ok, tenant} <- Cache.fetch_tenant_by_external_id(tenant_id),
@@ -124,13 +120,13 @@ defmodule RealtimeWeb.RealtimeChannel do
       state = %{postgres_changes: add_id_to_postgres_changes(pg_change_params)}
 
       assigns = %{
-        ack_broadcast: !!params["config"]["broadcast"]["ack"],
+        ack_broadcast: Join.ack_broadcast?(join),
         confirm_token_ref: confirm_token_ref,
         is_new_api: is_new_api,
         pg_sub_ref: nil,
         pg_change_params: pg_change_params,
-        presence_key: presence_key(params),
-        self_broadcast: !!params["config"]["broadcast"]["self"],
+        presence_key: Join.presence_key(join),
+        self_broadcast: Join.self_broadcast?(join),
         tenant_topic: tenant_topic,
         channel_name: sub_topic,
         presence_enabled?: presence_enabled?
@@ -655,13 +651,6 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp count(%{assigns: %{rate_counter: counter}}), do: GenCounter.add(counter.id)
-
-  defp presence_key(params) do
-    case params["config"]["presence"]["key"] do
-      key when is_binary(key) and key != "" -> key
-      _ -> UUID.uuid1()
-    end
-  end
 
   defp assign_access_token(%{assigns: %{tenant_token: tenant_token}} = socket, params) do
     access_token = Map.get(params, "access_token") || Map.get(params, "user_token")
