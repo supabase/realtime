@@ -1,15 +1,16 @@
-name: Update Tenant DB Baseline
+name: Update Tenant DB Catalog
 
 on:
   pull_request:
     paths:
       - "lib/realtime/tenants/repo/migrations/**"
       - "lib/realtime/tenants/migrations.ex"
-      - "lib/mix/tasks/realtime.export_tenant_db_baseline.ex"
+      - "lib/mix/tasks/realtime.export_tenant_db_catalog.ex"
+      - "priv/repo/tenant_db_catalog_*.json"
       - "mix.lock"
       - "mise.toml"
       - "compose.dbs.yml"
-      - ".github/workflows/update-tenant-db-baseline.yml"
+      - ".github/workflows/update-tenant-db-catalog.yml"
 
 permissions:
   contents: read
@@ -19,28 +20,32 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
-env:
-  POSTGRES_IMAGE: supabase/postgres:17.6.1.127
-
 jobs:
-  update-tenant-db-baseline:
-    name: Maybe regenerate tenant baseline
+  export:
+    name: Export catalog (${{ matrix.postgres }})
     runs-on: blacksmith-2vcpu-ubuntu-2404
     if: github.event.pull_request.head.repo.full_name == github.repository
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - postgres: pg14
+            postgres_image: supabase/postgres:14.1.0.82
+            catalog: priv/repo/tenant_db_catalog_14.json
+          - postgres: pg15
+            postgres_image: supabase/postgres:15.14.1.137
+            catalog: priv/repo/tenant_db_catalog_15.json
+          - postgres: pg17
+            postgres_image: supabase/postgres:17.6.1.137
+            catalog: priv/repo/tenant_db_catalog_17.json
+    env:
+      POSTGRES_IMAGE: ${{ matrix.postgres_image }}
 
     steps:
-      - name: Generate GitHub App token
-        id: app-token
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
-        with:
-          app-id: ${{ secrets.GH_AUTOFIX_APP_ID }}
-          private-key: ${{ secrets.GH_AUTOFIX_PRIVATE_KEY }}
-
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
-          token: ${{ steps.app-token.outputs.token }}
 
       - name: Setup mise
         uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
@@ -82,25 +87,58 @@ jobs:
       - name: Set up realtime DB and migrate tenant DB
         run: mix ecto.setup
 
-      - name: Export baseline snapshot
-        run: mix realtime.export_tenant_db_baseline
+      - name: Export catalog snapshot
+        run: mix realtime.export_tenant_db_catalog
 
-      - name: Check if baseline changed
+      - name: Upload catalog snapshot
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: catalog-${{ matrix.postgres }}
+          path: ${{ matrix.catalog }}
+
+  commit:
+    name: Commit catalog snapshots
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    needs: export
+    if: github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.GH_APP_MANAGER_ID }}
+          private-key: ${{ secrets.GH_APP_MANAGER_PRIVATE_KEY }}
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Download catalog snapshots
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: catalog-*
+          path: priv/repo
+          merge-multiple: true
+
+      - name: Check if catalogs changed
         id: check-changes
         run: |
-          if git diff --quiet priv/repo/tenant_db_baseline.json; then
+          git add priv/repo/tenant_db_catalog_*.json
+          if git diff --cached --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Commit and push baseline
+      - name: Commit and push catalogs
         if: steps.check-changes.outputs.changed == 'true'
         env:
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add priv/repo/tenant_db_baseline.json
-          git commit -m "chore: update tenant_db_baseline.json"
+          git commit -m "chore: update tenant_db_catalog snapshots"
           git push origin "HEAD:$PR_HEAD_REF"

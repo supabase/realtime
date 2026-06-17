@@ -68,7 +68,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
   test "renders pg-delta section header when tenant is found", %{conn: conn, tenant: tenant} do
     {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_migrations?external_id=#{tenant.external_id}")
 
-    assert has_element?(view, "h6", "pg-delta plan vs baseline")
+    assert has_element?(view, "h6", "pg-delta plan vs catalog")
   end
 
   describe "backfill_schema_migrations/1" do
