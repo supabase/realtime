@@ -91,6 +91,20 @@ defmodule RealtimeWeb.RealtimeChannel do
            maybe_replay_messages(params["config"], sub_topic, db_conn, tenant_id, socket.assigns.private?) do
       tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, !socket.assigns.private?)
 
+      # presence.read gate carried in the fastlane metadata so the dispatcher can withhold
+      # presence_diff from members denied presence.read:
+      #   * public channel (no policies) -> true (no presence authorization, always receive diffs)
+      #   * private + presence enabled at join -> the authorized presence.read value (true/false)
+      #   * private + presence not enabled -> nil (read not evaluated yet). The dispatcher routes
+      #     these diffs to the channel process (handle_info) instead of fastlaning, where presence.read
+      #     is consulted at delivery time (it is authorized on-demand when presence is auto-enabled via
+      #     a track message - see PresenceHandler).
+      presence_read? =
+        case socket.assigns.policies do
+          nil -> true
+          %Policies{presence: %{read: read}} -> read
+        end
+
       # fastlane subscription
       metadata =
         MessageDispatcher.fastlane_metadata(
@@ -99,7 +113,8 @@ defmodule RealtimeWeb.RealtimeChannel do
           topic,
           log_level,
           tenant_id,
-          replayed_message_ids
+          replayed_message_ids,
+          presence_read?
         )
 
       RealtimeWeb.Endpoint.subscribe(tenant_topic, metadata: metadata)
@@ -390,6 +405,16 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_info(:sync_presence, socket), do: {:noreply, socket}
+
+  # presence_diff for a socket whose presence.read was not authorized at join (presence disabled
+  # then) is routed here by the dispatcher instead of fastlaned. Deliver it only if this socket is
+  # authorized for presence.read (authorized on-demand when presence was auto-enabled via track),
+  # otherwise drop it.
+  def handle_info({:authorize_presence_diff, %Phoenix.Socket.Broadcast{} = msg}, socket) do
+    if can_read_presence?(socket), do: push(socket, "presence_diff", msg.payload)
+    {:noreply, socket}
+  end
+
   def handle_info(_, socket), do: {:noreply, socket}
 
   @impl true
@@ -915,6 +940,9 @@ defmodule RealtimeWeb.RealtimeChannel do
   defp presence_enabled?(client_enabled?, %Tenant{presence_enabled: tenant_enabled}) do
     client_enabled? || tenant_enabled
   end
+
+  defp can_read_presence?(%{assigns: %{policies: %Policies{presence: %{read: true}}}}), do: true
+  defp can_read_presence?(_socket), do: false
 
   defp max_heap_size(), do: :persistent_term.get({RealtimeWeb.UserSocket, :websocket_max_heap_size})
 

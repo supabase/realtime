@@ -205,6 +205,106 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
       assert get_in(join_payload, ["t"]) == payload.payload.t
     end
 
+    @tag policies: [
+           :authenticated_read_broadcast,
+           :authenticated_read_presence_for_sub,
+           :authenticated_write_broadcast_and_presence
+         ],
+         sub: Ecto.UUID.generate()
+    test "presence_diff is withheld from a member denied presence.read",
+         %{tenant: tenant, topic: topic, sub: sub, serializer: serializer} do
+      parent = self()
+      # Forward the other's frames tagged so they don't collide with the main mailbox.
+      other_inbox = spawn_link(fn -> forward_frames(parent, :other) end)
+
+      topic = "realtime:#{topic}"
+      config = %{presence: %{key: "", enabled: true}, private: true}
+
+      # main holds both broadcast.read and presence.read (presence.read is keyed to its sub).
+      {main, _} = get_connection(tenant, serializer, role: "authenticated", claims: %{sub: sub})
+
+      # Other holds broadcast.read but is explicitly denied presence.read (different sub).
+      {:ok, other_token} = token_valid(tenant, "authenticated", %{sub: Ecto.UUID.generate()})
+      other_uri = "#{uri(tenant, serializer)}&log_level=warning"
+
+      {:ok, other} =
+        WebsocketClient.connect(other_inbox, other_uri, serializer, [{"x-api-key", other_token}])
+
+      # Both join successfully: the join gate only enforces broadcast.read.
+      WebsocketClient.join(other, topic, %{config: config})
+      assert_receive {:other, %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}}, 500
+      # Should not receive presence_state
+      refute_receive {:other, %Message{event: "presence_state", topic: ^topic}}, 500
+
+      WebsocketClient.join(main, topic, %{config: config})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+      assert_receive %Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
+
+      # Main tracks presence metadata an application would treat as restricted.
+      test = %{test: "should not go to other", user_id: sub}
+      WebsocketClient.send_event(main, topic, "presence", %{type: "presence", event: "TRACK", payload: test})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+
+      # Main sees the diff
+      assert_receive %Message{event: "presence_diff", payload: %{"joins" => joins, "leaves" => %{}}, topic: ^topic}, 500
+      meta = joins |> Map.values() |> hd() |> get_in(["metas"]) |> hd()
+      assert get_in(meta, ["test"]) == "should not go to other"
+
+      # Other can't receive the diff
+      refute_receive {:other, %Message{event: "presence_diff", topic: ^topic}}, 1000
+      refute_receive _any
+    end
+
+    # Same as above but presence is auto-enabled via track (config presence.enabled = false), which
+    # exercises the on-demand presence.read authorization + fastlane metadata refresh path: the gate
+    # must hold even when presence.read is not authorized at join time.
+    @tag policies: [
+           :authenticated_read_broadcast,
+           :authenticated_read_presence_for_sub,
+           :authenticated_write_broadcast_and_presence
+         ],
+         sub: Ecto.UUID.generate()
+    test "presence_diff gate holds when presence is auto-enabled via track",
+         %{tenant: tenant, topic: topic, sub: sub, serializer: serializer} do
+      parent = self()
+      other_inbox = spawn_link(fn -> forward_frames(parent, :other) end)
+
+      topic = "realtime:#{topic}"
+      # presence disabled at join: presence.read is not authorized until the first track.
+      config = %{presence: %{key: "", enabled: false}, private: true}
+      track = fn payload -> %{type: "presence", event: "TRACK", payload: payload} end
+
+      {main, _} = get_connection(tenant, serializer, role: "authenticated", claims: %{sub: sub})
+
+      {:ok, other_token} = token_valid(tenant, "authenticated", %{sub: Ecto.UUID.generate()})
+      other_uri = "#{uri(tenant, serializer)}&log_level=warning"
+
+      {:ok, other} =
+        WebsocketClient.connect(other_inbox, other_uri, serializer, [{"x-api-key", other_token}])
+
+      WebsocketClient.join(other, topic, %{config: config})
+      assert_receive {:other, %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}}, 500
+
+      WebsocketClient.join(main, topic, %{config: config})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+
+      WebsocketClient.send_event(other, topic, "presence", track.(%{name: "other"}))
+      assert_receive {:other, %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}}, 500
+
+      test = %{test: "should not go to other", user_id: sub}
+      WebsocketClient.send_event(main, topic, "presence", track.(test))
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+
+      # Main sees the diff
+      assert_receive %Message{event: "presence_diff", payload: %{"joins" => joins}, topic: ^topic}, 1000
+      meta = joins |> Map.values() |> hd() |> get_in(["metas"]) |> hd()
+      assert get_in(meta, ["test"]) == "should not go to other"
+
+      # Other can't receive the diff
+      refute_receive {:other, %Message{event: "presence_diff", topic: ^topic}}, 1000
+      refute_receive _any
+    end
+
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
     test "presence enabled if param enabled is set in configuration for private channels", %{
       tenant: tenant,
@@ -312,5 +412,15 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
 
       refute log =~ ~r/external_id=#{tenant.external_id}.*UnableToHandlePresence/
     end
+  end
+
+  # Forwards every frame received from a WebsocketClient to `parent`, wrapped in `{tag, frame}`,
+  # so a second socket's frames can be asserted on independently of the test process mailbox.
+  defp forward_frames(parent, tag) do
+    receive do
+      frame -> send(parent, {tag, frame})
+    end
+
+    forward_frames(parent, tag)
   end
 end

@@ -86,11 +86,15 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
        when is_private?(socket) and is_nil(socket.assigns.policies.presence.write) do
     %{assigns: %{authorization_context: authorization_context, policies: policies}} = socket
 
-    case Authorization.get_write_authorizations(policies, db_conn, authorization_context) do
-      {:ok, policies} ->
-        socket = assign(socket, :policies, policies)
-        handle_presence_event("track", payload, db_conn, socket)
-
+    # presence is being enabled by this track. Authorize presence.read now if it wasn't evaluated at
+    # join (the join skips it when presence was disabled, leaving read nil) so the channel can gate
+    # presence_diff for this socket, then authorize presence.write.
+    with {:ok, policies} <- maybe_authorize_presence_read(policies, db_conn, authorization_context),
+         {:ok, policies} <-
+           Authorization.get_write_authorizations(policies, db_conn, authorization_context, presence_enabled?: true) do
+      socket = assign(socket, :policies, policies)
+      handle_presence_event("track", payload, db_conn, socket)
+    else
       {:error, :rls_policy_error, error} ->
         log_error("RlsPolicyError", error)
         {:error, :rls_policy_error}
@@ -173,6 +177,14 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
         {:error, :unable_to_track_presence}
     end
   end
+
+  # presence.read is left unevaluated (nil) at join when presence is disabled. Authorize it now that
+  # presence is being enabled; otherwise it was already evaluated at join, so reuse it.
+  defp maybe_authorize_presence_read(%{presence: %{read: nil}} = policies, db_conn, authorization_context) do
+    Authorization.get_read_authorizations(policies, db_conn, authorization_context, presence_enabled?: true)
+  end
+
+  defp maybe_authorize_presence_read(policies, _db_conn, _authorization_context), do: {:ok, policies}
 
   defp check_track_payload(_assigns, payload) when not is_map(payload), do: {:error, :invalid_payload}
   defp check_track_payload(%{presence_track_payload: payload}, payload), do: {:error, :no_payload_change}
