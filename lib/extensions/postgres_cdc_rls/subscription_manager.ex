@@ -84,17 +84,29 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     extension = Realtime.PostgresCdc.filter_settings("postgres_cdc_rls", tenant.extensions)
     extension = Map.merge(extension, %{"subs_pool_size" => Map.get(extension, "subcriber_pool_size", 4)})
 
+    publication = extension["publication"]
+
     with {:ok, subscription_manager_settings} <- Database.from_settings(extension, "realtime_subscription_manager"),
          {:ok, subscription_manager_pub_settings} <-
            Database.from_settings(extension, "realtime_subscription_manager_pub"),
          {:ok, conn} <- Database.connect_db(subscription_manager_settings),
-         {:ok, conn_pub} <- Database.connect_db(subscription_manager_pub_settings) do
-      Subscriptions.delete_all_if_table_exists(conn)
+         {:ok, conn_pub} <- Database.connect_db(subscription_manager_pub_settings),
+         {:ok, oids} <- Subscriptions.fetch_publication_tables(conn, publication) do
+      # The subscribers ETS tables are owned by the WorkerSupervisor, so they survive a
+      # SubscriptionManager-only restart. An empty pids table means a cold start (fresh
+      # WorkerSupervisor): clear any stale DB rows.
+      # A non-empty table means a warm manager restart: the DB + ETS state is
+      # still valid, so re-adopt it by rebuilding the monitors (the only thing lost with the
+      # previous manager) instead of wiping everyone out.
+      case :ets.info(subscribers_pids_table, :size) do
+        0 ->
+          Subscriptions.delete_all_if_table_exists(conn)
+
+        _ ->
+          readopt_monitors(subscribers_pids_table)
+      end
 
       Rls.update_meta(id, self(), conn_pub)
-
-      publication = extension["publication"]
-      oids = Subscriptions.fetch_publication_tables(conn, publication)
 
       check_region_interval = Map.get(args, :check_region_interval, rebalance_check_interval_in_ms())
       send_region_check_message(check_region_interval)
@@ -145,10 +157,10 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
 
     oids =
       case Subscriptions.fetch_publication_tables(conn, publication) do
-        ^old_oids ->
+        {:ok, ^old_oids} ->
           old_oids
 
-        new_oids ->
+        {:ok, new_oids} ->
           Logger.warning("Found new oids #{inspect(new_oids, pretty: true)}")
 
           Subscriptions.delete_all(conn)
@@ -163,6 +175,12 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
           :ets.delete_all_objects(state.subscribers_nodes_table)
 
           new_oids
+
+        {:error, reason} ->
+          # A fetch error must not be mistaken for a publication change: keep the
+          # current oids and subscribers untouched, just reschedule the next check.
+          log_error("CheckOidsError", reason)
+          old_oids
       end
 
     {:noreply, %{state | oids: oids, check_oid_ref: check_oids()}}
@@ -300,6 +318,29 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
   end
 
   ## Internal functions
+
+  # Warm restart: re-adopt the subscribers that survived in ETS.
+  #
+  # The previous manager's monitors died with it, so the new one re-monitors every surviving pid
+  # (refreshing the ref stored in ETS, which the :check_oids path uses to demonitor). A pid that
+  # died during the downtime makes Process.monitor/1 deliver :DOWN immediately, so the existing
+  # :DOWN handler cleans it up — self-healing.
+  #
+  # We deliberately do not reconcile the DB against ETS here: orphan DB rows are hygiene rather
+  # than correctness (the poller falls back to a cluster-wide broadcast on :node_not_found instead
+  # of dropping changes), and any DB-vs-ETS diff would scale with the tenant's total subscription
+  # count on its own database right at restart. Orphans are cleared by the cold-start / OID-change
+  # wipe instead.
+  @spec readopt_monitors(:ets.tid()) :: :ok
+  defp readopt_monitors(subscribers_pids_table) do
+    subscribers_pids_table
+    |> :ets.tab2list()
+    |> Enum.each(fn {pid, id, old_ref, node} ->
+      new_ref = Process.monitor(pid)
+      :ets.delete_object(subscribers_pids_table, {pid, id, old_ref, node})
+      :ets.insert(subscribers_pids_table, {pid, id, new_ref, node})
+    end)
+  end
 
   @spec pop_not_alive_pids([pid()], :ets.tid(), :ets.tid(), binary()) :: [Ecto.UUID.t()]
   def pop_not_alive_pids(pids, subscribers_pids_table, subscribers_nodes_table, tenant_id) do

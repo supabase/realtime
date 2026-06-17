@@ -9,8 +9,10 @@ defmodule Realtime.MetricsPusherTest do
 
   # Helper function to start MetricsPusher and allow it to use Req.Test
   defp start_and_allow_pusher(opts) do
+    opts = Keyword.put(opts, :interval, :timer.minutes(5))
     pid = start_supervised!({MetricsPusher, opts})
     Req.Test.allow(MetricsPusher, self(), pid)
+    send(pid, :push)
     {:ok, pid}
   end
 
@@ -26,7 +28,6 @@ defmodule Realtime.MetricsPusherTest do
         user: "realtime",
         auth: "hunter2",
         compress: true,
-        interval: 10,
         timeout: 5000
       ]
 
@@ -72,7 +73,6 @@ defmodule Realtime.MetricsPusherTest do
       opts = [
         url: "http://localhost:8428/api/v1/import/prometheus",
         compress: true,
-        interval: 10,
         timeout: 5000
       ]
 
@@ -96,7 +96,6 @@ defmodule Realtime.MetricsPusherTest do
         user: "hunter2",
         auth: "realtime",
         compress: false,
-        interval: 10,
         timeout: 5000
       ]
 
@@ -120,7 +119,6 @@ defmodule Realtime.MetricsPusherTest do
         url: "https://example.com:8428/api/v1/import/prometheus",
         auth: "hunter2",
         compress: true,
-        interval: 10,
         timeout: 5000
       ]
 
@@ -149,7 +147,6 @@ defmodule Realtime.MetricsPusherTest do
     test "when an error is raised" do
       opts = [
         url: "https://example.com:8428/api/v1/import/prometheus",
-        interval: 10,
         timeout: 5000
       ]
 
@@ -179,7 +176,6 @@ defmodule Realtime.MetricsPusherTest do
       opts = [
         url: "http://localhost:8428/api/v1/import/prometheus",
         compress: false,
-        interval: 10,
         timeout: 5000,
         extra_labels: [{"region", "us-east-1"}, {"env", "prod"}]
       ]
@@ -211,7 +207,6 @@ defmodule Realtime.MetricsPusherTest do
       {:ok, pid} =
         start_and_allow_pusher(
           url: "http://localhost:8428/api/v1/import/prometheus",
-          interval: 10,
           timeout: 5000
         )
 

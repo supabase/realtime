@@ -319,7 +319,7 @@ async function setup(): Promise<{ userId: string; testUser: { email: string; pas
     let stepStart = performance.now();
     log(kleur.dim("setup: truncating existing tables"));
     await Promise.allSettled([
-      sql`TRUNCATE TABLE IF EXISTS public.pg_changes, public.dummy, public.authorization, public.broadcast_changes, public.replay_check`.then(
+      sql`TRUNCATE TABLE public.pg_changes, public.dummy, public.authorization, public.broadcast_changes, public.replay_check`.then(
         () => log(kleur.dim("setup:   truncate ok")),
         (e: unknown) => log(kleur.dim(`setup:   truncate skipped (${e instanceof Error ? e.message : String(e)})`))
       ),
@@ -1001,6 +1001,7 @@ async function runBroadcastChangesTests(_testUser: { email: string; password: st
         .on("broadcast", { event: "INSERT" }, (res) => (result = res));
 
       const subscribeMs = await openChannel(channel);
+      await sleep(500);
       await supabase.from("broadcast_changes").insert({ value, id, topic: testTopic });
       const { latencyMs: eventMs } = await waitFor(() => result, "INSERT event");
 
@@ -1030,6 +1031,7 @@ async function runBroadcastChangesTests(_testUser: { email: string; password: st
         .on("broadcast", { event: "UPDATE" }, (res) => (result = res));
 
       const subscribeMs = await openChannel(channel);
+      await sleep(100);
       await supabase.from("broadcast_changes").insert({ value: originalValue, id, topic: testTopic });
       await supabase.from("broadcast_changes").update({ value: updatedValue }).eq("id", id);
       const { latencyMs: eventMs } = await waitFor(() => result, "UPDATE event");
@@ -1060,6 +1062,7 @@ async function runBroadcastChangesTests(_testUser: { email: string; password: st
         .on("broadcast", { event: "DELETE" }, (res) => (result = res));
 
       const subscribeMs = await openChannel(channel);
+      await sleep(100);
       await supabase.from("broadcast_changes").insert({ value, id, topic: testTopic });
       await supabase.from("broadcast_changes").delete().eq("id", id);
       const { latencyMs: eventMs } = await waitFor(() => result, "DELETE event");

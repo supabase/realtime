@@ -595,9 +595,18 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
   end
 
   describe "fetch_publication_tables/2" do
-    test "fetch_publication_tables", %{conn: conn} do
-      tables = Subscriptions.fetch_publication_tables(conn, "supabase_realtime_test")
+    test "returns {:ok, tables} for an existing publication", %{conn: conn} do
+      assert {:ok, tables} = Subscriptions.fetch_publication_tables(conn, "supabase_realtime_test")
       assert tables[{"*"}] != nil
+    end
+
+    test "returns {:ok, %{}} for a publication with no tables", %{conn: conn} do
+      assert {:ok, %{}} = Subscriptions.fetch_publication_tables(conn, "non_existing_publication")
+    end
+
+    test "returns {:error, _} when the query fails", %{conn: conn} do
+      GenServer.stop(conn)
+      assert {:error, _reason} = Subscriptions.fetch_publication_tables(conn, "supabase_realtime_test")
     end
   end
 

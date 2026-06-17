@@ -280,6 +280,18 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
     end
   end
 
+  describe "suspended tenant" do
+    test "does not broadcast when tenant is suspended", %{tenant: tenant} do
+      tenant = %{tenant | suspend: true}
+      topic = random_string()
+      reject(&TenantBroadcaster.pubsub_broadcast/5)
+
+      result = SingleBroadcast.broadcast(%Authorization{}, tenant, topic, "event", false, %{"data" => "test"}, :json)
+      assert {:error, :forbidden, "Tenant is suspended"} = result
+      assert calls(&TenantBroadcaster.pubsub_broadcast/5) == []
+    end
+  end
+
   describe "rate limiting" do
     test "rejects broadcast when rate limit is exceeded", %{tenant: tenant} do
       events_per_second_rate = Tenants.events_per_second_rate(tenant)

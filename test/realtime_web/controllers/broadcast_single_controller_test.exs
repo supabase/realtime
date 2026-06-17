@@ -412,6 +412,28 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
     end
   end
 
+  describe "suspended tenant" do
+    test "returns 403 and does not broadcast when tenant is suspended", %{conn: conn, tenant: tenant} do
+      Realtime.Tenants.Cache.update_cache(%{tenant | suspend: true})
+
+      sub_topic = "room:123"
+      event = "message"
+      topic = Tenants.tenant_topic(tenant, sub_topic)
+
+      subscribe(topic, sub_topic)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(Routes.broadcast_single_path(conn, :broadcast, sub_topic, event), %{"data" => "test"})
+
+      assert conn.status == 403
+      assert Jason.decode!(conn.resp_body)["message"] == "Tenant is suspended"
+
+      refute_receive {:socket_push, _, _}
+    end
+  end
+
   describe "Rate limiting" do
     test "returns 429 when rate limit is exceeded", %{conn: conn, tenant: tenant} do
       request_events_key = Tenants.requests_per_second_key(tenant)

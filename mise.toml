@@ -3,7 +3,7 @@ elixir = "1.18.4-otp-27"
 erlang = "27"
 node = "24"
 supabase = "2.105.0"
-"npm:@supabase/pg-delta" = "1.0.0-alpha.27"
+"npm:@supabase/pg-delta" = "1.0.0-alpha.30"
 
 [env]
 API_JWT_SECRET = "dev"

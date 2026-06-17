@@ -1,7 +1,11 @@
 import Config
 alias Realtime.Env
 
-api_jwt_secret = System.get_env("API_JWT_SECRET")
+api_jwt_secret =
+  ["API_JWT_SECRET", "API_JWT_SECRET_NEXT"]
+  |> Enum.map(&System.get_env/1)
+  |> Enum.reject(&is_nil/1)
+
 api_token_blocklist = Env.get_list("API_TOKEN_BLOCKLIST", [])
 app_name = System.get_env("APP_NAME", "")
 broadcast_pool_size = Env.get_integer("BROADCAST_POOL_SIZE", 10)

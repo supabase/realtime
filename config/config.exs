@@ -79,6 +79,7 @@ config :opentelemetry,
   span_processor: :batch
 
 config :gen_rpc,
+  extra_process_flags: [fullsweep_after: 20],
   # Inactivity period in milliseconds after which a pending process holding an async_call return value will exit.
   # This is used for process sanitation purposes so please make sure to set it in a sufficiently high number
   async_call_inactivity_timeout: 300_000

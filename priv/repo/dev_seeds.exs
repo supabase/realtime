@@ -62,6 +62,16 @@ Postgrex.transaction(admin_conn, fn db_conn ->
   |> Enum.each(&Postgrex.query!(db_conn, &1))
 end)
 
+# Enable supabase_realtime_admin so SetupSupabaseRealtimeAdmin runs during the
+# migrations below and the exported catalog reflects supabase_realtime_admin
+# ownership (the target state the tenant_migrations dashboard reconciles toward).
+{:ok, flag} =
+  %Realtime.Api.FeatureFlag{}
+  |> Realtime.Api.FeatureFlag.changeset(%{"name" => "use_supabase_realtime_admin", "enabled" => true})
+  |> Repo.insert(on_conflict: {:replace, [:enabled, :updated_at]}, conflict_target: :name, returning: true)
+
+Realtime.FeatureFlags.Cache.update_cache(flag)
+
 case Tenants.Migrations.run_migrations(tenant) do
   :ok -> :ok
   :noop -> :ok

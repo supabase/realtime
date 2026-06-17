@@ -66,6 +66,25 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationsTest do
     end
   end
 
+  describe "drop_replication_slot/2" do
+    test "returns slot_not_found when slot does not exist", %{conn: conn} do
+      assert {:error, :slot_not_found} =
+               Replications.drop_replication_slot(conn, "nonexistent_slot_#{:rand.uniform(999_999)}")
+    end
+
+    test "drops an existing inactive slot", %{conn: conn} do
+      slot_name = "test_drop_slot_#{:rand.uniform(999_999)}"
+      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json')", [slot_name])
+
+      assert {:ok, :dropped} = Replications.drop_replication_slot(conn, slot_name)
+
+      %{rows: [[count]]} =
+        Postgrex.query!(conn, "SELECT count(*)::int FROM pg_replication_slots WHERE slot_name = $1", [slot_name])
+
+      assert count == 0
+    end
+  end
+
   describe "prepare_replication/2" do
     test "creates a replication slot when it does not exist", %{conn: conn} do
       slot_name = "test_prep_slot_#{:rand.uniform(999_999)}"

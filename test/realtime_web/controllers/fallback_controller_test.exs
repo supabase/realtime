@@ -1,6 +1,8 @@
 defmodule RealtimeWeb.FallbackControllerTest do
   use RealtimeWeb.ConnCase, async: true
 
+  import ExUnit.CaptureLog
+
   alias RealtimeWeb.FallbackController
 
   describe "call/2" do
@@ -24,6 +26,28 @@ defmodule RealtimeWeb.FallbackControllerTest do
       conn = FallbackController.call(conn, {:error, :bad_request, "invalid input"})
 
       assert json_response(conn, 400) == %{"message" => "invalid input"}
+    end
+
+    test "does not log UnprocessableEntity for non-422 statuses", %{conn: conn} do
+      log =
+        capture_log(fn ->
+          conn = FallbackController.call(conn, {:error, :forbidden, "Tenant is suspended"})
+
+          assert json_response(conn, 403) == %{"message" => "Tenant is suspended"}
+        end)
+
+      refute log =~ "UnprocessableEntity"
+    end
+
+    test "logs UnprocessableEntity for 422 status with message", %{conn: conn} do
+      log =
+        capture_log(fn ->
+          conn = FallbackController.call(conn, {:error, :unprocessable_entity, "invalid input"})
+
+          assert json_response(conn, 422) == %{"message" => "invalid input"}
+        end)
+
+      assert log =~ "UnprocessableEntity: invalid input"
     end
 
     test "returns 401 for generic error tuple", %{conn: conn} do

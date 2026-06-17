@@ -1,15 +1,16 @@
-name: Update Tenant DB Baseline
+name: Update Tenant DB Catalog
 
 on:
   pull_request:
     paths:
       - "lib/realtime/tenants/repo/migrations/**"
       - "lib/realtime/tenants/migrations.ex"
-      - "lib/mix/tasks/realtime.export_tenant_db_baseline.ex"
+      - "lib/mix/tasks/realtime.export_tenant_db_catalog.ex"
+      - "priv/repo/tenant_db_catalog_*.json"
       - "mix.lock"
       - "mise.toml"
       - "compose.dbs.yml"
-      - ".github/workflows/update-tenant-db-baseline.yml"
+      - ".github/workflows/update-tenant-db-catalog.yml"
 
 permissions:
   contents: read
@@ -23,18 +24,18 @@ env:
   POSTGRES_IMAGE: supabase/postgres:17.6.1.127
 
 jobs:
-  update-tenant-db-baseline:
-    name: Maybe regenerate tenant baseline
+  update-tenant-db-catalog:
+    name: Maybe regenerate tenant catalog
     runs-on: blacksmith-2vcpu-ubuntu-2404
     if: github.event.pull_request.head.repo.full_name == github.repository
 
     steps:
       - name: Generate GitHub App token
         id: app-token
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ secrets.GH_AUTOFIX_APP_ID }}
-          private-key: ${{ secrets.GH_AUTOFIX_PRIVATE_KEY }}
+          client-id: ${{ secrets.GH_APP_MANAGER_ID }}
+          private-key: ${{ secrets.GH_APP_MANAGER_PRIVATE_KEY }}
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -82,25 +83,25 @@ jobs:
       - name: Set up realtime DB and migrate tenant DB
         run: mix ecto.setup
 
-      - name: Export baseline snapshot
-        run: mix realtime.export_tenant_db_baseline
+      - name: Export catalog snapshot
+        run: mix realtime.export_tenant_db_catalog
 
-      - name: Check if baseline changed
+      - name: Check if catalog changed
         id: check-changes
         run: |
-          if git diff --quiet priv/repo/tenant_db_baseline.json; then
+          git add priv/repo/tenant_db_catalog_17.json
+          if git diff --cached --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Commit and push baseline
+      - name: Commit and push catalog
         if: steps.check-changes.outputs.changed == 'true'
         env:
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add priv/repo/tenant_db_baseline.json
-          git commit -m "chore: update tenant_db_baseline.json"
+          git commit -m "chore: update tenant_db_catalog_17.json"
           git push origin "HEAD:$PR_HEAD_REF"

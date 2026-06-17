@@ -8,6 +8,9 @@ backend = "core:elixir"
 version = "27.3.4.10"
 backend = "core:erlang"
 
+[tools.erlang."platforms.macos-arm64"]
+checksum = "blake3:0d27e4815676201f374d135c1a9a8ee7d41535c3477509be9836232c57afddab"
+
 [[tools.node]]
 version = "24.14.1"
 backend = "core:node"
@@ -41,7 +44,7 @@ checksum = "sha256:6e50ce5498c0cebc20fd39ab3ff5df836ed2f8a31aa093cecad8497cff126
 url = "https://nodejs.org/dist/v24.14.1/node-v24.14.1-win-x64.zip"
 
 [[tools."npm:@supabase/pg-delta"]]
-version = "1.0.0-alpha.27"
+version = "1.0.0-alpha.30"
 backend = "npm:@supabase/pg-delta"
 
 [[tools.supabase]]
