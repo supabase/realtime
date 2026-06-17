@@ -33,17 +33,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify committed OpenAPI snapshot exists
-        run: |
-          if ! git ls-files --error-unmatch priv/openapi.json > /dev/null 2>&1; then
-            echo "::error file=priv/openapi.json::OpenAPI snapshot is not yet committed to the repository."
-            echo ""
-            echo "Bootstrap one-time: run 'mix openapi.export' locally and commit"
-            echo "priv/openapi.json. Or download the 'openapi-spec' artifact from a"
-            echo "previous run on this PR and commit it."
-            exit 1
-          fi
-
       - uses: erlef/setup-beam@v1
         with:
           version-file: .tool-versions
@@ -64,8 +53,31 @@ jobs:
           mix local.rebar --force
           mix deps.get
 
+      # Regenerate first and always upload the result, so the snapshot can be
+      # bootstrapped from the artifact on the very first run (before any
+      # priv/openapi.json is committed). The drift gates below still enforce
+      # that a committed, in-sync snapshot exists.
       - name: Regenerate OpenAPI spec
         run: mix openapi.export
+
+      - name: Upload spec artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openapi-spec
+          path: priv/openapi.json
+          if-no-files-found: warn
+
+      - name: Verify committed OpenAPI snapshot exists
+        run: |
+          if ! git ls-files --error-unmatch priv/openapi.json > /dev/null 2>&1; then
+            echo "::error file=priv/openapi.json::OpenAPI snapshot is not yet committed to the repository."
+            echo ""
+            echo "Bootstrap one-time: run 'mix openapi.export' locally and commit"
+            echo "priv/openapi.json. Or download the 'openapi-spec' artifact from"
+            echo "this run and commit it."
+            exit 1
+          fi
 
       - name: Fail if committed spec is out of date
         run: |
@@ -75,11 +87,3 @@ jobs:
             echo "Run 'mix openapi.export' locally and commit priv/openapi.json."
             exit 1
           fi
-
-      - name: Upload spec artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: openapi-spec
-          path: priv/openapi.json
-          if-no-files-found: warn
