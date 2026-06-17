@@ -4,7 +4,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
 
   Requires `pgdelta` on `$PATH`.
 
-  Regenerate the catalog snapshots with `mix realtime.export_tenant_db_catalog`.
+  Regenerate the catalog snapshot with `mix realtime.export_tenant_db_catalog`.
   """
   use Phoenix.LiveDashboard.PageBuilder
   use Realtime.Logs
@@ -24,6 +24,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   }
   """
   @application_name "realtime_dashboard_tenant_migrations"
+  @catalog_major 17
   @query_timeout 60_000
   @schema_migrations_query "SELECT version, inserted_at FROM realtime.schema_migrations ORDER BY version DESC"
 
@@ -50,15 +51,13 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     with %Tenant{} = tenant <- Api.get_tenant_by_external_id(ref),
          {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop),
          {:ok, db_conn} <- Database.connect_db(settings) do
-      pg_version = server_version_major(db_conn)
-
       {:noreply,
        assign(socket,
          external_id: ref,
          tenant: tenant,
          schema_migrations: fetch_schema_migrations(db_conn),
-         pg_delta: run_pg_delta(settings, pg_version),
-         catalog_version: catalog_major(pg_version),
+         pg_delta: run_pg_delta(settings),
+         catalog_version: @catalog_major,
          error: nil
        )}
     else
@@ -399,33 +398,18 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   # Used for debugging
   def pg_delta_filter, do: @pg_delta_filter
 
-  defp server_version_major(db_conn) do
-    case Postgrex.query(db_conn, "SHOW server_version_num", [], timeout: @query_timeout) do
-      {:ok, %{rows: [[num]]}} ->
-        div(String.to_integer(num), 10_000)
-
-      {:error, reason} ->
-        log_warning("TenantMigrationsServerVersionFailed", reason)
-        nil
-    end
+  defp catalog_path do
+    Application.app_dir(:realtime, "priv/repo/tenant_db_catalog_#{@catalog_major}.json")
   end
 
-  defp catalog_major(pg_version) when pg_version in [14, 15], do: pg_version
-  defp catalog_major(_), do: 17
-
-  defp catalog_path(pg_version) do
-    file = "tenant_db_catalog_#{catalog_major(pg_version)}.json"
-    Application.app_dir(:realtime, Path.join("priv/repo", file))
-  end
-
-  defp run_pg_delta(%Database{} = settings, pg_version) do
+  defp run_pg_delta(%Database{} = settings) do
     case System.find_executable("pgdelta") do
       nil ->
         log_warning("TenantMigrationsPgDeltaMissing", "pgdelta not found on PATH")
         {:error, "pgdelta not found on PATH"}
 
       path ->
-        catalog = catalog_path(pg_version)
+        catalog = catalog_path()
 
         args = [
           "plan",

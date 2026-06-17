@@ -1,15 +1,13 @@
 defmodule Mix.Tasks.Realtime.ExportTenantDbCatalog do
-  @shortdoc "Regenerate priv/repo/tenant_db_catalog_<pg_major>.json"
+  @shortdoc "Regenerate priv/repo/tenant_db_catalog_17.json"
 
   @moduledoc """
-  Writes the catalog snapshot at `priv/repo/tenant_db_catalog_<pg_major>.json`
-  used by `RealtimeWeb.Dashboard.TenantMigrations` to detect drifted DB state.
+  Writes the catalog snapshot at `priv/repo/tenant_db_catalog_17.json` used by
+  `RealtimeWeb.Dashboard.TenantMigrations` to detect drifted DB state.
 
-  The snapshot is named after the target server's major version (e.g.
-  `tenant_db_catalog_14.json`, `tenant_db_catalog_15.json`,
-  `tenant_db_catalog_17.json`). Some catalog objects only exist on newer
-  Postgres (e.g. the `MAINTAIN` privilege), so a single snapshot cannot
-  reconcile every supported version. Run this task once per Postgres major.
+  pg-delta requires Postgres 15+, so the snapshot is generated against PG17 and
+  the dashboard reconciles every tenant against it. The major version is kept in
+  the filename so other versions can be added later if needed.
 
   Usage:
 
@@ -29,25 +27,20 @@ defmodule Mix.Tasks.Realtime.ExportTenantDbCatalog do
   """
   use Mix.Task
 
+  @catalog_path "priv/repo/tenant_db_catalog_17.json"
   @catalog_filter ~s({"*/schema": "realtime"})
 
   @impl Mix.Task
   def run(args) do
     {opts, _, _} = OptionParser.parse(args, strict: [pgdelta_path: :string])
-    {:ok, _} = Application.ensure_all_started(:postgrex)
 
-    env = db_env()
-    url = build_url(env)
+    url = build_url_from_env()
     Mix.shell().info("[export_tenant_db_catalog] target: #{redact(url)}")
 
     pgdelta = pgdelta_bin!(opts[:pgdelta_path])
     Mix.shell().info("[export_tenant_db_catalog] pgdelta: #{pgdelta}")
 
-    major = server_version_major!(env)
-    catalog_path = "priv/repo/tenant_db_catalog_#{major}.json"
-    output = Path.expand(catalog_path, File.cwd!())
-    Mix.shell().info("[export_tenant_db_catalog] output: #{catalog_path} (PG#{major})")
-
+    output = Path.expand(@catalog_path, File.cwd!())
     args = ["catalog-export", "--target", url, "--output", output, "--filter", @catalog_filter]
 
     case System.cmd(pgdelta, args, stderr_to_stdout: true) do
@@ -67,33 +60,14 @@ defmodule Mix.Tasks.Realtime.ExportTenantDbCatalog do
     System.find_executable(path) || Mix.raise("pgdelta not found or not executable at #{path}")
   end
 
-  defp db_env do
-    %{
-      host: System.get_env("DB_HOST", "127.0.0.1"),
-      port: System.get_env("DB_PORT", "5433"),
-      name: System.get_env("DB_NAME", "postgres"),
-      user: System.get_env("DB_USER", "supabase_admin"),
-      password: System.get_env("DB_PASSWORD", "postgres")
-    }
-  end
+  defp build_url_from_env do
+    host = System.get_env("DB_HOST", "127.0.0.1")
+    port = System.get_env("DB_PORT", "5433")
+    name = System.get_env("DB_NAME", "postgres")
+    user = System.get_env("DB_USER", "supabase_admin")
+    password = System.get_env("DB_PASSWORD", "postgres")
 
-  defp build_url(env) do
-    "postgresql://#{URI.encode_www_form(env.user)}:#{URI.encode_www_form(env.password)}@#{env.host}:#{env.port}/#{env.name}"
-  end
-
-  defp server_version_major!(env) do
-    {:ok, conn} =
-      Postgrex.start_link(
-        hostname: env.host,
-        port: String.to_integer(env.port),
-        database: env.name,
-        username: env.user,
-        password: env.password
-      )
-
-    %{rows: [[num]]} = Postgrex.query!(conn, "SHOW server_version_num", [])
-    GenServer.stop(conn)
-    div(String.to_integer(num), 10_000)
+    "postgresql://#{URI.encode_www_form(user)}:#{URI.encode_www_form(password)}@#{host}:#{port}/#{name}"
   end
 
   defp validate_snapshot!(path) do
