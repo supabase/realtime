@@ -1393,9 +1393,9 @@ defmodule Forum.MusterDistributedTest do
           # match excludes the original 1 -> 2 node formation rebalances).
           for n <- [result.t_node, result.s_node] do
             assert of_kind(:muster_rebalance_start, trace)
-                     |> Enum.count(
-                       &(&1.node == n and &1.from == result.view3 and &1.to == result.view2)
-                     ) == 1
+                   |> Enum.count(
+                     &(&1.node == n and &1.from == result.view3 and &1.to == result.view2)
+                   ) == 1
           end
 
           # The post-death snapshots really carried the moved groups: T
@@ -1532,27 +1532,7 @@ defmodule Forum.MusterDistributedTest do
       %{scope: scope}
     end
 
-    # LIVENESS BUG (no existing coverage): the readiness barrier's member_views
-    # map is "newest-seq-wins and never reset" (README "the barrier converges"),
-    # keyed by the per-source announce watermark — a
-    # :erlang.unique_integer([:monotonic]) seq. That counter starts from the
-    # SAME base on every fresh VM, so a node that restarts under the SAME node
-    # name (an ordinary pod restart) comes back with a LOWER seq than the
-    # watermark a peer still holds from the dead incarnation. Nothing clears a
-    # departed peer's member_views entry (the :DOWN handler drops occupancy
-    # rows, not member_views), so put_member_view permanently rejects the
-    # restarted node's fresh announcements — and the view heartbeat, carrying
-    # the same regressed seq, is rejected too. The peer is stuck :converging
-    # forever for any view that differs from the stale one: it floods as a
-    # router instead of targeting, and never heals.
-    #
-    # The regression is forced deterministically by burning the global
-    # monotonic counter on S's first incarnation so its stored watermark is far
-    # above anything a fresh same-named restart reaches. View divergence is
-    # forced with a throwaway node Z (joins so S announces the HIGH watermark
-    # for {T,S,Z}, then dies before S restarts, so the final view is {T,S} —
-    # different from the stale {T,S,Z} entry T keeps).
-    test "a same-named restart's lower seq leaves the peer stuck :converging forever",
+    test "a same-named restart with a lower seq still re-converges (member_views cleared on :DOWN)",
          %{scope: scope} do
       t_node = node()
 
@@ -1588,16 +1568,19 @@ defmodule Forum.MusterDistributedTest do
           {^hash_tsz, stale_seq} = dump_tsz.member_views[s_node]
 
           # --- Kill S (incarnation #1) then Z, so the final view is {T,S} ----
-          # which differs from the stale {T,S,Z} entry T will keep.
+          # which differs from the stale {T,S,Z} view, exposing the regression
+          # if T were to keep S's stale watermark.
           :ok = stop_supervised({:peer, s_name})
           wait_until(fn -> Muster.members(scope) == Enum.sort([t_node, z_node]) end)
 
           :ok = stop_supervised({:peer, z_name})
           wait_until(fn -> Muster.members(scope) == [t_node] end)
 
-          # T kept the stale entry across both deaths (nothing clears it).
+          # The fix: T dropped S's member_views entry when S left, so there is
+          # no stale high-seq watermark left to strand the restart. (Against the
+          # unfixed code this entry is still {hash_tsz, stale_seq}.)
           dump_alone = GenServer.call(Forum.Supervisor.name(scope), :dump)
-          assert dump_alone.member_views[s_node] == {hash_tsz, stale_seq}
+          refute Map.has_key?(dump_alone.member_views, s_node)
 
           # --- S restarts under the SAME name (incarnation #2, fresh VM) -----
           tp(:test_s_rejoined, %{})
@@ -1631,25 +1614,41 @@ defmodule Forum.MusterDistributedTest do
           # T learns S is a member again (rebalances {T} -> {T,S})...
           wait_until(fn -> Muster.members(scope) == view_ts end)
 
-          # ...but S's fresh announce seq is LOWER than the watermark T still
-          # holds, so newest-seq-wins rejects every announcement. Prove the
-          # regression with real values (no hard-coded base).
+          # The dangerous condition is genuinely present: S's fresh announce seq
+          # is LOWER than the watermark T held from the dead incarnation (proven
+          # with real values, no hard-coded base). The fix must make T
+          # re-converge ANYWAY — it cannot lean on seqs to tell incarnations
+          # apart.
           s2_seq = :peer.call(p_s2, MusterPeerAux, :current_seq, [])
           assert s2_seq < stale_seq
 
-          # THE BUG: T is stuck :converging and cannot trust its occupancy
-          # table for the live cluster — it floods as a router forever. The
-          # 200ms heartbeat fires many times over the next second and heals
-          # nothing, because every heartbeat marker carries the same low seq.
-          Process.sleep(1_000)
+          # RECOVERY: T must reach :ready for the live {T,S} view despite the
+          # regressed seq — its SECOND :ready for that view (the first was
+          # incarnation #1's formation), hence nth: 2. With the fix, T cleared
+          # member_views[S] when S left, so S's fresh announcement is accepted
+          # rather than rejected by newest-seq-wins.
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_status_change,
+                       to: :ready,
+                       node: ^t_node,
+                       view_hash: ^hash_ts
+                     },
+                     2,
+                     15_000,
+                     :infinity
+                   )
 
-          assert status(scope) == :converging
-          refute Muster.can_decide?(scope, hash_ts)
+          assert status(scope) == :ready
+          assert Muster.can_decide?(scope, hash_ts)
 
-          # And T's member_views[S] is byte-for-byte the stale entry from
-          # incarnation #1 — T ignored every fresh announcement.
+          # T's member_views[S] now reflects S's FRESH announcement for the live
+          # {T,S} view — and carries the lower, post-restart seq, proving the
+          # stale high-seq {T,S,Z} watermark was discarded, not merely matched.
           dump_final = GenServer.call(Forum.Supervisor.name(scope), :dump)
-          assert dump_final.member_views[s_node] == {hash_tsz, stale_seq}
+          assert {^hash_ts, healed_seq} = dump_final.member_views[s_node]
+          assert healed_seq < stale_seq
 
           %{
             t_node: t_node,
@@ -1673,9 +1672,10 @@ defmodule Forum.MusterDistributedTest do
                        &1.view_hash == result.hash_ts)
                  )
 
-          # But T NEVER reached :ready for the live {T,S} view after the rejoin
-          # — it is permanently stuck :converging. (T was :ready for {T,S} only
-          # at the original formation, before the rejoin marker.)
+          # And T reached :ready for the live {T,S} view AFTER the rejoin — it
+          # recovered rather than stranding in :converging. (T's earlier :ready
+          # for {T,S} was incarnation #1's formation, before the rejoin marker;
+          # this asserts a fresh one after it.)
           t_ready_after_rejoin =
             trace
             |> Enum.with_index()
@@ -1684,10 +1684,11 @@ defmodule Forum.MusterDistributedTest do
                 e[:to] == :ready and e[:view_hash] == result.hash_ts and idx > rejoin_at
             end)
 
-          refute t_ready_after_rejoin,
-                 "T reached :ready for the live view after the restart — the bug is fixed?"
+          assert t_ready_after_rejoin,
+                 "T never reached :ready for the live view after the same-named restart — a stale member_views watermark stranded it"
 
-          # The mechanism: the restart's seq regressed below the stale watermark.
+          # The mechanism really fired: the restart's seq regressed below the
+          # stale watermark, yet T recovered anyway.
           assert result.s2_seq < result.stale_seq
         end
       )
