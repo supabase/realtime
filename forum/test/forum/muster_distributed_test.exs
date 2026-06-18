@@ -594,20 +594,14 @@ defmodule Forum.MusterDistributedTest do
           assert [%{seq: batch_seq}] = batches
           assert batch_seq < reclaim_seq
 
-          reclaim_at =
-            Enum.find_index(
-              trace,
-              &(&1[:"$kind"] == :muster_occupied and &1[:seq] == reclaim_seq)
-            )
-
-          batch_at =
-            Enum.find_index(
-              trace,
-              &(&1[:"$kind"] == :muster_vacant_batch and &1[:"$span"] == :start and
-                  &1[:seq] == batch_seq)
-            )
-
-          assert batch_at > reclaim_at
+          # Both events are pinned to their exact seqs, so this is a single
+          # forced pair: the stale batch was applied AFTER the re-claim that
+          # superseded it.
+          assert causality(
+                   %{:"$kind" => :muster_occupied, seq: ^reclaim_seq},
+                   %{:"$kind" => :muster_vacant_batch, :"$span" => :start, seq: ^batch_seq},
+                   trace
+                 )
         end
       )
     end
@@ -982,9 +976,9 @@ defmodule Forum.MusterDistributedTest do
         end,
         fn result, trace ->
           # The crash fired exactly once: at the first snapshot to C.
-          assert [_] =
-                   of_kind(:snabbkaffe_crash, trace)
-                   |> Enum.filter(&(&1[:node] == result.c_node and &1[:source] == result.t_node))
+          assert of_kind(:snabbkaffe_crash, trace)
+                 |> Enum.count(&(&1[:node] == result.c_node and &1[:source] == result.t_node)) ==
+                   1
 
           # Exactly one snapshot from T was applied-and-collected on C — the
           # post-restart retry (the crashed attempt dies at its trace point,
@@ -999,9 +993,9 @@ defmodule Forum.MusterDistributedTest do
           # crashed attempt and the successful post-restart one.
           t_rebalances =
             of_kind(:muster_rebalance_start, trace)
-            |> Enum.filter(&(&1.node == result.t_node and &1.view_hash == result.hash3))
+            |> Enum.count(&(&1.node == result.t_node and &1.view_hash == result.hash3))
 
-          assert length(t_rebalances) >= 2
+          assert t_rebalances >= 2
         end
       )
     end
@@ -1041,7 +1035,9 @@ defmodule Forum.MusterDistributedTest do
 
           # Kill the router's Scope. Its occupancy table dies with it.
           scope_pid = :erpc.call(r_node, Process, :whereis, [Forum.Supervisor.name(scope)])
+          Process.monitor(scope_pid)
           true = :erpc.call(r_node, Process, :exit, [scope_pid, :kill])
+          assert_receive {:DOWN, _, _, ^scope_pid, _}
 
           # T sees the monitor DOWN and rebalances down to itself (this `to`
           # matches no other rebalance in the test)...
@@ -1250,12 +1246,10 @@ defmodule Forum.MusterDistributedTest do
           # The holder NEVER trusted the intermediate 3-node view: T did not
           # emit :ready for its hash (only the released laggard R may, see the
           # note above the test).
-          assert [] =
-                   Enum.filter(
-                     status_changes,
-                     &(&1.node == result.t_node and &1.to == :ready and
-                         &1.view_hash == result.hash3)
-                   )
+          assert Enum.count(
+                   status_changes,
+                   &(&1.node == result.t_node and &1.to == :ready and &1.view_hash == result.hash3)
+                 ) == 0
 
           # Every node reached :ready for the final view, and that is every
           # node's LAST status word — a transient stale :ready (R's) must have
@@ -1398,11 +1392,10 @@ defmodule Forum.MusterDistributedTest do
           # Each survivor rebalanced view3 -> view2 exactly once (the `from`
           # match excludes the original 1 -> 2 node formation rebalances).
           for n <- [result.t_node, result.s_node] do
-            assert [_] =
-                     of_kind(:muster_rebalance_start, trace)
-                     |> Enum.filter(
+            assert of_kind(:muster_rebalance_start, trace)
+                     |> Enum.count(
                        &(&1.node == n and &1.from == result.view3 and &1.to == result.view2)
-                     )
+                     ) == 1
           end
 
           # The post-death snapshots really carried the moved groups: T

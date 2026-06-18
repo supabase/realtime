@@ -152,10 +152,6 @@ defmodule Forum.Muster.Scope do
     # Delete each row only if it is stamped no newer than this batch — i.e. a
     # later `occupied`/snapshot for the same key (higher seq) survives a stale,
     # late-arriving vacant DELETE. Atomic per row via select_delete's guard.
-    #
-    # The span's :start event fires BEFORE the deletes (so a forced ordering on
-    # it parks this RPC worker, delaying the whole batch) and its complete
-    # event fires after they are applied.
     tp_span(:muster_vacant_batch, %{
       scope: scope,
       node: node(),
