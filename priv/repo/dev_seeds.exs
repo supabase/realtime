@@ -30,7 +30,7 @@ publication = "supabase_realtime"
               "db_user" => System.get_env("DB_USER", "supabase_admin"),
               "db_password" => System.get_env("DB_PASSWORD", "postgres"),
               "db_user_realtime" => System.get_env("DB_USER_REALTIME", "supabase_realtime_admin"),
-              "db_pass_realtime" => System.get_env("DB_PASSWORD", "postgres"),
+              "db_pass_realtime" => System.get_env("DB_PASS_REALTIME", "postgres"),
               "db_port" => System.get_env("DB_PORT", "5433"),
               "region" => "us-east-1",
               "poll_interval_ms" => 100,
@@ -62,15 +62,8 @@ Postgrex.transaction(admin_conn, fn db_conn ->
   |> Enum.each(&Postgrex.query!(db_conn, &1))
 end)
 
-# Enable supabase_realtime_admin so SetupSupabaseRealtimeAdmin runs during the
-# migrations below and the exported catalog reflects supabase_realtime_admin
-# ownership (the target state the tenant_migrations dashboard reconciles toward).
-{:ok, flag} =
-  %Realtime.Api.FeatureFlag{}
-  |> Realtime.Api.FeatureFlag.changeset(%{"name" => "use_supabase_realtime_admin", "enabled" => true})
-  |> Repo.insert(on_conflict: {:replace, [:enabled, :updated_at]}, conflict_target: :name, returning: true)
-
-Realtime.FeatureFlags.Cache.update_cache(flag)
+# Enable supabase_realtime_admin to include SetupSupabaseRealtimeAdmin in tenant catalog
+{:ok, _} = Realtime.Api.upsert_feature_flag(%{name: "use_supabase_realtime_admin", enabled: true})
 
 case Tenants.Migrations.run_migrations(tenant) do
   :ok -> :ok
