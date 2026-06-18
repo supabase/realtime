@@ -251,8 +251,8 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
     test "only checks write policies once on private channels", %{tenant: tenant, topic: topic, db_conn: db_conn} do
-      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context ->
-        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context])
+      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context, opts ->
+        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context, opts])
       end)
 
       reject(&Authorization.get_write_authorizations/3)
@@ -279,7 +279,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
     test "increase_connection_pool from write authorization returns error and does not log UnableToSetPolicies",
          %{tenant: tenant, topic: topic, db_conn: db_conn} do
-      stub(Authorization, :get_write_authorizations, fn _, _, _ -> {:error, :increase_connection_pool} end)
+      stub(Authorization, :get_write_authorizations, fn _, _, _, _ -> {:error, :increase_connection_pool} end)
 
       key = random_string()
       socket = socket_fixture(tenant, topic, key)
@@ -299,8 +299,8 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :broken_write_presence]
     test "handle failing rls policy", %{tenant: tenant, topic: topic, db_conn: db_conn} do
-      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context ->
-        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context])
+      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context, opts ->
+        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context, opts])
       end)
 
       key = random_string()
