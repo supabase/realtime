@@ -149,7 +149,6 @@ defmodule Forum.Muster do
         {:rebalancing, members}
 
       _converging_or_ready ->
-        # ExHashRing.Ring.find_node already returns {:ok, node}.
         ExHashRing.Ring.find_node(ring_name(scope), group)
     end
   end
