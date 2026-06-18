@@ -319,6 +319,8 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
 
       new_value = random_string()
 
+      assert ReplicationConnection.ready?(tenant.external_id)
+
       Postgrex.query!(db_conn, "INSERT INTO #{table_name} (details) VALUES ($1)", [value])
       Postgrex.query!(db_conn, "UPDATE #{table_name} SET details = $1 WHERE details = $2", [new_value, value])
 
@@ -361,6 +363,8 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
 
       value = random_string()
+
+      assert ReplicationConnection.ready?(tenant.external_id)
 
       Postgrex.query!(db_conn, "INSERT INTO #{table_name} (details) VALUES ($1)", [value])
       Postgrex.query!(db_conn, "DELETE FROM #{table_name} WHERE details = $1", [value])
@@ -442,6 +446,8 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
 
       binary = <<0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0xFF, 0x01, 0x02>>
       event = random_string()
+
+      assert ReplicationConnection.ready?(tenant.external_id)
 
       Postgrex.query!(
         db_conn,
