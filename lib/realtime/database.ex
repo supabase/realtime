@@ -60,10 +60,20 @@ defmodule Realtime.Database do
 
     settings =
       settings
-      |> Map.take(["db_host", "db_port", "db_name", "db_user", "db_password"])
+      |> Map.take([
+        "db_host",
+        "db_port",
+        "db_name",
+        "db_user",
+        "db_password",
+        "db_user_realtime",
+        "db_pass_realtime"
+      ])
       |> Enum.map(fn {k, v} -> {k, Crypto.decrypt!(v)} end)
       |> Map.new()
       |> then(&Map.merge(settings, &1))
+
+    {username, password} = connection_credentials(application_name, settings)
 
     with {:ok, addrtype} <- detect_ip_version(settings["db_host"]) do
       ssl = if default_ssl_param(settings), do: [verify: :verify_none], else: false
@@ -73,8 +83,8 @@ defmodule Realtime.Database do
          hostname: settings["db_host"],
          port: String.to_integer(settings["db_port"]),
          database: settings["db_name"],
-         username: settings["db_user"],
-         password: settings["db_password"],
+         username: username,
+         password: password,
          pool_size: pool,
          queue_target: settings["db_queue_target"] || 5_000,
          application_name: application_name,
@@ -82,6 +92,18 @@ defmodule Realtime.Database do
          socket_options: [addrtype],
          ssl: ssl
        }}
+    end
+  end
+
+  defp connection_credentials("realtime_migrations" = _application_name, settings) do
+    {settings["db_user"], settings["db_password"]}
+  end
+
+  # Runtime connections prefer the least-privilege role, falling back to db_user.
+  defp connection_credentials(_application_name, settings) do
+    case settings["db_user_realtime"] do
+      nil -> {settings["db_user"], settings["db_password"]}
+      user -> {user, settings["db_pass_realtime"]}
     end
   end
 

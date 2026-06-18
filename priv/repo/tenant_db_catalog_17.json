@@ -492,6 +492,11 @@
           "grantable": false
         },
         {
+          "grantee": "dashboard_user",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
           "grantee": "supabase_realtime_admin",
           "privilege": "EXECUTE",
           "grantable": false
@@ -561,6 +566,11 @@
           "grantable": false
         },
         {
+          "grantee": "dashboard_user",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
           "grantee": "supabase_realtime_admin",
           "privilege": "EXECUTE",
           "grantable": false
@@ -618,6 +628,16 @@
       "privileges": [
         {
           "grantee": "PUBLIC",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "postgres",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "dashboard_user",
           "privilege": "EXECUTE",
           "grantable": false
         },
@@ -689,6 +709,11 @@
         },
         {
           "grantee": "service_role",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "dashboard_user",
           "privilege": "EXECUTE",
           "grantable": false
         },
@@ -766,6 +791,11 @@
           "grantable": false
         },
         {
+          "grantee": "dashboard_user",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
           "grantee": "supabase_realtime_admin",
           "privilege": "EXECUTE",
           "grantable": false
@@ -831,6 +861,11 @@
         },
         {
           "grantee": "service_role",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "dashboard_user",
           "privilege": "EXECUTE",
           "grantable": false
         },
@@ -915,6 +950,16 @@
           "grantable": false
         },
         {
+          "grantee": "postgres",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
           "grantee": "supabase_realtime_admin",
           "privilege": "EXECUTE",
           "grantable": false
@@ -982,6 +1027,11 @@
           "grantable": false
         },
         {
+          "grantee": "dashboard_user",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
           "grantee": "supabase_realtime_admin",
           "privilege": "EXECUTE",
           "grantable": false
@@ -1035,6 +1085,16 @@
           "grantable": false
         },
         {
+          "grantee": "postgres",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
           "grantee": "supabase_realtime_admin",
           "privilege": "EXECUTE",
           "grantable": false
@@ -1084,6 +1144,16 @@
       "privileges": [
         {
           "grantee": "PUBLIC",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "postgres",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "dashboard_user",
           "privilege": "EXECUTE",
           "grantable": false
         },
@@ -1147,6 +1217,11 @@
         },
         {
           "grantee": "service_role",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "dashboard_user",
           "privilege": "EXECUTE",
           "grantable": false
         },
@@ -1218,6 +1293,11 @@
           "grantable": false
         },
         {
+          "grantee": "dashboard_user",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
           "grantee": "supabase_realtime_admin",
           "privilege": "EXECUTE",
           "grantable": false
@@ -1257,6 +1337,16 @@
       "privileges": [
         {
           "grantee": "PUBLIC",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "postgres",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "dashboard_user",
           "privilege": "EXECUTE",
           "grantable": false
         },
@@ -1304,6 +1394,16 @@
       "privileges": [
         {
           "grantee": "PUBLIC",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "postgres",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "dashboard_user",
           "privilege": "EXECUTE",
           "grantable": false
         },
@@ -1359,6 +1459,46 @@
       "is_index_partition": false,
       "parent_index_name": null,
       "definition": "CREATE INDEX messages_inserted_at_topic_index ON ONLY realtime.messages USING btree (inserted_at DESC, topic) WHERE extension = 'broadcast'::text AND private IS TRUE",
+      "comment": null,
+      "owner": "supabase_realtime_admin"
+    },
+    "index:realtime.subscription.ix_realtime_subscription_entity": {
+      "schema": "realtime",
+      "table_name": "subscription",
+      "name": "ix_realtime_subscription_entity",
+      "storage_params": [],
+      "statistics_target": [
+        -1
+      ],
+      "index_type": "btree",
+      "tablespace": null,
+      "is_unique": false,
+      "is_primary": false,
+      "is_exclusion": false,
+      "nulls_not_distinct": false,
+      "immediate": true,
+      "is_clustered": false,
+      "is_replica_identity": false,
+      "key_columns": [
+        4
+      ],
+      "column_collations": [
+        null
+      ],
+      "operator_classes": [
+        "default"
+      ],
+      "column_options": [
+        0
+      ],
+      "index_expressions": null,
+      "partial_predicate": null,
+      "table_relkind": "r",
+      "is_owned_by_constraint": false,
+      "is_partitioned_index": false,
+      "is_index_partition": false,
+      "parent_index_name": null,
+      "definition": "CREATE INDEX ix_realtime_subscription_entity ON realtime.subscription USING btree (entity)",
       "comment": null,
       "owner": "supabase_realtime_admin"
     },
@@ -1421,46 +1561,6 @@
       "definition": "CREATE UNIQUE INDEX subscription_subscription_id_entity_filters_action_filter_selec ON realtime.subscription USING btree (subscription_id, entity, filters, action_filter, COALESCE(selected_columns, '{}'::text[]))",
       "comment": null,
       "owner": "supabase_realtime_admin"
-    },
-    "index:realtime.subscription.ix_realtime_subscription_entity": {
-      "schema": "realtime",
-      "table_name": "subscription",
-      "name": "ix_realtime_subscription_entity",
-      "storage_params": [],
-      "statistics_target": [
-        -1
-      ],
-      "index_type": "btree",
-      "tablespace": null,
-      "is_unique": false,
-      "is_primary": false,
-      "is_exclusion": false,
-      "nulls_not_distinct": false,
-      "immediate": true,
-      "is_clustered": false,
-      "is_replica_identity": false,
-      "key_columns": [
-        4
-      ],
-      "column_collations": [
-        null
-      ],
-      "operator_classes": [
-        "default"
-      ],
-      "column_options": [
-        0
-      ],
-      "index_expressions": null,
-      "partial_predicate": null,
-      "table_relkind": "r",
-      "is_owned_by_constraint": false,
-      "is_partitioned_index": false,
-      "is_index_partition": false,
-      "parent_index_name": null,
-      "definition": "CREATE INDEX ix_realtime_subscription_entity ON realtime.subscription USING btree (entity)",
-      "comment": null,
-      "owner": "supabase_realtime_admin"
     }
   },
   "materializedViews": {},
@@ -1487,17 +1587,7 @@
         {
           "grantee": "postgres",
           "privilege": "USAGE",
-          "grantable": false
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "USAGE",
-          "grantable": false
-        },
-        {
-          "grantee": "anon",
-          "privilege": "USAGE",
-          "grantable": false
+          "grantable": true
         },
         {
           "grantee": "anon",
@@ -1510,34 +1600,14 @@
           "grantable": false
         },
         {
-          "grantee": "authenticated",
-          "privilege": "USAGE",
-          "grantable": false
-        },
-        {
           "grantee": "service_role",
           "privilege": "USAGE",
-          "grantable": false
-        },
-        {
-          "grantee": "service_role",
-          "privilege": "USAGE",
-          "grantable": false
-        },
-        {
-          "grantee": "supabase_realtime_admin",
-          "privilege": "CREATE",
           "grantable": false
         },
         {
           "grantee": "supabase_realtime_admin",
           "privilege": "CREATE",
           "grantable": true
-        },
-        {
-          "grantee": "supabase_realtime_admin",
-          "privilege": "USAGE",
-          "grantable": false
         },
         {
           "grantee": "supabase_realtime_admin",
@@ -1817,7 +1887,25 @@
       "privileges": [
         {
           "grantee": "postgres",
+          "privilege": "DELETE",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "postgres",
           "privilege": "INSERT",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "postgres",
+          "privilege": "MAINTAIN",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "postgres",
+          "privilege": "REFERENCES",
           "grantable": false,
           "columns": null
         },
@@ -1829,6 +1917,18 @@
         },
         {
           "grantee": "postgres",
+          "privilege": "TRIGGER",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "postgres",
+          "privilege": "TRUNCATE",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "postgres",
           "privilege": "UPDATE",
           "grantable": false,
           "columns": null
@@ -1883,6 +1983,54 @@
         },
         {
           "grantee": "service_role",
+          "privilege": "UPDATE",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "DELETE",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "INSERT",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "MAINTAIN",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "REFERENCES",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "SELECT",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "TRIGGER",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "TRUNCATE",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
           "privilege": "UPDATE",
           "grantable": false,
           "columns": null
@@ -1955,7 +2103,7 @@
       "options": null,
       "partition_bound": null,
       "partition_by": null,
-      "owner": "supabase_realtime_admin",
+      "owner": "supabase_admin",
       "comment": null,
       "parent_schema": null,
       "parent_name": null,
@@ -2029,33 +2177,105 @@
           "on_delete": null,
           "match_type": null,
           "check_expression": null,
-          "owner": "supabase_realtime_admin",
+          "owner": "supabase_admin",
           "definition": "PRIMARY KEY (version)",
           "comment": null
         }
       ],
       "privileges": [
         {
-          "grantee": "postgres",
+          "grantee": "supabase_admin",
+          "privilege": "DELETE",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "supabase_admin",
+          "privilege": "INSERT",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "supabase_admin",
+          "privilege": "MAINTAIN",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "supabase_admin",
+          "privilege": "REFERENCES",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "supabase_admin",
           "privilege": "SELECT",
           "grantable": false,
           "columns": null
         },
         {
-          "grantee": "anon",
+          "grantee": "supabase_admin",
+          "privilege": "TRIGGER",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "supabase_admin",
+          "privilege": "TRUNCATE",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "supabase_admin",
+          "privilege": "UPDATE",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "DELETE",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "INSERT",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "MAINTAIN",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "REFERENCES",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
           "privilege": "SELECT",
           "grantable": false,
           "columns": null
         },
         {
-          "grantee": "authenticated",
-          "privilege": "SELECT",
+          "grantee": "dashboard_user",
+          "privilege": "TRIGGER",
           "grantable": false,
           "columns": null
         },
         {
-          "grantee": "service_role",
-          "privilege": "SELECT",
+          "grantee": "dashboard_user",
+          "privilege": "TRUNCATE",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "UPDATE",
           "grantable": false,
           "columns": null
         },
@@ -2375,7 +2595,49 @@
       "privileges": [
         {
           "grantee": "postgres",
+          "privilege": "DELETE",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "postgres",
+          "privilege": "INSERT",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "postgres",
+          "privilege": "MAINTAIN",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "postgres",
+          "privilege": "REFERENCES",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "postgres",
           "privilege": "SELECT",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "postgres",
+          "privilege": "TRIGGER",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "postgres",
+          "privilege": "TRUNCATE",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "postgres",
+          "privilege": "UPDATE",
           "grantable": false,
           "columns": null
         },
@@ -2394,6 +2656,54 @@
         {
           "grantee": "service_role",
           "privilege": "SELECT",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "DELETE",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "INSERT",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "MAINTAIN",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "REFERENCES",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "SELECT",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "TRIGGER",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "TRUNCATE",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "UPDATE",
           "grantable": false,
           "columns": null
         },
@@ -2648,17 +2958,7 @@
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "acl:table:realtime.schema_migrations::grantee:anon",
-      "referenced_stable_id": "table:realtime.schema_migrations",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:table:realtime.schema_migrations::grantee:authenticated",
-      "referenced_stable_id": "table:realtime.schema_migrations",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:table:realtime.schema_migrations::grantee:service_role",
+      "dependent_stable_id": "acl:table:realtime.schema_migrations::grantee:supabase_realtime_admin",
       "referenced_stable_id": "table:realtime.schema_migrations",
       "deptype": "n"
     },
@@ -2690,12 +2990,12 @@
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages.binary_payload",
-      "deptype": "a"
+      "deptype": "n"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages.binary_payload",
-      "deptype": "n"
+      "deptype": "a"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
@@ -2730,12 +3030,12 @@
     {
       "dependent_stable_id": "constraint:realtime.subscription.subscription_action_filter_check",
       "referenced_stable_id": "column:realtime.subscription.action_filter",
-      "deptype": "a"
+      "deptype": "n"
     },
     {
       "dependent_stable_id": "constraint:realtime.subscription.subscription_action_filter_check",
       "referenced_stable_id": "column:realtime.subscription.action_filter",
-      "deptype": "n"
+      "deptype": "a"
     },
     {
       "dependent_stable_id": "defacl:supabase_admin:f:schema:realtime:grantee:dashboard_user",

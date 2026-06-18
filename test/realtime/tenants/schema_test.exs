@@ -12,9 +12,10 @@ defmodule Realtime.Tenants.SchemaTest do
 
     # simulate postgres dashboard role
     {:ok, conn} = opts |> Keyword.put(:username, "postgres") |> Postgrex.start_link()
+    {:ok, superuser_conn} = opts |> Keyword.put(:username, "supabase_admin") |> Postgrex.start_link()
     {:ok, realtime_conn} = opts |> Keyword.put(:username, "supabase_realtime_admin") |> Postgrex.start_link()
 
-    %{conn: conn, realtime_conn: realtime_conn, settings: settings}
+    %{conn: conn, superuser_conn: superuser_conn, realtime_conn: realtime_conn, settings: settings}
   end
 
   describe "restrictions" do
@@ -176,30 +177,36 @@ defmodule Realtime.Tenants.SchemaTest do
   end
 
   describe "ownership" do
-    test "all objects in realtime schema are owned by supabase_realtime_admin", %{conn: conn} do
+    test "all objects in the realtime schema are owned by supabase_realtime_admin", %{superuser_conn: conn} do
       query = """
-      SELECT r.rolname FROM pg_class c
+      SELECT format('table %I.%I', n.nspname, c.relname), r.rolname FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace
       JOIN pg_roles r ON r.oid = c.relowner
       WHERE n.nspname = 'realtime' AND c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
         AND c.relname <> 'schema_migrations'
-      UNION
-      SELECT r.rolname FROM pg_proc p
+        AND r.rolname <> 'supabase_realtime_admin'
+      UNION ALL
+      SELECT format('function %I.%I', n.nspname, p.proname), r.rolname FROM pg_proc p
       JOIN pg_namespace n ON n.oid = p.pronamespace
       JOIN pg_roles r ON r.oid = p.proowner
-      WHERE n.nspname = 'realtime'
-      UNION
-      SELECT r.rolname FROM pg_type t
+      WHERE n.nspname = 'realtime' AND r.rolname <> 'supabase_realtime_admin'
+      UNION ALL
+      SELECT format('type %I.%I', n.nspname, t.typname), r.rolname FROM pg_type t
       JOIN pg_namespace n ON n.oid = t.typnamespace
       JOIN pg_roles r ON r.oid = t.typowner
       WHERE n.nspname = 'realtime' AND t.typtype IN ('b', 'd', 'e', 'r', 'm')
         AND t.typname <> '_schema_migrations'
+        AND r.rolname <> 'supabase_realtime_admin'
       """
 
-      assert %Postgrex.Result{rows: [["supabase_realtime_admin"]]} = Postgrex.query!(conn, query, [])
+      %Postgrex.Result{rows: offenders} = Postgrex.query!(conn, query, [])
+
+      assert offenders == [],
+             "realtime objects not owned by supabase_realtime_admin (add `ALTER ... OWNER TO supabase_realtime_admin` to the migration):\n" <>
+               Enum.map_join(offenders, "\n", fn [object, owner] -> "  - #{object} (owned by #{owner})" end)
     end
 
-    test "realtime schema is owned by supabase_admin", %{conn: conn} do
+    test "realtime schema is owned by supabase_admin", %{superuser_conn: conn} do
       assert %Postgrex.Result{rows: [["supabase_admin"]]} =
                Postgrex.query!(
                  conn,

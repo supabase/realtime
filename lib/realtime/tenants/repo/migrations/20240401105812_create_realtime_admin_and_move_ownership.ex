@@ -30,13 +30,6 @@ defmodule Realtime.Tenants.Migrations.CreateRealtimeAdminAndMoveOwnership do
     execute("ALTER table realtime.presences OWNER TO supabase_realtime_admin")
     execute("ALTER function realtime.channel_name() owner to supabase_realtime_admin")
 
-    execute("""
-    DO $$
-    BEGIN
-      IF (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) THEN
-        GRANT supabase_realtime_admin TO postgres;
-      END IF;
-    END $$;
-    """)
+    execute("GRANT supabase_realtime_admin TO postgres;")
   end
 end

@@ -27,8 +27,10 @@ publication = "supabase_realtime"
             "settings" => %{
               "db_name" => System.get_env("DB_NAME", "postgres"),
               "db_host" => System.get_env("DB_HOST", default_db_host),
-              "db_user" => System.get_env("DB_USER", "supabase_realtime_admin"),
+              "db_user" => System.get_env("DB_USER", "supabase_admin"),
               "db_password" => System.get_env("DB_PASSWORD", "postgres"),
+              "db_user_realtime" => System.get_env("DB_USER_REALTIME", "supabase_realtime_admin"),
+              "db_pass_realtime" => System.get_env("DB_PASS_REALTIME", "postgres"),
               "db_port" => System.get_env("DB_PORT", "5433"),
               "region" => "us-east-1",
               "poll_interval_ms" => 100,
@@ -59,6 +61,9 @@ Postgrex.transaction(admin_conn, fn db_conn ->
   ]
   |> Enum.each(&Postgrex.query!(db_conn, &1))
 end)
+
+# Enable supabase_realtime_admin to include SetupSupabaseRealtimeAdmin in tenant catalog
+{:ok, _} = Realtime.Api.upsert_feature_flag(%{name: "use_supabase_realtime_admin", enabled: true})
 
 case Tenants.Migrations.run_migrations(tenant) do
   :ok -> :ok

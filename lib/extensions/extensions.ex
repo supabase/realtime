@@ -11,9 +11,13 @@ defmodule Realtime.Extensions do
       end)
 
     if db_settings do
-      %{default: apply(db_settings, :default, []), required: apply(db_settings, :required, [])}
+      %{
+        default: apply(db_settings, :default, []),
+        required: apply(db_settings, :required, []),
+        optional: apply(db_settings, :optional, [])
+      }
     else
-      %{default: %{}, required: []}
+      %{default: %{}, required: [], optional: []}
     end
   end
 end

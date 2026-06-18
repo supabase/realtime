@@ -23,7 +23,8 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     ]
   }
   """
-  @application_name "realtime_dashboard_tenant_migrations"
+  # Apply changes using a superuser
+  @application_name "realtime_migrations"
   @catalog_major 17
   @query_timeout 60_000
   @schema_migrations_query "SELECT version, inserted_at FROM realtime.schema_migrations ORDER BY version DESC"
@@ -414,7 +415,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
         args = [
           "plan",
           "--source",
-          postgres_url(%{settings | username: "supabase_admin"}),
+          postgres_url(settings),
           "--target",
           catalog,
           "--filter",
