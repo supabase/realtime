@@ -465,7 +465,9 @@ defmodule Forum.Muster.Scope do
         :ets.match_delete(state.occupancy_table, {{:_, node(pid)}, :_})
         :telemetry.execute([:forum, state.scope, :node, :down], %{}, %{node: node(pid)})
 
-        state = %{state | peers: new_peers}
+        member_views = Map.delete(state.member_views, node(pid))
+
+        state = %{state | peers: new_peers, member_views: member_views}
         {:noreply, recompute_members(state)}
 
       _ ->
