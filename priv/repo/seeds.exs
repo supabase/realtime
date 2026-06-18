@@ -16,7 +16,10 @@ default_db_host = "host.docker.internal"
 # that requires TLS (e.g. AWS RDS with rds.force_ssl=1, GCP Cloud SQL
 # with "require SSL/TLS connections" on).
 db_ssl_enforced =
-  System.get_env("DB_SSL_ENFORCED", "false") |> String.downcase() |> String.trim() in ["true", "1"]
+  System.get_env("DB_SSL_ENFORCED", "false")
+  |> String.trim()
+  |> String.downcase()
+  |> then(&(&1 in ["true", "1"]))
 
 {:ok, tenant} =
   Repo.transaction(fn ->
