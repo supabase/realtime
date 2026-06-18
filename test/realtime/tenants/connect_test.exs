@@ -445,18 +445,18 @@ defmodule Realtime.Tenants.ConnectTest do
       assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       assert Connect.ready?(tenant.external_id)
 
-      replication_connection_before = ReplicationConnection.whereis(tenant.external_id)
+      replication_connection_before = assert_pid(fn -> ReplicationConnection.whereis(tenant.external_id) end)
       assert Process.alive?(replication_connection_before)
 
-      assert {:ok, replication_conn_pid_before} = Connect.replication_status(tenant.external_id)
+      assert {:ok, replication_conn_pid_before} = assert_replication_status(tenant.external_id)
 
       assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
 
-      replication_connection_after = ReplicationConnection.whereis(tenant.external_id)
+      replication_connection_after = assert_pid(fn -> ReplicationConnection.whereis(tenant.external_id) end)
       assert Process.alive?(replication_connection_after)
       assert replication_connection_before == replication_connection_after
 
-      assert {:ok, replication_conn_pid_after} = Connect.replication_status(tenant.external_id)
+      assert {:ok, replication_conn_pid_after} = assert_replication_status(tenant.external_id)
       assert replication_conn_pid_before == replication_conn_pid_after
     end
 
@@ -464,13 +464,13 @@ defmodule Realtime.Tenants.ConnectTest do
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       assert Connect.ready?(tenant.external_id)
 
-      replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
+      replication_connection_pid = assert_pid(fn -> ReplicationConnection.whereis(tenant.external_id) end)
       Process.monitor(replication_connection_pid)
 
       assert Process.alive?(replication_connection_pid)
       pid = Connect.whereis(tenant.external_id)
 
-      assert {:ok, replication_conn_before} = Connect.replication_status(tenant.external_id)
+      assert {:ok, replication_conn_before} = assert_replication_status(tenant.external_id)
 
       Postgrex.query!(
         db_conn,
@@ -497,12 +497,12 @@ defmodule Realtime.Tenants.ConnectTest do
       assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       assert Connect.ready?(tenant.external_id)
 
-      replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
+      replication_connection_pid = assert_pid(fn -> ReplicationConnection.whereis(tenant.external_id) end)
       Process.monitor(replication_connection_pid)
       assert Process.alive?(replication_connection_pid)
       pid = Connect.whereis(tenant.external_id)
 
-      assert {:ok, replication_conn_before} = Connect.replication_status(tenant.external_id)
+      assert {:ok, replication_conn_before} = assert_replication_status(tenant.external_id)
 
       Process.exit(replication_connection_pid, :kill)
       assert_receive {:DOWN, _, :process, ^replication_connection_pid, _}
@@ -692,12 +692,12 @@ defmodule Realtime.Tenants.ConnectTest do
       assert Process.alive?(db_conn)
       assert Connect.ready?(tenant.external_id)
       connect_pid = Connect.whereis(tenant.external_id)
-      replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
+      replication_connection_pid = assert_pid(fn -> ReplicationConnection.whereis(tenant.external_id) end)
       assert Process.alive?(connect_pid)
       assert Process.alive?(replication_connection_pid)
 
       assert {_, %{conn: ^db_conn}} = :syn.lookup(Connect, tenant.external_id)
-      assert {:ok, _replication_conn_pid} = Connect.replication_status(tenant.external_id)
+      assert {:ok, _replication_conn_pid} = assert_replication_status(tenant.external_id)
 
       Connect.shutdown(tenant.external_id)
       assert_process_down(connect_pid)
@@ -737,6 +737,9 @@ defmodule Realtime.Tenants.ConnectTest do
     test "recovery stops when elapsed time exceeds 2-hour window", %{tenant: tenant} do
       assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       assert Connect.ready?(tenant.external_id)
+      # Replication starts asynchronously; wait for it to settle so the async result handler
+      # doesn't clobber the state we inject below.
+      assert {:ok, _} = assert_replication_status(tenant.external_id)
 
       pid = Connect.whereis(tenant.external_id)
       ref = Process.monitor(pid)
@@ -756,6 +759,9 @@ defmodule Realtime.Tenants.ConnectTest do
     test "recovery preserves replication_recovery_started_at across multiple crashes", %{tenant: tenant} do
       assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       assert Connect.ready?(tenant.external_id)
+      # Replication starts asynchronously; wait for it to settle so the async result handler
+      # doesn't clobber the state we inject below.
+      assert {:ok, _} = assert_replication_status(tenant.external_id)
 
       pid = Connect.whereis(tenant.external_id)
       original_ts = System.monotonic_time(:millisecond) - 1000
@@ -786,7 +792,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
       pid = Connect.whereis(tenant.external_id)
 
-      replication_pid = ReplicationConnection.whereis(tenant.external_id)
+      replication_pid = assert_pid(fn -> ReplicationConnection.whereis(tenant.external_id) end)
       Process.monitor(replication_pid)
       Process.exit(replication_pid, :kill)
       assert_receive {:DOWN, _, :process, ^replication_pid, _}, 1000

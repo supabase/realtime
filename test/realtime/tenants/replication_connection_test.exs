@@ -765,6 +765,38 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       refute logs =~ "Recreating"
     end
 
+    test "disconnects when the publication cannot be created", %{tenant: tenant, db_conn: db_conn} do
+      publication_name = "supabase_realtime_messages_publication"
+
+      # No publication yet (forces the CREATE PUBLICATION path) and no table to publish,
+      # so `CREATE PUBLICATION ... FOR TABLE realtime.messages` fails with undefined_table.
+      Postgrex.query!(db_conn, "DROP PUBLICATION IF EXISTS #{publication_name}", [])
+      Postgrex.query!(db_conn, "DROP TABLE IF EXISTS realtime.messages CASCADE", [])
+
+      capture_log(fn ->
+        assert {:error, "Error creating publication:" <> _} = ReplicationConnection.start(tenant, self())
+      end)
+    end
+
+    test "disconnects when the publication cannot be recreated", %{tenant: tenant, db_conn: db_conn} do
+      publication_name = "supabase_realtime_messages_publication"
+
+      # Publication exists but with the wrong table, so validation triggers the
+      # `DROP ...; CREATE ...` recreate path. With realtime.messages gone, the CREATE half
+      # of that multi-statement fails, exercising the list-of-results error branch.
+      Postgrex.query!(db_conn, "DROP PUBLICATION IF EXISTS #{publication_name}", [])
+      Postgrex.query!(db_conn, "CREATE TABLE IF NOT EXISTS public.wrong_table (id int)", [])
+      Postgrex.query!(db_conn, "CREATE PUBLICATION #{publication_name} FOR TABLE public.wrong_table", [])
+      Postgrex.query!(db_conn, "DROP TABLE IF EXISTS realtime.messages CASCADE", [])
+
+      logs =
+        capture_log(fn ->
+          assert {:error, "Error creating publication:" <> _} = ReplicationConnection.start(tenant, self())
+        end)
+
+      assert logs =~ "Recreating"
+    end
+
     test "if includes unexpected tables, recreates publication", %{tenant: tenant, db_conn: db_conn} do
       publication_name = "supabase_realtime_messages_publication"
 

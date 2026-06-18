@@ -12,9 +12,13 @@ defmodule Realtime.SynHandler do
   @postgres_cdc_scope_prefix PostgresCdc.syn_topic_prefix()
 
   @impl true
-  def on_registry_process_updated(Connect, tenant_id, pid, %{conn: conn}, :normal) when is_pid(conn) do
+  def on_registry_process_updated(Connect, tenant_id, pid, %{conn: conn} = meta, :normal) when is_pid(conn) do
     # Update that a database connection is ready
-    Endpoint.local_broadcast(Connect.syn_topic(tenant_id), "ready", %{pid: pid, conn: conn})
+    Endpoint.local_broadcast(Connect.syn_topic(tenant_id), "ready", %{
+      pid: pid,
+      conn: conn,
+      replication_conn: meta[:replication_conn]
+    })
   end
 
   def on_registry_process_updated(scope, tenant_id, _pid, meta, _reason) do

@@ -291,6 +291,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       {:ok, _pid} = Connect.lookup_or_start_connection(tenant.external_id)
 
       assert Connect.ready?(tenant.external_id)
+      assert Realtime.Tenants.ReplicationConnection.ready?(tenant.external_id)
 
       assert Cache.get_tenant_by_external_id(tenant.external_id)
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
