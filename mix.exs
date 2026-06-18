@@ -53,7 +53,7 @@ defmodule Realtime.MixProject do
   # Type `mix help deps` for examples and options.
   defp deps do
     [
-      {:phoenix, override: true, github: "supabase/phoenix", branch: "feat/presence-custom-dispatcher-1.7.19"},
+      phoenix_dep(),
       {:phoenix_ecto, "~> 4.4.0"},
       {:ecto_sql, "~> 3.11"},
       {:ecto_psql_extras, "~> 0.8"},
@@ -111,6 +111,14 @@ defmodule Realtime.MixProject do
       {:poolboy, "~> 1.5", only: :test},
       {:mix_test_watch, "~> 1.0", only: [:dev, :test], runtime: false}
     ]
+  end
+
+  defp phoenix_dep do
+    if path = System.get_env("PHOENIX_PATH") do
+      {:phoenix, path: path, override: true}
+    else
+      {:phoenix, override: true, github: "supabase/phoenix", branch: "feat/presence-custom-dispatcher-1.7.19"}
+    end
   end
 
   # Aliases are shortcuts or tasks specific to the current project.
