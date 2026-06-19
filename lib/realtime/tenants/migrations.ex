@@ -94,7 +94,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_260_603_120_000, Migrations.AddSendBinaryFunction},
     {20_260_605_120_000, Migrations.RenameBroadcastSendWarning},
     {20_260_606_110_000, Migrations.SubscriptionCheckFiltersUsePgAttribute},
-    {20_260_606_120_000, Migrations.SetupSupabaseRealtimeAdmin}
+    {20_260_606_120_000, Migrations.SetupSupabaseRealtimeAdmin},
+    {20_260_616_120_000, Migrations.AddPostgrestFilterOps}
   ]
 
   defstruct [:tenant_external_id, :settings, migrations_ran: 0]

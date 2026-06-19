@@ -74,3 +74,59 @@ run = """
     --db-url "postgresql://postgres:postgres@127.0.0.1:54322/postgres" \
     "$@"
 """
+
+[tasks.e2e-local]
+description = "Run e2e tests against a locally-built realtime image (carries unreleased migrations). Builds the repo, swaps it in for supabase's stock realtime, then runs the suite. e.g. mise run e2e-local -- --test postgres-changes-filters"
+dir = "test/e2e"
+run = """
+  set -e
+  REF=$(grep -E '^[[:space:]]*project_id' supabase/config.toml | sed -E 's/.*"(.*)".*/\\1/')
+  IMAGE=realtime:e2e-local
+  RT="supabase_realtime_${REF}"
+
+  # 1. Build the repo into a local image (Docker layer cache keeps rebuilds cheap).
+  docker build -t "$IMAGE" ../..
+
+  # 2. Bring up the full supabase stack. We use its realtime container only as the source of
+  #    truth for env vars (JWT secret, DB creds, encryption key, etc.). A prior run may have left
+  #    realtime swapped out / removed; `supabase start` won't recreate an externally-removed
+  #    container, so if it's missing we recycle the stack to get a clean one back.
+  supabase start
+  if ! docker inspect "$RT" >/dev/null 2>&1; then
+    echo "realtime container missing (left over from a prior swap); recreating supabase stack..."
+    supabase stop >/dev/null 2>&1 || true
+    supabase start
+  fi
+
+  # 3. Swap realtime: copy supabase's exact env (via `env` inside their container, so we avoid
+  #    Go-template braces that collide with mise's templating), drop their container, and run ours
+  #    under the same name / network / aliases / healthcheck so Kong routes to it unchanged.
+  ENVFILE=$(mktemp)
+  docker exec "$RT" env > "$ENVFILE"
+  docker rm -f "$RT" >/dev/null
+  docker run -d --name "$RT" \
+    --network "supabase_network_${REF}" \
+    --network-alias realtime --network-alias realtime-dev \
+    --env-file "$ENVFILE" \
+    --health-cmd 'curl -sSfL --head -o /dev/null -H "Host:realtime-dev" http://127.0.0.1:4000/api/ping' \
+    --health-interval 10s --health-timeout 2s --health-retries 3 \
+    "$IMAGE" >/dev/null
+  rm -f "$ENVFILE"
+
+  # 4. Wait for our realtime to report healthy (boot + tenant migrations). `docker ps` with a
+  #    health filter prints the container id only once it is healthy — no Go-template needed.
+  echo "Waiting for local realtime ($IMAGE) to become healthy..."
+  for _ in $(seq 1 30); do
+    if [ -n "$(docker ps -q --filter "name=$RT" --filter health=healthy)" ]; then break; fi
+    sleep 2
+  done
+
+  # 5. Run the suite against the stack (Kong -> our realtime). Do NOT call `supabase start` again
+  #    here, or it would recreate realtime from the stock image.
+  eval "$(supabase status --output env)"
+  bun run realtime-check.ts --env local \
+    --publishable-key "$PUBLISHABLE_KEY" \
+    --secret-key "$SECRET_KEY" \
+    --db-url "postgresql://postgres:postgres@127.0.0.1:54322/postgres" \
+    "$@"
+"""

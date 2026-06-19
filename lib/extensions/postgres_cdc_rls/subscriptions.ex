@@ -7,14 +7,17 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   import Postgrex, only: [transaction: 3, query: 3, rollback: 2]
 
   @type conn() :: Postgrex.conn()
-  @type filter :: {binary, binary, binary}
+  # A filter written to realtime.subscription.filters: column, operator, value, and a `negate`
+  # flag (the `not.` prefix).
+  @type filter :: {column :: binary, op :: binary, value :: binary, negate :: boolean}
   @type subscription_params ::
           {action_filter :: binary, schema :: binary, table :: binary, [filter], selected_columns :: [binary] | nil}
   @type subscription_list :: [
           %{id: binary, claims: map, subscription_params: subscription_params}
         ]
 
-  @filter_types ["eq", "neq", "lt", "lte", "gt", "gte", "in"]
+  # All supported filter operators.
+  @filter_types ["eq", "neq", "lt", "lte", "gt", "gte", "in", "like", "ilike", "is", "match", "imatch", "isdistinct"]
 
   @spec create(conn(), String.t(), subscription_list, pid(), pid()) ::
           {:ok, Postgrex.Result.t()}
@@ -94,8 +97,19 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
         created_at = now()
       returning
          id"
+
     {action_filter, schema, table, filters, selected_columns} = subscription_params
-    query(conn, sql, [publication, schema, table, id, claims, filters, action_filter, selected_columns])
+
+    query(conn, sql, [
+      publication,
+      schema,
+      table,
+      id,
+      claims,
+      filters,
+      action_filter,
+      selected_columns
+    ])
   end
 
   defp params_to_log({action_filter, schema, table, filters, selected_columns}) do
@@ -184,12 +198,13 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
     case query(conn, sql, [publication]) do
       {:ok, %{columns: ["schemaname", "tablename", "oid"], rows: rows}} ->
         oids =
-          Enum.reduce(rows, %{}, fn [schema, table, oid], acc ->
+          rows
+          |> Enum.reduce(%{}, fn [schema, table, oid], acc ->
             Map.put(acc, {schema, table}, [oid])
             |> Map.update({schema}, [oid], &[oid | &1])
             |> Map.update({"*"}, [oid], &[oid | &1])
           end)
-          |> Enum.reduce(%{}, fn {k, v}, acc -> Map.put(acc, k, Enum.sort(v)) end)
+          |> Map.new(fn {k, v} -> {k, Enum.sort(v)} end)
 
         {:ok, oids}
 
@@ -207,7 +222,9 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   @doc """
   Parses subscription filter parameters into something we can pass into our `create_subscription` query.
 
-  We currently support the following filters: 'eq', 'neq', 'lt', 'lte', 'gt', 'gte', 'in'
+  Supported operators: `eq`, `neq`, `lt`, `lte`, `gt`, `gte`, `in`, `like`, `ilike`, `is`,
+  `match`, `imatch`, `isdistinct`. Any operator can be negated with the `not.` prefix
+  (e.g. `id=not.eq.5`).
 
   Multiple filters can be combined with commas and are applied as AND conditions:
   `"col1=eq.val,col2=gt.5"` means `col1 = val AND col2 > 5`.
@@ -215,17 +232,22 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   ## Examples
 
       iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "subject=eq.hey"})
-      {:ok, {"*", "public", "messages", [{"subject", "eq", "hey"}], nil}}
+      {:ok, {"*", "public", "messages", [{"subject", "eq", "hey", false}], nil}}
 
   `in` filter:
 
       iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "subject=in.(hidee,ho)"})
-      {:ok, {"*", "public", "messages", [{"subject", "in", "{hidee,ho}"}], nil}}
+      {:ok, {"*", "public", "messages", [{"subject", "in", "{hidee,ho}", false}], nil}}
+
+  negation with the `not.` prefix:
+
+      iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "subject=not.like.hey%"})
+      {:ok, {"*", "public", "messages", [{"subject", "like", "hey%", true}], nil}}
 
   AND composition — multiple filters separated by commas:
 
       iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "id=gt.0,id=lt.100"})
-      {:ok, {"*", "public", "messages", [{"id", "gt", "0"}, {"id", "lt", "100"}], nil}}
+      {:ok, {"*", "public", "messages", [{"id", "gt", "0", false}, {"id", "lt", "100", false}], nil}}
 
   empty or whitespace-only filter string is treated as no filter:
 
@@ -250,10 +272,10 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
       iex> parse_subscription_params(%{"table" => "messages"})
       {:ok, {"*", "public", "messages", [], nil}}
 
-  An unsupported filter will respond with an error tuple:
+  An unsupported operator will respond with an error tuple:
 
-      iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "subject=like.hey"})
-      {:error, ~s(Error parsing `filter` params: ["like", "hey"])}
+      iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "subject=foo.hey"})
+      {:error, ~s(Error parsing `filter` params: ["foo", "hey"])}
 
   Catch `undefined` filters:
 
@@ -276,38 +298,23 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
         %{"schema" => schema, "table" => table, "filter" => filter}
         when is_binary(schema) and is_binary(table) and is_binary(filter) ->
           case parse_filters(filter) do
-            {:ok, filters} ->
-              case reject_select_on_wildcard(schema, table, selected_columns) do
-                :ok -> {:ok, {action_filter, schema, table, filters, selected_columns}}
-                error -> error
-              end
-
-            {:error, reason} ->
-              {:error, "Error parsing `filter` params: #{reason}"}
+            {:ok, filters} -> ok_params(action_filter, schema, table, filters, selected_columns)
+            {:error, reason} -> {:error, "Error parsing `filter` params: #{reason}"}
           end
 
         %{"schema" => schema, "table" => table}
         when is_binary(schema) and is_binary(table) and not is_map_key(params, "filter") ->
-          case reject_select_on_wildcard(schema, table, selected_columns) do
-            :ok -> {:ok, {action_filter, schema, table, [], selected_columns}}
-            error -> error
-          end
+          ok_params(action_filter, schema, table, [], selected_columns)
 
         %{"schema" => schema}
         when is_binary(schema) and not is_map_key(params, "table") and
                not is_map_key(params, "filter") ->
-          case reject_select_on_wildcard(schema, "*", selected_columns) do
-            :ok -> {:ok, {action_filter, schema, "*", [], selected_columns}}
-            error -> error
-          end
+          ok_params(action_filter, schema, "*", [], selected_columns)
 
         %{"table" => table}
         when is_binary(table) and not is_map_key(params, "schema") and
                not is_map_key(params, "filter") ->
-          case reject_select_on_wildcard("public", table, selected_columns) do
-            :ok -> {:ok, {action_filter, "public", table, [], selected_columns}}
-            error -> error
-          end
+          ok_params(action_filter, "public", table, [], selected_columns)
 
         map when is_map_key(map, "user_token") or is_map_key(map, "auth_token") ->
           {:error,
@@ -332,6 +339,12 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   end
 
   defp parse_select(_), do: {:ok, nil}
+
+  defp ok_params(action_filter, schema, table, filters, selected_columns) do
+    with :ok <- reject_select_on_wildcard(schema, table, selected_columns) do
+      {:ok, {action_filter, schema, table, filters, selected_columns}}
+    end
+  end
 
   defp reject_select_on_wildcard(_schema, _table, nil), do: :ok
 
@@ -358,36 +371,43 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   defp parse_filters(filter) when is_binary(filter) do
     case String.trim(filter) do
       "" -> {:ok, []}
-      trimmed -> scan(trimmed, trimmed, 0, 0, 0, [])
+      trimmed -> trimmed |> split_top_level() |> parse_segments()
     end
   end
 
-  # Reached end of binary — parse the final segment
-  defp scan(<<>>, orig, start, len, _depth, acc) do
-    case parse_segment(binary_part(orig, start, len)) do
-      {:ok, parsed} -> {:ok, Enum.reverse([parsed | acc])}
-      {:error, _} = e -> e
+  # Split on commas that are NOT inside parentheses, so an `in.(a,b)` value stays a single
+  # segment. An unmatched `)` is tolerated and kept as a literal in the value (PostgREST
+  # behaviour), which is why depth floors at 0.
+  defp split_top_level(filter), do: split_top_level(filter, 0, "", [])
+
+  defp split_top_level(<<>>, _depth, current, acc), do: Enum.reverse([current | acc])
+
+  defp split_top_level(<<"(", rest::binary>>, depth, current, acc),
+    do: split_top_level(rest, depth + 1, current <> "(", acc)
+
+  defp split_top_level(<<")", rest::binary>>, depth, current, acc),
+    do: split_top_level(rest, max(0, depth - 1), current <> ")", acc)
+
+  # A comma at depth 0 ends the current segment.
+  defp split_top_level(<<",", rest::binary>>, 0, current, acc),
+    do: split_top_level(rest, 0, "", [current | acc])
+
+  # Any other byte (including a comma inside parentheses) extends the current segment.
+  defp split_top_level(<<char, rest::binary>>, depth, current, acc),
+    do: split_top_level(rest, depth, current <> <<char>>, acc)
+
+  # Parse each segment, short-circuiting on the first error.
+  defp parse_segments(segments) do
+    Enum.reduce_while(segments, {:ok, []}, fn segment, {:ok, acc} ->
+      case parse_segment(segment) do
+        {:ok, parsed} -> {:cont, {:ok, [parsed | acc]}}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, parsed} -> {:ok, Enum.reverse(parsed)}
+      error -> error
     end
-  end
-
-  defp scan(<<"(", rest::binary>>, orig, start, len, depth, acc) do
-    scan(rest, orig, start, len + 1, depth + 1, acc)
-  end
-
-  defp scan(<<")", rest::binary>>, orig, start, len, depth, acc) do
-    scan(rest, orig, start, len + 1, max(0, depth - 1), acc)
-  end
-
-  # Comma at depth 0 — segment boundary
-  defp scan(<<",", rest::binary>>, orig, start, len, 0, acc) do
-    case parse_segment(binary_part(orig, start, len)) do
-      {:ok, parsed} -> scan(rest, orig, start + len + 1, 0, 0, [parsed | acc])
-      {:error, _} = e -> e
-    end
-  end
-
-  defp scan(<<_::8, rest::binary>>, orig, start, len, depth, acc) do
-    scan(rest, orig, start, len + 1, depth, acc)
   end
 
   defp parse_segment(segment) do
@@ -397,16 +417,23 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
       trimmed ->
         with [col, rest] <- String.split(trimmed, "=", parts: 2),
-             [filter_type, value] when filter_type in @filter_types <-
-               String.split(rest, ".", parts: 2),
+             {negate, op_value} = parse_negate(rest),
+             [filter_type, value] <- String.split(op_value, ".", parts: 2),
+             # On an unsupported operator, fall through with the parsed parts so the `else`
+             # branch can report them (e.g. `["foo", "hey"]`).
+             true <- filter_type in @filter_types || [filter_type, value],
              {:ok, formatted_value} <- format_filter_value(filter_type, value) do
-          {:ok, {col, filter_type, formatted_value}}
+          {:ok, {col, filter_type, formatted_value, negate}}
         else
           {:error, msg} -> {:error, msg}
           e -> {:error, inspect(e)}
         end
     end
   end
+
+  # The `not.` prefix negates the operator.
+  defp parse_negate("not." <> op_value), do: {true, op_value}
+  defp parse_negate(op_value), do: {false, op_value}
 
   defp format_filter_value("in", value) do
     size = byte_size(value)
