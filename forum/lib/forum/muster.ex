@@ -259,6 +259,8 @@ defmodule Forum.Muster do
       "  ring_nodes:   #{inspect(s.ring_nodes)}",
       "  peers:        #{inspect(s.peers)}",
       "  member_views: #{inspect(s.member_views)}",
+      "  owed_snaps:   #{inspect(s.owed_snapshots)}",
+      "  applied_snap: #{inspect(s.applied_snapshot_seq)}",
       "  cooldown:     #{inspect(Enum.sort(s.cooldown))}",
       "group_states:" | group_lines
     ]
