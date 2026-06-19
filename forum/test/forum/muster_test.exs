@@ -309,6 +309,9 @@ defmodule Forum.MusterTest do
       # Seed something the snapshot should clear.
       :ok = Scope.occupied(scope, :stale_g, :src@nowhere, 1)
 
+      # receive_node_state applies the snapshot via a synchronous call into
+      # Scope (it serializes the apply to keep overlapping rebalances safe), so
+      # the occupancy table reflects it by the time this returns.
       assert :ok = Scope.receive_node_state(scope, :src@nowhere, [:fresh_a, :fresh_b], 0, 2)
 
       refute :src@nowhere in Scope.occupancy(scope, :stale_g)

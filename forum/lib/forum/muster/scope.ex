@@ -50,6 +50,8 @@ defmodule Forum.Muster.Scope do
             cooldown_timers: %{Forum.group() => reference},
             group_states: %{Forum.group() => group_state},
             member_views: %{node => {non_neg_integer, integer}},
+            owed_snapshots: %{node => integer},
+            applied_snapshot_seq: %{node => integer},
             view_seq: integer,
             telemetry_handler_id: term
           }
@@ -83,7 +85,25 @@ defmodule Forum.Muster.Scope do
       # the seq of our last snapshot round (or of init's re-announce). All
       # occupancy rows we dispatched up to that announcement carry a seq at or
       # below this value.
-      view_seq: 0
+      view_seq: 0,
+      # Routers we have an in-flight, fire-and-forget :receive_node_state
+      # snapshot to, each stamped with the snapshot_seq of the round that
+      # dispatched it. While a node is in here, announce_view must NOT send it a
+      # bare view marker: the marker for an owed node is carried by the snapshot
+      # itself, after its data is applied. A bare marker arriving first would let
+      # the node count us as "agreed on the new view" before our occupancy data
+      # has landed — a missed delivery. Cleared by the snapshot worker's
+      # :node_state_done on success; the seq stamp lets a later rebalance that
+      # re-owes the same node keep the obligation even if an earlier round's
+      # acknowledgement arrives afterwards.
+      owed_snapshots: %{},
+      # Router-role bookkeeping: the highest snapshot seq we have applied from
+      # each source node (see handle_call({:apply_snapshot, ...})). A snapshot
+      # whose seq is not strictly greater is a stale, reordered round and is
+      # dropped wholesale — this is what makes a *sequence* of overlapping
+      # rebalances safe, since the apply is serialized through this Scope and a
+      # late round can never resurrect a group a newer round already dropped.
+      applied_snapshot_seq: %{}
     ]
   end
 
@@ -173,44 +193,33 @@ defmodule Forum.Muster.Scope do
   Remote: source_node gives us a full-state snapshot of its groups for the
   cluster view identified by `view_hash`.
 
-  The snapshot doubles as source_node's rebalance marker for that view: after
-  committing the occupancy data we notify the local Scope so its readiness
-  barrier counts this source. Because the data is written to ETS *before* the
-  marker is sent, a router that later observes `:ready` has this source's
-  occupancy in place. We run in the adapter's RPC worker (not in Scope), so the
-  marker is sent to Scope by its registered name.
+  Unlike `occupied`/`vacant_batch`, this does **not** write the occupancy table
+  from the RPC worker. It applies the snapshot via a synchronous
+  `{:apply_snapshot, ...}` call into the receiver's Scope and returns its reply.
+  Serializing the apply through the single Scope process is what makes a
+  *sequence* of overlapping rebalances safe: Scope applies a source's snapshots
+  in mailbox order under a per-source seq guard, so a late or reordered round is
+  dropped wholesale and can never resurrect a group a newer round already
+  dropped — a guarantee that concurrent direct ETS writes from parallel RPC
+  workers cannot give (the multi-row insert+delete is not atomic across workers).
+
+  The snapshot still doubles as source_node's rebalance marker: Scope folds the
+  occupancy write and the `member_views` update into one indivisible apply (data
+  first, then readiness). Because the call only returns once Scope has applied
+  it, "RPC returned ⟹ applied" — so when the sender clears `owed_snapshots` and
+  resumes its view heartbeat to us, our data and marker are already in place;
+  readiness can never be recorded before the data lands. We pass `:infinity` for
+  the inner call (it is a few ETS ops that never block); the sender's `:erpc`
+  `:rpc_timeout_ms` is the real bound, so a wedged receiver still surfaces as a
+  snapshot failure on the sender.
   """
   @spec receive_node_state(atom, node, [Forum.group()], non_neg_integer, integer) :: :ok
   def receive_node_state(scope, source_node, groups, view_hash, seq) do
-    table = occupancy_table_name(scope)
-    # Insert the snapshot first, then delete only rows stamped older than it.
-    # This keeps the failure direction to false positives, never false
-    # negatives: held groups are overwritten in place (the :set key
-    # {group, source_node} is never momentarily absent), and groups the
-    # snapshot dropped linger as harmless extra-delivery targets until the
-    # guarded select_delete removes them. A concurrent :fanout_request scan
-    # during the window therefore sees a *superset* of the source's groups —
-    # an over-delivery (acceptable for best-effort Muster) rather than a
-    # missed delivery.
-    #
-    # The guard is strict `<`: the rows we just inserted carry exactly `seq`,
-    # so they survive, and a newer `occupied` re-claim racing this snapshot
-    # (higher seq) is never clobbered. `seq` is the source's monotonic
-    # snapshot stamp, strictly above any earlier occupied/vacant for these
-    # groups, so every truly-stale row for this source is `< seq`.
-    Enum.each(groups, fn group -> :ets.insert(table, {{group, source_node}, seq}) end)
-    :ets.select_delete(table, [{{{:_, source_node}, :"$1"}, [{:<, :"$1", seq}], [true]}])
-    Kernel.send(Forum.Supervisor.name(scope), {:rebalance_marker, source_node, view_hash, seq})
-
-    tp(:muster_node_state_received, %{
-      scope: scope,
-      node: node(),
-      source: source_node,
-      view_hash: view_hash,
-      groups: groups
-    })
-
-    :ok
+    GenServer.call(
+      Forum.Supervisor.name(scope),
+      {:apply_snapshot, source_node, groups, view_hash, seq},
+      :infinity
+    )
   end
 
   ## GenServer lifecycle
@@ -347,13 +356,59 @@ defmodule Forum.Muster.Scope do
   ## handle_call
 
   # Local source — Muster.join asking us to claim this group on the router.
-  # Remote occupancy updates (:occupied, :vacant_batch, :receive_node_state)
-  # write directly to the :public occupancy_table from their :erpc worker —
-  # they no longer bounce through this mailbox. See the "Remote entry points"
-  # section above.
+  # The high-frequency remote updates (:occupied, :vacant_batch) write directly
+  # to the :public occupancy_table from their :erpc worker — they do not bounce
+  # through this mailbox. The rare snapshot apply (:apply_snapshot, below) DOES
+  # come through here, so its per-source seq guard is serialized. See the
+  # "Remote entry points" section above.
   @impl true
   def handle_call({:claim, group}, from, state) do
     handle_claim(group, from, state)
+  end
+
+  # Apply a full-state snapshot from `source` (dispatched by its rebalance, via
+  # the receive_node_state RPC, which calls in here and waits for the reply).
+  # Serializing the apply through Scope is what makes a *sequence* of overlapping
+  # rebalances safe: the per-source seq guard is atomic because Scope is one
+  # process.
+  #
+  # A snapshot whose seq is not strictly greater than the highest already applied
+  # from this source is a stale, reordered round (the RPC that carried it may
+  # have been delayed past a newer round, or executed late after an erpc timeout
+  # — erpc does not cancel remote execution). We drop it wholesale, so it can
+  # never resurrect a group a newer round already dropped, and still reply :ok
+  # (the data the caller wanted committed is already there, or superseded).
+  #
+  # Insert the snapshot rows at `seq`, then delete only this source's older rows (strict
+  # `<`, so the just-inserted rows survive and a racing higher-seq `occupied`
+  # re-claim is never clobbered). We then advance the watermark and fold in the
+  # carried view marker (member_views + update_status). Data first, then
+  # readiness, in one indivisible step.
+  def handle_call({:apply_snapshot, source, groups, view_hash, seq}, _from, %State{} = state) do
+    applied = Map.get(state.applied_snapshot_seq, source)
+
+    if applied != nil and seq <= applied do
+      {:reply, :ok, state}
+    else
+      table = state.occupancy_table
+      Enum.each(groups, fn group -> :ets.insert(table, {{group, source}, seq}) end)
+      :ets.select_delete(table, [{{{:_, source}, :"$1"}, [{:<, :"$1", seq}], [true]}])
+
+      tp(:muster_node_state_received, %{
+        scope: state.scope,
+        node: node(),
+        source: source,
+        view_hash: view_hash,
+        groups: groups
+      })
+
+      state = %{
+        state
+        | applied_snapshot_seq: Map.put(state.applied_snapshot_seq, source, seq)
+      }
+
+      {:reply, :ok, update_status(put_member_view(state, source, view_hash, seq))}
+    end
   end
 
   # For tests / introspection
@@ -390,6 +445,8 @@ defmodule Forum.Muster.Scope do
       ring_nodes: ring_nodes,
       peers: Map.keys(state.peers) |> Enum.map(&node/1),
       member_views: state.member_views,
+      owed_snapshots: state.owed_snapshots,
+      applied_snapshot_seq: state.applied_snapshot_seq,
       group_states: state.group_states,
       cooldown: :ets.tab2list(state.recently_vacant_table) |> Enum.map(&elem(&1, 0)),
       occupancy: occupancy
@@ -466,8 +523,15 @@ defmodule Forum.Muster.Scope do
         :telemetry.execute([:forum, state.scope, :node, :down], %{}, %{node: node(pid)})
 
         member_views = Map.delete(state.member_views, node(pid))
+        applied_snapshot_seq = Map.delete(state.applied_snapshot_seq, node(pid))
 
-        state = %{state | peers: new_peers, member_views: member_views}
+        state = %{
+          state
+          | peers: new_peers,
+            member_views: member_views,
+            applied_snapshot_seq: applied_snapshot_seq
+        }
+
         {:noreply, recompute_members(state)}
 
       _ ->
@@ -498,6 +562,34 @@ defmodule Forum.Muster.Scope do
   # Worker reported back the result of a batched :vacant flush to one router.
   def handle_info({{:vacant_batch_done, groups}, _ref, :process, _pid, exit_reason}, state) do
     {:noreply, handle_vacant_batch_done(groups, worker_result(exit_reason), state)}
+  end
+
+  # Worker reported back the result of a fire-and-forget :receive_node_state
+  # snapshot dispatched during a rebalance.
+  #
+  # On success the receiver has enqueued (and will FIFO-apply) our snapshot, and
+  # the marker it carries, so we stop suppressing the view heartbeat to that
+  # node — but only if this is still the round that owes it. A newer rebalance
+  # may have re-owed the same router with a higher seq; clearing on a stale
+  # (lower-seq) acknowledgement would let the next heartbeat send a bare marker
+  # before the newer snapshot lands. The seq stamp guards against that.
+  def handle_info(
+        {{:node_state_done, router_node, seq}, _ref, :process, _pid, exit_reason},
+        state
+      ) do
+    case worker_result(exit_reason) do
+      :ok ->
+        owed =
+          case Map.get(state.owed_snapshots, router_node) do
+            ^seq -> Map.delete(state.owed_snapshots, router_node)
+            _ -> state.owed_snapshots
+          end
+
+        {:noreply, %{state | owed_snapshots: owed}}
+
+      other ->
+        raise "Muster rebalance snapshot to #{inspect(router_node)} failed: #{inspect(other)}"
+    end
   end
 
   # Periodic flush of queued vacancies.
@@ -835,11 +927,18 @@ defmodule Forum.Muster.Scope do
   # their side; re-sending our current watermark is idempotent). Sent even
   # when we're already :ready, because a peer may be the one missing our
   # announcement.
+  #
+  # Members we still owe a rebalance snapshot are skipped: their marker is
+  # carried by the in-flight snapshot, after its data is applied. A bare
+  # heartbeat marker reaching them first would let them count us as agreed
+  # before our occupancy data lands (a missed delivery). The snapshot worker's
+  # :node_state_done clears the node from owed_snapshots, so the next heartbeat
+  # resumes covering it.
   defp announce_view(state) do
     view_hash = own_view_hash(state)
 
     Enum.each(state.members, fn member ->
-      if member != node() do
+      if member != node() and not Map.has_key?(state.owed_snapshots, member) do
         state.message_module.send(
           state.scope,
           member,
@@ -1002,10 +1101,10 @@ defmodule Forum.Muster.Scope do
       |> Map.take(MapSet.to_list(changed_routers))
 
     # Local self-target: synchronous ETS inserts in the Scope process.
-    # Remote targets: one Task per destination, awaited in parallel so the
-    # rebalance window is bounded by ~RTT rather than N × RTT. Tasks link to
-    # Scope, so an uncaught raise inside any closure crashes Scope just like
-    # a sequential raise would have.
+    # Remote targets: one fire-and-forget worker per destination. We do NOT wait
+    # — the whole point is that Scope stays free to service claims while the
+    # snapshots are in flight. Each worker reports its result via a tagged DOWN
+    # ({:node_state_done, ...}); a failure crashes Scope from that handler
     {local_groups, remote_targets} =
       Enum.split_with(by_router, fn {dest, _} -> dest == node() end)
 
@@ -1020,68 +1119,69 @@ defmodule Forum.Muster.Scope do
       end)
     end)
 
-    message_module = state.message_module
-    scope = state.scope
-    rpc_timeout = state.rpc_timeout_ms
     view_hash = :erlang.phash2(new_members)
 
-    tasks =
-      Enum.map(remote_targets, fn {router_node, groups} ->
-        task =
-          Task.async(fn ->
-            message_module.call(
-              scope,
-              router_node,
-              __MODULE__,
-              :receive_node_state,
-              [scope, node(), groups, view_hash, snapshot_seq],
-              rpc_timeout
-            )
-          end)
-
-        {router_node, task}
-      end)
-
-    # Each remote call is already bounded by `rpc_timeout` inside the
-    # adapter; add 1s of slack here so a hung Task surfaces via Task.await
-    # rather than hanging Scope indefinitely.
-    await_timeout = rpc_timeout + 1_000
-
-    Enum.each(tasks, fn {router_node, task} ->
-      case Task.await(task, await_timeout) do
-        :ok ->
-          :ok
-
-        other ->
-          raise "Muster rebalance failed: target=#{inspect(router_node)} result=#{inspect(other)}"
-      end
+    # Fire each snapshot into a monitored worker and record the target in
+    # owed_snapshots (stamped with this round's seq) so the view heartbeat won't
+    # send it a bare marker before its data lands — see the owed_snapshots note
+    # on the State struct.
+    Enum.each(remote_targets, fn {router_node, groups} ->
+      spawn_rpc_worker(
+        state,
+        router_node,
+        :receive_node_state,
+        [state.scope, node(), groups, view_hash, snapshot_seq],
+        {:node_state_done, router_node, snapshot_seq}
+      )
     end)
 
-    # Marker hybrid: members that received a data snapshot are marked by the
-    # receive_node_state RPC itself (it carries view_hash and notifies the
-    # receiver's Scope) — no separate signal, no double-contact. Every other
-    # member has nothing to fold a marker into, so it gets a cheap async marker
-    # instead; that is how its barrier learns "this source holds nothing for
-    # me" rather than "this source has not arrived yet". Self never needs one.
     snapshot_targets = Enum.map(remote_targets, fn {router_node, _} -> router_node end)
 
+    owed_snapshots =
+      Enum.reduce(snapshot_targets, state.owed_snapshots, fn router_node, acc ->
+        Map.put(acc, router_node, snapshot_seq)
+      end)
+
+    # Marker hybrid: members that received a data snapshot are marked by the
+    # snapshot itself (its {:apply_snapshot} message carries view_hash and is
+    # folded into member_views when applied, after the data write) — no separate
+    # signal, no double-contact. Every other member has nothing to fold a marker
+    # into, so it gets a cheap async marker instead; that is how its barrier
+    # learns "this source holds nothing for me" rather than "this source has not
+    # arrived yet". Self never needs one.
     Enum.each(new_members -- [node() | snapshot_targets], fn member ->
-      message_module.send(scope, member, {:rebalance_marker, node(), view_hash, snapshot_seq})
+      state.message_module.send(
+        state.scope,
+        member,
+        {:rebalance_marker, node(), view_hash, snapshot_seq}
+      )
     end)
 
-    # 5) Settle :occupied_pending claims whose router changed. The
-    #    rebalance just informed the new router via :receive_node_state,
-    #    so the parked callers can be unblocked with :ok. Their original
-    #    workers (targeting the old router) may still complete later;
-    #    the resulting :occupied_done lands in handle_occupied_done's _other
-    #    clause and is dropped because group_states[group] will be :occupied by
-    #    then.
+    # 5) Settle :occupied_pending claims whose router changed, replying :ok
+    #    *optimistically* — before the async snapshot is acknowledged. Safe
+    #    because while the snapshot is in flight the cluster is
+    #    :rebalancing/:converging, so senders flood (router/2) rather than target
+    #    a not-yet-populated occupancy row; no delivery is missed. If a snapshot
+    #    ultimately fails, Scope crashes and the restart re-announces every
+    #    locally-held group from the partition tables, so the optimistic :ok
+    #    self-heals. Their original workers (targeting the old router) may still
+    #    complete later; the resulting :occupied_done lands in
+    #    handle_occupied_done's _other clause and is dropped because
+    #    group_states[group] will be :occupied by then.
     state = settle_pending_after_rebalance(state, MapSet.new(groups_to_reannounce))
 
     # Adopt the new view (and this round's announce watermark) before judging
     # stale entries, so drop_stale_router_entries compares each source's
-    # announced view against the view the ring now implements.
-    state = %{state | members: new_members, view_seq: snapshot_seq}
+    # announced view against the view the ring now implements. Prune owed
+    # entries for nodes no longer in the cluster (a node that left mid-snapshot
+    # is gone; its worker, if still running, will fail and crash us like any
+    # other snapshot failure).
+    state = %{
+      state
+      | members: new_members,
+        view_seq: snapshot_seq,
+        owed_snapshots: Map.take(owed_snapshots, new_members)
+    }
 
     drop_stale_router_entries(state)
 
