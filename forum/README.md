@@ -94,23 +94,24 @@ caller                       local Scope                 router Scope (remote)
   | Partition.member_count > 0?  |                                    |
   | yes  -- Partition.join, :ok  |                                    |
   | no                           |                                    |
-  |----- {:claim, group} ------->|                                    |
+  |--- {:claim, group, pid} ---->|                                    |
   |                              | router == self?                    |
-  |                              |   yes: write occupancy, reply :ok  |
+  |                              |   yes: write occupancy,            |
+  |                              |        Partition.join, reply :ok   |
   |                              |   no: spawn worker --------------->|
   |                              |                                    | insert {{group, A}}
   |                              | <---- :ok ------------------------ |
-  |                              | reply :ok to all waiters           |
-  | <----- :ok ----------------- |                                    |
-  | Partition.join(group, pid)   |                                    |
+  |                              | Partition.join, reply :ok          |
+  | <----- :ok ----------------- |        to all waiters              |
 ```
 
 Key invariants:
 
-* The RPC happens **before** `Partition.join`, so an entry in the Partition implies the router has been told.
-* If the RPC fails the caller gets `{:error, :rpc_failed}` and the Partition stays empty, so the next `join/3` naturally retries.
-* Concurrent `join/3` calls for the same fresh group dedup into **one** RPC; the rest of the callers piggyback on the in-flight `:occupied_pending` state.
-* The Scope GenServer never blocks on an RPC — it dispatches the call to a short-lived worker process and parks the waiters in `{:occupied_pending, [from | …]}`. The worker reports back with `{:rpc_done, …}`.
+* On the cold (first-member) path **Scope** performs the `Partition.join`, and it does so only *after* the router has been told (the occupancy write / `:occupied` RPC). The fast path (count already > 0) still registers directly on the sharded Partition without touching Scope.
+* Because the claim and the registration are both owned by the long-lived Scope, the router is never told a group is occupied before a *monitored* local member exists. A caller that dies mid-join therefore cannot leave the router believing we hold a group we don't — and if `pid` is already dead when Scope registers it, the monitor fires immediately and the normal `:vacant → :cooldown` path retracts it.
+* If the RPC fails the caller gets `{:error, :rpc_failed}` and Scope never registers, so the Partition stays empty and the next `join/3` naturally retries.
+* Concurrent `join/3` calls for the same fresh group dedup into **one** RPC; the rest of the callers piggyback on the in-flight `:occupied_pending` state, and each waiter's pid is registered when the RPC confirms.
+* The Scope GenServer never blocks on an RPC — it dispatches the call to a short-lived worker process and parks the waiters in `{:occupied_pending, [{from, pid} | …]}`. The worker reports back with `{:occupied_done, …}`.
 
 ### How leave works (the cooldown, and the batched vacant flush)
 

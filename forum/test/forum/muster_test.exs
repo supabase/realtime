@@ -398,6 +398,27 @@ defmodule Forum.MusterTest do
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
       assert :ok = Muster.join(scope, :g1, pid)
     end
+
+    test "cold join of an already-dead pid self-heals (no orphan occupancy)",
+         %{scope: scope} do
+      pid = spawn(fn -> :ok end)
+      ref = Process.monitor(pid)
+      assert_receive {:DOWN, ^ref, :process, ^pid, _}, 1_000
+
+      # Scope registers the (already-dead) pid as part of the claim, so its
+      # monitor fires and drives retraction — the router is never left occupied
+      # with no live local member.
+      assert :ok = Muster.join(scope, :g1, pid)
+
+      # Monitor-driven vacancy moves the group out of :occupied, and the
+      # occupancy row is eventually dropped — no permanent orphan.
+      wait_for_group_state(scope, :g1, :vacant_queued)
+      assert Muster.local_member_count(scope, :g1) == 0
+
+      trigger_flush(scope)
+      wait_for_group_state(scope, :g1, nil)
+      refute node() in Scope.occupancy(scope, :g1)
+    end
   end
 
   describe "router == remote (fake node injection)" do
@@ -496,6 +517,50 @@ defmodule Forum.MusterTest do
       assert [[^scope, @fake_node, Scope, :occupied, [^scope, ^g, _, _], _]] = drain_calls()
 
       assert Muster.local_member_count(scope, g) == 1
+    end
+
+    @tag rpc_timeout: 5_000
+    test "member is registered only after the occupied RPC confirms",
+         %{scope: scope, remote_group: g} do
+      test_pid = self()
+      hold_ms = 150
+
+      stub_call(
+        {:fn,
+         fn ->
+           Kernel.send(test_pid, :rpc_started)
+           Process.sleep(hold_ms)
+           :ok
+         end}
+      )
+
+      member = spawn_link(fn -> Process.sleep(:infinity) end)
+      task = Task.async(fn -> Muster.join(scope, g, member) end)
+
+      assert_receive :rpc_started, 1_000
+      # The claim RPC is still in flight. Scope registers only after it confirms
+      # (register-after-success), so the member is not local yet.
+      refute Muster.local_member?(scope, g, member)
+
+      assert :ok = Task.await(task, 5_000)
+      assert Muster.local_member?(scope, g, member)
+      assert Muster.local_member_count(scope, g) == 1
+    end
+
+    test "cold join of an already-dead pid registers via Scope and self-heals",
+         %{scope: scope, remote_group: g} do
+      pid = spawn(fn -> :ok end)
+      ref = Process.monitor(pid)
+      assert_receive {:DOWN, ^ref, :process, ^pid, _}, 1_000
+
+      # The claim RPC succeeds and Scope registers the (dead) pid; its monitor
+      # then fires, so the group is retracted rather than left orphaned at the
+      # router with no live member.
+      assert :ok = Muster.join(scope, g, pid)
+      assert_call(&match?([^scope, @fake_node, Scope, :occupied, [^scope, ^g, _, _], _], &1))
+
+      wait_for_group_state(scope, g, fn s -> s in [:cooldown, :vacant_queued] end)
+      assert Muster.local_member_count(scope, g) == 0
     end
 
     @tag rpc_timeout: 5_000
