@@ -293,10 +293,10 @@ defmodule Forum.MusterDistributedTest do
           # The group always routes to C, so no partial-view sweep C ran while
           # discovering peers may ever have dropped T's row.
           assert of_kind(:muster_drop_stale_entry, trace)
-            |> Enum.count(
-              &(&1.node == result.c_node and &1.group == result.group and
-                  &1.source == result.t_node)
-            ) == 0
+                 |> Enum.count(
+                   &(&1.node == result.c_node and &1.group == result.group and
+                       &1.source == result.t_node)
+                 ) == 0
         end
       )
     end
