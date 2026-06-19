@@ -23,31 +23,33 @@ defmodule RealtimeWeb.RealtimeChannelReplicationReadyTest do
     assert_receive %Socket.Message{event: "system", payload: %{message: "Replication connection established"}}, 500
   end
 
-  test "pushes the system message when the syn ready broadcast arrives after join", %{tenant: tenant} do
+  test "pushes the system message once replication becomes ready while polling", %{tenant: tenant} do
+    {:ok, counter} = Agent.start_link(fn -> 0 end)
+
     stub(Connect, :lookup_or_start_connection, fn _ -> {:ok, self()} end)
-    stub(Connect, :replication_status, fn _ -> {:error, :not_connected} end)
+
+    stub(Connect, :replication_status, fn _ ->
+      case Agent.get_and_update(counter, fn n -> {n, n + 1} end) do
+        n when n < 3 -> {:error, :not_connected}
+        _ -> {:ok, self()}
+      end
+    end)
 
     assert {:ok, _, _} = join(tenant)
-
-    refute_receive %Socket.Message{event: "system", payload: %{message: "Replication connection established"}}, 200
-
-    signal_ready(tenant, self())
 
     assert_receive %Socket.Message{event: "system", payload: %{message: "Replication connection established"}}, 500
   end
 
-  test "ignores syn ready broadcasts without a replication connection", %{tenant: tenant} do
+  test "does not push while replication is unavailable", %{tenant: tenant} do
     stub(Connect, :lookup_or_start_connection, fn _ -> {:ok, self()} end)
     stub(Connect, :replication_status, fn _ -> {:error, :not_connected} end)
 
     assert {:ok, _, _} = join(tenant)
 
-    signal_ready(tenant, nil)
-
     refute_receive %Socket.Message{event: "system", payload: %{message: "Replication connection established"}}, 300
   end
 
-  test "notifies at most once and stops listening after the first signal", %{tenant: tenant} do
+  test "notifies at most once", %{tenant: tenant} do
     stub(Connect, :lookup_or_start_connection, fn _ -> {:ok, self()} end)
     stub(Connect, :replication_status, fn _ -> {:ok, self()} end)
 
@@ -55,23 +57,33 @@ defmodule RealtimeWeb.RealtimeChannelReplicationReadyTest do
 
     assert_receive %Socket.Message{event: "system", payload: %{message: "Replication connection established"}}, 500
 
-    signal_ready(tenant, self())
-
     refute_receive %Socket.Message{event: "system", payload: %{message: "Replication connection established"}}, 300
+  end
+
+  test "stops the channel when replication is not established before the timeout", %{tenant: tenant} do
+    previous = Application.get_env(:realtime, :replication_ready_timeout)
+    Application.put_env(:realtime, :replication_ready_timeout, 50)
+    on_exit(fn -> Application.put_env(:realtime, :replication_ready_timeout, previous) end)
+
+    stub(Connect, :lookup_or_start_connection, fn _ -> {:ok, self()} end)
+    stub(Connect, :replication_status, fn _ -> {:error, :not_connected} end)
+
+    assert {:ok, _, socket} = join(tenant)
+    ref = Process.monitor(socket.channel_pid)
+
+    assert_receive %Socket.Message{
+                     event: "system",
+                     payload: %{status: "error", message: "Replication connection was not established in time"}
+                   },
+                   500
+
+    assert_receive {:DOWN, ^ref, :process, _, _}, 500
   end
 
   defp join(tenant) do
     jwt = generate_jwt_token(tenant)
     {:ok, socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
     subscribe_and_join(socket, "realtime:test", %{"config" => %{}})
-  end
-
-  defp signal_ready(tenant, replication_conn) do
-    RealtimeWeb.Endpoint.local_broadcast(
-      Connect.syn_topic(tenant.external_id),
-      "ready",
-      %{pid: self(), conn: self(), replication_conn: replication_conn}
-    )
   end
 
   defp conn_opts(tenant, token) do
