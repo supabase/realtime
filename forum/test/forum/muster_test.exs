@@ -1073,6 +1073,50 @@ defmodule Forum.MusterTest do
     end
   end
 
+  describe "drop_stale_router_entries source-agreement guard" do
+    setup %{scope: scope, base_opts: opts} do
+      start_supervised!(spec(scope, opts))
+      :ok
+    end
+
+    # A router must not delete a source's occupancy row while sweeping under a
+    # view the source has NOT agreed to. The reachable case (now that snapshot
+    # apply is serialized through Scope, which kills the old concurrent
+    # write-vs-sweep race) is *ahead-of-source membership*: we adopt a view
+    # containing a node the source hasn't seen yet, under which the group hashes
+    # away from us — but the source's last-announced view still routes it to us,
+    # so the row is live and deleting it would lose data permanently (the source
+    # has no reason to re-announce). The distributed suite covers the real-
+    # cluster end-states black-box; this drives the guard deterministically.
+    test "a stale-view sweep spares a row whose source disagrees on the view",
+         %{scope: scope} do
+      src = :t@nowhere
+      final_view = Enum.sort([node(), src])
+      stale_view = Enum.sort([node(), src, :d@nowhere])
+
+      # `g` routes to us under the source's (final) view, but to the phantom D
+      # under the stale view we transiently adopt.
+      g = find_group_flipping_router(final_view, node(), stale_view, :d@nowhere)
+      assert g
+
+      # Adopt the source's view and apply its snapshot: the row lands with the
+      # source's final-view marker recorded in member_views.
+      rebalance_sync(scope, final_view)
+      assert :ok = Scope.receive_node_state(scope, src, [g], :erlang.phash2(final_view), 100)
+      assert src in Scope.occupancy(scope, g)
+
+      # Adopt the stale view (we learned of D before the source did). The sweep
+      # sees `g` hash to D, not us — a drop candidate — but the source still
+      # agrees only on the final view, so the guard must spare the row.
+      rebalance_sync(scope, stale_view)
+      assert src in Scope.occupancy(scope, g)
+
+      # Converging back to the source's view keeps it.
+      rebalance_sync(scope, final_view)
+      assert src in Scope.occupancy(scope, g)
+    end
+  end
+
   describe "router-readiness barrier" do
     setup %{scope: scope, base_opts: opts} do
       start_supervised!(spec(scope, opts))

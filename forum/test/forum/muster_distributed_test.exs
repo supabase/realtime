@@ -77,24 +77,6 @@ defmodule Forum.MusterDistributedTest do
 
   defp trigger_flush(scope), do: Kernel.send(Forum.Supervisor.name(scope), :flush_vacant)
 
-  # Deterministically drive `node`'s Scope through a rebalance into `members`
-  # (the test-only :__rebalance_for_test hook) and wait until it has fully run —
-  # ring swap, snapshot dispatch, AND drop_stale_router_entries — by flushing
-  # the Scope mailbox with a synchronous :status call afterwards (FIFO: the
-  # rebalance message is enqueued first, so the call returns only once it has
-  # been processed). This is how we reproduce a specific sweep ordering now that
-  # apply and rebalance are serialized in one Scope process and can no longer be
-  # interleaved with cross-process force_ordering.
-  defp drive_rebalance(scope, node, members) when node == node() do
-    Kernel.send(Forum.Supervisor.name(scope), {:__rebalance_for_test, members})
-    GenServer.call(Forum.Supervisor.name(scope), :status)
-  end
-
-  defp drive_rebalance(scope, node, members) do
-    Kernel.send({Forum.Supervisor.name(scope), node}, {:__rebalance_for_test, members})
-    :erpc.call(node, GenServer, :call, [Forum.Supervisor.name(scope), :status])
-  end
-
   # Find a group the LIVE local ring routes to `target` (cluster must be settled).
   defp group_routed_to(scope, target) do
     Enum.find(Stream.map(1..20_000, &:"dist_group_#{&1}"), fn g ->
@@ -260,26 +242,18 @@ defmodule Forum.MusterDistributedTest do
       %{scope: scope}
     end
 
-    # Both tests probe whether a node's drop_stale_router_entries can delete
-    # occupancy rows another node snapshotted to it, by driving that node
-    # through a sweep under a specific cluster view while a real remote source's
-    # row is in place.
-    #
-    # Snapshot application is now serialized through the receiver's Scope, in the
-    # same single process that runs drop_stale_router_entries — so the old
-    # concurrent write-vs-sweep race is gone, and the two events can no longer be
-    # ordered against each other with snabbkaffe force_ordering (they would
-    # self-deadlock). Instead we land the row via a real snapshot from T (so T's
-    # announced view in member_views is genuine), then drive C through the
-    # relevant sweep deterministically with :__rebalance_for_test and assert the
-    # sweep's source-agreement/monotonicity logic spares the row.
+    # These exercise, black-box (real nodes + public API only), that a node's
+    # drop_stale_router_entries never permanently loses an occupancy row another
+    # node snapshotted to it, across real cluster churn. The precise source-
+    # agreement guard logic — whose worst case (a stale-view sweep over a row
+    # whose source disagrees) is no longer reachable black-box now that apply is
+    # serialized through Scope — is driven deterministically in muster_test.exs.
 
-    # The "joiner still discovering peers" case: a joiner rebalances through a
-    # partial (subset) view before it has learned every peer. This is SAFE by
-    # consistent-hashing monotonicity — a group that routes to C in the final
-    # view also routes to C in every SUBSET view containing C — so the sweep
-    # never judges a snapshotted row as "not mine".
-    test "a snapshotted row survives a joiner's partial-view sweep", %{scope: scope} do
+    # A real joiner C rebalances through partial (subset) views as it discovers
+    # peers, before settling. A group routing to C must never be dropped from
+    # C's occupancy along the way — consistent-hashing monotonicity keeps it
+    # routed to C in every subset view a joiner transiently holds.
+    test "a snapshotted row survives a real joiner reaching :ready", %{scope: scope} do
       t_node = node()
 
       check_trace(
@@ -294,7 +268,7 @@ defmodule Forum.MusterDistributedTest do
           c_node = :"#{c_name}@127.0.0.1"
           final_members = Enum.sort([t_node, o_node, c_node])
           # The victim group must route to C in the final view {C, O, T}; by
-          # monotonicity it then also routes to C in the {C, T} subset.
+          # monotonicity it then also routes to C in every subset C holds.
           group = pick_group([{final_members, c_node}])
 
           # T holds the group; the pre-join router knows it by the time join
@@ -308,63 +282,31 @@ defmodule Forum.MusterDistributedTest do
           :ok = :snabbkaffe.forward_trace(c_node)
           start_remote_muster(p_c, scope)
 
-          # Cluster settles; T's rebalance snapshots {group, T} onto C, and C
-          # records T's final-view marker.
+          # Cluster settles; T's rebalance snapshots {group, T} onto C.
           await_ready(final_members)
           assert {:ok, ^c_node} = Muster.router(scope, group)
           assert t_node in occupancy_on(c_node, scope, group)
 
-          # Drive C through the partial {C, T} subset sweep a still-discovering
-          # joiner would run before it learns about O. The row must survive.
-          subset = Enum.sort([c_node, t_node])
-          drive_rebalance(scope, c_node, subset)
-          assert t_node in occupancy_on(c_node, scope, group)
-
-          # Restore the full view; the row is still intact.
-          drive_rebalance(scope, c_node, final_members)
-          assert t_node in occupancy_on(c_node, scope, group)
-
-          %{
-            group: group,
-            c_node: c_node,
-            t_node: t_node,
-            subset_hash: :erlang.phash2(subset)
-          }
+          %{group: group, c_node: c_node, t_node: t_node}
         end,
         fn result, trace ->
-          # The partial-view sweep really ran on C...
-          assert of_kind(:muster_rebalance_start, trace)
-                 |> Enum.any?(&(&1.node == result.c_node and &1.view_hash == result.subset_hash))
-
-          # ...and never dropped T's row (monotonicity kept it routed to C).
-          drops =
-            of_kind(:muster_drop_stale_entry, trace)
-            |> Enum.filter(
+          # The group always routes to C, so no partial-view sweep C ran while
+          # discovering peers may ever have dropped T's row.
+          assert of_kind(:muster_drop_stale_entry, trace)
+            |> Enum.count(
               &(&1.node == result.c_node and &1.group == result.group and
                   &1.source == result.t_node)
-            )
-
-          assert drops == []
+            ) == 0
         end
       )
     end
 
-    # The ephemeral-node hazard: a node D joins and dies, leaving C to run a
-    # drop_stale sweep under a stale view {C, D, O, T} that is NOT a subset of
-    # the final view — one where the group routes to the departed D, not C.
-    # After T heals (re-snapshots C as the group moves D -> C), C holds T's row
-    # with T's FINAL-view marker. If C then runs the stale-view sweep, an
-    # unguarded drop_stale_router_entries would delete that row permanently: T
-    # never rebalances again, the readiness barrier is already satisfied, and
-    # vacant flushes only ever delete.
-    #
-    # The source-agreement guard protects it: T's announced view ({C, O, T})
-    # disagrees with the stale ring, so the sweep must not judge T's row under
-    # it. We reproduce the hazard deterministically — settle C with a real row
-    # and T's real final-view marker, then drive C through the stale-view sweep
-    # (D is a phantom that only ever exists in ring math) and assert the row
-    # survives.
-    test "a stale-view sweep does not drop a row whose source disagrees", %{scope: scope} do
+    # A real ephemeral node D joins and dies. While D is alive the group routes
+    # to D (C correctly stops holding it); when D dies T heals C — its rebalance
+    # back to {C, O, T} moves the group D -> C and re-snapshots it onto C. After
+    # the churn settles C must again be the router and hold T's row — the round
+    # trip must not permanently lose it.
+    test "a snapshotted row survives a real ephemeral node's churn", %{scope: scope} do
       t_node = node()
 
       check_trace(
@@ -375,15 +317,14 @@ defmodule Forum.MusterDistributedTest do
           start_remote_muster(p_o, scope)
           await_ready([t_node, o_node])
 
-          # C's and the phantom D's node names are chosen upfront so the victim
-          # group can be picked from ring math: it must route to C in the final
-          # view {C, O, T} and to D in {C, D, O, T}. D is never booted.
+          # C's and D's node names are chosen upfront so the victim group can be
+          # picked from ring math before either boots: it must route to C in the
+          # final view {C, O, T} and to D in {C, D, O, T}.
           c_name = ~c"muster_race_c_#{System.unique_integer([:positive])}"
           c_node = :"#{c_name}@127.0.0.1"
           d_name = ~c"muster_race_d_#{System.unique_integer([:positive])}"
           d_node = :"#{d_name}@127.0.0.1"
           final_members = Enum.sort([t_node, o_node, c_node])
-          stale_view = Enum.sort([d_node | final_members])
           group = pick_victim_group(c_node, d_node, [t_node, o_node])
 
           # T holds the group; the pre-join router knows it by the time join
@@ -393,50 +334,40 @@ defmodule Forum.MusterDistributedTest do
           {:ok, r1} = Muster.router(scope, group)
           assert t_node in occupancy_on(r1, scope, group)
 
-          # Settle C into the cluster: T snapshots the group to C as it
-          # rebalances to {C, O, T}, so C holds the real row AND T's genuine
-          # final-view marker in member_views — exactly the post-heal state.
+          # Settle C: T snapshots the group to C as it rebalances to {C, O, T}.
           {:ok, p_c, ^c_node} = Peer.start(name: c_name, aux_mod: @aux_mod)
           :ok = :snabbkaffe.forward_trace(c_node)
           start_remote_muster(p_c, scope)
-
           await_ready(final_members)
           assert {:ok, ^c_node} = Muster.router(scope, group)
           assert t_node in occupancy_on(c_node, scope, group)
 
-          # Drive C through the stale {C, D, O, T} sweep, where the group routes
-          # to the phantom D (so the row is a drop candidate) but T's announced
-          # view is the final one (so the guard must spare it).
-          drive_rebalance(scope, c_node, stale_view)
-          assert t_node in occupancy_on(c_node, scope, group)
+          # D joins: the group's router moves C -> D; T hands it over to D.
+          {:ok, p_d, ^d_node} = Peer.start(name: d_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(d_node)
+          start_remote_muster(p_d, scope)
+          await_ready(Enum.sort([d_node | final_members]))
+          assert {:ok, ^d_node} = Muster.router(scope, group)
 
-          # Converge back to the final view; the row is still intact.
-          drive_rebalance(scope, c_node, final_members)
+          # D dies: the group moves D -> C and T re-snapshots (heals) it onto C.
+          # final view reaches :ready a 2nd time (the 1st was before D), nth: 2.
+          :ok = stop_supervised({:peer, d_name})
+          await_ready(final_members, nth: 2, timeout: 20_000)
+
           assert {:ok, ^c_node} = Muster.router(scope, group)
           assert t_node in occupancy_on(c_node, scope, group)
 
-          %{
-            group: group,
-            c_node: c_node,
-            t_node: t_node,
-            stale_hash: :erlang.phash2(stale_view)
-          }
+          %{group: group, c_node: c_node, t_node: t_node}
         end,
         fn result, trace ->
-          # The stale-view sweep really ran on C...
-          assert of_kind(:muster_rebalance_start, trace)
-                 |> Enum.any?(&(&1.node == result.c_node and &1.view_hash == result.stale_hash))
+          # T snapshotted C at least twice: the initial join and the post-death
+          # heal — proving the heal actually re-delivered the row after D's
+          # tenure (during which C correctly dropped it).
+          snapshots =
+            of_kind(:muster_node_state_received, trace)
+            |> Enum.filter(&(&1.node == result.c_node and &1.source == result.t_node))
 
-          # ...and the source-agreement guard spared T's row (an unguarded
-          # sweep would have deleted it, since the group routed to D there).
-          drops =
-            of_kind(:muster_drop_stale_entry, trace)
-            |> Enum.filter(
-              &(&1.node == result.c_node and &1.group == result.group and
-                  &1.source == result.t_node)
-            )
-
-          assert drops == []
+          assert length(snapshots) >= 2
         end
       )
     end
