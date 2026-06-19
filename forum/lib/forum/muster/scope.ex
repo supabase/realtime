@@ -756,8 +756,15 @@ defmodule Forum.Muster.Scope do
         :ets.delete(state.recently_vacant_table, group)
 
         if count > 0 do
-          # FIXME This should not happen. We should probably raise
-          # Defensive — a claim should have moved us out of :cooldown already.
+          # This is the guard that closes the Muster.join fast-path race.
+          # Muster.join skips the router claim when the local count is > 0, and a fast
+          # re-occupation does not notify Scope (the Partition :occupied telemetry is
+          # unhandled). So a member can join while this group sits in :cooldown after its
+          # previous occupant left. Rechecking the live count here is what catches that:
+          # count > 0 means someone re-joined during cooldown, so we revert to :occupied
+          # and never tell the router :vacant (its occupancy row for us was never
+          # removed). This is why the cooldown exists — it gives the racing join time to
+          # land before we commit the group to release.
           Logger.debug(
             "Muster[#{node()}|#{state.scope}] cooldown expired for #{inspect(group)} but #{count} local member(s) present, reclaiming"
           )
