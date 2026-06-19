@@ -22,10 +22,10 @@ defmodule Forum.Muster do
           | {:rpc_timeout_ms, timeout()}
           | {:message_module, module()}
 
-  # Timeout for the local GenServer.call to Scope. Generous because the
+  # Timeout for the local GenServer.call to the claim shard. Generous because the
   # underlying RPC timeout is what actually bounds the wait; this just needs
-  # to be longer than that. The supervisor restarts Scope if it crashes, so
-  # callers won't wait forever on a dead Scope. During a rebalance, callers
+  # to be longer than that. The supervisor restarts a shard if it crashes, so
+  # callers won't wait forever on a dead shard. During a rebalance, callers
   # stay parked on this call until the rebalance settles them with :ok.
   @claim_call_timeout 60_000
 
@@ -97,13 +97,15 @@ defmodule Forum.Muster do
   @doc """
   Join `pid` to `group` in `scope`.
 
-  If this is the first local member of `group`, `pid` is handed to `Scope`,
-  which notifies the router node via a synchronous `:occupied` RPC and only
-  then registers `pid` locally. Doing both under `Scope` means the router is
-  never told a group is occupied before a monitored local member exists, so a
-  caller that dies mid-join can never leave the router believing we hold a
-  group we don't. If the `:occupied` RPC fails the join fails and `pid` is not
-  registered locally; the next call to `join/3` will retry the RPC.
+  If this is the first local member of `group`, `pid` is handed to the group's
+  claim shard (`Forum.Muster.Shard`, chosen by `phash2(group)` so a join storm
+  across distinct groups spreads over N shard mailboxes), which notifies the
+  router node via a synchronous `:occupied` RPC and only then registers `pid`
+  locally. Doing both under the long-lived shard means the router is never told a
+  group is occupied before a monitored local member exists, so a caller that dies
+  mid-join can never leave the router believing we hold a group we don't. If the
+  `:occupied` RPC fails the join fails and `pid` is not registered locally; the
+  next call to `join/3` will retry the RPC.
 
   If the group was recently vacant (in cooldown, or queued/in-flight for a
   vacant flush), the join reclaims it without re-notifying the router where
@@ -117,17 +119,17 @@ defmodule Forum.Muster do
     partition = Forum.Supervisor.partition(scope, group)
 
     if Partition.member_count(partition, group) > 0 do
-    # Fast path: skip the router claim when we already hold local members. The count
-    # read is unsynchronized, so a fast-path join can re-occupy a group just as Scope
-    # is releasing it toward telling the router :vacant — and since the Partition's
-    # :occupied telemetry has no Scope handler, Scope never learns about this join.
-    #
-    # Safe because handle_vacancy_expired rechecks the live count before queuing the
-    # :vacant: if a member re-joined during cooldown, it reverts to :occupied without
-    # notifying the router. The new member's Partition.join just has to land before
-    # that recheck — a window of vacancy_cooldown_ms (default 30s), so in practice
-    # never an issue. Only at risk if vacancy_cooldown_ms is ~0 or the Partition is
-    # starved past the cooldown.
+      # Fast path: skip the router claim when we already hold local members. The count
+      # read is unsynchronized, so a fast-path join can re-occupy a group just as Scope
+      # is releasing it toward telling the router :vacant — and since the Partition's
+      # :occupied telemetry has no Scope handler, Scope never learns about this join.
+      #
+      # Safe because handle_vacancy_expired rechecks the live count before queuing the
+      # :vacant: if a member re-joined during cooldown, it reverts to :occupied without
+      # notifying the router. The new member's Partition.join just has to land before
+      # that recheck — a window of vacancy_cooldown_ms (default 30s), so in practice
+      # never an issue. Only at risk if vacancy_cooldown_ms is ~0 or the Partition is
+      # starved past the cooldown.
       Partition.join(partition, group, pid)
     else
       claim(scope, group, pid)
@@ -217,7 +219,11 @@ defmodule Forum.Muster do
   end
 
   defp claim(scope, group, pid) do
-    GenServer.call(Forum.Supervisor.name(scope), {:claim, group, pid}, @claim_call_timeout)
+    GenServer.call(
+      Forum.Supervisor.shard(scope, group),
+      {:claim, group, pid},
+      @claim_call_timeout
+    )
   catch
     :exit, reason -> {:error, {:scope_exit, reason}}
   end

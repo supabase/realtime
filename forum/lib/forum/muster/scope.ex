@@ -1,54 +1,50 @@
 defmodule Forum.Muster.Scope do
   @moduledoc false
-  # Per-node coordinator for Forum.Muster.
+  # Per-node cluster coordinator for Forum.Muster.
   #
-  # Owns:
-  #   * Cluster view (sorted node list) via persistent_term.
-  #   * Per-group state machine for the "have I told the router about
-  #     this group?" question. RPCs are dispatched to short-lived worker
-  #     processes so the Scope mailbox stays responsive.
-  #   * Router-role occupancy table — when this node is the router
-  #     for a group, the set of source nodes that hold it.
-  #   * Cooldown bookkeeping for the "recently vacant" suppression.
-  #   * A queue of vacated groups (group_state :vacant_queued) flushed
-  #     periodically in per-router batches. A failed batch re-queues its
-  #     groups, so the flush doubles as a self-draining retry that keeps the
-  #     router's occupancy table from accumulating stale entries.
+  # The per-group claim state machine lives in the N Forum.Muster.Shard
+  # processes (one per partition index). This process owns only the rare,
+  # node-wide cluster-coordination concerns:
+  #
+  #   * Cluster view (sorted node list) + the :status / :view_hash
+  #     persistent_terms read by Forum.Muster.router/2 and can_decide?/2.
+  #     This process is the SOLE writer of those terms and of the ring's node
+  #     set, which is exactly why sharding the claim path cannot weaken those
+  #     two guarantees.
+  #   * Router-role occupancy table — when this node is the router for a group,
+  #     the set of source nodes that hold it. :public so :erpc workers running
+  #     the remote entry points (occupied/4, vacant_batch/4) and the local
+  #     shards write it directly.
+  #   * The readiness barrier: member_views, owed_snapshots, applied_snapshot_seq.
+  #   * Snapshot apply ({:apply_snapshot}) — serialized through this one process.
+  #   * Rebalance orchestration (do_rebalance), the view heartbeat, and the
+  #     stale-router-entry sweep.
+  #
+  # Rebalance gathers each shard's held groups with a SYNCHRONOUS GenServer.call
+  # ({:rebalance, ...}); the slow snapshot RPCs it then dispatches stay
+  # fire-and-forget, so this loop never blocks on a remote RPC. Shards never call
+  # back into this process, so the synchronous gather cannot deadlock.
   use GenServer
   require Logger
   use Snabbkaffe
 
   alias ExHashRing.Ring
 
-  @default_vacancy_cooldown_ms 30_000
-  @default_vacant_flush_interval_ms 5_000
   @default_rpc_timeout_ms 5_000
   @default_view_heartbeat_interval_ms 10_000
-  @default_ring_replicas 128
+  @ring_replicas 128
   @ring_depth 2
 
   defmodule State do
     @moduledoc false
-    @type group_state ::
-            :occupied
-            | :cooldown
-            | :vacant_queued
-            | {:occupied_pending, [{GenServer.from(), pid}]}
-            | :vacant_flushing
-
     @type t :: %__MODULE__{
             scope: atom,
             message_module: module,
-            vacancy_cooldown_ms: non_neg_integer,
-            vacant_flush_interval_ms: pos_integer,
             view_heartbeat_interval_ms: pos_integer,
             rpc_timeout_ms: timeout,
-            recently_vacant_table: atom,
             occupancy_table: atom,
             members: [node],
             peers: %{pid => reference},
-            cooldown_timers: %{Forum.group() => reference},
-            group_states: %{Forum.group() => group_state},
             member_views: %{node => {non_neg_integer, integer}},
             owed_snapshots: %{node => integer},
             applied_snapshot_seq: %{node => integer},
@@ -58,50 +54,39 @@ defmodule Forum.Muster.Scope do
     defstruct [
       :scope,
       :message_module,
-      :vacancy_cooldown_ms,
-      :vacant_flush_interval_ms,
       :view_heartbeat_interval_ms,
       :rpc_timeout_ms,
-      :recently_vacant_table,
       :occupancy_table,
       :telemetry_handler_id,
       members: [],
       peers: %{},
-      cooldown_timers: %{},
-      group_states: %{},
       # Barrier bookkeeping: each peer's most-recently-announced
       # {cluster-view hash, seq watermark} (via a :rebalance_marker, or seeded
       # on the discovery handshake). Newest-seq-wins, never reset — so an
       # announcement that arrives before we adopt that view is retained, and a
       # stale announcement arriving late (markers travel on more than one
-      # channel) cannot regress a newer one. We are "ready" — and our
-      # occupancy table can be trusted as a router — once every member's
-      # latest view agrees with ours. The watermark is the seq of the peer's
-      # last announce round: occupancy rows it wrote up to that round carry a
-      # seq at or below it, rows it dispatched afterwards carry a higher one
-      # (see drop_stale_router_entries).
+      # channel) cannot regress a newer one. We are "ready" — and our occupancy
+      # table can be trusted as a router — once every member's latest view agrees
+      # with ours. The watermark is the seq of the peer's last announce round.
       member_views: %{},
-      # Our own announce watermark, sent alongside every view announcement:
-      # the seq of our last snapshot round (or of init's re-announce). All
-      # occupancy rows we dispatched up to that announcement carry a seq at or
-      # below this value.
+      # Our own announce watermark, sent alongside every view announcement: the
+      # seq of our last snapshot round (or of init's re-announce).
       view_seq: 0,
       # Routers we have an in-flight, fire-and-forget :receive_node_state
       # snapshot to, each stamped with the snapshot_seq of the round that
       # dispatched it. While a node is in here, announce_view must NOT send it a
       # bare view marker: the marker for an owed node is carried by the snapshot
       # itself, after its data is applied. A bare marker arriving first would let
-      # the node count us as "agreed on the new view" before our occupancy data
-      # has landed — a missed delivery. Cleared by the snapshot worker's
-      # :node_state_done on success; the seq stamp lets a later rebalance that
-      # re-owes the same node keep the obligation even if an earlier round's
-      # acknowledgement arrives afterwards.
+      # the node count us as "agreed" before our occupancy data lands. Cleared by
+      # the snapshot worker's :node_state_done on success; the seq stamp lets a
+      # later rebalance that re-owes the same node keep the obligation even if an
+      # earlier round's acknowledgement arrives afterwards.
       owed_snapshots: %{},
       # Router-role bookkeeping: the highest snapshot seq we have applied from
       # each source node (see handle_call({:apply_snapshot, ...})). A snapshot
       # whose seq is not strictly greater is a stale, reordered round and is
       # dropped wholesale — this is what makes a *sequence* of overlapping
-      # rebalances safe, since the apply is serialized through this Scope and a
+      # rebalances safe, since the apply is serialized through this process and a
       # late round can never resurrect a group a newer round already dropped.
       applied_snapshot_seq: %{}
     ]
@@ -115,40 +100,73 @@ defmodule Forum.Muster.Scope do
     :ets.select(occupancy_table_name(scope), [{{{group, :"$1"}, :_}, [], [:"$1"]}])
   end
 
+  @doc false
+  # Occupancy ETS table name. Public so Forum.Muster.Shard can write it directly.
+  @spec occupancy_table_name(atom) :: atom
+  def occupancy_table_name(scope), do: :"#{scope}_muster_occupancy"
+
+  @doc false
+  # Insert/raise an occupancy row to `seq`, but never lower a row already stamped
+  # at or above `seq`. Makes the occupancy table a uniform last-writer-wins-by-seq
+  # register so a snapshot (dispatched by this coordinator) and an :occupied
+  # (dispatched by a shard) writing the same {group, source} key concurrently can
+  # never clobber the newer of the two. Atomic against concurrent writers via
+  # select_replace (update branch) + insert_new (absent branch), retried on the
+  # rare interleaving where a strictly-older row appears in between.
+  @spec upsert_if_newer(atom, {Forum.group(), node}, integer) :: :ok
+  def upsert_if_newer(table, key, seq) do
+    # Keyed (literal key → set-table key lookup, not a scan) seq-guarded replace.
+    # The replacement object must reconstruct the row; the key tuple is injected
+    # as a {:const, _} literal (a bare tuple in a match-spec body is read as a
+    # construction form, not a value) and `seq` is a bare integer literal.
+    spec = [{{key, :"$1"}, [{:<, :"$1", seq}], [{{{:const, key}, seq}}]}]
+
+    case :ets.select_replace(table, spec) do
+      1 ->
+        :ok
+
+      0 ->
+        if :ets.insert_new(table, {key, seq}) do
+          :ok
+        else
+          case :ets.lookup(table, key) do
+            [{^key, existing}] when existing < seq -> upsert_if_newer(table, key, seq)
+            _ -> :ok
+          end
+        end
+    end
+  end
+
   ## Remote entry points
   #
-  # These are invoked on the *router* / receiver node by remote nodes
-  # via the configured Forum.Adapter (default: :erpc.call). They run inside
-  # whatever process the adapter spawns to handle the RPC — typically an
-  # :erpc worker — and write directly to the :public occupancy_table.
-  #
-  # Bypassing Scope's mailbox here means a busy router can absorb many
-  # concurrent updates from many source nodes in parallel. Correctness is
-  # preserved because each occupancy key is {group, source_node}: different
-  # sources own disjoint keys, and the source's own Scope serializes
-  # :occupied vs. :vacant_batch per group.
+  # These are invoked on the *router* / receiver node by remote nodes' shards
+  # (occupied/4, vacant_batch/4) or coordinator (receive_node_state/5) via the
+  # configured Forum.Adapter (default: :erpc.call). occupied/4 and vacant_batch/4
+  # run inside the :erpc worker and write directly to the :public occupancy_table,
+  # bypassing this coordinator's mailbox, so a busy router absorbs many concurrent
+  # updates in parallel. Correctness holds because each occupancy key is
+  # {group, source_node}: different sources own disjoint keys, and the source's
+  # own shard serializes :occupied vs. :vacant_batch per group.
 
   # Occupancy rows are versioned: each row is {{group, source_node}, seq} where
   # `seq` is a per-source monotonic stamp (:erlang.unique_integer([:monotonic]))
   # assigned by the source at *dispatch* time. Seqs are only ever compared for
   # the same {group, source} key, so they always come from one source's VM and
   # are totally ordered there. The versioning closes a race that bare
-  # delete/insert could not: a `vacant_batch` whose RPC timed out is not
-  # cancelled by :erpc, so its DELETE may land on the router *after* the source
-  # has already re-claimed the group with a fresh `occupied` INSERT. Because the
-  # re-claim is dispatched after the vacant worker exited, its seq is strictly
-  # higher, and `vacant_batch` below refuses to delete a row stamped newer than
-  # itself — so the stale DELETE can no longer clobber a live entry.
+  # delete/insert could not: a `vacant_batch` whose RPC timed out is not cancelled
+  # by :erpc, so its DELETE may land on the router *after* the source re-claimed
+  # with a fresh `occupied` INSERT. Because the re-claim is dispatched after the
+  # vacant worker exited, its seq is strictly higher, and `vacant_batch` refuses to
+  # delete a row stamped newer than itself.
 
   @doc "Remote: source_node tells us it now holds local members of `group`."
   @spec occupied(atom, Forum.group(), node, integer) :: :ok
   def occupied(scope, group, source_node, seq) do
-    # Unconditional overwrite is safe: the source never has two `occupied` RPCs
-    # in flight for the same group (the state machine moves it to
-    # :occupied_pending and dedups further claims), so this never writes a stale
-    # seq over a newer one. It only ever races a strictly-older `vacant_batch`,
-    # which the guard below handles.
-    :ets.insert(occupancy_table_name(scope), {{group, source_node}, seq})
+    # Seq-guarded upsert (not an unconditional insert): a snapshot for this same
+    # {group, source} may be applied concurrently by this coordinator during a
+    # rebalance, and we must not let an older write clobber a newer one. See
+    # upsert_if_newer/3.
+    upsert_if_newer(occupancy_table_name(scope), {group, source_node}, seq)
 
     # Emitted AFTER the insert, so a forced ordering on this event implies the
     # row is committed (muster_distributed_test.exs races it against a stale
@@ -195,23 +213,21 @@ defmodule Forum.Muster.Scope do
 
   Unlike `occupied`/`vacant_batch`, this does **not** write the occupancy table
   from the RPC worker. It applies the snapshot via a synchronous
-  `{:apply_snapshot, ...}` call into the receiver's Scope and returns its reply.
-  Serializing the apply through the single Scope process is what makes a
-  *sequence* of overlapping rebalances safe: Scope applies a source's snapshots
-  in mailbox order under a per-source seq guard, so a late or reordered round is
-  dropped wholesale and can never resurrect a group a newer round already
+  `{:apply_snapshot, ...}` call into the receiver's coordinator and returns its
+  reply. Serializing the apply through the single coordinator is what makes a
+  *sequence* of overlapping rebalances safe: the coordinator applies a source's
+  snapshots in mailbox order under a per-source seq guard, so a late or reordered
+  round is dropped wholesale and can never resurrect a group a newer round already
   dropped — a guarantee that concurrent direct ETS writes from parallel RPC
   workers cannot give (the multi-row insert+delete is not atomic across workers).
 
-  The snapshot still doubles as source_node's rebalance marker: Scope folds the
-  occupancy write and the `member_views` update into one indivisible apply (data
-  first, then readiness). Because the call only returns once Scope has applied
-  it, "RPC returned ⟹ applied" — so when the sender clears `owed_snapshots` and
-  resumes its view heartbeat to us, our data and marker are already in place;
-  readiness can never be recorded before the data lands. We pass `:infinity` for
-  the inner call (it is a few ETS ops that never block); the sender's `:erpc`
-  `:rpc_timeout_ms` is the real bound, so a wedged receiver still surfaces as a
-  snapshot failure on the sender.
+  The snapshot still doubles as source_node's rebalance marker: the apply folds
+  the occupancy write and the `member_views` update into one indivisible step
+  (data first, then readiness). Because the call only returns once it has been
+  applied, "RPC returned ⟹ applied" — so when the sender clears `owed_snapshots`
+  and resumes its view heartbeat to us, our data and marker are already in place.
+  We pass `:infinity` for the inner call (it is a few ETS ops that never block);
+  the sender's `:erpc` `:rpc_timeout_ms` is the real bound.
   """
   @spec receive_node_state(atom, node, [Forum.group()], non_neg_integer, integer) :: :ok
   def receive_node_state(scope, source_node, groups, view_hash, seq) do
@@ -228,28 +244,26 @@ defmodule Forum.Muster.Scope do
   def start_link(scope, opts \\ []),
     do: GenServer.start_link(__MODULE__, [scope, opts], name: Forum.Supervisor.name(scope))
 
+  @doc false
+  # Child spec for the scope's shared ring. Started as a supervised sibling by
+  # Forum.Supervisor (NOT linked to this coordinator) so a coordinator restart
+  # does not take the ring down under the shards that read it directly.
+  def ring_child_spec(scope) do
+    %{
+      id: :muster_ring,
+      start:
+        {Ring, :start_link,
+         [[name: ring_name(scope), depth: @ring_depth, replicas: @ring_replicas]]}
+    }
+  end
+
   @impl true
   def init([scope, opts]) do
-    vacancy_cooldown_ms = Keyword.get(opts, :vacancy_cooldown_ms, @default_vacancy_cooldown_ms)
-
-    vacant_flush_interval_ms =
-      Keyword.get(opts, :vacant_flush_interval_ms, @default_vacant_flush_interval_ms)
-
     view_heartbeat_interval_ms =
       Keyword.get(opts, :view_heartbeat_interval_ms, @default_view_heartbeat_interval_ms)
 
     rpc_timeout_ms = Keyword.get(opts, :rpc_timeout_ms, @default_rpc_timeout_ms)
     message_module = Keyword.get(opts, :message_module, Forum.Adapter.ErlDist)
-
-    if not (is_integer(vacancy_cooldown_ms) and vacancy_cooldown_ms >= 0) do
-      raise ArgumentError,
-            "expected :vacancy_cooldown_ms to be a non-negative integer, got: #{inspect(vacancy_cooldown_ms)}"
-    end
-
-    if not (is_integer(vacant_flush_interval_ms) and vacant_flush_interval_ms > 0) do
-      raise ArgumentError,
-            "expected :vacant_flush_interval_ms to be a positive integer, got: #{inspect(vacant_flush_interval_ms)}"
-    end
 
     if not (is_integer(view_heartbeat_interval_ms) and view_heartbeat_interval_ms > 0) do
       raise ArgumentError,
@@ -258,18 +272,9 @@ defmodule Forum.Muster.Scope do
 
     :ok = :net_kernel.monitor_nodes(true)
 
-    recently_vacant_table =
-      :ets.new(recently_vacant_table_name(scope), [
-        :set,
-        :protected,
-        :named_table,
-        read_concurrency: true
-      ])
-
-    # :public so :erpc workers running our remote entry points
-    # (occupied/4, vacant_batch/4, receive_node_state/5) can write directly,
-    # bypassing Scope's mailbox. write_concurrency: true makes those
-    # concurrent writes scale across schedulers.
+    # :public so :erpc workers running our remote entry points (occupied/4,
+    # vacant_batch/4) and the local shards can write directly, bypassing this
+    # mailbox. write_concurrency makes those concurrent writes scale.
     occupancy_table =
       :ets.new(occupancy_table_name(scope), [
         :set,
@@ -281,14 +286,9 @@ defmodule Forum.Muster.Scope do
 
     :ok = message_module.register(scope)
 
-    # Linked ring process; lives and dies with this Scope.
-    {:ok, _ring_pid} =
-      Ring.start_link(
-        name: ring_name(scope),
-        depth: @ring_depth,
-        replicas: @default_ring_replicas
-      )
-
+    # The ring is a supervised sibling (Forum.Supervisor starts it before us).
+    # Reset its node set to just us — on a coordinator restart members shrinks
+    # back to [node()] until peers re-discover us.
     {:ok, _} = Ring.set_nodes(ring_name(scope), [node()])
 
     # Lifecycle tri-state: :rebalancing (my ring is in flux — senders flood) →
@@ -306,7 +306,7 @@ defmodule Forum.Muster.Scope do
         telemetry_handler_id,
         [:forum, scope, :group, :vacant],
         &__MODULE__.handle_vacant_telemetry/4,
-        %{scope_pid: self()}
+        %{scope: scope}
       )
 
     Logger.info("Muster[#{node()}|#{scope}] Starting")
@@ -314,19 +314,16 @@ defmodule Forum.Muster.Scope do
     state = %State{
       scope: scope,
       message_module: message_module,
-      vacancy_cooldown_ms: vacancy_cooldown_ms,
-      vacant_flush_interval_ms: vacant_flush_interval_ms,
       view_heartbeat_interval_ms: view_heartbeat_interval_ms,
       rpc_timeout_ms: rpc_timeout_ms,
-      recently_vacant_table: recently_vacant_table,
       occupancy_table: occupancy_table,
       telemetry_handler_id: telemetry_handler_id,
       members: [node()]
     }
 
     state = reannounce_local_groups_at_init(state)
-    # Above the seqs of the rows just re-announced, so receivers may judge
-    # them once this watermark is announced.
+    # Above the seqs of the rows just re-announced, so receivers may judge them
+    # once this watermark is announced.
     state = %{state | view_seq: next_seq()}
 
     {:ok, state, {:continue, :discover}}
@@ -339,7 +336,6 @@ defmodule Forum.Muster.Scope do
       {:muster_discover, self(), own_view_hash(state), state.view_seq}
     )
 
-    schedule_vacant_flush(state)
     schedule_view_heartbeat(state)
     {:noreply, state}
   end
@@ -355,35 +351,23 @@ defmodule Forum.Muster.Scope do
 
   ## handle_call
 
-  # Local source — Muster.join asking us to claim this group on the router.
-  # The high-frequency remote updates (:occupied, :vacant_batch) write directly
-  # to the :public occupancy_table from their :erpc worker — they do not bounce
-  # through this mailbox. The rare snapshot apply (:apply_snapshot, below) DOES
-  # come through here, so its per-source seq guard is serialized. See the
-  # "Remote entry points" section above.
-  @impl true
-  def handle_call({:claim, group, pid}, from, state) do
-    handle_claim(group, pid, from, state)
-  end
-
   # Apply a full-state snapshot from `source` (dispatched by its rebalance, via
   # the receive_node_state RPC, which calls in here and waits for the reply).
-  # Serializing the apply through Scope is what makes a *sequence* of overlapping
-  # rebalances safe: the per-source seq guard is atomic because Scope is one
-  # process.
+  # Serializing the apply through this one process is what makes a *sequence* of
+  # overlapping rebalances safe: the per-source seq guard is atomic because this
+  # is one process.
   #
   # A snapshot whose seq is not strictly greater than the highest already applied
-  # from this source is a stale, reordered round (the RPC that carried it may
-  # have been delayed past a newer round, or executed late after an erpc timeout
-  # — erpc does not cancel remote execution). We drop it wholesale, so it can
-  # never resurrect a group a newer round already dropped, and still reply :ok
-  # (the data the caller wanted committed is already there, or superseded).
+  # from this source is a stale, reordered round (the RPC that carried it may have
+  # been delayed past a newer round, or executed late after an erpc timeout). We
+  # drop it wholesale, so it can never resurrect a group a newer round already
+  # dropped, and still reply :ok.
   #
-  # Insert the snapshot rows at `seq`, then delete only this source's older rows (strict
-  # `<`, so the just-inserted rows survive and a racing higher-seq `occupied`
-  # re-claim is never clobbered). We then advance the watermark and fold in the
-  # carried view marker (member_views + update_status). Data first, then
-  # readiness, in one indivisible step.
+  # Upsert the snapshot rows at `seq` (never lowering a newer racing re-claim),
+  # then delete only this source's older rows (strict `<`). We then advance the
+  # watermark and fold in the carried view marker (member_views + update_status).
+  # Data first, then readiness, in one indivisible step.
+  @impl true
   def handle_call({:apply_snapshot, source, groups, view_hash, seq}, _from, %State{} = state) do
     applied = Map.get(state.applied_snapshot_seq, source)
 
@@ -391,7 +375,7 @@ defmodule Forum.Muster.Scope do
       {:reply, :ok, state}
     else
       table = state.occupancy_table
-      Enum.each(groups, fn group -> :ets.insert(table, {{group, source}, seq}) end)
+      Enum.each(groups, fn group -> upsert_if_newer(table, {group, source}, seq) end)
       :ets.select_delete(table, [{{{:_, source}, :"$1"}, [{:<, :"$1", seq}], [true]}])
 
       tp(:muster_node_state_received, %{
@@ -411,21 +395,24 @@ defmodule Forum.Muster.Scope do
     end
   end
 
-  # For tests / introspection
+  # For tests / introspection — group_states + cooldown are gathered from the
+  # shards (they own the per-group state machine now).
   def handle_call(:status, _from, state) do
+    group_states = gather_group_states(state.scope)
+
     reply = %{
       members: state.members,
       peers: Map.keys(state.peers) |> Enum.map(&node/1),
-      group_states: state.group_states,
-      cooldown: :ets.tab2list(state.recently_vacant_table) |> Enum.map(&elem(&1, 0))
+      group_states: group_states,
+      cooldown: for({g, :cooldown} <- group_states, do: g)
     }
 
     {:reply, reply, state}
   end
 
-  # Full snapshot for `Forum.Muster.dump/1` — everything :status returns plus
-  # the persistent_term lifecycle fields, the per-peer view bookkeeping, the
-  # ring's current node set, and the router-role occupancy table folded into
+  # Full snapshot for `Forum.Muster.dump/1` — everything :status returns plus the
+  # persistent_term lifecycle fields, the per-peer view bookkeeping, the ring's
+  # current node set, and the router-role occupancy table folded into
   # %{group => [source_node]}.
   def handle_call(:dump, _from, state) do
     occupancy =
@@ -436,6 +423,7 @@ defmodule Forum.Muster.Scope do
       end)
 
     {:ok, ring_nodes} = Ring.get_nodes(ring_name(state.scope))
+    group_states = gather_group_states(state.scope)
 
     reply = %{
       scope: state.scope,
@@ -447,8 +435,8 @@ defmodule Forum.Muster.Scope do
       member_views: state.member_views,
       owed_snapshots: state.owed_snapshots,
       applied_snapshot_seq: state.applied_snapshot_seq,
-      group_states: state.group_states,
-      cooldown: :ets.tab2list(state.recently_vacant_table) |> Enum.map(&elem(&1, 0)),
+      group_states: group_states,
+      cooldown: for({g, :cooldown} <- group_states, do: g),
       occupancy: occupancy
     }
 
@@ -457,9 +445,9 @@ defmodule Forum.Muster.Scope do
 
   ## handle_info
 
-  # Peer discovery (the receiver of a discover replies with an ack and registers the peer).
-  # The handshake piggybacks each side's current view hash and announce
-  # watermark so member_views is seeded immediately — important after a Scope
+  # Peer discovery (the receiver of a discover replies with an ack and registers
+  # the peer). The handshake piggybacks each side's current view hash and announce
+  # watermark so member_views is seeded immediately — important after a coordinator
   # restart, where it would otherwise be empty until the next membership change.
   @impl true
   def handle_info({:muster_discover, peer, view_hash, seq}, %State{} = state) do
@@ -500,18 +488,17 @@ defmodule Forum.Muster.Scope do
   # Net split / disconnect — wait for the peer's monitor DOWN.
   def handle_info({:nodedown, _node}, state), do: {:noreply, state}
 
-  # A peer announced the cluster view it has finished rebalancing into, plus
-  # its announce watermark. Record it as that peer's latest view
-  # (newest-seq-wins). We do NOT gate on it matching our current view: storing
-  # it means an announcement that arrives before we adopt that view is
-  # retained, so once we catch up the agreement check in ready?/1 sees it.
-  # Readiness is then "every member's latest view == ours".
+  # A peer announced the cluster view it has finished rebalancing into, plus its
+  # announce watermark. Record it as that peer's latest view (newest-seq-wins). We
+  # do NOT gate on it matching our current view: storing it means an announcement
+  # that arrives before we adopt that view is retained, so once we catch up the
+  # agreement check in ready?/1 sees it.
   def handle_info({:rebalance_marker, source, view_hash, seq}, %State{} = state) do
     {:noreply, update_status(put_member_view(state, source, view_hash, seq))}
   end
 
-  # Peer scope crashed/disconnected — drop occupancy entries owned by that node
-  # and rebalance.
+  # Peer coordinator crashed/disconnected — drop occupancy entries owned by that
+  # node and rebalance.
   def handle_info({:DOWN, ref, :process, pid, _reason}, %State{} = state) do
     case Map.pop(state.peers, pid) do
       {^ref, new_peers} ->
@@ -539,40 +526,15 @@ defmodule Forum.Muster.Scope do
     end
   end
 
-  # Telemetry handler delivers this when the last local member of `group` leaves.
-  def handle_info({:local_vacant, group}, state) do
-    handle_local_vacant(group, state)
-  end
-
-  # Cooldown timer fired for `group`.
-  def handle_info({:vacancy_expired, group}, state) do
-    handle_vacancy_expired(group, state)
-  end
-
-  # Worker reported back the result of a claim (:occupied) RPC.
-  #
-  # The worker process is spawned via `spawn_opt(fn -> exit({:rpc_result, r}) end,
-  # [{:monitor, [{:tag, {:occupied_done, group}}]}])`. Whatever termination path the
-  # worker takes — normal exit with the result, raise, hard kill, OOM — we get
-  # exactly one tagged DOWN with the exit reason.
-  def handle_info({{:occupied_done, group}, _ref, :process, _pid, exit_reason}, state) do
-    handle_occupied_done(group, worker_result(exit_reason), state)
-  end
-
-  # Worker reported back the result of a batched :vacant flush to one router.
-  def handle_info({{:vacant_batch_done, groups}, _ref, :process, _pid, exit_reason}, state) do
-    {:noreply, handle_vacant_batch_done(groups, worker_result(exit_reason), state)}
-  end
-
   # Worker reported back the result of a fire-and-forget :receive_node_state
   # snapshot dispatched during a rebalance.
   #
   # On success the receiver has enqueued (and will FIFO-apply) our snapshot, and
-  # the marker it carries, so we stop suppressing the view heartbeat to that
-  # node — but only if this is still the round that owes it. A newer rebalance
-  # may have re-owed the same router with a higher seq; clearing on a stale
-  # (lower-seq) acknowledgement would let the next heartbeat send a bare marker
-  # before the newer snapshot lands. The seq stamp guards against that.
+  # the marker it carries, so we stop suppressing the view heartbeat to that node
+  # — but only if this is still the round that owes it. A newer rebalance may have
+  # re-owed the same router with a higher seq; clearing on a stale (lower-seq)
+  # acknowledgement would let the next heartbeat send a bare marker before the
+  # newer snapshot lands. The seq stamp guards against that.
   def handle_info(
         {{:node_state_done, router_node, seq}, _ref, :process, _pid, exit_reason},
         state
@@ -592,13 +554,6 @@ defmodule Forum.Muster.Scope do
     end
   end
 
-  # Periodic flush of queued vacancies.
-  def handle_info(:flush_vacant, state) do
-    state = flush_vacant(state)
-    schedule_vacant_flush(state)
-    {:noreply, state}
-  end
-
   # Periodic re-announce of our current view to every member. The event-driven
   # path (rebalance announcements + the discovery handshake) normally converges
   # member_views in milliseconds; this heartbeat is the backstop that heals a
@@ -612,10 +567,9 @@ defmodule Forum.Muster.Scope do
   end
 
   # Test-only — drives the rebalance path with a synthetic members list.
-  # Locally-spawned pids can't masquerade as remote peers (`node/1` returns
-  # the local node), so triggering rebalance through the normal discovery
-  # path with a fake remote isn't possible in single-node tests. This hook
-  # is the unlock.
+  # Locally-spawned pids can't masquerade as remote peers (`node/1` returns the
+  # local node), so triggering rebalance through the normal discovery path with a
+  # fake remote isn't possible in single-node tests. This hook is the unlock.
   def handle_info({:__rebalance_for_test, new_members}, state) when is_list(new_members) do
     new_members_sorted = Enum.sort(new_members)
     state = do_rebalance(state, new_members_sorted)
@@ -627,383 +581,276 @@ defmodule Forum.Muster.Scope do
   ## Telemetry handler
 
   @doc false
-  def handle_vacant_telemetry(_event, _measurements, %{group: group}, %{scope_pid: pid}) do
-    Kernel.send(pid, {:local_vacant, group})
-  end
-
-  ## State machine — claim
-
-  defp handle_claim(group, pid, from, state) do
-    case Map.get(state.group_states, group) do
-      nil ->
-        router_node = router_from_state(state, group)
-
-        if router_node == node() do
-          Logger.debug(
-            "Muster[#{node()}|#{state.scope}] claim #{inspect(group)}: local router, occupied"
-          )
-
-          :ets.insert(state.occupancy_table, {{group, node()}, next_seq()})
-          register_member(state, group, pid)
-          {:reply, :ok, put_group_state(state, group, :occupied)}
-        else
-          Logger.debug(
-            "Muster[#{node()}|#{state.scope}] claim #{inspect(group)}: dispatching :occupied to router #{inspect(router_node)}"
-          )
-
-          dispatch_rpc(:occupied, group, router_node, state)
-          {:noreply, put_group_state(state, group, {:occupied_pending, [{from, pid}]})}
-        end
-
-      :occupied ->
-        Logger.debug("Muster[#{node()}|#{state.scope}] claim #{inspect(group)}: already occupied")
-
-        register_member(state, group, pid)
-        {:reply, :ok, state}
-
-      :cooldown ->
-        Logger.debug(
-          "Muster[#{node()}|#{state.scope}] claim #{inspect(group)}: reclaim from cooldown (no RPC)"
-        )
-
-        state = cancel_cooldown(state, group)
-        register_member(state, group, pid)
-        {:reply, :ok, put_group_state(state, group, :occupied)}
-
-      {:occupied_pending, waiters} ->
-        Logger.debug(
-          "Muster[#{node()}|#{state.scope}] claim #{inspect(group)}: parked behind in-flight :occupied (#{length(waiters) + 1} waiter(s))"
-        )
-
-        {:noreply, put_group_state(state, group, {:occupied_pending, [{from, pid} | waiters]})}
-
-      vacant when vacant in [:vacant_queued, :vacant_flushing] ->
-        # Reclaim a group we were releasing. For :vacant_queued nothing is in
-        # flight. For :vacant_flushing a vacant batch DELETE is in flight, but we
-        # do NOT wait for it: the :occupied we dispatch now is dispatched after
-        # that batch, so next_seq/0 gives it a strictly higher seq, and the
-        # router's seq guard makes the INSERT win over the racing (lower-seq)
-        # DELETE regardless of arrival order (see the versioning note above
-        # occupied/4). The in-flight batch's eventual :vacant_batch_done lands in
-        # handle_vacant_batch_done's catch-all (state is no longer
-        # :vacant_flushing) and is dropped.
-        router_node = router_from_state(state, group)
-
-        if router_node == node() do
-          Logger.debug(
-            "Muster[#{node()}|#{state.scope}] claim #{inspect(group)}: reclaim from #{vacant}, local router"
-          )
-
-          :ets.insert(state.occupancy_table, {{group, node()}, next_seq()})
-          register_member(state, group, pid)
-          {:reply, :ok, put_group_state(state, group, :occupied)}
-        else
-          Logger.debug(
-            "Muster[#{node()}|#{state.scope}] claim #{inspect(group)}: reclaim from #{vacant}, dispatching :occupied to router #{inspect(router_node)}"
-          )
-
-          dispatch_rpc(:occupied, group, router_node, state)
-          {:noreply, put_group_state(state, group, {:occupied_pending, [{from, pid}]})}
-        end
+  # Runs in the emitting Partition process. Route the vacancy to the shard that
+  # owns the group (same phash2(group, N) the claim path uses), guarded so a
+  # mid-restart shard never makes the Partition process raise.
+  def handle_vacant_telemetry(_event, _measurements, %{group: group}, %{scope: scope}) do
+    case Process.whereis(Forum.Supervisor.shard(scope, group)) do
+      nil -> :ok
+      pid -> Kernel.send(pid, {:local_vacant, group})
     end
   end
 
-  # Register a (now-claimed) first local member from inside Scope. Doing the
-  # Partition.join here — rather than in the caller after `claim` returns —
-  # guarantees the monitored entry is installed as part of resolving the claim,
-  # so the router is never left believing we hold a group that has no live local
-  # member (e.g. if the caller dies right after the claim). If `pid` is already
-  # dead, Partition.join installs the monitor and the immediate DOWN drives the
-  # normal :vacant -> :cooldown retraction.
-  defp register_member(state, group, pid) do
-    Forum.Partition.join(Forum.Supervisor.partition(state.scope, group), group, pid)
-    :ok
-  end
+  ## Rebalance
 
-  defp handle_local_vacant(group, state) do
-    case Map.get(state.group_states, group) do
-      :occupied ->
-        Logger.debug(
-          "Muster[#{node()}|#{state.scope}] #{inspect(group)} vacant locally, entering cooldown (#{state.vacancy_cooldown_ms}ms)"
-        )
+  defp do_rebalance(state, new_members) do
+    ring = ring_name(state.scope)
 
-        :ets.insert(state.recently_vacant_table, {group})
-        ref = Process.send_after(self(), {:vacancy_expired, group}, state.vacancy_cooldown_ms)
+    Logger.info(
+      "Muster[#{node()}|#{state.scope}] rebalance start: members #{inspect(state.members)} -> #{inspect(new_members)} (view_hash #{:erlang.phash2(new_members)})"
+    )
 
-        state = %{
-          state
-          | cooldown_timers: Map.put(state.cooldown_timers, group, ref)
-        }
+    tp(:muster_rebalance_start, %{
+      scope: state.scope,
+      node: node(),
+      from: state.members,
+      to: new_members,
+      view_hash: :erlang.phash2(new_members)
+    })
 
-        {:noreply, put_group_state(state, group, :cooldown)}
+    # 1) Flip status to :rebalancing BEFORE updating the ring. Callers reading
+    #    router/2 see :rebalancing and fan out to all members. member_views is NOT
+    #    reset — peers' already-announced views stay and are re-evaluated against
+    #    the new hash by update_status at the end.
+    :persistent_term.put({Forum.Muster, state.scope, :status}, :rebalancing)
+    :persistent_term.put({Forum.Muster, state.scope, :view_hash}, :erlang.phash2(new_members))
 
-      _ ->
-        # Vacancy telemetry can arrive when group_states is something other than
-        # :occupied after a Scope restart (the partition still has entries but
-        # we have not finished re-announcing) or during transient states.
-        # Best-effort: ignore; the next event will bring us back in sync.
-        {:noreply, state}
-    end
-  end
+    # 2) Atomically replace the node set; this bumps the ring's generation. After
+    #    this call: find_node = NEW routers; find_historical_node(_, _, 1) = OLD.
+    {:ok, _} = Ring.set_nodes(ring, new_members)
 
-  defp handle_vacancy_expired(group, state) do
-    case Map.get(state.group_states, group) do
-      :cooldown ->
-        partition = Forum.Supervisor.partition(state.scope, group)
-        count = Forum.Partition.member_count(partition, group)
+    # 3) Stamp the snapshot seq for this round NOW — right after the ring swap and
+    #    before gathering the shards. This is a clean cut in the VM-global
+    #    monotonic sequence: every group held before the rebalance carries an
+    #    occupancy seq < snapshot_seq, and every claim a shard processes from here
+    #    on carries seq > snapshot_seq — so the wipe below (strict `<`) can never
+    #    delete a freshly-claimed group's row.
+    snapshot_seq = next_seq()
 
-        state = %{state | cooldown_timers: Map.delete(state.cooldown_timers, group)}
-        :ets.delete(state.recently_vacant_table, group)
+    # 4) Gather every shard's held groups synchronously. In this same call each
+    #    shard also normalizes its in-flight vacant batch and settles its moved
+    #    :occupied_pending waiters (see Forum.Muster.Shard). Because each shard's
+    #    mailbox is FIFO and the ring is already swapped, the union below is a
+    #    COMPLETE held set — the basis for complete-per-router snapshots.
+    #    Candidates are the groups we hold (:occupied, :cooldown, :occupied_pending):
+    #    :cooldown must be included even though the Partition count is 0, because
+    #    the old router still believes we hold them; :occupied_pending so parked
+    #    callers get :ok once the new router has been told.
+    candidates =
+      state.scope
+      |> Forum.Supervisor.shards()
+      |> Enum.flat_map(fn shard ->
+        {:held, groups} = GenServer.call(shard, {:rebalance, new_members})
+        groups
+      end)
 
-        if count > 0 do
-          # This is the guard that closes the Muster.join fast-path race.
-          # Muster.join skips the router claim when the local count is > 0, and a fast
-          # re-occupation does not notify Scope (the Partition :occupied telemetry is
-          # unhandled). So a member can join while this group sits in :cooldown after its
-          # previous occupant left. Rechecking the live count here is what catches that:
-          # count > 0 means someone re-joined during cooldown, so we revert to :occupied
-          # and never tell the router :vacant (its occupancy row for us was never
-          # removed). This is why the cooldown exists — it gives the racing join time to
-          # land before we commit the group to release.
-          Logger.debug(
-            "Muster[#{node()}|#{state.scope}] cooldown expired for #{inspect(group)} but #{count} local member(s) present, reclaiming"
-          )
+    new_router =
+      Map.new(candidates, fn group ->
+        {:ok, n} = Ring.find_node(ring, group)
+        {group, n}
+      end)
 
-          {:noreply, put_group_state(state, group, :occupied)}
-        else
-          # Cooldown elapsed and still empty. Queue the vacancy; the periodic
-          # flush groups all queued vacancies by current router, sends one
-          # batched RPC per router, and re-queues any that fail.
-          Logger.debug(
-            "Muster[#{node()}|#{state.scope}] cooldown expired for #{inspect(group)}, queued for vacant flush"
-          )
+    # Groups whose router actually changed — used to decide which routers need a
+    # refreshed snapshot at all.
+    groups_to_reannounce =
+      Enum.filter(candidates, fn group ->
+        {:ok, old_dest} = Ring.find_historical_node(ring, group, 1)
+        Map.fetch!(new_router, group) != old_dest
+      end)
 
-          {:noreply, put_group_state(state, group, :vacant_queued)}
-        end
+    # Routers that gained at least one moved group. Each gets a FULL snapshot of
+    # every group we hold routed to it — not just the moved ones — because
+    # receive_node_state wipes all of this source's rows before inserting. Sending
+    # only the moved groups would drop unchanged groups that still route there.
+    # Routers with no moved group are left untouched: their existing rows for us
+    # are still correct, and any group that moved *away* is cleared by their own
+    # drop_stale_router_entries.
+    changed_routers =
+      groups_to_reannounce |> Enum.map(&Map.fetch!(new_router, &1)) |> MapSet.new()
 
-      _ ->
-        {:noreply, state}
-    end
-  end
+    Logger.info(
+      "Muster[#{node()}|#{state.scope}] rebalance: #{length(candidates)} group(s) held, #{length(groups_to_reannounce)} moved, snapshotting #{MapSet.size(changed_routers)} router(s): #{inspect(MapSet.to_list(changed_routers))}"
+    )
 
-  defp handle_occupied_done(group, result, state) do
-    case Map.get(state.group_states, group) do
-      {:occupied_pending, waiters} ->
-        case result do
-          :ok ->
-            Logger.debug(
-              "Muster[#{node()}|#{state.scope}] :occupied confirmed for #{inspect(group)}, replying :ok to #{length(waiters)} waiter(s)"
-            )
+    by_router =
+      candidates
+      |> Enum.group_by(&Map.fetch!(new_router, &1))
+      |> Map.take(MapSet.to_list(changed_routers))
 
-            # Register each waiter's pid only now that the router has been told,
-            # then reply. On failure we never register (below), preserving the
-            # "pid not registered on rpc_failed" contract.
-            Enum.each(waiters, fn {from, pid} ->
-              register_member(state, group, pid)
-              GenServer.reply(from, :ok)
-            end)
+    # Local self-target: synchronous (seq-guarded) ETS inserts. Remote targets:
+    # one fire-and-forget worker per destination. We do NOT wait — Scope stays
+    # free while the snapshots are in flight; each worker reports via a tagged
+    # DOWN ({:node_state_done, ...}); a failure crashes us from that handler.
+    {local_groups, remote_targets} =
+      Enum.split_with(by_router, fn {dest, _} -> dest == node() end)
 
-            {:noreply, put_group_state(state, group, :occupied)}
+    Enum.each(local_groups, fn {_, groups} ->
+      Enum.each(groups, fn group ->
+        upsert_if_newer(state.occupancy_table, {group, node()}, snapshot_seq)
+      end)
+    end)
 
-          _ ->
-            Logger.debug(
-              "Muster[#{node()}|#{state.scope}] :occupied RPC failed for #{inspect(group)}: #{inspect(result)}, replying error to #{length(waiters)} waiter(s)"
-            )
+    view_hash = :erlang.phash2(new_members)
 
-            Enum.each(waiters, fn {from, _pid} -> GenServer.reply(from, {:error, :rpc_failed}) end)
-
-            {:noreply, delete_group_state(state, group)}
-        end
-
-      _ ->
-        # Out-of-band — e.g., state was reset by rebalance crash. Drop.
-        {:noreply, state}
-    end
-  end
-
-  # Result of one batched :vacant flush. For each group still in
-  # :vacant_flushing: on success drop it; on failure re-queue it so the next
-  # flush retries (this is what drains stale router entries). A group that was
-  # re-claimed while the batch was in flight is no longer :vacant_flushing
-  # (handle_claim moved it straight to :occupied/:occupied_pending), so it falls
-  # through the catch-all here — the seq guard already kept the in-flight
-  # DELETE from clobbering its fresh :occupied INSERT.
-  defp handle_vacant_batch_done(groups, result, state) do
-    success? = not match?({:error, _}, result)
-
-    if success? do
-      Logger.debug(
-        "Muster[#{node()}|#{state.scope}] vacant batch of #{length(groups)} group(s) acknowledged by router"
+    Enum.each(remote_targets, fn {router_node, groups} ->
+      spawn_rpc_worker(
+        state,
+        router_node,
+        :receive_node_state,
+        [state.scope, node(), groups, view_hash, snapshot_seq],
+        {:node_state_done, router_node, snapshot_seq}
       )
-    else
-      Logger.warning(
-        "Muster[#{node()}|#{state.scope}] vacant batch RPC failed for #{length(groups)} group(s): #{inspect(result)} — re-queuing"
+    end)
+
+    snapshot_targets = Enum.map(remote_targets, fn {router_node, _} -> router_node end)
+
+    owed_snapshots =
+      Enum.reduce(snapshot_targets, state.owed_snapshots, fn router_node, acc ->
+        Map.put(acc, router_node, snapshot_seq)
+      end)
+
+    # Marker hybrid: members that received a data snapshot are marked by the
+    # snapshot itself (its {:apply_snapshot} carries view_hash and is folded into
+    # member_views when applied, after the data write). Every other member gets a
+    # cheap async marker so its barrier learns "this source holds nothing for me"
+    # rather than "this source has not arrived yet". Self never needs one.
+    Enum.each(new_members -- [node() | snapshot_targets], fn member ->
+      state.message_module.send(
+        state.scope,
+        member,
+        {:rebalance_marker, node(), view_hash, snapshot_seq}
       )
+    end)
+
+    # Adopt the new view (and this round's announce watermark) before judging
+    # stale entries. Prune owed entries for nodes no longer in the cluster.
+    state = %{
+      state
+      | members: new_members,
+        view_seq: snapshot_seq,
+        owed_snapshots: Map.take(owed_snapshots, new_members)
+    }
+
+    drop_stale_router_entries(state)
+
+    # Leave :rebalancing for :ready or :converging based on peer agreement. A
+    # single-node cluster lands on :ready immediately; a multi-node cluster stays
+    # :converging until peer announcements arrive. If a snapshot RPC ultimately
+    # fails it crashes us from :node_state_done and the restart re-announces every
+    # locally-held group from the partition tables, so the optimistic settle that
+    # each shard already did self-heals.
+    update_status(state)
+  end
+
+  # Recompute the lifecycle status from member_views vs. current membership and
+  # publish it (only when it actually changes). Only ever sets :ready or
+  # :converging — :rebalancing is owned by do_rebalance.
+  defp update_status(state) do
+    status = if ready?(state), do: :ready, else: :converging
+    key = {Forum.Muster, state.scope, :status}
+    previous = :persistent_term.get(key, nil)
+
+    if previous != status do
+      :persistent_term.put(key, status)
+
+      tp(:muster_status_change, %{
+        scope: state.scope,
+        node: node(),
+        from: previous,
+        to: status,
+        members: state.members,
+        view_hash: own_view_hash(state)
+      })
+
+      Logger.info(
+        "Muster[#{node()}|#{state.scope}] status #{inspect(previous)} -> #{inspect(status)} (members #{inspect(state.members)})"
+      )
+
+      # Most stale rows cannot be GC'd during the rebalance itself: peers have
+      # typically not yet announced the new view, so the source-agreement guard in
+      # drop_stale_router_entries skips their rows. Re-run the sweep once every
+      # member has agreed — now every member's rows are judgeable.
+      if status == :ready, do: drop_stale_router_entries(state)
     end
 
-    Enum.reduce(groups, state, fn group, st ->
-      case Map.get(st.group_states, group) do
-        :vacant_flushing ->
-          if success?,
-            do: delete_group_state(st, group),
-            else: put_group_state(st, group, :vacant_queued)
+    state
+  end
 
-        _ ->
-          # Re-claimed before the batch returned (now :occupied/:occupied_pending),
-          # or moved out of :vacant_flushing by a rebalance. Drop.
-          st
-      end
+  # Ready once every member (other than ourselves) has announced a view that
+  # agrees with ours. A member with no entry yet, or one whose latest view
+  # differs, keeps us not-ready — the safe direction (the router floods).
+  defp ready?(state) do
+    own = own_view_hash(state)
+
+    Enum.all?(state.members, fn member ->
+      member == node() or match?({^own, _}, Map.get(state.member_views, member))
     end)
   end
 
-  # Collect every :vacant_queued group, bucket by current router, and send
-  # one batched RPC per remote router (self-routed groups are pruned
-  # locally). The queued groups stay in :vacant_queued only until a flush moves
-  # them to :vacant_flushing; a failed batch returns them to :vacant_queued.
-  defp flush_vacant(state) do
-    queued = for {group, :vacant_queued} <- state.group_states, do: group
+  defp own_view_hash(state), do: :erlang.phash2(state.members)
 
-    case queued do
-      [] ->
+  # Newest-seq-wins: seqs are per-source monotonic dispatch stamps, so the entry
+  # with the highest seq is the source's causally-latest announcement even when
+  # markers arrive out of order (they travel both as async dist sends and inside
+  # :receive_node_state RPCs).
+  defp put_member_view(state, source, view_hash, seq) do
+    case Map.get(state.member_views, source) do
+      {_hash, newer} when newer > seq ->
         state
 
       _ ->
-        by_router = Enum.group_by(queued, &router_from_state(state, &1))
-
-        Logger.debug(
-          "Muster[#{node()}|#{state.scope}] flushing #{length(queued)} vacant group(s) across #{map_size(by_router)} router(s)"
-        )
-
-        by_router
-        |> Enum.reduce(state, fn {router_node, groups}, st ->
-          if router_node == node() do
-            Enum.each(groups, fn g -> :ets.delete(st.occupancy_table, {g, node()}) end)
-            Enum.reduce(groups, st, fn g, s -> delete_group_state(s, g) end)
-          else
-            dispatch_vacant_batch(groups, router_node, st)
-            Enum.reduce(groups, st, fn g, s -> put_group_state(s, g, :vacant_flushing) end)
-          end
-        end)
+        %{state | member_views: Map.put(state.member_views, source, {view_hash, seq})}
     end
   end
 
-  defp dispatch_rpc(:occupied, group, router_node, state) do
-    spawn_rpc_worker(
-      state,
-      router_node,
-      :occupied,
-      [state.scope, group, node(), next_seq()],
-      {:occupied_done, group}
-    )
-  end
-
-  defp dispatch_vacant_batch(groups, router_node, state) do
-    spawn_rpc_worker(
-      state,
-      router_node,
-      :vacant_batch,
-      [state.scope, groups, node(), next_seq()],
-      {:vacant_batch_done, groups}
-    )
-  end
-
-  # spawn_opt with monitor + tag gives us:
-  #   (a) atomic spawn+monitor — no race where a fast worker exits before
-  #       we install the monitor (a plain Process.monitor/2 after spawn
-  #       would see :noproc and lose the real exit reason).
-  #   (b) the worker uses its exit reason as the result channel, so any
-  #       termination — clean return, raise, hard kill, OOM — surfaces
-  #       as a single tagged DOWN message Scope is guaranteed to receive.
+  # GC of router-role occupancy rows for groups that no longer route to us.
   #
-  # This mirrors gen_rpc's async_call pattern.
-  defp spawn_rpc_worker(state, router_node, function, args, tag) do
-    message_module = state.message_module
-    scope = state.scope
-    rpc_timeout = state.rpc_timeout_ms
+  # A row may only be judged under our ring if its source demonstrably shares the
+  # view the ring implements; otherwise deleting it can lose data. The source's
+  # announced view (member_views) must equal ours, and the row's seq must not
+  # exceed the watermark carried by that announcement (snapshot data is committed
+  # straight to ETS by the RPC worker while the matching marker waits in our
+  # mailbox, so the table can be AHEAD of member_views). Skipped rows are harmless
+  # and are re-judged on the :ready transition. Our own rows are always judgeable
+  # and must stay in the sweep: a group that moved away — or was vacated while
+  # routed elsewhere — leaves a self row nothing else cleans up.
+  defp drop_stale_router_entries(state) do
+    ring = ring_name(state.scope)
+    own = own_view_hash(state)
 
-    {_pid, _ref} =
-      :erlang.spawn_opt(
-        fn ->
-          result =
-            try do
-              message_module.call(scope, router_node, __MODULE__, function, args, rpc_timeout)
-            catch
-              kind, reason -> {:error, {kind, reason}}
-            end
+    state.occupancy_table
+    |> :ets.select([{{{:"$1", :"$2"}, :"$3"}, [], [{{:"$1", :"$2", :"$3"}}]}])
+    |> Enum.each(fn {group, n, row_seq} ->
+      # Agreement first: it is a map lookup, and at rebalance time most sources
+      # have not announced the new view yet — their rows are skipped without
+      # paying for the ring lookup.
+      if source_agrees?(state, n, row_seq, own) and router_under_ring(ring, group) != node() do
+        :ets.delete(state.occupancy_table, {group, n})
 
-          exit({:rpc_result, result})
-        end,
-        [{:monitor, [{:tag, tag}]}]
-      )
-
-    :ok
-  end
-
-  # Decode a worker's monitor DOWN exit reason into an RPC result.
-  defp worker_result({:rpc_result, r}), do: r
-  defp worker_result(:noproc), do: {:error, :worker_noproc}
-  defp worker_result(other), do: {:error, {:worker_exit, other}}
-
-  defp schedule_vacant_flush(state) do
-    Process.send_after(self(), :flush_vacant, state.vacant_flush_interval_ms)
-    :ok
-  end
-
-  defp schedule_view_heartbeat(state) do
-    Process.send_after(self(), :view_heartbeat, state.view_heartbeat_interval_ms)
-    :ok
-  end
-
-  # Re-announce our current view to every other member (newest-seq-wins on
-  # their side; re-sending our current watermark is idempotent). Sent even
-  # when we're already :ready, because a peer may be the one missing our
-  # announcement.
-  #
-  # Members we still owe a rebalance snapshot are skipped: their marker is
-  # carried by the in-flight snapshot, after its data is applied. A bare
-  # heartbeat marker reaching them first would let them count us as agreed
-  # before our occupancy data lands (a missed delivery). The snapshot worker's
-  # :node_state_done clears the node from owed_snapshots, so the next heartbeat
-  # resumes covering it.
-  defp announce_view(state) do
-    view_hash = own_view_hash(state)
-
-    Enum.each(state.members, fn member ->
-      if member != node() and not Map.has_key?(state.owed_snapshots, member) do
-        state.message_module.send(
-          state.scope,
-          member,
-          {:rebalance_marker, node(), view_hash, state.view_seq}
-        )
+        # Emitted AFTER the delete, so a block_until on this event implies the
+        # row is gone.
+        tp(:muster_drop_stale_entry, %{
+          scope: state.scope,
+          node: node(),
+          group: group,
+          source: n
+        })
       end
     end)
-
-    :ok
   end
 
-  defp cancel_cooldown(state, group) do
-    {timer_ref, new_timers} = Map.pop(state.cooldown_timers, group)
-    if timer_ref, do: Process.cancel_timer(timer_ref)
-    :ets.delete(state.recently_vacant_table, group)
-    %{state | cooldown_timers: new_timers}
-  end
-
-  # Both emit :muster_group_state so trace-based tests can synchronize on
-  # per-group state-machine transitions (state: nil = forgotten) instead of
-  # polling the :status call.
-  defp put_group_state(state, group, value) do
-    tp(:muster_group_state, %{scope: state.scope, node: node(), group: group, state: value})
-    %{state | group_states: Map.put(state.group_states, group, value)}
-  end
-
-  defp delete_group_state(state, group) do
-    tp(:muster_group_state, %{scope: state.scope, node: node(), group: group, state: nil})
-    %{state | group_states: Map.delete(state.group_states, group)}
-  end
-
-  defp router_from_state(state, group) do
-    {:ok, n} = Ring.find_node(ring_name(state.scope), group)
+  defp router_under_ring(ring, group) do
+    {:ok, n} = Ring.find_node(ring, group)
     n
+  end
+
+  defp source_agrees?(_state, source, _row_seq, _own) when source == node(), do: true
+
+  defp source_agrees?(state, source, row_seq, own) do
+    case Map.get(state.member_views, source) do
+      {^own, watermark} -> row_seq <= watermark
+      _ -> false
+    end
   end
 
   ## Peer/membership
@@ -1044,314 +891,18 @@ defmodule Forum.Muster.Scope do
     end
   end
 
-  ## Rebalance
+  ## Init / introspection helpers
 
-  defp do_rebalance(state, new_members) do
-    ring = ring_name(state.scope)
-
-    Logger.info(
-      "Muster[#{node()}|#{state.scope}] rebalance start: members #{inspect(state.members)} -> #{inspect(new_members)} (view_hash #{:erlang.phash2(new_members)})"
-    )
-
-    tp(:muster_rebalance_start, %{
-      scope: state.scope,
-      node: node(),
-      from: state.members,
-      to: new_members,
-      view_hash: :erlang.phash2(new_members)
-    })
-
-    # 1) Flip status to :rebalancing BEFORE updating the ring. Callers reading
-    #    router/2 see :rebalancing and fan out to all members. During the
-    #    window, get_nodes/1 returns the current ring (still old generation
-    #    until set_nodes returns), which is also fine — fan-out to either
-    #    member set is safe.
-    # :rebalancing means our ring is in flux; senders fan out to all members
-    # until we settle. Bump the cluster-view hash too. member_views is NOT
-    # reset — peers' already-announced views (possibly for this very view, if
-    # they got here first) stay and are re-evaluated against the new hash by
-    # update_status at the end.
-    :persistent_term.put({Forum.Muster, state.scope, :status}, :rebalancing)
-    :persistent_term.put({Forum.Muster, state.scope, :view_hash}, :erlang.phash2(new_members))
-
-    # 2) Normalize in-flight pending states (see normalize_pending_for_rebalance):
-    #    an in-flight vacant batch (:vacant_flushing) falls back to
-    #    :vacant_queued and is re-routed by the next flush; plain :vacant_queued
-    #    is left alone and re-routed too.
-    state = normalize_pending_for_rebalance(state)
-
-    # 3) Atomically replace the node set; this bumps the ring's generation.
-    #    After this call: find_node = NEW routers; find_historical_node
-    #    (back: 1) = OLD routers.
-    {:ok, _} = Ring.set_nodes(ring, new_members)
-
-    # 4) Announce-set. Candidates are groups we hold: :occupied, :cooldown, or
-    #    :occupied_pending. :cooldown groups must be included even though the
-    #    Partition count is 0, because the old router still believes we hold
-    #    them and the new router needs to know to expect a future :vacant.
-    #    :occupied_pending must be included so callers parked on Scope's
-    #    GenServer.call get :ok once the new router has been told — instead of
-    #    being cancelled with :rebalance_in_progress.
-    candidates =
-      for {group, gs} <- state.group_states,
-          gs in [:occupied, :cooldown] or match?({:occupied_pending, _}, gs),
-          do: group
-
-    new_router =
-      Map.new(candidates, fn group ->
-        {:ok, n} = Ring.find_node(ring, group)
-        {group, n}
-      end)
-
-    # Groups whose router actually changed. Used to settle parked claims, and
-    # to decide which routers need a refreshed snapshot at all.
-    groups_to_reannounce =
-      Enum.filter(candidates, fn group ->
-        {:ok, old_dest} = Ring.find_historical_node(ring, group, 1)
-        Map.fetch!(new_router, group) != old_dest
-      end)
-
-    # Routers that gained at least one moved group. Each gets a FULL snapshot
-    # of every group we hold routed to it — not just the moved ones — because
-    # receive_node_state wipes all of this source's rows before inserting.
-    # Sending only the moved groups would drop unchanged groups that still
-    # route there (the entry would never be re-added until natural churn).
-    # Routers with no moved group are left untouched: their existing rows for
-    # us are still correct, and any group that moved *away* from them is
-    # cleared by their own drop_stale_router_entries.
-    changed_routers =
-      groups_to_reannounce |> Enum.map(&Map.fetch!(new_router, &1)) |> MapSet.new()
-
-    Logger.info(
-      "Muster[#{node()}|#{state.scope}] rebalance: #{length(candidates)} group(s) held, #{length(groups_to_reannounce)} moved, snapshotting #{MapSet.size(changed_routers)} router(s): #{inspect(MapSet.to_list(changed_routers))}"
-    )
-
-    by_router =
-      candidates
-      |> Enum.group_by(&Map.fetch!(new_router, &1))
-      |> Map.take(MapSet.to_list(changed_routers))
-
-    # Local self-target: synchronous ETS inserts in the Scope process.
-    # Remote targets: one fire-and-forget worker per destination. We do NOT wait
-    # — the whole point is that Scope stays free to service claims while the
-    # snapshots are in flight. Each worker reports its result via a tagged DOWN
-    # ({:node_state_done, ...}); a failure crashes Scope from that handler
-    {local_groups, remote_targets} =
-      Enum.split_with(by_router, fn {dest, _} -> dest == node() end)
-
-    # One seq for this whole snapshot round — dispatched now, so it is strictly
-    # higher than any earlier occupied/vacant for these groups and wins over a
-    # late, stale vacant DELETE at any receiver.
-    snapshot_seq = next_seq()
-
-    Enum.each(local_groups, fn {_, groups} ->
-      Enum.each(groups, fn group ->
-        :ets.insert(state.occupancy_table, {{group, node()}, snapshot_seq})
-      end)
+  # At init, members is just [node()], so the router for every group is ourselves.
+  # Walk the partitions (which may have entries left over from a previous
+  # incarnation) and insert their self occupancy rows. The per-group state machine
+  # is rebuilt independently by each shard.
+  defp reannounce_local_groups_at_init(state) do
+    Enum.each(local_groups(state), fn group ->
+      upsert_if_newer(state.occupancy_table, {group, node()}, next_seq())
     end)
-
-    view_hash = :erlang.phash2(new_members)
-
-    # Fire each snapshot into a monitored worker and record the target in
-    # owed_snapshots (stamped with this round's seq) so the view heartbeat won't
-    # send it a bare marker before its data lands — see the owed_snapshots note
-    # on the State struct.
-    Enum.each(remote_targets, fn {router_node, groups} ->
-      spawn_rpc_worker(
-        state,
-        router_node,
-        :receive_node_state,
-        [state.scope, node(), groups, view_hash, snapshot_seq],
-        {:node_state_done, router_node, snapshot_seq}
-      )
-    end)
-
-    snapshot_targets = Enum.map(remote_targets, fn {router_node, _} -> router_node end)
-
-    owed_snapshots =
-      Enum.reduce(snapshot_targets, state.owed_snapshots, fn router_node, acc ->
-        Map.put(acc, router_node, snapshot_seq)
-      end)
-
-    # Marker hybrid: members that received a data snapshot are marked by the
-    # snapshot itself (its {:apply_snapshot} message carries view_hash and is
-    # folded into member_views when applied, after the data write) — no separate
-    # signal, no double-contact. Every other member has nothing to fold a marker
-    # into, so it gets a cheap async marker instead; that is how its barrier
-    # learns "this source holds nothing for me" rather than "this source has not
-    # arrived yet". Self never needs one.
-    Enum.each(new_members -- [node() | snapshot_targets], fn member ->
-      state.message_module.send(
-        state.scope,
-        member,
-        {:rebalance_marker, node(), view_hash, snapshot_seq}
-      )
-    end)
-
-    # 5) Settle :occupied_pending claims whose router changed, replying :ok
-    #    *optimistically* — before the async snapshot is acknowledged. Safe
-    #    because while the snapshot is in flight the cluster is
-    #    :rebalancing/:converging, so senders flood (router/2) rather than target
-    #    a not-yet-populated occupancy row; no delivery is missed. If a snapshot
-    #    ultimately fails, Scope crashes and the restart re-announces every
-    #    locally-held group from the partition tables, so the optimistic :ok
-    #    self-heals. Their original workers (targeting the old router) may still
-    #    complete later; the resulting :occupied_done lands in
-    #    handle_occupied_done's _other clause and is dropped because
-    #    group_states[group] will be :occupied by then.
-    state = settle_pending_after_rebalance(state, MapSet.new(groups_to_reannounce))
-
-    # Adopt the new view (and this round's announce watermark) before judging
-    # stale entries, so drop_stale_router_entries compares each source's
-    # announced view against the view the ring now implements. Prune owed
-    # entries for nodes no longer in the cluster (a node that left mid-snapshot
-    # is gone; its worker, if still running, will fail and crash us like any
-    # other snapshot failure).
-    state = %{
-      state
-      | members: new_members,
-        view_seq: snapshot_seq,
-        owed_snapshots: Map.take(owed_snapshots, new_members)
-    }
-
-    drop_stale_router_entries(state)
-
-    # 6) Leave :rebalancing for :ready or :converging based on peer agreement.
-    #    A single-node cluster has no peers to hear from, so it lands on :ready
-    #    immediately; a multi-node cluster stays :converging until peer
-    #    announcements arrive (handle_info({:rebalance_marker, ...})). If
-    #    rebalance raised above we skip this and supervisor restart
-    #    re-initializes :status — until then callers observing :rebalancing fan
-    #    out to every member, which is safe.
-    update_status(state)
-  end
-
-  # Recompute the lifecycle status from member_views vs. current membership and
-  # publish it (only when it actually changes, to avoid redundant
-  # persistent_term writes during a burst of announcements). Only ever sets
-  # :ready or :converging — :rebalancing is owned by do_rebalance.
-  defp update_status(state) do
-    status = if ready?(state), do: :ready, else: :converging
-    key = {Forum.Muster, state.scope, :status}
-    previous = :persistent_term.get(key, nil)
-
-    if previous != status do
-      :persistent_term.put(key, status)
-
-      tp(:muster_status_change, %{
-        scope: state.scope,
-        node: node(),
-        from: previous,
-        to: status,
-        members: state.members,
-        view_hash: own_view_hash(state)
-      })
-
-      Logger.info(
-        "Muster[#{node()}|#{state.scope}] status #{inspect(previous)} -> #{inspect(status)} (members #{inspect(state.members)})"
-      )
-
-      # Most stale rows cannot be GC'd during the rebalance itself: peers have
-      # typically not yet announced the new view, so the source-agreement
-      # guard in drop_stale_router_entries skips their rows. Re-run the sweep
-      # once every member has agreed — now every member's rows are judgeable.
-      if status == :ready, do: drop_stale_router_entries(state)
-    end
 
     state
-  end
-
-  # Ready once every member (other than ourselves) has announced a view that
-  # agrees with ours. A member with no entry yet, or one whose latest view
-  # differs, keeps us not-ready — the safe direction (the router floods).
-  defp ready?(state) do
-    own = own_view_hash(state)
-
-    Enum.all?(state.members, fn member ->
-      member == node() or match?({^own, _}, Map.get(state.member_views, member))
-    end)
-  end
-
-  defp own_view_hash(state), do: :erlang.phash2(state.members)
-
-  # Newest-seq-wins: seqs are per-source monotonic dispatch stamps, so the
-  # entry with the highest seq is the source's causally-latest announcement
-  # even when markers arrive out of order (they travel both as async dist
-  # sends and inside :receive_node_state RPCs).
-  defp put_member_view(state, source, view_hash, seq) do
-    case Map.get(state.member_views, source) do
-      {_hash, newer} when newer > seq ->
-        state
-
-      _ ->
-        %{state | member_views: Map.put(state.member_views, source, {view_hash, seq})}
-    end
-  end
-
-  # GC of router-role occupancy rows for groups that no longer route to us.
-  #
-  # A row may only be judged under our ring if its source demonstrably shares
-  # the view the ring implements; otherwise deleting it can lose data:
-  #
-  #   * The source's announced view (member_views) must equal ours. A source
-  #     still on another view may have legitimately announced the row's group
-  #     to us under a view we have not adopted (or have already left) —
-  #     consistent-hashing monotonicity only protects rows when both sides
-  #     judge under comparable views, and it does not hold at all when our
-  #     ring transiently contains a node the source never saw.
-  #   * The row's seq must not exceed the watermark carried by that
-  #     announcement. Snapshot data is committed straight to ETS by the RPC
-  #     worker while the matching marker waits in our mailbox — so the table
-  #     can be AHEAD of member_views. A row stamped above the watermark is
-  #     from an announce round we have not processed yet (e.g. a re-snapshot
-  #     healing this exact group after an ephemeral node's churn) and must
-  #     not be judged under the older view.
-  #
-  # Skipped rows are harmless (a non-router's rows are never consulted; at
-  # worst they are memory) and are re-judged on the :ready transition, when
-  # every member has agreed on our view.
-  #
-  # Our own rows are always judgeable (we trivially share our own view) and
-  # must stay in the sweep: a group that moved away — or was vacated while
-  # routed elsewhere (flush_vacant only deletes locally when we are the
-  # router) — leaves a self row nothing else cleans up.
-  defp drop_stale_router_entries(state) do
-    ring = ring_name(state.scope)
-    own = own_view_hash(state)
-
-    state.occupancy_table
-    |> :ets.select([{{{:"$1", :"$2"}, :"$3"}, [], [{{:"$1", :"$2", :"$3"}}]}])
-    |> Enum.each(fn {group, n, row_seq} ->
-      # Agreement first: it is a map lookup, and at rebalance time most
-      # sources have not announced the new view yet — their rows are skipped
-      # without paying for the ring lookup.
-      if source_agrees?(state, n, row_seq, own) and router_under_ring(ring, group) != node() do
-        :ets.delete(state.occupancy_table, {group, n})
-
-        # Emitted AFTER the delete, so a block_until on this event implies the
-        # row is gone.
-        tp(:muster_drop_stale_entry, %{
-          scope: state.scope,
-          node: node(),
-          group: group,
-          source: n
-        })
-      end
-    end)
-  end
-
-  defp router_under_ring(ring, group) do
-    {:ok, n} = Ring.find_node(ring, group)
-    n
-  end
-
-  defp source_agrees?(_state, source, _row_seq, _own) when source == node(), do: true
-
-  defp source_agrees?(state, source, row_seq, own) do
-    case Map.get(state.member_views, source) do
-      {^own, watermark} -> row_seq <= watermark
-      _ -> false
-    end
   end
 
   defp local_groups(state) do
@@ -1360,74 +911,84 @@ defmodule Forum.Muster.Scope do
     |> Enum.flat_map(&Forum.Partition.groups/1)
   end
 
-  # Run at the start of rebalance.
-  #
-  # :vacant_queued entries are kept as-is (handled by the catch-all): we don't
-  # hold the group, so it is not announced via :receive_node_state, but the
-  # next flush after the ring updates will send the vacant to the group's
-  # *current* router — which drains any stale entry the old router
-  # still holds.
-  #
-  # :vacant_flushing (a batch RPC in flight) is rewritten to :vacant_queued so
-  # the next flush re-sends to the post-rebalance router; the in-flight worker's
-  # result lands in handle_vacant_batch_done's catch-all and is dropped. A group
-  # is never announced while a vacant DELETE for it may still be in flight, and
-  # the next flush re-routes it correctly.
-  defp normalize_pending_for_rebalance(state) do
-    Enum.reduce(state.group_states, state, fn
-      {group, :vacant_flushing}, st ->
-        put_group_state(st, group, :vacant_queued)
-
-      _, st ->
-        st
+  # Fold every shard's per-group state into one map for :status / :dump. A shard
+  # that is momentarily down (mid-restart) is skipped rather than crashing this
+  # introspection call — the groups it owns simply read as absent until it is
+  # back. (do_rebalance's gather is deliberately NOT tolerant: a shard down
+  # mid-rebalance should crash us so the restart re-announces from a clean slate.)
+  defp gather_group_states(scope) do
+    scope
+    |> Forum.Supervisor.shards()
+    |> Enum.reduce(%{}, fn shard, acc ->
+      try do
+        Map.merge(acc, GenServer.call(shard, :group_states))
+      catch
+        :exit, _ -> acc
+      end
     end)
   end
 
-  # Run at the end of rebalance, once :receive_node_state RPCs have informed
-  # the new router about every group whose router changed. For each
-  # :occupied_pending entry in that settled set, reply :ok to the waiters
-  # and transition to :occupied. Entries not in the settled set are left
-  # alone — their router did not change, so the original in-flight
-  # worker is still talking to the correct router.
-  defp settle_pending_after_rebalance(state, settled_groups) do
-    Enum.reduce(state.group_states, state, fn
-      {group, {:occupied_pending, waiters}}, st ->
-        if MapSet.member?(settled_groups, group) do
-          Enum.each(waiters, fn {from, pid} ->
-            register_member(st, group, pid)
-            GenServer.reply(from, :ok)
-          end)
+  ## View announce / RPC workers
 
-          put_group_state(st, group, :occupied)
-        else
-          st
-        end
+  # Re-announce our current view to every other member (newest-seq-wins on their
+  # side). Members we still owe a rebalance snapshot are skipped: their marker is
+  # carried by the in-flight snapshot, after its data is applied.
+  defp announce_view(state) do
+    view_hash = own_view_hash(state)
 
-      _, st ->
-        st
+    Enum.each(state.members, fn member ->
+      if member != node() and not Map.has_key?(state.owed_snapshots, member) do
+        state.message_module.send(
+          state.scope,
+          member,
+          {:rebalance_marker, node(), view_hash, state.view_seq}
+        )
+      end
     end)
+
+    :ok
   end
 
-  defp reannounce_local_groups_at_init(state) do
-    # At init, members is just [node()], so the router for every group is
-    # ourselves. Walk the partitions (which may have entries left over from a
-    # previous incarnation of Scope) and mark them :occupied locally.
-    Enum.reduce(local_groups(state), state, fn group, st ->
-      :ets.insert(st.occupancy_table, {{group, node()}, next_seq()})
-      put_group_state(st, group, :occupied)
-    end)
+  defp schedule_view_heartbeat(state) do
+    Process.send_after(self(), :view_heartbeat, state.view_heartbeat_interval_ms)
+    :ok
   end
 
-  # Per-source monotonic occupancy stamp. VM-global and strictly increasing, so
-  # it reflects dispatch order on this node and survives Scope restarts. Only
-  # ever compared at a router for the same {group, source} key, all of whose
-  # writes originate on this node — so the comparison is always within one VM's
-  # sequence. See the occupancy-row versioning note above occupied/4.
+  # spawn_opt with monitor + tag gives us atomic spawn+monitor and uses the
+  # worker's exit reason as the result channel, so any termination surfaces as a
+  # single tagged DOWN message. Used here only for the rebalance snapshot RPC
+  # (receive_node_state); shards dispatch occupied/vacant_batch.
+  defp spawn_rpc_worker(state, router_node, function, args, tag) do
+    message_module = state.message_module
+    scope = state.scope
+    rpc_timeout = state.rpc_timeout_ms
+
+    {_pid, _ref} =
+      :erlang.spawn_opt(
+        fn ->
+          result =
+            try do
+              message_module.call(scope, router_node, __MODULE__, function, args, rpc_timeout)
+            catch
+              kind, reason -> {:error, {kind, reason}}
+            end
+
+          exit({:rpc_result, result})
+        end,
+        [{:monitor, [{:tag, tag}]}]
+      )
+
+    :ok
+  end
+
+  defp worker_result({:rpc_result, r}), do: r
+  defp worker_result(:noproc), do: {:error, :worker_noproc}
+  defp worker_result(other), do: {:error, {:worker_exit, other}}
+
+  # Per-source monotonic occupancy stamp. VM-global and strictly increasing.
   defp next_seq, do: :erlang.unique_integer([:monotonic])
 
   ## Names
 
-  defp recently_vacant_table_name(scope), do: :"#{scope}_muster_recently_vacant"
-  defp occupancy_table_name(scope), do: :"#{scope}_muster_occupancy"
   defp ring_name(scope), do: :"#{scope}_muster_ring"
 end
