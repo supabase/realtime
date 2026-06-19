@@ -134,7 +134,8 @@ defmodule Forum.MusterTest do
   end
 
   defp trigger_flush(scope) do
-    Kernel.send(Forum.Supervisor.name(scope), :flush_vacant)
+    # The vacant flush is per-shard now; fan the trigger to every shard.
+    Enum.each(Forum.Supervisor.shards(scope), &Kernel.send(&1, :flush_vacant))
   end
 
   defp trigger_view_heartbeat(scope) do
@@ -679,7 +680,7 @@ defmodule Forum.MusterTest do
       assert nil == wait_for_group_state(scope, g, &is_nil/1)
     end
 
-    test "vacancies to the same router flush as a single batch", %{scope: scope} do
+    test "vacancies to the same router flush in per-shard batches", %{scope: scope} do
       [g1, g2] = groups_for_router(scope, @fake_node, 2)
 
       p1 = spawn_link(fn -> Process.sleep(:infinity) end)
@@ -694,24 +695,21 @@ defmodule Forum.MusterTest do
 
       _ = drain_calls()
       trigger_flush(scope)
+      Process.sleep(100)
 
-      [^scope, @fake_node, Scope, :vacant_batch, [^scope, groups, _, _], _] =
-        assert_call(fn
-          [^scope, @fake_node, Scope, :vacant_batch, [^scope, _, _, _], _] -> true
-          _ -> false
-        end)
+      batches =
+        drain_calls()
+        |> Enum.filter(&match?([^scope, @fake_node, Scope, :vacant_batch, _, _], &1))
 
-      assert g1 in groups
-      assert g2 in groups
+      flushed = Enum.flat_map(batches, fn [_, _, _, _, [_, groups, _, _], _] -> groups end)
 
-      # The assert_call above consumed the one batch call; no others follow.
-      remaining =
-        Enum.count(
-          drain_calls(),
-          &match?([_, @fake_node, Scope, :vacant_batch, _, _], &1)
-        )
-
-      assert remaining == 0
+      # Both vacancies reach the router. Each shard that holds queued vacancies
+      # sends ONE batch per router, so the count is bounded by the shard count
+      # (not one RPC per group): g1 and g2 share a batch if they hash to the same
+      # shard, else one batch each.
+      assert g1 in flushed
+      assert g2 in flushed
+      assert length(batches) <= length(Forum.Supervisor.shards(scope))
     end
   end
 
@@ -1083,7 +1081,10 @@ defmodule Forum.MusterTest do
       assert g1 && g2 && g1 != g2
 
       # Establish the old 3-node membership, then hold both groups locally.
-      trigger_rebalance(scope, members_old)
+      # rebalance_sync (not trigger_rebalance) so the ring is the old view BEFORE
+      # the joins: the claim now runs in a shard, a different process from the
+      # coordinator that handles the rebalance, so an async trigger would race it.
+      rebalance_sync(scope, members_old)
 
       p1 = spawn_link(fn -> Process.sleep(:infinity) end)
       p2 = spawn_link(fn -> Process.sleep(:infinity) end)
@@ -1123,7 +1124,9 @@ defmodule Forum.MusterTest do
       g = find_group_flipping_router(members_old, :keep@nowhere, members_new, :keep@nowhere)
       assert g
 
-      trigger_rebalance(scope, members_old)
+      # rebalance_sync so the old view is the live ring before the join (the
+      # claim runs in a shard, a different process from the rebalancing coordinator).
+      rebalance_sync(scope, members_old)
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
       assert :ok = Muster.join(scope, g, pid)
       _ = drain_calls()
@@ -1339,7 +1342,9 @@ defmodule Forum.MusterTest do
       g = find_group_flipping_router(members_old, :z@nowhere, members_new, :x@nowhere)
       assert g
 
-      trigger_rebalance(scope, members_old)
+      # rebalance_sync so the old view is the live ring before the join (the
+      # claim runs in a shard, a different process from the rebalancing coordinator).
+      rebalance_sync(scope, members_old)
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
       assert :ok = Muster.join(scope, g, pid)
       _ = drain_calls()
@@ -1386,6 +1391,70 @@ defmodule Forum.MusterTest do
           Process.sleep(5)
           do_wait_ready(scope, expected, deadline)
       end
+    end
+  end
+
+  describe "coordinator/shard split" do
+    setup %{scope: scope, base_opts: opts} do
+      start_supervised!(spec(scope, opts))
+      :ok
+    end
+
+    test "occupied and apply_snapshot inserts are seq-guarded (a stale write never lowers a newer row)",
+         %{scope: scope} do
+      # A snapshot (dispatched by the coordinator) and an :occupied (dispatched by
+      # a shard) can write the same {group, source} concurrently during a
+      # rebalance. Both inserts are seq-guarded, so neither clobbers the newer of
+      # the two.
+
+      # A newer :occupied is not lowered by a stale (lower-seq) snapshot.
+      src1 = :guard1@nowhere
+      :ok = Scope.occupied(scope, :sg1, src1, 100)
+      :ok = Scope.receive_node_state(scope, src1, [:sg1], 0, 50)
+      assert src1 in Scope.occupancy(scope, :sg1)
+
+      # A newer snapshot is not lowered by a stale (late, lower-seq) :occupied.
+      src2 = :guard2@nowhere
+      :ok = Scope.receive_node_state(scope, src2, [:sg2], 0, 200)
+      :ok = Scope.occupied(scope, :sg2, src2, 150)
+      assert src2 in Scope.occupancy(scope, :sg2)
+    end
+
+    test "a shard rebuilds its group_states from its partition after a crash", %{scope: scope} do
+      g = :rebuild_g
+      pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, g, pid)
+      assert :occupied = wait_for_group_state(scope, g, :occupied)
+
+      shard = Forum.Supervisor.shard(scope, g)
+      shard_pid = Process.whereis(shard)
+      ref = Process.monitor(shard_pid)
+      Process.exit(shard_pid, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^shard_pid, :killed}, 1_000
+
+      # The supervisor restarts the shard; init rebuilds :occupied from its aligned
+      # partition (whose ETS tables are owned by the Supervisor and survive the
+      # shard crash). The live member is untouched — Partition is a separate process.
+      assert :occupied = wait_for_group_state(scope, g, :occupied, 2_000)
+      assert Muster.local_member?(scope, g, pid)
+    end
+
+    test "the ring is decoupled from the coordinator and survives its crash",
+         %{scope: scope} do
+      ring = Process.whereis(ring_name(scope))
+      assert is_pid(ring)
+
+      coord = Process.whereis(Forum.Supervisor.name(scope))
+      ref = Process.monitor(coord)
+      Process.exit(coord, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^coord, :killed}, 1_000
+
+      # The ring is a supervised sibling (not linked to the coordinator), so a
+      # coordinator crash does not take it down under the shards that read it
+      # directly — it is the SAME process, so there is no cascade of shard
+      # ring-read crashes.
+      assert Process.alive?(ring)
+      assert Process.whereis(ring_name(scope)) == ring
     end
   end
 end

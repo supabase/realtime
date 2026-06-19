@@ -75,7 +75,8 @@ defmodule Forum.MusterDistributedTest do
   defp group_state(scope, group),
     do: GenServer.call(Forum.Supervisor.name(scope), :status).group_states[group]
 
-  defp trigger_flush(scope), do: Kernel.send(Forum.Supervisor.name(scope), :flush_vacant)
+  defp trigger_flush(scope),
+    do: Enum.each(Forum.Supervisor.shards(scope), &Kernel.send(&1, :flush_vacant))
 
   # Find a group the LIVE local ring routes to `target` (cluster must be settled).
   defp group_routed_to(scope, target) do
