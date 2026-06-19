@@ -33,7 +33,7 @@ defmodule Forum.Muster.Scope do
             :occupied
             | :cooldown
             | :vacant_queued
-            | {:occupied_pending, [GenServer.from()]}
+            | {:occupied_pending, [{GenServer.from(), pid}]}
             | :vacant_flushing
 
     @type t :: %__MODULE__{
@@ -362,8 +362,8 @@ defmodule Forum.Muster.Scope do
   # come through here, so its per-source seq guard is serialized. See the
   # "Remote entry points" section above.
   @impl true
-  def handle_call({:claim, group}, from, state) do
-    handle_claim(group, from, state)
+  def handle_call({:claim, group, pid}, from, state) do
+    handle_claim(group, pid, from, state)
   end
 
   # Apply a full-state snapshot from `source` (dispatched by its rebalance, via
@@ -633,7 +633,7 @@ defmodule Forum.Muster.Scope do
 
   ## State machine — claim
 
-  defp handle_claim(group, from, state) do
+  defp handle_claim(group, pid, from, state) do
     case Map.get(state.group_states, group) do
       nil ->
         router_node = router_from_state(state, group)
@@ -644,6 +644,7 @@ defmodule Forum.Muster.Scope do
           )
 
           :ets.insert(state.occupancy_table, {{group, node()}, next_seq()})
+          register_member(state, group, pid)
           {:reply, :ok, put_group_state(state, group, :occupied)}
         else
           Logger.debug(
@@ -651,12 +652,13 @@ defmodule Forum.Muster.Scope do
           )
 
           dispatch_rpc(:occupied, group, router_node, state)
-          {:noreply, put_group_state(state, group, {:occupied_pending, [from]})}
+          {:noreply, put_group_state(state, group, {:occupied_pending, [{from, pid}]})}
         end
 
       :occupied ->
         Logger.debug("Muster[#{node()}|#{state.scope}] claim #{inspect(group)}: already occupied")
 
+        register_member(state, group, pid)
         {:reply, :ok, state}
 
       :cooldown ->
@@ -665,6 +667,7 @@ defmodule Forum.Muster.Scope do
         )
 
         state = cancel_cooldown(state, group)
+        register_member(state, group, pid)
         {:reply, :ok, put_group_state(state, group, :occupied)}
 
       {:occupied_pending, waiters} ->
@@ -672,7 +675,7 @@ defmodule Forum.Muster.Scope do
           "Muster[#{node()}|#{state.scope}] claim #{inspect(group)}: parked behind in-flight :occupied (#{length(waiters) + 1} waiter(s))"
         )
 
-        {:noreply, put_group_state(state, group, {:occupied_pending, [from | waiters]})}
+        {:noreply, put_group_state(state, group, {:occupied_pending, [{from, pid} | waiters]})}
 
       vacant when vacant in [:vacant_queued, :vacant_flushing] ->
         # Reclaim a group we were releasing. For :vacant_queued nothing is in
@@ -692,6 +695,7 @@ defmodule Forum.Muster.Scope do
           )
 
           :ets.insert(state.occupancy_table, {{group, node()}, next_seq()})
+          register_member(state, group, pid)
           {:reply, :ok, put_group_state(state, group, :occupied)}
         else
           Logger.debug(
@@ -699,9 +703,21 @@ defmodule Forum.Muster.Scope do
           )
 
           dispatch_rpc(:occupied, group, router_node, state)
-          {:noreply, put_group_state(state, group, {:occupied_pending, [from]})}
+          {:noreply, put_group_state(state, group, {:occupied_pending, [{from, pid}]})}
         end
     end
+  end
+
+  # Register a (now-claimed) first local member from inside Scope. Doing the
+  # Partition.join here — rather than in the caller after `claim` returns —
+  # guarantees the monitored entry is installed as part of resolving the claim,
+  # so the router is never left believing we hold a group that has no live local
+  # member (e.g. if the caller dies right after the claim). If `pid` is already
+  # dead, Partition.join installs the monitor and the immediate DOWN drives the
+  # normal :vacant -> :cooldown retraction.
+  defp register_member(state, group, pid) do
+    Forum.Partition.join(Forum.Supervisor.partition(state.scope, group), group, pid)
+    :ok
   end
 
   defp handle_local_vacant(group, state) do
@@ -772,7 +788,14 @@ defmodule Forum.Muster.Scope do
               "Muster[#{node()}|#{state.scope}] :occupied confirmed for #{inspect(group)}, replying :ok to #{length(waiters)} waiter(s)"
             )
 
-            Enum.each(waiters, fn from -> GenServer.reply(from, :ok) end)
+            # Register each waiter's pid only now that the router has been told,
+            # then reply. On failure we never register (below), preserving the
+            # "pid not registered on rpc_failed" contract.
+            Enum.each(waiters, fn {from, pid} ->
+              register_member(state, group, pid)
+              GenServer.reply(from, :ok)
+            end)
+
             {:noreply, put_group_state(state, group, :occupied)}
 
           _ ->
@@ -780,7 +803,8 @@ defmodule Forum.Muster.Scope do
               "Muster[#{node()}|#{state.scope}] :occupied RPC failed for #{inspect(group)}: #{inspect(result)}, replying error to #{length(waiters)} waiter(s)"
             )
 
-            Enum.each(waiters, fn from -> GenServer.reply(from, {:error, :rpc_failed}) end)
+            Enum.each(waiters, fn {from, _pid} -> GenServer.reply(from, {:error, :rpc_failed}) end)
+
             {:noreply, delete_group_state(state, group)}
         end
 
@@ -1362,7 +1386,11 @@ defmodule Forum.Muster.Scope do
     Enum.reduce(state.group_states, state, fn
       {group, {:occupied_pending, waiters}}, st ->
         if MapSet.member?(settled_groups, group) do
-          Enum.each(waiters, fn from -> GenServer.reply(from, :ok) end)
+          Enum.each(waiters, fn {from, pid} ->
+            register_member(st, group, pid)
+            GenServer.reply(from, :ok)
+          end)
+
           put_group_state(st, group, :occupied)
         else
           st
