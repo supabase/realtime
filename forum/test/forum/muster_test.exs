@@ -250,6 +250,26 @@ defmodule Forum.MusterTest do
     end
   end
 
+  # Poll `fun` until it returns true (or the deadline elapses).
+  defp wait_until(fun, timeout \\ 1_000) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+    do_wait_until(fun, deadline)
+  end
+
+  defp do_wait_until(fun, deadline) do
+    cond do
+      fun.() ->
+        true
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        flunk("condition not met in time")
+
+      true ->
+        Process.sleep(5)
+        do_wait_until(fun, deadline)
+    end
+  end
+
   describe "start_link/2" do
     test "starts with custom partition count", %{scope: scope, base_opts: opts} do
       pid = start_supervised!(spec(scope, opts))
@@ -1600,10 +1620,15 @@ defmodule Forum.MusterTest do
       assert_receive {:DOWN, ^caller_ref, :process, ^caller, _}, 1_000
 
       # The crash left no member registered for g (the pid is only registered after
-      # the router confirms the claim), so the restarted shard adopts nothing.
+      # the router confirms the claim), but the durable states table persisted the
+      # :occupied_pending shape — and the in-flight :occupied RPC may have landed on
+      # the router. So the restarted shard reconciles the now-empty group to
+      # :vacant_queued, which the next flush turns into a vacant batch that retracts
+      # any row that was written. (It does NOT silently forget the group, which is
+      # what used to leak a stale router entry.)
       restarted = wait_for_new_pid(shard, shard_pid)
       assert is_pid(restarted)
-      assert is_nil(wait_for_group_state(scope, g, &is_nil/1))
+      assert :vacant_queued = wait_for_group_state(scope, g, :vacant_queued, 2_000)
 
       # A retry now succeeds end-to-end and leaves the group :occupied.
       stub_call(:ok)
@@ -1611,6 +1636,182 @@ defmodule Forum.MusterTest do
       assert :ok = Muster.join(scope, g, member)
       assert :occupied = wait_for_group_state(scope, g, :occupied, 2_000)
       assert Muster.local_member?(scope, g, member)
+    end
+
+    test "the occupancy table is owned by the supervisor and survives a coordinator crash",
+         %{scope: scope} do
+      # The shards write the occupancy table directly. If it were owned by the
+      # coordinator, a coordinator crash would delete it out from under the live
+      # shards (ArgumentError on their next write). It is owned by the long-lived
+      # Supervisor instead, so it survives unchanged.
+      g = :occ_survives_g
+      pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, g, pid)
+      assert :occupied = wait_for_group_state(scope, g, :occupied)
+      assert node() in Scope.occupancy(scope, g)
+
+      table = Scope.occupancy_table_name(scope)
+      tid_before = :ets.whereis(table)
+      assert tid_before != :undefined
+
+      coord = Process.whereis(Forum.Supervisor.name(scope))
+      ref = Process.monitor(coord)
+      Process.exit(coord, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^coord, :killed}, 1_000
+
+      new_coord = wait_for_new_pid(Forum.Supervisor.name(scope), coord)
+      assert is_pid(new_coord)
+
+      # SAME table identity — it was never recreated, so no shard write could have
+      # raced a vanished table.
+      assert :ets.whereis(table) == tid_before
+      # The self row is re-asserted from the partition at coordinator init, and a
+      # fresh claim on another group still works (shards are healthy).
+      assert node() in Scope.occupancy(scope, g)
+      other = spawn_link(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, :occ_survives_g2, other)
+      assert :occupied = wait_for_group_state(scope, :occ_survives_g2, :occupied, 2_000)
+    end
+
+    test "a self-routed group is retracted after the shard crashes mid-cooldown",
+         %{scope: scope} do
+      # Occupy a (self-routed) group, then let its last member leave so the shard
+      # is mid-retraction (:cooldown / :vacant_queued). On a shard restart the OLD
+      # rebuild forgot the group entirely, orphaning the self occupancy row. The
+      # durable states table now preserves it, so the restart drives it to a
+      # vacant flush that deletes the row.
+      g = :self_retract_g
+      member = spawn(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, g, member)
+      assert :occupied = wait_for_group_state(scope, g, :occupied)
+      assert node() in Scope.occupancy(scope, g)
+
+      Process.exit(member, :kill)
+      # Member gone, shard now mid-retraction; the self occupancy row still stands
+      # (only a flush removes it, and the flush interval is long in these tests).
+      assert wait_for_group_state(scope, g, &(&1 in [:cooldown, :vacant_queued])) in [
+               :cooldown,
+               :vacant_queued
+             ]
+
+      shard = Forum.Supervisor.shard(scope, g)
+      shard_pid = Process.whereis(shard)
+      ref = Process.monitor(shard_pid)
+      Process.exit(shard_pid, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^shard_pid, :killed}, 1_000
+
+      # Restart REMEMBERS the group (not forgotten): it reconciles to a retraction
+      # state rather than dropping it.
+      assert wait_for_group_state(scope, g, &(&1 in [:cooldown, :vacant_queued]), 2_000) in [
+               :cooldown,
+               :vacant_queued
+             ]
+
+      # Once it reaches :vacant_queued, a flush deletes the orphaned self row.
+      assert :vacant_queued = wait_for_group_state(scope, g, :vacant_queued, 2_000)
+      trigger_flush(scope)
+      assert wait_until(fn -> node() not in Scope.occupancy(scope, g) end)
+    end
+
+    test "a remote-routed group is re-flushed to its router after the shard crashes",
+         %{scope: scope} do
+      # The case the old design leaked permanently: a group routed to a REMOTE
+      # router, forgotten on a shard restart, leaving a stale {group, this_node}
+      # row on that router with no local record to retract it. The durable states
+      # table keeps the record, so the restart re-flushes a vacant_batch.
+      inject_fake_remote(scope)
+      g = group_for_router(scope, @fake_node)
+      assert g
+
+      member = spawn(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, g, member)
+      assert :occupied = wait_for_group_state(scope, g, :occupied)
+
+      Process.exit(member, :kill)
+      assert :vacant_queued = wait_for_group_state(scope, g, :vacant_queued, 2_000)
+
+      shard = Forum.Supervisor.shard(scope, g)
+      shard_pid = Process.whereis(shard)
+      ref = Process.monitor(shard_pid)
+      Process.exit(shard_pid, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^shard_pid, :killed}, 1_000
+
+      assert :vacant_queued = wait_for_group_state(scope, g, :vacant_queued, 2_000)
+
+      # The restarted shard re-flushes the remembered remote assertion: a
+      # vacant_batch RPC to the fake router carrying g.
+      drain_calls()
+      trigger_flush(scope)
+
+      assert_call(fn
+        [_s, @fake_node, Scope, :vacant_batch, [_scope, groups, _src, _seq], _t] -> g in groups
+        _ -> false
+      end)
+    end
+
+    test "a vacancy dropped while the shard is down is caught by restart reconciliation",
+         %{scope: scope} do
+      # BUG #4: when the last member leaves while the shard is mid-restart, the
+      # :vacant telemetry is dropped (Process.whereis == nil). We reproduce that
+      # drop deterministically — the queued :local_vacant dies with the shard — and
+      # assert the restart still retracts the row from the durable :occupied state.
+      g = :dropped_vacant_g
+      member = spawn(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, g, member)
+      assert :occupied = wait_for_group_state(scope, g, :occupied)
+      assert node() in Scope.occupancy(scope, g)
+
+      shard = Forum.Supervisor.shard(scope, g)
+      shard_pid = Process.whereis(shard)
+
+      # Freeze the shard so it cannot process the vacancy telemetry...
+      :ok = :sys.suspend(shard_pid)
+      # ...drop the member: the Partition (a separate, live process) processes the
+      # DOWN, counts to 0, and sends {:local_vacant, g} into the SUSPENDED shard's
+      # mailbox where it sits unprocessed.
+      Process.exit(member, :kill)
+      assert wait_until(fn -> Muster.local_member_count(scope, g) == 0 end)
+
+      # Kill the suspended shard: its mailbox (with the unprocessed vacancy) is
+      # discarded — the vacancy is now truly LOST, exactly as in the restart-window
+      # race. The durable state is still :occupied.
+      ref = Process.monitor(shard_pid)
+      Process.exit(shard_pid, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^shard_pid, :killed}, 1_000
+
+      # Restart reconciliation rechecks the live count, sees 0, and drives the
+      # durable :occupied group to retraction instead of trusting it forever.
+      assert :vacant_queued = wait_for_group_state(scope, g, :vacant_queued, 2_000)
+      trigger_flush(scope)
+      assert wait_until(fn -> node() not in Scope.occupancy(scope, g) end)
+    end
+
+    test "rebalance gather timeout is configurable and crashes the coordinator when exceeded",
+         %{scope: scope, base_opts: base_opts} do
+      # A slow/blocked shard must not hang the coordinator for the full default
+      # window. With a small :rebalance_gather_timeout_ms the gather gives up fast
+      # and crashes the coordinator (the documented "restart from a clean slate").
+      gt_scope = :"#{scope}_gather_timeout"
+      opts = Keyword.put(base_opts, :rebalance_gather_timeout_ms, 150)
+      start_supervised!(spec(gt_scope, opts))
+
+      # Suspend a shard so the gather blocks on it.
+      shard_pid = Process.whereis(Forum.Supervisor.shard_name(gt_scope, 0))
+      :ok = :sys.suspend(shard_pid)
+
+      coord = Process.whereis(Forum.Supervisor.name(gt_scope))
+      ref = Process.monitor(coord)
+
+      trigger_rebalance(gt_scope, Enum.sort([node(), :gt@nowhere]))
+      wait_status(gt_scope, :rebalancing)
+
+      # Crash arrives ~150ms in — well under the 15s default — proving the timeout
+      # is in force.
+      assert_receive {:DOWN, ^ref, :process, ^coord, reason}, 1_000
+      assert match?({:timeout, _}, reason) or match?(:killed, reason) or is_tuple(reason)
+
+      # Let the suspended shard go so teardown is clean.
+      :sys.resume(shard_pid)
     end
   end
 end

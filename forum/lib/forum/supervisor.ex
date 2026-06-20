@@ -10,6 +10,11 @@ defmodule Forum.Supervisor do
   # Forum.Muster claim shard (one per partition index; same phash2 slice).
   def shard_name(scope, index), do: :"#{scope}_muster_shard_#{index}"
 
+  # Per-shard durable claim-state ETS table. Created and owned by this Supervisor
+  # (not the shard) so the shard's group_states survive a shard crash and are
+  # rebuilt + reconciled on restart. One per shard index, same phash2 slice.
+  def shard_states_table(scope, index), do: :"#{scope}_muster_shard_#{index}_states"
+
   @spec partition(atom, Forum.group()) :: atom
   def partition(scope, group) do
     case :persistent_term.get(scope, :unknown) do
@@ -81,10 +86,15 @@ defmodule Forum.Supervisor do
   end
 
   # Forum.Muster adds, per scope: a shared ring (a supervised sibling, so a
-  # coordinator restart does not take it down under the shards that read it) and
-  # N claim shards (one per partition index). The ring starts BEFORE the
-  # coordinator (which resets its node set at init); shards start after the
-  # partitions whose ETS tables they rebuild from. Forum.Census gets neither.
+  # coordinator restart does not take it down under the shards that read it), the
+  # router-role occupancy table, and N claim shards (one per partition index).
+  # The occupancy table and the per-shard durable claim-state tables are created
+  # HERE (owned by this long-lived Supervisor) rather than inside the coordinator
+  # or shard processes, so they survive a coordinator/shard restart — the shards
+  # write the occupancy table directly and rebuild their group_states from the
+  # state tables. The ring starts BEFORE the coordinator (which resets its node
+  # set at init); shards start after the partitions whose ETS tables they rebuild
+  # from. Forum.Census gets none of these.
   defp scope_children(
          Forum.Muster.Scope,
          scope,
@@ -93,11 +103,32 @@ defmodule Forum.Supervisor do
          scope_child,
          partition_children
        ) do
+    # :public so the coordinator, the local shards, and the :erpc workers running
+    # the remote entry points (occupied/4, vacant_batch/4) all write it directly,
+    # bypassing the coordinator mailbox; write_concurrency makes that scale.
+    occupancy_table = Forum.Muster.Scope.occupancy_table_name(scope)
+
+    ^occupancy_table =
+      :ets.new(occupancy_table, [
+        :set,
+        :public,
+        :named_table,
+        read_concurrency: true,
+        write_concurrency: true
+      ])
+
     shard_names = for i <- 0..(partitions - 1), do: shard_name(scope, i)
     :persistent_term.put({scope, :muster_shards}, List.to_tuple(shard_names))
 
     shard_children =
       for i <- 0..(partitions - 1) do
+        # :public (Supervisor owns it, the shard writes it). Single writer (the
+        # shard) so no write_concurrency needed.
+        states_table = shard_states_table(scope, i)
+
+        ^states_table =
+          :ets.new(states_table, [:set, :public, :named_table, read_concurrency: true])
+
         %{id: {:muster_shard, i}, start: {Forum.Muster.Shard, :start_link, [scope, i, opts]}}
       end
 
