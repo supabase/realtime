@@ -75,6 +75,14 @@ defmodule Forum.MusterDistributedTest do
   defp group_state(scope, group),
     do: GenServer.call(Forum.Supervisor.name(scope), :status).group_states[group]
 
+  # `group_state/2` read on a remote node `n` (the coordinator's :status folds in
+  # every shard's per-group state). A shard that is momentarily down mid-restart
+  # is skipped by the gather, so the group reads as nil until it is back.
+  defp remote_group_state(n, scope, group) do
+    status = :erpc.call(n, GenServer, :call, [Forum.Supervisor.name(scope), :status])
+    status.group_states[group]
+  end
+
   defp trigger_flush(scope),
     do: Enum.each(Forum.Supervisor.shards(scope), &Kernel.send(&1, :flush_vacant))
 
@@ -966,6 +974,106 @@ defmodule Forum.MusterDistributedTest do
                    |> Enum.filter(&(&1.node == result.r_node and &1.source == result.t_node))
 
           assert result.group in groups
+        end
+      )
+    end
+  end
+
+  describe "shard crash recovery" do
+    setup do
+      scope = :"muster_shard_crash_#{System.unique_integer([:positive])}"
+      start_supervised!(spec(scope, vacant_flush_interval_ms: 100))
+      %{scope: scope}
+    end
+
+    # A claim shard owns only the per-group state machine; the durable data lives
+    # elsewhere — members in the Supervisor-owned Partition ETS, occupancy in the
+    # router's coordinator. So a shard crash must be INVISIBLE at the cluster
+    # level: the supervisor restarts the shard, init re-adopts its held groups
+    # :occupied from the surviving Partition, and NO cluster traffic is needed —
+    # no rebalance (the coordinator does not monitor shards, only peers), no
+    # snapshot, no re-:occupied RPC. This is the counterpoint to the router Scope
+    # crash above, whose heal IS a cross-node snapshot.
+    test "a crashed shard restarts and re-adopts its groups with zero cluster traffic",
+         %{scope: scope} do
+      t_node = node()
+
+      check_trace(
+        fn ->
+          {:ok, p_r, r_node} = Peer.start(aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(r_node)
+          start_remote_muster(p_r, scope)
+
+          view2 = Enum.sort([t_node, r_node])
+          await_ready(view2)
+
+          # R holds a group routed to T: R's shard dispatched :occupied to T, so
+          # T's (router) occupancy carries {group, R}. The member lives on R.
+          group = group_routed_to(scope, t_node)
+          :ok = :peer.call(p_r, MusterPeerAux, :join, [scope, group])
+          assert r_node in occupancy_on(t_node, scope, group)
+          assert :erpc.call(r_node, Muster, :local_member_count, [scope, group]) == 1
+          assert :occupied = remote_group_state(r_node, scope, group)
+
+          # Kill the shard that owns the group ON R (a remote node), at the worst
+          # moment for that shard — while it is the live holder of the group. Its
+          # member pid and Partition are separate, Supervisor-owned processes and
+          # survive.
+          shard_name = :erpc.call(r_node, Forum.Supervisor, :shard, [scope, group])
+          old_shard = :erpc.call(r_node, Process, :whereis, [shard_name])
+          assert is_pid(old_shard)
+          ref = Process.monitor(old_shard)
+          true = :erpc.call(r_node, Process, :exit, [old_shard, :kill])
+          assert_receive {:DOWN, ^ref, :process, ^old_shard, :killed}, 5_000
+
+          # The supervisor restarts the shard; init re-adopts the group :occupied
+          # from R's surviving Partition. rebuild_group_states does not emit a
+          # trace point, so poll for the restarted pid + re-adopted state.
+          wait_until(fn ->
+            pid = :erpc.call(r_node, Process, :whereis, [shard_name])
+
+            is_pid(pid) and pid != old_shard and
+              remote_group_state(r_node, scope, group) == :occupied
+          end)
+
+          # Transparent: occupancy on the router is unchanged, the member
+          # survived, neither node left :ready, and membership never moved — the
+          # kill never disturbed the cluster.
+          assert r_node in occupancy_on(t_node, scope, group)
+          assert :erpc.call(r_node, Muster, :local_member_count, [scope, group]) == 1
+          assert remote_status(p_r, scope) == :ready
+          assert status(scope) == :ready
+          assert :erpc.call(r_node, Muster, :members, [scope]) == view2
+
+          # The recovered shard is fully functional: a fresh join through it lands.
+          :ok = :peer.call(p_r, MusterPeerAux, :join, [scope, group])
+
+          wait_until(fn ->
+            :erpc.call(r_node, Muster, :local_member_count, [scope, group]) == 2
+          end)
+
+          %{group: group, r_node: r_node, t_node: t_node}
+        end,
+        fn result, trace ->
+          # The whole heal was shard-local: NO node ever applied a snapshot for
+          # this group. The original claim travelled as :occupied and the restart
+          # re-adopts from the Partition — neither path is a snapshot. (Contrast
+          # the router Scope crash, where the heal IS a snapshot.)
+          snaps =
+            of_kind(:muster_node_state_received, trace)
+            |> Enum.filter(&(result.group in &1.groups))
+
+          assert snaps == [],
+                 "a shard crash must heal locally — no cross-node snapshot should be needed"
+
+          # And no rebalance was triggered by the crash: the only rebalances are
+          # the cluster-formation ones into the 2-node view (a shard DOWN is not
+          # a membership event).
+          view2_hash = :erlang.phash2(Enum.sort([result.t_node, result.r_node]))
+
+          assert of_kind(:muster_rebalance_start, trace)
+                 |> Enum.all?(&(&1.view_hash == view2_hash or &1.to == [&1.node])),
+                 "a shard crash must not trigger a rebalance into any new view"
         end
       )
     end
