@@ -20,6 +20,7 @@ defmodule Forum.Muster do
           | {:vacant_flush_interval_ms, pos_integer()}
           | {:view_heartbeat_interval_ms, pos_integer()}
           | {:rpc_timeout_ms, timeout()}
+          | {:rebalance_gather_timeout_ms, pos_integer()}
           | {:message_module, module()}
 
   # Timeout for the local GenServer.call to the claim shard. Generous because the
@@ -57,6 +58,11 @@ defmodule Forum.Muster do
     backstop: it heals a dropped view announcement without a membership change,
     bounding the worst-case "router floods instead of targeting" window.
   * `:rpc_timeout_ms` — timeout for router-node RPCs (default: 5_000).
+  * `:rebalance_gather_timeout_ms` — timeout for the synchronous in-VM call the
+    coordinator makes to each claim shard to gather its held groups during a
+    rebalance (default: 15_000). A shard that does not reply within this window
+    crashes the coordinator (which then restarts and re-announces from a clean
+    slate); raise it if shards routinely hold very large group sets.
   * `:message_module` — module implementing `Forum.Adapter` (default:
     `Forum.Adapter.ErlDist`).
   """
@@ -91,6 +97,13 @@ defmodule Forum.Muster do
             "expected :view_heartbeat_interval_ms to be a positive integer, got: #{inspect(heartbeat_interval)}"
     end
 
+    gather_timeout = Keyword.get(opts, :rebalance_gather_timeout_ms)
+
+    if gather_timeout != nil and not (is_integer(gather_timeout) and gather_timeout > 0) do
+      raise ArgumentError,
+            "expected :rebalance_gather_timeout_ms to be a positive integer, got: #{inspect(gather_timeout)}"
+    end
+
     Forum.Supervisor.start_link(Forum.Muster.Scope, scope, partitions, opts)
   end
 
@@ -110,6 +123,12 @@ defmodule Forum.Muster do
   If the group was recently vacant (in cooldown, or queued/in-flight for a
   vacant flush), the join reclaims it without re-notifying the router where
   it can — a quick leave/join cycle costs no RPC.
+
+  The shard's per-group state lives in a Supervisor-owned ETS table (its single
+  source of truth), so it survives a shard crash: on restart the shard reconciles
+  the table against the live member counts, and never forgets an outstanding router
+  assertion — so a shard crash cannot orphan a `{group, node}` entry on a (local or
+  remote) router.
   """
   @spec join(atom, group, pid) :: :ok | {:error, :not_local | :rpc_failed | term}
   def join(_scope, _group, pid) when is_pid(pid) and node(pid) != node(),

@@ -32,6 +32,7 @@ defmodule Forum.Muster.Scope do
 
   @default_rpc_timeout_ms 5_000
   @default_view_heartbeat_interval_ms 10_000
+  @default_rebalance_gather_timeout_ms 15_000
   @ring_replicas 128
   @ring_depth 2
 
@@ -42,6 +43,7 @@ defmodule Forum.Muster.Scope do
             message_module: module,
             view_heartbeat_interval_ms: pos_integer,
             rpc_timeout_ms: timeout,
+            rebalance_gather_timeout_ms: timeout,
             occupancy_table: atom,
             members: [node],
             peers: %{pid => reference},
@@ -56,6 +58,7 @@ defmodule Forum.Muster.Scope do
       :message_module,
       :view_heartbeat_interval_ms,
       :rpc_timeout_ms,
+      :rebalance_gather_timeout_ms,
       :occupancy_table,
       :telemetry_handler_id,
       members: [],
@@ -263,6 +266,10 @@ defmodule Forum.Muster.Scope do
       Keyword.get(opts, :view_heartbeat_interval_ms, @default_view_heartbeat_interval_ms)
 
     rpc_timeout_ms = Keyword.get(opts, :rpc_timeout_ms, @default_rpc_timeout_ms)
+
+    rebalance_gather_timeout_ms =
+      Keyword.get(opts, :rebalance_gather_timeout_ms, @default_rebalance_gather_timeout_ms)
+
     message_module = Keyword.get(opts, :message_module, Forum.Adapter.ErlDist)
 
     if not (is_integer(view_heartbeat_interval_ms) and view_heartbeat_interval_ms > 0) do
@@ -272,17 +279,16 @@ defmodule Forum.Muster.Scope do
 
     :ok = :net_kernel.monitor_nodes(true)
 
-    # :public so :erpc workers running our remote entry points (occupied/4,
-    # vacant_batch/4) and the local shards can write directly, bypassing this
-    # mailbox. write_concurrency makes those concurrent writes scale.
-    occupancy_table =
-      :ets.new(occupancy_table_name(scope), [
-        :set,
-        :public,
-        :named_table,
-        read_concurrency: true,
-        write_concurrency: true
-      ])
+    # The occupancy table is created and OWNED by Forum.Supervisor (a long-lived
+    # sibling), not by us — so it survives a coordinator restart under the live
+    # shards that write it directly. We only reference it by name. On our restart
+    # the table retains the previous incarnation's rows; that is safe: members
+    # resets to [node()] below so our view_hash mismatches every sender and
+    # can_decide?/2 is false (callers flood, never trusting occupancy), each
+    # remote source's next snapshot replaces its rows wholesale, and
+    # drop_stale_router_entries prunes the rest on the :ready transition. Our own
+    # self rows are re-asserted (monotonically) by reannounce_local_groups_at_init.
+    occupancy_table = occupancy_table_name(scope)
 
     :ok = message_module.register(scope)
 
@@ -316,6 +322,7 @@ defmodule Forum.Muster.Scope do
       message_module: message_module,
       view_heartbeat_interval_ms: view_heartbeat_interval_ms,
       rpc_timeout_ms: rpc_timeout_ms,
+      rebalance_gather_timeout_ms: rebalance_gather_timeout_ms,
       occupancy_table: occupancy_table,
       telemetry_handler_id: telemetry_handler_id,
       members: [node()]
@@ -640,7 +647,9 @@ defmodule Forum.Muster.Scope do
       state.scope
       |> Forum.Supervisor.shards()
       |> Enum.flat_map(fn shard ->
-        {:held, groups} = GenServer.call(shard, {:rebalance, new_members})
+        {:held, groups} =
+          GenServer.call(shard, {:rebalance, new_members}, state.rebalance_gather_timeout_ms)
+
         groups
       end)
 

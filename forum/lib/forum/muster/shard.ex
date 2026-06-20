@@ -10,8 +10,20 @@ defmodule Forum.Muster.Shard do
   # of serializing through the single Forum.Muster.Scope coordinator.
   #
   # Owns:
-  #   * group_states — the per-group state machine.
-  #   * cooldown_timers — the "recently vacant" suppression timers.
+  #   * The per-group state machine, held entirely in a Supervisor-owned ETS table
+  #     (Forum.Supervisor.shard_states_table/2, group => group_state) — the SINGLE
+  #     source of truth. The shard keeps no in-memory copy; it reads and writes the
+  #     table directly. Because the table is Supervisor-owned it SURVIVES a shard
+  #     crash: on restart the shard reconciles it against the live partition counts
+  #     (see rebuild_group_states/1) and therefore never forgets an outstanding
+  #     router assertion (a :cooldown / :vacant_queued / :vacant_flushing /
+  #     :occupied_pending group) — closing the stale-router-entry leak the old
+  #     "re-adopt only live partition groups" rebuild left behind.
+  #   * cooldown_timers — the "recently vacant" suppression timers. The ONLY
+  #     process-local state: timer references are runtime handles that cannot
+  #     survive a crash, so they are re-armed from the table on restart. (The
+  #     :occupied_pending waiters live in the table tuple; they go stale on a crash
+  #     and are simply not replied to — the callers' join calls already exited.)
   #   * A periodic vacant flush of its own :vacant_queued groups, in per-router
   #     batches; a failed batch re-queues, so the flush doubles as a
   #     self-draining retry.
@@ -38,26 +50,30 @@ defmodule Forum.Muster.Shard do
             | {:occupied_pending, [{GenServer.from(), pid}]}
             | :vacant_flushing
 
+    # The per-group state machine is NOT held here — it lives in `states_table`
+    # (Supervisor-owned ETS, group => group_state), the single source of truth.
+    # Only `cooldown_timers` is process-local: timer references are runtime handles
+    # that cannot survive a crash and are re-armed from the table on restart.
     @type t :: %__MODULE__{
             scope: atom,
             index: non_neg_integer,
             occupancy_table: atom,
+            states_table: atom,
             message_module: module,
             vacancy_cooldown_ms: non_neg_integer,
             vacant_flush_interval_ms: pos_integer,
             rpc_timeout_ms: timeout,
-            group_states: %{Forum.group() => group_state},
             cooldown_timers: %{Forum.group() => reference}
           }
     defstruct [
       :scope,
       :index,
       :occupancy_table,
+      :states_table,
       :message_module,
       :vacancy_cooldown_ms,
       :vacant_flush_interval_ms,
       :rpc_timeout_ms,
-      group_states: %{},
       cooldown_timers: %{}
     ]
   end
@@ -87,6 +103,7 @@ defmodule Forum.Muster.Shard do
       scope: scope,
       index: index,
       occupancy_table: Scope.occupancy_table_name(scope),
+      states_table: Forum.Supervisor.shard_states_table(scope, index),
       message_module: message_module,
       vacancy_cooldown_ms: vacancy_cooldown_ms,
       vacant_flush_interval_ms: vacant_flush_interval_ms,
@@ -102,22 +119,76 @@ defmodule Forum.Muster.Shard do
     {:noreply, state}
   end
 
-  # On (re)start, adopt every group our aligned partition still holds as
-  # :occupied. The occupancy rows for those groups (self rows, or rows on a
-  # remote router) are owned by the long-lived coordinator / remote routers and
-  # survive a shard restart, so we only need to rebuild the local state machine.
-  # Groups with no live members (a previous :cooldown / :occupied_pending) are
-  # not re-adopted; their stale router entries drain via drop_stale / the flush,
-  # exactly as on a coordinator restart.
+  # On (re)start, reconcile the state machine — which lives in the durable states
+  # table (Supervisor-owned, so it survived our crash) — against the live partition
+  # counts. The table is the source of truth, so we reconcile it IN PLACE; we do
+  # not rebuild a separate copy. Unlike a from-scratch "adopt only live partition
+  # groups" rebuild, this RETAINS the count-0 "outstanding assertion" states — so a
+  # group we had told a router about (:cooldown / :vacant_queued / :vacant_flushing
+  # / :occupied_pending) is still driven to retraction after the restart, and no
+  # router is left believing we hold a group we don't (the stale-entry leak).
+  #
+  # The two transient parts of the state the table cannot carry across a crash are
+  # reconstructed:
+  #   * cooldown TIMER refs (process-local) — re-armed fresh here for :cooldown.
+  #   * :occupied_pending WAITERS — the froms in the stored tuple are stale (their
+  #     join GenServer.calls already exited when we crashed; callers retry). We never
+  #     reply to them; we just resolve the group from the live count.
   defp rebuild_group_states(state) do
     partition = Forum.Supervisor.partition_name(state.scope, state.index)
+    counts = Forum.Partition.member_counts(partition)
+    durable = all_group_states(state)
 
-    group_states =
-      partition
-      |> Forum.Partition.groups()
-      |> Map.new(fn group -> {group, :occupied} end)
+    # The old timer refs died with us; re-arm fresh ones as we reconcile.
+    state = %{state | cooldown_timers: %{}}
 
-    %{state | group_states: group_states}
+    state =
+      Enum.reduce(durable, state, fn {group, durable_state}, st ->
+        reconcile_group(st, group, durable_state, Map.get(counts, group, 0))
+      end)
+
+    # Safety net: a crash between register_member (Partition.join) and the state
+    # write can leave a live member with no table entry. Adopt those as :occupied.
+    Enum.reduce(counts, state, fn {group, count}, st ->
+      if count > 0 and get_group_state(st, group) == nil,
+        do: put_group_state(st, group, :occupied),
+        else: st
+    end)
+  end
+
+  # Reconcile one stored entry against the current live member count, writing the
+  # result back to the table. A count > 0 always wins back to :occupied (a member is
+  # live, so the router rightly believes we hold it); a count of 0 drives the group
+  # toward retraction.
+  defp reconcile_group(state, group, durable_state, count) do
+    cond do
+      count > 0 ->
+        # Live member present: hold it. Covers a re-join during our downtime and
+        # any state whose group turned out to still be occupied.
+        put_group_state(state, group, :occupied)
+
+      durable_state in [:occupied, :cooldown] ->
+        # Was occupied (or cooling down) and is now empty — re-enter cooldown so a
+        # quick re-join still costs no RPC; the timer drives it to :vacant_queued.
+        # This is also where a :vacant event dropped while we were restarting gets
+        # caught (the durable :occupied + empty count reveals it).
+        enter_cooldown(state, group)
+
+      true ->
+        # :vacant_queued / :vacant_flushing / :occupied_pending, all now empty.
+        # Queue a vacant: the next flush retracts our router row (a no-op DELETE if
+        # nothing was ever written). For :occupied_pending the in-flight :occupied
+        # RPC may or may not have landed; :vacant_queued retracts it either way, and
+        # a retrying caller re-claims with a strictly higher seq (the INSERT wins).
+        # For :vacant_flushing the in-flight batch worker died with us; re-queue.
+        put_group_state(state, group, :vacant_queued)
+    end
+  end
+
+  defp enter_cooldown(state, group) do
+    ref = Process.send_after(self(), {:vacancy_expired, group}, state.vacancy_cooldown_ms)
+    state = %{state | cooldown_timers: Map.put(state.cooldown_timers, group, ref)}
+    put_group_state(state, group, :cooldown)
   end
 
   ## handle_call
@@ -155,19 +226,13 @@ defmodule Forum.Muster.Shard do
   def handle_call({:rebalance, _new_members}, _from, state) do
     state = normalize_pending_for_rebalance(state)
     state = settle_moved_pending(state)
-
-    held =
-      for {group, gs} <- state.group_states,
-          gs in [:occupied, :cooldown] or match?({:occupied_pending, _}, gs),
-          do: group
-
-    {:reply, {:held, held}, state}
+    {:reply, {:held, held_groups(state)}, state}
   end
 
   # Introspection — the coordinator folds every shard's group_states together to
   # answer Muster.dump/1 and the :status call used by tests.
   def handle_call(:group_states, _from, state) do
-    {:reply, state.group_states, state}
+    {:reply, Map.new(all_group_states(state)), state}
   end
 
   ## handle_info
@@ -206,7 +271,7 @@ defmodule Forum.Muster.Shard do
   ## State machine — claim
 
   defp handle_claim(group, pid, from, state) do
-    case Map.get(state.group_states, group) do
+    case get_group_state(state, group) do
       nil ->
         router_node = router_from_state(state, group)
 
@@ -295,20 +360,13 @@ defmodule Forum.Muster.Shard do
   end
 
   defp handle_local_vacant(group, state) do
-    case Map.get(state.group_states, group) do
+    case get_group_state(state, group) do
       :occupied ->
         Logger.debug(
           "Muster[#{node()}|#{state.scope}] #{inspect(group)} vacant locally, entering cooldown (#{state.vacancy_cooldown_ms}ms)"
         )
 
-        ref = Process.send_after(self(), {:vacancy_expired, group}, state.vacancy_cooldown_ms)
-
-        state = %{
-          state
-          | cooldown_timers: Map.put(state.cooldown_timers, group, ref)
-        }
-
-        {:noreply, put_group_state(state, group, :cooldown)}
+        {:noreply, enter_cooldown(state, group)}
 
       _ ->
         # Vacancy telemetry can arrive when group_states is something other than
@@ -320,7 +378,7 @@ defmodule Forum.Muster.Shard do
   end
 
   defp handle_vacancy_expired(group, state) do
-    case Map.get(state.group_states, group) do
+    case get_group_state(state, group) do
       :cooldown ->
         partition = Forum.Supervisor.partition(state.scope, group)
         count = Forum.Partition.member_count(partition, group)
@@ -358,7 +416,7 @@ defmodule Forum.Muster.Shard do
   end
 
   defp handle_occupied_done(group, result, state) do
-    case Map.get(state.group_states, group) do
+    case get_group_state(state, group) do
       {:occupied_pending, waiters} ->
         case result do
           :ok ->
@@ -414,7 +472,7 @@ defmodule Forum.Muster.Shard do
     end
 
     Enum.reduce(groups, state, fn group, st ->
-      case Map.get(st.group_states, group) do
+      case get_group_state(st, group) do
         :vacant_flushing ->
           if success?,
             do: delete_group_state(st, group),
@@ -431,7 +489,7 @@ defmodule Forum.Muster.Shard do
   # queued groups stay in :vacant_queued only until a flush moves them to
   # :vacant_flushing; a failed batch returns them to :vacant_queued.
   defp flush_vacant(state) do
-    queued = for {group, :vacant_queued} <- state.group_states, do: group
+    queued = groups_in_state(state, :vacant_queued)
 
     case queued do
       [] ->
@@ -473,9 +531,8 @@ defmodule Forum.Muster.Shard do
   # the next flush re-sends to the post-rebalance router; the in-flight worker's
   # result lands in handle_vacant_batch_done's catch-all and is dropped.
   defp normalize_pending_for_rebalance(state) do
-    Enum.reduce(state.group_states, state, fn
-      {group, :vacant_flushing}, st -> put_group_state(st, group, :vacant_queued)
-      _, st -> st
+    Enum.reduce(groups_in_state(state, :vacant_flushing), state, fn group, st ->
+      put_group_state(st, group, :vacant_queued)
     end)
   end
 
@@ -484,21 +541,17 @@ defmodule Forum.Muster.Shard do
   # alone — their original in-flight worker is still talking to the correct
   # router, so handle_occupied_done will settle them normally.
   defp settle_moved_pending(state) do
-    Enum.reduce(state.group_states, state, fn
-      {group, {:occupied_pending, waiters}}, st ->
-        if router_changed?(st, group) do
-          Enum.each(waiters, fn {from, pid} ->
-            register_member(st, group, pid)
-            GenServer.reply(from, :ok)
-          end)
+    Enum.reduce(pending_groups(state), state, fn {group, waiters}, st ->
+      if router_changed?(st, group) do
+        Enum.each(waiters, fn {from, pid} ->
+          register_member(st, group, pid)
+          GenServer.reply(from, :ok)
+        end)
 
-          put_group_state(st, group, :occupied)
-        else
-          st
-        end
-
-      _, st ->
+        put_group_state(st, group, :occupied)
+      else
         st
+      end
     end)
   end
 
@@ -577,16 +630,61 @@ defmodule Forum.Muster.Shard do
     %{state | cooldown_timers: new_timers}
   end
 
-  # Emits :muster_group_state so trace-based tests can synchronize on per-group
-  # state-machine transitions (state: nil = forgotten) instead of polling.
+  # The states table is the single source of truth: these helpers read and write it
+  # directly. put/delete also emit :muster_group_state so trace-based tests can
+  # synchronize on per-group transitions (state: nil = forgotten) instead of
+  # polling. They return `state` unchanged (the table is the state); callers thread
+  # it through unchanged so the existing {:noreply, put_group_state(...)} shape and
+  # any concurrent cooldown_timers update both keep working.
+  defp get_group_state(state, group) do
+    case :ets.lookup(state.states_table, group) do
+      [{^group, value}] -> value
+      [] -> nil
+    end
+  end
+
+  # All {group, group_state} pairs in this shard's slice. Only for callers that
+  # genuinely need EVERY entry (rebuild reconciliation, the :group_states dump);
+  # callers that want a single state should `:ets.select` for it (helpers below) so
+  # the filter runs in the table, not in Elixir over a full copy. The table is
+  # single-writer (this shard), so a plain tab2list needs no snapshot guarantees.
+  defp all_group_states(state), do: :ets.tab2list(state.states_table)
+
+  # Groups currently in exactly `value` (an atom state: :occupied / :cooldown /
+  # :vacant_queued / :vacant_flushing). Matched and projected to the group key in
+  # the ETS engine.
+  defp groups_in_state(state, value) do
+    :ets.select(state.states_table, [{{:"$1", value}, [], [:"$1"]}])
+  end
+
+  # Groups the coordinator must snapshot during a rebalance — those we still hold:
+  # :occupied, :cooldown, or {:occupied_pending, _}. One multi-clause select.
+  defp held_groups(state) do
+    :ets.select(state.states_table, [
+      {{:"$1", :occupied}, [], [:"$1"]},
+      {{:"$1", :cooldown}, [], [:"$1"]},
+      {{:"$1", {:occupied_pending, :_}}, [], [:"$1"]}
+    ])
+  end
+
+  # {group, waiters} for every {:occupied_pending, waiters} group, projecting both
+  # the key and the waiter list out of the matched tuple.
+  defp pending_groups(state) do
+    :ets.select(state.states_table, [
+      {{:"$1", {:occupied_pending, :"$2"}}, [], [{{:"$1", :"$2"}}]}
+    ])
+  end
+
   defp put_group_state(state, group, value) do
     tp(:muster_group_state, %{scope: state.scope, node: node(), group: group, state: value})
-    %{state | group_states: Map.put(state.group_states, group, value)}
+    :ets.insert(state.states_table, {group, value})
+    state
   end
 
   defp delete_group_state(state, group) do
     tp(:muster_group_state, %{scope: state.scope, node: node(), group: group, state: nil})
-    %{state | group_states: Map.delete(state.group_states, group)}
+    :ets.delete(state.states_table, group)
+    state
   end
 
   defp router_from_state(state, group) do
