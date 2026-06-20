@@ -196,6 +196,60 @@ defmodule Forum.MusterTest do
     |> Enum.take(count)
   end
 
+  # Find a group that hashes to the shard at `index` (same phash2(group, N) the
+  # claim path uses), so a crash test can pin a group to the shard it kills.
+  defp group_on_shard(scope, index) do
+    target = Forum.Supervisor.shard_name(scope, index)
+
+    Stream.iterate(0, &(&1 + 1))
+    |> Stream.map(&:"shardg#{&1}")
+    |> Enum.find(fn g -> Forum.Supervisor.shard(scope, g) == target end)
+  end
+
+  # Poll until `name` is re-registered to a pid other than `old_pid` (i.e. the
+  # supervisor has restarted it).
+  defp wait_for_new_pid(name, old_pid, timeout \\ 2_000) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+    do_wait_for_new_pid(name, old_pid, deadline)
+  end
+
+  defp do_wait_for_new_pid(name, old_pid, deadline) do
+    case Process.whereis(name) do
+      pid when is_pid(pid) and pid != old_pid ->
+        pid
+
+      _ ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          flunk("#{inspect(name)} did not restart with a new pid in time")
+        else
+          Process.sleep(5)
+          do_wait_for_new_pid(name, old_pid, deadline)
+        end
+    end
+  end
+
+  # Poll the lock-free :status persistent_term until it reaches `expected`. Read
+  # directly (not via a :status GenServer.call) so it works even while the
+  # coordinator is blocked inside a synchronous rebalance gather.
+  defp wait_status(scope, expected, timeout \\ 1_000) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+    do_wait_status(scope, expected, deadline)
+  end
+
+  defp do_wait_status(scope, expected, deadline) do
+    cond do
+      :persistent_term.get({Forum.Muster, scope, :status}, nil) == expected ->
+        :ok
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        flunk("status did not reach #{inspect(expected)} in time")
+
+      true ->
+        Process.sleep(2)
+        do_wait_status(scope, expected, deadline)
+    end
+  end
+
   describe "start_link/2" do
     test "starts with custom partition count", %{scope: scope, base_opts: opts} do
       pid = start_supervised!(spec(scope, opts))
@@ -1455,6 +1509,108 @@ defmodule Forum.MusterTest do
       # ring-read crashes.
       assert Process.alive?(ring)
       assert Process.whereis(ring_name(scope)) == ring
+    end
+
+    test "a shard crash during the rebalance gather crashes the coordinator and the cluster self-heals",
+         %{scope: scope} do
+      # The most dangerous moment for a shard crash: the coordinator's SYNCHRONOUS
+      # {:rebalance} gather, where it is mid-way through collecting every shard's
+      # held set. Pin a group to shard 0 (the first shard gathered) and hold it
+      # :occupied, then crash shard 0 out from under the in-flight gather.
+      g = group_on_shard(scope, 0)
+      assert g
+
+      pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, g, pid)
+      assert :occupied = wait_for_group_state(scope, g, :occupied)
+
+      shard = Forum.Supervisor.shard(scope, g)
+      shard_pid = Process.whereis(shard)
+
+      coord = Process.whereis(Forum.Supervisor.name(scope))
+      coord_ref = Process.monitor(coord)
+
+      # Suspend shard 0 so the gather BLOCKS on it: the coordinator cannot get
+      # past the suspended shard, so the kill below is guaranteed to land while the
+      # gather call is in flight (no race with a fast, healthy gather).
+      :ok = :sys.suspend(shard_pid)
+
+      # Kick off a rebalance. do_rebalance flips status to :rebalancing, swaps the
+      # ring, then blocks gathering the suspended shard 0.
+      trigger_rebalance(scope, Enum.sort([node(), :gc@nowhere]))
+
+      # Once status is :rebalancing the coordinator has entered do_rebalance and
+      # (within microseconds of pure-local work) is parked on shard 0's call.
+      wait_status(scope, :rebalancing)
+      Process.sleep(20)
+
+      # Kill the shard the gather is blocked on. The coordinator's GenServer.call
+      # gets an :exit, which the gather deliberately does NOT catch — so it crashes
+      # (the documented "restart re-announces from a clean slate" behaviour).
+      Process.exit(shard_pid, :kill)
+      assert_receive {:DOWN, ^coord_ref, :process, ^coord, _reason}, 1_000
+
+      # The supervisor restarts both the coordinator and the shard. After they
+      # settle the group is re-adopted :occupied (the shard rebuilds it from its
+      # partition, whose ETS survived both crashes), the live member is still
+      # tracked, and the restarted coordinator's occupancy table has the self row
+      # again (reannounced from the partition at init).
+      new_coord = wait_for_new_pid(Forum.Supervisor.name(scope), coord)
+      assert is_pid(new_coord)
+
+      assert :occupied = wait_for_group_state(scope, g, :occupied, 2_000)
+      assert Muster.local_member?(scope, g, pid)
+      assert node() in Scope.occupancy(scope, g)
+    end
+
+    test "a shard crash while a claim is in flight fails the caller cleanly and a retry heals",
+         %{scope: scope} do
+      # Route the group to a fake remote so the claim dispatches an :occupied RPC
+      # and parks the caller in :occupied_pending.
+      inject_fake_remote(scope)
+      g = group_for_router(scope, @fake_node)
+      assert g
+
+      # Block the :occupied RPC so the claim stays parked: the caller is blocked on
+      # the shard's GenServer.call and the shard sits in :occupied_pending.
+      stub_call({:fn, fn -> Process.sleep(:infinity) end})
+
+      test = self()
+
+      caller =
+        spawn(fn ->
+          member = spawn_link(fn -> Process.sleep(:infinity) end)
+          send(test, {:claim_result, Muster.join(scope, g, member)})
+        end)
+
+      caller_ref = Process.monitor(caller)
+
+      assert {:occupied_pending, _} =
+               wait_for_group_state(scope, g, &match?({:occupied_pending, _}, &1))
+
+      shard = Forum.Supervisor.shard(scope, g)
+      shard_pid = Process.whereis(shard)
+      ref = Process.monitor(shard_pid)
+      Process.exit(shard_pid, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^shard_pid, :killed}, 1_000
+
+      # The blocked caller is released with a clean error — it does NOT hang for the
+      # full @claim_call_timeout.
+      assert_receive {:claim_result, {:error, {:scope_exit, _}}}, 1_000
+      assert_receive {:DOWN, ^caller_ref, :process, ^caller, _}, 1_000
+
+      # The crash left no member registered for g (the pid is only registered after
+      # the router confirms the claim), so the restarted shard adopts nothing.
+      restarted = wait_for_new_pid(shard, shard_pid)
+      assert is_pid(restarted)
+      assert is_nil(wait_for_group_state(scope, g, &is_nil/1))
+
+      # A retry now succeeds end-to-end and leaves the group :occupied.
+      stub_call(:ok)
+      member = spawn_link(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, g, member)
+      assert :occupied = wait_for_group_state(scope, g, :occupied, 2_000)
+      assert Muster.local_member?(scope, g, member)
     end
   end
 end
