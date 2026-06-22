@@ -6,10 +6,14 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
   use Phoenix.LiveDashboard.PageBuilder
   use Realtime.Logs
 
+  alias Extensions.PostgresCdcRls
   alias Realtime.Api
   alias Realtime.Api.Tenant
   alias Realtime.Crypto
   alias Realtime.Database
+  alias Realtime.Nodes
+  alias Realtime.Tenants.Connect
+  alias Realtime.UsersCounter
 
   @application_name "realtime_dashboard_tenant_info"
 
@@ -18,7 +22,7 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
 
   @impl true
   def mount(_params, _, socket) do
-    {:ok, assign(socket, external_id: "", tenant: nil, pg_version: nil, error: nil)}
+    {:ok, assign(socket, external_id: "", tenant: nil, pg_version: nil, runtime: nil, error: nil)}
   end
 
   @impl true
@@ -27,7 +31,8 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
 
     case Api.get_tenant_by_external_id(ref) do
       nil ->
-        {:noreply, assign(socket, external_id: ref, tenant: nil, pg_version: nil, error: "Tenant not found")}
+        {:noreply,
+         assign(socket, external_id: ref, tenant: nil, pg_version: nil, runtime: nil, error: "Tenant not found")}
 
       %Tenant{} = tenant ->
         {:noreply,
@@ -35,19 +40,34 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
            external_id: ref,
            tenant: prepare_tenant(tenant),
            pg_version: fetch_pg_version(tenant),
+           runtime: runtime_info(ref),
            error: nil
          )}
     end
   end
 
   def handle_params(_params, _uri, socket) do
-    {:noreply, assign(socket, external_id: "", tenant: nil, pg_version: nil, error: nil)}
+    {:noreply, assign(socket, external_id: "", tenant: nil, pg_version: nil, runtime: nil, error: nil)}
   end
 
   @impl true
   def handle_event("lookup", %{"external_id" => ref}, socket) do
     ref = String.trim(ref)
     {:noreply, push_patch(socket, to: "/admin/dashboard/tenant_info?external_id=#{URI.encode(ref)}")}
+  end
+
+  @impl true
+  # Auto-refresh (the dashboard's "refresh every" selector) only recomputes the
+  # cheap runtime info. pg_version is intentionally not refreshed as it opens a
+  # database connection.
+  def handle_refresh(socket) do
+    case socket.assigns do
+      %{external_id: ref, tenant: %Tenant{}} when ref != "" ->
+        {:noreply, assign(socket, runtime: runtime_info(ref))}
+
+      _ ->
+        {:noreply, socket}
+    end
   end
 
   @impl true
@@ -114,6 +134,45 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
           </tbody>
         </table>
 
+        <h6 class="mt-4">Runtime</h6>
+        <table class="table table-hover">
+          <tbody>
+            <tr>
+              <td>connect</td>
+              <td><%= status_cell(@runtime.connect) %></td>
+            </tr>
+            <tr>
+              <td>replication_connection</td>
+              <td><%= status_cell(@runtime.replication) %></td>
+            </tr>
+            <tr>
+              <td>postgres_cdc_rls</td>
+              <td><%= status_cell(@runtime.cdc_rls) %></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h6 class="mt-4">Connected users per region</h6>
+        <table class="table table-hover">
+          <thead>
+            <tr><th>region</th><th>nodes</th><th>connected</th></tr>
+          </thead>
+          <tbody>
+            <%= for region <- @runtime.users.regions do %>
+              <tr>
+                <td><%= region.region %></td>
+                <td><%= region.nodes %></td>
+                <td><%= region.count %></td>
+              </tr>
+            <% end %>
+            <tr class="font-weight-bold">
+              <td>total (cluster)</td>
+              <td></td>
+              <td><%= @runtime.users.total %></td>
+            </tr>
+          </tbody>
+        </table>
+
         <%= for ext <- @tenant.extensions do %>
           <h6 class="mt-4">Extension: <%= ext.type %></h6>
           <table class="table table-hover">
@@ -161,6 +220,61 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
       |> Enum.sort_by(&elem(&1, 0))
 
     %{ext | settings: settings}
+  end
+
+  # Cheap, RPC-free runtime status pulled from :syn metadata and Census' cached
+  # membership counts. No database connections or remote calls are made here.
+  defp runtime_info(tenant_id) do
+    %{
+      connect: process_status(Connect.whereis(tenant_id)),
+      replication: replication_status(tenant_id),
+      cdc_rls: cdc_rls_status(tenant_id),
+      users: users_by_region(tenant_id)
+    }
+  end
+
+  defp cdc_rls_status(tenant_id) do
+    case PostgresCdcRls.get_manager_conn(tenant_id) do
+      {:ok, manager, _conn} -> process_status(manager)
+      {:error, _} -> %{up: false, node: nil}
+    end
+  end
+
+  defp replication_status(tenant_id) do
+    case Connect.replication_status(tenant_id) do
+      {:ok, pid} -> process_status(pid)
+      {:error, :not_connected} -> %{up: false, node: nil}
+    end
+  end
+
+  defp process_status(pid) when is_pid(pid), do: %{up: true, node: node(pid)}
+  defp process_status(_), do: %{up: false, node: nil}
+
+  defp users_by_region(tenant_id) do
+    regions =
+      for region <- Enum.sort(Nodes.all_node_regions()) do
+        nodes = Nodes.region_nodes(region)
+        count = Enum.sum_by(nodes, &UsersCounter.tenant_users(tenant_id, &1))
+        %{region: region, nodes: length(nodes), count: count}
+      end
+
+    %{total: UsersCounter.tenant_users(tenant_id), regions: regions}
+  end
+
+  defp status_cell(%{up: true, node: node}) do
+    assigns = %{node: node}
+
+    ~H"""
+    <span class="text-success">up</span> <span class="font-monospace">(<%= @node %>)</span>
+    """
+  end
+
+  defp status_cell(%{up: false}) do
+    assigns = %{}
+
+    ~H"""
+    <span class="text-muted">not connected</span>
+    """
   end
 
   defp fetch_pg_version(%Tenant{} = tenant) do
