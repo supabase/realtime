@@ -27,6 +27,12 @@ defmodule Realtime.UsersCounter do
   def tenant_users(tenant_id), do: Census.member_count(:users, tenant_id)
 
   @doc """
+  Returns the count of connected clients for a tenant on a specific node.
+  """
+  @spec tenant_users(String.t(), node()) :: non_neg_integer()
+  def tenant_users(tenant_id, node), do: Census.member_count(:users, tenant_id, node)
+
+  @doc """
   Returns the counts of all connected clients for all tenants for the cluster.
   """
   @spec tenant_counts() :: %{String.t() => non_neg_integer()}
