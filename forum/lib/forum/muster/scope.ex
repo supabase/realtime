@@ -36,6 +36,12 @@ defmodule Forum.Muster.Scope do
   @ring_replicas 128
   @ring_depth 2
 
+  # A vacancy tombstone is kept this many multiples of rpc_timeout_ms before the
+  # GC sweep reaps it — long enough that an orphaned, un-cancelled :occupied/
+  # snapshot RPC (whose only delay is scheduling/network, bounded by the erpc
+  # timeout in a healthy cluster) can no longer land and resurrect the row.
+  @tombstone_window_multiplier 5
+
   defmodule State do
     @moduledoc false
     @type t :: %__MODULE__{
@@ -44,6 +50,7 @@ defmodule Forum.Muster.Scope do
             view_heartbeat_interval_ms: pos_integer,
             rpc_timeout_ms: timeout,
             rebalance_gather_timeout_ms: timeout,
+            tombstone_window_ms: pos_integer,
             occupancy_table: atom,
             members: [node],
             peers: %{pid => reference},
@@ -59,6 +66,7 @@ defmodule Forum.Muster.Scope do
       :view_heartbeat_interval_ms,
       :rpc_timeout_ms,
       :rebalance_gather_timeout_ms,
+      :tombstone_window_ms,
       :occupancy_table,
       :telemetry_handler_id,
       members: [],
@@ -100,7 +108,8 @@ defmodule Forum.Muster.Scope do
   @doc "Returns the list of nodes (as known by the local router state) holding `group`."
   @spec occupancy(atom, Forum.group()) :: [node]
   def occupancy(scope, group) do
-    :ets.select(occupancy_table_name(scope), [{{{group, :"$1"}, :_}, [], [:"$1"]}])
+    # :present rows only — a tombstone (meta is an integer timestamp) reads as absent.
+    :ets.select(occupancy_table_name(scope), [{{{group, :"$1"}, :_, :present}, [], [:"$1"]}])
   end
 
   @doc false
@@ -108,36 +117,82 @@ defmodule Forum.Muster.Scope do
   @spec occupancy_table_name(atom) :: atom
   def occupancy_table_name(scope), do: :"#{scope}_muster_occupancy"
 
+  # Occupancy rows are a uniform last-writer-wins-by-seq register, keyed by
+  # {group, source} and shaped {{group, source}, seq, meta}:
+  #
+  #   * meta == :present        — the source holds local members of the group.
+  #   * meta == <created_at ms>  — a TOMBSTONE: the source vacated the group as of
+  #     `seq`. Kept (not deleted) so the seq guard works in BOTH directions. The
+  #     covered direction is a stale, lower-seq DELETE losing to a live INSERT; the
+  #     reverse is a stale, lower-seq INSERT (an `occupied`/snapshot whose RPC was
+  #     orphaned and — because :erpc does not cancel — lands late) which must NOT
+  #     resurrect a vacated group. Physically removing the row would discard the
+  #     high-water seq and let that late INSERT win via insert_new. Tombstones are
+  #     reaped by a periodic, time-windowed sweep (reap_tombstones/1) once older
+  #     than the longest an in-flight RPC could still be (a multiple of
+  #     rpc_timeout_ms — see default_tombstone_window/1).
+  #
+  # `occupancy/2` returns only :present rows, so a tombstone reads as "absent".
+
   @doc false
-  # Insert/raise an occupancy row to `seq`, but never lower a row already stamped
-  # at or above `seq`. Makes the occupancy table a uniform last-writer-wins-by-seq
-  # register so a snapshot (dispatched by this coordinator) and an :occupied
-  # (dispatched by a shard) writing the same {group, source} key concurrently can
-  # never clobber the newer of the two. Atomic against concurrent writers via
-  # select_replace (update branch) + insert_new (absent branch), retried on the
-  # rare interleaving where a strictly-older row appears in between.
+  # INSERT/raise the key to a :present row at `seq` (never lowering a row already
+  # at or above `seq`). Used by `occupied`, the rebalance snapshot, and self-routed
+  # claims. Strict `<`: an equal seq never overwrites (seqs are globally unique per
+  # source, so ties do not occur in practice). Public so Forum.Muster.Shard writes
+  # it directly.
   @spec upsert_if_newer(atom, {Forum.group(), node}, integer) :: :ok
-  def upsert_if_newer(table, key, seq) do
-    # Keyed (literal key → set-table key lookup, not a scan) seq-guarded replace.
-    # The replacement object must reconstruct the row; the key tuple is injected
-    # as a {:const, _} literal (a bare tuple in a match-spec body is read as a
-    # construction form, not a value) and `seq` is a bare integer literal.
-    spec = [{{key, :"$1"}, [{:<, :"$1", seq}], [{{{:const, key}, seq}}]}]
+  def upsert_if_newer(table, key, seq), do: put_if_newer(table, key, seq, :present, :lt)
+
+  # Mark the key a TOMBSTONE at `seq` (absent), stamped `created_at` (router-local
+  # monotonic ms) for the GC sweep. `=<` so a vacancy at the stored seq still wins
+  # (mirrors the old select_delete `=<` guard); a strictly-newer :present row (a
+  # re-claim) survives.
+  @spec tombstone_if_newer(atom, {Forum.group(), node}, integer, integer) :: :ok
+  defp tombstone_if_newer(table, key, seq, created_at),
+    do: put_if_newer(table, key, seq, created_at, :lte)
+
+  # Seq-guarded write of {key, seq, meta}. Atomic against concurrent writers via
+  # select_replace (raise branch) + insert_new (absent branch), retried on the rare
+  # interleaving where a still-older row appears in between. `cmp` is the overwrite
+  # comparison (:lt for a present INSERT, :lte for a tombstone). The replacement
+  # object reconstructs the row; the key tuple is injected as a {:const, _} literal
+  # (a bare tuple in a match-spec body is a construction form, not a value).
+  defp put_if_newer(table, key, seq, meta, cmp) do
+    spec = [{{key, :"$1", :_}, [{op(cmp), :"$1", seq}], [{{{:const, key}, seq, meta}}]}]
 
     case :ets.select_replace(table, spec) do
       1 ->
         :ok
 
       0 ->
-        if :ets.insert_new(table, {key, seq}) do
+        if :ets.insert_new(table, {key, seq, meta}) do
           :ok
         else
           case :ets.lookup(table, key) do
-            [{^key, existing}] when existing < seq -> upsert_if_newer(table, key, seq)
-            _ -> :ok
+            [{^key, existing, _}] ->
+              if overwrite?(cmp, existing, seq),
+                do: put_if_newer(table, key, seq, meta, cmp),
+                else: :ok
+
+            _ ->
+              :ok
           end
         end
     end
+  end
+
+  defp op(:lt), do: :<
+  defp op(:lte), do: :"=<"
+  defp overwrite?(:lt, existing, seq), do: existing < seq
+  defp overwrite?(:lte, existing, seq), do: existing <= seq
+
+  # Convert this `source`'s rows older than `seq` into tombstones at `seq` (used by
+  # the rebalance snapshot's full-state replace). Each write is individually
+  # seq-guarded, so a row a racing re-claim already raised above `seq` is spared.
+  defp tombstone_stale_source_rows(table, source, seq, created_at) do
+    table
+    |> :ets.select([{{{:"$1", source}, :"$2", :_}, [{:<, :"$2", seq}], [:"$1"]}])
+    |> Enum.each(fn group -> tombstone_if_newer(table, {group, source}, seq, created_at) end)
   end
 
   ## Remote entry points
@@ -169,7 +224,21 @@ defmodule Forum.Muster.Scope do
     # {group, source} may be applied concurrently by this coordinator during a
     # rebalance, and we must not let an older write clobber a newer one. See
     # upsert_if_newer/3.
-    upsert_if_newer(occupancy_table_name(scope), {group, source_node}, seq)
+    #
+    # Wrapped in a span so a test can force an ordering on the INSERT *before* it
+    # writes: the :start fires ahead of the upsert (unlike :muster_occupied below,
+    # which fires after). muster_distributed_test.exs uses :start to park a stale
+    # occupied INSERT behind a fresh vacant DELETE (the reverse of the covered
+    # stale-DELETE-after-fresh-INSERT race).
+    tp_span(:muster_occupied_apply, %{
+      scope: scope,
+      node: node(),
+      group: group,
+      source: source_node,
+      seq: seq
+    }) do
+      upsert_if_newer(occupancy_table_name(scope), {group, source_node}, seq)
+    end
 
     # Emitted AFTER the insert, so a forced ordering on this event implies the
     # row is committed (muster_distributed_test.exs races it against a stale
@@ -189,10 +258,14 @@ defmodule Forum.Muster.Scope do
   @spec vacant_batch(atom, [Forum.group()], node, integer) :: :ok
   def vacant_batch(scope, groups, source_node, seq) do
     table = occupancy_table_name(scope)
+    created_at = System.monotonic_time(:millisecond)
 
-    # Delete each row only if it is stamped no newer than this batch — i.e. a
-    # later `occupied`/snapshot for the same key (higher seq) survives a stale,
-    # late-arriving vacant DELETE. Atomic per row via select_delete's guard.
+    # Tombstone each row (mark it absent at this batch's seq) rather than delete it.
+    # A later `occupied`/snapshot for the same key (higher seq) still survives a
+    # stale, late DELETE — and, crucially, the reverse also holds: a stale, lower-
+    # seq INSERT that lands AFTER this DELETE (an orphaned, un-cancelled :occupied/
+    # snapshot RPC) is rejected by the seq guard instead of resurrecting the group.
+    # Atomic per row.
     tp_span(:muster_vacant_batch, %{
       scope: scope,
       node: node(),
@@ -201,9 +274,7 @@ defmodule Forum.Muster.Scope do
       seq: seq
     }) do
       Enum.each(groups, fn group ->
-        :ets.select_delete(table, [
-          {{{group, source_node}, :"$1"}, [{:"=<", :"$1", seq}], [true]}
-        ])
+        tombstone_if_newer(table, {group, source_node}, seq, created_at)
       end)
     end
 
@@ -270,6 +341,9 @@ defmodule Forum.Muster.Scope do
     rebalance_gather_timeout_ms =
       Keyword.get(opts, :rebalance_gather_timeout_ms, @default_rebalance_gather_timeout_ms)
 
+    tombstone_window_ms =
+      Keyword.get(opts, :tombstone_window_ms, default_tombstone_window(rpc_timeout_ms))
+
     message_module = Keyword.get(opts, :message_module, Forum.Adapter.ErlDist)
 
     if not (is_integer(view_heartbeat_interval_ms) and view_heartbeat_interval_ms > 0) do
@@ -323,6 +397,7 @@ defmodule Forum.Muster.Scope do
       view_heartbeat_interval_ms: view_heartbeat_interval_ms,
       rpc_timeout_ms: rpc_timeout_ms,
       rebalance_gather_timeout_ms: rebalance_gather_timeout_ms,
+      tombstone_window_ms: tombstone_window_ms,
       occupancy_table: occupancy_table,
       telemetry_handler_id: telemetry_handler_id,
       members: [node()]
@@ -344,6 +419,7 @@ defmodule Forum.Muster.Scope do
     )
 
     schedule_view_heartbeat(state)
+    schedule_tombstone_sweep(state)
     {:noreply, state}
   end
 
@@ -371,7 +447,7 @@ defmodule Forum.Muster.Scope do
   # dropped, and still reply :ok.
   #
   # Upsert the snapshot rows at `seq` (never lowering a newer racing re-claim),
-  # then delete only this source's older rows (strict `<`). We then advance the
+  # then tombstone only this source's older rows (strict `<`). We then advance the
   # watermark and fold in the carried view marker (member_views + update_status).
   # Data first, then readiness, in one indivisible step.
   @impl true
@@ -382,8 +458,13 @@ defmodule Forum.Muster.Scope do
       {:reply, :ok, state}
     else
       table = state.occupancy_table
+      created_at = System.monotonic_time(:millisecond)
       Enum.each(groups, fn group -> upsert_if_newer(table, {group, source}, seq) end)
-      :ets.select_delete(table, [{{{:_, source}, :"$1"}, [{:<, :"$1", seq}], [true]}])
+      # Tombstone (not delete) this source's rows that predate the snapshot and are
+      # not in it: a late, lower-seq INSERT for a group the source no longer holds
+      # must not resurrect it. The just-upserted present rows are at `seq` (not
+      # < seq) and are spared.
+      tombstone_stale_source_rows(table, source, seq, created_at)
 
       tp(:muster_node_state_received, %{
         scope: state.scope,
@@ -425,8 +506,9 @@ defmodule Forum.Muster.Scope do
     occupancy =
       state.occupancy_table
       |> :ets.tab2list()
-      |> Enum.reduce(%{}, fn {{group, src}, _seq}, acc ->
-        Map.update(acc, group, [src], &[src | &1])
+      |> Enum.reduce(%{}, fn
+        {{group, src}, _seq, :present}, acc -> Map.update(acc, group, [src], &[src | &1])
+        _tombstone, acc -> acc
       end)
 
     {:ok, ring_nodes} = Ring.get_nodes(ring_name(state.scope))
@@ -513,7 +595,7 @@ defmodule Forum.Muster.Scope do
           "Muster[#{node()}|#{state.scope}] peer down: #{inspect(node(pid))} — dropping its occupancy and rebalancing"
         )
 
-        :ets.match_delete(state.occupancy_table, {{:_, node(pid)}, :_})
+        :ets.match_delete(state.occupancy_table, {{:_, node(pid)}, :_, :_})
         :telemetry.execute([:forum, state.scope, :node, :down], %{}, %{node: node(pid)})
 
         member_views = Map.delete(state.member_views, node(pid))
@@ -570,6 +652,17 @@ defmodule Forum.Muster.Scope do
   def handle_info(:view_heartbeat, state) do
     announce_view(state)
     schedule_view_heartbeat(state)
+    {:noreply, state}
+  end
+
+  # Periodic GC of vacancy tombstones older than the window — see the register
+  # note above upsert_if_newer/3. Reaping is the only thing that bounds the
+  # tombstones' memory; correctness does not depend on it firing promptly (a
+  # tombstone kept too long is merely an absent row), so a single periodic sweep
+  # on the coordinator suffices.
+  def handle_info(:sweep_tombstones, state) do
+    reap_tombstones(state)
+    schedule_tombstone_sweep(state)
     {:noreply, state}
   end
 
@@ -828,7 +921,7 @@ defmodule Forum.Muster.Scope do
     own = own_view_hash(state)
 
     state.occupancy_table
-    |> :ets.select([{{{:"$1", :"$2"}, :"$3"}, [], [{{:"$1", :"$2", :"$3"}}]}])
+    |> :ets.select([{{{:"$1", :"$2"}, :"$3", :_}, [], [{{:"$1", :"$2", :"$3"}}]}])
     |> Enum.each(fn {group, n, row_seq} ->
       # Agreement first: it is a map lookup, and at rebalance time most sources
       # have not announced the new view yet — their rows are skipped without
@@ -962,6 +1055,30 @@ defmodule Forum.Muster.Scope do
     Process.send_after(self(), :view_heartbeat, state.view_heartbeat_interval_ms)
     :ok
   end
+
+  defp schedule_tombstone_sweep(state) do
+    Process.send_after(self(), :sweep_tombstones, state.tombstone_window_ms)
+    :ok
+  end
+
+  # Delete tombstones older than the window. Tombstone rows carry an integer
+  # created_at (router-local monotonic ms) in the meta slot; :present rows carry
+  # the :present atom, so `is_integer` cleanly selects only tombstones. A reaped
+  # tombstone is at most window + sweep-interval old; both equal tombstone_window_ms.
+  defp reap_tombstones(state) do
+    cutoff = System.monotonic_time(:millisecond) - state.tombstone_window_ms
+
+    :ets.select_delete(state.occupancy_table, [
+      {{:_, :_, :"$1"}, [{:is_integer, :"$1"}, {:<, :"$1", cutoff}], [true]}
+    ])
+  end
+
+  # Tombstone retention window: a multiple of the RPC timeout, the practical upper
+  # bound on how late an orphaned, un-cancelled :occupied/snapshot RPC can land.
+  defp default_tombstone_window(rpc_timeout_ms) when is_integer(rpc_timeout_ms),
+    do: rpc_timeout_ms * @tombstone_window_multiplier
+
+  defp default_tombstone_window(_), do: @default_rpc_timeout_ms * @tombstone_window_multiplier
 
   # spawn_opt with monitor + tag gives us atomic spawn+monitor and uses the
   # worker's exit reason as the result channel, so any termination surfaces as a

@@ -502,6 +502,185 @@ defmodule Forum.MusterDistributedTest do
     end
   end
 
+  describe "reverse race — a stale occupied INSERT vs. a fresh vacant DELETE (forced ordering)" do
+    setup do
+      scope = :"muster_revseq_#{System.unique_integer([:positive])}"
+      # Long flush interval so the only vacant flush is the one the test triggers
+      # deterministically; a generous rpc_timeout so the parked occupied worker
+      # does not time out before we release it.
+      start_supervised!(
+        spec(scope,
+          vacancy_cooldown_ms: 50,
+          vacant_flush_interval_ms: 60_000,
+          rpc_timeout_ms: 30_000
+        )
+      )
+
+      %{scope: scope}
+    end
+
+    # The MIRROR of "a late vacant DELETE cannot clobber a re-claimed group". That
+    # test proved a stale, lower-seq DELETE landing after a fresh, higher-seq
+    # INSERT is a no-op (vacant_batch's `=<` seq guard). This proves the opposite
+    # direction now holds too: a stale, lower-seq `occupied` INSERT landing on a
+    # real router AFTER a fresh, higher-seq `vacant_batch` DELETE must NOT
+    # resurrect a group the source has actually vacated. Before vacancy tombstones
+    # (the DELETE removed the row outright, discarding its seq) the late INSERT
+    # won via insert_new and left a permanent phantom; now the DELETE leaves a
+    # seq-stamped tombstone that the lower-seq INSERT loses to.
+    #
+    # This IS a plain occupied-vs-vacant race, via the SAME :erpc-no-cancel
+    # property the vacant side exploits — an `occupied` whose RPC was orphaned is
+    # not cancelled, so its INSERT can still land late. The only subtlety is
+    # producing it: the claim state machine awaits `occupied` (a caller parks in
+    # :occupied_pending until it confirms), so an `occupied` is not normally in
+    # flight while a later `vacant` for the same group is dispatched. A shard
+    # CRASH is the bridge — the orphaned `occupied` worker (low seq) survives the
+    # crash (it is monitored, not linked), and the restart reconciles the
+    # un-confirmed :occupied_pending (count 0) straight to :vacant_queued, so the
+    # next flush dispatches a HIGHER-seq `vacant` for the same {group, source}.
+    # Both RPCs race the router; we force the dangerous order — DELETE first, then
+    # the orphaned INSERT — and assert the vacated group does not reappear.
+    test "a stale occupied INSERT after a fresh vacant DELETE must NOT resurrect the group",
+         %{scope: scope} do
+      t_node = node()
+
+      check_trace(
+        fn ->
+          {:ok, p_r, r_node} = Peer.start(aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(r_node)
+          start_remote_muster(p_r, scope)
+          await_ready([t_node, r_node])
+
+          group = group_routed_to(scope, r_node)
+
+          # Park the occupied INSERT on the router until the vacant_batch DELETE
+          # for the same source has completed there — forcing the stale INSERT to
+          # apply strictly AFTER the fresh DELETE. The :muster_occupied_apply
+          # :start anchor fires BEFORE the ETS write, so the row is genuinely not
+          # written while parked.
+          force_ordering(
+            %{
+              :"$kind" => :muster_vacant_batch,
+              :"$span" => {:complete, _},
+              node: ^r_node,
+              source: ^t_node
+            },
+            %{
+              :"$kind" => :muster_occupied_apply,
+              :"$span" => :start,
+              node: ^r_node,
+              group: ^group,
+              source: ^t_node
+            }
+          )
+
+          # Claim the group. join blocks in :occupied_pending (its occupied RPC is
+          # parked on the router), so run it off to the side — we never use its
+          # result; the shard is about to be killed under it. spawn (not
+          # spawn_link) so its exit does not touch the test.
+          member = spawn(fn -> Process.sleep(:infinity) end)
+          _claimer = spawn(fn -> Muster.join(scope, group, member) end)
+
+          # The occupied RPC has been dispatched (the shard is now :occupied_pending
+          # and the worker is in flight to the router, where it will park at the
+          # forced :muster_occupied_apply :start). We wait on this SOURCE-side event
+          # rather than the parked apply event itself — force_ordering withholds the
+          # parked event from the trace until it is released, so waiting on it here
+          # would deadlock.
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_group_state,
+                       node: ^t_node,
+                       group: ^group,
+                       state: {:occupied_pending, _}
+                     },
+                     10_000
+                   )
+
+          # Kill the shard that owns the group on the SOURCE while its occupied is
+          # in flight. The orphaned worker (monitored, not linked) survives and
+          # stays parked on the router.
+          shard_name = Forum.Supervisor.shard(scope, group)
+          old_shard = Process.whereis(shard_name)
+          ref = Process.monitor(old_shard)
+          true = Process.exit(old_shard, :kill)
+          assert_receive {:DOWN, ^ref, :process, ^old_shard, :killed}, 5_000
+
+          # The restarted shard reconciles the un-confirmed claim (count 0) to
+          # :vacant_queued — the source now considers the group released.
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_group_state,
+                       node: ^t_node,
+                       group: ^group,
+                       state: :vacant_queued
+                     },
+                     10_000
+                   )
+
+          # Flush: dispatch the (higher-seq) vacant_batch to the router. With the
+          # INSERT parked, it deletes nothing, and on completion releases the
+          # parked INSERT — which then applies its stale, lower seq.
+          trigger_flush(scope)
+
+          # Wait for the freed INSERT to commit on the router.
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_occupied_apply,
+                       :"$span" => {:complete, _},
+                       node: ^r_node,
+                       group: ^group,
+                       source: ^t_node
+                     },
+                     10_000
+                   )
+
+          # The source has fully forgotten the group (the vacant batch was
+          # acknowledged).
+          wait_until(fn -> group_state(scope, group) == nil end)
+
+          %{group: group, r_node: r_node, t_node: t_node}
+        end,
+        fn result, trace ->
+          # The forced order really was DELETE-then-INSERT, and the INSERT carried
+          # the lower (stale) seq — otherwise this would not be the reverse race.
+          assert [%{seq: ins_seq}] =
+                   of_kind(:muster_occupied_apply, trace)
+                   |> Enum.filter(
+                     &(&1[:"$span"] == :start and &1.node == result.r_node and
+                         &1.group == result.group)
+                   )
+
+          assert [%{seq: del_seq}] =
+                   of_kind(:muster_vacant_batch, trace)
+                   |> Enum.filter(
+                     &(&1[:"$span"] == :start and &1.node == result.r_node and
+                         result.group in &1.groups)
+                   )
+
+          assert ins_seq < del_seq,
+                 "the INSERT must be the stale (lower-seq) write for this to be the reverse race"
+
+          # THE PROPERTY UNDER TEST: the source genuinely vacated the group (no
+          # local member, state forgotten), so the router must NOT still list it.
+          # A failure here means the stale INSERT resurrected a phantom occupancy
+          # that nothing will ever retract (the group routes to this router, so
+          # its own drop_stale_router_entries spares it; the source will never
+          # re-vacate).
+          assert Muster.local_member_count(scope, result.group) == 0
+          assert group_state(scope, result.group) == nil
+
+          refute result.t_node in occupancy_on(result.r_node, scope, result.group),
+                 "stale occupied INSERT resurrected a vacated group on the router (phantom occupancy)"
+        end
+      )
+    end
+  end
+
   describe "router-readiness barrier across real nodes (forced ordering)" do
     setup do
       scope = :"muster_barrier_#{System.unique_integer([:positive])}"
