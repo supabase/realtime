@@ -375,26 +375,33 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
     end
   end
 
-  # Split on commas that are NOT inside parentheses, so an `in.(a,b)` value stays a single
-  # segment. An unmatched `)` is tolerated and kept as a literal in the value (PostgREST
-  # behaviour), which is why depth floors at 0.
-  defp split_top_level(filter), do: split_top_level(filter, 0, "", [])
+  defp split_top_level(filter), do: split_top_level(filter, 0, false, 0, "", [])
 
-  defp split_top_level(<<>>, _depth, current, acc), do: Enum.reverse([current | acc])
+  defp split_top_level(<<>>, _depth, _quoted, _prev, current, acc), do: Enum.reverse([current | acc])
 
-  defp split_top_level(<<"(", rest::binary>>, depth, current, acc),
-    do: split_top_level(rest, depth + 1, current <> "(", acc)
+  defp split_top_level(<<"\\", next, rest::binary>>, depth, true, _prev, current, acc),
+    do: split_top_level(rest, depth, true, next, current <> "\\" <> <<next>>, acc)
 
-  defp split_top_level(<<")", rest::binary>>, depth, current, acc),
-    do: split_top_level(rest, max(0, depth - 1), current <> ")", acc)
+  defp split_top_level(<<"\"", rest::binary>>, depth, true, _prev, current, acc),
+    do: split_top_level(rest, depth, false, ?", current <> "\"", acc)
 
-  # A comma at depth 0 ends the current segment.
-  defp split_top_level(<<",", rest::binary>>, 0, current, acc),
-    do: split_top_level(rest, 0, "", [current | acc])
+  defp split_top_level(<<char, rest::binary>>, depth, true, _prev, current, acc),
+    do: split_top_level(rest, depth, true, char, current <> <<char>>, acc)
 
-  # Any other byte (including a comma inside parentheses) extends the current segment.
-  defp split_top_level(<<char, rest::binary>>, depth, current, acc),
-    do: split_top_level(rest, depth, current <> <<char>>, acc)
+  defp split_top_level(<<"\"", rest::binary>>, depth, false, prev, current, acc) when prev in [?., ?(, ?,],
+    do: split_top_level(rest, depth, true, ?", current <> "\"", acc)
+
+  defp split_top_level(<<"(", rest::binary>>, depth, false, _prev, current, acc),
+    do: split_top_level(rest, depth + 1, false, ?(, current <> "(", acc)
+
+  defp split_top_level(<<")", rest::binary>>, depth, false, _prev, current, acc),
+    do: split_top_level(rest, max(0, depth - 1), false, ?), current <> ")", acc)
+
+  defp split_top_level(<<",", rest::binary>>, 0, false, _prev, current, acc),
+    do: split_top_level(rest, 0, false, 0, "", [current | acc])
+
+  defp split_top_level(<<char, rest::binary>>, depth, false, _prev, current, acc),
+    do: split_top_level(rest, depth, false, char, current <> <<char>>, acc)
 
   # Parse each segment, short-circuiting on the first error.
   defp parse_segments(segments) do
@@ -445,5 +452,20 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
     end
   end
 
-  defp format_filter_value(_filter, value), do: {:ok, value}
+  defp format_filter_value(_filter, value), do: {:ok, unquote_value(value)}
+
+  defp unquote_value(<<"\"", rest::binary>> = original) do
+    case take_quoted(rest, "") do
+      {:ok, unquoted} -> unquoted
+      :error -> original
+    end
+  end
+
+  defp unquote_value(value), do: value
+
+  defp take_quoted(<<"\"">>, acc), do: {:ok, acc}
+  defp take_quoted(<<"\"", _rest::binary>>, _acc), do: :error
+  defp take_quoted(<<"\\", char, rest::binary>>, acc), do: take_quoted(rest, acc <> <<char>>)
+  defp take_quoted(<<char, rest::binary>>, acc), do: take_quoted(rest, acc <> <<char>>)
+  defp take_quoted(<<>>, _acc), do: :error
 end
