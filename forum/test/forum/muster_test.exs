@@ -36,6 +36,9 @@ defmodule Forum.MusterTest do
       # test drives it deterministically via trigger_view_heartbeat/1.
       view_heartbeat_interval_ms: Map.get(ctx, :heartbeat_ms, 60_000),
       rpc_timeout_ms: Map.get(ctx, :rpc_timeout, 500),
+      # Long by default so the periodic tombstone sweep never reaps mid-test; the
+      # GC test shrinks it and drives the sweep deterministically.
+      tombstone_window_ms: Map.get(ctx, :tombstone_window_ms, 60_000),
       message_module: ErlDist
     ]
 
@@ -380,6 +383,25 @@ defmodule Forum.MusterTest do
       refute :src@nowhere in Scope.occupancy(scope, :race_g)
     end
 
+    test "a stale (lower) seq occupied INSERT does NOT resurrect a fresh vacant DELETE",
+         %{scope: scope} do
+      # The reverse of the race above. A fresh, higher-seq vacant DELETE leaves a
+      # seq-stamped tombstone; a stale, lower-seq occupied INSERT that lands after
+      # it (an orphaned, un-cancelled :occupied RPC) must be a no-op — the
+      # tombstone's seq guards the INSERT, so the vacated group is not resurrected.
+      :ok = Scope.occupied(scope, :rev_g, :src@nowhere, 5)
+      assert :ok = Scope.vacant_batch(scope, [:rev_g], :src@nowhere, 10)
+      refute :src@nowhere in Scope.occupancy(scope, :rev_g)
+
+      # Stale INSERT (seq 7 < tombstone seq 10) must not bring it back.
+      assert :ok = Scope.occupied(scope, :rev_g, :src@nowhere, 7)
+      refute :src@nowhere in Scope.occupancy(scope, :rev_g)
+
+      # A genuine re-claim (seq above the tombstone) DOES win.
+      assert :ok = Scope.occupied(scope, :rev_g, :src@nowhere, 11)
+      assert :src@nowhere in Scope.occupancy(scope, :rev_g)
+    end
+
     test "receive_node_state/5 replaces all rows for a source", %{scope: scope} do
       # Seed something the snapshot should clear.
       :ok = Scope.occupied(scope, :stale_g, :src@nowhere, 1)
@@ -423,6 +445,44 @@ defmodule Forum.MusterTest do
       assert is_map(reply)
       # Mailbox processing should be near-instant since writes never queued.
       assert t1 - t0 < 100
+    end
+  end
+
+  describe "vacancy tombstone GC" do
+    @describetag tombstone_window_ms: 200
+
+    setup %{scope: scope, base_opts: opts} do
+      start_supervised!(spec(scope, opts))
+      :ok
+    end
+
+    # A tombstone is retained for the window (so a late, lower-seq INSERT still
+    # loses to it), then reaped by the periodic sweep so it does not leak. We read
+    # the raw row — occupancy/2 reports a tombstone as absent either way, so it
+    # cannot distinguish "still tombstoned" from "reaped".
+    test "a tombstone is retained for the window then reaped", %{scope: scope} do
+      table = Scope.occupancy_table_name(scope)
+      key = {:gc_g, :src@nowhere}
+
+      :ok = Scope.occupied(scope, :gc_g, :src@nowhere, 1)
+      assert :ok = Scope.vacant_batch(scope, [:gc_g], :src@nowhere, 2)
+
+      # Tombstone present immediately after the vacancy (meta is the created_at ms).
+      assert [{^key, 2, created_at}] = :ets.lookup(table, key)
+      assert is_integer(created_at)
+
+      # A sweep before the window elapses must NOT reap it (and a stale, lower-seq
+      # INSERT still loses to it).
+      Kernel.send(Forum.Supervisor.name(scope), :sweep_tombstones)
+      assert :ok = Scope.occupied(scope, :gc_g, :src@nowhere, 1)
+      refute :src@nowhere in Scope.occupancy(scope, :gc_g)
+      assert [{^key, _, _}] = :ets.lookup(table, key)
+
+      # After the window, the sweep reaps it.
+      Process.sleep(500)
+      Kernel.send(Forum.Supervisor.name(scope), :sweep_tombstones)
+
+      wait_until(fn -> :ets.lookup(table, key) == [] end)
     end
   end
 
