@@ -59,6 +59,20 @@ defmodule Forum.Muster.Shard do
   # ETS-backed) ring directly and writes the (:public) occupancy table directly,
   # and it NEVER synchronously calls the coordinator — so the coordinator can
   # synchronously call shards during a rebalance without any deadlock risk.
+  #
+  # Write-ordering invariant (crash safety): handle_join commits the DURABLE
+  # state BEFORE the externally-visible occupancy assertion, so any crash leaves
+  # a state restart reconciliation can drive to consistency.
+  #   * Remote router: write :occupied_pending, THEN dispatch the :occupied RPC.
+  #     A crash in the dispatch→state-write window is recoverable — the durable
+  #     :occupied_pending (no live member) reconciles to :vacant_queued and the
+  #     flush retracts whatever row the orphaned (monitored, not linked) worker
+  #     lands. Dispatching first would lose the record and strand the router row.
+  #   * Local router: register the member + write :occupied, THEN write the local
+  #     occupancy row LAST. A crash before the row leaves no orphan (no row); a
+  #     crash after it implies the entry already exists, so rebuild_group_states
+  #     re-asserts the row from the live member. Writing the row first would let a
+  #     crash strand a member-less row that nothing retracts.
   use GenServer
   require Logger
   use Snabbkaffe
@@ -251,11 +265,27 @@ defmodule Forum.Muster.Shard do
 
     # Safety net: a crash between register_member's entry write and the state write
     # can leave a live member with no state entry. Adopt those as :occupied.
-    Enum.reduce(live, state, fn group, st ->
-      if get_group_state(st, group) == nil,
-        do: put_group_state(st, group, :occupied),
-        else: st
+    state =
+      Enum.reduce(live, state, fn group, st ->
+        if get_group_state(st, group) == nil,
+          do: put_group_state(st, group, :occupied),
+          else: st
+      end)
+
+    # Re-assert the occupancy row for every live group whose router is THIS node.
+    # The join handler writes the local occupancy row LAST, so a crash mid-join
+    # can leave a live local-router member with no row; this restores the
+    # invariant "live local-router member ⟹ occupancy row present". The fresh seq
+    # is strictly higher than any pre-crash write, so upsert_if_newer wins (and is
+    # a harmless bump for rows that already exist). Remote-router groups need no
+    # re-assertion — their row lives on another node, untouched by our crash.
+    Enum.each(live, fn group ->
+      if router_from_state(state, group) == node() do
+        Scope.upsert_if_newer(state.occupancy_table, {group, node()}, next_seq())
+      end
     end)
+
+    state
   end
 
   # The set of groups in this slice that currently have ≥1 live member, derived
@@ -400,16 +430,30 @@ defmodule Forum.Muster.Shard do
             "Muster[#{node()}|#{state.scope}] join #{inspect(group)}: local router, occupied"
           )
 
-          Scope.upsert_if_newer(state.occupancy_table, {group, node()}, next_seq())
+          # Durable membership + state FIRST, the occupancy row (the externally
+          # visible assertion) LAST. A crash before the row leaves no orphan; a
+          # crash after it implies the entry already exists, so restart
+          # reconciliation re-asserts the row from the live member (see
+          # rebuild_group_states). Writing the row first would let a crash strand
+          # a row with no member that nothing retracts.
           state = register_member(state, group, pid)
-          {:reply, :ok, put_group_state(state, group, :occupied)}
+          state = put_group_state(state, group, :occupied)
+          Scope.upsert_if_newer(state.occupancy_table, {group, node()}, next_seq())
+          {:reply, :ok, state}
         else
           Logger.debug(
             "Muster[#{node()}|#{state.scope}] join #{inspect(group)}: dispatching :occupied to router #{inspect(router_node)}"
           )
 
+          # Durable :occupied_pending BEFORE dispatching the RPC. If we crash in
+          # this window the orphaned worker's INSERT may still land on the router,
+          # but restart reconciliation finds the durable :occupied_pending (no live
+          # member) and drives it to :vacant_queued, whose flush retracts the row.
+          # Writing the state after dispatch would lose that record and strand the
+          # router row (nothing left to drive its retraction).
+          state = put_group_state(state, group, {:occupied_pending, [{from, pid}]})
           dispatch_rpc(:occupied, group, router_node, state)
-          {:noreply, put_group_state(state, group, {:occupied_pending, [{from, pid}]})}
+          {:noreply, state}
         end
 
       :occupied ->
@@ -453,16 +497,21 @@ defmodule Forum.Muster.Shard do
             "Muster[#{node()}|#{state.scope}] join #{inspect(group)}: reclaim from #{vacant}, local router"
           )
 
-          Scope.upsert_if_newer(state.occupancy_table, {group, node()}, next_seq())
+          # Same write ordering as the nil branch: membership + state first, the
+          # occupancy row last (crash-safe — see the nil branch above).
           state = register_member(state, group, pid)
-          {:reply, :ok, put_group_state(state, group, :occupied)}
+          state = put_group_state(state, group, :occupied)
+          Scope.upsert_if_newer(state.occupancy_table, {group, node()}, next_seq())
+          {:reply, :ok, state}
         else
           Logger.debug(
             "Muster[#{node()}|#{state.scope}] join #{inspect(group)}: reclaim from #{vacant}, dispatching :occupied to router #{inspect(router_node)}"
           )
 
+          # Durable :occupied_pending before dispatch (crash-safe — see nil branch).
+          state = put_group_state(state, group, {:occupied_pending, [{from, pid}]})
           dispatch_rpc(:occupied, group, router_node, state)
-          {:noreply, put_group_state(state, group, {:occupied_pending, [{from, pid}]})}
+          {:noreply, state}
         end
     end
   end
@@ -727,6 +776,21 @@ defmodule Forum.Muster.Shard do
       [state.scope, group, node(), next_seq()],
       {:occupied_done, group}
     )
+
+    # Ordering anchor for the dispatch→state-write window. handle_join writes the
+    # durable :occupied_pending BEFORE calling us, so by the time this fires the
+    # worker is in flight AND the claim is already recoverable: a crash here
+    # reconciles to :vacant_queued on restart and the flush retracts any row the
+    # orphaned worker lands. muster_distributed_test.exs injects a crash at this
+    # point to prove exactly that.
+    tp(:muster_occupied_dispatched, %{
+      scope: state.scope,
+      node: node(),
+      group: group,
+      router: router_node
+    })
+
+    :ok
   end
 
   defp dispatch_vacant_batch(groups, router_node, state) do

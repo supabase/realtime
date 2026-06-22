@@ -1256,6 +1256,96 @@ defmodule Forum.MusterDistributedTest do
         end
       )
     end
+
+    # The dispatch→state-write window. handle_join must commit the durable
+    # :occupied_pending BEFORE dispatching the :occupied RPC, so that a shard
+    # crash in that window is recoverable WITHOUT a caller retry: the restart
+    # reconciles the un-confirmed claim (no live member) straight to
+    # :vacant_queued, and the flush retracts whatever row the orphaned RPC worker
+    # (monitored, not linked, so it survives the crash) lands on the router.
+    #
+    # If the state were written AFTER dispatch, a crash here would leave the
+    # source with NO record of the claim while the orphaned worker's INSERT lands
+    # a phantom occupancy row on the router that nothing ever retracts. We force
+    # exactly that crash by injecting at :muster_occupied_dispatched (the anchor
+    # fires after the worker is spawned but before handle_join returns) and assert
+    # the row never survives — proving recovery does not depend on the caller.
+    test "a shard crash in the :occupied dispatch→state-write window strands no router row",
+         %{scope: scope} do
+      t_node = node()
+
+      check_trace(
+        fn ->
+          {:ok, p_r, r_node} = Peer.start(aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(r_node)
+          start_remote_muster(p_r, scope)
+          await_ready([t_node, r_node])
+
+          # A group whose router is the REMOTE node, so the join takes the
+          # dispatch (remote-router) branch on T.
+          group = group_routed_to(scope, r_node)
+
+          # Crash T's shard the FIRST time it dispatches the :occupied for this
+          # group — i.e. right in the dispatch→state-write window. recover_after(1)
+          # leaves the restarted shard healthy.
+          inject_crash(
+            %{:"$kind" => :muster_occupied_dispatched, node: ^t_node, group: ^group},
+            :snabbkaffe_nemesis.recover_after(1)
+          )
+
+          # Claim off to the side: the join call dies with the shard and we NEVER
+          # retry it — recovery must not depend on a caller retry. spawn (not
+          # spawn_link) so its exit does not touch the test.
+          member = spawn(fn -> Process.sleep(:infinity) end)
+          _claimer = spawn(fn -> Muster.join(scope, group, member) end)
+
+          # The injected crash fires on T's shard...
+          assert {:ok, _} =
+                   block_until(
+                     %{:"$kind" => :snabbkaffe_crash, node: ^t_node, group: ^group},
+                     10_000
+                   )
+
+          # ...and the restarted shard reconciles the un-confirmed claim (no live
+          # member) to :vacant_queued — with no caller retry. (On the broken
+          # ordering the source has no record at all, so this never appears.)
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_group_state,
+                       node: ^t_node,
+                       group: ^group,
+                       state: :vacant_queued
+                     },
+                     10_000
+                   )
+
+          # Flush: a vacant batch retracts the row (a real tombstone if the
+          # orphaned worker landed it, a no-op DELETE otherwise). The source then
+          # forgets the group (state: nil).
+          trigger_flush(scope)
+
+          assert {:ok, _} =
+                   block_until(
+                     %{:"$kind" => :muster_group_state, node: ^t_node, group: ^group, state: nil},
+                     10_000
+                   )
+
+          # The orphaned INSERT may land before OR after the DELETE; the seq guard
+          # makes the (lower-seq) INSERT lose either way, so the row clears for good.
+          wait_until(fn -> occupancy_on(r_node, scope, group) == [] end)
+
+          %{group: group, r_node: r_node, t_node: t_node}
+        end,
+        fn result, _trace ->
+          refute result.t_node in occupancy_on(result.r_node, scope, result.group),
+                 "an orphaned :occupied INSERT stranded a phantom row the source never retracted"
+
+          assert group_state(scope, result.group) == nil
+          assert Muster.local_member_count(scope, result.group) == 0
+        end
+      )
+    end
   end
 
   describe "cascading joins — a second node joins before the first rebalance converges" do
