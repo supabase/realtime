@@ -60,7 +60,7 @@ defmodule RealtimeWeb.RealtimeChannelReplicationReadyTest do
     refute_receive %Socket.Message{event: "system", payload: %{message: "Replication connection established"}}, 300
   end
 
-  test "stops the channel when replication is not established before the timeout", %{tenant: tenant} do
+  test "shuts down the channel when replication is not established before the timeout", %{tenant: tenant} do
     previous = Application.get_env(:realtime, :replication_ready_timeout)
     Application.put_env(:realtime, :replication_ready_timeout, 50)
     on_exit(fn -> Application.put_env(:realtime, :replication_ready_timeout, previous) end)
@@ -80,10 +80,21 @@ defmodule RealtimeWeb.RealtimeChannelReplicationReadyTest do
     assert_receive {:DOWN, ^ref, :process, _, _}, 500
   end
 
+  test "does not arm replication readiness notifications unless opted in", %{tenant: tenant} do
+    stub(Connect, :lookup_or_start_connection, fn _ -> {:ok, self()} end)
+    stub(Connect, :replication_status, fn _ -> {:ok, self()} end)
+
+    jwt = generate_jwt_token(tenant)
+    {:ok, socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+    assert {:ok, _, _} = subscribe_and_join(socket, "realtime:test", %{"config" => %{}})
+
+    refute_receive %Socket.Message{event: "system", payload: %{message: "Replication connection established"}}, 300
+  end
+
   defp join(tenant) do
     jwt = generate_jwt_token(tenant)
     {:ok, socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
-    subscribe_and_join(socket, "realtime:test", %{"config" => %{}})
+    subscribe_and_join(socket, "realtime:test", %{"config" => %{"replication_ready" => true}})
   end
 
   defp conn_opts(tenant, token) do

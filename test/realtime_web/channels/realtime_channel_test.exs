@@ -105,12 +105,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                "commit_timestamp" => _
              } = Jason.encode!(data) |> Jason.decode!()
 
-      assert_receive %Socket.Message{
-                       event: "system",
-                       payload: %{message: "Replication connection established"}
-                     },
-                     500
-
       refute_receive %Socket.Message{}
       refute_receive %Socket.Reply{}
     end
@@ -184,12 +178,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                "schema" => "public",
                "commit_timestamp" => _
              } = Jason.encode!(data) |> Jason.decode!()
-
-      assert_receive %Socket.Message{
-                       event: "system",
-                       payload: %{message: "Replication connection established"}
-                     },
-                     500
 
       refute_receive _any
     end
@@ -515,12 +503,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
         }
       }
 
-      assert_receive %Socket.Message{
-                       event: "system",
-                       payload: %{message: "Replication connection established"}
-                     },
-                     500
-
       refute_receive %Socket.Message{}
     end
   end
@@ -704,12 +686,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       assert_receive %Socket.Reply{payload: %{}, topic: "realtime:test", status: :ok}, 500
       # no presence_diff this time
-
-      assert_receive %Socket.Message{
-                       event: "system",
-                       payload: %{message: "Replication connection established"}
-                     },
-                     500
 
       refute_receive %Socket.Message{}
       refute_receive %Socket.Reply{}

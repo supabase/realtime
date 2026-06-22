@@ -68,7 +68,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
       assert {:ok, ^replication_conn} = Connect.replication_status(tenant.external_id)
     end
 
-    test "every joining client receives the replication established system message, even after streaming has started",
+    test "clients that opt in receive the replication established system message, even after streaming has started",
          %{serializer: serializer} do
       tenant = Containers.checkout_tenant(run_migrations: true)
 
@@ -82,7 +82,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
       {socket1, _} = get_connection(tenant, serializer, role: "authenticated")
       {socket2, _} = get_connection(tenant, serializer, role: "authenticated")
 
-      config = %{broadcast: %{self: true}, private: false}
+      config = %{broadcast: %{self: true}, private: false, replication_ready: true}
       topic1 = "realtime:#{random_string()}"
       topic2 = "realtime:#{random_string()}"
 
@@ -246,14 +246,6 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
           WebsocketClient.join(socket, topic, %{config: config})
 
           assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
-
-          assert_receive %Message{
-                           event: "system",
-                           topic: ^topic,
-                           payload: %{"message" => "Replication connection established"}
-                         },
-                         2000
-
           topic
         end
 

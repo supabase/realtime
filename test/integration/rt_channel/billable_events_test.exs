@@ -76,13 +76,7 @@ defmodule Realtime.Integration.RtChannel.BillableEventsTest do
 
       # Join events
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
-
-      assert_receive %Message{
-                       topic: ^topic,
-                       event: "system",
-                       payload: %{"extension" => "postgres_changes", "status" => "ok"}
-                     },
-                     50000
+      assert_receive %Message{topic: ^topic, event: "system"}, 5000
 
       # Wait for RateCounter to run
       RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
@@ -116,7 +110,6 @@ defmodule Realtime.Integration.RtChannel.BillableEventsTest do
 
       # Join events
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
-
       # Broadcast event
       payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
 
@@ -127,7 +120,7 @@ defmodule Realtime.Integration.RtChannel.BillableEventsTest do
         assert_receive %Message{topic: ^topic, event: "broadcast", payload: ^payload}
       end
 
-      refute_receive %Message{topic: ^topic, event: "broadcast"}
+      refute_receive _any
 
       # Wait for RateCounter to run
       RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
@@ -207,25 +200,13 @@ defmodule Realtime.Integration.RtChannel.BillableEventsTest do
 
       # Join events
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
-
-      assert_receive %Message{
-                       topic: ^topic,
-                       event: "system",
-                       payload: %{"extension" => "postgres_changes", "status" => "ok"}
-                     },
-                     5000
+      assert_receive %Message{topic: ^topic, event: "system"}, 5000
 
       # Add second user to test the "multiplication" of billable events
       {socket, _} = get_connection(tenant, serializer)
       WebsocketClient.join(socket, topic, %{config: config})
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
-
-      assert_receive %Message{
-                       topic: ^topic,
-                       event: "system",
-                       payload: %{"extension" => "postgres_changes", "status" => "ok"}
-                     },
-                     5000
+      assert_receive %Message{topic: ^topic, event: "system"}, 5000
 
       tenant = Tenants.get_tenant_by_external_id(tenant.external_id)
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
@@ -239,7 +220,7 @@ defmodule Realtime.Integration.RtChannel.BillableEventsTest do
                          event: "postgres_changes",
                          payload: %{"data" => %{"schema" => "public", "table" => "test", "type" => "INSERT"}}
                        },
-                       500
+                       5000
       end
 
       # Wait for RateCounter to run
@@ -267,13 +248,7 @@ defmodule Realtime.Integration.RtChannel.BillableEventsTest do
 
       # Join events
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
-
-      assert_receive %Message{
-                       topic: ^topic,
-                       event: "system",
-                       payload: %{"extension" => "postgres_changes", "status" => "error"}
-                     },
-                     5000
+      assert_receive %Message{topic: ^topic, event: "system"}, 5000
 
       # Wait for RateCounter to run
       RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)

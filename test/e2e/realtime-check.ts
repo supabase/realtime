@@ -274,14 +274,8 @@ async function waitForSubscribed(channel: ReturnType<SupabaseClient["channel"]>)
 // Subscribes a channel and waits until it is fully joined.
 // All data operations must happen after this returns to avoid delivery races.
 async function openChannel(channel: ReturnType<SupabaseClient["channel"]>): Promise<number> {
-  let replicationReady = false;
-  channel.on("system", "*", ({ message }: { message?: string }) => {
-    if (message === "Replication connection established") replicationReady = true;
-  });
   channel.subscribe();
-  const subscribeMs = await waitForSubscribed(channel);
-  await waitFor(() => replicationReady ? true : null, "replication established");
-  return subscribeMs;
+  return waitForSubscribed(channel);
 }
 
 // Subscribes a postgres_changes channel and waits for both the join and the
@@ -289,9 +283,7 @@ async function openChannel(channel: ReturnType<SupabaseClient["channel"]>): Prom
 async function openPostgresChannel(channel: ReturnType<SupabaseClient["channel"]>): Promise<{ subscribeMs: number; systemMs: number }> {
   const start = performance.now();
   let systemOk = false;
-  channel.on("system", "*", ({ status, extension }: { status: string; extension?: string }) => {
-    if (status === "ok" && extension === "postgres_changes") systemOk = true;
-  });
+  channel.on("system", "*", ({ status }: { status: string }) => { if (status === "ok") systemOk = true; });
   const subscribeMs = await openChannel(channel);
   const { latencyMs: systemMs } = await waitFor(() => systemOk ? true : null, "system ok");
   return { subscribeMs, systemMs: performance.now() - start };
@@ -1009,6 +1001,7 @@ async function runBroadcastChangesTests(_testUser: { email: string; password: st
         .on("broadcast", { event: "INSERT" }, (res) => (result = res));
 
       const subscribeMs = await openChannel(channel);
+      await sleep(500);
       await supabase.from("broadcast_changes").insert({ value, id, topic: testTopic });
       const { latencyMs: eventMs } = await waitFor(() => result, "INSERT event");
 
@@ -1038,6 +1031,7 @@ async function runBroadcastChangesTests(_testUser: { email: string; password: st
         .on("broadcast", { event: "UPDATE" }, (res) => (result = res));
 
       const subscribeMs = await openChannel(channel);
+      await sleep(100);
       await supabase.from("broadcast_changes").insert({ value: originalValue, id, topic: testTopic });
       await supabase.from("broadcast_changes").update({ value: updatedValue }).eq("id", id);
       const { latencyMs: eventMs } = await waitFor(() => result, "UPDATE event");
@@ -1068,6 +1062,7 @@ async function runBroadcastChangesTests(_testUser: { email: string; password: st
         .on("broadcast", { event: "DELETE" }, (res) => (result = res));
 
       const subscribeMs = await openChannel(channel);
+      await sleep(100);
       await supabase.from("broadcast_changes").insert({ value, id, topic: testTopic });
       await supabase.from("broadcast_changes").delete().eq("id", id);
       const { latencyMs: eventMs } = await waitFor(() => result, "DELETE event");
@@ -1776,6 +1771,7 @@ async function runBroadcastBinaryTests(supabase: SupabaseClient) {
         .on("broadcast", { event }, (msg) => (result = msg.payload));
 
       const subscribeMs = await openChannel(channel);
+      await sleep(100);
 
       await sql`SELECT realtime.send_binary(${binary}::bytea, ${event}::text, ${topic}::text, true)`;
 

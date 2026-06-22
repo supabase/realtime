@@ -116,7 +116,8 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       RealtimeWeb.Endpoint.subscribe(tenant_topic, metadata: metadata)
       RealtimeWeb.Endpoint.subscribe("realtime:operations:" <> tenant_id, metadata: metadata)
-      send(self(), :notify_replication_ready)
+
+      replication_ready_opt_in? = !!params["config"]["replication_ready"]
 
       is_new_api = new_api?(params)
       presence_enabled? = socket.assigns.presence_enabled?
@@ -146,10 +147,20 @@ defmodule RealtimeWeb.RealtimeChannel do
         self_broadcast: Join.self_broadcast?(join),
         tenant_topic: tenant_topic,
         channel_name: sub_topic,
-        presence_enabled?: presence_enabled?,
-        replication_ready_notified?: false,
-        replication_ready_deadline: System.monotonic_time(:millisecond) + replication_ready_timeout()
+        presence_enabled?: presence_enabled?
       }
+
+      assigns =
+        if replication_ready_opt_in? do
+          Process.send_after(self(), :notify_replication_ready, @replication_ready_check_interval)
+
+          Map.merge(assigns, %{
+            replication_ready_notified?: false,
+            replication_ready_deadline: System.monotonic_time(:millisecond) + replication_ready_timeout()
+          })
+        else
+          assigns
+        end
 
       socket =
         socket
@@ -314,7 +325,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     cond do
       match?({:ok, _replication_conn}, Connect.replication_status(tenant_id)) ->
-        push_system_message("broadcast", socket, "ok", "Replication connection established", channel_name)
+        push_system_message("system", socket, "ok", "Replication connection established", channel_name)
         {:noreply, assign(socket, :replication_ready_notified?, true)}
 
       System.monotonic_time(:millisecond) >= deadline ->
