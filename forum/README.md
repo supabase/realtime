@@ -8,7 +8,7 @@ Forum is a scalable, distributed process-group library for Elixir/OTP. It ships 
 Both share the same per-node fundamentals:
 
 * Process pids never leave the node they live on.
-* Group membership is partitioned locally for concurrency (one partition GenServer per scheduler by default).
+* Group membership is partitioned locally for concurrency (one GenServer per scheduler by default — a `Forum.Partition` for Census, a `Forum.Muster.Shard` for Muster).
 * A cluster forms by all nodes starting the same scope name; nodes discover each other via Erlang distribution.
 
 ## Installation
@@ -69,15 +69,15 @@ To broadcast, a caller asks `router/2` for the group's router node and routes th
 Each Muster scope runs **two kinds of process per node**, both started under the scope's supervisor:
 
 * One **coordinator** (`Forum.Muster.Scope`) — the per-node cluster brain. It owns the ring's node set, cluster membership and peer monitors, the readiness barrier (`member_views`), snapshot apply, and rebalance orchestration. It is the **sole writer** of the `:status`/`:view_hash` persistent_terms that `router/2` and `can_decide?/2` read — which is exactly why partitioning the claim path cannot weaken those guarantees.
-* **N claim shards** (`Forum.Muster.Shard`, one per partition index, default = schedulers online) — each owns the per-group claim state machine (the "have I told the router?" question, cooldown, vacant flush) for the slice of groups hashing to it, via the same `:erlang.phash2(group, N)` the local `Partition` uses. A first-member `join/3` (the slow path) is a `GenServer.call` to the group's shard, so a storm of distinct-group first-joins spreads across N mailboxes instead of serializing through one. Each shard holds its state machine **directly in a Supervisor-owned ETS table** (no in-memory copy), so it survives a shard crash (see [Coordinator or shard crash](#coordinator-or-shard-crash-for-other-reasons)).
+* **N claim shards** (`Forum.Muster.Shard`, one per partition index, default = schedulers online) — each owns, for the slice of groups hashing to it via `:erlang.phash2(group, N)`, **both** the local **membership** (which pids belong to each group and the `Process.monitor` that fires when a member dies) **and** the per-group claim state machine (the "have I told the router?" question, cooldown, vacant flush). Membership is a slimmer version of the job `Forum.Partition` does for Census, but Muster does **not** run separate `Forum.Partition` processes — the shard absorbs it, and it skips Census's O(1) **counts** table: the claim FSM only needs "is there ≥1 member" and "did this removal hit 0", both derived on demand from the entries table (an `:ordered_set`, so a group's members are contiguous and those checks are bounded prefix scans). That makes a `join/3` a **single** `GenServer.call` to the group's shard (claim + register in one handler, no second hop to a membership process), and it puts the member monitor in the same process as the claim state, so the last member leaving drives the cooldown transition **directly** — no `[:forum, scope, :group, :vacant]` telemetry hop. A storm of distinct-group first-joins still spreads across N mailboxes. Each shard's entries and claim-state tables live **directly in Supervisor-owned ETS** (no in-memory copy), so it survives a shard crash (see [Coordinator or shard crash](#coordinator-or-shard-crash-for-other-reasons)).
 
-The split keeps the hot path (claims) sharded while the rare, node-wide work (rebalance, the barrier) stays centralized. Shards read the ring and write the `:public` occupancy table directly and **never** call the coordinator synchronously; the coordinator calls shards synchronously only during a rebalance, to gather their held groups. The router-role occupancy table, the ring, and the per-shard claim-state tables are all **owned by the scope's long-lived Supervisor** (not the coordinator or the shards), so neither a coordinator restart nor a shard restart pulls a table out from under a process still using it — the coordinator and shards reference them by name.
+The split keeps the hot path (joins/claims) sharded while the rare, node-wide work (rebalance, the barrier) stays centralized. Shards read the ring and write the `:public` occupancy table directly and **never** call the coordinator synchronously; the coordinator calls shards synchronously only during a rebalance, to gather their held groups. The router-role occupancy table, the ring, and each shard's entries and claim-state tables are all **owned by the scope's long-lived Supervisor** (not the coordinator or the shards), so neither a coordinator restart nor a shard restart pulls a table out from under a process still using it — the coordinator and shards reference them by name.
 
 ### Public API
 
 ```elixir
 Forum.Muster.join(scope, group, pid)        # :ok | {:error, :rpc_failed | :not_local | ...}
-Forum.Muster.leave(scope, group, pid)       # :ok
+Forum.Muster.leave(scope, group, pid)       # :ok | {:error, term}
 Forum.Muster.router(scope, group)           # {:ok, node} | {:rebalancing, [node]}
 Forum.Muster.members(scope)                 # [node]
 Forum.Muster.local_members(scope, group)    # [pid]
@@ -100,31 +100,33 @@ children = [
 ```
 caller                       claim shard                 router (remote)
   |                              |                                    |
-  | Partition.member_count > 0?  |                                    |
-  | yes  -- Partition.join, :ok  |                                    |
-  | no                           |                                    |
-  |--- {:claim, group, pid} ---->|  (shard = phash2(group, N))        |
-  |                              | router == self?                    |
-  |                              |   yes: write occupancy,            |
-  |                              |        Partition.join, reply :ok   |
-  |                              |   no: spawn worker --------------->|
+  |--- {:join, group, pid} ----->|  (shard = phash2(group, N))        |
+  |                              | group_state?                       |
+  |                              |   :occupied  -> register, reply :ok |
+  |                              |   :cooldown  -> reclaim, register,  |
+  |                              |                 reply :ok           |
+  |                              |   nil (first member):              |
+  |                              |     router == self?                |
+  |                              |       yes: write occupancy,        |
+  |                              |            register, reply :ok     |
+  |                              |       no: spawn worker ----------->|
   |                              |                                    | insert {{group, A}}
   |                              | <---- :ok ------------------------ |
-  |                              | Partition.join, reply :ok          |
-  | <----- :ok ----------------- |        to all waiters              |
+  |                              | register, reply :ok to all waiters |
+  | <----- :ok ----------------- |                                    |
 ```
 
 Key invariants:
 
-* On the cold (first-member) path the **shard** performs the `Partition.join`, and it does so only *after* the router has been told (the occupancy write / `:occupied` RPC). The fast path (count already > 0) still registers directly on the sharded Partition without touching the shard.
-* Because the claim and the registration are both owned by the long-lived shard, the router is never told a group is occupied before a *monitored* local member exists. A caller that dies mid-join therefore cannot leave the router believing we hold a group we don't — and if `pid` is already dead when the shard registers it, the monitor fires immediately and the normal `:vacant → :cooldown` path retracts it.
-* If the RPC fails the caller gets `{:error, :rpc_failed}` and the shard never registers, so the Partition stays empty and the next `join/3` naturally retries.
+* Every `join/3` is a single `GenServer.call` to the group's shard; the shard's state machine decides what to do. An already-`:occupied` group just registers the member; a `:cooldown`/`:vacant_*` group is reclaimed (no router RPC where avoidable); only a `nil` (genuinely first) member dispatches the `:occupied` claim. There is no separate "fast path" call — registration always happens in the shard because that is the process that owns the member monitor.
+* On the first-member path the shard registers the member only *after* the router has been told (the occupancy write / `:occupied` RPC). Because the claim and the registration are both owned by the long-lived shard, the router is never told a group is occupied before a *monitored* local member exists. A caller that dies mid-join therefore cannot leave the router believing we hold a group we don't — and if `pid` is already dead when the shard registers it, the monitor fires immediately and the normal `:vacant → :cooldown` path retracts it.
+* If the RPC fails the caller gets `{:error, :rpc_failed}` and the shard never registers, so no membership entry is left behind and the next `join/3` naturally retries.
 * Concurrent `join/3` calls for the same fresh group dedup into **one** RPC; they all hash to the same shard (same `phash2(group, N)`), so the rest piggyback on the in-flight `:occupied_pending` state there, and each waiter's pid is registered when the RPC confirms.
 * The shard never blocks on an RPC — it dispatches the call to a short-lived worker process and parks the waiters in `{:occupied_pending, [{from, pid} | …]}`. The worker reports back with `{:occupied_done, …}`.
 
 ### How leave works (the cooldown, and the batched vacant flush)
 
-`leave/3` just does `Forum.Partition.leave`. When the local count for the group goes 1 → 0, Partition emits a `[:forum, scope, :group, :vacant]` telemetry event. A single per-scope handler (attached by the coordinator, but running in the Partition process) routes it to the group's **shard** — `phash2(group, N)`, the same slice the claim path uses — which enters the **cooldown** state for the group (default 30 s, configurable via `:vacancy_cooldown_ms`). During cooldown:
+`leave/3` is a `GenServer.call` to the group's shard, which removes the member (entry + monitor teardown). A monitored member that simply *dies* takes the same path via its tagged `DOWN`. When that removal empties the group (no entries remain — a bounded check on the `:ordered_set`, no counter needed) and the shard still holds the group (`:occupied`), it enters the **cooldown** state directly — in the same handler, with no telemetry hop and no cross-process step (the shard owns both the membership and the claim state). Cooldown lasts `:vacancy_cooldown_ms` (default 30 s). During cooldown:
 
 * The router still believes we hold the group — no RPC has been sent.
 * If a new `join/3` arrives, the shard cancels the cooldown timer and goes back to `:occupied` — no network traffic. This is the whole reason cooldown exists: a quick join/leave/join cycle costs zero RPCs.
@@ -164,7 +166,7 @@ A rebalance starts on every node whenever its view of the cluster changes:
 2. Flip `:status` to `:rebalancing` and bump `:view_hash`. From this point, `Muster.router/2` returns `{:rebalancing, members}` for all groups; broadcasters fan out to every member.
 3. Call `ExHashRing.Ring.set_nodes/2` with the new member list. The ring atomically swaps to a new generation; the prior generation is retained for one cycle (so `find_node/2` = NEW router, `find_historical_node/3 back: 1` = OLD).
 4. **Stamp this round's `snapshot_seq`** (`:erlang.unique_integer([:monotonic])`) — a clean cut in the VM-global sequence: every group held before the rebalance carries occupancy `seq < snapshot_seq`, and every claim a shard processes from here on carries a higher one, so the snapshot's stale-row tombstone pass (strict `<`, below) can never touch a freshly-claimed group's row.
-5. **Gather every shard's held groups — synchronously.** Call each shard `{:rebalance, new_members}`. In that one call each shard: (a) normalizes its in-flight vacant batch (`:vacant_flushing → :vacant_queued`, re-routed by the next flush; the in-flight worker's late result is dropped); (b) **settles its moved `:occupied_pending` waiters** — for each pending group whose router *changed* it replies `:ok` and moves to `:occupied`, leaving non-moved pending for their own in-flight worker to settle; and (c) returns its held groups (`:occupied`, `:cooldown`, `:occupied_pending`). Because a shard's mailbox is FIFO and the ring is already swapped, every in-flight claim was processed *before* this call — so the union of the shards' replies is a **complete** held set, the basis for complete-per-router snapshots. (`:cooldown` groups are held even though the Partition count is 0 — the old router still believes we hold them; `:occupied_pending` so parked callers get `:ok`.) The settle reply is **optimistic** — done before the snapshot is dispatched — and safe because `:status` is `:rebalancing`, so senders flood rather than target a not-yet-populated row. This in-VM call is the only synchronous coupling between the coordinator and a shard; it is bounded by `:rebalance_gather_timeout_ms` (default 15 s), and a shard that does not reply in time crashes the coordinator (which then restarts and re-announces from a clean slate) — so a wedged shard can never hang the coordinator indefinitely.
+5. **Gather every shard's held groups — synchronously.** Call each shard `{:rebalance, new_members}`. In that one call each shard: (a) normalizes its in-flight vacant batch (`:vacant_flushing → :vacant_queued`, re-routed by the next flush; the in-flight worker's late result is dropped); (b) **settles its moved `:occupied_pending` waiters** — for each pending group whose router *changed* it replies `:ok` and moves to `:occupied`, leaving non-moved pending for their own in-flight worker to settle; and (c) returns its held groups (`:occupied`, `:cooldown`, `:occupied_pending`). Because a shard's mailbox is FIFO and the ring is already swapped, every in-flight claim was processed *before* this call — so the union of the shards' replies is a **complete** held set, the basis for complete-per-router snapshots. (`:cooldown` groups are held even though the member count is 0 — the old router still believes we hold them; `:occupied_pending` so parked callers get `:ok`.) The settle reply is **optimistic** — done before the snapshot is dispatched — and safe because `:status` is `:rebalancing`, so senders flood rather than target a not-yet-populated row. This in-VM call is the only synchronous coupling between the coordinator and a shard; it is bounded by `:rebalance_gather_timeout_ms` (default 15 s), and a shard that does not reply in time crashes the coordinator (which then restarts and re-announces from a clean slate) — so a wedged shard can never hang the coordinator indefinitely.
 6. **Find the moved groups and affected routers** from the gathered set: a group's router *changed* iff `find_node/2 ≠ find_historical_node/3 (back: 1)`. The distinct new routers of moved groups are the *affected* routers (~1/N of candidates with consistent hashing).
 7. **Send each affected router a full snapshot — fire-and-forget.** Dispatch **one** `:receive_node_state` RPC carrying *all* held groups routed to it — not just the moved ones (groups routed to this node are written to the local occupancy table directly, seq-guarded at `snapshot_seq`). Each RPC goes to a short-lived monitored worker and **the coordinator does not wait** — it returns as soon as the workers are dispatched. The hot claim path runs entirely in the shards and never touches the coordinator, so claims are never blocked by a rebalance; the only synchronous coupling is the in-VM shard gather of step 5, never a remote RPC. Each worker reports via a tagged `{:node_state_done, router, seq}` DOWN; a failure crashes the coordinator from that handler (see "Rebalance RPC failure"). The receiver replaces its rows for our node with the list, so the snapshot **must** be complete: sending only the moved groups would silently drop unchanged groups that still route there. A router that gained nothing is left untouched — its existing rows for us are still correct, and any group that moved *away* is cleared by its own `drop_stale_router_entries` (step 9).
 
@@ -220,12 +222,12 @@ The synchronous `:occupied` call from the source node to the router can fail (ne
 
 * The shard replies `{:error, :rpc_failed}` to the waiting caller.
 * `Muster.join/3` propagates this to its caller.
-* **Nothing is inserted into the local Partition.** This is the load-bearing invariant: a row in the Partition means the router has been notified.
-* The next `Muster.join/3` for the same group naturally retries — local count is still 0, so it goes through the claim path again.
+* **Nothing is inserted into the shard's membership entries.** This is the load-bearing invariant: a local membership entry means the router has been notified.
+* The next `Muster.join/3` for the same group naturally retries — local count is still 0, so it goes through the first-member claim path again.
 
 ### Vacant-time RPC failure
 
-`:vacant_batch` RPCs to the router are best-effort but **retried**. A failed batch is logged and its groups are returned to `:vacant_queued`, so the next flush re-sends them. The group keeps being re-sent until the router acknowledges it, which means the router cannot accumulate a permanently stale `{group, source_node}` entry from a transient failure — the flush (per shard) is a self-draining retry loop. (A failure never crashes the shard or fails a `leave/3` call; `leave/3` only touches the Partition.)
+`:vacant_batch` RPCs to the router are best-effort but **retried**. A failed batch is logged and its groups are returned to `:vacant_queued`, so the next flush re-sends them. The group keeps being re-sent until the router acknowledges it, which means the router cannot accumulate a permanently stale `{group, source_node}` entry from a transient failure — the flush (per shard) is a self-draining retry loop. (A failure never crashes the shard or fails a `leave/3` call; `leave/3` only removes the local membership entry — the retraction RPC is the flush's job, off the caller's path.)
 
 In addition to the retry, two event-driven cleanups still apply:
 
@@ -249,17 +251,17 @@ Snapshot dispatch is fire-and-forget on the sender (the coordinator does not wai
 After a crash the supervisor restarts the **coordinator**, whose `init/1`:
 
 * Resets the member list to `[node()]`, the `:status` persistent_term to `:ready`, and `:view_hash` to `phash2([node()])` (forgetting the cluster view). A sender that still holds the pre-crash multi-node `:view_hash` will mismatch this single-node hash, so `can_decide?/2` returns false and broadcasts to the restarted router fan out to all nodes until it re-converges.
-* Walks the Partition entries (which survive a coordinator death because they live in `:public, :named_table` ETS owned by the Supervisor) and re-asserts (monotonic upsert) its router-role **occupancy self-rows** for every locally-held group. The occupancy table is itself owned by the Supervisor, so it is **not** recreated on a coordinator restart — it survives intact under the live shards that write it directly. Any foreign-source rows the dead incarnation held are harmless: the restart resets `:view_hash` (below), so `can_decide?/2` is false and callers flood until each source re-snapshots (replacing its rows) and the `:ready` sweep prunes the rest. The per-group state machine lives in the shards, which the coordinator's crash does not restart (one_for_one), so it is not lost; remote sources' rows are refilled when they re-snapshot after re-discovery.
+* Walks the shards' membership entries (which survive a coordinator death because they live in `:public, :named_table` ETS owned by the Supervisor) and re-asserts (monotonic upsert) its router-role **occupancy self-rows** for every group with live local members. The occupancy table is itself owned by the Supervisor, so it is **not** recreated on a coordinator restart — it survives intact under the live shards that write it directly. Any foreign-source rows the dead incarnation held are harmless: the restart resets `:view_hash` (below), so `can_decide?/2` is false and callers flood until each source re-snapshots (replacing its rows) and the `:ready` sweep prunes the rest. The per-group state machine lives in the shards, which the coordinator's crash does not restart (one_for_one), so it is not lost; remote sources' rows are refilled when they re-snapshot after re-discovery.
 * Re-broadcasts the discovery message; peers respond; `recompute_members` runs again.
 
 The supervisor restart strategy ensures the cluster eventually re-converges. During the restart window — between the crash and `init/1` running — the `:status` persistent_term is left at `:rebalancing`, so `Muster.router/2` returns `{:rebalancing, members}` and callers correctly fan out. (`test/forum/muster_distributed_test.exs` exercises this by `inject_crash`ing the first snapshot apply on a fresh router: that crashes the router's coordinator, which fails the source's RPC and crashes the source too — both restart, the source re-snapshots once the router is back, and the cluster converges with the row in place.)
 
 ### Coordinator or shard crash for other reasons
 
-Same recovery path, and the two crash domains are independent (`one_for_one`). The occupancy table, the ring, and every per-shard claim-state table are owned by the long-lived **Supervisor**, so they survive *both* crash domains and no restart yanks a table out from under a process still writing it:
+Same recovery path, and the two crash domains are independent (`one_for_one`). The occupancy table, the ring, and every per-shard membership (entries) and claim-state table are owned by the long-lived **Supervisor**, so they survive *both* crash domains and no restart yanks a table out from under a process still writing it:
 
-* **Coordinator crash** — the occupancy table, Partition data, and the ring are all preserved, so shard ring-reads and occupancy writes keep working uninterrupted; `init/1` re-asserts the occupancy self-rows, re-discovers, and rebalances.
-* **Shard crash** — the shard's `init/1` rebuilds *its* `group_states` from its **durable claim-state table** (Supervisor-owned, so it survived the crash), reconciled against the live Partition counts: a group with live members is re-adopted `:occupied`; a group with no live members but an outstanding router assertion (`:cooldown` / `:vacant_queued` / `:vacant_flushing` / `:occupied_pending`) is **retained** and driven to retraction (its router row is flushed away), rather than being silently forgotten. Cooldown timers (process-local) are re-armed; `:occupied_pending` waiters are dropped (their callers retry). This is what closes the stale-router-entry leak a from-scratch "re-adopt only live groups" rebuild used to leave behind — for **remote-routed** rows too, which only the source's own record can retract. (`test/forum/muster_test.exs` kills a shard mid-cooldown, mid-pending, and after a dropped vacancy, and asserts each group is retracted rather than orphaned; it also kills the coordinator and asserts the occupancy table keeps the same ETS identity.)
+* **Coordinator crash** — the occupancy table, the shards' membership/claim-state tables, and the ring are all preserved, so shard ring-reads and occupancy writes keep working uninterrupted; `init/1` re-asserts the occupancy self-rows, re-discovers, and rebalances.
+* **Shard crash** — the shard's `init/1` first re-installs its member monitors from the **durable entries table** (Supervisor-owned, so it survived the crash) by re-`Process.monitor`ing every surviving entry — so a member that *died* while the shard was down is recovered, its re-installed monitor's immediate `DOWN` driving the normal removal. It then rebuilds its `group_states` from its **durable claim-state table**, reconciled against the live membership the entries imply (the set of groups with ≥1 member): a group with live members is re-adopted `:occupied`; a group with no live members but an outstanding router assertion (`:cooldown` / `:vacant_queued` / `:vacant_flushing` / `:occupied_pending`) is **retained** and driven to retraction (its router row is flushed away), rather than being silently forgotten. Cooldown timers (process-local) are re-armed; `:occupied_pending` waiters are dropped (their callers retry). This is what closes the stale-router-entry leak a from-scratch "re-adopt only live groups" rebuild used to leave behind — for **remote-routed** rows too, which only the source's own record can retract. (`test/forum/muster_test.exs` kills a shard mid-cooldown, mid-pending, and after a dropped vacancy, and asserts each group is retracted rather than orphaned; it also kills the coordinator and asserts the occupancy table keeps the same ETS identity.)
 
 ### Stale router entries
 
@@ -319,7 +321,7 @@ occupancy (as router):
   "room:1" => [:node1@host]
 ```
 
-Node up/down and group vacancy are also emitted as `:telemetry` events (`[:forum, scope, :node, :up | :down]`, `[:forum, scope, :group, :vacant]`) if you'd rather attach a handler than read logs.
+Node up/down is also emitted as a `:telemetry` event (`[:forum, scope, :node, :up | :down]`) if you'd rather attach a handler than read logs. (Group vacancy is no longer surfaced as telemetry for Muster: the shard that owns the group's membership transitions its own claim state directly, with no telemetry hop.)
 
 ## Trace-based testing (`Snabbkaffe`)
 

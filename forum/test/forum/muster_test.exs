@@ -1811,10 +1811,13 @@ defmodule Forum.MusterTest do
 
     test "a vacancy dropped while the shard is down is caught by restart reconciliation",
          %{scope: scope} do
-      # BUG #4: when the last member leaves while the shard is mid-restart, the
-      # :vacant telemetry is dropped (Process.whereis == nil). We reproduce that
-      # drop deterministically — the queued :local_vacant dies with the shard — and
-      # assert the restart still retracts the row from the durable :occupied state.
+      # BUG #4: when the last member dies while the shard is down, the DOWN that
+      # would retract the group is lost with the shard's mailbox. Now that the shard
+      # OWNS the member monitor (no separate Partition), the merged design recovers
+      # it on restart: rebuild_membership re-monitors the surviving entries table
+      # record, the dead pid's immediate DOWN drives the normal removal, and the
+      # durable :occupied group is driven to retraction instead of trusting it
+      # forever.
       g = :dropped_vacant_g
       member = spawn(fn -> Process.sleep(:infinity) end)
       assert :ok = Muster.join(scope, g, member)
@@ -1824,23 +1827,22 @@ defmodule Forum.MusterTest do
       shard = Forum.Supervisor.shard(scope, g)
       shard_pid = Process.whereis(shard)
 
-      # Freeze the shard so it cannot process the vacancy telemetry...
+      # Freeze the shard so it cannot process the member's death...
       :ok = :sys.suspend(shard_pid)
-      # ...drop the member: the Partition (a separate, live process) processes the
-      # DOWN, counts to 0, and sends {:local_vacant, g} into the SUSPENDED shard's
-      # mailbox where it sits unprocessed.
+      # ...kill the member: its tagged DOWN lands in the SUSPENDED shard's mailbox
+      # where it sits unprocessed, and the entries table record is left behind.
       Process.exit(member, :kill)
-      assert wait_until(fn -> Muster.local_member_count(scope, g) == 0 end)
 
-      # Kill the suspended shard: its mailbox (with the unprocessed vacancy) is
+      # Kill the suspended shard: its mailbox (with the unprocessed DOWN) is
       # discarded — the vacancy is now truly LOST, exactly as in the restart-window
-      # race. The durable state is still :occupied.
+      # race. The durable state is still :occupied and the entries record survives.
       ref = Process.monitor(shard_pid)
       Process.exit(shard_pid, :kill)
       assert_receive {:DOWN, ^ref, :process, ^shard_pid, :killed}, 1_000
 
-      # Restart reconciliation rechecks the live count, sees 0, and drives the
-      # durable :occupied group to retraction instead of trusting it forever.
+      # The restarted shard re-monitors the surviving (now-dead) entry; its
+      # immediate DOWN removes the member, drives the group vacant, and a flush
+      # retracts the row — instead of leaving the durable :occupied trusted forever.
       assert :vacant_queued = wait_for_group_state(scope, g, :vacant_queued, 2_000)
       trigger_flush(scope)
       assert wait_until(fn -> node() not in Scope.occupancy(scope, g) end)
