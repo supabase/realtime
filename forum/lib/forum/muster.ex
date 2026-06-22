@@ -11,7 +11,7 @@ defmodule Forum.Muster do
   Use a different scope name than any `Forum.Census` scope on the same node.
   """
 
-  alias Forum.Partition
+  alias Forum.Muster.Shard
 
   @type group :: Forum.group()
   @type start_option ::
@@ -110,15 +110,15 @@ defmodule Forum.Muster do
   @doc """
   Join `pid` to `group` in `scope`.
 
-  If this is the first local member of `group`, `pid` is handed to the group's
-  claim shard (`Forum.Muster.Shard`, chosen by `phash2(group)` so a join storm
-  across distinct groups spreads over N shard mailboxes), which notifies the
-  router node via a synchronous `:occupied` RPC and only then registers `pid`
-  locally. Doing both under the long-lived shard means the router is never told a
-  group is occupied before a monitored local member exists, so a caller that dies
-  mid-join can never leave the router believing we hold a group we don't. If the
-  `:occupied` RPC fails the join fails and `pid` is not registered locally; the
-  next call to `join/3` will retry the RPC.
+  `pid` is handed to the group's claim shard (`Forum.Muster.Shard`, chosen by
+  `phash2(group)` so a join storm across distinct groups spreads over N shard
+  mailboxes), which both registers the member locally and — if this is the first
+  local member of `group` — notifies the router node via a synchronous `:occupied`
+  RPC. The shard owns the member monitor as well as the claim state, so the router
+  is never told a group is occupied before a monitored local member exists: a
+  caller that dies mid-join can never leave the router believing we hold a group we
+  don't. If the `:occupied` RPC fails the join fails and `pid` is not registered
+  locally; the next call to `join/3` will retry the RPC.
 
   If the group was recently vacant (in cooldown, or queued/in-flight for a
   vacant flush), the join reclaims it without re-notifying the router where
@@ -135,30 +135,13 @@ defmodule Forum.Muster do
     do: {:error, :not_local}
 
   def join(scope, group, pid) when is_atom(scope) and is_pid(pid) do
-    partition = Forum.Supervisor.partition(scope, group)
-
-    if Partition.member_count(partition, group) > 0 do
-      # Fast path: skip the router claim when we already hold local members. The count
-      # read is unsynchronized, so a fast-path join can re-occupy a group just as Scope
-      # is releasing it toward telling the router :vacant — and since the Partition's
-      # :occupied telemetry has no Scope handler, Scope never learns about this join.
-      #
-      # Safe because handle_vacancy_expired rechecks the live count before queuing the
-      # :vacant: if a member re-joined during cooldown, it reverts to :occupied without
-      # notifying the router. The new member's Partition.join just has to land before
-      # that recheck — a window of vacancy_cooldown_ms (default 30s), so in practice
-      # never an issue. Only at risk if vacancy_cooldown_ms is ~0 or the Partition is
-      # starved past the cooldown.
-      Partition.join(partition, group, pid)
-    else
-      claim(scope, group, pid)
-    end
+    call_shard(scope, group, {:join, group, pid})
   end
 
   @doc "Remove `pid` from `group` in `scope`."
-  @spec leave(atom, group, pid) :: :ok
+  @spec leave(atom, group, pid) :: :ok | {:error, term}
   def leave(scope, group, pid) when is_atom(scope) and is_pid(pid) do
-    Partition.leave(Forum.Supervisor.partition(scope, group), group, pid)
+    call_shard(scope, group, {:leave, group, pid})
   end
 
   @doc """
@@ -222,27 +205,23 @@ defmodule Forum.Muster do
   @doc "List local pids registered to `group` in `scope`."
   @spec local_members(atom, group) :: [pid]
   def local_members(scope, group) when is_atom(scope) do
-    Partition.members(Forum.Supervisor.partition(scope, group), group)
+    Shard.members(scope, group)
   end
 
   @doc "Whether `pid` is a local member of `group` in `scope`."
   @spec local_member?(atom, group, pid) :: boolean
   def local_member?(scope, group, pid) when is_atom(scope) and is_pid(pid) do
-    Partition.member?(Forum.Supervisor.partition(scope, group), group, pid)
+    Shard.member?(scope, group, pid)
   end
 
   @doc "Local member count for `group` in `scope`."
   @spec local_member_count(atom, group) :: non_neg_integer
   def local_member_count(scope, group) when is_atom(scope) do
-    Partition.member_count(Forum.Supervisor.partition(scope, group), group)
+    Shard.member_count(scope, group)
   end
 
-  defp claim(scope, group, pid) do
-    GenServer.call(
-      Forum.Supervisor.shard(scope, group),
-      {:claim, group, pid},
-      @claim_call_timeout
-    )
+  defp call_shard(scope, group, msg) do
+    GenServer.call(Forum.Supervisor.shard(scope, group), msg, @claim_call_timeout)
   catch
     :exit, reason -> {:error, {:scope_exit, reason}}
   end

@@ -57,8 +57,7 @@ defmodule Forum.Muster.Scope do
             member_views: %{node => {non_neg_integer, integer}},
             owed_snapshots: %{node => integer},
             applied_snapshot_seq: %{node => integer},
-            view_seq: integer,
-            telemetry_handler_id: term
+            view_seq: integer
           }
     defstruct [
       :scope,
@@ -68,7 +67,6 @@ defmodule Forum.Muster.Scope do
       :rebalance_gather_timeout_ms,
       :tombstone_window_ms,
       :occupancy_table,
-      :telemetry_handler_id,
       members: [],
       peers: %{},
       # Barrier bookkeeping: each peer's most-recently-announced
@@ -145,8 +143,7 @@ defmodule Forum.Muster.Scope do
 
   # Mark the key a TOMBSTONE at `seq` (absent), stamped `created_at` (router-local
   # monotonic ms) for the GC sweep. `=<` so a vacancy at the stored seq still wins
-  # (mirrors the old select_delete `=<` guard); a strictly-newer :present row (a
-  # re-claim) survives.
+  # a strictly-newer :present row (a re-claim) survives.
   @spec tombstone_if_newer(atom, {Forum.group(), node}, integer, integer) :: :ok
   defp tombstone_if_newer(table, key, seq, created_at),
     do: put_if_newer(table, key, seq, created_at, :lte)
@@ -379,16 +376,6 @@ defmodule Forum.Muster.Scope do
     # Cluster-view hash senders tag broadcasts with; router compares against its own.
     :persistent_term.put({Forum.Muster, scope, :view_hash}, :erlang.phash2([node()]))
 
-    telemetry_handler_id = {__MODULE__, scope, self()}
-
-    :ok =
-      :telemetry.attach(
-        telemetry_handler_id,
-        [:forum, scope, :group, :vacant],
-        &__MODULE__.handle_vacant_telemetry/4,
-        %{scope: scope}
-      )
-
     Logger.info("Muster[#{node()}|#{scope}] Starting")
 
     state = %State{
@@ -399,7 +386,6 @@ defmodule Forum.Muster.Scope do
       rebalance_gather_timeout_ms: rebalance_gather_timeout_ms,
       tombstone_window_ms: tombstone_window_ms,
       occupancy_table: occupancy_table,
-      telemetry_handler_id: telemetry_handler_id,
       members: [node()]
     }
 
@@ -421,15 +407,6 @@ defmodule Forum.Muster.Scope do
     schedule_view_heartbeat(state)
     schedule_tombstone_sweep(state)
     {:noreply, state}
-  end
-
-  @impl true
-  def terminate(_reason, state) do
-    if state.telemetry_handler_id do
-      _ = :telemetry.detach(state.telemetry_handler_id)
-    end
-
-    :ok
   end
 
   ## handle_call
@@ -677,19 +654,6 @@ defmodule Forum.Muster.Scope do
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
-
-  ## Telemetry handler
-
-  @doc false
-  # Runs in the emitting Partition process. Route the vacancy to the shard that
-  # owns the group (same phash2(group, N) the claim path uses), guarded so a
-  # mid-restart shard never makes the Partition process raise.
-  def handle_vacant_telemetry(_event, _measurements, %{group: group}, %{scope: scope}) do
-    case Process.whereis(Forum.Supervisor.shard(scope, group)) do
-      nil -> :ok
-      pid -> Kernel.send(pid, {:local_vacant, group})
-    end
-  end
 
   ## Rebalance
 
@@ -1008,9 +972,7 @@ defmodule Forum.Muster.Scope do
   end
 
   defp local_groups(state) do
-    state.scope
-    |> Forum.Supervisor.partitions()
-    |> Enum.flat_map(&Forum.Partition.groups/1)
+    Forum.Muster.Shard.groups(state.scope)
   end
 
   # Fold every shard's per-group state into one map for :status / :dump. A shard
