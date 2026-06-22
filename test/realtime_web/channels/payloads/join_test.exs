@@ -52,8 +52,9 @@ defmodule RealtimeWeb.Channels.Payloads.JoinTest do
     test "presence key as default" do
       config = %{"config" => %{"presence" => %{"enabled" => true}}}
 
-      assert {:ok, %Join{config: %Config{presence: %Presence{key: key}}}} = Join.validate(config)
+      assert {:ok, %Join{config: %Config{presence: %Presence{}}} = join} = Join.validate(config)
 
+      key = Join.presence_key(join)
       assert key != ""
       assert is_binary(key)
     end
@@ -77,10 +78,10 @@ defmodule RealtimeWeb.Channels.Payloads.JoinTest do
                Join.validate(config)
     end
 
-    test "missing enabled presence defaults to true" do
+    test "missing enabled presence defaults to false" do
       config = %{"config" => %{"presence" => %{}}}
 
-      assert {:ok, %Join{config: %Config{presence: %Presence{enabled: true}}}} = Join.validate(config)
+      assert {:ok, %Join{config: %Config{presence: %Presence{enabled: false}}}} = Join.validate(config)
     end
 
     test "invalid payload returns errors" do
@@ -231,12 +232,12 @@ defmodule RealtimeWeb.Channels.Payloads.JoinTest do
       assert Join.presence_enabled?(join)
     end
 
-    test "defaults to true when config is nil" do
-      assert Join.presence_enabled?(%Join{config: nil})
+    test "defaults to false when config is nil" do
+      refute Join.presence_enabled?(%Join{config: nil})
     end
 
-    test "defaults to true for non-Join struct" do
-      assert Join.presence_enabled?(nil)
+    test "defaults to false for non-Join struct" do
+      refute Join.presence_enabled?(nil)
     end
   end
 
