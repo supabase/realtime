@@ -145,6 +145,136 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                })
     end
 
+    test "a double-quoted value can contain a literal comma without splitting the filter" do
+      assert {:ok, {"*", "public", "test", [{"name", "eq", "a,b", false}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~s|name=eq."a,b"|
+               })
+    end
+
+    test "a double-quoted value does not split a multi-filter expression on its inner comma" do
+      assert {:ok, {"*", "public", "test", filters, _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~s|name=eq."a,b",id=gt.0|
+               })
+
+      assert [{"name", "eq", "a,b", false}, {"id", "gt", "0", false}] = filters
+    end
+
+    test "double quotes let a value contain other reserved characters (period, colon, parens)" do
+      assert {:ok, {"*", "public", "test", [{"name", "eq", "a.b:c(d)", false}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~s|name=eq."a.b:c(d)"|
+               })
+    end
+
+    test "an escaped double quote inside a quoted value becomes a literal quote" do
+      assert {:ok, {"*", "public", "test", [{"name", "eq", ~s|she said "hi"|, false}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~s|name=eq."she said \\"hi\\""|
+               })
+    end
+
+    test "an escaped backslash inside a quoted value becomes a single backslash" do
+      assert {:ok, {"*", "public", "test", [{"path", "eq", ~S|C:\tmp|, false}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~S|path=eq."C:\\tmp"|
+               })
+    end
+
+    test "a quoted value combines with the not. negation prefix" do
+      assert {:ok, {"*", "public", "test", [{"name", "neq", "a,b", true}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~s|name=not.neq."a,b"|
+               })
+    end
+
+    test "a backslash inside a quoted value escapes the next character, whatever it is" do
+      assert {:ok, {"*", "public", "test", [{"path", "eq", "C:new", false}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~S|path=eq."C:\new"|
+               })
+    end
+
+    test "an empty quoted value matches the empty string" do
+      assert {:ok, {"*", "public", "test", [{"name", "eq", "", false}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~s|name=eq.""|
+               })
+    end
+
+    test "whitespace inside a quoted value is preserved verbatim" do
+      assert {:ok, {"*", "public", "test", [{"name", "eq", " a ", false}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~s|name=eq." a "|
+               })
+    end
+
+    test "in-list elements can be double-quoted to contain commas" do
+      assert {:ok, {"*", "public", "test", [{"tags", "in", ~s|{"a,b",c}|, false}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~s|tags=in.("a,b",c)|
+               })
+    end
+
+    test "multiple in-list elements can each be double-quoted" do
+      assert {:ok, {"*", "public", "test", [{"tags", "in", ~s|{"a,b","c,d"}|, false}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~s|tags=in.("a,b","c,d")|
+               })
+    end
+
+    test "an unterminated quoted value falls back to a literal value (PostgREST behaviour)" do
+      assert {:ok, {"*", "public", "test", [{"name", "eq", ~s|"unterminated|, false}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~s|name=eq."unterminated|
+               })
+    end
+
+    test "characters after a closing quote make the whole value literal (PostgREST backtracks)" do
+      assert {:ok, {"*", "public", "test", [{"name", "eq", ~s|"ab"cd|, false}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~s|name=eq."ab"cd|
+               })
+    end
+
+    test "a double quote that is not at the start of a value does not protect a following comma" do
+      assert {:ok, {"*", "public", "test", filters, _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~s|desc=eq.5" tall,id=gt.0|
+               })
+
+      assert [{"desc", "eq", ~s|5" tall|, false}, {"id", "gt", "0", false}] = filters
+    end
+
     test "user gets a clear error when the filter string ends with a stray comma" do
       assert {:error, msg} =
                Subscriptions.parse_subscription_params(%{
