@@ -117,7 +117,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       RealtimeWeb.Endpoint.subscribe(tenant_topic, metadata: metadata)
       RealtimeWeb.Endpoint.subscribe("realtime:operations:" <> tenant_id, metadata: metadata)
 
-      replication_ready_opt_in? = !!params["config"]["replication_ready"]
+      replication_ready_opt_in? = !!get_in(params, ["config", "broadcast", "replication_ready"])
 
       is_new_api = new_api?(params)
       presence_enabled? = socket.assigns.presence_enabled?

@@ -94,7 +94,7 @@ defmodule RealtimeWeb.RealtimeChannelReplicationReadyTest do
   defp join(tenant) do
     jwt = generate_jwt_token(tenant)
     {:ok, socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
-    subscribe_and_join(socket, "realtime:test", %{"config" => %{"replication_ready" => true}})
+    subscribe_and_join(socket, "realtime:test", %{"config" => %{"broadcast" => %{"replication_ready" => true}}})
   end
 
   defp conn_opts(tenant, token) do

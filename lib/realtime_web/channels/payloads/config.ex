@@ -15,7 +15,6 @@ defmodule RealtimeWeb.Channels.Payloads.Config do
     embeds_one :presence, Presence
     embeds_many :postgres_changes, PostgresChange
     field :private, FlexibleBoolean, default: false
-    field :replication_ready, FlexibleBoolean, default: false
   end
 
   def changeset(config, attrs) do
@@ -29,7 +28,7 @@ defmodule RealtimeWeb.Channels.Payloads.Config do
       |> Map.new()
 
     config
-    |> cast(attrs, [:private, :replication_ready], message: &Join.error_message/2)
+    |> cast(attrs, [:private], message: &Join.error_message/2)
     |> cast_embed(:broadcast, invalid_message: "unable to parse, expected a map")
     |> cast_embed(:presence, invalid_message: "unable to parse, expected a map")
     |> cast_embed(:postgres_changes, invalid_message: "unable to parse, expected an array of maps")

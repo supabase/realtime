@@ -10,12 +10,13 @@ defmodule RealtimeWeb.Channels.Payloads.Broadcast do
   embedded_schema do
     field :ack, FlexibleBoolean, default: false
     field :self, FlexibleBoolean, default: false
+    field :replication_ready, FlexibleBoolean, default: false
     embeds_one :replay, RealtimeWeb.Channels.Payloads.Broadcast.Replay
   end
 
   def changeset(broadcast, attrs) do
     broadcast
-    |> cast(attrs, [:ack, :self], message: &Join.error_message/2)
+    |> cast(attrs, [:ack, :self, :replication_ready], message: &Join.error_message/2)
     |> cast_embed(:replay, invalid_message: "unable to parse, expected a map")
   end
 end

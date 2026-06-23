@@ -82,7 +82,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
       {socket1, _} = get_connection(tenant, serializer, role: "authenticated")
       {socket2, _} = get_connection(tenant, serializer, role: "authenticated")
 
-      config = %{broadcast: %{self: true}, private: false, replication_ready: true}
+      config = %{broadcast: %{self: true, replication_ready: true}, private: false}
       topic1 = "realtime:#{random_string()}"
       topic2 = "realtime:#{random_string()}"
 
