@@ -141,9 +141,19 @@ defmodule Realtime.MixProject do
       ],
       test: ["test.setup", "test"],
       "test.partitioned": ["test.setup", "test --partitions 4"],
-      crap: ["compile", "crap"],
-      "crap.report": ["run --no-start .github/scripts/crap_report.exs"],
+      "crap.ci": ["compile", &merge_coverdata/1, "crap"],
       "assets.deploy": ["esbuild default --minify", "tailwind default --minify", "phx.digest"]
     ]
+  end
+
+  defp merge_coverdata(_args) do
+    File.mkdir_p!("cover")
+    :cover.start()
+
+    "coverage/**/*.coverdata"
+    |> Path.wildcard()
+    |> Enum.each(&:cover.import(String.to_charlist(&1)))
+
+    :cover.export(~c"cover/default.coverdata")
   end
 end

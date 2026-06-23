@@ -63,7 +63,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Setup elixir
         id: beam
-        uses: erlef/setup-beam@ee09b1e59bb240681c382eb1f0abc6a04af72764 # v1.23.0
+        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1.24.0
         with:
           otp-version: 27.x # Define the OTP version [required]
           elixir-version: 1.18.x # Define the elixir version [required]
@@ -104,7 +104,7 @@ jobs:
         run: MIX_TEST_PARTITION=${{ matrix.partition }} mix coveralls.lcov --partitions 4 --export-coverage partition-${{ matrix.partition }}
       - name: Upload coverage artifact
         if: matrix.postgres == 'pg17'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: coverage-partition-${{ matrix.partition }}
           path: |
@@ -119,7 +119,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Download all coverage artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           pattern: coverage-partition-*
           path: coverage
@@ -137,7 +137,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Setup elixir
-        uses: erlef/setup-beam@ee09b1e59bb240681c382eb1f0abc6a04af72764 # v1.23.0
+        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1.24.0
         with:
           otp-version: 27.x
           elixir-version: 1.18.x
@@ -154,12 +154,18 @@ jobs:
       - name: Install dependencies
         run: mix deps.get
       - name: Download coverage artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           pattern: coverage-partition-*
           path: coverage
       - name: Build CRAP report
-        run: mix crap.report crap-report.md
+        run: |
+          {
+            echo '## CRAP Score Report'
+            echo '```'
+            mix crap.ci 2>&1 | sed -r 's/\x1b\[[0-9;]*m//g' || true
+            echo '```'
+          } > crap-report.md
       - name: Post CRAP report comment
         continue-on-error: true
         uses: marocchino/sticky-pull-request-comment@0ea0beb66eb9baf113663a64ec522f60e49231c0 # v3.0.4
