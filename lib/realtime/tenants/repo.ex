@@ -36,7 +36,7 @@ defmodule Realtime.Tenants.Repo do
   @doc """
   Inserts a given changeset into the database and converts the result into a given struct.
 
-  Mirrors `Ecto.Repo.insert/2`'s `:returning` option. Pass `returning: false` to omit
+  Partially mirrors `Ecto.Repo.insert/2`'s `:returning` option. Pass `returning: false` to omit
   `RETURNING *` and return `{:ok, struct}` built from the fields that were sent, instead
   of the row loaded from the database. This matters for authorization probes: with
   `RETURNING *`, Postgres enforces the SELECT (read) policy on the returned row, which
