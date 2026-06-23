@@ -12,7 +12,8 @@ config :realtime,
   ecto_repos: [Realtime.Repo],
   version: Mix.Project.config()[:version],
   replication_watchdog_interval: :timer.minutes(5),
-  replication_watchdog_timeout: :timer.minutes(1)
+  replication_watchdog_timeout: :timer.minutes(1),
+  replication_ready_timeout: :timer.minutes(1)
 
 # Configures the endpoint
 config :realtime, RealtimeWeb.Endpoint,

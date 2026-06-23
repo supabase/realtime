@@ -12,6 +12,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
   alias Phoenix.Socket.Message
   alias Realtime.Integration.WebsocketClient
   alias Realtime.Tenants
+  alias Realtime.Tenants.Connect
   alias RealtimeWeb.UserSocket
 
   @moduletag :capture_log
@@ -50,6 +51,60 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
         end)
 
       assert log =~ "MissingAPIKey"
+    end
+  end
+
+  describe "replication connection establishment" do
+    test "Connect signals replication readiness on its syn topic with the replication_conn pid" do
+      tenant = Containers.checkout_tenant(run_migrations: true)
+
+      Phoenix.PubSub.subscribe(Realtime.PubSub, Connect.syn_topic(tenant.external_id))
+      {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+
+      assert_receive %Phoenix.Socket.Broadcast{event: "ready", payload: %{replication_conn: replication_conn}}
+                     when is_pid(replication_conn),
+                     5000
+
+      assert {:ok, ^replication_conn} = Connect.replication_status(tenant.external_id)
+    end
+
+    test "clients that opt in receive the replication established system message, even after streaming has started",
+         %{serializer: serializer} do
+      tenant = Containers.checkout_tenant(run_migrations: true)
+
+      Phoenix.PubSub.subscribe(Realtime.PubSub, Connect.syn_topic(tenant.external_id))
+      {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+
+      assert_receive %Phoenix.Socket.Broadcast{event: "ready", payload: %{replication_conn: replication_conn}}
+                     when is_pid(replication_conn),
+                     5000
+
+      {socket1, _} = get_connection(tenant, serializer, role: "authenticated")
+      {socket2, _} = get_connection(tenant, serializer, role: "authenticated")
+
+      config = %{broadcast: %{self: true, replication_ready: true}, private: false}
+      topic1 = "realtime:#{random_string()}"
+      topic2 = "realtime:#{random_string()}"
+
+      WebsocketClient.join(socket1, topic1, %{config: config})
+      WebsocketClient.join(socket2, topic2, %{config: config})
+
+      assert_receive %Message{event: "phx_reply", topic: ^topic1, payload: %{"status" => "ok"}}, 500
+      assert_receive %Message{event: "phx_reply", topic: ^topic2, payload: %{"status" => "ok"}}, 500
+
+      assert_receive %Message{
+                       event: "system",
+                       topic: ^topic1,
+                       payload: %{"message" => "Replication connection established"}
+                     },
+                     2000
+
+      assert_receive %Message{
+                       event: "system",
+                       topic: ^topic2,
+                       payload: %{"message" => "Replication connection established"}
+                     },
+                     2000
     end
   end
 

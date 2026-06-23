@@ -30,6 +30,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias RealtimeWeb.RealtimeChannel.Tracker
 
   @confirm_token_ms_interval :timer.minutes(5)
+  @replication_ready_check_interval 10
   @fullsweep_after Application.compile_env!(:realtime, :websocket_fullsweep_after)
 
   @impl true
@@ -116,6 +117,8 @@ defmodule RealtimeWeb.RealtimeChannel do
       RealtimeWeb.Endpoint.subscribe(tenant_topic, metadata: metadata)
       RealtimeWeb.Endpoint.subscribe("realtime:operations:" <> tenant_id, metadata: metadata)
 
+      replication_ready_opt_in? = !!get_in(params, ["config", "broadcast", "replication_ready"])
+
       is_new_api = new_api?(params)
       presence_enabled? = socket.assigns.presence_enabled?
 
@@ -146,6 +149,18 @@ defmodule RealtimeWeb.RealtimeChannel do
         channel_name: sub_topic,
         presence_enabled?: presence_enabled?
       }
+
+      assigns =
+        if replication_ready_opt_in? do
+          Process.send_after(self(), :notify_replication_ready, @replication_ready_check_interval)
+
+          Map.merge(assigns, %{
+            replication_ready_notified?: false,
+            replication_ready_deadline: System.monotonic_time(:millisecond) + replication_ready_timeout()
+          })
+        else
+          assigns
+        end
 
       socket =
         socket
@@ -299,6 +314,27 @@ defmodule RealtimeWeb.RealtimeChannel do
     pg_sub_ref = postgres_subscribe()
 
     {:noreply, assign(socket, %{pg_sub_ref: pg_sub_ref})}
+  end
+
+  def handle_info(:notify_replication_ready, %{assigns: %{replication_ready_notified?: true}} = socket) do
+    {:noreply, socket}
+  end
+
+  def handle_info(:notify_replication_ready, socket) do
+    %{assigns: %{tenant: tenant_id, channel_name: channel_name, replication_ready_deadline: deadline}} = socket
+
+    cond do
+      match?({:ok, _replication_conn}, Connect.replication_status(tenant_id)) ->
+        push_system_message("system", socket, "ok", "Replication connection established", channel_name)
+        {:noreply, assign(socket, :replication_ready_notified?, true)}
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        shutdown_response(socket, "Replication connection was not established in time")
+
+      true ->
+        Process.send_after(self(), :notify_replication_ready, @replication_ready_check_interval)
+        {:noreply, socket}
+    end
   end
 
   def handle_info(_msg, %{assigns: %{policies: %Policies{broadcast: %BroadcastPolicies{read: false}}}} = socket) do
@@ -735,6 +771,10 @@ defmodule RealtimeWeb.RealtimeChannel do
     push_system_message("system", socket, "error", message, channel_name)
     maybe_log_warning(socket, "ChannelShutdown", message)
     {:stop, :normal, socket}
+  end
+
+  defp replication_ready_timeout do
+    Application.fetch_env!(:realtime, :replication_ready_timeout)
   end
 
   defp push_system_message(extension, socket, status, error, channel_name)
