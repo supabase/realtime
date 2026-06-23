@@ -34,7 +34,14 @@ defmodule Realtime.Tenants.Repo do
   end
 
   @doc """
-  Inserts a given changeset into the database and converts the result into a given struct
+  Inserts a given changeset into the database and converts the result into a given struct.
+
+  Partially mirrors `Ecto.Repo.insert/2`'s `:returning` option. Pass `returning: false` to omit
+  `RETURNING *` and return `{:ok, struct}` built from the fields that were sent, instead
+  of the row loaded from the database. This matters for authorization probes: with
+  `RETURNING *`, Postgres enforces the SELECT (read) policy on the returned row, which
+  would conflate write with read. Without it, a member with write-but-not-read access
+  still inserts successfully.
   """
   @spec insert(
           DBConnection.conn(),
@@ -44,10 +51,16 @@ defmodule Realtime.Tenants.Repo do
         ) ::
           {:ok, struct()} | {:error, any()} | Ecto.Changeset.t()
   def insert(conn, changeset, result_struct, opts \\ []) do
-    with {:ok, {query, args}} <- insert_query_from_changeset(changeset) do
-      conn
-      |> run_query_with_trap(query, args, opts)
-      |> result_to_single_struct(result_struct, changeset)
+    {returning?, opts} = Keyword.pop(opts, :returning, true)
+
+    with {:ok, {query, args}} <- insert_query_from_changeset(changeset, returning: returning?) do
+      result = run_query_with_trap(conn, query, args, opts)
+
+      if returning? do
+        result_to_single_struct(result, result_struct, changeset)
+      else
+        with {:ok, %Postgrex.Result{}} <- result, do: {:ok, Ecto.Changeset.apply_changes(changeset)}
+      end
     end
   end
 
@@ -123,9 +136,9 @@ defmodule Realtime.Tenants.Repo do
     {:ok, Enum.map(rows, &repo_module.load(struct, Enum.zip(columns, &1)))}
   end
 
-  defp insert_query_from_changeset(%{valid?: false} = changeset), do: {:error, changeset}
+  defp insert_query_from_changeset(%{valid?: false} = changeset, _opts), do: {:error, changeset}
 
-  defp insert_query_from_changeset(changeset) do
+  defp insert_query_from_changeset(changeset, opts) do
     schema = changeset.data.__struct__
     source = schema.__schema__(:source)
     prefix = schema.__schema__(:prefix)
@@ -154,7 +167,9 @@ defmodule Realtime.Tenants.Repo do
       |> Enum.with_index(1)
       |> Enum.map_join(",", fn {_, index} -> "$#{index}" end)
 
-    {:ok, {"INSERT INTO #{table} #{header} VALUES (#{arg_index}) RETURNING *", rows}}
+    returning = if Keyword.get(opts, :returning, true), do: " RETURNING *", else: ""
+
+    {:ok, {"INSERT INTO #{table} #{header} VALUES (#{arg_index})#{returning}", rows}}
   end
 
   defp insert_all_query_from_changeset(changesets) do

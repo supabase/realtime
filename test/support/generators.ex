@@ -230,6 +230,19 @@ defmodule Generators do
     """
   end
 
+  def policy_query(:authenticated_read_presence_for_sub, %{topic: name, sub: sub}) do
+    """
+    CREATE POLICY "authenticated_read_presence_for_sub_#{name}"
+    ON realtime.messages FOR SELECT
+    TO authenticated
+    USING (
+      realtime.topic() = '#{name}'
+      AND realtime.messages.extension = 'presence'
+      AND ((SELECT auth.uid())::text) = '#{sub}'
+    );
+    """
+  end
+
   def policy_query(:authenticated_read_broadcast_and_presence, %{topic: name}) do
     """
     CREATE POLICY "authenticated_read_presence_#{name}"

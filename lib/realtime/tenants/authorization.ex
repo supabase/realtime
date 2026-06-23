@@ -309,13 +309,12 @@ defmodule Realtime.Tenants.Authorization do
     with {:ok, res} <- Repo.all(conn, query, Message) do
       returned_ids = MapSet.new(res, & &1.id)
 
+      # Only the requested extensions were inserted, so we only set read for those. Extensions that
+      # were not checked are left unevaluated (nil) so callers can tell "denied" (false) apart from
+      # "not checked yet" (nil).
       {:ok,
-       Enum.reduce(@all_extensions, policies, fn extension, acc ->
-         can? =
-           Map.has_key?(messages_by_extension, extension) and
-             MapSet.member?(returned_ids, messages_by_extension[extension])
-
-         Policies.update_policies(acc, extension, :read, can?)
+       Enum.reduce(messages_by_extension, policies, fn {extension, id}, acc ->
+         Policies.update_policies(acc, extension, :read, MapSet.member?(returned_ids, id))
        end)}
     end
   end
@@ -325,7 +324,7 @@ defmodule Realtime.Tenants.Authorization do
       if extension in extensions do
         changeset = Message.changeset(%Message{}, %{topic: authorization_context.topic, extension: extension})
 
-        case Repo.insert(conn, changeset, Message, mode: :savepoint) do
+        case Repo.insert(conn, changeset, Message, mode: :savepoint, returning: false) do
           {:ok, _} ->
             {:cont, {:ok, Policies.update_policies(acc, extension, :write, true)}}
 

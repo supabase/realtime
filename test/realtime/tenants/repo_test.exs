@@ -99,6 +99,39 @@ defmodule Realtime.Tenants.RepoTest do
     end
   end
 
+  describe "insert/4 with returning: false" do
+    test "persists the row but returns only the sent fields, not the database row", %{db_conn: db_conn} do
+      changeset = Message.changeset(%Message{}, %{topic: "foo", extension: :presence})
+
+      assert {:ok, %Message{topic: "foo", extension: :presence} = message} =
+               Repo.insert(db_conn, changeset, Message, returning: false)
+
+      # No RETURNING clause, so the struct mirrors the changeset rather than the
+      # loaded row: database-generated fields are absent and it is not marked loaded.
+      assert is_nil(message.id)
+      assert Ecto.get_meta(message, :state) == :built
+
+      # The row is still inserted in the database.
+      assert {:ok, [%Message{topic: "foo", extension: :presence, id: id}]} = Repo.all(db_conn, Message, Message)
+      refute is_nil(id)
+    end
+
+    test "returns changeset if changeset is invalid", %{db_conn: db_conn} do
+      changeset = Message.changeset(%Message{}, %{})
+
+      assert {:error, %Ecto.Changeset{valid?: false}} = Repo.insert(db_conn, changeset, Message, returning: false)
+    end
+
+    test "handles exceptions", %{db_conn: db_conn} do
+      Process.unlink(db_conn)
+      Process.exit(db_conn, :kill)
+
+      changeset = Message.changeset(%Message{}, %{topic: "foo", extension: :presence})
+
+      assert {:error, :postgrex_exception} = Repo.insert(db_conn, changeset, Message, returning: false)
+    end
+  end
+
   describe "insert_all_entries/3" do
     test "inserts a new entries with a given changeset and returns struct", %{db_conn: db_conn} do
       changeset = [

@@ -71,9 +71,10 @@ defmodule Realtime.Tenants.AuthorizationTest do
           presence_enabled?: false
         )
 
+      # presence.read is left unevaluated (nil) since presence was not checked; write is false.
       assert %Policies{
                broadcast: %BroadcastPolicies{read: true, write: true},
-               presence: %PresencePolicies{read: false, write: false}
+               presence: %PresencePolicies{read: nil, write: false}
              } == policies
     end
 

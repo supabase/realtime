@@ -7,8 +7,16 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
   alias Phoenix.Socket.Broadcast
   alias RealtimeWeb.Socket.UserBroadcast
 
-  def fastlane_metadata(fastlane_pid, serializer, topic, log_level, tenant_id, replayed_message_ids \\ MapSet.new()) do
-    {:rc_fastlane, fastlane_pid, serializer, topic, log_level, tenant_id, replayed_message_ids}
+  def fastlane_metadata(
+        fastlane_pid,
+        serializer,
+        topic,
+        log_level,
+        tenant_id,
+        replayed_message_ids \\ MapSet.new(),
+        presence_read? \\ true
+      ) do
+    {:rc_fastlane, fastlane_pid, serializer, topic, log_level, tenant_id, replayed_message_ids, presence_read?}
   end
 
   @presence_diff "presence_diff"
@@ -26,7 +34,22 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
         {pid, _}, {cache, count} when pid == from ->
           {cache, count}
 
-        {_pid, {:rc_fastlane, fastlane_pid, serializer, join_topic, log_level, tenant_id, _replayed_message_ids}},
+        # Subscriber is authorized for broadcast.read but denied presence.read: withhold the
+        # presence_diff. Mirrors the can_read_presence?/1 gate on the presence_state push.
+        {_pid, {:rc_fastlane, _fastlane_pid, _serializer, _join_topic, _log_level, _tenant_id, _replayed, false}},
+        {cache, count} ->
+          {cache, count}
+
+        # presence.read not yet authorized (presence was not enabled at join): route to the channel
+        # process so it can consult presence.read at delivery time. Wrapped in a
+        # tuple so it is handled by RealtimeChannel.handle_info rather than intercepted and pushed by
+        # Phoenix.Channel.Server's built-in %Broadcast{} handling.
+        {pid, {:rc_fastlane, _fastlane_pid, _serializer, _join_topic, _log_level, _tenant_id, _replayed, nil}},
+        {cache, count} ->
+          send(pid, {:authorize_presence_diff, msg})
+          {cache, count}
+
+        {_pid, {:rc_fastlane, fastlane_pid, serializer, join_topic, log_level, tenant_id, _replayed_message_ids, true}},
         {cache, count} ->
           maybe_log(log_level, join_topic, msg, tenant_id)
 
@@ -52,7 +75,9 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
         {pid, _}, cache when pid == from ->
           cache
 
-        {pid, {:rc_fastlane, fastlane_pid, serializer, join_topic, log_level, tenant_id, replayed_message_ids}},
+        {pid,
+         {:rc_fastlane, fastlane_pid, serializer, join_topic, log_level, tenant_id, replayed_message_ids,
+          _presence_read?}},
         cache ->
           if already_replayed?(message_id, replayed_message_ids) do
             # skip already replayed message
@@ -123,7 +148,7 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
 
   defp fastlane!(serializer, msg), do: {:ok, serializer.fastlane!(msg)}
 
-  defp tenant_id([{_pid, {:rc_fastlane, _, _, _, _, tenant_id, _}} | _]), do: tenant_id
+  defp tenant_id([{_pid, {:rc_fastlane, _, _, _, _, tenant_id, _, _}} | _]), do: tenant_id
   defp tenant_id(_), do: nil
 
   defp increment_presence_counter(tenant_id, "presence_diff", count) when is_binary(tenant_id) do
