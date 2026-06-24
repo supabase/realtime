@@ -410,6 +410,30 @@
         {
           "sort_order": 7,
           "label": "in"
+        },
+        {
+          "sort_order": 8,
+          "label": "like"
+        },
+        {
+          "sort_order": 9,
+          "label": "ilike"
+        },
+        {
+          "sort_order": 10,
+          "label": "is"
+        },
+        {
+          "sort_order": 11,
+          "label": "match"
+        },
+        {
+          "sort_order": 12,
+          "label": "imatch"
+        },
+        {
+          "sort_order": 13,
+          "label": "isdistinct"
         }
       ],
       "comment": null,
@@ -757,10 +781,10 @@
       "all_argument_types": [],
       "argument_modes": null,
       "argument_defaults": null,
-      "source_code": "\n      /*\n      Casts *val_1* and *val_2* as type *type_* and check the *op* condition for truthiness\n      */\n      declare\n          op_symbol text = (\n              case\n                  when op = 'eq' then '='\n                  when op = 'neq' then '!='\n                  when op = 'lt' then '<'\n                  when op = 'lte' then '<='\n                  when op = 'gt' then '>'\n                  when op = 'gte' then '>='\n                  when op = 'in' then '= any'\n                  else 'UNKNOWN OP'\n              end\n          );\n          res boolean;\n      begin\n          execute format(\n              'select %L::'|| type_::text || ' ' || op_symbol\n              || ' ( %L::'\n              || (\n                  case\n                      when op = 'in' then type_::text || '[]'\n                      else type_::text end\n              )\n              || ')', val_1, val_2) into res;\n          return res;\n      end;\n      ",
+      "source_code": "\n/*\nCasts *val_1* and *val_2* as type *type_* and check the *op* condition for truthiness\n*/\ndeclare\n    op_symbol text = (\n        case\n            when op = 'eq' then '='\n            when op = 'neq' then '!='\n            when op = 'lt' then '<'\n            when op = 'lte' then '<='\n            when op = 'gt' then '>'\n            when op = 'gte' then '>='\n            when op = 'in' then '= any'\n            else 'UNKNOWN OP'\n        end\n    );\n    res boolean;\nbegin\n    execute format(\n        'select %L::'|| type_::text || ' ' || op_symbol\n        || ' ( %L::'\n        || (\n            case\n                when op = 'in' then type_::text || '[]'\n                else type_::text end\n        )\n        || ')', val_1, val_2) into res;\n    return res;\nend;\n",
       "binary_path": null,
       "sql_body": null,
-      "definition": "CREATE OR REPLACE FUNCTION realtime.check_equality_op(op realtime.equality_op, type_ regtype, val_1 text, val_2 text)\n RETURNS boolean\n LANGUAGE plpgsql\n IMMUTABLE\nAS $function$\n      /*\n      Casts *val_1* and *val_2* as type *type_* and check the *op* condition for truthiness\n      */\n      declare\n          op_symbol text = (\n              case\n                  when op = 'eq' then '='\n                  when op = 'neq' then '!='\n                  when op = 'lt' then '<'\n                  when op = 'lte' then '<='\n                  when op = 'gt' then '>'\n                  when op = 'gte' then '>='\n                  when op = 'in' then '= any'\n                  else 'UNKNOWN OP'\n              end\n          );\n          res boolean;\n      begin\n          execute format(\n              'select %L::'|| type_::text || ' ' || op_symbol\n              || ' ( %L::'\n              || (\n                  case\n                      when op = 'in' then type_::text || '[]'\n                      else type_::text end\n              )\n              || ')', val_1, val_2) into res;\n          return res;\n      end;\n      $function$\n",
+      "definition": "CREATE OR REPLACE FUNCTION realtime.check_equality_op(op realtime.equality_op, type_ regtype, val_1 text, val_2 text)\n RETURNS boolean\n LANGUAGE plpgsql\n IMMUTABLE\nAS $function$\n/*\nCasts *val_1* and *val_2* as type *type_* and check the *op* condition for truthiness\n*/\ndeclare\n    op_symbol text = (\n        case\n            when op = 'eq' then '='\n            when op = 'neq' then '!='\n            when op = 'lt' then '<'\n            when op = 'lte' then '<='\n            when op = 'gt' then '>'\n            when op = 'gte' then '>='\n            when op = 'in' then '= any'\n            else 'UNKNOWN OP'\n        end\n    );\n    res boolean;\nbegin\n    execute format(\n        'select %L::'|| type_::text || ' ' || op_symbol\n        || ' ( %L::'\n        || (\n            case\n                when op = 'in' then type_::text || '[]'\n                else type_::text end\n        )\n        || ')', val_1, val_2) into res;\n    return res;\nend;\n$function$\n",
       "config": null,
       "owner": "supabase_realtime_admin",
       "comment": null,
@@ -831,10 +855,10 @@
       "all_argument_types": [],
       "argument_modes": null,
       "argument_defaults": null,
-      "source_code": "\n    /*\n    Should the record be visible (true) or filtered out (false) after *filters* are applied\n    */\n        select\n            -- Default to allowed when no filters present\n            $2 is null -- no filters. this should not happen because subscriptions has a default\n            or array_length($2, 1) is null -- array length of an empty array is null\n            or bool_and(\n                coalesce(\n                    realtime.check_equality_op(\n                        op:=f.op,\n                        type_:=coalesce(\n                            col.type_oid::regtype, -- null when wal2json version <= 2.4\n                            col.type_name::regtype\n                        ),\n                        -- cast jsonb to text\n                        val_1:=col.value #>> '{}',\n                        val_2:=f.value\n                    ),\n                    false -- if null, filter does not match\n                )\n            )\n        from\n            unnest(filters) f\n            join unnest(columns) col\n                on f.column_name = col.name;\n    ",
+      "source_code": "\n/*\nShould the record be visible (true) or filtered out (false) after *filters* are applied\n*/\n    select\n        -- Default to allowed when no filters present\n        $2 is null -- no filters. this should not happen because subscriptions has a default\n        or array_length($2, 1) is null -- array length of an empty array is null\n        or bool_and(\n            coalesce(\n                realtime.check_equality_op(\n                    op:=f.op,\n                    type_:=coalesce(\n                        col.type_oid::regtype, -- null when wal2json version <= 2.4\n                        col.type_name::regtype\n                    ),\n                    -- cast jsonb to text\n                    val_1:=col.value #>> '{}',\n                    val_2:=f.value\n                ),\n                false -- if null, filter does not match\n            )\n        )\n    from\n        unnest(filters) f\n        join unnest(columns) col\n            on f.column_name = col.name;\n",
       "binary_path": null,
       "sql_body": null,
-      "definition": "CREATE OR REPLACE FUNCTION realtime.is_visible_through_filters(columns realtime.wal_column[], filters realtime.user_defined_filter[])\n RETURNS boolean\n LANGUAGE sql\n IMMUTABLE\nAS $function$\n    /*\n    Should the record be visible (true) or filtered out (false) after *filters* are applied\n    */\n        select\n            -- Default to allowed when no filters present\n            $2 is null -- no filters. this should not happen because subscriptions has a default\n            or array_length($2, 1) is null -- array length of an empty array is null\n            or bool_and(\n                coalesce(\n                    realtime.check_equality_op(\n                        op:=f.op,\n                        type_:=coalesce(\n                            col.type_oid::regtype, -- null when wal2json version <= 2.4\n                            col.type_name::regtype\n                        ),\n                        -- cast jsonb to text\n                        val_1:=col.value #>> '{}',\n                        val_2:=f.value\n                    ),\n                    false -- if null, filter does not match\n                )\n            )\n        from\n            unnest(filters) f\n            join unnest(columns) col\n                on f.column_name = col.name;\n    $function$\n",
+      "definition": "CREATE OR REPLACE FUNCTION realtime.is_visible_through_filters(columns realtime.wal_column[], filters realtime.user_defined_filter[])\n RETURNS boolean\n LANGUAGE sql\n IMMUTABLE\nAS $function$\n/*\nShould the record be visible (true) or filtered out (false) after *filters* are applied\n*/\n    select\n        -- Default to allowed when no filters present\n        $2 is null -- no filters. this should not happen because subscriptions has a default\n        or array_length($2, 1) is null -- array length of an empty array is null\n        or bool_and(\n            coalesce(\n                realtime.check_equality_op(\n                    op:=f.op,\n                    type_:=coalesce(\n                        col.type_oid::regtype, -- null when wal2json version <= 2.4\n                        col.type_name::regtype\n                    ),\n                    -- cast jsonb to text\n                    val_1:=col.value #>> '{}',\n                    val_2:=f.value\n                ),\n                false -- if null, filter does not match\n            )\n        )\n    from\n        unnest(filters) f\n        join unnest(columns) col\n            on f.column_name = col.name;\n$function$\n",
       "config": null,
       "owner": "supabase_realtime_admin",
       "comment": null,
@@ -1462,46 +1486,6 @@
       "comment": null,
       "owner": "supabase_realtime_admin"
     },
-    "index:realtime.subscription.ix_realtime_subscription_entity": {
-      "schema": "realtime",
-      "table_name": "subscription",
-      "name": "ix_realtime_subscription_entity",
-      "storage_params": [],
-      "statistics_target": [
-        -1
-      ],
-      "index_type": "btree",
-      "tablespace": null,
-      "is_unique": false,
-      "is_primary": false,
-      "is_exclusion": false,
-      "nulls_not_distinct": false,
-      "immediate": true,
-      "is_clustered": false,
-      "is_replica_identity": false,
-      "key_columns": [
-        4
-      ],
-      "column_collations": [
-        null
-      ],
-      "operator_classes": [
-        "default"
-      ],
-      "column_options": [
-        0
-      ],
-      "index_expressions": null,
-      "partial_predicate": null,
-      "table_relkind": "r",
-      "is_owned_by_constraint": false,
-      "is_partitioned_index": false,
-      "is_index_partition": false,
-      "parent_index_name": null,
-      "definition": "CREATE INDEX ix_realtime_subscription_entity ON realtime.subscription USING btree (entity)",
-      "comment": null,
-      "owner": "supabase_realtime_admin"
-    },
     "index:realtime.subscription.subscription_subscription_id_entity_filters_action_filter_selec": {
       "schema": "realtime",
       "table_name": "subscription",
@@ -1559,6 +1543,46 @@
       "is_index_partition": false,
       "parent_index_name": null,
       "definition": "CREATE UNIQUE INDEX subscription_subscription_id_entity_filters_action_filter_selec ON realtime.subscription USING btree (subscription_id, entity, filters, action_filter, COALESCE(selected_columns, '{}'::text[]))",
+      "comment": null,
+      "owner": "supabase_realtime_admin"
+    },
+    "index:realtime.subscription.ix_realtime_subscription_entity": {
+      "schema": "realtime",
+      "table_name": "subscription",
+      "name": "ix_realtime_subscription_entity",
+      "storage_params": [],
+      "statistics_target": [
+        -1
+      ],
+      "index_type": "btree",
+      "tablespace": null,
+      "is_unique": false,
+      "is_primary": false,
+      "is_exclusion": false,
+      "nulls_not_distinct": false,
+      "immediate": true,
+      "is_clustered": false,
+      "is_replica_identity": false,
+      "key_columns": [
+        4
+      ],
+      "column_collations": [
+        null
+      ],
+      "operator_classes": [
+        "default"
+      ],
+      "column_options": [
+        0
+      ],
+      "index_expressions": null,
+      "partial_predicate": null,
+      "table_relkind": "r",
+      "is_owned_by_constraint": false,
+      "is_partitioned_index": false,
+      "is_index_partition": false,
+      "parent_index_name": null,
+      "definition": "CREATE INDEX ix_realtime_subscription_entity ON realtime.subscription USING btree (entity)",
       "comment": null,
       "owner": "supabase_realtime_admin"
     }
@@ -2990,22 +3014,22 @@
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages.binary_payload",
-      "deptype": "n"
+      "deptype": "a"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages.binary_payload",
-      "deptype": "a"
-    },
-    {
-      "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
-      "referenced_stable_id": "column:realtime.messages.payload",
       "deptype": "n"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages.payload",
       "deptype": "a"
+    },
+    {
+      "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
+      "referenced_stable_id": "column:realtime.messages.payload",
+      "deptype": "n"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_pkey",
@@ -3030,12 +3054,12 @@
     {
       "dependent_stable_id": "constraint:realtime.subscription.subscription_action_filter_check",
       "referenced_stable_id": "column:realtime.subscription.action_filter",
-      "deptype": "n"
+      "deptype": "a"
     },
     {
       "dependent_stable_id": "constraint:realtime.subscription.subscription_action_filter_check",
       "referenced_stable_id": "column:realtime.subscription.action_filter",
-      "deptype": "a"
+      "deptype": "n"
     },
     {
       "dependent_stable_id": "defacl:supabase_admin:f:schema:realtime:grantee:dashboard_user",
