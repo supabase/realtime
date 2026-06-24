@@ -65,6 +65,23 @@ defmodule Realtime.Env do
 
   def get_binary(env, default), do: System.get_env(env, default)
 
+  @spec get_non_empty_binary(binary()) :: binary() | nil
+  def get_non_empty_binary(env) do
+    case System.get_env(env) do
+      nil ->
+        nil
+
+      value ->
+        value = String.trim(value)
+
+        if value in ["", "''", ~s("")] do
+          nil
+        else
+          value
+        end
+    end
+  end
+
   @spec get_list(binary(), [binary()]) :: [binary()]
   def get_list(env, default) when is_list(default) do
     value = System.get_env(env)
