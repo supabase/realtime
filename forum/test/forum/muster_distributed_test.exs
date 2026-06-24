@@ -6,6 +6,17 @@ defmodule Forum.MusterDistributedTest do
   # by the single-node tests in muster_test.exs; this file proves the wiring
   # works across real nodes and that every node converges all the way to
   # :ready (not left stuck in :rebalancing or :converging).
+  #
+  # BLACK BOX ONLY. Every test here must drive Muster purely through its public
+  # surface and real cluster events — start/stop nodes, join/leave, real process
+  # crashes — and observe outcomes through public reads (persistent_term, the
+  # occupancy table) and the snabbkaffe trace. The ONLY sanctioned ways to steer
+  # execution are snabbkaffe `force_ordering/2,3` and `inject_crash/2,3` (both
+  # anchored on real `tp` events). NO mocks, and NO reaching inside a process to
+  # mutate it: `:sys.replace_state`, hand-set `:persistent_term`s standing in for
+  # real convergence, or any other state surgery are forbidden — they assert on a
+  # fiction the running system never actually produces. If a scenario cannot be
+  # reached black-box, observe the mechanism via a `tp` rather than fake the state.
   use ExUnit.Case, async: false
   use Snabbkaffe
 
@@ -1955,6 +1966,51 @@ defmodule Forum.MusterDistributedTest do
           # stale watermark, yet T recovered anyway.
           assert result.s2_seq < result.stale_seq
         end
+      )
+    end
+  end
+
+  describe "re-discovery backstop (rediscover/1)" do
+    setup do
+      scope = :"muster_rediscover_#{System.unique_integer([:positive])}"
+      # Fast heartbeat so the periodic re-discovery sweep fires on its own; the
+      # test perturbs nothing — it just observes the natural heartbeat.
+      start_supervised!(
+        spec(scope, view_heartbeat_interval_ms: 150, vacant_flush_interval_ms: 100)
+      )
+
+      %{scope: scope}
+    end
+
+    # The gap rediscover/1 closes: a coordinator that crashes and restarts IN
+    # PLACE re-pairs only via the single :muster_discover its init broadcasts — no
+    # :nodeup re-fires (the dist connection never dropped) and peers dropped it on
+    # its old pid's :DOWN, so they won't reach back out. If that lone discovery is
+    # lost, nothing else heals the edge: the announce heartbeat and member_views
+    # only ever talk to nodes ALREADY in `members`. rediscover/1 makes the
+    # heartbeat re-offer discovery to every connected non-member, bounding
+    # worst-case stranding to one interval.
+    #
+    # Black-box (see the file header): we can neither drop a message nor fabricate
+    # a stranded coordinator without a mock or state surgery. So we observe the
+    # mechanism directly — a node connected at the dist layer but running no
+    # Muster (a genuine connected non-member) must be re-offered :muster_discover
+    # on the heartbeat. Together with the convergence tests above (a received
+    # discover leads to pairing), this covers the heal end to end.
+    test "the heartbeat re-offers discovery to a connected non-member", %{scope: scope} do
+      check_trace(
+        fn ->
+          # A bare node: connected to us (Peer.start calls Node.connect) but
+          # running no Muster scope, so it never enters `members` and never sends
+          # a discover of its own — the only thing that can reach it is our
+          # heartbeat's rediscover/1.
+          {:ok, _p1, n1} = Peer.start()
+          wait_until(fn -> n1 in Node.list() end)
+          refute n1 in Muster.members(scope)
+
+          assert {:ok, _} = block_until(%{:"$kind" => :muster_rediscover, target: ^n1}, 5_000)
+        end,
+        fn _trace -> :ok end
       )
     end
   end
