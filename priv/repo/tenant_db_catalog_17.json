@@ -1486,6 +1486,46 @@
       "comment": null,
       "owner": "supabase_realtime_admin"
     },
+    "index:realtime.subscription.ix_realtime_subscription_entity": {
+      "schema": "realtime",
+      "table_name": "subscription",
+      "name": "ix_realtime_subscription_entity",
+      "storage_params": [],
+      "statistics_target": [
+        -1
+      ],
+      "index_type": "btree",
+      "tablespace": null,
+      "is_unique": false,
+      "is_primary": false,
+      "is_exclusion": false,
+      "nulls_not_distinct": false,
+      "immediate": true,
+      "is_clustered": false,
+      "is_replica_identity": false,
+      "key_columns": [
+        4
+      ],
+      "column_collations": [
+        null
+      ],
+      "operator_classes": [
+        "default"
+      ],
+      "column_options": [
+        0
+      ],
+      "index_expressions": null,
+      "partial_predicate": null,
+      "table_relkind": "r",
+      "is_owned_by_constraint": false,
+      "is_partitioned_index": false,
+      "is_index_partition": false,
+      "parent_index_name": null,
+      "definition": "CREATE INDEX ix_realtime_subscription_entity ON realtime.subscription USING btree (entity)",
+      "comment": null,
+      "owner": "supabase_realtime_admin"
+    },
     "index:realtime.subscription.subscription_subscription_id_entity_filters_action_filter_selec": {
       "schema": "realtime",
       "table_name": "subscription",
@@ -1543,46 +1583,6 @@
       "is_index_partition": false,
       "parent_index_name": null,
       "definition": "CREATE UNIQUE INDEX subscription_subscription_id_entity_filters_action_filter_selec ON realtime.subscription USING btree (subscription_id, entity, filters, action_filter, COALESCE(selected_columns, '{}'::text[]))",
-      "comment": null,
-      "owner": "supabase_realtime_admin"
-    },
-    "index:realtime.subscription.ix_realtime_subscription_entity": {
-      "schema": "realtime",
-      "table_name": "subscription",
-      "name": "ix_realtime_subscription_entity",
-      "storage_params": [],
-      "statistics_target": [
-        -1
-      ],
-      "index_type": "btree",
-      "tablespace": null,
-      "is_unique": false,
-      "is_primary": false,
-      "is_exclusion": false,
-      "nulls_not_distinct": false,
-      "immediate": true,
-      "is_clustered": false,
-      "is_replica_identity": false,
-      "key_columns": [
-        4
-      ],
-      "column_collations": [
-        null
-      ],
-      "operator_classes": [
-        "default"
-      ],
-      "column_options": [
-        0
-      ],
-      "index_expressions": null,
-      "partial_predicate": null,
-      "table_relkind": "r",
-      "is_owned_by_constraint": false,
-      "is_partitioned_index": false,
-      "is_index_partition": false,
-      "parent_index_name": null,
-      "definition": "CREATE INDEX ix_realtime_subscription_entity ON realtime.subscription USING btree (entity)",
       "comment": null,
       "owner": "supabase_realtime_admin"
     }
@@ -3014,22 +3014,22 @@
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages.binary_payload",
-      "deptype": "a"
+      "deptype": "n"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages.binary_payload",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
-      "referenced_stable_id": "column:realtime.messages.payload",
       "deptype": "a"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages.payload",
       "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
+      "referenced_stable_id": "column:realtime.messages.payload",
+      "deptype": "a"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_pkey",
@@ -3054,12 +3054,12 @@
     {
       "dependent_stable_id": "constraint:realtime.subscription.subscription_action_filter_check",
       "referenced_stable_id": "column:realtime.subscription.action_filter",
-      "deptype": "a"
+      "deptype": "n"
     },
     {
       "dependent_stable_id": "constraint:realtime.subscription.subscription_action_filter_check",
       "referenced_stable_id": "column:realtime.subscription.action_filter",
-      "deptype": "n"
+      "deptype": "a"
     },
     {
       "dependent_stable_id": "defacl:supabase_admin:f:schema:realtime:grantee:dashboard_user",
