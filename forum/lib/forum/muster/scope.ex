@@ -399,10 +399,7 @@ defmodule Forum.Muster.Scope do
 
   @impl true
   def handle_continue(:discover, state) do
-    state.message_module.broadcast(
-      state.scope,
-      {:muster_discover, self(), own_view_hash(state), state.view_seq}
-    )
+    state.message_module.broadcast(state.scope, discover_msg(state))
 
     schedule_view_heartbeat(state)
     schedule_tombstone_sweep(state)
@@ -542,11 +539,7 @@ defmodule Forum.Muster.Scope do
 
     :telemetry.execute([:forum, state.scope, :node, :up], %{}, %{node: node})
 
-    state.message_module.send(
-      state.scope,
-      node,
-      {:muster_discover, self(), own_view_hash(state), state.view_seq}
-    )
+    state.message_module.send(state.scope, node, discover_msg(state))
 
     {:noreply, state}
   end
@@ -620,14 +613,18 @@ defmodule Forum.Muster.Scope do
     end
   end
 
-  # Periodic re-announce of our current view to every member. The event-driven
-  # path (rebalance announcements + the discovery handshake) normally converges
+  # Periodic re-announce of our current view to every member, plus a re-discovery
+  # sweep (rediscover/1) to any connected non-member. The event-driven path
+  # (rebalance announcements + the discovery handshake) normally converges
   # member_views in milliseconds; this heartbeat is the backstop that heals a
-  # dropped announcement without needing a membership change, bounding the
-  # worst-case "stuck flooding as a router" window to one interval. Idempotent
-  # with member_views (latest-wins), so a redundant heartbeat is harmless.
+  # dropped announcement — and a dropped discovery — without needing a membership
+  # change, bounding both the worst-case "stuck flooding as a router" window and
+  # the worst-case "restarted in place but never re-paired" window to one
+  # interval. Idempotent with member_views (latest-wins) and with discovery
+  # (register_peer no-ops a known peer), so a redundant heartbeat is harmless.
   def handle_info(:view_heartbeat, state) do
     announce_view(state)
+    rediscover(state)
     schedule_view_heartbeat(state)
     {:noreply, state}
   end
@@ -993,6 +990,44 @@ defmodule Forum.Muster.Scope do
   end
 
   ## View announce / RPC workers
+
+  defp discover_msg(state) do
+    {:muster_discover, self(), own_view_hash(state), state.view_seq}
+  end
+
+  # Periodic re-discovery backstop. The one-shot :muster_discover broadcast in
+  # handle_continue(:discover) is the ONLY thing that re-pairs a coordinator that
+  # restarted IN PLACE: its dist connection never dropped, so no :nodeup re-fires,
+  # and every peer dropped it on its old pid's :DOWN, so peers won't reach back
+  # out either. If that lone announcement is lost (a peer mid-restart hadn't
+  # re-subscribed yet, or a transient transport drop), nothing else heals the edge
+  # — announce_view only ever talks to nodes already in `members`. So on each
+  # heartbeat we re-offer discovery to every connected node that is not yet a
+  # member, bounding worst-case stranding to one heartbeat interval.
+  #
+  # Heals symmetrically: re-pairs a peer that missed OUR announcement, and — when
+  # WE are the stranded island (members == [node()] after our own restart) —
+  # re-offers us to everyone connected. Idempotent: an already-paired node is a
+  # member and excluded here, and register_peer no-ops a duplicate pid anyway. A
+  # connected node not running this scope has no subscriber and ignores it. Like
+  # announce_view this is local work + fire-and-forget sends only, so the Scope
+  # loop never blocks.
+  defp rediscover(state) do
+    case Node.list() -- state.members do
+      [] ->
+        :ok
+
+      unpaired ->
+        msg = discover_msg(state)
+
+        Enum.each(unpaired, fn target ->
+          state.message_module.send(state.scope, target, msg)
+          tp(:muster_rediscover, %{scope: state.scope, node: node(), target: target})
+        end)
+
+        :ok
+    end
+  end
 
   # Re-announce our current view to every other member (newest-seq-wins on their
   # side). Members we still owe a rebalance snapshot are skipped: their marker is

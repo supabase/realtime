@@ -54,9 +54,13 @@ defmodule Forum.Muster do
     their router nodes in per-router batches (default: 5_000). A failed
     batch re-queues its groups, so this also bounds the retry cadence.
   * `:view_heartbeat_interval_ms` — how often each node re-announces its current
-    cluster-view hash to peers (default: 10_000). This is the readiness-barrier
-    backstop: it heals a dropped view announcement without a membership change,
-    bounding the worst-case "router floods instead of targeting" window.
+    cluster-view hash to peers AND re-offers discovery to any connected
+    non-member (default: 10_000). This is the readiness-barrier and re-discovery
+    backstop: it heals a dropped view announcement — and a dropped discovery (e.g.
+    a coordinator that restarted in place, whose one-shot discovery was lost) —
+    without a membership change, bounding both the worst-case "router floods
+    instead of targeting" window and the worst-case "restarted but never
+    re-paired" window to one interval.
   * `:rpc_timeout_ms` — timeout for router-node RPCs (default: 5_000).
   * `:rebalance_gather_timeout_ms` — timeout for the synchronous in-VM call the
     coordinator makes to each claim shard to gather its held groups during a
