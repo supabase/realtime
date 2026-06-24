@@ -942,6 +942,47 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert_process_down(socket.channel_pid)
     end
 
+    @tag policies: [:authenticated_all_topic_read]
+    test "disconnects when only presence read permission is revoked on new access_token", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      assert socket =
+               subscribe_and_join!(socket, "realtime:test", %{
+                 "config" => %{"private" => true, "presence" => %{"enabled" => true}}
+               })
+
+      assert socket.assigns.policies == %Realtime.Tenants.Authorization.Policies{
+               broadcast: %Realtime.Tenants.Authorization.Policies.BroadcastPolicies{read: true, write: nil},
+               presence: %Realtime.Tenants.Authorization.Policies.PresencePolicies{read: true, write: nil}
+             }
+
+      new_token =
+        Generators.generate_jwt_token(tenant, %{
+          exp: System.system_time(:second) + 10_000,
+          role: "authenticated",
+          sub: "123"
+        })
+
+      assert new_token != jwt
+
+      # Replace policies so broadcast read is still allowed but presence read is revoked
+      {:ok, db_conn} = Realtime.Database.connect(tenant, "realtime_test")
+      clean_table(db_conn, "realtime", "messages")
+      create_rls_policies(db_conn, [:authenticated_read_broadcast], %{topic: "test"})
+
+      push(socket, "access_token", %{"access_token" => new_token})
+
+      assert_push "system", %{
+        extension: "system",
+        status: "error",
+        message: "You no longer have permission to read from this Channel topic: test"
+      }
+
+      # Channel closes
+      assert_process_down(socket.channel_pid)
+    end
+
     test "new valid access_token but Connect timed out", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
