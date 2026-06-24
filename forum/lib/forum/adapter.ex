@@ -18,7 +18,7 @@ defmodule Forum.Adapter do
   @doc """
   Synchronously invoke a function on a remote node and return its result.
 
-  This is a generic RPC primitive — the adapter has no opinion about what
+  This is a generic RPC primitive: the adapter has no opinion about what
   the remote callee does. Caller specifies the `module`, `function`, and
   `args` to invoke; the adapter is responsible only for transport (e.g.
   `:erpc.call`, `:gen_rpc.call`, or any other RPC mechanism).

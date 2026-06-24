@@ -7,48 +7,46 @@ defmodule Forum.Muster.Shard do
   # Forum.Partition. A shard owns BOTH halves of a group's local story for its
   # slice of groups:
   #
-  #   1. Membership — which local pids belong to each group and the
-  #      `Process.monitor` that fires when a member dies. This is a slimmer version
-  #      of the job Forum.Partition does for Forum.Census, inlined here (NOT
-  #      delegated to a Forum.Partition process) and WITHOUT Census's O(1) counts
+  #   1. Membership: which local pids belong to each group and the
+  #      `Process.monitor` that fires when a member dies. Membership is inlined here
+  #      (NOT delegated to a Forum.Partition process) and WITHOUT an O(1) counts
   #      table: the claim state machine only needs "is there ≥1 local member" and
   #      "did this removal take us to 0", both derived on demand from the entries
   #      table (an :ordered_set, so a group's members are contiguous and a bounded
   #      prefix scan answers those in ~O(members-of-group), not a full-table scan).
   #      So for Muster:
-  #        * a join is a SINGLE process hop — the shard registers the member and
-  #          resolves the router claim in one handler, instead of calling out to a
-  #          separate Partition GenServer and blocking on its reply;
+  #        * a join is a SINGLE process hop: the shard registers the member and
+  #          resolves the router claim in one handler, without calling out to a
+  #          separate GenServer and blocking on its reply;
   #        * the monitor that drives vacancy is owned by THIS process, so the last
   #          member leaving transitions the claim state machine directly in the
-  #          DOWN handler — no `[:forum, scope, :group, :vacant]` telemetry hop and
-  #          no cross-process race between "count hit 0" and "the shard learns".
-  #   2. The per-group claim state machine — the "have I told the router about
-  #      this group?" question — so that a storm of first-member claims for
+  #          DOWN handler, with no telemetry hop and no cross-process race between
+  #          "count hit 0" and "the shard learns".
+  #   2. The per-group claim state machine (the "have I told the router about
+  #      this group?" question) so that a storm of first-member claims for
   #      distinct groups spreads across N mailboxes instead of serializing through
   #      the single Forum.Muster.Scope coordinator.
   #
   # Owns (all ETS tables are Forum.Supervisor-owned, so they SURVIVE a shard
   # crash; on restart the shard rebuilds its process-local state from them):
-  #   * entries_table (`{group, pid}` keys, an :ordered_set) — the SINGLE source of
+  #   * entries_table (`{group, pid}` keys, an :ordered_set): the SINGLE source of
   #     truth for membership. Member counts are NOT stored; they are derived from
   #     this table when needed (member_count/2, the "is the group now empty" check
   #     on removal, and the set of occupied groups during restart reconciliation).
-  #   * states_table (group => group_state) — the claim state machine, the SINGLE
+  #   * states_table (group => group_state): the claim state machine, the SINGLE
   #     source of truth for "what have we told the router". The shard keeps no
   #     in-memory copy; it reads and writes the table directly. On restart it
   #     reconciles the table against the live member counts (see
   #     rebuild_group_states/1) and therefore never forgets an outstanding router
   #     assertion (a :cooldown / :vacant_queued / :vacant_flushing /
-  #     :occupied_pending group) — closing the stale-router-entry leak the old
-  #     "re-adopt only live partition groups" rebuild left behind.
-  #   * monitors — the {group, pid} => ref map for installed member monitors.
+  #     :occupied_pending group), so no router is left holding a stale entry.
+  #   * monitors: the {group, pid} => ref map for installed member monitors.
   #     Process-local (monitor refs cannot survive a crash); rebuilt from
   #     entries_table on restart.
-  #   * cooldown_timers — the "recently vacant" suppression timers. Process-local
+  #   * cooldown_timers: the "recently vacant" suppression timers. Process-local
   #     for the same reason; re-armed from the table on restart. (The
   #     :occupied_pending waiters live in the table tuple; they go stale on a crash
-  #     and are simply not replied to — the callers' join calls already exited.)
+  #     and are simply not replied to, since the callers' join calls already exited.)
   #   * A periodic vacant flush of its own :vacant_queued groups, in per-router
   #     batches; a failed batch re-queues, so the flush doubles as a
   #     self-draining retry.
@@ -57,14 +55,14 @@ defmodule Forum.Muster.Shard do
   # occupancy table, the readiness barrier, snapshot apply, and rebalance
   # orchestration all live in Forum.Muster.Scope. A shard reads the (shared,
   # ETS-backed) ring directly and writes the (:public) occupancy table directly,
-  # and it NEVER synchronously calls the coordinator — so the coordinator can
+  # and it NEVER synchronously calls the coordinator, so the coordinator can
   # synchronously call shards during a rebalance without any deadlock risk.
   #
   # Write-ordering invariant (crash safety): handle_join commits the DURABLE
   # state BEFORE the externally-visible occupancy assertion, so any crash leaves
   # a state restart reconciliation can drive to consistency.
   #   * Remote router: write :occupied_pending, THEN dispatch the :occupied RPC.
-  #     A crash in the dispatch→state-write window is recoverable — the durable
+  #     A crash in the dispatch/state-write window is recoverable: the durable
   #     :occupied_pending (no live member) reconciles to :vacant_queued and the
   #     flush retracts whatever row the orphaned (monitored, not linked) worker
   #     lands. Dispatching first would lose the record and strand the router row.
@@ -89,7 +87,7 @@ defmodule Forum.Muster.Shard do
             | {:occupied_pending, [{GenServer.from(), pid}]}
             | :vacant_flushing
 
-    # The per-group state machine is NOT held here — it lives in `states_table`
+    # The per-group state machine is NOT held here; it lives in `states_table`
     # (Supervisor-owned ETS, group => group_state), the single source of truth.
     # `monitors` and `cooldown_timers` are the only process-local state: monitor
     # refs and timer refs are runtime handles that cannot survive a crash and are
@@ -126,7 +124,7 @@ defmodule Forum.Muster.Shard do
   @default_vacant_flush_interval_ms 5_000
   @default_rpc_timeout_ms 5_000
 
-  ## Membership reads (static ETS reads — no process hop, run in the caller).
+  ## Membership reads (static ETS reads, no process hop, run in the caller).
 
   @spec member_count(atom, Forum.group()) :: non_neg_integer
   def member_count(scope, group) do
@@ -234,21 +232,20 @@ defmodule Forum.Muster.Shard do
     %{state | monitors: monitors}
   end
 
-  # On (re)start, reconcile the state machine — which lives in the durable states
-  # table (Supervisor-owned, so it survived our crash) — against the live
+  # On (re)start, reconcile the state machine (which lives in the durable states
+  # table, Supervisor-owned, so it survived our crash) against the live
   # membership the entries table implies (the set of groups with ≥1 member). The
   # states table is the source of truth, so we reconcile it IN PLACE; we do not
-  # rebuild a separate copy. Unlike a from-scratch "adopt only live groups" rebuild,
-  # this RETAINS the empty-group "outstanding assertion" states — so a group we had
-  # told a router about
+  # rebuild a separate copy. We RETAIN the empty-group "outstanding assertion"
+  # states, so a group we had told a router about
   # (:cooldown / :vacant_queued / :vacant_flushing / :occupied_pending) is still
   # driven to retraction after the restart, and no router is left believing we hold
-  # a group we don't (the stale-entry leak).
+  # a group we don't.
   #
   # The two transient parts of the state the table cannot carry across a crash are
   # reconstructed:
-  #   * cooldown TIMER refs (process-local) — re-armed fresh here for :cooldown.
-  #   * :occupied_pending WAITERS — the froms in the stored tuple are stale (their
+  #   * cooldown TIMER refs (process-local): re-armed fresh here for :cooldown.
+  #   * :occupied_pending WAITERS: the froms in the stored tuple are stale (their
   #     join GenServer.calls already exited when we crashed; callers retry). We never
   #     reply to them; we just resolve the group from the live count.
   defp rebuild_group_states(state) do
@@ -278,7 +275,7 @@ defmodule Forum.Muster.Shard do
     # invariant "live local-router member ⟹ occupancy row present". The fresh seq
     # is strictly higher than any pre-crash write, so upsert_if_newer wins (and is
     # a harmless bump for rows that already exist). Remote-router groups need no
-    # re-assertion — their row lives on another node, untouched by our crash.
+    # re-assertion: their row lives on another node, untouched by our crash.
     Enum.each(live, fn group ->
       if router_from_state(state, group) == node() do
         Scope.upsert_if_newer(state.occupancy_table, {group, node()}, next_seq())
@@ -308,7 +305,7 @@ defmodule Forum.Muster.Shard do
         put_group_state(state, group, :occupied)
 
       durable_state in [:occupied, :cooldown] ->
-        # Was occupied (or cooling down) and is now empty — re-enter cooldown so a
+        # Was occupied (or cooling down) and is now empty: re-enter cooldown so a
         # quick re-join still costs no RPC; the timer drives it to :vacant_queued.
         # This is also where a :vacant event dropped while we were restarting gets
         # caught (the durable :occupied + empty count reveals it).
@@ -333,17 +330,17 @@ defmodule Forum.Muster.Shard do
 
   ## handle_call
 
-  # Local source — Muster.join asking us to register a member and (if it is the
-  # first) claim this group on its router. Handles every group_state, so the old
-  # Muster.join "count > 0" fast path is gone: an already-:occupied group just
-  # registers the member, a :cooldown / :vacant_* group is reclaimed without re-
-  # notifying the router where possible, and nil dispatches the :occupied claim.
+  # Local source: Muster.join asking us to register a member and (if it is the
+  # first) claim this group on its router. Handles every group_state: an
+  # already-:occupied group just registers the member, a :cooldown / :vacant_*
+  # group is reclaimed without re-notifying the router where possible, and nil
+  # dispatches the :occupied claim.
   @impl true
   def handle_call({:join, group, pid}, from, state) do
     handle_join(group, pid, from, state)
   end
 
-  # Local source — Muster.leave removing a member. Mirrors a member DOWN.
+  # Local source: Muster.leave removing a member. Mirrors a member DOWN.
   def handle_call({:leave, group, pid}, _from, state) do
     {:reply, :ok, remove_member(state, group, pid)}
   end
@@ -354,7 +351,7 @@ defmodule Forum.Muster.Shard do
   #   * find_node/2 returns the NEW router, find_historical_node(_, _, 1) the OLD.
   #   * because our mailbox is FIFO, every in-flight claim's occupancy write /
   #     :occupied dispatch was processed before this call, so the held set we
-  #     return is COMPLETE — the coordinator can build a complete per-router
+  #     return is COMPLETE: the coordinator can build a complete per-router
   #     snapshot from it (the "one complete snapshot per source" invariant).
   #
   # We do three things and reply with our held set:
@@ -363,8 +360,8 @@ defmodule Forum.Muster.Shard do
   #      router; the in-flight worker's result lands in the catch-all and is
   #      dropped.
   #   2) Settle every :occupied_pending group whose router CHANGED: register the
-  #      waiters and reply :ok optimistically, then move to :occupied. Safe — and
-  #      done here rather than after the snapshot dispatch — because :status is
+  #      waiters and reply :ok optimistically, then move to :occupied. Safe (and
+  #      done here rather than after the snapshot dispatch) because :status is
   #      :rebalancing throughout, so senders flood (router/2) rather than target a
   #      not-yet-populated occupancy row. The coordinator includes these groups in
   #      the snapshot it sends right after gathering us. Their original
@@ -378,7 +375,7 @@ defmodule Forum.Muster.Shard do
     {:reply, {:held, held_groups(state)}, state}
   end
 
-  # Introspection — the coordinator folds every shard's group_states together to
+  # Introspection: the coordinator folds every shard's group_states together to
   # answer Muster.dump/1 and the :status call used by tests.
   def handle_call(:group_states, _from, state) do
     {:reply, Map.new(all_group_states(state)), state}
@@ -388,7 +385,7 @@ defmodule Forum.Muster.Shard do
 
   # A monitored local member died. Remove it (entry + counter + monitor); if it was
   # the last member of the group, remove_member/3 drives the vacancy transition
-  # directly — no telemetry, no cross-process hop.
+  # directly, with no telemetry and no cross-process hop.
   @impl true
   def handle_info({{:DOWN, group}, _ref, :process, pid, _reason}, state) do
     {:noreply, remove_member(state, group, pid)}
@@ -418,7 +415,7 @@ defmodule Forum.Muster.Shard do
 
   def handle_info(_msg, state), do: {:noreply, state}
 
-  ## State machine — join
+  ## State machine: join
 
   defp handle_join(group, pid, from, state) do
     case get_group_state(state, group) do
@@ -489,7 +486,7 @@ defmodule Forum.Muster.Shard do
         # lands in handle_vacant_batch_done's catch-all (state is no longer
         # :vacant_flushing) and is dropped. Both the batch and the re-claim are
         # dispatched from THIS shard (same group → same shard), so their dispatch
-        # order — and thus their seq order — is well defined.
+        # order, and thus their seq order, is well defined.
         router_node = router_from_state(state, group)
 
         if router_node == node() do
@@ -498,7 +495,7 @@ defmodule Forum.Muster.Shard do
           )
 
           # Same write ordering as the nil branch: membership + state first, the
-          # occupancy row last (crash-safe — see the nil branch above).
+          # occupancy row last (crash-safe; see the nil branch above).
           state = register_member(state, group, pid)
           state = put_group_state(state, group, :occupied)
           Scope.upsert_if_newer(state.occupancy_table, {group, node()}, next_seq())
@@ -508,7 +505,7 @@ defmodule Forum.Muster.Shard do
             "Muster[#{node()}|#{state.scope}] join #{inspect(group)}: reclaim from #{vacant}, dispatching :occupied to router #{inspect(router_node)}"
           )
 
-          # Durable :occupied_pending before dispatch (crash-safe — see nil branch).
+          # Durable :occupied_pending before dispatch (crash-safe; see nil branch).
           state = put_group_state(state, group, {:occupied_pending, [{from, pid}]})
           dispatch_rpc(:occupied, group, router_node, state)
           {:noreply, state}
@@ -516,12 +513,11 @@ defmodule Forum.Muster.Shard do
     end
   end
 
-  ## Membership writes (inlined from the old Forum.Partition; the monitor that
-  ## drives vacancy is owned by this shard).
+  ## Membership writes (the monitor that drives vacancy is owned by this shard).
 
   # Register a (now-claimed) local member: insert the entry and monitor the pid
-  # (tagged so its DOWN routes back here). Doing this inside the shard — rather than
-  # in the caller after a claim returns — guarantees the monitored entry is
+  # (tagged so its DOWN routes back here). Doing this inside the shard, rather than
+  # in the caller after a claim returns, guarantees the monitored entry is
   # installed as part of resolving the join, so the router is never left believing
   # we hold a group that has no live local member (e.g. if the caller dies right
   # after the join). If `pid` is already dead the monitor's immediate DOWN drives
@@ -600,7 +596,7 @@ defmodule Forum.Muster.Shard do
         # Cooldown elapsed while still empty. A re-join during cooldown would have
         # cancelled this timer and moved the group back to :occupied in handle_join
         # (joins and membership now share this process), so reaching here means the
-        # slice is genuinely still vacant — no live-count recheck is needed. Queue
+        # slice is genuinely still vacant, so no live-count recheck is needed. Queue
         # the vacancy; the periodic flush groups all queued vacancies by current
         # router, sends one batched RPC per router, and re-queues any that fail.
         Logger.debug(
@@ -647,8 +643,8 @@ defmodule Forum.Muster.Shard do
         end
 
       _ ->
-        # Out-of-band — e.g. the group was settled by a rebalance (now :occupied)
-        # before this old-router worker returned. Drop.
+        # Out-of-band (e.g. the group was settled by a rebalance, now :occupied,
+        # before this old-router worker returned). Drop.
         {:noreply, state}
     end
   end
@@ -658,7 +654,7 @@ defmodule Forum.Muster.Shard do
   # flush retries (this is what drains stale router entries). A group that was
   # re-claimed while the batch was in flight is no longer :vacant_flushing
   # (handle_join moved it straight to :occupied/:occupied_pending), so it falls
-  # through the catch-all here — the seq guard already kept the in-flight DELETE
+  # through the catch-all here; the seq guard already kept the in-flight DELETE
   # from clobbering its fresh :occupied INSERT.
   defp handle_vacant_batch_done(groups, result, state) do
     success? = not match?({:error, _}, result)
@@ -669,7 +665,7 @@ defmodule Forum.Muster.Shard do
       )
     else
       Logger.warning(
-        "Muster[#{node()}|#{state.scope}] vacant batch RPC failed for #{length(groups)} group(s): #{inspect(result)} — re-queuing"
+        "Muster[#{node()}|#{state.scope}] vacant batch RPC failed for #{length(groups)} group(s): #{inspect(result)}, re-queuing"
       )
     end
 
@@ -726,7 +722,7 @@ defmodule Forum.Muster.Shard do
   #
   # :vacant_queued entries are kept as-is (handled by the catch-all): we don't
   # hold the group, so it is not announced, but the next flush after the ring
-  # updates sends the vacant to the group's *current* router — which drains any
+  # updates sends the vacant to the group's *current* router, which drains any
   # stale entry the old router still holds.
   #
   # :vacant_flushing (a batch RPC in flight) is rewritten to :vacant_queued so
@@ -740,7 +736,7 @@ defmodule Forum.Muster.Shard do
 
   # Settle every :occupied_pending group whose router changed: reply :ok to the
   # waiters and move to :occupied. Groups whose router did NOT change are left
-  # alone — their original in-flight worker is still talking to the correct
+  # alone: their original in-flight worker is still talking to the correct
   # router, so handle_occupied_done will settle them normally.
   defp settle_moved_pending(state) do
     Enum.reduce(pending_groups(state), state, fn {group, waiters}, st ->
@@ -876,7 +872,7 @@ defmodule Forum.Muster.Shard do
     :ets.select(state.states_table, [{{:"$1", value}, [], [:"$1"]}])
   end
 
-  # Groups the coordinator must snapshot during a rebalance — those we still hold:
+  # Groups the coordinator must snapshot during a rebalance, those we still hold:
   # :occupied, :cooldown, or {:occupied_pending, _}. One multi-clause select.
   defp held_groups(state) do
     :ets.select(state.states_table, [
@@ -914,7 +910,7 @@ defmodule Forum.Muster.Shard do
   # Per-source monotonic occupancy stamp. VM-global and strictly increasing, so
   # it reflects dispatch order on this node and survives restarts. Only ever
   # compared at a router for the same {group, source} key, all of whose writes
-  # originate on this node — so the comparison is always within one VM's
+  # originate on this node, so the comparison is always within one VM's
   # sequence. See the occupancy-row versioning note above Scope.occupied/4.
   defp next_seq, do: :erlang.unique_integer([:monotonic])
 

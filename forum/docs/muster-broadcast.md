@@ -1,7 +1,7 @@
 # Broadcasting through Muster's router node
 
 `Forum.Muster` answers one question: *given a group, which nodes hold local
-members of it?* — and lets you route a fan-out broadcast precisely instead of
+members of it?*, and lets you route a fan-out broadcast precisely instead of
 blasting every node in the cluster.
 
 The key thing to internalize: **Muster owns the routing decision, you supply the
@@ -24,14 +24,14 @@ nodes → local pids.*
 
 For each group, exactly one node is the **router**, chosen by consistent hashing
 ([`ex_hash_ring`](https://hexdocs.pm/ex_hash_ring)) over the sorted member list.
-Every node computes the same router independently from the same ring — no
+Every node computes the same router independently from the same ring: no
 consensus, the member list is the only input. The router owns an occupancy table
 keyed by `{group, source_node}`: the authoritative set of nodes a broadcast for
 that group must reach.
 
 ```mermaid
 flowchart TB
-    subgraph Ring["ExHashRing — identical on every node, members [A, B, C]"]
+    subgraph Ring["ExHashRing (identical on every node, members [A, B, C])"]
         direction LR
         G1["group :topic_1"] --> R1{{"consistent hash → Node B"}}
         G2["group :topic_2"] --> R2{{"consistent hash → Node C"}}
@@ -40,10 +40,10 @@ flowchart TB
     R1 --> RB
     R2 --> RC
 
-    subgraph RB["Node B — router for :topic_1"]
+    subgraph RB["Node B: router for :topic_1"]
         OB["occupancy table<br/>{:topic_1, A}<br/>{:topic_1, C}"]
     end
-    subgraph RC["Node C — router for :topic_2"]
+    subgraph RC["Node C: router for :topic_2"]
         OC["occupancy table<br/>{:topic_2, A}"]
     end
 ```
@@ -81,7 +81,7 @@ consistent hashing only remaps ~1/N of groups per node change.
 
 Putting it together. On a stable cluster you take the cheap single-router path;
 during a rebalance you fan out to all members. In both cases delivery to actual
-pids happens *on the node that owns them* — pids never leave their node.
+pids happens *on the node that owns them*: pids never leave their node.
 
 ```mermaid
 sequenceDiagram
@@ -109,7 +109,7 @@ sequenceDiagram
 ### Why this shape
 
 - **Precision.** On the stable path the caller contacts exactly one router, and
-  the router contacts exactly the source nodes that have members — not the whole
+  the router contacts exactly the source nodes that have members, not the whole
   cluster.
 - **Locality.** Only the node that owns a pid ever sends to it, so delivery
   scales with where members actually live.
