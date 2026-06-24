@@ -12,9 +12,11 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   alias Realtime.Api
   alias Realtime.Api.Tenant
   alias Realtime.Database
+  alias Realtime.Nodes
+  alias Realtime.Rpc
   alias Realtime.Tenants.Migrations
 
-  @pg_delta_filter ~s"""
+  @pgdelta_filter ~s"""
   {
     "and": [
       {"*/schema": "realtime"},
@@ -27,6 +29,8 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   @application_name "realtime_migrations"
   @catalog_major 17
   @query_timeout 60_000
+  @pgdelta_timeout @query_timeout * 2
+  @rpc_timeout @query_timeout * 3
   @schema_migrations_query "SELECT version, inserted_at FROM realtime.schema_migrations ORDER BY version DESC"
 
   @impl true
@@ -39,7 +43,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
        external_id: "",
        tenant: nil,
        schema_migrations: nil,
-       pg_delta: nil,
+       pgdelta: nil,
        catalog_version: nil,
        error: nil
      )}
@@ -50,14 +54,13 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     ref = String.trim(ref)
 
     with %Tenant{} = tenant <- Api.get_tenant_by_external_id(ref),
-         {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop),
-         {:ok, db_conn} <- Database.connect_db(settings) do
+         {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop) do
       {:noreply,
        assign(socket,
          external_id: ref,
          tenant: tenant,
-         schema_migrations: fetch_schema_migrations(db_conn),
-         pg_delta: run_pg_delta(settings),
+         schema_migrations: with_tenant_conn(settings, &fetch_schema_migrations/1),
+         pgdelta: run_pgdelta(tenant),
          catalog_version: @catalog_major,
          error: nil
        )}
@@ -66,7 +69,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
         {:noreply, assign_error(socket, ref, "Tenant not found")}
 
       {:error, reason} ->
-        log_warning("TenantMigrationsConnectFailed", reason)
+        log_error("TenantMigrationsConnectFailed", reason)
         {:noreply, assign_error(socket, ref, "Failed to connect to tenant DB: #{inspect(reason)}")}
     end
   end
@@ -77,7 +80,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
        external_id: "",
        tenant: nil,
        schema_migrations: nil,
-       pg_delta: nil,
+       pgdelta: nil,
        catalog_version: nil,
        error: nil
      )}
@@ -90,23 +93,16 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   end
 
   @impl true
-  def handle_event("apply_plan", _params, socket) do
-    %{tenant: %Tenant{} = tenant, external_id: ref, pg_delta: {:ok, %{status: :changes, sql: sql}}} = socket.assigns
+  def handle_event("apply", _params, socket) do
+    %{tenant: %Tenant{} = tenant, external_id: ref, pgdelta: pgdelta} = socket.assigns
 
-    case apply_pg_delta(tenant, sql) do
-      :ok ->
-        {:noreply, push_patch(socket, to: "/admin/dashboard/tenant_migrations?external_id=#{URI.encode(ref)}")}
+    sql =
+      case pgdelta do
+        {:ok, %{status: :changes, sql: sql}} -> sql
+        _ -> nil
+      end
 
-      {:error, msg} ->
-        {:noreply, assign(socket, error: msg)}
-    end
-  end
-
-  @impl true
-  def handle_event("backfill_migrations", _params, socket) do
-    %{tenant: %Tenant{} = tenant, external_id: ref, pg_delta: {:ok, %{status: :no_changes}}} = socket.assigns
-
-    case backfill_schema_migrations(tenant) do
+    case apply_pgdelta(tenant, sql) do
       :ok ->
         {:noreply, push_patch(socket, to: "/admin/dashboard/tenant_migrations?external_id=#{URI.encode(ref)}")}
 
@@ -146,12 +142,21 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
         <%= schema_migrations(@schema_migrations) %>
 
         <h6 class="mt-4">pg-delta plan vs catalog (PG<%= @catalog_version %>)</h6>
-        <%= pg_delta_plan(@pg_delta) %>
-
-        <%= backfill_section(@pg_delta, @schema_migrations) %>
+        <%= pgdelta_plan(@pgdelta, @schema_migrations) %>
       <% end %>
     </div>
     """
+  end
+
+  defp assign_error(socket, ref, msg) do
+    assign(socket,
+      external_id: ref,
+      tenant: nil,
+      schema_migrations: nil,
+      pgdelta: nil,
+      catalog_version: nil,
+      error: msg
+    )
   end
 
   defp schema_migrations(nil) do
@@ -201,12 +206,12 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     """
   end
 
-  defp pg_delta_plan(nil) do
+  defp pgdelta_plan(nil, _schema_migrations) do
     assigns = %{}
     ~H""
   end
 
-  defp pg_delta_plan({:error, msg}) do
+  defp pgdelta_plan({:error, msg}, _schema_migrations) do
     assigns = %{msg: msg}
 
     ~H"""
@@ -217,17 +222,42 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     """
   end
 
-  defp pg_delta_plan({:ok, %{status: :no_changes}}) do
-    assigns = %{}
+  defp pgdelta_plan({:ok, %{status: :no_changes}}, schema_migrations) do
+    total = length(Migrations.migrations())
+
+    applied =
+      case schema_migrations do
+        {:ok, rows} -> length(rows)
+        _ -> total
+      end
+
+    assigns = %{behind: applied < total, applied: applied, total: total}
 
     ~H"""
-    <div class="alert alert-success mb-0">
+    <div :if={@behind}>
+      <div class="alert alert-warning">
+        No schema drift, but realtime.schema_migrations has <%= @applied %> of <%= @total %> versions recorded.
+        Apply records the missing version(s) and sets tenants.migrations_ran to <%= @total %>.
+      </div>
+      <div class="d-flex justify-content-end mt-3">
+        <button
+          type="button"
+          class="btn btn-primary"
+          phx-click="apply"
+          phx-disable-with="Applying..."
+          data-confirm={"Record missing version(s) and set tenants.migrations_ran to #{@total}?"}
+        >
+          Apply
+        </button>
+      </div>
+    </div>
+    <div :if={not @behind} class="alert alert-success mb-0">
       No drift detected. Tenant schema matches the catalog.
     </div>
     """
   end
 
-  defp pg_delta_plan({:ok, %{status: :changes, sql: sql}}) do
+  defp pgdelta_plan({:ok, %{status: :changes, sql: sql}}, _schema_migrations) do
     assigns = %{sql: sql}
 
     ~H"""
@@ -259,7 +289,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
       <button
         type="button"
         class="btn btn-danger"
-        phx-click="apply_plan"
+        phx-click="apply"
         phx-disable-with="Applying..."
         data-confirm="Apply this SQL plan to the tenant database? This may include destructive statements and is irreversible."
       >
@@ -269,98 +299,30 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     """
   end
 
-  defp backfill_section(pg_delta, schema_migrations) do
-    total = length(Migrations.migrations())
-
-    {show, applied} =
-      case {pg_delta, schema_migrations} do
-        {{:ok, %{status: :no_changes}}, {:ok, rows}} ->
-          applied = length(rows)
-          {applied < total, applied}
-
-        _ ->
-          {false, nil}
-      end
-
-    assigns = %{show: show, applied: applied, total: total}
-
-    ~H"""
-    <div :if={@show}>
-      <h6 class="mt-4">Backfill schema_migrations</h6>
-      <div class="alert alert-warning">
-        realtime.schema_migrations has <%= @applied %> of <%= @total %> versions applied and pg-delta reports no drift.
-        Backfill inserts the missing rows and sets tenants.migrations_ran to <%= @total %>.
-      </div>
-      <div class="d-flex justify-content-end mt-3">
-        <button
-          type="button"
-          class="btn btn-primary"
-          phx-click="backfill_migrations"
-          phx-disable-with="Backfilling..."
-          data-confirm={"Insert missing version(s) into realtime.schema_migrations and set tenants.migrations_ran to #{@total}?"}
-        >
-          Backfill schema_migrations
-        </button>
-      </div>
-    </div>
+  defp insert_versions(conn, versions) do
+    insert = """
+    INSERT INTO realtime.schema_migrations (version, inserted_at)
+    SELECT unnest($1::bigint[]), NOW()
+    ON CONFLICT (version) DO NOTHING
     """
-  end
 
-  @doc false
-  def backfill_schema_migrations(%Tenant{external_id: external_id} = tenant) do
-    versions = Enum.map(Migrations.migrations(), fn {v, _mod} -> v end)
-    total = length(versions)
-
-    with {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop),
-         {:ok, db_conn} <- Database.connect_db(settings),
-         :ok <- insert_versions(db_conn, versions),
-         {:ok, _} <- Api.update_migrations_ran(external_id, total) do
-      :ok
-    else
-      {:error, %{postgres: %{message: message}}} ->
-        log_warning("TenantMigrationsBackfillFailed", message)
-        {:error, "Backfill failed: #{message}"}
-
-      {:error, reason} ->
-        log_warning("TenantMigrationsBackfillFailed", reason)
-        {:error, "Backfill failed: #{inspect(reason)}"}
+    case Postgrex.query(conn, insert, [versions], timeout: @query_timeout) do
+      {:ok, _} -> :ok
+      {:error, _} = err -> err
     end
   end
 
-  defp insert_versions(db_conn, versions) do
-    backfill_insert =
-      "INSERT INTO realtime.schema_migrations (version, inserted_at) VALUES ($1, NOW()) ON CONFLICT (version) DO NOTHING"
-
-    Enum.reduce_while(versions, :ok, fn version, _acc ->
-      case Postgrex.query(db_conn, backfill_insert, [version], timeout: @query_timeout) do
-        {:ok, _} -> {:cont, :ok}
-        {:error, _} = err -> {:halt, err}
-      end
-    end)
-  end
-
-  defp assign_error(socket, ref, msg) do
-    assign(socket,
-      external_id: ref,
-      tenant: nil,
-      schema_migrations: nil,
-      pg_delta: nil,
-      catalog_version: nil,
-      error: msg
-    )
-  end
-
-  defp fetch_schema_migrations(db_conn) do
-    case Postgrex.query(db_conn, @schema_migrations_query, [], timeout: @query_timeout) do
+  defp fetch_schema_migrations(conn) do
+    case Postgrex.query(conn, @schema_migrations_query, [], timeout: @query_timeout) do
       {:ok, %{rows: rows}} ->
         {:ok, Enum.map(rows, fn [v, ts] -> [to_string(v), format_ts(ts)] end)}
 
       {:error, %{postgres: %{message: message}}} ->
-        log_warning("TenantMigrationsSchemaMigrationsQueryError", message)
+        log_error("TenantMigrationsSchemaMigrationsQueryFailed", message)
         {:error, message}
 
       {:error, reason} ->
-        log_warning("TenantMigrationsSchemaMigrationsQueryFailed", reason)
+        log_error("TenantMigrationsSchemaMigrationsQueryFailed", reason)
         {:error, inspect(reason)}
     end
   end
@@ -397,16 +359,31 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
 
   @doc false
   # Used for debugging
-  def pg_delta_filter, do: @pg_delta_filter
+  def pgdelta_filter, do: @pgdelta_filter
 
   defp catalog_path do
     Application.app_dir(:realtime, "priv/repo/tenant_db_catalog_#{@catalog_major}.json")
   end
 
-  defp run_pg_delta(%Database{} = settings) do
+  @doc false
+  def run_pgdelta(%Tenant{external_id: external_id} = tenant) do
+    with {:ok, node, _region} <- Nodes.get_node_for_tenant(tenant),
+         {:ok, _} = result <-
+           Rpc.enhanced_call(node, __MODULE__, :run_pgdelta_tenant, [tenant],
+             timeout: @rpc_timeout,
+             tenant_id: external_id
+           ) do
+      result
+    else
+      {:error, :rpc_error, reason} -> {:error, "pg-delta RPC failed: #{inspect(reason)}"}
+      {:error, _} = err -> err
+    end
+  end
+
+  def run_pgdelta(%Database{} = settings) do
     case System.find_executable("pgdelta") do
       nil ->
-        log_warning("TenantMigrationsPgDeltaMissing", "pgdelta not found on PATH")
+        log_error("TenantMigrationsPgDeltaMissing", "pgdelta not found on PATH")
         {:error, "pgdelta not found on PATH"}
 
       path ->
@@ -419,50 +396,99 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
           "--target",
           catalog,
           "--filter",
-          pg_delta_filter(),
+          pgdelta_filter(),
           "--format",
           "sql"
         ]
 
         env = [
-          {"PGDELTA_CONNECTION_TIMEOUT_MS", Integer.to_string(@query_timeout)},
-          {"PGDELTA_CONNECT_TIMEOUT_MS", Integer.to_string(@query_timeout)}
+          {~c"PGDELTA_CONNECTION_TIMEOUT_MS", ~c"#{@query_timeout}"},
+          {~c"PGDELTA_CONNECT_TIMEOUT_MS", ~c"#{@query_timeout}"}
         ]
 
-        case System.cmd(path, args, stderr_to_stdout: true, env: env) do
+        case run_pgdelta_cmd(path, args, env) do
           {output, 0} ->
             {:ok, %{status: :no_changes, sql: output}}
 
           {output, 2} ->
             {:ok, %{status: :changes, sql: output}}
 
+          :timeout ->
+            log_error("TenantMigrationsPgDeltaTimeout", "killed after #{@pgdelta_timeout}ms")
+            {:error, "pg-delta timed out after #{div(@pgdelta_timeout, 1000)}s"}
+
           {output, code} ->
-            log_warning("TenantMigrationsPgDeltaNonZeroExit", "exit #{code}: #{output}")
+            log_error("TenantMigrationsPgDeltaNonZeroExit", "exit #{code}: #{output}")
             {:error, "pg-delta exited #{code}:\n#{output}"}
         end
     end
   end
 
+  defp run_pgdelta_cmd(path, args, env) do
+    port =
+      Port.open({:spawn_executable, path}, [:binary, :exit_status, :stderr_to_stdout, args: args, env: env])
+
+    collect_pgdelta(port, [])
+  end
+
+  defp collect_pgdelta(port, acc) do
+    receive do
+      {^port, {:data, data}} ->
+        collect_pgdelta(port, [acc | data])
+
+      {^port, {:exit_status, status}} ->
+        {IO.iodata_to_binary(acc), status}
+    after
+      @pgdelta_timeout ->
+        if Port.info(port), do: Port.close(port)
+        :timeout
+    end
+  end
+
   @doc false
-  def apply_pg_delta(%Tenant{external_id: external_id} = tenant, sql) do
-    opts = [query_type: :text, timeout: @query_timeout]
+  def run_pgdelta_tenant(%Tenant{} = tenant) do
+    with {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop) do
+      run_pgdelta(settings)
+    end
+  end
+
+  @doc false
+  def apply_pgdelta(%Tenant{external_id: external_id} = tenant, sql) do
     versions = Enum.map(Migrations.migrations(), fn {v, _mod} -> v end)
     total = length(versions)
 
     with {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop),
-         {:ok, db_conn} <- Database.connect_db(settings),
-         {:ok, _} <- Postgrex.query(db_conn, sql, [], opts),
-         :ok <- insert_versions(db_conn, versions),
+         :ok <- with_tenant_conn(settings, &apply_plan(&1, sql, versions)),
          {:ok, _} <- Api.update_migrations_ran(external_id, total) do
       :ok
     else
       {:error, %{postgres: %{message: message}}} ->
-        log_warning("TenantMigrationsApplyFailed", message)
+        log_error("TenantMigrationsApplyFailed", message)
         {:error, "Apply failed: #{message}"}
 
       {:error, reason} ->
-        log_warning("TenantMigrationsApplyFailed", reason)
+        log_error("TenantMigrationsApplyFailed", reason)
         {:error, "Apply failed: #{inspect(reason)}"}
+    end
+  end
+
+  defp apply_plan(conn, nil, versions), do: insert_versions(conn, versions)
+
+  defp apply_plan(conn, sql, versions) do
+    with {:ok, _} <- Postgrex.query(conn, sql, [], query_type: :text, timeout: @query_timeout) do
+      insert_versions(conn, versions)
+    end
+  end
+
+  defp with_tenant_conn(%Database{} = settings, fun) do
+    case Database.connect_db(%{settings | pool_size: 1}) do
+      {:ok, conn} ->
+        result = fun.(conn)
+        GenServer.stop(conn)
+        result
+
+      {:error, _} = err ->
+        err
     end
   end
 end

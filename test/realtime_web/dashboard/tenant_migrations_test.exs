@@ -71,7 +71,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
     assert has_element?(view, "h6", "pg-delta plan vs catalog")
   end
 
-  describe "backfill_schema_migrations/1" do
+  describe "apply_pgdelta/2 with nil sql (backfill)" do
     test "inserts missing versions and updates tenants.migrations_ran", %{tenant: tenant} do
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
 
@@ -83,7 +83,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
 
       {:ok, _} = Api.update_migrations_ran(tenant.external_id, 7)
 
-      assert :ok = TenantMigrations.backfill_schema_migrations(tenant)
+      assert :ok = TenantMigrations.apply_pgdelta(tenant, nil)
 
       %{rows: [[count]]} =
         Postgrex.query!(db_conn, "SELECT count(*)::int FROM realtime.schema_migrations", [])
@@ -99,8 +99,8 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
       total = length(Migrations.migrations())
 
-      assert :ok = TenantMigrations.backfill_schema_migrations(tenant)
-      assert :ok = TenantMigrations.backfill_schema_migrations(tenant)
+      assert :ok = TenantMigrations.apply_pgdelta(tenant, nil)
+      assert :ok = TenantMigrations.apply_pgdelta(tenant, nil)
 
       %{rows: [[count]]} =
         Postgrex.query!(db_conn, "SELECT count(*)::int FROM realtime.schema_migrations", [])
@@ -112,7 +112,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
     end
   end
 
-  describe "apply_pg_delta/2" do
+  describe "apply_pgdelta/2" do
     test "runs the sql plan and backfills schema_migrations", %{tenant: tenant} do
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
 
@@ -124,7 +124,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
 
       {:ok, _} = Api.update_migrations_ran(tenant.external_id, 7)
 
-      assert :ok = TenantMigrations.apply_pg_delta(tenant, "SELECT 1")
+      assert :ok = TenantMigrations.apply_pgdelta(tenant, "SELECT 1")
 
       %{rows: [[count]]} =
         Postgrex.query!(db_conn, "SELECT count(*)::int FROM realtime.schema_migrations", [])
