@@ -11,12 +11,12 @@ defmodule Forum.Muster.Scope do
   #     This process is the SOLE writer of those terms and of the ring's node
   #     set, which is exactly why sharding the claim path cannot weaken those
   #     two guarantees.
-  #   * Router-role occupancy table — when this node is the router for a group,
+  #   * Router-role occupancy table: when this node is the router for a group,
   #     the set of source nodes that hold it. :public so :erpc workers running
   #     the remote entry points (occupied/4, vacant_batch/4) and the local
   #     shards write it directly.
   #   * The readiness barrier: member_views, owed_snapshots, applied_snapshot_seq.
-  #   * Snapshot apply ({:apply_snapshot}) — serialized through this one process.
+  #   * Snapshot apply ({:apply_snapshot}), serialized through this one process.
   #   * Rebalance orchestration (do_rebalance), the view heartbeat, and the
   #     stale-router-entry sweep.
   #
@@ -37,7 +37,7 @@ defmodule Forum.Muster.Scope do
   @ring_depth 2
 
   # A vacancy tombstone is kept this many multiples of rpc_timeout_ms before the
-  # GC sweep reaps it — long enough that an orphaned, un-cancelled :occupied/
+  # GC sweep reaps it: long enough that an orphaned, un-cancelled :occupied/
   # snapshot RPC (whose only delay is scheduling/network, bounded by the erpc
   # timeout in a healthy cluster) can no longer land and resurrect the row.
   @tombstone_window_multiplier 5
@@ -71,11 +71,11 @@ defmodule Forum.Muster.Scope do
       peers: %{},
       # Barrier bookkeeping: each peer's most-recently-announced
       # {cluster-view hash, seq watermark} (via a :rebalance_marker, or seeded
-      # on the discovery handshake). Newest-seq-wins, never reset — so an
+      # on the discovery handshake). Newest-seq-wins, never reset, so an
       # announcement that arrives before we adopt that view is retained, and a
       # stale announcement arriving late (markers travel on more than one
-      # channel) cannot regress a newer one. We are "ready" — and our occupancy
-      # table can be trusted as a router — once every member's latest view agrees
+      # channel) cannot regress a newer one. We are "ready" (and our occupancy
+      # table can be trusted as a router) once every member's latest view agrees
       # with ours. The watermark is the seq of the peer's last announce round.
       member_views: %{},
       # Our own announce watermark, sent alongside every view announcement: the
@@ -94,7 +94,7 @@ defmodule Forum.Muster.Scope do
       # Router-role bookkeeping: the highest snapshot seq we have applied from
       # each source node (see handle_call({:apply_snapshot, ...})). A snapshot
       # whose seq is not strictly greater is a stale, reordered round and is
-      # dropped wholesale — this is what makes a *sequence* of overlapping
+      # dropped wholesale. This is what makes a *sequence* of overlapping
       # rebalances safe, since the apply is serialized through this process and a
       # late round can never resurrect a group a newer round already dropped.
       applied_snapshot_seq: %{}
@@ -106,7 +106,7 @@ defmodule Forum.Muster.Scope do
   @doc "Returns the list of nodes (as known by the local router state) holding `group`."
   @spec occupancy(atom, Forum.group()) :: [node]
   def occupancy(scope, group) do
-    # :present rows only — a tombstone (meta is an integer timestamp) reads as absent.
+    # :present rows only (a tombstone, whose meta is an integer timestamp, reads as absent).
     :ets.select(occupancy_table_name(scope), [{{{group, :"$1"}, :_, :present}, [], [:"$1"]}])
   end
 
@@ -118,17 +118,17 @@ defmodule Forum.Muster.Scope do
   # Occupancy rows are a uniform last-writer-wins-by-seq register, keyed by
   # {group, source} and shaped {{group, source}, seq, meta}:
   #
-  #   * meta == :present        — the source holds local members of the group.
-  #   * meta == <created_at ms>  — a TOMBSTONE: the source vacated the group as of
+  #   * meta == :present        : the source holds local members of the group.
+  #   * meta == <created_at ms>  : a TOMBSTONE. The source vacated the group as of
   #     `seq`. Kept (not deleted) so the seq guard works in BOTH directions. The
   #     covered direction is a stale, lower-seq DELETE losing to a live INSERT; the
   #     reverse is a stale, lower-seq INSERT (an `occupied`/snapshot whose RPC was
-  #     orphaned and — because :erpc does not cancel — lands late) which must NOT
+  #     orphaned and, because :erpc does not cancel, lands late) which must NOT
   #     resurrect a vacated group. Physically removing the row would discard the
   #     high-water seq and let that late INSERT win via insert_new. Tombstones are
   #     reaped by a periodic, time-windowed sweep (reap_tombstones/1) once older
   #     than the longest an in-flight RPC could still be (a multiple of
-  #     rpc_timeout_ms — see default_tombstone_window/1).
+  #     rpc_timeout_ms, see default_tombstone_window/1).
   #
   # `occupancy/2` returns only :present rows, so a tombstone reads as "absent".
 
@@ -259,7 +259,7 @@ defmodule Forum.Muster.Scope do
 
     # Tombstone each row (mark it absent at this batch's seq) rather than delete it.
     # A later `occupied`/snapshot for the same key (higher seq) still survives a
-    # stale, late DELETE — and, crucially, the reverse also holds: a stale, lower-
+    # stale, late DELETE, and, crucially, the reverse also holds: a stale, lower-
     # seq INSERT that lands AFTER this DELETE (an orphaned, un-cancelled :occupied/
     # snapshot RPC) is rejected by the seq guard instead of resurrecting the group.
     # Atomic per row.
@@ -289,13 +289,13 @@ defmodule Forum.Muster.Scope do
   *sequence* of overlapping rebalances safe: the coordinator applies a source's
   snapshots in mailbox order under a per-source seq guard, so a late or reordered
   round is dropped wholesale and can never resurrect a group a newer round already
-  dropped — a guarantee that concurrent direct ETS writes from parallel RPC
+  dropped, a guarantee that concurrent direct ETS writes from parallel RPC
   workers cannot give (the multi-row insert+delete is not atomic across workers).
 
   The snapshot still doubles as source_node's rebalance marker: the apply folds
   the occupancy write and the `member_views` update into one indivisible step
   (data first, then readiness). Because the call only returns once it has been
-  applied, "RPC returned ⟹ applied" — so when the sender clears `owed_snapshots`
+  applied, "RPC returned ⟹ applied", so when the sender clears `owed_snapshots`
   and resumes its view heartbeat to us, our data and marker are already in place.
   We pass `:infinity` for the inner call (it is a few ETS ops that never block);
   the sender's `:erpc` `:rpc_timeout_ms` is the real bound.
@@ -351,7 +351,7 @@ defmodule Forum.Muster.Scope do
     :ok = :net_kernel.monitor_nodes(true)
 
     # The occupancy table is created and OWNED by Forum.Supervisor (a long-lived
-    # sibling), not by us — so it survives a coordinator restart under the live
+    # sibling), not by us, so it survives a coordinator restart under the live
     # shards that write it directly. We only reference it by name. On our restart
     # the table retains the previous incarnation's rows; that is safe: members
     # resets to [node()] below so our view_hash mismatches every sender and
@@ -364,12 +364,12 @@ defmodule Forum.Muster.Scope do
     :ok = message_module.register(scope)
 
     # The ring is a supervised sibling (Forum.Supervisor starts it before us).
-    # Reset its node set to just us — on a coordinator restart members shrinks
+    # Reset its node set to just us: on a coordinator restart members shrinks
     # back to [node()] until peers re-discover us.
     {:ok, _} = Ring.set_nodes(ring_name(scope), [node()])
 
-    # Lifecycle tri-state: :rebalancing (my ring is in flux — senders flood) →
-    # :converging (ring adopted, still waiting for peers to agree on my view) →
+    # Lifecycle tri-state: :rebalancing (my ring is in flux, senders flood) ->
+    # :converging (ring adopted, still waiting for peers to agree on my view) ->
     # :ready (all peers agree; my occupancy table can be trusted as a router).
     # A single-node cluster has no peers to hear from, so it starts :ready.
     :persistent_term.put({Forum.Muster, scope, :status}, :ready)
@@ -457,8 +457,8 @@ defmodule Forum.Muster.Scope do
     end
   end
 
-  # For tests / introspection — group_states + cooldown are gathered from the
-  # shards (they own the per-group state machine now).
+  # For tests / introspection: group_states + cooldown are gathered from the
+  # shards, which own the per-group state machine.
   def handle_call(:status, _from, state) do
     group_states = gather_group_states(state.scope)
 
@@ -472,7 +472,7 @@ defmodule Forum.Muster.Scope do
     {:reply, reply, state}
   end
 
-  # Full snapshot for `Forum.Muster.dump/1` — everything :status returns plus the
+  # Full snapshot for `Forum.Muster.dump/1`: everything :status returns plus the
   # persistent_term lifecycle fields, the per-peer view bookkeeping, the ring's
   # current node set, and the router-role occupancy table folded into
   # %{group => [source_node]}.
@@ -510,7 +510,7 @@ defmodule Forum.Muster.Scope do
 
   # Peer discovery (the receiver of a discover replies with an ack and registers
   # the peer). The handshake piggybacks each side's current view hash and announce
-  # watermark so member_views is seeded immediately — important after a coordinator
+  # watermark so member_views is seeded immediately, important after a coordinator
   # restart, where it would otherwise be empty until the next membership change.
   @impl true
   def handle_info({:muster_discover, peer, view_hash, seq}, %State{} = state) do
@@ -534,7 +534,7 @@ defmodule Forum.Muster.Scope do
 
   def handle_info({:nodeup, node}, state) do
     Logger.info(
-      "Muster[#{node()}|#{state.scope}] node up: #{inspect(node)} — reaching out to pair"
+      "Muster[#{node()}|#{state.scope}] node up: #{inspect(node)}, reaching out to pair"
     )
 
     :telemetry.execute([:forum, state.scope, :node, :up], %{}, %{node: node})
@@ -544,7 +544,7 @@ defmodule Forum.Muster.Scope do
     {:noreply, state}
   end
 
-  # Net split / disconnect — wait for the peer's monitor DOWN.
+  # Net split / disconnect: wait for the peer's monitor DOWN.
   def handle_info({:nodedown, _node}, state), do: {:noreply, state}
 
   # A peer announced the cluster view it has finished rebalancing into, plus its
@@ -556,13 +556,13 @@ defmodule Forum.Muster.Scope do
     {:noreply, update_status(put_member_view(state, source, view_hash, seq))}
   end
 
-  # Peer coordinator crashed/disconnected — drop occupancy entries owned by that
+  # Peer coordinator crashed/disconnected: drop occupancy entries owned by that
   # node and rebalance.
   def handle_info({:DOWN, ref, :process, pid, _reason}, %State{} = state) do
     case Map.pop(state.peers, pid) do
       {^ref, new_peers} ->
         Logger.info(
-          "Muster[#{node()}|#{state.scope}] peer down: #{inspect(node(pid))} — dropping its occupancy and rebalancing"
+          "Muster[#{node()}|#{state.scope}] peer down: #{inspect(node(pid))}, dropping its occupancy and rebalancing"
         )
 
         :ets.match_delete(state.occupancy_table, {{:_, node(pid)}, :_, :_})
@@ -589,8 +589,8 @@ defmodule Forum.Muster.Scope do
   # snapshot dispatched during a rebalance.
   #
   # On success the receiver has enqueued (and will FIFO-apply) our snapshot, and
-  # the marker it carries, so we stop suppressing the view heartbeat to that node
-  # — but only if this is still the round that owes it. A newer rebalance may have
+  # the marker it carries, so we stop suppressing the view heartbeat to that node,
+  # but only if this is still the round that owes it. A newer rebalance may have
   # re-owed the same router with a higher seq; clearing on a stale (lower-seq)
   # acknowledgement would let the next heartbeat send a bare marker before the
   # newer snapshot lands. The seq stamp guards against that.
@@ -617,7 +617,7 @@ defmodule Forum.Muster.Scope do
   # sweep (rediscover/1) to any connected non-member. The event-driven path
   # (rebalance announcements + the discovery handshake) normally converges
   # member_views in milliseconds; this heartbeat is the backstop that heals a
-  # dropped announcement — and a dropped discovery — without needing a membership
+  # dropped announcement (and a dropped discovery) without needing a membership
   # change, bounding both the worst-case "stuck flooding as a router" window and
   # the worst-case "restarted in place but never re-paired" window to one
   # interval. Idempotent with member_views (latest-wins) and with discovery
@@ -629,7 +629,7 @@ defmodule Forum.Muster.Scope do
     {:noreply, state}
   end
 
-  # Periodic GC of vacancy tombstones older than the window — see the register
+  # Periodic GC of vacancy tombstones older than the window; see the register
   # note above upsert_if_newer/3. Reaping is the only thing that bounds the
   # tombstones' memory; correctness does not depend on it firing promptly (a
   # tombstone kept too long is merely an absent row), so a single periodic sweep
@@ -640,7 +640,7 @@ defmodule Forum.Muster.Scope do
     {:noreply, state}
   end
 
-  # Test-only — drives the rebalance path with a synthetic members list.
+  # Test-only: drives the rebalance path with a synthetic members list.
   # Locally-spawned pids can't masquerade as remote peers (`node/1` returns the
   # local node), so triggering rebalance through the normal discovery path with a
   # fake remote isn't possible in single-node tests. This hook is the unlock.
@@ -671,7 +671,7 @@ defmodule Forum.Muster.Scope do
 
     # 1) Flip status to :rebalancing BEFORE updating the ring. Callers reading
     #    router/2 see :rebalancing and fan out to all members. member_views is NOT
-    #    reset — peers' already-announced views stay and are re-evaluated against
+    #    reset: peers' already-announced views stay and are re-evaluated against
     #    the new hash by update_status at the end.
     :persistent_term.put({Forum.Muster, state.scope, :status}, :rebalancing)
     :persistent_term.put({Forum.Muster, state.scope, :view_hash}, :erlang.phash2(new_members))
@@ -680,11 +680,11 @@ defmodule Forum.Muster.Scope do
     #    this call: find_node = NEW routers; find_historical_node(_, _, 1) = OLD.
     {:ok, _} = Ring.set_nodes(ring, new_members)
 
-    # 3) Stamp the snapshot seq for this round NOW — right after the ring swap and
+    # 3) Stamp the snapshot seq for this round NOW, right after the ring swap and
     #    before gathering the shards. This is a clean cut in the VM-global
     #    monotonic sequence: every group held before the rebalance carries an
     #    occupancy seq < snapshot_seq, and every claim a shard processes from here
-    #    on carries seq > snapshot_seq — so the wipe below (strict `<`) can never
+    #    on carries seq > snapshot_seq, so the wipe below (strict `<`) can never
     #    delete a freshly-claimed group's row.
     snapshot_seq = next_seq()
 
@@ -692,7 +692,7 @@ defmodule Forum.Muster.Scope do
     #    shard also normalizes its in-flight vacant batch and settles its moved
     #    :occupied_pending waiters (see Forum.Muster.Shard). Because each shard's
     #    mailbox is FIFO and the ring is already swapped, the union below is a
-    #    COMPLETE held set — the basis for complete-per-router snapshots.
+    #    COMPLETE held set, the basis for complete-per-router snapshots.
     #    Candidates are the groups we hold (:occupied, :cooldown, :occupied_pending):
     #    :cooldown must be included even though the Partition count is 0, because
     #    the old router still believes we hold them; :occupied_pending so parked
@@ -713,7 +713,7 @@ defmodule Forum.Muster.Scope do
         {group, n}
       end)
 
-    # Groups whose router actually changed — used to decide which routers need a
+    # Groups whose router actually changed, used to decide which routers need a
     # refreshed snapshot at all.
     groups_to_reannounce =
       Enum.filter(candidates, fn group ->
@@ -722,7 +722,7 @@ defmodule Forum.Muster.Scope do
       end)
 
     # Routers that gained at least one moved group. Each gets a FULL snapshot of
-    # every group we hold routed to it — not just the moved ones — because
+    # every group we hold routed to it (not just the moved ones) because
     # receive_node_state wipes all of this source's rows before inserting. Sending
     # only the moved groups would drop unchanged groups that still route there.
     # Routers with no moved group are left untouched: their existing rows for us
@@ -741,7 +741,7 @@ defmodule Forum.Muster.Scope do
       |> Map.take(MapSet.to_list(changed_routers))
 
     # Local self-target: synchronous (seq-guarded) ETS inserts. Remote targets:
-    # one fire-and-forget worker per destination. We do NOT wait — Scope stays
+    # one fire-and-forget worker per destination. We do NOT wait: Scope stays
     # free while the snapshots are in flight; each worker reports via a tagged
     # DOWN ({:node_state_done, ...}); a failure crashes us from that handler.
     {local_groups, remote_targets} =
@@ -807,7 +807,7 @@ defmodule Forum.Muster.Scope do
 
   # Recompute the lifecycle status from member_views vs. current membership and
   # publish it (only when it actually changes). Only ever sets :ready or
-  # :converging — :rebalancing is owned by do_rebalance.
+  # :converging; :rebalancing is owned by do_rebalance.
   defp update_status(state) do
     status = if ready?(state), do: :ready, else: :converging
     key = {Forum.Muster, state.scope, :status}
@@ -832,7 +832,7 @@ defmodule Forum.Muster.Scope do
       # Most stale rows cannot be GC'd during the rebalance itself: peers have
       # typically not yet announced the new view, so the source-agreement guard in
       # drop_stale_router_entries skips their rows. Re-run the sweep once every
-      # member has agreed — now every member's rows are judgeable.
+      # member has agreed; now every member's rows are judgeable.
       if status == :ready, do: drop_stale_router_entries(state)
     end
 
@@ -841,7 +841,7 @@ defmodule Forum.Muster.Scope do
 
   # Ready once every member (other than ourselves) has announced a view that
   # agrees with ours. A member with no entry yet, or one whose latest view
-  # differs, keeps us not-ready — the safe direction (the router floods).
+  # differs, keeps us not-ready: the safe direction (the router floods).
   defp ready?(state) do
     own = own_view_hash(state)
 
@@ -875,8 +875,8 @@ defmodule Forum.Muster.Scope do
   # straight to ETS by the RPC worker while the matching marker waits in our
   # mailbox, so the table can be AHEAD of member_views). Skipped rows are harmless
   # and are re-judged on the :ready transition. Our own rows are always judgeable
-  # and must stay in the sweep: a group that moved away — or was vacated while
-  # routed elsewhere — leaves a self row nothing else cleans up.
+  # and must stay in the sweep: a group that moved away (or was vacated while
+  # routed elsewhere) leaves a self row nothing else cleans up.
   defp drop_stale_router_entries(state) do
     ring = ring_name(state.scope)
     own = own_view_hash(state)
@@ -885,7 +885,7 @@ defmodule Forum.Muster.Scope do
     |> :ets.select([{{{:"$1", :"$2"}, :"$3", :_}, [], [{{:"$1", :"$2", :"$3"}}]}])
     |> Enum.each(fn {group, n, row_seq} ->
       # Agreement first: it is a map lookup, and at rebalance time most sources
-      # have not announced the new view yet — their rows are skipped without
+      # have not announced the new view yet, so their rows are skipped without
       # paying for the ring lookup.
       if source_agrees?(state, n, row_seq, own) and router_under_ring(ring, group) != node() do
         :ets.delete(state.occupancy_table, {group, n})
@@ -974,7 +974,7 @@ defmodule Forum.Muster.Scope do
 
   # Fold every shard's per-group state into one map for :status / :dump. A shard
   # that is momentarily down (mid-restart) is skipped rather than crashing this
-  # introspection call — the groups it owns simply read as absent until it is
+  # introspection call: the groups it owns simply read as absent until it is
   # back. (do_rebalance's gather is deliberately NOT tolerant: a shard down
   # mid-rebalance should crash us so the restart re-announces from a clean slate.)
   defp gather_group_states(scope) do
@@ -1000,13 +1000,13 @@ defmodule Forum.Muster.Scope do
   # restarted IN PLACE: its dist connection never dropped, so no :nodeup re-fires,
   # and every peer dropped it on its old pid's :DOWN, so peers won't reach back
   # out either. If that lone announcement is lost (a peer mid-restart hadn't
-  # re-subscribed yet, or a transient transport drop), nothing else heals the edge
-  # — announce_view only ever talks to nodes already in `members`. So on each
+  # re-subscribed yet, or a transient transport drop), nothing else heals the
+  # edge: announce_view only ever talks to nodes already in `members`. So on each
   # heartbeat we re-offer discovery to every connected node that is not yet a
   # member, bounding worst-case stranding to one heartbeat interval.
   #
-  # Heals symmetrically: re-pairs a peer that missed OUR announcement, and — when
-  # WE are the stranded island (members == [node()] after our own restart) —
+  # Heals symmetrically: re-pairs a peer that missed OUR announcement, and, when
+  # WE are the stranded island (members == [node()] after our own restart),
   # re-offers us to everyone connected. Idempotent: an already-paired node is a
   # member and excluded here, and register_peer no-ops a duplicate pid anyway. A
   # connected node not running this scope has no subscriber and ignores it. Like

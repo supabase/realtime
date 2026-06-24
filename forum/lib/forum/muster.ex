@@ -47,27 +47,27 @@ defmodule Forum.Muster do
 
   Options:
 
-  * `:partitions` — number of local partitions (default: schedulers online).
-  * `:vacancy_cooldown_ms` — how long to wait after a group goes vacant locally
+  * `:partitions`: number of local partitions (default: schedulers online).
+  * `:vacancy_cooldown_ms`: how long to wait after a group goes vacant locally
     before queuing it for a vacant flush (default: 30_000).
-  * `:vacant_flush_interval_ms` — how often the queued vacancies are flushed to
+  * `:vacant_flush_interval_ms`: how often the queued vacancies are flushed to
     their router nodes in per-router batches (default: 5_000). A failed
     batch re-queues its groups, so this also bounds the retry cadence.
-  * `:view_heartbeat_interval_ms` — how often each node re-announces its current
+  * `:view_heartbeat_interval_ms`: how often each node re-announces its current
     cluster-view hash to peers AND re-offers discovery to any connected
     non-member (default: 10_000). This is the readiness-barrier and re-discovery
-    backstop: it heals a dropped view announcement — and a dropped discovery (e.g.
-    a coordinator that restarted in place, whose one-shot discovery was lost) —
+    backstop: it heals a dropped view announcement (and a dropped discovery, e.g.
+    a coordinator that restarted in place, whose one-shot discovery was lost)
     without a membership change, bounding both the worst-case "router floods
     instead of targeting" window and the worst-case "restarted but never
     re-paired" window to one interval.
-  * `:rpc_timeout_ms` — timeout for router-node RPCs (default: 5_000).
-  * `:rebalance_gather_timeout_ms` — timeout for the synchronous in-VM call the
+  * `:rpc_timeout_ms`: timeout for router-node RPCs (default: 5_000).
+  * `:rebalance_gather_timeout_ms`: timeout for the synchronous in-VM call the
     coordinator makes to each claim shard to gather its held groups during a
     rebalance (default: 15_000). A shard that does not reply within this window
     crashes the coordinator (which then restarts and re-announces from a clean
     slate); raise it if shards routinely hold very large group sets.
-  * `:message_module` — module implementing `Forum.Adapter` (default:
+  * `:message_module`: module implementing `Forum.Adapter` (default:
     `Forum.Adapter.ErlDist`).
   """
   @spec start_link(atom, [start_option]) :: Supervisor.on_start()
@@ -116,8 +116,8 @@ defmodule Forum.Muster do
 
   `pid` is handed to the group's claim shard (`Forum.Muster.Shard`, chosen by
   `phash2(group)` so a join storm across distinct groups spreads over N shard
-  mailboxes), which both registers the member locally and — if this is the first
-  local member of `group` — notifies the router node via a synchronous `:occupied`
+  mailboxes), which both registers the member locally and, if this is the first
+  local member of `group`, notifies the router node via a synchronous `:occupied`
   RPC. The shard owns the member monitor as well as the claim state, so the router
   is never told a group is occupied before a monitored local member exists: a
   caller that dies mid-join can never leave the router believing we hold a group we
@@ -126,12 +126,12 @@ defmodule Forum.Muster do
 
   If the group was recently vacant (in cooldown, or queued/in-flight for a
   vacant flush), the join reclaims it without re-notifying the router where
-  it can — a quick leave/join cycle costs no RPC.
+  it can, so a quick leave/join cycle costs no RPC.
 
   The shard's per-group state lives in a Supervisor-owned ETS table (its single
   source of truth), so it survives a shard crash: on restart the shard reconciles
   the table against the live member counts, and never forgets an outstanding router
-  assertion — so a shard crash cannot orphan a `{group, node}` entry on a (local or
+  assertion, so a shard crash cannot orphan a `{group, node}` entry on a (local or
   remote) router.
   """
   @spec join(atom, group, pid) :: :ok | {:error, :not_local | :rpc_failed | term}
@@ -151,10 +151,10 @@ defmodule Forum.Muster do
   @doc """
   Returns the router node for `group` in `scope`.
 
-  * `{:ok, node}` — our ring is settled (`:converging` or `:ready`); route to
+  * `{:ok, node}`: our ring is settled (`:converging` or `:ready`); route to
     `node`. (If the chosen router's own table isn't complete yet it will fall
-    back to flooding — see `can_decide?/2`.)
-  * `{:rebalancing, [node]}` — the local Scope's ring is in flux. The router
+    back to flooding; see `can_decide?/2`.)
+  * `{:rebalancing, [node]}`: the local Scope's ring is in flux. The router
     mapping is unreliable; callers using their own transport should fan out to
     every node in the list rather than targeting a single router.
   """
@@ -195,8 +195,8 @@ defmodule Forum.Muster do
   Returns `false` unless this node is `:ready` (every member's latest announced
   view agrees with ours, so our occupancy table is complete) AND it agrees with
   the sender about cluster membership. `:ready` already implies the ring is
-  settled, so it subsumes the old `:stable` check. When false, the caller
-  should fan out to all nodes instead of trusting `Scope.occupancy/2`.
+  settled. When false, the caller should fan out to all nodes instead of
+  trusting `Scope.occupancy/2`.
   """
   @spec can_decide?(atom, non_neg_integer) :: boolean
   def can_decide?(scope, sender_view_hash) when is_atom(scope) do

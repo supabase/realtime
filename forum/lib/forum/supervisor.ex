@@ -31,7 +31,7 @@ defmodule Forum.Supervisor do
     end
   end
 
-  # The Forum.Muster claim shard owning `group` — same phash2 slice as the
+  # The Forum.Muster claim shard owning `group`: same phash2 slice as the
   # group's partition, so shard i aligns 1:1 with partition i.
   @spec shard(atom, Forum.group()) :: atom
   def shard(scope, group) do
@@ -58,8 +58,8 @@ defmodule Forum.Supervisor do
   @impl true
   def init([module, scope, partitions, opts]) do
     # The per-slice membership tables, created and owned by this long-lived
-    # Supervisor — NOT by the process that writes them — so they survive that
-    # process's crash and are rebuilt from on restart. The layout differs per
+    # Supervisor (NOT by the process that writes them) so they survive that
+    # process's crash and are rebuilt on restart. The layout differs per
     # primitive (see create_membership_tables/3).
     for i <- 0..(partitions - 1), do: create_membership_tables(module, scope, i)
 
@@ -102,12 +102,12 @@ defmodule Forum.Supervisor do
   # coordinator restart does not take it down under the shards that read it), the
   # router-role occupancy table, and N claim shards (one per partition index). A
   # Muster shard absorbs the membership job Forum.Partition does for Census, so
-  # Muster starts NO Forum.Partition processes — the shard owns the slice's
+  # Muster starts NO Forum.Partition processes: the shard owns the slice's
   # entries table (created in init/1, no counts table) along with its claim state.
   #
   # The occupancy table and the per-shard durable claim-state tables are created
   # HERE (owned by this long-lived Supervisor) rather than inside the coordinator
-  # or shard processes, so they survive a coordinator/shard restart — the shards
+  # or shard processes, so they survive a coordinator/shard restart: the shards
   # write the occupancy table directly and rebuild their group_states from the
   # state tables. The ring starts BEFORE the coordinator (which resets its node
   # set at init). The shards rebuild from Supervisor-owned tables (created in

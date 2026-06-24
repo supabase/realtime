@@ -8,13 +8,13 @@ defmodule Snabbkaffe do
   Elixir. This module provides the Elixir macro counterparts so that:
 
     * **Trace points** placed in production code (`tp/2`, `tp/3`, `tp_span/3`,
-      `tp_span/4`) are *discarded* when compiled outside of the test environment —
-      exactly like the Erlang `trace_prod.hrl` no-ops — and only become real
+      `tp_span/4`) are *discarded* when compiled outside of the test environment
+      (exactly like the Erlang `trace_prod.hrl` no-ops) and only become real
       snabbkaffe calls in `:test`.
     * **Test helpers** (`check_trace/2`, `block_until/2`, `of_kind/2`, ...) wrap
       the corresponding `:snabbkaffe` runtime calls. Most are plain functions;
       only the ones that take an Elixir *pattern* (`block_until`, `find_pairs`,
-      `causality`, `force_ordering`, ...) need to be macros — they turn the
+      `causality`, `force_ordering`, ...) need to be macros: they turn the
       pattern into a matcher function in place of snabbkaffe's `?match_event`.
 
   ## Why discard in prod?
@@ -151,7 +151,7 @@ defmodule Snabbkaffe do
 
   `run_fun` is a zero-arity function whose return value becomes the test result.
   `check_fun` is a function of either arity 1 (`trace`) or arity 2
-  (`result, trace`). The check **passes unless it raises** — use ordinary ExUnit
+  (`result, trace`). The check **passes unless it raises**: use ordinary ExUnit
   assertions; the function's return value is ignored (unlike Erlang snabbkaffe,
   which requires `true`/`ok`).
 
