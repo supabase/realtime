@@ -103,7 +103,11 @@ defmodule Forum.Muster.Scope do
 
   ## Public helpers (read paths used by Forum.Muster from the caller's process)
 
-  @doc "Returns the list of nodes (as known by the local router state) holding `group`."
+  @doc false
+  # Returns the list of nodes (as known by the local router state) holding
+  # `group`. Internal read backing `Forum.Muster.targets/3` — callers should go
+  # through that (or `Forum.Muster.can_decide?/2`) so the readiness barrier is
+  # honored, never trusting this table directly.
   @spec occupancy(atom, Forum.group()) :: [node]
   def occupancy(scope, group) do
     # :present rows only (a tombstone, whose meta is an integer timestamp, reads as absent).

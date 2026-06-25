@@ -1351,6 +1351,33 @@ defmodule Forum.MusterTest do
       refute Muster.can_decide?(scope, Muster.view_hash(scope) + 1)
     end
 
+    test "targets returns {:ok, occupancy} when the barrier is satisfied", %{scope: scope} do
+      pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, :tg, pid)
+
+      assert {:ok, nodes} = Muster.targets(scope, :tg, Muster.view_hash(scope))
+      assert node() in nodes
+    end
+
+    test "targets returns {:ok, []} for a group nobody holds", %{scope: scope} do
+      assert {:ok, []} = Muster.targets(scope, :nobody, Muster.view_hash(scope))
+    end
+
+    test "targets returns {:error, :flood} when the sender's view disagrees", %{scope: scope} do
+      assert {:error, :flood} = Muster.targets(scope, :tg, Muster.view_hash(scope) + 1)
+    end
+
+    test "targets returns {:error, :flood} while converging, even though the ring is settled",
+         %{scope: scope} do
+      members = Enum.sort([node(), :a@nowhere, :b@nowhere])
+      rebalance_sync(scope, members)
+
+      # Ring is settled (router/2 says :ok) but the barrier is not satisfied yet.
+      assert Muster.router(scope, :tg) |> elem(0) == :ok
+      refute ready?(scope)
+      assert {:error, :flood} = Muster.targets(scope, :tg, Muster.view_hash(scope))
+    end
+
     test "rebalance clears readiness until every peer's marker arrives", %{scope: scope} do
       members = Enum.sort([node(), :a@nowhere, :b@nowhere])
       rebalance_sync(scope, members)

@@ -12,7 +12,7 @@ primitives, and you wire them together with whatever transport you like
 | Primitive | Where you run it | What it gives you |
 | --- | --- | --- |
 | `Forum.Muster.router(scope, group)` | anywhere | the single **router node** for the group (or, mid-rebalance, every member) |
-| `Forum.Muster.Scope.occupancy(scope, group)` | on the **router node** | the list of **source nodes** that hold local members |
+| `Forum.Muster.targets(scope, group, sender_view_hash)` | on the **router node** | `{:ok, source_nodes}` from the occupancy table, or `{:error, :flood}` when the table can't be trusted |
 | `Forum.Muster.local_members(scope, group)` | on a **source node** | the local **pids** to deliver to |
 
 A broadcast is therefore a caller-wired, 3-hop flow: *caller → router → source
@@ -53,6 +53,16 @@ node A, A sends a synchronous `:occupied` notification to the router; when the
 last leaves (after a cooldown), a periodic flush sends a batched `:vacant_batch`.
 See the README for the join/leave and rebalance details.
 
+You don't read the table directly — `targets/3` does it for you, and only after
+checking a **readiness barrier**: a broadcast carries the sender's cluster-view
+hash, and the router returns `{:ok, source_nodes}` only when it is `:ready` and
+agrees with the sender about membership (so its table is provably complete).
+Otherwise it returns `{:error, :flood}`, and you fan out to everyone your
+transport knows (e.g. every node in the region), trading a brief burst of extra
+traffic for never missing a holder while the cluster view settles. See the
+README's *Router-readiness barrier* for why this is needed even when `router/2`
+says the cluster is stable.
+
 ---
 
 ## 2. Picking the target: `router/2`
@@ -87,16 +97,16 @@ pids happens *on the node that owns them*: pids never leave their node.
 sequenceDiagram
     autonumber
     participant Caller
-    participant Router as Router node (B)<br/>Forum.Muster.Scope
+    participant Router as Router node (B)<br/>Forum.Muster
     participant Src as Source node (A)
     participant Pid as Local pids (on A)
 
     Caller->>Caller: Forum.Muster.router(scope, group)
 
     alt status == :stable → {:ok, router_node}
-        Caller->>Router: deliver fan-out request (your transport, e.g. :erpc)
-        Router->>Router: Forum.Muster.Scope.occupancy(scope, group)<br/>→ [A, C, …] source nodes
-        Router-->>Src: forward message to each source node (your transport)
+        Caller->>Router: deliver fan-out request + sender view_hash (your transport, e.g. :erpc)
+        Router->>Router: Forum.Muster.targets(scope, group, view_hash)<br/>→ {:ok, [A, C, …]} or {:error, :flood}
+        Router-->>Src: forward message to each target node (your transport)
         Src->>Src: Forum.Muster.local_members(scope, group) → [pids]
         Src->>Pid: send(pid, message) for each local pid
     else status == :rebalancing → {:rebalancing, members}

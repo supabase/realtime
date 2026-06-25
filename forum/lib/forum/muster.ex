@@ -11,6 +11,7 @@ defmodule Forum.Muster do
   Use a different scope name than any `Forum.Census` scope on the same node.
   """
 
+  alias Forum.Muster.Scope
   alias Forum.Muster.Shard
 
   @type group :: Forum.group()
@@ -196,12 +197,48 @@ defmodule Forum.Muster do
   view agrees with ours, so our occupancy table is complete) AND it agrees with
   the sender about cluster membership. `:ready` already implies the ring is
   settled. When false, the caller should fan out to all nodes instead of
-  trusting `Scope.occupancy/2`.
+  trusting the occupancy table.
+
+  Most callers want `targets/3`, which folds this check and the occupancy read
+  into one result; use `can_decide?/2` directly only when you need the boolean
+  on its own.
   """
   @spec can_decide?(atom, non_neg_integer) :: boolean
   def can_decide?(scope, sender_view_hash) when is_atom(scope) do
     :persistent_term.get({Forum.Muster, scope, :status}) == :ready and
       :persistent_term.get({Forum.Muster, scope, :view_hash}) == sender_view_hash
+  end
+
+  @doc """
+  Returns the fan-out targets for a broadcast to `group` tagged with the
+  sender's `sender_view_hash`. Run this **on the router node** for `group` (see
+  `router/2`).
+
+  This is the single read a router should use to pick its delivery set: it folds
+  the readiness barrier (`can_decide?/2`) and the occupancy lookup into one step,
+  so a caller can never read occupancy without first confirming the table can be
+  trusted.
+
+  * `{:ok, [node]}`: this node is `:ready` and agrees with the sender about
+    cluster membership, so its router-role occupancy table is complete and
+    authoritative. Deliver to exactly these source nodes (may be empty — nobody
+    holds the group).
+  * `{:error, :flood}`: the barrier is not satisfied (still `:converging`, the
+    sender disagrees about membership, or a coordinator restart shrank our view).
+    The occupancy table cannot be trusted, so the caller must over-deliver
+    instead of risking a miss. Muster does not pick the flood set: the caller
+    fans out to whatever "everyone" means for its transport (e.g. all nodes in
+    the region), which is intentionally *not* `members/2` — a freshly-restarted
+    coordinator resets its ring to just `[node()]`, so the ring view can be
+    incomplete in exactly the situation that triggers a flood.
+  """
+  @spec targets(atom, group, non_neg_integer) :: {:ok, [node]} | {:error, :flood}
+  def targets(scope, group, sender_view_hash) when is_atom(scope) do
+    if can_decide?(scope, sender_view_hash) do
+      {:ok, Scope.occupancy(scope, group)}
+    else
+      {:error, :flood}
+    end
   end
 
   defp ring_name(scope), do: :"#{scope}_muster_ring"
