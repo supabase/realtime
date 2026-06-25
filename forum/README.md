@@ -79,6 +79,7 @@ The split keeps the hot path (joins/claims) sharded while the rare, node-wide wo
 Forum.Muster.join(scope, group, pid)        # :ok | {:error, :rpc_failed | :not_local | ...}
 Forum.Muster.leave(scope, group, pid)       # :ok | {:error, term}
 Forum.Muster.router(scope, group)           # {:ok, node} | {:rebalancing, [node]}
+Forum.Muster.targets(scope, group, sender_view_hash)  # (on router) {:ok, [node]} | {:error, :flood}
 Forum.Muster.members(scope)                 # [node]
 Forum.Muster.local_members(scope, group)    # [pid]
 Forum.Muster.local_member?(scope, group, pid)
@@ -99,21 +100,21 @@ children = [
 
 ```
 caller                       claim shard                 router (remote)
-  |                              |                                    |
-  |--- {:join, group, pid} ----->|  (shard = phash2(group, N))        |
-  |                              | group_state?                       |
+  |                              |                                     |
+  |--- {:join, group, pid} ----->|  (shard = phash2(group, N))         |
+  |                              | group_state?                        |
   |                              |   :occupied  -> register, reply :ok |
   |                              |   :cooldown  -> reclaim, register,  |
   |                              |                 reply :ok           |
-  |                              |   nil (first member):              |
-  |                              |     router == self?                |
-  |                              |       yes: write occupancy,        |
-  |                              |            register, reply :ok     |
-  |                              |       no: spawn worker ----------->|
-  |                              |                                    | insert {{group, A}}
-  |                              | <---- :ok ------------------------ |
-  |                              | register, reply :ok to all waiters |
-  | <----- :ok ----------------- |                                    |
+  |                              |   nil (first member):               |
+  |                              |     router == self?                 |
+  |                              |       yes: write occupancy,         |
+  |                              |            register, reply :ok      |
+  |                              |       no: spawn worker ------------>|
+  |                              |                                     | insert {{group, A}}
+  |                              | <---- :ok ------------------------- |
+  |                              | register, reply :ok to all waiters  |
+  | <----- :ok ----------------- |                                     |
 ```
 
 Key invariants:
@@ -188,15 +189,21 @@ A rebalance starts on every node whenever its view of the cluster changes:
 
 The `:rebalancing` status is *local* to each node and only protects senders on that node. It does not cover this ordering: node A finishes its rebalance and goes `:ready` while node B is still mid-rebalance, so a group that re-hashed onto a fresh router C is routed there by A before B has announced it to C. A and C *agree* on membership, and C is `:ready`, yet C's occupancy table is incomplete. Neither a membership-agreement check nor C's own status catches this, because the lag is in a *third* node's announcement.
 
-The barrier closes it. Each broadcast is tagged with the sender's `:view_hash`. On the router, the fan-out path calls `Muster.can_decide?/2` before trusting the occupancy table:
+The barrier closes it. Each broadcast is tagged with the sender's `:view_hash`. On the router, the fan-out path calls `Muster.targets/3`, which folds the barrier (`Muster.can_decide?/2`) and the occupancy read into one result:
 
 ```elixir
-Muster.can_decide?(scope, sender_view_hash)
-#  status == :ready          : ring settled AND every member agrees with our view
-#  and view_hash == sender's : the sender agrees with us on the node set
+Muster.targets(scope, group, sender_view_hash)
+#  {:ok, [node]}   : status == :ready AND view_hash == sender's
+#                    → occupancy table is complete; deliver to exactly these source nodes
+#  {:error, :flood}: either clause false
+#                    → table can't be trusted; caller over-delivers to everyone
+#
+# can_decide?/2 is the boolean behind the {:ok, _} branch:
+#   status == :ready          : ring settled AND every member agrees with our view
+#   and view_hash == sender's : the sender agrees with us on the node set
 ```
 
-If either clause is false the router **cannot decide its targets and falls back to fanning out to all nodes** (the real connected cluster, not the ring's member view, since a freshly-restarted coordinator resets its ring to just `[node()]`). The two checks are complementary: the `:view_hash` comparison catches sender/router *disagreement* (and the coordinator-restart window, where a restarted router's view shrinks to `[node()]` and so mismatches), while `:ready` (vs. `:converging`) catches the *convergence* gap above, where membership agreement holds but not every holder has re-announced yet. `:ready` implies the ring is settled, so it covers the not-rebalancing case too.
+If either clause is false the router **cannot decide its targets and the caller must fan out to all nodes**. `targets/3` returns `{:error, :flood}` rather than a node list because picking the flood set is the caller's job — it fans out to whatever "everyone" means for its transport (e.g. every node in the region). That set is deliberately *not* `members/2` (the ring's member view): a freshly-restarted coordinator resets its ring to just `[node()]`, so the ring can be incomplete in exactly the situation that triggers a flood. The two checks are complementary: the `:view_hash` comparison catches sender/router *disagreement* (and the coordinator-restart window, where a restarted router's view shrinks to `[node()]` and so mismatches), while `:ready` (vs. `:converging`) catches the *convergence* gap above, where membership agreement holds but not every holder has re-announced yet. `:ready` implies the ring is settled, so it covers the not-rebalancing case too.
 
 `:status == :ready` is derived from `member_views`, a map of **each peer's most-recently-announced `{view hash, announce watermark}`**. A peer announces its view by finishing its own rebalance, either via its data-carrying `:receive_node_state` RPC (which echoes the sender's view and that round's seq) or, for a member that sent no snapshot, via a cheap async `{:rebalance_marker, source, view_hash, seq}` (step 7). The handshake (`:muster_discover`/`_ack`) also piggybacks each side's view and watermark, so a node seeds `member_views` immediately, which matters after a coordinator restart that would start with an empty map. We are `:ready` once every member's latest view equals ours; otherwise `:converging`.
 
