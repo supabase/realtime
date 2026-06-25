@@ -296,7 +296,12 @@ defmodule Realtime.DatabaseTest do
       {:ok, ip_version} = Database.detect_ip_version("127.0.0.1")
       socket_options = [ip_version]
       settings = Realtime.PostgresCdc.filter_settings("postgres_cdc_rls", tenant.extensions)
-      username = System.get_env("DB_USER_REALTIME", "supabase_realtime_admin")
+
+      username =
+        Realtime.Env.get_binary("DB_USER_REALTIME", fn ->
+          Realtime.Env.get_binary("DB_USER", "supabase_realtime_admin")
+        end)
+
       {:ok, settings} = Database.from_settings(settings, application_name, backoff)
       port = settings.port
 
