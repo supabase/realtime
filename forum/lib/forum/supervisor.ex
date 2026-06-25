@@ -4,6 +4,9 @@ defmodule Forum.Supervisor do
 
   def name(scope), do: :"#{scope}_forum"
   def supervisor_name(scope), do: :"#{scope}_forum_supervisor"
+  # Inner :one_for_one supervisor holding the Muster coordinator + shards, nested
+  # under the outer :rest_for_one so a ring crash restarts the whole inner unit.
+  def inner_supervisor_name(scope), do: :"#{scope}_forum_inner"
   def partition_name(scope, partition), do: :"#{scope}_forum_partition_#{partition}"
   def partition_entries_table(partition_name), do: :"#{partition_name}_entries"
 
@@ -69,9 +72,9 @@ defmodule Forum.Supervisor do
 
     scope_child = %{id: :scope, start: {module, :start_link, [scope, opts]}}
 
-    children = scope_children(module, scope, partitions, opts, scope_child)
+    {strategy, children} = scope_children(module, scope, partitions, opts, scope_child)
 
-    Supervisor.init(children, strategy: :one_for_one)
+    Supervisor.init(children, strategy: strategy)
   end
 
   # Forum.Muster keeps NO counts table: its Forum.Muster.Shard derives "is there a
@@ -98,21 +101,39 @@ defmodule Forum.Supervisor do
     :ok
   end
 
-  # Forum.Muster adds, per scope: a shared ring (a supervised sibling, so a
-  # coordinator restart does not take it down under the shards that read it), the
-  # router-role occupancy table, and N claim shards (one per partition index). A
-  # Muster shard absorbs the membership job Forum.Partition does for Census, so
-  # Muster starts NO Forum.Partition processes: the shard owns the slice's
-  # entries table (created in init/1, no counts table) along with its claim state.
+  # Forum.Muster adds, per scope: a shared ring, the router-role occupancy table,
+  # and N claim shards (one per partition index). A Muster shard absorbs the
+  # membership job Forum.Partition does for Census, so Muster starts NO
+  # Forum.Partition processes: the shard owns the slice's entries table (created in
+  # init/1, no counts table) along with its claim state.
+  #
+  # Supervision shape — a nested tree expressing the ring's role as the
+  # coordinator's sole dependency:
+  #
+  #   outer (:rest_for_one)
+  #   ├── ring                       # node set lives in the ring's own ETS table
+  #   └── inner (:one_for_one)
+  #       ├── coordinator (scope)    # the ONLY writer of the ring's node set
+  #       └── shard_0 .. shard_n     # read the ring directly; durable ETS state
+  #
+  # The ring stores its node set in a process-owned ETS table, and the coordinator
+  # is the sole writer of that set (Ring.set_nodes, at init and on rebalance). So a
+  # ring crash brings the set back EMPTY with nothing to re-seed it until the next
+  # membership change. :rest_for_one fixes that: the ring is the dependency root, so
+  # its crash restarts the inner unit (coordinator + shards) after it, and the
+  # coordinator's init re-seeds the ring. A coordinator crash stays contained in the
+  # inner :one_for_one (the ring, sitting before the inner child, is untouched — so
+  # a coordinator restart still does not take the ring down under the shards that
+  # read it directly); a single shard crash restarts only that shard.
   #
   # The occupancy table and the per-shard durable claim-state tables are created
-  # HERE (owned by this long-lived Supervisor) rather than inside the coordinator
-  # or shard processes, so they survive a coordinator/shard restart: the shards
-  # write the occupancy table directly and rebuild their group_states from the
-  # state tables. The ring starts BEFORE the coordinator (which resets its node
-  # set at init). The shards rebuild from Supervisor-owned tables (created in
-  # init/1, before any child starts), so they have no start-order dependency on a
-  # membership process. Forum.Census gets none of these.
+  # HERE (owned by this long-lived OUTER Supervisor, whose init/1 does NOT re-run on
+  # a ring/inner restart) rather than inside the coordinator or shard processes, so
+  # they survive a coordinator/shard/ring restart: the shards write the occupancy
+  # table directly and rebuild their group_states from the state tables. The shards
+  # rebuild from these Supervisor-owned tables (created before any child starts), so
+  # they have no start-order dependency on a membership process. Forum.Census gets
+  # none of these.
   defp scope_children(Forum.Muster.Scope, scope, partitions, opts, scope_child) do
     # :public so the coordinator, the local shards, and the :erpc workers running
     # the remote entry points (occupied/4, vacant_batch/4) all write it directly,
@@ -148,7 +169,20 @@ defmodule Forum.Supervisor do
         %{id: {:muster_shard, i}, start: {Forum.Muster.Shard, :start_link, [scope, i, opts]}}
       end
 
-    [Forum.Muster.Scope.ring_child_spec(scope), scope_child] ++ shard_children
+    # Inner unit: coordinator + shards under :one_for_one, so a coordinator crash
+    # and a single shard crash each restart in isolation. The whole unit is one
+    # child of the outer :rest_for_one, after the ring, so a ring crash restarts it.
+    inner_children = [scope_child | shard_children]
+
+    inner_supervisor = %{
+      id: :muster_inner,
+      type: :supervisor,
+      start:
+        {Supervisor, :start_link,
+         [inner_children, [strategy: :one_for_one, name: inner_supervisor_name(scope)]]}
+    }
+
+    {:rest_for_one, [Forum.Muster.Scope.ring_child_spec(scope), inner_supervisor]}
   end
 
   # Forum.Census: one Forum.Partition process per slice owns membership (entries +
@@ -166,6 +200,6 @@ defmodule Forum.Supervisor do
         }
       end
 
-    [scope_child | partition_children]
+    {:one_for_one, [scope_child | partition_children]}
   end
 end

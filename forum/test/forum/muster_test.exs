@@ -1618,6 +1618,47 @@ defmodule Forum.MusterTest do
       assert Process.whereis(ring_name(scope)) == ring
     end
 
+    test "a ring crash restarts the coordinator and shards and re-seeds the ring",
+         %{scope: scope} do
+      # The ring is the coordinator's sole dependency: it stores the node set in an
+      # ETS table owned by the ring process (so the set dies with the process), and
+      # the coordinator is the ONLY writer of that set (Ring.set_nodes, at init and
+      # on rebalance). So a ring crash that restarts the ring ALONE would bring it
+      # back empty with nothing to re-seed it until the next membership change. The
+      # supervision tree must therefore restart the coordinator (and shards) after
+      # the ring, so the coordinator's init re-seeds the ring to [node()].
+      ring = Process.whereis(ring_name(scope))
+      coord = Process.whereis(Forum.Supervisor.name(scope))
+      shards = Enum.map(Forum.Supervisor.shards(scope), &Process.whereis/1)
+
+      assert Muster.members(scope) == [node()]
+
+      ref = Process.monitor(ring)
+      Process.exit(ring, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^ring, :killed}, 1_000
+
+      # The ring comes back as a fresh process...
+      new_ring = wait_for_new_pid(ring_name(scope), ring)
+      assert is_pid(new_ring)
+
+      # ...and the coordinator + every shard restart after it (rest_for_one), so
+      # the coordinator's init runs again.
+      new_coord = wait_for_new_pid(Forum.Supervisor.name(scope), coord)
+      assert is_pid(new_coord)
+
+      new_shards = Enum.map(Forum.Supervisor.shards(scope), &Process.whereis/1)
+
+      Enum.zip(shards, new_shards)
+      |> Enum.each(fn {old, new} ->
+        assert is_pid(new)
+        assert new != old
+      end)
+
+      # The restarted coordinator re-seeds the otherwise-empty ring with its node
+      # set, so routing recovers instead of stalling on an empty ring.
+      assert wait_until(fn -> Muster.members(scope) == [node()] end, 2_000)
+    end
+
     test "a shard crash during the rebalance gather crashes the coordinator and the cluster self-heals",
          %{scope: scope} do
       # The most dangerous moment for a shard crash: the coordinator's SYNCHRONOUS
