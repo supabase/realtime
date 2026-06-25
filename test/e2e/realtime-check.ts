@@ -1246,24 +1246,356 @@ async function runPostgresChangesTests(_testUser: { email: string; password: str
 async function runPostgresChangesFiltersTests(_testUser: { email: string; password: string }, supabase: SupabaseClient) {
   suite("postgres-changes-filters");
 
-  await sleep(RATE_LIMIT_PAUSE_MS);
-  await test("in: delivers row whose value is in the list", async () => {
+  await test("eq: delivers row equal to the value", async () => {
     try {
       const tag = crypto.randomUUID().replace(/-/g, "");
-      const values = [`inA${tag}`, `inB${tag}`, `inC${tag}`];
-      const chosen = values[1];
+      const value = `eq_${tag}`;
       let result: any = null;
 
       const channel = supabase
         .channel(randomTopic(), BROADCAST_CONFIG)
-        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: `value=in.(${values.join(",")})` }, (p) => { if (p.new.value === chosen) result = p; });
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: `value=eq.${value}` }, (p) => { if (p.new.value === value) result = p; });
 
       const { subscribeMs } = await openPostgresChannel(channel);
-      await executeInsert(supabase, "pg_changes", chosen);
+      await executeInsert(supabase, "pg_changes", value);
+      await waitFor(() => result, "eq event");
+
+      assert.strictEqual(result.new.value, value);
+      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
+    } finally {
+      await supabase.removeAllChannels();
+    }
+  });
+
+  await test("neq: delivers row not equal to the value", async () => {
+    try {
+      const tag = crypto.randomUUID().replace(/-/g, "");
+      const value = `neq_${tag}`;
+      let result: any = null;
+
+      const channel = supabase
+        .channel(randomTopic(), BROADCAST_CONFIG)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: `value=neq.no_${tag}` }, (p) => { if (p.new.value === value) result = p; });
+
+      const { subscribeMs } = await openPostgresChannel(channel);
+      await executeInsert(supabase, "pg_changes", value);
+      await waitFor(() => result, "neq event");
+
+      assert.strictEqual(result.new.value, value);
+      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
+    } finally {
+      await supabase.removeAllChannels();
+    }
+  });
+
+  await test("lt: delivers row less than the value", async () => {
+    try {
+      const tag = crypto.randomUUID().replace(/-/g, "");
+      const value = `a_${tag}`;
+      let result: any = null;
+
+      const channel = supabase
+        .channel(randomTopic(), BROADCAST_CONFIG)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: `value=lt.b_${tag}` }, (p) => { if (p.new.value === value) result = p; });
+
+      const { subscribeMs } = await openPostgresChannel(channel);
+      await executeInsert(supabase, "pg_changes", value);
+      await waitFor(() => result, "lt event");
+
+      assert.strictEqual(result.new.value, value);
+      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
+    } finally {
+      await supabase.removeAllChannels();
+    }
+  });
+
+  await test("lte: delivers row less than or equal to the value", async () => {
+    try {
+      const tag = crypto.randomUUID().replace(/-/g, "");
+      const value = `a_${tag}`;
+      let result: any = null;
+
+      const channel = supabase
+        .channel(randomTopic(), BROADCAST_CONFIG)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: `value=lte.b_${tag}` }, (p) => { if (p.new.value === value) result = p; });
+
+      const { subscribeMs } = await openPostgresChannel(channel);
+      await executeInsert(supabase, "pg_changes", value);
+      await waitFor(() => result, "lte event");
+
+      assert.strictEqual(result.new.value, value);
+      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
+    } finally {
+      await supabase.removeAllChannels();
+    }
+  });
+
+  await test("gt: delivers row greater than the value", async () => {
+    try {
+      const tag = crypto.randomUUID().replace(/-/g, "");
+      const value = `c_${tag}`;
+      let result: any = null;
+
+      const channel = supabase
+        .channel(randomTopic(), BROADCAST_CONFIG)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: `value=gt.b_${tag}` }, (p) => { if (p.new.value === value) result = p; });
+
+      const { subscribeMs } = await openPostgresChannel(channel);
+      await executeInsert(supabase, "pg_changes", value);
+      await waitFor(() => result, "gt event");
+
+      assert.strictEqual(result.new.value, value);
+      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
+    } finally {
+      await supabase.removeAllChannels();
+    }
+  });
+
+  await test("gte: delivers row greater than or equal to the value", async () => {
+    try {
+      const tag = crypto.randomUUID().replace(/-/g, "");
+      const value = `c_${tag}`;
+      let result: any = null;
+
+      const channel = supabase
+        .channel(randomTopic(), BROADCAST_CONFIG)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: `value=gte.b_${tag}` }, (p) => { if (p.new.value === value) result = p; });
+
+      const { subscribeMs } = await openPostgresChannel(channel);
+      await executeInsert(supabase, "pg_changes", value);
+      await waitFor(() => result, "gte event");
+
+      assert.strictEqual(result.new.value, value);
+      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
+    } finally {
+      await supabase.removeAllChannels();
+    }
+  });
+
+  await test("in: delivers row whose value is in the list", async () => {
+    try {
+      const tag = crypto.randomUUID().replace(/-/g, "");
+      const value = `in_${tag}`;
+      let result: any = null;
+
+      const channel = supabase
+        .channel(randomTopic(), BROADCAST_CONFIG)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: `value=in.(${value},other_${tag})` }, (p) => { if (p.new.value === value) result = p; });
+
+      const { subscribeMs } = await openPostgresChannel(channel);
+      await executeInsert(supabase, "pg_changes", value);
       await waitFor(() => result, "in event");
 
-      assert.strictEqual(result.eventType, "INSERT");
-      assert.strictEqual(result.new.value, chosen);
+      assert.strictEqual(result.new.value, value);
+      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
+    } finally {
+      await supabase.removeAllChannels();
+    }
+  });
+
+  await test("like: delivers row matching the pattern", async () => {
+    try {
+      const tag = crypto.randomUUID().replace(/-/g, "");
+      const value = `${tag}hello`;
+      let result: any = null;
+
+      const channel = supabase
+        .channel(randomTopic(), BROADCAST_CONFIG)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: `value=like.${tag}%` }, (p) => { if (p.new.value === value) result = p; });
+
+      const { subscribeMs } = await openPostgresChannel(channel);
+      await executeInsert(supabase, "pg_changes", value);
+      await waitFor(() => result, "like event");
+
+      assert.strictEqual(result.new.value, value);
+      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
+    } finally {
+      await supabase.removeAllChannels();
+    }
+  });
+
+  await test("ilike: matches the pattern case-insensitively", async () => {
+    try {
+      const tag = crypto.randomUUID().replace(/-/g, "");
+      const value = `${tag}HELLO`; // upper-cased value, lower-cased filter
+      let result: any = null;
+
+      const channel = supabase
+        .channel(randomTopic(), BROADCAST_CONFIG)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: `value=ilike.${tag}hello%` }, (p) => { if (p.new.value === value) result = p; });
+
+      const { subscribeMs } = await openPostgresChannel(channel);
+      await executeInsert(supabase, "pg_changes", value);
+      await waitFor(() => result, "ilike event");
+
+      assert.strictEqual(result.new.value, value);
+      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
+    } finally {
+      await supabase.removeAllChannels();
+    }
+  });
+
+
+  await test("is: delivers row whose nullable column is null", async () => {
+    try {
+      const tag = crypto.randomUUID().replace(/-/g, "");
+      const value = `is_${tag}`; // executeInsert only sets `value`, so nullable_value stays null
+      let result: any = null;
+
+      const channel = supabase
+        .channel(randomTopic(), BROADCAST_CONFIG)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: `nullable_value=is.null` }, (p) => { if (p.new.value === value) result = p; });
+
+      const { subscribeMs } = await openPostgresChannel(channel);
+      await executeInsert(supabase, "pg_changes", value);
+      await waitFor(() => result, "is event");
+
+      assert.strictEqual(result.new.nullable_value, null);
+      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
+    } finally {
+      await supabase.removeAllChannels();
+    }
+  });
+
+  await test("match: delivers row matching the regex", async () => {
+    try {
+      const tag = crypto.randomUUID().replace(/-/g, "");
+      const value = `${tag}abc123`;
+      let result: any = null;
+
+      const channel = supabase
+        .channel(randomTopic(), BROADCAST_CONFIG)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: `value=match.^${tag}` }, (p) => { if (p.new.value === value) result = p; });
+
+      const { subscribeMs } = await openPostgresChannel(channel);
+      await executeInsert(supabase, "pg_changes", value);
+      await waitFor(() => result, "match event");
+
+      assert.strictEqual(result.new.value, value);
+      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
+    } finally {
+      await supabase.removeAllChannels();
+    }
+  });
+
+  await test("imatch: matches the regex case-insensitively", async () => {
+    try {
+      const tag = crypto.randomUUID().replace(/-/g, "");
+      const value = `${tag}ABC`; // upper-cased value, lower-cased regex
+      let result: any = null;
+
+      const channel = supabase
+        .channel(randomTopic(), BROADCAST_CONFIG)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: `value=imatch.^${tag}abc` }, (p) => { if (p.new.value === value) result = p; });
+
+      const { subscribeMs } = await openPostgresChannel(channel);
+      await executeInsert(supabase, "pg_changes", value);
+      await waitFor(() => result, "imatch event");
+
+      assert.strictEqual(result.new.value, value);
+      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
+    } finally {
+      await supabase.removeAllChannels();
+    }
+  });
+
+  await test("isdistinct: delivers row whose value is distinct from the literal", async () => {
+    try {
+      const tag = crypto.randomUUID().replace(/-/g, "");
+      const value = `isd_${tag}`;
+      let result: any = null;
+
+      const channel = supabase
+        .channel(randomTopic(), BROADCAST_CONFIG)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: `value=isdistinct.other_${tag}` }, (p) => { if (p.new.value === value) result = p; });
+
+      const { subscribeMs } = await openPostgresChannel(channel);
+      await executeInsert(supabase, "pg_changes", value);
+      await waitFor(() => result, "isdistinct event");
+
+      assert.strictEqual(result.new.value, value);
+      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
+    } finally {
+      await supabase.removeAllChannels();
+    }
+  });
+
+  await test("and: delivers only rows matching every comma-separated condition", async () => {
+    try {
+      const tag = crypto.randomUUID().replace(/-/g, "");
+      const match = `${tag}both`;
+      const decoy = `${tag}one`;
+      const seen: string[] = [];
+
+      // value LIKE tag%  AND  details = tag-keep
+      const channel = supabase
+        .channel(randomTopic(), BROADCAST_CONFIG)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: `value=like.${tag}%,details=eq.${tag}keep` }, (p) => { seen.push(p.new.value); });
+
+      const { subscribeMs } = await openPostgresChannel(channel);
+      await supabase.from("pg_changes").insert([
+        { value: match, details: `${tag}keep` }, // satisfies both conditions
+        { value: decoy, details: `${tag}nope` }, // satisfies only the value condition
+      ]);
+      await waitFor(() => (seen.includes(match) ? true : null), "and event");
+      await sleep(1000); // give the decoy a chance to arrive if AND were wrongly treated as OR
+
+      assert.ok(seen.includes(match), "row matching both conditions must be delivered");
+      assert.ok(!seen.includes(decoy), "row matching only one condition must be excluded");
+      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
+    } finally {
+      await supabase.removeAllChannels();
+    }
+  });
+
+  await test("not: excludes the negated value and delivers the rest", async () => {
+    try {
+      const tag = crypto.randomUUID().replace(/-/g, "");
+      const excluded = `${tag}skip`;
+      const delivered = `${tag}keep`;
+      const seen: string[] = [];
+
+      const channel = supabase
+        .channel(randomTopic(), BROADCAST_CONFIG)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: `value=not.eq.${excluded}` }, (p) => { if (p.new.value === excluded || p.new.value === delivered) seen.push(p.new.value); });
+
+      const { subscribeMs } = await openPostgresChannel(channel);
+      await executeInsert(supabase, "pg_changes", excluded);
+      await executeInsert(supabase, "pg_changes", delivered);
+      await waitFor(() => (seen.includes(delivered) ? true : null), "not event");
+      await sleep(1000); // give the excluded row a chance to arrive if the negation were ignored
+
+      assert.ok(seen.includes(delivered), "non-matching row must be delivered");
+      assert.ok(!seen.includes(excluded), "negated value must be excluded");
+      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
+    } finally {
+      await supabase.removeAllChannels();
+    }
+  });
+
+  await test("compose: combines and, not and a pattern filter", async () => {
+    try {
+      const tag = crypto.randomUUID().replace(/-/g, "");
+      const match = `${tag}ok`;
+      const decoy = `${tag}ok2`;
+      const seen: string[] = [];
+
+      // value LIKE tag%  AND  details NOT LIKE skip%  AND  nullable_value IS NULL
+      const filter = `value=like.${tag}%,details=not.like.skip%,nullable_value=is.null`;
+      const channel = supabase
+        .channel(randomTopic(), BROADCAST_CONFIG)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter }, (p) => { seen.push(p.new.value); });
+
+      const { subscribeMs } = await openPostgresChannel(channel);
+      await supabase.from("pg_changes").insert([
+        { value: match, details: "keep" }, // matches all three (nullable_value defaults to null)
+        { value: decoy, details: "skipme" }, // fails details NOT LIKE skip%
+      ]);
+      await waitFor(() => (seen.includes(match) ? true : null), "compose event");
+      await sleep(1000);
+
+      assert.ok(seen.includes(match), "row matching all three conditions must be delivered");
+      assert.ok(!seen.includes(decoy), "row failing the not.like condition must be excluded");
       return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
     } finally {
       await supabase.removeAllChannels();
