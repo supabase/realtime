@@ -80,10 +80,22 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
       select
         $4::text::uuid,
         sub_tables.entity,
-        $6,
+        -- Build the realtime.user_defined_filter[] server-side from primitive text arrays
+        -- instead of binding a list of composite tuples. Postgrex caches the composite type's
+        -- field count per connection at bootstrap and never refreshes it, so a long-lived
+        -- connection whose cache predates an ALTER TYPE on user_defined_filter would otherwise
+        -- encode against a stale arity and crash with :badarg. Constructing the rows here keeps
+        -- the arity resolved by the server's current catalog.
+        (
+          select coalesce(
+            array_agg(row(c, o::realtime.equality_op, v)::realtime.user_defined_filter),
+            '{}'::realtime.user_defined_filter[]
+          )
+          from unnest($6::text[], $7::text[], $8::text[]) as f(c, o, v)
+        ),
         $5,
-        $7,
-        $8
+        $9,
+        $10
       from
         sub_tables
         on conflict
@@ -95,7 +107,10 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
       returning
          id"
     {action_filter, schema, table, filters, selected_columns} = subscription_params
-    query(conn, sql, [publication, schema, table, id, claims, filters, action_filter, selected_columns])
+    columns = Enum.map(filters, &elem(&1, 0))
+    ops = Enum.map(filters, &elem(&1, 1))
+    values = Enum.map(filters, &elem(&1, 2))
+    query(conn, sql, [publication, schema, table, id, claims, columns, ops, values, action_filter, selected_columns])
   end
 
   defp params_to_log({action_filter, schema, table, filters, selected_columns}) do
