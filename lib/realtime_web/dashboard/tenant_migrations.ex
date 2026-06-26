@@ -38,15 +38,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok,
-     assign(socket,
-       external_id: "",
-       tenant: nil,
-       schema_migrations: nil,
-       pgdelta: nil,
-       catalog_version: nil,
-       error: nil
-     )}
+    {:ok, reset_assigns(socket)}
   end
 
   @impl true
@@ -55,15 +47,15 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
 
     with %Tenant{} = tenant <- Api.get_tenant_by_external_id(ref),
          {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop) do
-      {:noreply,
-       assign(socket,
-         external_id: ref,
-         tenant: tenant,
-         schema_migrations: with_tenant_conn(settings, &fetch_schema_migrations/1),
-         pgdelta: run_pgdelta(tenant),
-         catalog_version: @catalog_major,
-         error: nil
-       )}
+      schema_migrations = with_tenant_conn(settings, &fetch_schema_migrations/1)
+
+      socket =
+        socket
+        |> reset_assigns()
+        |> assign(external_id: ref, tenant: tenant, schema_migrations: schema_migrations)
+        |> start_pgdelta(tenant)
+
+      {:noreply, socket}
     else
       nil ->
         {:noreply, assign_error(socket, ref, "Tenant not found")}
@@ -75,16 +67,81 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   end
 
   def handle_params(_params, _uri, socket) do
+    {:noreply, reset_assigns(socket)}
+  end
+
+  @impl true
+  def handle_info(:pgdelta_tick, %{assigns: %{pgdelta_running: true}} = socket) do
+    elapsed = System.monotonic_time(:millisecond) - socket.assigns.pgdelta_started_at
+
+    socket
+    |> assign(pgdelta_elapsed_ms: elapsed)
+    |> schedule_tick()
+    |> then(&{:noreply, &1})
+  end
+
+  def handle_info(
+        {ref, {:rechecked, schema_migrations, pgdelta_result}},
+        %{assigns: %{pgdelta_task: %Task{ref: ref}}} = socket
+      ) do
+    Process.demonitor(ref, [:flush])
+
     {:noreply,
      assign(socket,
-       external_id: "",
-       tenant: nil,
-       schema_migrations: nil,
-       pgdelta: nil,
-       catalog_version: nil,
-       error: nil
+       schema_migrations: schema_migrations,
+       pgdelta_result: pgdelta_result,
+       pgdelta_running: false,
+       pgdelta_task: nil
      )}
   end
+
+  def handle_info({ref, pgdelta_result}, %{assigns: %{pgdelta_task: %Task{ref: ref}}} = socket) do
+    Process.demonitor(ref, [:flush])
+    {:noreply, assign(socket, pgdelta_result: pgdelta_result, pgdelta_running: false, pgdelta_task: nil)}
+  end
+
+  def handle_info({ref, :ok}, %{assigns: %{apply_task: %Task{ref: ref}, tenant: %Tenant{} = tenant}} = socket) do
+    Process.demonitor(ref, [:flush])
+    socket = assign(socket, applying: false, apply_task: nil, error: nil)
+
+    case Database.from_tenant(tenant, @application_name, :stop) do
+      {:ok, settings} ->
+        case socket.assigns.pgdelta_result do
+          {:ok, %{status: :changes}} ->
+            socket |> start_recheck(tenant, settings) |> then(&{:noreply, &1})
+
+          _ ->
+            schema_migrations = with_tenant_conn(settings, &fetch_schema_migrations/1)
+            {:noreply, assign(socket, schema_migrations: schema_migrations)}
+        end
+
+      {:error, reason} ->
+        {:noreply, assign(socket, error: "Applied, but re-check failed: #{inspect(reason)}")}
+    end
+  end
+
+  def handle_info({ref, {:error, msg}}, %{assigns: %{apply_task: %Task{ref: ref}}} = socket) do
+    Process.demonitor(ref, [:flush])
+    {:noreply, assign(socket, applying: false, apply_task: nil, error: msg)}
+  end
+
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{assigns: %{pgdelta_task: %Task{ref: ref}}} = socket) do
+    log_error("TenantMigrationsPgDeltaCrash", inspect(reason))
+
+    {:noreply,
+     assign(socket,
+       pgdelta_result: {:error, "pg-delta crashed: #{inspect(reason)}"},
+       pgdelta_running: false,
+       pgdelta_task: nil
+     )}
+  end
+
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{assigns: %{apply_task: %Task{ref: ref}}} = socket) do
+    log_error("TenantMigrationsApplyCrash", inspect(reason))
+    {:noreply, assign(socket, applying: false, apply_task: nil, error: "Apply crashed: #{inspect(reason)}")}
+  end
+
+  def handle_info(_msg, socket), do: {:noreply, socket}
 
   @impl true
   def handle_event("lookup", %{"external_id" => ref}, socket) do
@@ -94,20 +151,12 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
 
   @impl true
   def handle_event("apply", _params, socket) do
-    %{tenant: %Tenant{} = tenant, external_id: ref, pgdelta: pgdelta} = socket.assigns
+    %{tenant: %Tenant{} = tenant, pgdelta_result: pgdelta_result} = socket.assigns
 
-    sql =
-      case pgdelta do
-        {:ok, %{status: :changes, sql: sql}} -> sql
-        _ -> nil
-      end
-
-    case apply_pgdelta(tenant, sql) do
-      :ok ->
-        {:noreply, push_patch(socket, to: "/admin/dashboard/tenant_migrations?external_id=#{URI.encode(ref)}")}
-
-      {:error, msg} ->
-        {:noreply, assign(socket, error: msg)}
+    case pgdelta_result do
+      {:ok, %{status: :changes, sql: sql}} -> {:noreply, start_apply(socket, tenant, sql)}
+      {:ok, %{status: :no_changes}} -> {:noreply, start_apply(socket, tenant, nil)}
+      _ -> {:noreply, socket}
     end
   end
 
@@ -142,21 +191,91 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
         <%= schema_migrations(@schema_migrations) %>
 
         <h6 class="mt-4">pg-delta plan vs catalog (PG<%= @catalog_version %>)</h6>
-        <%= pgdelta_plan(@pgdelta, @schema_migrations) %>
+        <div :if={@pgdelta_running} class="alert alert-info d-flex align-items-center" style="gap: 8px;">
+          <div class="spinner-border spinner-border-sm" role="status"></div>
+          <span>Processing... (<%= div(@pgdelta_elapsed_ms, 1000) %>s)</span>
+        </div>
+        <div :if={@applying} class="alert alert-info d-flex align-items-center" style="gap: 8px;">
+          <div class="spinner-border spinner-border-sm" role="status"></div>
+          <span>Applying plan to tenant database...</span>
+        </div>
+        <%= pgdelta_plan(@pgdelta_result, @schema_migrations, @applying or @pgdelta_running) %>
       <% end %>
     </div>
     """
   end
 
-  defp assign_error(socket, ref, msg) do
+  defp reset_assigns(socket) do
     assign(socket,
-      external_id: ref,
+      external_id: "",
       tenant: nil,
       schema_migrations: nil,
-      pgdelta: nil,
+      pgdelta_result: nil,
+      pgdelta_elapsed_ms: 0,
+      pgdelta_running: false,
+      pgdelta_started_at: nil,
+      pgdelta_task: nil,
+      applying: false,
+      apply_task: nil,
       catalog_version: nil,
-      error: msg
+      error: nil
     )
+  end
+
+  defp assign_error(socket, ref, msg) do
+    socket
+    |> reset_assigns()
+    |> assign(external_id: ref, error: msg)
+  end
+
+  defp schedule_tick(socket) do
+    Process.send_after(self(), :pgdelta_tick, 1000)
+    socket
+  end
+
+  defp start_pgdelta(socket, %Tenant{} = tenant) do
+    task = Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn -> run_pgdelta(tenant) end)
+    running_pgdelta(socket, task)
+  end
+
+  defp start_recheck(socket, %Tenant{} = tenant, %Database{} = settings) do
+    task =
+      Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn ->
+        {:rechecked, with_tenant_conn(settings, &fetch_schema_migrations/1), run_pgdelta(tenant)}
+      end)
+
+    socket
+    |> assign(schema_migrations: nil)
+    |> running_pgdelta(task)
+  end
+
+  defp running_pgdelta(socket, task) do
+    socket
+    |> assign(
+      catalog_version: @catalog_major,
+      pgdelta_running: true,
+      pgdelta_elapsed_ms: 0,
+      pgdelta_started_at: System.monotonic_time(:millisecond),
+      pgdelta_task: task
+    )
+    |> schedule_tick()
+  end
+
+  defp start_apply(socket, %Tenant{} = tenant, sql) do
+    task = Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn -> apply_pgdelta(tenant, sql) end)
+    assign(socket, applying: true, apply_task: task, error: nil)
+  end
+
+  defp migrations_progress(schema_migrations) do
+    total = length(Migrations.migrations())
+
+    applied =
+      case schema_migrations do
+        {:ok, rows} -> length(rows)
+        _ -> total
+      end
+
+    {applied, total}
   end
 
   defp schema_migrations(nil) do
@@ -206,12 +325,12 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     """
   end
 
-  defp pgdelta_plan(nil, _schema_migrations) do
+  defp pgdelta_plan(nil, _schema_migrations, _apply_disabled) do
     assigns = %{}
     ~H""
   end
 
-  defp pgdelta_plan({:error, msg}, _schema_migrations) do
+  defp pgdelta_plan({:error, msg}, _schema_migrations, _apply_disabled) do
     assigns = %{msg: msg}
 
     ~H"""
@@ -222,16 +341,9 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     """
   end
 
-  defp pgdelta_plan({:ok, %{status: :no_changes}}, schema_migrations) do
-    total = length(Migrations.migrations())
-
-    applied =
-      case schema_migrations do
-        {:ok, rows} -> length(rows)
-        _ -> total
-      end
-
-    assigns = %{behind: applied < total, applied: applied, total: total}
+  defp pgdelta_plan({:ok, %{status: :no_changes}}, schema_migrations, apply_disabled) do
+    {applied, total} = migrations_progress(schema_migrations)
+    assigns = %{behind: applied < total, applied: applied, total: total, apply_disabled: apply_disabled}
 
     ~H"""
     <div :if={@behind}>
@@ -240,13 +352,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
         Apply records the missing version(s) and sets tenants.migrations_ran to <%= @total %>.
       </div>
       <div class="d-flex justify-content-end mt-3">
-        <button
-          type="button"
-          class="btn btn-primary"
-          phx-click="apply"
-          phx-disable-with="Applying..."
-          data-confirm={"Record missing version(s) and set tenants.migrations_ran to #{@total}?"}
-        >
+        <button type="button" class="btn btn-primary" phx-click="apply" phx-disable-with="Applying..." disabled={@apply_disabled}>
           Apply
         </button>
       </div>
@@ -257,8 +363,8 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     """
   end
 
-  defp pgdelta_plan({:ok, %{status: :changes, sql: sql}}, _schema_migrations) do
-    assigns = %{sql: sql}
+  defp pgdelta_plan({:ok, %{status: :changes, sql: sql}}, _schema_migrations, apply_disabled) do
+    assigns = %{sql: sql, apply_disabled: apply_disabled}
 
     ~H"""
     <div class="alert alert-warning">
@@ -291,6 +397,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
         class="btn btn-danger"
         phx-click="apply"
         phx-disable-with="Applying..."
+        disabled={@apply_disabled}
         data-confirm="Apply this SQL plan to the tenant database? This may include destructive statements and is irreversible."
       >
         Apply
