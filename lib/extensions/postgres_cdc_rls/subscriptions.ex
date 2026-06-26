@@ -83,7 +83,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
       select
         $4::text::uuid,
         sub_tables.entity,
-        -- Build the realtime.user_defined_filter[] server-side from primitive text arrays
+        -- Build the realtime.user_defined_filter[] server-side from primitive type arrays
         -- instead of binding a list of composite tuples. Postgrex caches the composite type's
         -- field count per connection at bootstrap and never refreshes it, so a long-lived
         -- connection whose cache predates an ALTER TYPE on user_defined_filter would otherwise
