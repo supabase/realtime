@@ -36,3 +36,5 @@ demo/.env
 
 # Local
 mise.local.toml
+
+.temp

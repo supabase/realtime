@@ -26,7 +26,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
     %{conn: conn, tenant: tenant}
   end
 
-  describe "subscribing with row filters" do
+  describe "filters: parsing" do
     test "user can combine two range conditions to create a bounded filter" do
       assert {:ok, {"*", "public", "test", filters, _}} =
                Subscriptions.parse_subscription_params(%{
@@ -35,7 +35,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                  "filter" => "id=gt.0,id=lt.100"
                })
 
-      assert [{"id", "gt", "0"}, {"id", "lt", "100"}] = Enum.sort(filters)
+      assert [{"id", "gt", "0", false}, {"id", "lt", "100", false}] = Enum.sort(filters)
     end
 
     test "user gets a clear error when one filter in a multi-filter expression is unsupported" do
@@ -43,7 +43,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                Subscriptions.parse_subscription_params(%{
                  "schema" => "public",
                  "table" => "test",
-                 "filter" => "id=gt.0,id=like.100"
+                 "filter" => "id=gt.0,id=foo.100"
                })
 
       assert msg =~ "Error parsing `filter` params"
@@ -59,7 +59,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
     end
 
     test "user can filter by a single equality condition" do
-      assert {:ok, {"*", "public", "test", [{"id", "eq", "5"}], _}} =
+      assert {:ok, {"*", "public", "test", [{"id", "eq", "5", false}], _}} =
                Subscriptions.parse_subscription_params(%{
                  "schema" => "public",
                  "table" => "test",
@@ -75,7 +75,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                  "filter" => "id=in.(1,2,3),details=eq.active"
                })
 
-      assert [{"details", "eq", "active"}, {"id", "in", "{1,2,3}"}] = Enum.sort(filters)
+      assert [{"details", "eq", "active", false}, {"id", "in", "{1,2,3}", false}] = Enum.sort(filters)
     end
 
     test "user can use an in-list filter with multi-word string values alongside another filter" do
@@ -86,7 +86,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                  "filter" => "name=in.(red,blue),quantity=gt.0"
                })
 
-      assert [{"name", "in", "{red,blue}"}, {"quantity", "gt", "0"}] = filters
+      assert [{"name", "in", "{red,blue}", false}, {"quantity", "gt", "0", false}] = filters
     end
 
     test "user can place an in-list filter after a range filter" do
@@ -97,7 +97,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                  "filter" => "quantity=gt.0,name=in.(red,blue)"
                })
 
-      assert [{"quantity", "gt", "0"}, {"name", "in", "{red,blue}"}] = filters
+      assert [{"quantity", "gt", "0", false}, {"name", "in", "{red,blue}", false}] = filters
     end
 
     test "user can combine two in-list filters each with multiple values" do
@@ -108,7 +108,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                  "filter" => "name=in.(red,blue,green),status=in.(active,inactive)"
                })
 
-      assert [{"name", "in", "{red,blue,green}"}, {"status", "in", "{active,inactive}"}] = filters
+      assert [{"name", "in", "{red,blue,green}", false}, {"status", "in", "{active,inactive}", false}] = filters
     end
 
     test "user can use filter values that contain a closing parenthesis character" do
@@ -119,7 +119,160 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                  "filter" => "a=eq.x),b=eq.y),c=eq.z"
                })
 
-      assert [{"a", "eq", "x)"}, {"b", "eq", "y)"}, {"c", "eq", "z"}] = filters
+      assert [{"a", "eq", "x)", false}, {"b", "eq", "y)", false}, {"c", "eq", "z", false}] = filters
+    end
+
+    test "filter values keep quotes and other special characters verbatim" do
+      assert {:ok, {"*", "public", "test", [{"name", "eq", ~s|O'Brien "x"|, false}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~s|name=eq.O'Brien "x"|
+               })
+
+      assert {:ok, {"*", "public", "test", [{"name", "neq", "a'b", true}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "name=not.neq.a'b"
+               })
+
+      assert {:ok, {"*", "public", "test", [{"name", "in", "{O'Brien,Smith}", false}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "name=in.(O'Brien,Smith)"
+               })
+    end
+
+    test "a double-quoted value can contain a literal comma without splitting the filter" do
+      assert {:ok, {"*", "public", "test", [{"name", "eq", "a,b", false}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~s|name=eq."a,b"|
+               })
+    end
+
+    test "a double-quoted value does not split a multi-filter expression on its inner comma" do
+      assert {:ok, {"*", "public", "test", filters, _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~s|name=eq."a,b",id=gt.0|
+               })
+
+      assert [{"name", "eq", "a,b", false}, {"id", "gt", "0", false}] = filters
+    end
+
+    test "double quotes let a value contain other reserved characters (period, colon, parens)" do
+      assert {:ok, {"*", "public", "test", [{"name", "eq", "a.b:c(d)", false}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~s|name=eq."a.b:c(d)"|
+               })
+    end
+
+    test "an escaped double quote inside a quoted value becomes a literal quote" do
+      assert {:ok, {"*", "public", "test", [{"name", "eq", ~s|she said "hi"|, false}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~s|name=eq."she said \\"hi\\""|
+               })
+    end
+
+    test "an escaped backslash inside a quoted value becomes a single backslash" do
+      assert {:ok, {"*", "public", "test", [{"path", "eq", ~S|C:\tmp|, false}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~S|path=eq."C:\\tmp"|
+               })
+    end
+
+    test "a quoted value combines with the not. negation prefix" do
+      assert {:ok, {"*", "public", "test", [{"name", "neq", "a,b", true}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~s|name=not.neq."a,b"|
+               })
+    end
+
+    test "a backslash inside a quoted value escapes the next character, whatever it is" do
+      assert {:ok, {"*", "public", "test", [{"path", "eq", "C:new", false}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~S|path=eq."C:\new"|
+               })
+    end
+
+    test "an empty quoted value matches the empty string" do
+      assert {:ok, {"*", "public", "test", [{"name", "eq", "", false}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~s|name=eq.""|
+               })
+    end
+
+    test "whitespace inside a quoted value is preserved verbatim" do
+      assert {:ok, {"*", "public", "test", [{"name", "eq", " a ", false}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~s|name=eq." a "|
+               })
+    end
+
+    test "in-list elements can be double-quoted to contain commas" do
+      assert {:ok, {"*", "public", "test", [{"tags", "in", ~s|{"a,b",c}|, false}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~s|tags=in.("a,b",c)|
+               })
+    end
+
+    test "multiple in-list elements can each be double-quoted" do
+      assert {:ok, {"*", "public", "test", [{"tags", "in", ~s|{"a,b","c,d"}|, false}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~s|tags=in.("a,b","c,d")|
+               })
+    end
+
+    test "an unterminated quoted value falls back to a literal value (PostgREST behaviour)" do
+      assert {:ok, {"*", "public", "test", [{"name", "eq", ~s|"unterminated|, false}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~s|name=eq."unterminated|
+               })
+    end
+
+    test "characters after a closing quote make the whole value literal (PostgREST backtracks)" do
+      assert {:ok, {"*", "public", "test", [{"name", "eq", ~s|"ab"cd|, false}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~s|name=eq."ab"cd|
+               })
+    end
+
+    test "a double quote that is not at the start of a value does not protect a following comma" do
+      assert {:ok, {"*", "public", "test", filters, _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~s|desc=eq.5" tall,id=gt.0|
+               })
+
+      assert [{"desc", "eq", ~s|5" tall|, false}, {"id", "gt", "0", false}] = filters
     end
 
     test "user gets a clear error when the filter string ends with a stray comma" do
@@ -163,25 +316,78 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                  "filter" => "   "
                })
     end
+
+    test "like/ilike/is/match/imatch/isdistinct operators parse into filters" do
+      assert {:ok, {"*", "public", "test", [{"details", "like", "hel%", false}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "details=like.hel%"
+               })
+
+      assert {:ok, {"*", "public", "test", [{"flag", "is", "true", false}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "flag=is.true"
+               })
+    end
+
+    test "the not. prefix sets the negate flag" do
+      assert {:ok, {"*", "public", "test", [{"id", "eq", "5", true}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "id=not.eq.5"
+               })
+
+      assert {:ok, {"*", "public", "test", [{"details", "like", "hel%", true}], _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "details=not.like.hel%"
+               })
+    end
+
+    test "operators can be combined in a single filter expression" do
+      assert {:ok, {"*", "public", "test", filters, _}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "id=eq.5,id=in.(1,2)"
+               })
+
+      assert [{"id", "eq", "5", false}, {"id", "in", "{1,2}", false}] = Enum.sort(filters)
+    end
+
+    test "user gets an error when filter param is not a string" do
+      {:error, msg} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "images",
+          "filter" => [123]
+        })
+
+      assert msg =~ "No subscription params provided"
+    end
   end
 
-  describe "subscribing to table changes" do
-    test "user can subscribe to all events on all tables in a schema", %{conn: conn} do
+  describe "filters: persisting to the subscription row" do
+    test "filters are stored in the filters column", %{conn: conn} do
       {:ok, subscription_params} =
-        Subscriptions.parse_subscription_params(%{"event" => "*", "schema" => "public"})
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "test",
+          "filter" => "details=like.hel%"
+        })
 
-      params_list = [
-        %{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}
-      ]
+      params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
 
       assert {:ok, [%Postgrex.Result{}]} =
                Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
 
-      assert %Postgrex.Result{rows: rows} =
-               Postgrex.query!(conn, "select filters, action_filter from realtime.subscription", [])
-
-      assert rows != []
-      assert Enum.all?(rows, &match?([[], "*"], &1))
+      assert %Postgrex.Result{rows: [[[{"details", "like", "hel%", false}]]]} =
+               Postgrex.query!(conn, "select filters from realtime.subscription", [])
     end
 
     test "create with filter on valid column succeeds", %{conn: conn} do
@@ -201,7 +407,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                rows: [
                  [
                    "test",
-                   [{"id", "eq", "123"}],
+                   [{"id", "eq", "123", false}],
                    "*"
                  ]
                ]
@@ -211,6 +417,235 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                  "select entity::text, filters, action_filter from realtime.subscription",
                  []
                )
+    end
+
+    test "user can combine AND row filters which are all stored in the subscription", %{
+      conn: conn
+    } do
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "test",
+          "filter" => "id=gt.0,id=lt.100"
+        })
+
+      params_list = [
+        %{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}
+      ]
+
+      assert {:ok, [%Postgrex.Result{}]} =
+               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+
+      assert %Postgrex.Result{rows: [[filters]]} =
+               Postgrex.query!(conn, "select filters from realtime.subscription", [])
+
+      assert [_, _] = filters
+    end
+
+    test "user gets an error when filtering on a column that does not exist", %{conn: conn} do
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "test",
+          "filter" => "subject=eq.hey"
+        })
+
+      subscription_list = [
+        %{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}
+      ]
+
+      assert {:error,
+              {:subscription_insert_failed,
+               "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [event: *, schema: public, table: test, filters: [{\"subject\", \"eq\", \"hey\", false}], select: nil]. Exception: ERROR P0001 (raise_exception) invalid column for filter subject"}} =
+               Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+
+      %Postgrex.Result{rows: [[0]]} =
+        Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+    end
+
+    test "user gets an error when filter value is incompatible with column type", %{conn: conn} do
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "test",
+          "filter" => "id=eq.hey"
+        })
+
+      subscription_list = [
+        %{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}
+      ]
+
+      assert {:error,
+              {:subscription_insert_failed,
+               "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [event: *, schema: public, table: test, filters: [{\"id\", \"eq\", \"hey\", false}], select: nil]. Exception: ERROR 22P02 (invalid_text_representation) invalid input syntax for type integer: \"hey\""}} =
+               Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+
+      %Postgrex.Result{rows: [[0]]} =
+        Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+    end
+  end
+
+  describe "filters: gating rows end to end (apply_rls)" do
+    test "apply_rls honours a like filter end to end", %{conn: conn} do
+      visible_id = UUID.uuid1()
+      hidden_id = UUID.uuid1()
+      slot_name = "test_apply_rls_like_#{:rand.uniform(999_999)}"
+
+      for {id, filter} <- [{visible_id, "details=like.hel%"}, {hidden_id, "details=like.bye%"}] do
+        {:ok, subscription_params} =
+          Subscriptions.parse_subscription_params(%{
+            "schema" => "public",
+            "table" => "test",
+            "filter" => filter
+          })
+
+        params_list = [%{claims: %{"role" => "anon"}, id: id, subscription_params: subscription_params}]
+
+        assert {:ok, [%Postgrex.Result{}]} =
+                 Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+      end
+
+      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json')", [slot_name])
+
+      try do
+        Postgrex.query!(conn, "insert into test (details) values ('hello')", [])
+
+        %{rows: rows} =
+          Postgrex.query!(
+            conn,
+            "select wal, subscription_ids from realtime.list_changes($1, $2, 100, 1048576)",
+            ["supabase_realtime_test", slot_name]
+          )
+
+        all_sub_ids = rows |> Enum.flat_map(fn [_wal, sub_ids] -> sub_ids || [] end)
+
+        assert UUID.string_to_binary!(visible_id) in all_sub_ids
+        refute UUID.string_to_binary!(hidden_id) in all_sub_ids
+      after
+        Postgrex.query(conn, "SELECT pg_drop_replication_slot($1)", [slot_name])
+      end
+    end
+
+    test "equality, range and negation operators gate rows end to end", %{conn: conn} do
+      visible_eq = UUID.uuid1()
+      visible_compose = UUID.uuid1()
+      hidden_eq = UUID.uuid1()
+      hidden_negate = UUID.uuid1()
+      slot_name = "test_apply_rls_operators_#{:rand.uniform(999_999)}"
+
+      subs = [
+        {visible_eq, "id=eq.5"},
+        {visible_compose, "id=gt.0,details=eq.hello"},
+        {hidden_eq, "id=eq.6"},
+        {hidden_negate, "id=not.eq.5"}
+      ]
+
+      for {id, filter} <- subs do
+        {:ok, subscription_params} =
+          Subscriptions.parse_subscription_params(%{
+            "schema" => "public",
+            "table" => "test",
+            "filter" => filter
+          })
+
+        params_list = [%{claims: %{"role" => "anon"}, id: id, subscription_params: subscription_params}]
+
+        assert {:ok, [%Postgrex.Result{}]} =
+                 Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+      end
+
+      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json')", [slot_name])
+
+      try do
+        Postgrex.query!(conn, "insert into test (id, details) values (5, 'hello')", [])
+
+        %{rows: rows} =
+          Postgrex.query!(
+            conn,
+            "select wal, subscription_ids from realtime.list_changes($1, $2, 100, 1048576)",
+            ["supabase_realtime_test", slot_name]
+          )
+
+        all_sub_ids = rows |> Enum.flat_map(fn [_wal, sub_ids] -> sub_ids || [] end)
+
+        assert UUID.string_to_binary!(visible_eq) in all_sub_ids
+        assert UUID.string_to_binary!(visible_compose) in all_sub_ids
+        refute UUID.string_to_binary!(hidden_eq) in all_sub_ids
+        refute UUID.string_to_binary!(hidden_negate) in all_sub_ids
+      after
+        Postgrex.query(conn, "SELECT pg_drop_replication_slot($1)", [slot_name])
+      end
+    end
+
+    test "apply_rls handles filter values containing quotes and special characters", %{conn: conn} do
+      obrien = ~s|O'Brien "x"|
+      angelo = "D'Angelo"
+
+      match_eq = UUID.uuid1()
+      match_neg = UUID.uuid1()
+      match_in = UUID.uuid1()
+      miss_eq = UUID.uuid1()
+      slot_name = "test_apply_rls_quotes_#{:rand.uniform(999_999)}"
+
+      subs = [
+        {match_eq, "details=eq.#{obrien}"},
+        {match_neg, "details=not.eq.nomatch"},
+        {match_in, "details=in.(#{angelo},Smith)"},
+        {miss_eq, "details=eq.someone-else"}
+      ]
+
+      for {id, filter} <- subs do
+        {:ok, subscription_params} =
+          Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test", "filter" => filter})
+
+        params_list = [%{claims: %{"role" => "anon"}, id: id, subscription_params: subscription_params}]
+
+        assert {:ok, [%Postgrex.Result{}]} =
+                 Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+      end
+
+      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json')", [slot_name])
+
+      try do
+        Postgrex.query!(conn, "insert into test (details) values ($1)", [obrien])
+        Postgrex.query!(conn, "insert into test (details) values ($1)", [angelo])
+
+        %{rows: rows} =
+          Postgrex.query!(
+            conn,
+            "select wal, subscription_ids from realtime.list_changes($1, $2, 100, 1048576)",
+            ["supabase_realtime_test", slot_name]
+          )
+
+        all_sub_ids = rows |> Enum.flat_map(fn [_wal, sub_ids] -> sub_ids || [] end)
+
+        assert UUID.string_to_binary!(match_eq) in all_sub_ids
+        assert UUID.string_to_binary!(match_neg) in all_sub_ids
+        assert UUID.string_to_binary!(match_in) in all_sub_ids
+        refute UUID.string_to_binary!(miss_eq) in all_sub_ids
+      after
+        Postgrex.query(conn, "SELECT pg_drop_replication_slot($1)", [slot_name])
+      end
+    end
+  end
+
+  describe "subscribing to table changes" do
+    test "user can subscribe to all events on all tables in a schema", %{conn: conn} do
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{"event" => "*", "schema" => "public"})
+
+      params_list = [
+        %{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}
+      ]
+
+      assert {:ok, [%Postgrex.Result{}]} =
+               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+
+      assert %Postgrex.Result{rows: rows} =
+               Postgrex.query!(conn, "select filters, action_filter from realtime.subscription", [])
+
+      assert rows != []
+      assert Enum.all?(rows, &match?([[], "*"], &1))
     end
 
     test "subscription works when role lacks usage permission", %{conn: conn, tenant: tenant} do
@@ -242,16 +677,18 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
     end
 
     test "create succeeds when the connection cached a stale user_defined_filter arity", %{conn: conn, tenant: tenant} do
-      # Regression for ErrorOnRpcCall :badarg in element(4, {col, op, value}).
+      # Regression for ErrorOnRpcCall :badarg when a Postgrex connection holds a stale composite
+      # arity for realtime.user_defined_filter.
       #
-      # realtime.user_defined_filter is a composite type. Postgrex caches a composite's field
-      # list per connection at bootstrap and never refreshes it when ALTER TYPE changes the
-      # type. A connection that bootstrapped while the type briefly carried a 4th `negate`
-      # attribute keeps a 4-field encoder; after the attribute is dropped, encoding a 3-element
-      # filter tuple would call element(4, {col, op, value}) and crash with :badarg.
+      # Postgrex caches a composite's field list per connection at bootstrap and never refreshes
+      # it when ALTER TYPE changes the type. After ReAddPostgrestFilterOps the type carries a 4th
+      # `negate` attribute, but a connection that bootstrapped before the re-add still caches the
+      # 3-field arity. Building the filter row server-side (in the INSERT) instead of binding a
+      # composite tuple keeps the arity resolved by the server's current catalog, so the insert
+      # must still succeed on such a connection.
       #
-      # We reproduce the stale cache by adding the attribute, opening a fresh connection (which
-      # caches 4 fields), then dropping it back to 3 fields before inserting.
+      # We reproduce the stale cache by dropping the attribute, opening a fresh connection (which
+      # caches 3 fields), then adding it back to 4 fields before inserting.
       {:ok, admin_settings} = Database.from_tenant(tenant, "realtime_test", :stop)
 
       {:ok, admin_conn} =
@@ -265,7 +702,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
 
       Postgrex.query!(
         admin_conn,
-        "alter type realtime.user_defined_filter add attribute negate boolean cascade",
+        "alter type realtime.user_defined_filter drop attribute negate cascade",
         []
       )
 
@@ -276,12 +713,12 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
         |> Postgrex.start_link()
 
       # Postgrex loads a composite type's field info lazily on first encode/decode, so force the
-      # fresh connection to cache the 4-field arity by decoding a 4-field value now.
-      Postgrex.query!(stale_conn, "select row('x', 'eq', 'y', true)::realtime.user_defined_filter", [])
+      # fresh connection to cache the 3-field arity by decoding a 3-field value now.
+      Postgrex.query!(stale_conn, "select row('x', 'eq', 'y')::realtime.user_defined_filter", [])
 
       Postgrex.query!(
         admin_conn,
-        "alter type realtime.user_defined_filter drop attribute negate cascade",
+        "alter type realtime.user_defined_filter add attribute negate boolean cascade",
         []
       )
 
@@ -297,10 +734,10 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
       assert {:ok, [%Postgrex.Result{}]} =
                Subscriptions.create(stale_conn, "supabase_realtime_test", params_list, self(), self())
 
-      # Read filters back as text: the shared Postgrex type cache still holds the stale 4-field
+      # Read filters back as text: the shared Postgrex type cache still holds the stale 3-field
       # composite decoder, so casting to text avoids decoding through it while still proving the
-      # row was inserted with the right 3-field filter.
-      assert %Postgrex.Result{rows: [["test", ~s|{"(id,eq,123)"}|, "*"]]} =
+      # row was inserted with the right 4-field filter (negate defaults to false → f).
+      assert %Postgrex.Result{rows: [["test", ~s|{"(id,eq,123,f)"}|, "*"]]} =
                Postgrex.query!(
                  conn,
                  "select entity::text, filters::text, action_filter from realtime.subscription",
@@ -396,48 +833,6 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
         Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
     end
 
-    test "user gets an error when filtering on a column that does not exist", %{conn: conn} do
-      {:ok, subscription_params} =
-        Subscriptions.parse_subscription_params(%{
-          "schema" => "public",
-          "table" => "test",
-          "filter" => "subject=eq.hey"
-        })
-
-      subscription_list = [
-        %{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}
-      ]
-
-      assert {:error,
-              {:subscription_insert_failed,
-               "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [event: *, schema: public, table: test, filters: [{\"subject\", \"eq\", \"hey\"}], select: nil]. Exception: ERROR P0001 (raise_exception) invalid column for filter subject"}} =
-               Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
-
-      %Postgrex.Result{rows: [[0]]} =
-        Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
-    end
-
-    test "user gets an error when filter value is incompatible with column type", %{conn: conn} do
-      {:ok, subscription_params} =
-        Subscriptions.parse_subscription_params(%{
-          "schema" => "public",
-          "table" => "test",
-          "filter" => "id=eq.hey"
-        })
-
-      subscription_list = [
-        %{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}
-      ]
-
-      assert {:error,
-              {:subscription_insert_failed,
-               "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [event: *, schema: public, table: test, filters: [{\"id\", \"eq\", \"hey\"}], select: nil]. Exception: ERROR 22P02 (invalid_text_representation) invalid input syntax for type integer: \"hey\""}} =
-               Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
-
-      %Postgrex.Result{rows: [[0]]} =
-        Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
-    end
-
     test "subscription creation fails gracefully when database connection is dead" do
       {:ok, subscription_params} =
         Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test"})
@@ -486,40 +881,6 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
         })
 
       assert msg =~ "No subscription params provided"
-    end
-
-    test "user gets an error when filter param is not a string" do
-      {:error, msg} =
-        Subscriptions.parse_subscription_params(%{
-          "schema" => "public",
-          "table" => "images",
-          "filter" => [123]
-        })
-
-      assert msg =~ "No subscription params provided"
-    end
-
-    test "user can combine AND row filters which are all stored in the subscription", %{
-      conn: conn
-    } do
-      {:ok, subscription_params} =
-        Subscriptions.parse_subscription_params(%{
-          "schema" => "public",
-          "table" => "test",
-          "filter" => "id=gt.0,id=lt.100"
-        })
-
-      params_list = [
-        %{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}
-      ]
-
-      assert {:ok, [%Postgrex.Result{}]} =
-               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
-
-      assert %Postgrex.Result{rows: [[filters]]} =
-               Postgrex.query!(conn, "select filters from realtime.subscription", [])
-
-      assert [_, _] = filters
     end
   end
 
@@ -791,7 +1152,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
     end
 
     test "user can combine column selection with a row filter" do
-      assert {:ok, {"*", "public", "messages", [{"id", "eq", "5"}], ["id", "details"]}} =
+      assert {:ok, {"*", "public", "messages", [{"id", "eq", "5", false}], ["id", "details"]}} =
                Subscriptions.parse_subscription_params(%{
                  "schema" => "public",
                  "table" => "messages",
