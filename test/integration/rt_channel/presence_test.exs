@@ -359,6 +359,68 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
     end
   end
 
+  describe "presence authorization on access_token refresh" do
+    setup [:rls_context]
+
+    @tag policies: [
+           :authenticated_read_broadcast,
+           :authenticated_write_broadcast_and_presence,
+           :authenticated_read_presence_based_on_claim
+         ]
+    test "disconnects when presence read permission changes from true to false on new access_token",
+         %{tenant: tenant, topic: topic, serializer: serializer} do
+      # Token whose claims satisfy the presence read policy
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated", claims: %{presence_read: true})
+
+      config = %{presence: %{key: "", enabled: true}, private: true}
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{config: config})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^realtime_topic}, 500
+      assert_receive %Message{event: "presence_state", topic: ^realtime_topic}, 500
+
+      # New token whose claims no longer satisfy the presence read policy
+      {:ok, new_token} =
+        generate_token(tenant, %{
+          exp: System.system_time(:second) + 1000,
+          role: "authenticated",
+          presence_read: false
+        })
+
+      WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => new_token})
+
+      assert_receive %Message{event: "phx_close", topic: ^realtime_topic}, 500
+    end
+
+    @tag policies: [
+           :authenticated_read_broadcast,
+           :authenticated_write_broadcast_and_presence,
+           :authenticated_read_presence_based_on_claim
+         ]
+    test "stays connected when presence read permission remains true on new access_token",
+         %{tenant: tenant, topic: topic, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated", claims: %{presence_read: true})
+
+      config = %{presence: %{key: "", enabled: true}, private: true}
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{config: config})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^realtime_topic}, 500
+      assert_receive %Message{event: "presence_state", topic: ^realtime_topic}, 500
+
+      {:ok, new_token} =
+        generate_token(tenant, %{
+          exp: System.system_time(:second) + 1000,
+          role: "authenticated",
+          presence_read: true
+        })
+
+      WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => new_token})
+
+      refute_receive %Message{event: "phx_close", topic: ^realtime_topic}, 500
+    end
+  end
+
   describe "database connection errors" do
     setup [:rls_context]
 

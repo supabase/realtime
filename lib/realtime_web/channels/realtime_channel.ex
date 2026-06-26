@@ -541,13 +541,17 @@ defmodule RealtimeWeb.RealtimeChannel do
       }
     } = socket
 
+    # Keep track of the policies evaluated with the previous token so we can detect revoked permissions
+    previous_policies = socket.assigns.policies
+
     # Update token and reset policies
     socket = assign(socket, %{access_token: refresh_token, policies: nil})
 
     with {:ok, claims, confirm_token_ref} <- confirm_token(socket),
          socket = assign_authorization_context(socket, channel_name, claims),
          {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
-         {:ok, socket} <- maybe_assign_policies(channel_name, db_conn, socket) do
+         {:ok, socket} <- maybe_assign_policies(channel_name, db_conn, socket),
+         :ok <- check_read_permissions_revoked(previous_policies, socket.assigns.policies) do
       Helpers.cancel_timer(pg_sub_ref)
       pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
 
@@ -567,6 +571,9 @@ defmodule RealtimeWeb.RealtimeChannel do
     else
       {:error, reason, msg} when reason in ~w(unauthorized expired_token token_malformed)a ->
         shutdown_response(socket, msg)
+
+      {:error, :read_permissions_revoked} ->
+        shutdown_response(socket, "You no longer have permission to read from this Channel topic: #{channel_name}")
 
       {:error, :missing_claims} ->
         shutdown_response(socket, "Fields `role` and `exp` are required in JWT")
@@ -929,6 +936,20 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp maybe_assign_policies(_, _, socket), do: {:ok, assign(socket, policies: nil)}
+
+  # Detects read permissions that were granted under the previous token but are no longer allowed
+  # after re-evaluating the policies with the new token. When that happens we disconnect the channel.
+  defp check_read_permissions_revoked(%Policies{} = previous, %Policies{} = current) do
+    if read_revoked?(previous.broadcast.read, current.broadcast.read) or
+         read_revoked?(previous.presence.read, current.presence.read),
+       do: {:error, :read_permissions_revoked},
+       else: :ok
+  end
+
+  defp check_read_permissions_revoked(_previous, _current), do: :ok
+
+  defp read_revoked?(true, false), do: true
+  defp read_revoked?(_previous, _current), do: false
 
   defp only_private?(tenant, %{assigns: %{private?: private?}}) do
     if tenant.private_only and !private? do
