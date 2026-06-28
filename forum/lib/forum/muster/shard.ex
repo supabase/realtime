@@ -370,9 +370,11 @@ defmodule Forum.Muster.Shard do
   #   3) Return held groups (:occupied | :cooldown | :occupied_pending) for the
   #      coordinator to snapshot.
   def handle_call({:rebalance, _new_members}, _from, state) do
-    state = normalize_pending_for_rebalance(state)
-    state = settle_moved_pending(state)
-    {:reply, {:held, held_groups(state)}, state}
+    tp_span(:muster_rebalance_gather, %{scope: state.scope, node: node(), index: state.index}) do
+      state = normalize_pending_for_rebalance(state)
+      state = settle_moved_pending(state)
+      {:reply, {:held, held_groups(state)}, state}
+    end
   end
 
   # Introspection: the coordinator folds every shard's group_states together to
@@ -408,6 +410,7 @@ defmodule Forum.Muster.Shard do
 
   # Periodic flush of queued vacancies.
   def handle_info(:flush_vacant, state) do
+    tp(:muster_flush_tick, %{scope: state.scope, node: node(), index: state.index})
     state = flush_vacant(state)
     schedule_vacant_flush(state)
     {:noreply, state}

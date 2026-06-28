@@ -68,13 +68,17 @@ defmodule Forum.MusterDistributedTest do
     %{id: scope, start: {Muster, :start_link, [scope, opts]}, type: :supervisor}
   end
 
-  defp start_remote_muster(peer, scope), do: :peer.call(peer, MusterPeerAux, :start, [scope])
+  defp start_remote_muster(peer, scope), do: start_remote_muster(peer, scope, [])
+
+  defp start_remote_muster(peer, scope, opts) do
+    :peer.call(peer, MusterPeerAux, :start, [scope, opts])
+  end
 
   # Start Muster on a peer with a fast view heartbeat, so the heartbeat backstop
   # gets many chances to heal during a test (used by the restart-regression test
   # to prove the heartbeat cannot heal the stuck node).
   defp start_remote_muster_fast_heartbeat(peer, scope) do
-    :peer.call(peer, MusterPeerAux, :start, [scope, [view_heartbeat_interval_ms: 200]])
+    start_remote_muster(peer, scope, view_heartbeat_interval_ms: 200)
   end
 
   defp status(scope), do: :persistent_term.get({Forum.Muster, scope, :status})
@@ -93,9 +97,6 @@ defmodule Forum.MusterDistributedTest do
     status = :erpc.call(n, GenServer, :call, [Forum.Supervisor.name(scope), :status])
     status.group_states[group]
   end
-
-  defp trigger_flush(scope),
-    do: Enum.each(Forum.Supervisor.shards(scope), &Kernel.send(&1, :flush_vacant))
 
   # Find a group the LIVE local ring routes to `target` (cluster must be settled).
   defp group_routed_to(scope, target) do
@@ -980,7 +981,7 @@ defmodule Forum.MusterDistributedTest do
       start_supervised!(
         spec(scope,
           vacancy_cooldown_ms: 50,
-          vacant_flush_interval_ms: 60_000,
+          vacant_flush_interval_ms: 100,
           rpc_timeout_ms: 30_000
         )
       )
@@ -1090,10 +1091,9 @@ defmodule Forum.MusterDistributedTest do
                      10_000
                    )
 
-          # Flush: dispatch the (higher-seq) vacant_batch to the router. With the
-          # INSERT parked, it deletes nothing, and on completion releases the
-          # parked INSERT — which then applies its stale, lower seq.
-          trigger_flush(scope)
+          # The natural flush dispatches the (higher-seq) vacant_batch to the
+          # router. With the INSERT parked, it deletes nothing, and on completion
+          # releases the parked INSERT — which then applies its stale, lower seq.
 
           # Wait for the freed INSERT to commit on the router.
           assert {:ok, _} =
@@ -1281,10 +1281,11 @@ defmodule Forum.MusterDistributedTest do
   describe "queued vacancy across a rebalance" do
     setup do
       scope = :"muster_vac_#{System.unique_integer([:positive])}"
-      # Long flush interval: the test triggers the flush deterministically
-      # AFTER the rebalance, so the queued vacancy must be routed by the ring
-      # of the NEW view.
-      start_supervised!(spec(scope, vacancy_cooldown_ms: 50, vacant_flush_interval_ms: 60_000))
+      # Natural flush only: we align the leave to just after a real flush tick on
+      # the owning shard, then use a comfortably larger interval than the 50ms
+      # cooldown so the vacancy stays queued across the rebalance before the next
+      # natural flush dispatches it.
+      start_supervised!(spec(scope, vacancy_cooldown_ms: 50, vacant_flush_interval_ms: 1_000))
       %{scope: scope}
     end
 
@@ -1316,8 +1317,37 @@ defmodule Forum.MusterDistributedTest do
           :ok = Muster.join(scope, group, member)
           assert t_node in occupancy_on(o_node, scope, group)
 
+          shard_name = Forum.Supervisor.shard(scope, group)
+          shard_pid = Process.whereis(shard_name)
+
+          shard_index =
+            case shard_name do
+              name when is_atom(name) ->
+                name
+                |> Atom.to_string()
+                |> String.split("_")
+                |> List.last()
+                |> String.to_integer()
+            end
+
+          assert is_pid(shard_pid)
+
+          # Align the leave to just after a real flush tick on the owning shard.
+          # That gives the next natural tick enough runway to happen after the
+          # rebalance rather than before it.
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_flush_tick,
+                       node: ^t_node,
+                       index: ^shard_index
+                     },
+                     5_000
+                   )
+
           # Vacate. The cooldown (50ms) expires and the vacancy is queued, but
-          # never flushed (interval 60s) — O still believes we hold the group.
+          # the next natural flush has not fired yet — O still believes we hold
+          # the group until the post-rebalance flush below.
           :ok = Muster.leave(scope, group, member)
 
           assert {:ok, _} =
@@ -1359,8 +1389,7 @@ defmodule Forum.MusterDistributedTest do
 
           assert occupancy_on(o_node, scope, group) == []
 
-          # Flush now: the vacancy must be sent to the CURRENT router, C.
-          trigger_flush(scope)
+          # The next natural flush must send the vacancy to the CURRENT router, C.
 
           assert {:ok, batch} =
                    block_until(
@@ -1400,6 +1429,179 @@ defmodule Forum.MusterDistributedTest do
                    &(&1[:"$span"] == :start and &1.node == result.o_node and
                        result.group in &1.groups)
                  )
+        end
+      )
+    end
+  end
+
+  describe "real remote claim/vacancy RPC failures" do
+    setup do
+      scope = :"muster_rpc_fail_#{System.unique_integer([:positive])}"
+
+      start_supervised!(spec(scope, vacancy_cooldown_ms: 50, vacant_flush_interval_ms: 100))
+
+      %{scope: scope}
+    end
+
+    test "a real occupied RPC failure returns :rpc_failed and leaves no local registration",
+         %{scope: scope} do
+      t_node = node()
+
+      check_trace(
+        fn ->
+          r_name = ~c"muster_occ_fail_r_#{System.unique_integer([:positive])}"
+          r_node = :"#{r_name}@127.0.0.1"
+
+          {:ok, p_r, ^r_node} = Peer.start(name: r_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(r_node)
+          start_remote_muster(p_r, scope)
+          await_ready([t_node, r_node])
+
+          group = group_routed_to(scope, r_node)
+
+          # Hold the remote INSERT at the router so the claim cannot complete
+          # before we kill the peer, turning this into a real occupied RPC
+          # failure instead of a race with a fast success.
+          force_ordering(
+            %{:"$kind" => :test_release_occupied_never},
+            %{
+              :"$kind" => :muster_occupied_apply,
+              :"$span" => :start,
+              node: ^r_node,
+              group: ^group,
+              source: ^t_node
+            }
+          )
+
+          member = spawn(fn -> Process.sleep(:infinity) end)
+          join_task = Task.async(fn -> Muster.join(scope, group, member) end)
+
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_group_state,
+                       node: ^t_node,
+                       group: ^group,
+                       state: {:occupied_pending, _}
+                     },
+                     10_000
+                   )
+
+          :ok = stop_supervised({:peer, r_name})
+
+          assert {:error, :rpc_failed} = Task.await(join_task, 10_000)
+
+          wait_until(fn -> Muster.members(scope) == [t_node] and status(scope) == :ready end)
+
+          refute Muster.local_member?(scope, group, member)
+          assert Muster.local_member_count(scope, group) == 0
+          assert group_state(scope, group) == nil
+
+          %{group: group, t_node: t_node}
+        end,
+        fn result, trace ->
+          refute of_kind(:muster_occupied, trace)
+                 |> Enum.any?(&(&1.group == result.group and &1.source == result.t_node))
+        end
+      )
+    end
+
+    test "a failed real vacant batch is re-queued and a later flush drains it",
+         %{scope: scope} do
+      t_node = node()
+
+      check_trace(
+        fn ->
+          r_name = ~c"muster_vac_fail_r_#{System.unique_integer([:positive])}"
+          r_node = :"#{r_name}@127.0.0.1"
+
+          {:ok, p_r, ^r_node} = Peer.start(name: r_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(r_node)
+          start_remote_muster(p_r, scope)
+          await_ready([t_node, r_node])
+
+          group = group_routed_to(scope, r_node)
+          member = spawn(fn -> Process.sleep(:infinity) end)
+
+          :ok = Muster.join(scope, group, member)
+          assert t_node in occupancy_on(r_node, scope, group)
+
+          :ok = Muster.leave(scope, group, member)
+
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_group_state,
+                       node: ^t_node,
+                       group: ^group,
+                       state: :vacant_queued
+                     },
+                     5_000
+                   )
+
+          # Hold the router-side DELETE so the natural flush stays in flight until
+          # we kill the peer, forcing the source shard down the real re-queue path.
+          force_ordering(
+            %{:"$kind" => :test_release_vacant_never},
+            %{
+              :"$kind" => :muster_vacant_batch,
+              :"$span" => :start,
+              node: ^r_node,
+              source: ^t_node
+            }
+          )
+
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_group_state,
+                       node: ^t_node,
+                       group: ^group,
+                       state: :vacant_flushing
+                     },
+                     5_000
+                   )
+
+          :ok = stop_supervised({:peer, r_name})
+
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_group_state,
+                       node: ^t_node,
+                       group: ^group,
+                       state: :vacant_queued
+                     },
+                     10_000
+                   )
+
+          wait_until(fn -> Muster.members(scope) == [t_node] and status(scope) == :ready end)
+
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_group_state,
+                       node: ^t_node,
+                       group: ^group,
+                       state: nil
+                     },
+                     10_000
+                   )
+
+          assert occupancy_on(t_node, scope, group) == []
+          assert Muster.local_member_count(scope, group) == 0
+
+          %{group: group}
+        end,
+        fn result, trace ->
+          states =
+            of_kind(:muster_group_state, trace)
+            |> Enum.filter(&(&1.group == result.group and &1.node == node()))
+            |> Enum.map(& &1.state)
+
+          assert :vacant_flushing in states
+          assert :vacant_queued in states
+          assert nil in states
         end
       )
     end
@@ -1523,14 +1725,16 @@ defmodule Forum.MusterDistributedTest do
                  |> Enum.count(&(&1[:node] == result.c_node and &1[:source] == result.t_node)) ==
                    1
 
-          # Exactly one snapshot from T was applied-and-collected on C — the
-          # post-restart retry (the crashed attempt dies at its trace point,
-          # which is never collected) — and it carried the group.
-          assert [%{groups: groups}] =
-                   of_kind(:muster_node_state_received, trace)
-                   |> Enum.filter(&(&1.node == result.c_node and &1.source == result.t_node))
+          # At least one post-crash snapshot from T landed on C and every such
+          # delivery carried the group. The crashed attempt dies at its trace point
+          # and is never collected; later recovery rounds may legitimately
+          # re-snapshot the same group to the same router.
+          snaps_to_c =
+            of_kind(:muster_node_state_received, trace)
+            |> Enum.filter(&(&1.node == result.c_node and &1.source == result.t_node))
 
-          assert result.group in groups
+          assert snaps_to_c != []
+          assert Enum.all?(snaps_to_c, &(result.group in &1.groups))
 
           # T entered a rebalance into the 3-node view at least twice: the
           # crashed attempt and the successful post-restart one.
@@ -1622,6 +1826,90 @@ defmodule Forum.MusterDistributedTest do
                    |> Enum.filter(&(&1.node == result.r_node and &1.source == result.t_node))
 
           assert result.group in groups
+        end
+      )
+    end
+  end
+
+  describe "rebalance gather timeout on a real membership change" do
+    setup do
+      scope = :"muster_gather_timeout_dist_#{System.unique_integer([:positive])}"
+
+      start_supervised!(
+        spec(scope, vacant_flush_interval_ms: 100, rebalance_gather_timeout_ms: 150)
+      )
+
+      %{scope: scope}
+    end
+
+    test "a blocked shard times out the coordinator, which restarts and re-converges",
+         %{scope: scope} do
+      t_node = node()
+
+      check_trace(
+        fn ->
+          {:ok, p_r, r_node} = Peer.start(aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(r_node)
+          start_remote_muster(p_r, scope)
+          await_ready([t_node, r_node])
+
+          # Hold shard 0 inside the synchronous rebalance gather with a real trace
+          # ordering, so the coordinator times out naturally on its GenServer.call.
+          force_ordering(
+            %{:"$kind" => :test_release_gather},
+            %{:"$kind" => :muster_rebalance_gather, node: ^t_node, index: 0}
+          )
+
+          coord = Process.whereis(Forum.Supervisor.name(scope))
+          coord_ref = Process.monitor(coord)
+
+          c_name = ~c"muster_gather_timeout_c_#{System.unique_integer([:positive])}"
+          c_node = :"#{c_name}@127.0.0.1"
+
+          {:ok, p_c, ^c_node} = Peer.start(name: c_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(c_node)
+          start_remote_muster(p_c, scope)
+
+          assert_receive {:DOWN, ^coord_ref, :process, ^coord, _reason}, 5_000
+
+          # Release the held gather on the restarted shard so the recovery
+          # rebalance can complete; only the first rebalance should time out.
+          tp(:test_release_gather, %{})
+
+          wait_until(
+            fn ->
+              pid = Process.whereis(Forum.Supervisor.name(scope))
+              is_pid(pid) and pid != coord
+            end,
+            5_000
+          )
+
+          view3 = Enum.sort([t_node, r_node, c_node])
+
+          wait_until(
+            fn ->
+              Muster.members(scope) == view3 and
+                status(scope) == :ready and
+                :erpc.call(r_node, Muster, :members, [scope]) == view3 and
+                remote_status(p_r, scope) == :ready and
+                :erpc.call(c_node, Muster, :members, [scope]) == view3 and
+                remote_status(p_c, scope) == :ready
+            end,
+            20_000
+          )
+
+          assert :ok =
+                   Muster.join(
+                     scope,
+                     :"gather_timeout_recovered_#{System.unique_integer([:positive])}",
+                     spawn(fn -> Process.sleep(:infinity) end)
+                   )
+
+          %{t_node: t_node, view3: view3}
+        end,
+        fn result, trace ->
+          assert of_kind(:muster_rebalance_start, trace)
+                 |> Enum.count(&(&1.node == result.t_node and &1.to == result.view3)) >= 2
         end
       )
     end
@@ -1789,10 +2077,9 @@ defmodule Forum.MusterDistributedTest do
                      10_000
                    )
 
-          # Flush: a vacant batch retracts the row (a real tombstone if the
-          # orphaned worker landed it, a no-op DELETE otherwise). The source then
-          # forgets the group (state: nil).
-          trigger_flush(scope)
+          # The natural flush retracts the row (a real tombstone if the orphaned
+          # worker landed it, a no-op DELETE otherwise). The source then forgets
+          # the group (state: nil).
 
           assert {:ok, _} =
                    block_until(
