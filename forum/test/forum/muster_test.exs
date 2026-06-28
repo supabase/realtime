@@ -1190,6 +1190,147 @@ defmodule Forum.MusterTest do
     end
   end
 
+  describe "rebalance full vs. delta dispatch" do
+    setup %{scope: scope, base_opts: opts} do
+      start_supervised!(spec(scope, opts))
+      :ok
+    end
+
+    # Poll the coordinator's :dump until owed_snapshots drains, i.e. every
+    # fire-and-forget RPC from the last rebalance has been acked (its worker
+    # returned :ok and its :node_state_done cleared the entry). A router is only
+    # eligible for a DELTA once it is no longer owed.
+    defp wait_owed_empty(scope, timeout \\ 2_000) do
+      deadline = System.monotonic_time(:millisecond) + timeout
+      name = Forum.Supervisor.name(scope)
+
+      Stream.repeatedly(fn ->
+        owed = GenServer.call(name, :dump).owed_snapshots
+        owed == %{} or System.monotonic_time(:millisecond) >= deadline or Process.sleep(10)
+      end)
+      |> Enum.find(&(&1 == true))
+      |> case do
+        true -> :ok
+        _ -> flunk("owed_snapshots did not drain within #{timeout}ms")
+      end
+    end
+
+    # Routers of `groups` under a probe ring built from `members`.
+    defp routers_under(members, groups) do
+      probe = :"_probe_fd_#{System.unique_integer([:positive])}_muster_ring"
+      {:ok, _} = ExHashRing.Ring.start_link(name: probe, replicas: 128)
+      {:ok, _} = ExHashRing.Ring.set_nodes(probe, Enum.sort(members))
+      routed = Map.new(groups, fn g -> {g, elem(ExHashRing.Ring.find_node(probe, g), 1)} end)
+      ExHashRing.Ring.stop(probe)
+      routed
+    end
+
+    # A settled member that GAINS groups when another node leaves gets a DELTA
+    # carrying only the groups that moved onto it, never the ones it already
+    # held. This is the node-leave / churn win: re-sending the full set would be
+    # pure waste.
+    test "a settled router that gains groups on a leave gets a delta of only the moved-in groups",
+         %{scope: scope} do
+      a = :a@nowhere
+      b = :b@nowhere
+      view3 = [node(), a, b]
+      view2 = [node(), a]
+
+      # Hold a spread of groups locally (single-node: all :occupied, source = us).
+      groups = Enum.map(1..120, &:"fd#{&1}")
+
+      Enum.each(groups, fn g ->
+        :ok = Muster.join(scope, g, spawn(fn -> Process.sleep(:infinity) end))
+      end)
+
+      # Up to {us, a, b}: a and b are brand-new routers -> FULL snapshots. Drain
+      # to :ready and wait for both snapshots to be acked so a is not owed.
+      rebalance_sync(scope, view3)
+      wait_owed_empty(scope)
+
+      routed3 = routers_under(view3, groups)
+      _ = drain_calls()
+
+      # b leaves -> {us, a}. b's groups redistribute to us/a; a keeps its own.
+      trigger_rebalance(scope, view2)
+      GenServer.call(Forum.Supervisor.name(scope), :status)
+
+      routed2 = routers_under(view2, groups)
+      moved_into_a = for g <- groups, routed2[g] == a, routed3[g] != a, do: g
+      a_kept = for g <- groups, routed2[g] == a, routed3[g] == a, do: g
+
+      # Sanity: this scenario only proves anything if a both kept some rows and
+      # gained others.
+      assert moved_into_a != []
+      assert a_kept != []
+
+      [^scope, ^a, Scope, :apply_delta, [^scope, src, delta_groups | _], _] =
+        assert_call(
+          fn
+            [^scope, ^a, Scope, :apply_delta, [^scope, _, _ | _], _] -> true
+            _ -> false
+          end,
+          1_000
+        )
+
+      assert src == node()
+      # The delta is exactly the moved-in groups...
+      assert Enum.sort(delta_groups) == Enum.sort(moved_into_a)
+      # ...and carries NONE of the groups a already held.
+      assert Enum.all?(a_kept, &(&1 not in delta_groups))
+    end
+
+    # When a prior round to a router is still in flight (owed_snapshots), its
+    # baseline is unknown, so even a leave that would normally delta falls back to
+    # a FULL snapshot for that router.
+    test "an owed router falls back to a full snapshot", %{scope: scope} do
+      a = :a@nowhere
+      b = :b@nowhere
+
+      # Block the RPC to `a` forever so its first snapshot never acks: a stays in
+      # owed_snapshots. (`b` returns :ok normally.)
+      test_pid = self()
+
+      stub(ErlDist, :call, fn _scope, target, _m, _f, _args, _t ->
+        if target == a do
+          send(test_pid, :a_called)
+          Process.sleep(:infinity)
+        else
+          :ok
+        end
+      end)
+
+      groups = Enum.map(1..120, &:"ow#{&1}")
+
+      Enum.each(groups, fn g ->
+        :ok = Muster.join(scope, g, spawn(fn -> Process.sleep(:infinity) end))
+      end)
+
+      # Up to {us, a, b}: a gets a FULL snapshot whose worker blocks -> a is owed.
+      trigger_rebalance(scope, [node(), a, b])
+      assert_receive :a_called, 1_000
+
+      # a is still owed (its worker is parked). Confirm via :dump, then leave b.
+      assert Map.has_key?(GenServer.call(Forum.Supervisor.name(scope), :dump).owed_snapshots, a)
+      _ = drain_calls()
+
+      trigger_rebalance(scope, [node(), a])
+      GenServer.call(Forum.Supervisor.name(scope), :status)
+
+      # Even though a is an existing member gaining groups, the in-flight prior
+      # round forces a FULL snapshot, not a delta. (do_rebalance dispatches exactly
+      # one RPC per changed router, so a :receive_node_state to `a` precludes an
+      # :apply_delta to it.)
+      assert_call(
+        fn
+          [^scope, ^a, Scope, :receive_node_state, [^scope, _, _ | _], _] -> true
+          _ -> false
+        end,
+        1_000
+      )
+    end
+  end
+
   describe "rebalance occupancy snapshot completeness" do
     setup %{scope: scope, base_opts: opts} do
       start_supervised!(spec(scope, opts))
@@ -1198,11 +1339,12 @@ defmodule Forum.MusterTest do
 
     # This node holds two groups, both routed to :x@nowhere AFTER the rebalance.
     # g1's router does not change (x before and after); g2's router changes
-    # (z -> x). Because receive_node_state wipes ALL of this source's rows on x
-    # before inserting the snapshot, the snapshot to x must be a FULL snapshot
-    # of every group we hold routed to x — both g1 and g2 — or x would silently
-    # drop {g1, node()}.
-    test "snapshot to a router that gains a group includes the groups already routed there",
+    # (z -> x). x is a settled router (it received no rebalance snapshot, so it is
+    # not owed), so the leave sends it a DELTA of only the moved-in group g2. g1 is
+    # NOT re-sent: x already holds {g1, node()} and the delta path never wipes, so
+    # re-sending it would be pure waste (contrast the full-snapshot path, which
+    # wipes and therefore must re-include every held group routed to x).
+    test "a leave sends the gaining router a delta of only the moved-in group, not the kept one",
          %{scope: scope} do
       members_old = Enum.sort([node(), :x@nowhere, :z@nowhere])
       members_new = Enum.sort([node(), :x@nowhere])
@@ -1227,13 +1369,15 @@ defmodule Forum.MusterTest do
 
       _ = drain_calls()
 
-      # Drop :z@nowhere. g2 moves onto x; g1 stays on x.
+      # Drop :z@nowhere. g2 moves onto x; g1 stays on x. x is a settled member
+      # (it received no rebalance snapshot: the joins travelled as :occupied, not
+      # tracked in owed_snapshots), so it gets a DELTA, not a full snapshot.
       trigger_rebalance(scope, members_new)
 
-      [^scope, :x@nowhere, Scope, :receive_node_state, [^scope, src, groups | _], _] =
+      [^scope, :x@nowhere, Scope, :apply_delta, [^scope, src, groups | _], _] =
         assert_call(
           fn
-            [^scope, :x@nowhere, Scope, :receive_node_state, [^scope, _, _ | _], _] -> true
+            [^scope, :x@nowhere, Scope, :apply_delta, [^scope, _, _ | _], _] -> true
             _ -> false
           end,
           500
@@ -1242,9 +1386,9 @@ defmodule Forum.MusterTest do
       assert src == node()
       assert g2 in groups, "the moved group must be announced to its new router"
 
-      assert g1 in groups,
-             "the unchanged group still routed to x must be re-announced, " <>
-               "else the source-wide wipe on x drops {g1, node()}"
+      refute g1 in groups,
+             "the unchanged group is NOT re-sent: x already holds {g1, node()} and " <>
+               "the delta path never wipes, so re-sending it would be pure waste"
     end
 
     test "a router that gains nothing is not sent a snapshot", %{scope: scope} do
@@ -1496,7 +1640,7 @@ defmodule Forum.MusterTest do
       assert_ready(scope)
     end
 
-    test "a router that receives a snapshot is not also sent a separate marker",
+    test "a router that receives a rebalance RPC is not also sent a separate marker",
          %{scope: scope} do
       members_old = Enum.sort([node(), :x@nowhere, :z@nowhere])
       members_new = Enum.sort([node(), :x@nowhere])
@@ -1516,13 +1660,15 @@ defmodule Forum.MusterTest do
       calls = drain_calls()
       sends = drain_sends()
 
-      # x is an affected router: it gets the snapshot RPC (which carries the marker)...
+      # x is an affected router gaining a moved group from a settled baseline, so
+      # it gets a DELTA RPC (which carries the marker)...
       assert Enum.any?(calls, fn
-               [^scope, :x@nowhere, Scope, :receive_node_state, _, _] -> true
+               [^scope, :x@nowhere, Scope, :apply_delta, _, _] -> true
                _ -> false
              end)
 
-      # ...and is NOT also sent a redundant async marker.
+      # ...and is NOT also sent a redundant async marker (it is in owed_snapshots
+      # while the delta is in flight, so announce_view skips it).
       refute Enum.any?(sends, fn
                [^scope, :x@nowhere, {:rebalance_marker, _, _, _}] -> true
                _ -> false
