@@ -380,14 +380,472 @@ defmodule Forum.MusterDistributedTest do
           %{group: group, c_node: c_node, t_node: t_node}
         end,
         fn result, trace ->
-          # T snapshotted C at least twice: the initial join and the post-death
-          # heal — proving the heal actually re-delivered the row after D's
-          # tenure (during which C correctly dropped it).
-          snapshots =
+          # T delivered the row to C at least twice: the initial join and the
+          # post-death heal, proving the heal actually re-delivered it after D's
+          # tenure (during which C correctly dropped it). The initial delivery is a
+          # FULL snapshot (C was a brand-new router); the heal, to a now-settled C
+          # regaining the group on a leave, is a DELTA.
+          fulls =
             of_kind(:muster_node_state_received, trace)
             |> Enum.filter(&(&1.node == result.c_node and &1.source == result.t_node))
 
-          assert length(snapshots) >= 2
+          deltas =
+            of_kind(:muster_delta_received, trace)
+            |> Enum.filter(&(&1.node == result.c_node and &1.source == result.t_node))
+
+          # The initial join took the full-snapshot path.
+          assert fulls != []
+
+          # The group reached C at least twice across full + delta deliveries.
+          deliveries =
+            (fulls ++ deltas) |> Enum.count(&(result.group in &1.groups))
+
+          assert deliveries >= 2
+
+          # And the post-death heal exercised the delta path.
+          assert Enum.any?(deltas, &(result.group in &1.groups))
+        end
+      )
+    end
+  end
+
+  describe "delta-on-leave across real nodes" do
+    setup do
+      scope = :"muster_delta_#{System.unique_integer([:positive])}"
+      start_supervised!(spec(scope, vacant_flush_interval_ms: 100))
+      %{scope: scope}
+    end
+
+    # README rebalance step 7 (full vs. delta): when a node leaves, a surviving
+    # router that INHERITS the departed node's groups is a settled member whose
+    # rows match the previous generation, so the holder re-announces via a DELTA
+    # carrying only the moved-in groups, never the groups the survivor already
+    # held (those are preserved on it because the delta path does not wipe). The
+    # full-snapshot path would re-send the survivor's entire slice; this is the
+    # churn win. Driven black-box: a real node D dies and T heals the survivor S.
+    test "a survivor inheriting a group on a leave gets a delta of only the moved-in group",
+         %{scope: scope} do
+      t_node = node()
+
+      check_trace(
+        fn ->
+          # Settled {T, S}.
+          {:ok, p_s, s_node} = Peer.start(aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(s_node)
+          start_remote_muster(p_s, scope)
+          await_ready([t_node, s_node])
+
+          # D's name upfront so the victim groups can be picked from ring math.
+          d_name = ~c"muster_delta_d_#{System.unique_integer([:positive])}"
+          d_node = :"#{d_name}@127.0.0.1"
+          view3 = Enum.sort([t_node, s_node, d_node])
+          view2 = Enum.sort([t_node, s_node])
+
+          # g_keep routes to S before AND after D dies (S holds it throughout);
+          # g_move routes to D before, S after (it moves onto S when D dies).
+          g_keep = pick_group([{view3, s_node}, {view2, s_node}])
+          g_move = pick_group([{view3, d_node}, {view2, s_node}])
+          assert g_keep != g_move
+
+          # Bring up D and settle {T, S, D}.
+          {:ok, p_d, ^d_node} = Peer.start(name: d_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(d_node)
+          start_remote_muster(p_d, scope)
+          await_ready(view3)
+
+          # T holds both groups; each travels to its router as :occupied (not a
+          # snapshot), so S never enters owed_snapshots and stays a settled router.
+          :ok = Muster.join(scope, g_keep, spawn(fn -> Process.sleep(:infinity) end))
+          :ok = Muster.join(scope, g_move, spawn(fn -> Process.sleep(:infinity) end))
+          assert t_node in occupancy_on(s_node, scope, g_keep)
+          assert t_node in occupancy_on(d_node, scope, g_move)
+
+          # D dies: g_move moves D -> S; T re-announces it to the settled survivor
+          # S via a DELTA.
+          :ok = stop_supervised({:peer, d_name})
+
+          assert {:ok, %{groups: delta_groups}} =
+                   block_until(
+                     %{:"$kind" => :muster_delta_received, node: ^s_node, source: ^t_node},
+                     20_000
+                   )
+
+          # view2 reaches :ready a 2nd time (the 1st was before D joined), nth: 2.
+          await_ready(view2, nth: 2, timeout: 20_000)
+
+          assert g_move in delta_groups, "the inherited group must ride the delta"
+
+          refute g_keep in delta_groups,
+                 "the group S already held must NOT be re-sent in the delta"
+
+          # Final occupancy: the moved group was ADDED and the kept group PRESERVED
+          # (it was never re-sent, yet survives because the delta does not wipe).
+          assert {:ok, ^s_node} = Muster.router(scope, g_move)
+          assert t_node in occupancy_on(s_node, scope, g_move)
+          assert t_node in occupancy_on(s_node, scope, g_keep)
+
+          %{g_keep: g_keep, g_move: g_move, s_node: s_node, t_node: t_node}
+        end,
+        fn result, trace ->
+          # The heal was a delta, never a full snapshot: S was settled throughout
+          # (it only ever GAINED groups, which on a leave travels incrementally),
+          # so T never sent it a receive_node_state.
+          assert of_kind(:muster_node_state_received, trace)
+                 |> Enum.filter(&(&1.node == result.s_node and &1.source == result.t_node)) == []
+
+          # Exactly the moved group rode the delta(s) to S; the kept group never did.
+          delta_groups =
+            of_kind(:muster_delta_received, trace)
+            |> Enum.filter(&(&1.node == result.s_node and &1.source == result.t_node))
+            |> Enum.flat_map(& &1.groups)
+
+          assert result.g_move in delta_groups
+          refute result.g_keep in delta_groups
+        end
+      )
+    end
+  end
+
+  describe "owed router falls back to a full snapshot (forced ordering)" do
+    setup do
+      scope = :"muster_owed_#{System.unique_integer([:positive])}"
+      # Generous rpc_timeout: the survivor's snapshot apply is parked for the whole
+      # window between two membership changes, and the sender's snapshot RPCs wait
+      # on it, so they must not time out (which crashes the sender) before release.
+      start_supervised!(spec(scope, vacant_flush_interval_ms: 100, rpc_timeout_ms: 30_000))
+      %{scope: scope}
+    end
+
+    # README rebalance step 7 (full vs. delta): when a router has a still-in-flight
+    # round from us (`owed_snapshots`), its baseline is unknown, so a SECOND
+    # rebalance that would otherwise send it a delta falls back to a FULL snapshot.
+    # Driven black-box with forced ordering: park survivor S's first snapshot apply
+    # so S stays owed on T, then make a real second membership change (O leaves)
+    # move a group onto S, and assert S receives that group via a full snapshot,
+    # never a delta.
+    test "a second rebalance while a router is owed sends a full snapshot, not a delta",
+         %{scope: scope} do
+      t_node = node()
+
+      o_name = ~c"muster_owed_o_#{System.unique_integer([:positive])}"
+      o_node = :"#{o_name}@127.0.0.1"
+      s_name = ~c"muster_owed_s_#{System.unique_integer([:positive])}"
+      s_node = :"#{s_name}@127.0.0.1"
+      view_tos = Enum.sort([t_node, o_node, s_node])
+      view_ts = Enum.sort([t_node, s_node])
+
+      check_trace(
+        fn ->
+          # Settled {T, O}.
+          {:ok, p_o, ^o_node} = Peer.start(name: o_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(o_node)
+          start_remote_muster(p_o, scope)
+          await_ready([t_node, o_node])
+
+          # g_park routes to S in {T,O,S} and {T,S}, so S's join snapshots it onto
+          # S (the round we park, making S owed) and it stays there. g_move routes
+          # to O in {T,O,S} but S in {T,S}, so it moves onto S when O leaves (the
+          # would-be delta).
+          g_park = pick_group([{view_tos, s_node}, {view_ts, s_node}])
+          g_move = pick_group([{view_tos, o_node}, {view_ts, s_node}])
+          assert g_park != g_move
+
+          # T holds both (they travel as :occupied, not snapshots).
+          :ok = Muster.join(scope, g_park, spawn(fn -> Process.sleep(:infinity) end))
+          :ok = Muster.join(scope, g_move, spawn(fn -> Process.sleep(:infinity) end))
+
+          # Park EVERY snapshot apply on S from T until we release: S's coordinator
+          # blocks in {:apply_snapshot}, so its RPC worker on T never returns and
+          # T's owed_snapshots[S] never clears.
+          force_ordering(
+            %{:"$kind" => :test_release_s},
+            %{:"$kind" => :muster_node_state_received, node: ^s_node, source: ^t_node}
+          )
+
+          # S joins {T,O,S}: T's rebalance snapshots g_park onto the new router S
+          # (full, since S is new), and that apply parks -> S is owed on T.
+          {:ok, p_s, ^s_node} = Peer.start(name: s_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(s_node)
+          start_remote_muster(p_s, scope)
+
+          # Wait until T records S as owed (its snapshot is in flight / parked).
+          wait_until(fn ->
+            Forum.Supervisor.name(scope)
+            |> GenServer.call(:dump)
+            |> Map.fetch!(:owed_snapshots)
+            |> Map.has_key?(s_node)
+          end)
+
+          # O leaves {T,O,S} -> {T,S} while S is owed. g_move moves O -> S, so T
+          # re-announces it to S, and because S is owed, as a FULL snapshot.
+          :ok = stop_supervised({:peer, o_name})
+
+          assert {:ok, _} =
+                   block_until(
+                     %{:"$kind" => :muster_rebalance_start, node: ^t_node, to: ^view_ts},
+                     10_000
+                   )
+
+          # Release: S applies the parked rounds, processes O's DOWN, and converges.
+          tp(:test_release_s, %{})
+          await_ready(view_ts, timeout: 20_000)
+
+          # Both groups landed on S from T.
+          assert {:ok, ^s_node} = Muster.router(scope, g_move)
+          assert t_node in occupancy_on(s_node, scope, g_move)
+          assert t_node in occupancy_on(s_node, scope, g_park)
+
+          %{g_park: g_park, g_move: g_move, s_node: s_node, t_node: t_node}
+        end,
+        fn result, trace ->
+          # The owed fallback held: T sent S only FULL snapshots, and g_move,
+          # which for a settled, non-owed router would have been a delta, arrived
+          # in one.
+          fulls =
+            of_kind(:muster_node_state_received, trace)
+            |> Enum.filter(&(&1.node == result.s_node and &1.source == result.t_node))
+
+          assert Enum.any?(fulls, &(result.g_move in &1.groups)),
+                 "g_move must reach S via a full snapshot under the owed fallback"
+
+          assert of_kind(:muster_delta_received, trace)
+                 |> Enum.count(&(&1.node == result.s_node and &1.source == result.t_node)) == 0,
+                 "no delta should be sent to an owed router"
+        end
+      )
+    end
+  end
+
+  describe "delta correctness across multiple rounds" do
+    setup do
+      scope = :"muster_delta_multi_#{System.unique_integer([:positive])}"
+      start_supervised!(spec(scope, vacant_flush_interval_ms: 100))
+      %{scope: scope}
+    end
+
+    # README rebalance step 7 (full vs. delta), the INDUCTIVE step: a delta's
+    # baseline is "the receiver's rows from the PREVIOUS ring generation", and that
+    # baseline must hold even when the previous generation was itself established by
+    # a delta (not a full snapshot). Two sequential leaves each move a different
+    # group onto the same settled survivor S; the SECOND delta must build on the
+    # table the FIRST delta left, never dropping the group the first delta delivered
+    # (nor the group S has held since the joins). If deltas did not chain correctly,
+    # S would end the test missing g1.
+    test "consecutive leaves chain deltas onto one survivor (a delta built on a delta base)",
+         %{scope: scope} do
+      t_node = node()
+
+      check_trace(
+        fn ->
+          # Settled {T, S}. T holds nothing yet, so S joins as a settled router that
+          # never receives a full snapshot (the joins below travel as :occupied).
+          {:ok, p_s, s_node} = Peer.start(aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(s_node)
+          start_remote_muster(p_s, scope)
+          await_ready([t_node, s_node])
+
+          # D1, D2 names upfront so the victim groups can be picked from ring math.
+          d1_name = ~c"muster_chain_d1_#{System.unique_integer([:positive])}"
+          d2_name = ~c"muster_chain_d2_#{System.unique_integer([:positive])}"
+          d1_node = :"#{d1_name}@127.0.0.1"
+          d2_node = :"#{d2_name}@127.0.0.1"
+
+          view4 = Enum.sort([t_node, s_node, d1_node, d2_node])
+          view_b = Enum.sort([t_node, s_node, d2_node])
+          view2 = Enum.sort([t_node, s_node])
+
+          # g_keep: S in every view (S holds it throughout, never re-sent).
+          # g1: D1 in view4, S after D1 leaves -> rides delta #1.
+          # g2: D2 in view4 AND view_b (survives D1's leave), S after D2 leaves ->
+          #     rides delta #2, which must build on the base delta #1 left.
+          g_keep = pick_group([{view4, s_node}, {view_b, s_node}, {view2, s_node}])
+          g1 = pick_group([{view4, d1_node}, {view_b, s_node}])
+          g2 = pick_group([{view4, d2_node}, {view_b, d2_node}, {view2, s_node}])
+          assert g_keep != g1 and g1 != g2 and g_keep != g2
+
+          # Bring up D1 then D2; settle the 4-node view.
+          {:ok, p_d1, ^d1_node} = Peer.start(name: d1_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(d1_node)
+          start_remote_muster(p_d1, scope)
+          await_ready(Enum.sort([t_node, s_node, d1_node]))
+
+          {:ok, p_d2, ^d2_node} = Peer.start(name: d2_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(d2_node)
+          start_remote_muster(p_d2, scope)
+          await_ready(view4)
+
+          # T holds all three; each travels to its router as :occupied, so S never
+          # enters owed_snapshots and stays a settled router.
+          :ok = Muster.join(scope, g_keep, spawn(fn -> Process.sleep(:infinity) end))
+          :ok = Muster.join(scope, g1, spawn(fn -> Process.sleep(:infinity) end))
+          :ok = Muster.join(scope, g2, spawn(fn -> Process.sleep(:infinity) end))
+          assert t_node in occupancy_on(s_node, scope, g_keep)
+          assert t_node in occupancy_on(d1_node, scope, g1)
+          assert t_node in occupancy_on(d2_node, scope, g2)
+
+          # Round 1: D1 leaves. g1 moves D1 -> S via DELTA #1; g_keep and g2 unmoved.
+          :ok = stop_supervised({:peer, d1_name})
+
+          assert {:ok, %{groups: delta1}} =
+                   block_until(
+                     %{:"$kind" => :muster_delta_received, node: ^s_node, source: ^t_node},
+                     20_000
+                   )
+
+          assert g1 in delta1
+          await_ready(view_b, timeout: 20_000)
+
+          # Drain owed so round 2 to S is a genuine delta, not an owed-fallback full.
+          wait_until(fn ->
+            owed = GenServer.call(Forum.Supervisor.name(scope), :dump).owed_snapshots
+            not Map.has_key?(owed, s_node)
+          end)
+
+          # Round 2: D2 leaves. g2 moves D2 -> S via DELTA #2, built on the table
+          # delta #1 left (g_keep + g1 already present on S, neither re-sent).
+          :ok = stop_supervised({:peer, d2_name})
+
+          # The 4-arg (nth) block_until returns {:ok, [events]}; the 2nd is delta #2.
+          assert {:ok, deltas_to_s} =
+                   block_until(
+                     %{:"$kind" => :muster_delta_received, node: ^s_node, source: ^t_node},
+                     2,
+                     20_000,
+                     :infinity
+                   )
+
+          assert g2 in List.last(deltas_to_s).groups
+          await_ready(view2, nth: 2, timeout: 20_000)
+
+          # All three groups are present on S: g1 survived round 2 (the chain did not
+          # drop it), g2 was added, g_keep preserved throughout without re-send.
+          assert t_node in occupancy_on(s_node, scope, g1)
+          assert t_node in occupancy_on(s_node, scope, g2)
+          assert t_node in occupancy_on(s_node, scope, g_keep)
+
+          %{g_keep: g_keep, g1: g1, g2: g2, s_node: s_node, t_node: t_node}
+        end,
+        fn result, trace ->
+          to_s = fn kind ->
+            of_kind(kind, trace)
+            |> Enum.filter(&(&1.node == result.s_node and &1.source == result.t_node))
+          end
+
+          # S was settled throughout: it only ever GAINED groups on leaves, which
+          # travels incrementally, so T never sent it a full snapshot.
+          assert to_s.(:muster_node_state_received) == []
+
+          # Both moved groups rode deltas; the kept group never did.
+          delta_groups = to_s.(:muster_delta_received) |> Enum.flat_map(& &1.groups)
+          assert result.g1 in delta_groups
+          assert result.g2 in delta_groups
+          refute result.g_keep in delta_groups
+        end
+      )
+    end
+
+    # README rebalance step 7 + step 9 ("the receiver owns removes"): the delta path
+    # leans on the receiver's OWN drop_stale_router_entries to retract a group that
+    # moved away, and on the delta's baseline surviving a round that delivered the
+    # receiver no data at all. Here g_move ping-pongs S -> D -> S: when D joins, S is
+    # only bare-marked (it gains nothing) yet must DROP g_move via its own sweep;
+    # when D leaves, S regains g_move via a delta whose baseline is exactly that
+    # swept-down table. g_keep, held by S throughout, is never re-sent and must
+    # survive. This is the inductive base-maintenance that the (not deterministically
+    # forceable) divergent-observation-order case ultimately relies on.
+    test "a survivor's own sweep retracts a moved-away group and a later delta re-adds it",
+         %{scope: scope} do
+      t_node = node()
+
+      check_trace(
+        fn ->
+          {:ok, p_s, s_node} = Peer.start(aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(s_node)
+          start_remote_muster(p_s, scope)
+          await_ready([t_node, s_node])
+
+          d_name = ~c"muster_pingpong_d_#{System.unique_integer([:positive])}"
+          d_node = :"#{d_name}@127.0.0.1"
+          view2 = Enum.sort([t_node, s_node])
+          view3 = Enum.sort([t_node, s_node, d_node])
+
+          # g_keep: S in both views. g_move: S in {T,S}, D once D joins.
+          g_keep = pick_group([{view2, s_node}, {view3, s_node}])
+          g_move = pick_group([{view2, s_node}, {view3, d_node}])
+          assert g_keep != g_move
+
+          # T holds both; both route to S now, travelling as :occupied.
+          :ok = Muster.join(scope, g_keep, spawn(fn -> Process.sleep(:infinity) end))
+          :ok = Muster.join(scope, g_move, spawn(fn -> Process.sleep(:infinity) end))
+          assert t_node in occupancy_on(s_node, scope, g_keep)
+          assert t_node in occupancy_on(s_node, scope, g_move)
+
+          # D joins: g_move's router moves S -> D. S gains nothing (g_keep stays), so
+          # T only bare-marks S; S must drop its now-stale {g_move, T} on its own.
+          {:ok, p_d, ^d_node} = Peer.start(name: d_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(d_node)
+          start_remote_muster(p_d, scope)
+          await_ready(view3)
+
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_drop_stale_entry,
+                       node: ^s_node,
+                       group: ^g_move,
+                       source: ^t_node
+                     },
+                     20_000
+                   )
+
+          # The sweep ran: S no longer routes g_move (D does) and dropped its row;
+          # g_keep is untouched and D now holds it.
+          assert occupancy_on(s_node, scope, g_move) == []
+          assert t_node in occupancy_on(d_node, scope, g_move)
+          assert t_node in occupancy_on(s_node, scope, g_keep)
+
+          # D leaves: g_move moves D -> S again. S is settled (only ever bare-marked,
+          # never owed), so T re-announces via a DELTA whose baseline is S's
+          # swept-down table.
+          :ok = stop_supervised({:peer, d_name})
+
+          assert {:ok, %{groups: delta_groups}} =
+                   block_until(
+                     %{:"$kind" => :muster_delta_received, node: ^s_node, source: ^t_node},
+                     20_000
+                   )
+
+          assert g_move in delta_groups
+          await_ready(view2, nth: 2, timeout: 20_000)
+
+          # g_move re-added by the delta; g_keep preserved without ever being re-sent.
+          assert t_node in occupancy_on(s_node, scope, g_move)
+          assert t_node in occupancy_on(s_node, scope, g_keep)
+
+          %{g_keep: g_keep, g_move: g_move, s_node: s_node, t_node: t_node}
+        end,
+        fn result, trace ->
+          to_s = fn kind ->
+            of_kind(kind, trace)
+            |> Enum.filter(&(&1.node == result.s_node and &1.source == result.t_node))
+          end
+
+          # S was never sent a full snapshot: it stayed settled across the whole
+          # ping-pong (bare marker on the join, delta on the leave).
+          assert to_s.(:muster_node_state_received) == []
+
+          # Exactly the moved group rode the delta back to S; the kept group never did.
+          delta_groups = to_s.(:muster_delta_received) |> Enum.flat_map(& &1.groups)
+          assert result.g_move in delta_groups
+          refute result.g_keep in delta_groups
+
+          # S itself performed the retract (receiver owns removes): the only node to
+          # drop g_move (sourced from T) as stale was S.
+          drops =
+            of_kind(:muster_drop_stale_entry, trace)
+            |> Enum.filter(&(&1.group == result.g_move and &1.source == result.t_node))
+
+          assert drops |> Enum.map(& &1.node) |> Enum.uniq() == [result.s_node]
         end
       )
     end
@@ -1673,16 +2131,21 @@ defmodule Forum.MusterDistributedTest do
                    ) == 1
           end
 
-          # The post-death snapshots really carried the moved groups: T
-          # re-told S about g_t, and S re-told T about g_s.
-          assert of_kind(:muster_node_state_received, trace)
-                 |> Enum.any?(
+          # The post-death re-announces really carried the moved groups: T
+          # re-told S about g_t, and S re-told T about g_s. A survivor gaining a
+          # group on a leave is a settled router, so the re-announce travels as a
+          # DELTA (`:muster_delta_received`), not a full snapshot.
+          deliveries =
+            of_kind(:muster_delta_received, trace) ++ of_kind(:muster_node_state_received, trace)
+
+          assert Enum.any?(
+                   deliveries,
                    &(&1.node == result.s_node and &1.source == result.t_node and
                        result.g_t in &1.groups)
                  )
 
-          assert of_kind(:muster_node_state_received, trace)
-                 |> Enum.any?(
+          assert Enum.any?(
+                   deliveries,
                    &(&1.node == result.t_node and &1.source == result.s_node and
                        result.g_s in &1.groups)
                  )

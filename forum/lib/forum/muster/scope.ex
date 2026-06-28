@@ -313,6 +313,29 @@ defmodule Forum.Muster.Scope do
     )
   end
 
+  @doc """
+  Remote: source_node gives us an incremental DELTA (the groups that just moved
+  onto us) for the cluster view identified by `view_hash`.
+
+  The add-only counterpart of `receive_node_state`, dispatched by a source's
+  rebalance to a router that was already a member and had acked the source's
+  previous round, so its rows for the source match the previous ring generation.
+  Unlike a snapshot it does **not** wipe: groups that moved *away* from us are
+  reaped by our own `drop_stale_router_entries`, and a group the source vacated by
+  the source's vacant-batch retry, so a delta need only ADD what moved in. Applied
+  via `{:apply_delta, ...}` through the coordinator (same per-source seq guard as a
+  snapshot), and it doubles as the source's rebalance marker (data first, then
+  readiness), so the readiness barrier treats it exactly like a snapshot.
+  """
+  @spec apply_delta(atom, node, [Forum.group()], non_neg_integer, integer) :: :ok
+  def apply_delta(scope, source_node, adds, view_hash, seq) do
+    GenServer.call(
+      Forum.Supervisor.name(scope),
+      {:apply_delta, source_node, adds, view_hash, seq},
+      :infinity
+    )
+  end
+
   ## GenServer lifecycle
 
   @spec start_link(atom, Keyword.t()) :: GenServer.on_start()
@@ -450,6 +473,45 @@ defmodule Forum.Muster.Scope do
         source: source,
         view_hash: view_hash,
         groups: groups
+      })
+
+      state = %{
+        state
+        | applied_snapshot_seq: Map.put(state.applied_snapshot_seq, source, seq)
+      }
+
+      {:reply, :ok, update_status(put_member_view(state, source, view_hash, seq))}
+    end
+  end
+
+  # Incremental sibling of {:apply_snapshot}: apply a DELTA (the groups that just
+  # moved onto us) from `source`. Like the snapshot it is seq-guarded per source:
+  # a round not strictly newer than the highest already applied is a stale,
+  # reordered round and is dropped wholesale. But it does NOT wipe: a delta only
+  # ADDS, since groups that moved away are reaped by our own
+  # drop_stale_router_entries and a vacated group by the source's vacant-batch
+  # retry (the sender asserts what it holds; the receiver owns removes). Each add
+  # is an individually seq-guarded upsert (the same per-{group, source} discipline
+  # as occupied/4), so it composes with concurrent claims from the source's shards.
+  # We then advance the watermark and fold in the carried view marker, exactly like
+  # a snapshot (data first, then readiness), so the barrier cannot tell the two
+  # apart.
+  @impl true
+  def handle_call({:apply_delta, source, adds, view_hash, seq}, _from, %State{} = state) do
+    applied = Map.get(state.applied_snapshot_seq, source)
+
+    if applied != nil and seq <= applied do
+      {:reply, :ok, state}
+    else
+      table = state.occupancy_table
+      Enum.each(adds, fn group -> upsert_if_newer(table, {group, source}, seq) end)
+
+      tp(:muster_delta_received, %{
+        scope: state.scope,
+        node: node(),
+        source: source,
+        view_hash: view_hash,
+        groups: adds
       })
 
       state = %{
@@ -725,33 +787,67 @@ defmodule Forum.Muster.Scope do
         Map.fetch!(new_router, group) != old_dest
       end)
 
-    # Routers that gained at least one moved group. Each gets a FULL snapshot of
-    # every group we hold routed to it (not just the moved ones) because
-    # receive_node_state wipes all of this source's rows before inserting. Sending
-    # only the moved groups would drop unchanged groups that still route there.
-    # Routers with no moved group are left untouched: their existing rows for us
-    # are still correct, and any group that moved *away* is cleared by their own
-    # drop_stale_router_entries.
+    # Routers that gained at least one moved group; only these need to hear from
+    # us. A router with no moved group is left untouched: its existing rows for us
+    # are still correct, and any group that moved *away* is cleared by its own
+    # drop_stale_router_entries (the receiver owns removes; we only ever assert
+    # what we hold).
     changed_routers =
       groups_to_reannounce |> Enum.map(&Map.fetch!(new_router, &1)) |> MapSet.new()
 
-    Logger.info(
-      "Muster[#{node()}|#{state.scope}] rebalance: #{length(candidates)} group(s) held, #{length(groups_to_reannounce)} moved, snapshotting #{MapSet.size(changed_routers)} router(s): #{inspect(MapSet.to_list(changed_routers))}"
-    )
+    # Each changed router gets either a FULL snapshot or a DELTA:
+    #
+    #   * FULL (receive_node_state, wipe+replace) when the router's baseline is
+    #     unknown: it joined THIS round (its table is empty or stale-surviving),
+    #     or it has an in-flight round from us (owed_snapshots: it may not have
+    #     applied the previous round, so a ring-derived diff has no trustworthy
+    #     base). The wipe re-establishes a complete, correct picture.
+    #
+    #   * DELTA (apply_delta, add-only upsert) otherwise: the router was already
+    #     a member and acked our last round, so its rows match the PREVIOUS ring
+    #     generation. R holds the groups that routed to it before this round
+    #     (maintained inductively: it gained them in the round they moved in, and
+    #     drops what moves away via its own sweep), so we need only send what moved
+    #     IN this round (groups_to_reannounce routed to R). find_historical_node(_,
+    #     _, 1), the previous generation, is exactly that baseline.
+    #
+    # old_members is the pre-rebalance view (state.members is updated below). After
+    # a Scope restart members is [node()], so every other router reads as "new" and
+    # gets a FULL snapshot, so the post-crash heal stays a full re-announce.
+    old_members = state.members
 
-    by_router =
+    full_by_router =
       candidates
       |> Enum.group_by(&Map.fetch!(new_router, &1))
       |> Map.take(MapSet.to_list(changed_routers))
 
-    # Local self-target: synchronous (seq-guarded) ETS inserts. Remote targets:
-    # one fire-and-forget worker per destination. We do NOT wait: Scope stays
-    # free while the snapshots are in flight; each worker reports via a tagged
-    # DOWN ({:node_state_done, ...}); a failure crashes us from that handler.
-    {local_groups, remote_targets} =
-      Enum.split_with(by_router, fn {dest, _} -> dest == node() end)
+    moved_by_router = Enum.group_by(groups_to_reannounce, &Map.fetch!(new_router, &1))
 
-    Enum.each(local_groups, fn {_, groups} ->
+    targets =
+      Enum.map(MapSet.to_list(changed_routers), fn router_node ->
+        if router_node not in old_members or Map.has_key?(state.owed_snapshots, router_node) do
+          {router_node, Map.get(full_by_router, router_node, []), :receive_node_state}
+        else
+          {router_node, Map.get(moved_by_router, router_node, []), :apply_delta}
+        end
+      end)
+
+    full_count = Enum.count(targets, fn {_, _, fun} -> fun == :receive_node_state end)
+
+    Logger.info(
+      "Muster[#{node()}|#{state.scope}] rebalance: #{length(candidates)} group(s) held, #{length(groups_to_reannounce)} moved, notifying #{length(targets)} router(s) (#{full_count} full): #{inspect(MapSet.to_list(changed_routers))}"
+    )
+
+    # Local self-target: synchronous (seq-guarded) ETS inserts (a full local
+    # target's stale rows are reaped by drop_stale_router_entries below, exactly
+    # like a delta's, so the local path never needs the wipe). Remote targets: one
+    # fire-and-forget worker per destination. We do NOT wait: Scope stays free
+    # while the RPCs are in flight; each worker reports via a tagged DOWN
+    # ({:node_state_done, ...}); a failure crashes us from that handler.
+    {local_targets, remote_targets} =
+      Enum.split_with(targets, fn {dest, _, _} -> dest == node() end)
+
+    Enum.each(local_targets, fn {_, groups, _} ->
       Enum.each(groups, fn group ->
         upsert_if_newer(state.occupancy_table, {group, node()}, snapshot_seq)
       end)
@@ -759,17 +855,17 @@ defmodule Forum.Muster.Scope do
 
     view_hash = :erlang.phash2(new_members)
 
-    Enum.each(remote_targets, fn {router_node, groups} ->
+    Enum.each(remote_targets, fn {router_node, groups, function} ->
       spawn_rpc_worker(
         state,
         router_node,
-        :receive_node_state,
+        function,
         [state.scope, node(), groups, view_hash, snapshot_seq],
         {:node_state_done, router_node, snapshot_seq}
       )
     end)
 
-    snapshot_targets = Enum.map(remote_targets, fn {router_node, _} -> router_node end)
+    snapshot_targets = Enum.map(remote_targets, fn {router_node, _, _} -> router_node end)
 
     owed_snapshots =
       Enum.reduce(snapshot_targets, state.owed_snapshots, fn router_node, acc ->
