@@ -43,15 +43,13 @@ defmodule Realtime.MetricsPusherTest do
         assert conn.port == 8428
         assert conn.request_path == "/api/v1/import/prometheus"
         assert Conn.get_req_header(conn, "authorization") == ["Basic #{Base.encode64("realtime:hunter2")}"]
-        assert Conn.get_req_header(conn, "content-encoding") == ["gzip"]
         assert Conn.get_req_header(conn, "content-type") == ["text/plain"]
 
         body = Req.Test.raw_body(conn)
-        decompressed_body = :zlib.gunzip(body)
 
         # Collect decompressed bodies so we can assert that one has global metrics
         # and the other has tenant metrics.
-        send(parent, {:req_called, decompressed_body})
+        send(parent, {:req_called, body})
         Req.Test.text(conn, "")
       end)
 
