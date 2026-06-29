@@ -39,7 +39,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        postgres: [pg14, pg15, pg15_latest, pg17]
+        postgres: [pg14, pg15, pg15_latest, pg17, orioledb]
         include:
           - postgres: pg14
             postgres_image: supabase/postgres:14.1.0.82
@@ -53,6 +53,9 @@ jobs:
             db_user_realtime: supabase_realtime_admin
           - postgres: pg17
             postgres_image: supabase/postgres:17.6.1.127
+            db_user_realtime: supabase_realtime_admin
+          - postgres: orioledb
+            postgres_image: supabase/postgres:17.6.0.096-orioledb
             db_user_realtime: supabase_realtime_admin
 
     steps:
