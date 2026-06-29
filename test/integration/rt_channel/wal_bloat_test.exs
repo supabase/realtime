@@ -28,7 +28,7 @@ defmodule Realtime.Integration.RtChannel.WalBloatTest do
       %{rows: [[wal_keep_size]]} = Postgrex.query!(db_conn, "SHOW wal_keep_size", [])
       %{rows: [[max_slot_wal_keep_size]]} = Postgrex.query!(db_conn, "SHOW max_slot_wal_keep_size", [])
 
-      assert max_wal_size == "32MB"
+      assert max_wal_size == "1GB"
       assert wal_keep_size == "32MB"
       assert max_slot_wal_keep_size == "32MB"
 

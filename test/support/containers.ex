@@ -353,7 +353,7 @@ defmodule Containers do
         "-c",
         "wal_keep_size=32MB",
         "-c",
-        "max_wal_size=32MB",
+        "max_wal_size=1GB",
         "-c",
         "max_slot_wal_keep_size=32MB"
       ],
