@@ -3097,22 +3097,22 @@
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages.binary_payload",
-      "deptype": "a"
+      "deptype": "n"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages.binary_payload",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
-      "referenced_stable_id": "column:realtime.messages.payload",
       "deptype": "a"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages.payload",
       "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
+      "referenced_stable_id": "column:realtime.messages.payload",
+      "deptype": "a"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_pkey",
@@ -3137,12 +3137,12 @@
     {
       "dependent_stable_id": "constraint:realtime.subscription.subscription_action_filter_check",
       "referenced_stable_id": "column:realtime.subscription.action_filter",
-      "deptype": "a"
+      "deptype": "n"
     },
     {
       "dependent_stable_id": "constraint:realtime.subscription.subscription_action_filter_check",
       "referenced_stable_id": "column:realtime.subscription.action_filter",
-      "deptype": "n"
+      "deptype": "a"
     },
     {
       "dependent_stable_id": "defacl:supabase_admin:f:schema:realtime:grantee:dashboard_user",
