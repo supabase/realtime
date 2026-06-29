@@ -104,6 +104,7 @@ defmodule Realtime.MixProject do
       {:postgres_replication, git: "https://github.com/filipecabaco/postgres_replication.git", only: :test},
       {:benchee, "~> 1.1.0", only: [:dev, :test]},
       {:excoveralls, "~> 0.18", only: [:dev, :test], runtime: false},
+      {:ex_crap, "~> 0.1", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
       {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
@@ -140,7 +141,19 @@ defmodule Realtime.MixProject do
       ],
       test: ["test.setup", "test"],
       "test.partitioned": ["test.setup", "test --partitions 4"],
+      "crap.ci": ["compile", &merge_coverdata/1, "crap"],
       "assets.deploy": ["esbuild default --minify", "tailwind default --minify", "phx.digest"]
     ]
+  end
+
+  defp merge_coverdata(_args) do
+    File.mkdir_p!("cover")
+    :cover.start()
+
+    "coverage/**/*.coverdata"
+    |> Path.wildcard()
+    |> Enum.each(&:cover.import(String.to_charlist(&1)))
+
+    :cover.export(~c"cover/default.coverdata")
   end
 end
