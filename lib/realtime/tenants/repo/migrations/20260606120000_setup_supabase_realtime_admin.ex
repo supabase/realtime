@@ -27,7 +27,27 @@ defmodule Realtime.Tenants.Migrations.SetupSupabaseRealtimeAdmin do
     execute("ALTER TABLE realtime.subscription OWNER TO supabase_realtime_admin")
     execute("ALTER TYPE realtime.action OWNER TO supabase_realtime_admin")
     execute("ALTER TYPE realtime.equality_op OWNER TO supabase_realtime_admin")
+
+    execute("""
+    do $$
+    begin
+        if exists (select 1 from pg_extension where extname = 'orioledb') then
+            execute 'drop index if exists realtime.subscription_subscription_id_entity_filters_action_filter_selected_columns_key';
+        end if;
+    end $$;
+    """)
+
     execute("ALTER TYPE realtime.user_defined_filter OWNER TO supabase_realtime_admin")
+
+    execute("""
+    do $$
+    begin
+        if exists (select 1 from pg_extension where extname = 'orioledb') then
+            execute 'create unique index if not exists subscription_subscription_id_entity_filters_action_filter_selected_columns_key on realtime.subscription (subscription_id, entity, filters, action_filter, coalesce(selected_columns, ''{}''))';
+        end if;
+    end $$;
+    """)
+
     execute("ALTER TYPE realtime.wal_column OWNER TO supabase_realtime_admin")
     execute("ALTER TYPE realtime.wal_rls OWNER TO supabase_realtime_admin")
     execute("ALTER FUNCTION realtime.apply_rls(jsonb, integer) OWNER TO supabase_realtime_admin")

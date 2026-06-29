@@ -543,6 +543,15 @@ defmodule Realtime.Tenants.Migrations.RevertPostgrestFilterOps do
     # Drop the negate-aware 5-arg overload added by the filter ops migration.
     execute("drop function if exists realtime.check_equality_op(realtime.equality_op, regtype, text, text, boolean);")
 
+    execute("""
+    do $$
+    begin
+        if exists (select 1 from pg_extension where extname = 'orioledb') then
+            execute 'drop index if exists realtime.subscription_subscription_id_entity_filters_action_filter_selected_columns_key';
+        end if;
+    end $$;
+    """)
+
     # Drop the `negate` attribute so realtime.user_defined_filter is back to 3 fields. Guard on
     # pg_attribute for idempotency. CASCADE because the type backs the `filters` column.
     execute("""
@@ -560,6 +569,15 @@ defmodule Realtime.Tenants.Migrations.RevertPostgrestFilterOps do
               and not a.attisdropped
         ) then
             alter type realtime.user_defined_filter drop attribute negate cascade;
+        end if;
+    end $$;
+    """)
+
+    execute("""
+    do $$
+    begin
+        if exists (select 1 from pg_extension where extname = 'orioledb') then
+            execute 'create unique index if not exists subscription_subscription_id_entity_filters_action_filter_selected_columns_key on realtime.subscription (subscription_id, entity, filters, action_filter, coalesce(selected_columns, ''{}''))';
         end if;
     end $$;
     """)
