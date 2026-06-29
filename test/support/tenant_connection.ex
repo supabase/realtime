@@ -3,6 +3,7 @@ defmodule TenantConnection do
   Boilerplate code to handle Realtime.Tenants.Connect during tests
   """
   alias Realtime.Api.Message
+  alias Realtime.Database
   alias Realtime.Tenants.Repo
   alias Realtime.Tenants.Connect
   alias RealtimeWeb.Endpoint
@@ -15,10 +16,17 @@ defmodule TenantConnection do
   def create_message(attrs, conn, opts \\ []) do
     message = Message.changeset(%Message{}, attrs)
 
-    case Repo.insert(conn, message, Message, opts) do
-      {:ok, %Message{} = message} -> {:ok, message}
+    {:ok, result} =
+      Database.transaction(conn, fn transaction_conn ->
+        with {:ok, %Message{} = message} <- Repo.insert(transaction_conn, message, Message, opts) do
+          message
+        end
+      end)
+
+    case result do
       %Ecto.Changeset{valid?: false} = error -> {:error, error}
       {:error, error} -> {:error, error}
+      result -> {:ok, result}
     end
   end
 
