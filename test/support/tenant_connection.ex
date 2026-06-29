@@ -3,25 +3,22 @@ defmodule TenantConnection do
   Boilerplate code to handle Realtime.Tenants.Connect during tests
   """
   alias Realtime.Api.Message
-  alias Realtime.Database
   alias Realtime.Tenants.Repo
   alias Realtime.Tenants.Connect
   alias RealtimeWeb.Endpoint
 
-  def create_message(attrs, conn, opts \\ [mode: :savepoint]) do
+  # OrioleDB logical decoding drops an INSERT made inside a SAVEPOINT (Postgrex `mode: :savepoint`)
+  #
+  # Repro on a `test_decoding` slot, OrioleDB table `m`:
+  #   INSERT INTO m VALUES (1, 'top');                                                   -- decoded
+  #   BEGIN; SAVEPOINT s; INSERT INTO m VALUES (2, 'sp'); RELEASE SAVEPOINT s; COMMIT;   -- dropped
+  def create_message(attrs, conn, opts \\ []) do
     message = Message.changeset(%Message{}, attrs)
 
-    {:ok, result} =
-      Database.transaction(conn, fn transaction_conn ->
-        with {:ok, %Message{} = message} <- Repo.insert(transaction_conn, message, Message, opts) do
-          message
-        end
-      end)
-
-    case result do
+    case Repo.insert(conn, message, Message, opts) do
+      {:ok, %Message{} = message} -> {:ok, message}
       %Ecto.Changeset{valid?: false} = error -> {:error, error}
       {:error, error} -> {:error, error}
-      result -> {:ok, result}
     end
   end
 

@@ -700,6 +700,24 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
           password: admin_settings.password
         )
 
+      # OrioleDB can't ALTER TYPE a type an index depends on.
+      %Postgrex.Result{rows: [[index_name, index_def]]} =
+        Postgrex.query!(
+          admin_conn,
+          """
+          SELECT i.indexrelid::regclass::text, pg_get_indexdef(i.indexrelid)
+          FROM pg_index i
+          WHERE i.indrelid = 'realtime.subscription'::regclass
+            AND EXISTS (
+              SELECT 1 FROM pg_attribute a
+              WHERE a.attrelid = i.indrelid AND a.attname = 'filters' AND a.attnum = ANY(i.indkey)
+            )
+          """,
+          []
+        )
+
+      Postgrex.query!(admin_conn, "DROP INDEX IF EXISTS #{index_name}", [])
+
       Postgrex.query!(
         admin_conn,
         "alter type realtime.user_defined_filter drop attribute negate cascade",
@@ -721,6 +739,8 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
         "alter type realtime.user_defined_filter add attribute negate boolean cascade",
         []
       )
+
+      Postgrex.query!(admin_conn, index_def, [])
 
       {:ok, subscription_params} =
         Subscriptions.parse_subscription_params(%{
