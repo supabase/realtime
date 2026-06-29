@@ -59,7 +59,7 @@ jobs:
       - name: Run hex audit
         run: mix hex.audit
       - name: Run mix_audit
-        run: mix deps.audit --ignore-advisory-ids "GHSA-g2wm-735q-3f56,CVE-2026-43966"
+        run: mix deps.audit
       - name: Run sobelow
         run: mix sobelow --config .sobelow-conf
       - name: Retrieve PLT Cache
