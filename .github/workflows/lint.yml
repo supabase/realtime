@@ -59,9 +59,7 @@ jobs:
       - name: Run hex audit
         run: mix hex.audit
       - name: Run mix_audit
-        # GHSA-g2wm-735q-3f56: low severity blocking CI
-        # remove once a fixed cowlib is published
-        run: mix deps.audit --ignore-advisory-ids "GHSA-g2wm-735q-3f56"
+        run: mix deps.audit
       - name: Run sobelow
         run: mix sobelow --config .sobelow-conf
       - name: Retrieve PLT Cache
