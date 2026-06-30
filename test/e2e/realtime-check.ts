@@ -289,6 +289,25 @@ async function openPostgresChannel(channel: ReturnType<SupabaseClient["channel"]
   return { subscribeMs, systemMs: performance.now() - start };
 }
 
+// Channel config that opts in to the "Replication connection established" system
+// message, used by broadcast-from-database tests to avoid sleeping while the
+// tenant replication connection comes up.
+const REPLICATION_READY_CONFIG = { config: { private: true, broadcast: { replication_ready: true } } } as any;
+
+// Subscribes a private broadcast-from-database channel and waits for both the join
+// and the server's replication-ready system message, so inserts that rely on the
+// replication connection are not raced.
+async function openReplicationChannel(channel: ReturnType<SupabaseClient["channel"]>): Promise<{ subscribeMs: number; replicationMs: number }> {
+  const start = performance.now();
+  let replicationReady = false;
+  channel.on("system", "*", ({ extension, status }: { extension?: string; status?: string }) => {
+    if (extension === "system" && status === "ok") replicationReady = true;
+  });
+  const subscribeMs = await openChannel(channel);
+  await waitFor(() => replicationReady ? true : null, "replication ready");
+  return { subscribeMs, replicationMs: performance.now() - start };
+}
+
 type TableName = "pg_changes" | "dummy" | "authorization" | "broadcast_changes" | "wallet" | "replay_check";
 
 async function executeInsert(supabase: SupabaseClient, table: TableName, value?: string): Promise<number> {
@@ -997,11 +1016,10 @@ async function runBroadcastChangesTests(_testUser: { email: string; password: st
       let result: any = null;
 
       const channel = supabase
-        .channel(testTopic, { config: { private: true } })
+        .channel(testTopic, REPLICATION_READY_CONFIG)
         .on("broadcast", { event: "INSERT" }, (res) => (result = res));
 
-      const subscribeMs = await openChannel(channel);
-      await sleep(500);
+      const { subscribeMs } = await openReplicationChannel(channel);
       await supabase.from("broadcast_changes").insert({ value, id, topic: testTopic });
       const { latencyMs: eventMs } = await waitFor(() => result, "INSERT event");
 
@@ -1027,11 +1045,10 @@ async function runBroadcastChangesTests(_testUser: { email: string; password: st
       let result: any = null;
 
       const channel = supabase
-        .channel(testTopic, { config: { private: true } })
+        .channel(testTopic, REPLICATION_READY_CONFIG)
         .on("broadcast", { event: "UPDATE" }, (res) => (result = res));
 
-      const subscribeMs = await openChannel(channel);
-      await sleep(100);
+      const { subscribeMs } = await openReplicationChannel(channel);
       await supabase.from("broadcast_changes").insert({ value: originalValue, id, topic: testTopic });
       await supabase.from("broadcast_changes").update({ value: updatedValue }).eq("id", id);
       const { latencyMs: eventMs } = await waitFor(() => result, "UPDATE event");
@@ -1058,11 +1075,10 @@ async function runBroadcastChangesTests(_testUser: { email: string; password: st
       let result: any = null;
 
       const channel = supabase
-        .channel(testTopic, { config: { private: true } })
+        .channel(testTopic, REPLICATION_READY_CONFIG)
         .on("broadcast", { event: "DELETE" }, (res) => (result = res));
 
-      const subscribeMs = await openChannel(channel);
-      await sleep(100);
+      const { subscribeMs } = await openReplicationChannel(channel);
       await supabase.from("broadcast_changes").insert({ value, id, topic: testTopic });
       await supabase.from("broadcast_changes").delete().eq("id", id);
       const { latencyMs: eventMs } = await waitFor(() => result, "DELETE event");
@@ -1767,11 +1783,10 @@ async function runBroadcastBinaryTests(supabase: SupabaseClient) {
 
       let result: any = null;
       const channel = supabase
-        .channel(topic, { config: { private: true } })
+        .channel(topic, REPLICATION_READY_CONFIG)
         .on("broadcast", { event }, (msg) => (result = msg.payload));
 
-      const subscribeMs = await openChannel(channel);
-      await sleep(100);
+      const { subscribeMs } = await openReplicationChannel(channel);
 
       await sql`SELECT realtime.send_binary(${binary}::bytea, ${event}::text, ${topic}::text, true)`;
 
