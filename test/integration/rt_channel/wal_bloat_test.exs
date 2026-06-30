@@ -17,7 +17,7 @@ defmodule Realtime.Integration.RtChannel.WalBloatTest do
 
   @moduletag :capture_log
 
-  setup [:checkout_tenant_and_connect]
+  setup [:short_replication_watchdog, :checkout_tenant_and_connect]
 
   describe "WAL bloat handling" do
     setup %{tenant: tenant} do
@@ -123,6 +123,12 @@ defmodule Realtime.Integration.RtChannel.WalBloatTest do
                      },
                      5000
     end
+  end
+
+  defp short_replication_watchdog(_context) do
+    prev = Application.get_env(:realtime, :replication_watchdog_interval)
+    ExUnit.Callbacks.on_exit(fn -> Application.put_env(:realtime, :replication_watchdog_interval, prev) end)
+    Application.put_env(:realtime, :replication_watchdog_interval, 100)
   end
 
   defp active_replication_slot_pid!(db_conn) do
