@@ -781,7 +781,6 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
     test "create works for a table whose name contains a backslash", %{conn: conn} do
       Postgrex.query!(conn, ~s|CREATE TABLE "my\\table" (id int)|, [])
       Postgrex.query!(conn, ~s|GRANT ALL ON "my\\table" TO anon|, [])
-      Postgrex.query!(conn, ~s|ALTER PUBLICATION supabase_realtime_test ADD TABLE "my\\table"|, [])
 
       {:ok, subscription_params} =
         Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "my\\table"})
