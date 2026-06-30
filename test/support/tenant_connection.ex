@@ -8,11 +8,9 @@ defmodule TenantConnection do
   alias Realtime.Tenants.Connect
   alias RealtimeWeb.Endpoint
 
-  # OrioleDB logical decoding drops an INSERT made inside a SAVEPOINT (Postgrex `mode: :savepoint`)
-  #
-  # Repro on a `test_decoding` slot, OrioleDB table `m`:
-  #   INSERT INTO m VALUES (1, 'top');                                                   -- decoded
-  #   BEGIN; SAVEPOINT s; INSERT INTO m VALUES (2, 'sp'); RELEASE SAVEPOINT s; COMMIT;   -- dropped
+  # Can't use `opts \\ [mode: :savepoint]` because OrioleDB logical decoding drops
+  # INSERTs made inside a SAVEPOINT (Postgrex `mode: :savepoint`)
+  # See https://github.com/orioledb/orioledb/issues/936
   def create_message(attrs, conn, opts \\ []) do
     message = Message.changeset(%Message{}, attrs)
 
