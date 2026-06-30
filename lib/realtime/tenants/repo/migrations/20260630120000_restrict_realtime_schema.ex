@@ -55,9 +55,8 @@ defmodule Realtime.Tenants.Migrations.RestrictRealtimeSchema do
     END $$;
     """)
 
-    # realtime.schema_migrations is owned and accessed only by supabase_admin
     execute(
-      "REVOKE ALL ON realtime.schema_migrations FROM postgres, dashboard_user, anon, authenticated, service_role, supabase_realtime_admin"
+      "REVOKE ALL ON realtime.schema_migrations FROM postgres, dashboard_user, anon, authenticated, service_role"
     )
   end
 end
