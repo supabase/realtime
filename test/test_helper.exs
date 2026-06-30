@@ -45,6 +45,7 @@ for tenant <- Api.list_tenants(), do: Api.delete_tenant_by_external_id(tenant.ex
 Ecto.Adapters.SQL.Sandbox.mode(Realtime.Repo, :manual)
 
 Mimic.copy(:syn)
+Mimic.copy(Cachex)
 Mimic.copy(Ecto.Migrator)
 Mimic.copy(Extensions.PostgresCdcRls)
 Mimic.copy(Extensions.PostgresCdcRls.Replications)
