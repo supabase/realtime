@@ -22,12 +22,6 @@ defmodule Generators do
             "db_name" => "postgres",
             "db_user" => System.get_env("DB_USER", "supabase_admin"),
             "db_password" => "postgres",
-            "db_user_realtime" =>
-              Realtime.Env.get_binary("DB_USER_REALTIME", fn ->
-                Realtime.Env.get_binary("DB_USER", "supabase_realtime_admin")
-              end),
-            "db_pass_realtime" =>
-              Realtime.Env.get_binary("DB_PASS_REALTIME", fn -> Realtime.Env.get_binary("DB_PASSWORD", "postgres") end),
             "db_port" => "#{override[:port] || port()}",
             "poll_interval_ms" => 10,
             "poll_max_changes" => 100,

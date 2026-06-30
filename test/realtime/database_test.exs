@@ -9,19 +9,6 @@ defmodule Realtime.DatabaseTest do
   doctest Realtime.Database
   def handle_telemetry(event, metadata, content, pid: pid), do: send(pid, {event, metadata, content})
 
-  defp encrypted_settings(extra \\ %{}) do
-    Map.merge(
-      %{
-        "db_host" => Realtime.Crypto.encrypt!("127.0.0.1"),
-        "db_port" => Realtime.Crypto.encrypt!("5432"),
-        "db_name" => Realtime.Crypto.encrypt!("postgres"),
-        "db_user" => Realtime.Crypto.encrypt!("supabase_admin"),
-        "db_password" => Realtime.Crypto.encrypt!("super-pass")
-      },
-      extra
-    )
-  end
-
   setup do
     tenant = Containers.checkout_tenant()
     :telemetry.attach(__MODULE__, [:realtime, :database, :transaction], &__MODULE__.handle_telemetry/4, pid: self())
@@ -292,7 +279,6 @@ defmodule Realtime.DatabaseTest do
     end
 
     test "returns struct with correct setup", %{tenant: tenant} do
-      stub(Realtime.FeatureFlags, :enabled?, fn "use_supabase_realtime_admin" -> false end)
       application_name = "realtime_connect"
       backoff = :stop
       {:ok, ip_version} = Database.detect_ip_version("127.0.0.1")
@@ -338,52 +324,6 @@ defmodule Realtime.DatabaseTest do
       settings = Map.put(settings, "ssl_enforced", false)
       {:ok, settings} = Database.from_settings(settings, application_name, backoff)
       refute settings.ssl
-    end
-
-    test "runtime connections use db_user_realtime when the flag is enabled and it is present" do
-      stub(Realtime.FeatureFlags, :enabled?, fn "use_supabase_realtime_admin" -> true end)
-
-      settings =
-        encrypted_settings(%{
-          "db_user_realtime" => Realtime.Crypto.encrypt!("supabase_realtime_admin"),
-          "db_pass_realtime" => Realtime.Crypto.encrypt!("realtime-pass")
-        })
-
-      assert {:ok, %{username: "supabase_realtime_admin", password: "realtime-pass"}} =
-               Database.from_settings(settings, "realtime_connect", :stop)
-    end
-
-    test "runtime connections use db_user when the flag is disabled even if db_user_realtime is present" do
-      stub(Realtime.FeatureFlags, :enabled?, fn "use_supabase_realtime_admin" -> false end)
-
-      settings =
-        encrypted_settings(%{
-          "db_user_realtime" => Realtime.Crypto.encrypt!("supabase_realtime_admin"),
-          "db_pass_realtime" => Realtime.Crypto.encrypt!("realtime-pass")
-        })
-
-      assert {:ok, %{username: "supabase_admin", password: "super-pass"}} =
-               Database.from_settings(settings, "realtime_connect", :stop)
-    end
-
-    test "runtime connections fall back to db_user when db_user_realtime is absent" do
-      stub(Realtime.FeatureFlags, :enabled?, fn "use_supabase_realtime_admin" -> true end)
-
-      assert {:ok, %{username: "supabase_admin", password: "super-pass"}} =
-               Database.from_settings(encrypted_settings(), "realtime_connect", :stop)
-    end
-
-    test "realtime_migrations always uses db_user even when the flag is enabled and db_user_realtime is set" do
-      stub(Realtime.FeatureFlags, :enabled?, fn "use_supabase_realtime_admin" -> true end)
-
-      settings =
-        encrypted_settings(%{
-          "db_user_realtime" => Realtime.Crypto.encrypt!("supabase_realtime_admin"),
-          "db_pass_realtime" => Realtime.Crypto.encrypt!("realtime-pass")
-        })
-
-      assert {:ok, %{username: "supabase_admin", password: "super-pass"}} =
-               Database.from_settings(settings, "realtime_migrations", :stop)
     end
   end
 

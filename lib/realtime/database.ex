@@ -65,15 +65,11 @@ defmodule Realtime.Database do
         "db_port",
         "db_name",
         "db_user",
-        "db_password",
-        "db_user_realtime",
-        "db_pass_realtime"
+        "db_password"
       ])
       |> Enum.map(fn {k, v} -> {k, Crypto.decrypt!(v)} end)
       |> Map.new()
       |> then(&Map.merge(settings, &1))
-
-    {username, password} = connection_credentials(application_name, settings)
 
     with {:ok, addrtype} <- detect_ip_version(settings["db_host"]) do
       ssl = if default_ssl_param(settings), do: [verify: :verify_none], else: false
@@ -83,8 +79,8 @@ defmodule Realtime.Database do
          hostname: settings["db_host"],
          port: String.to_integer(settings["db_port"]),
          database: settings["db_name"],
-         username: username,
-         password: password,
+         username: settings["db_user"],
+         password: settings["db_password"],
          pool_size: pool,
          queue_target: settings["db_queue_target"] || 5_000,
          application_name: application_name,
@@ -92,18 +88,6 @@ defmodule Realtime.Database do
          socket_options: [addrtype],
          ssl: ssl
        }}
-    end
-  end
-
-  defp connection_credentials("realtime_migrations" = _application_name, settings) do
-    {settings["db_user"], settings["db_password"]}
-  end
-
-  defp connection_credentials(_application_name, settings) do
-    if Realtime.FeatureFlags.enabled?("use_supabase_realtime_admin") && settings["db_user_realtime"] do
-      {settings["db_user_realtime"], settings["db_pass_realtime"]}
-    else
-      {settings["db_user"], settings["db_password"]}
     end
   end
 

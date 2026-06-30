@@ -55,9 +55,7 @@ defmodule Realtime.Tenants.Migrations.RestrictRealtimeSchema do
     END $$;
     """)
 
-    execute(
-      "REVOKE ALL ON realtime.schema_migrations FROM postgres, dashboard_user, anon, authenticated, service_role"
-    )
+    execute("REVOKE ALL ON realtime.schema_migrations FROM postgres, dashboard_user, anon, authenticated, service_role")
 
     execute(
       "REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON realtime.schema_migrations FROM supabase_realtime_admin"
