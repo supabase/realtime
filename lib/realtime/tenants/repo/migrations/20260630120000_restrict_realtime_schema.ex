@@ -43,11 +43,12 @@ defmodule Realtime.Tenants.Migrations.RestrictRealtimeSchema do
       "ALTER FUNCTION realtime.is_visible_through_filters(realtime.wal_column[], realtime.user_defined_filter[]) OWNER TO supabase_realtime_admin"
     )
 
-    # supabase/postgres >= 15.14.1.018
     execute("""
     DO $$
+    DECLARE
+      grants text := current_setting('supautils.policy_grants', true);
     BEGIN
-      IF current_setting('supautils.policy_grants', true) LIKE '%realtime.subscription%' THEN
+      IF grants LIKE '%realtime.messages%' AND grants LIKE '%realtime.subscription%' THEN
         REVOKE supabase_realtime_admin FROM postgres;
         GRANT USAGE ON SCHEMA realtime TO postgres WITH GRANT OPTION;
         REVOKE CREATE ON SCHEMA realtime FROM postgres;
