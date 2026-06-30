@@ -99,11 +99,11 @@ defmodule Realtime.Database do
     {settings["db_user"], settings["db_password"]}
   end
 
-  # Runtime connections prefer the least-privilege role, falling back to db_user.
   defp connection_credentials(_application_name, settings) do
-    case settings["db_user_realtime"] do
-      nil -> {settings["db_user"], settings["db_password"]}
-      user -> {user, settings["db_pass_realtime"]}
+    if Realtime.FeatureFlags.enabled?("use_supabase_realtime_admin") && settings["db_user_realtime"] do
+      {settings["db_user_realtime"], settings["db_pass_realtime"]}
+    else
+      {settings["db_user"], settings["db_password"]}
     end
   end
 

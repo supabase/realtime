@@ -24,8 +24,9 @@ requires_pg_140006 = if pg_version_num < 140_006, do: :requires_pg_140006
 
 # Restriction assertions on the postgres role only hold on builds where supautils.policy_grants includes realtime.subscription (supabase/postgres 15.14.1.018 or higher)
 requires_supautils_policy_grants = if !has_supautils_subscription_grants, do: :requires_supautils_policy_grants
+requires_no_supautils_policy_grants = if has_supautils_subscription_grants, do: :requires_no_supautils_policy_grants
 
-exclude = [:failing, requires_pg_140006, requires_supautils_policy_grants]
+exclude = [:failing, requires_pg_140006, requires_supautils_policy_grants, requires_no_supautils_policy_grants]
 
 ExUnit.start(exclude: exclude, max_cases: max_cases, capture_log: true)
 

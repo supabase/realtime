@@ -66,9 +66,6 @@ Postgrex.transaction(admin_conn, fn db_conn ->
   |> Enum.each(&Postgrex.query!(db_conn, &1))
 end)
 
-# Enable supabase_realtime_admin to include SetupSupabaseRealtimeAdmin in tenant catalog
-{:ok, _} = Realtime.Api.upsert_feature_flag(%{name: "use_supabase_realtime_admin", enabled: true})
-
 case Tenants.Migrations.run_migrations(tenant) do
   :ok -> :ok
   :noop -> :ok

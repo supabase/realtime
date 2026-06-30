@@ -7,7 +7,6 @@ defmodule Realtime.Tenants.Migrations do
   use Realtime.Logs
 
   alias Realtime.Database
-  alias Realtime.FeatureFlags
   alias Realtime.Registry.Unique
   alias Realtime.Repo
   alias Realtime.Api.Tenant
@@ -94,10 +93,10 @@ defmodule Realtime.Tenants.Migrations do
     {20_260_603_120_000, Migrations.AddSendBinaryFunction},
     {20_260_605_120_000, Migrations.RenameBroadcastSendWarning},
     {20_260_606_110_000, Migrations.SubscriptionCheckFiltersUsePgAttribute},
-    {20_260_606_120_000, Migrations.SetupSupabaseRealtimeAdmin},
     {20_260_616_120_000, Migrations.AddPostgrestFilterOps},
     {20_260_624_120_000, Migrations.RevertPostgrestFilterOps},
-    {20_260_626_120_000, Migrations.ReAddPostgrestFilterOps}
+    {20_260_626_120_000, Migrations.ReAddPostgrestFilterOps},
+    {20_260_630_120_000, Migrations.RestrictRealtimeSchema}
   ]
 
   defstruct [:tenant_external_id, :settings, migrations_ran: 0]
@@ -112,12 +111,7 @@ defmodule Realtime.Tenants.Migrations do
   """
   @spec run_migrations?(Tenant.t() | integer()) :: boolean()
   def run_migrations?(%Tenant{} = tenant) do
-    available_migrations =
-      tenant.external_id
-      |> migrations()
-      |> Enum.count()
-
-    tenant.migrations_ran < available_migrations
+    tenant.migrations_ran < Enum.count(migrations())
   end
 
   def run_migrations?(migrations_ran) when is_integer(migrations_ran),
@@ -191,7 +185,7 @@ defmodule Realtime.Tenants.Migrations do
       :ok ->
         Task.Supervisor.async_nolink(__MODULE__.TaskSupervisor, Api, :update_migrations_ran, [
           tenant_external_id,
-          Enum.count(migrations(tenant_external_id))
+          Enum.count(migrations())
         ])
 
         :ignore
@@ -224,7 +218,7 @@ defmodule Realtime.Tenants.Migrations do
 
         try do
           opts = [all: true, prefix: "realtime", dynamic_repo: repo]
-          result = Ecto.Migrator.run(Repo, migrations(tenant_external_id), :up, opts)
+          result = Ecto.Migrator.run(Repo, migrations(), :up, opts)
           Telemetry.stop(event, start_time, Map.put(metadata, :migrations_executed, length(result)))
         rescue
           error ->
@@ -252,19 +246,6 @@ defmodule Realtime.Tenants.Migrations do
   @doc """
   Returns the migrations to run.
   """
-  @spec migrations(String.t() | nil) :: [{pos_integer(), module()}]
-  def migrations(tenant_external_id \\ nil) do
-    Enum.filter(@migrations, fn {_version, module} -> migration_enabled?(module, tenant_external_id) end)
-  end
-
-  defp migration_enabled?(Migrations.SetupSupabaseRealtimeAdmin, nil = _tenant_external_id) do
-    FeatureFlags.enabled?("use_supabase_realtime_admin")
-  end
-
-  defp migration_enabled?(Migrations.SetupSupabaseRealtimeAdmin, tenant_external_id)
-       when is_binary(tenant_external_id) do
-    FeatureFlags.enabled?("use_supabase_realtime_admin", tenant_external_id)
-  end
-
-  defp migration_enabled?(_migration, _tenant_external_id), do: true
+  @spec migrations() :: [{pos_integer(), module()}]
+  def migrations, do: @migrations
 end
