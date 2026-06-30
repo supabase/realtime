@@ -25,7 +25,7 @@ defmodule Realtime.DatabaseTest do
         "settings" => %{
           "db_host" => "127.0.0.1",
           "db_name" => "postgres",
-          "db_user" => "supabase_realtime_admin",
+          "db_user" => "supabase_admin",
           "db_password" => "postgres",
           "region" => "us-east-1",
           "ssl_enforced" => false,
@@ -112,7 +112,7 @@ defmodule Realtime.DatabaseTest do
         "settings" => %{
           "db_host" => "127.0.0.1",
           "db_name" => "postgres",
-          "db_user" => "supabase_realtime_admin",
+          "db_user" => "supabase_admin",
           "db_password" => "postgres",
           "region" => "us-east-1",
           "ssl_enforced" => false,

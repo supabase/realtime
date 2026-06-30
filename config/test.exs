@@ -15,7 +15,7 @@ for repo <- [
       Realtime.Repo.Replica.SanJose
     ] do
   config :realtime, repo,
-    username: "supabase_realtime_admin",
+    username: "supabase_admin",
     password: "postgres",
     database: "realtime_test#{partition}",
     hostname: "127.0.0.1",
