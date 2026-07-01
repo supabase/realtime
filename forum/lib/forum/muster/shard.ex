@@ -642,7 +642,13 @@ defmodule Forum.Muster.Shard do
 
             Enum.each(waiters, fn {from, _pid} -> GenServer.reply(from, {:error, :rpc_failed}) end)
 
-            {:noreply, delete_group_state(state, group)}
+            # Queue a vacant instead of forgetting the group outright: :erpc does
+            # not cancel remote execution on a timeout, so the router may have
+            # already committed the INSERT by the time we see the error. The next
+            # flush retracts whatever may have landed (a no-op tombstone if
+            # nothing did), the same recovery the crash-window analysis above
+            # relies on for this exact orphan.
+            {:noreply, put_group_state(state, group, :vacant_queued)}
         end
 
       _ ->
