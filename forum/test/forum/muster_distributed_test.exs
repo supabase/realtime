@@ -1856,7 +1856,12 @@ defmodule Forum.MusterDistributedTest do
 
           refute Muster.local_member?(scope, group, member)
           assert Muster.local_member_count(scope, group) == 0
-          assert group_state(scope, group) == nil
+
+          # The failure queues a vacant instead of forgetting the group
+          # outright (see Shard.handle_occupied_done): the group is now
+          # self-routed (R is gone), so the next flush's local no-op drains
+          # it to nil.
+          wait_until(fn -> group_state(scope, group) == nil end)
 
           %{group: group, t_node: t_node}
         end,
@@ -1963,6 +1968,107 @@ defmodule Forum.MusterDistributedTest do
           assert :vacant_flushing in states
           assert :vacant_queued in states
           assert nil in states
+        end
+      )
+    end
+  end
+
+  describe "occupied RPC timeout after remote execution lands" do
+    setup do
+      scope = :"muster_rpc_timeout_#{System.unique_integer([:positive])}"
+
+      start_supervised!(
+        spec(scope, vacancy_cooldown_ms: 50, vacant_flush_interval_ms: 100, rpc_timeout_ms: 150)
+      )
+
+      %{scope: scope}
+    end
+
+    # README invariant: "router notified ⟹ a local record exists to eventually
+    # retract". :erpc does not cancel remote execution on timeout (the fact
+    # every other crash-window analysis in this codebase leans on), so a claim
+    # RPC can time out on the caller while the router still commits the
+    # INSERT afterwards. handle_occupied_done's error branch currently
+    # deletes the group state outright on ANY {:error, _} result, timeout
+    # included, forgetting the group instead of queuing a retraction. If the
+    # remote INSERT then lands, nothing on the source ever tells the router
+    # to drop it: the periodic sweep does not help (the group genuinely
+    # routes to that router), so the phantom row leaks until the source
+    # sends that router a fresh full snapshot or leaves the cluster.
+    test "a timed-out :occupied RPC whose write still lands is eventually retracted",
+         %{scope: scope} do
+      t_node = node()
+
+      check_trace(
+        fn ->
+          r_name = ~c"muster_occ_timeout_r_#{System.unique_integer([:positive])}"
+          r_node = :"#{r_name}@127.0.0.1"
+
+          {:ok, p_r, ^r_node} = Peer.start(name: r_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(r_node)
+          start_remote_muster(p_r, scope)
+          await_ready([t_node, r_node])
+
+          group = group_routed_to(scope, r_node)
+
+          # Park the remote apply BEFORE it writes the row, so it genuinely
+          # cannot complete before T's short rpc_timeout_ms elapses -- a real
+          # client-side timeout, not a race with a fast success.
+          force_ordering(
+            %{:"$kind" => :test_release_occupied_timeout},
+            %{
+              :"$kind" => :muster_occupied_apply,
+              :"$span" => :start,
+              node: ^r_node,
+              group: ^group,
+              source: ^t_node
+            }
+          )
+
+          member = spawn(fn -> Process.sleep(:infinity) end)
+          join_task = Task.async(fn -> Muster.join(scope, group, member) end)
+
+          # T's :erpc.call times out while the remote apply is still parked.
+          assert {:error, :rpc_failed} = Task.await(join_task, 10_000)
+
+          # Release the park: this is the RPC's execution finally landing on
+          # R, exactly as :erpc's non-cancelling timeout allows.
+          tp(:test_release_occupied_timeout, %{})
+
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_occupied_apply,
+                       :"$span" => {:complete, _},
+                       node: ^r_node,
+                       group: ^group,
+                       source: ^t_node
+                     },
+                     10_000
+                   )
+
+          wait_until(fn -> occupancy_on(r_node, scope, group) != [] end)
+          assert t_node in occupancy_on(r_node, scope, group)
+
+          # The phantom row must eventually be retracted: T should have
+          # queued the group for a vacant flush instead of forgetting it, so
+          # the next flush drains the row it may have left behind.
+          assert {:ok, _} =
+                   block_until(
+                     %{:"$kind" => :muster_vacant_batch, :"$span" => :start, source: ^t_node},
+                     5_000
+                   )
+
+          wait_until(fn -> occupancy_on(r_node, scope, group) == [] end)
+
+          %{group: group, t_node: t_node, r_node: r_node}
+        end,
+        fn result, trace ->
+          batches =
+            of_kind(:muster_vacant_batch, trace)
+            |> Enum.filter(&(&1[:"$span"] == :start and &1.node == result.r_node))
+
+          assert Enum.any?(batches, &(result.group in &1.groups))
         end
       )
     end
