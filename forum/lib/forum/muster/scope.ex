@@ -700,8 +700,20 @@ defmodule Forum.Muster.Scope do
   # tombstones' memory; correctness does not depend on it firing promptly (a
   # tombstone kept too long is merely an absent row), so a single periodic sweep
   # on the coordinator suffices.
+  #
+  # Piggybacked on the same tick: an UNCONDITIONAL re-run of
+  # drop_stale_router_entries, regardless of the current :status. Without this,
+  # a claim (occupied/4, vacant_batch/4 — the only cross-node writes with no
+  # view_hash fencing) whose :erpc was delayed past a rebalance can land on a
+  # router AFTER it already agreed on the view that routes the group away, with
+  # no row yet to judge and no further :ready transition ever coming to re-judge
+  # it once the row does appear. do_rebalance's own sweep and the :ready
+  # transition's (above) cover the common case promptly; this tick is the
+  # backstop that bounds the worst case to one :tombstone_window_ms interval
+  # even when the cluster goes quiet right after the delayed write lands.
   def handle_info(:sweep_tombstones, state) do
     reap_tombstones(state)
+    drop_stale_router_entries(state)
     schedule_tombstone_sweep(state)
     {:noreply, state}
   end
@@ -932,7 +944,10 @@ defmodule Forum.Muster.Scope do
       # Most stale rows cannot be GC'd during the rebalance itself: peers have
       # typically not yet announced the new view, so the source-agreement guard in
       # drop_stale_router_entries skips their rows. Re-run the sweep once every
-      # member has agreed; now every member's rows are judgeable.
+      # member has agreed; now every member's rows are judgeable. This is an
+      # additional, prompt sweep on top of the periodic one piggybacked on
+      # :sweep_tombstones (below) — it catches the common case immediately
+      # instead of waiting for the next tick.
       if status == :ready, do: drop_stale_router_entries(state)
     end
 
@@ -974,9 +989,12 @@ defmodule Forum.Muster.Scope do
   # exceed the watermark carried by that announcement (snapshot data is committed
   # straight to ETS by the RPC worker while the matching marker waits in our
   # mailbox, so the table can be AHEAD of member_views). Skipped rows are harmless
-  # and are re-judged on the :ready transition. Our own rows are always judgeable
-  # and must stay in the sweep: a group that moved away (or was vacated while
-  # routed elsewhere) leaves a self row nothing else cleans up.
+  # and are re-judged on the :ready transition and, as a backstop, on every
+  # :sweep_tombstones tick (see handle_info(:sweep_tombstones, _) above) —
+  # together these also cover a row that does not exist yet at either point and
+  # only appears afterwards (a claim delayed by :erpc past both). Our own rows
+  # are always judgeable and must stay in the sweep: a group that moved away (or
+  # was vacated while routed elsewhere) leaves a self row nothing else cleans up.
   defp drop_stale_router_entries(state) do
     ring = ring_name(state.scope)
     own = own_view_hash(state)

@@ -1150,6 +1150,367 @@ defmodule Forum.MusterDistributedTest do
     end
   end
 
+  describe "periodic stale-router-entry sweep (piggybacked on :sweep_tombstones)" do
+    setup do
+      scope = :"muster_fencing_gap_#{System.unique_integer([:positive])}"
+      # Generous rpc_timeout: the parked occupied worker survives across an
+      # entire membership change and its convergence before we release it, and
+      # must not time out client-side and confuse the source shard's state
+      # machine while we orchestrate the race. A short, independent
+      # tombstone_window_ms (the periodic sweep's interval) so the backstop
+      # this test proves has several chances to fire within the timeout below.
+      start_supervised!(
+        spec(scope,
+          vacancy_cooldown_ms: 50,
+          vacant_flush_interval_ms: 100,
+          rpc_timeout_ms: 30_000,
+          tombstone_window_ms: 200
+        )
+      )
+
+      %{scope: scope}
+    end
+
+    # occupied/4 and vacant_batch/4 are the only cross-node writes in Muster
+    # with no cluster-view fencing — only {group, source_node, seq}. Every
+    # other cross-node write (receive_node_state, apply_delta) is stamped with
+    # view_hash and folds into the readiness barrier.
+    #
+    # :erpc does not cancel a delayed call: the request still lands and
+    # executes on the remote node later (the same property the reverse-race
+    # test above exploits). Here it lands on a router that has ALREADY swept
+    # past the view where it would have mattered:
+    #
+    #   1. T holds `group`, routed to R; its shard dispatches occupied(group,
+    #      T, seq) to R. We park it (force_ordering) BEFORE it writes the row.
+    #   2. Before it lands, X joins and `group`'s router moves R -> X. T's
+    #      rebalance settles the parked join locally (the ring already shows
+    #      the new router — settle_moved_pending) and snapshots the group onto
+    #      X; it never waits on the worker still parked against R.
+    #   3. R agrees on the new (3-node) view and runs its OWN
+    #      drop_stale_router_entries sweep on the :ready transition — a no-op
+    #      for {group, T}, since R has no row for it yet.
+    #   4. We release the park. The stale, low-seq occupied INSERT finally
+    #      lands on R. upsert_if_newer has no existing row to compare against,
+    #      so insert_new wins UNCONDITIONALLY, planting a phantom present row.
+    #
+    # Nothing else in this test's remaining life ever touches that row: T only
+    # ever asserts what it currently holds (X, not R) and never sends R a
+    # retraction, and no further membership churn arrives to trigger another
+    # rebalance or :ready transition. The ONLY thing left that can catch it is
+    # the periodic backstop sweep piggybacked on :sweep_tombstones — this test
+    # proves it does, within one :tombstone_window_ms tick, without needing
+    # any further churn.
+    test "a stale occupied INSERT delayed past R's sweep is caught by the next periodic tick",
+         %{scope: scope} do
+      t_node = node()
+
+      check_trace(
+        fn ->
+          # Settled 2-node cluster {T, R}. R needs the same short
+          # tombstone_window_ms as T -- it is R's own periodic sweep, running
+          # on R's own schedule, that this test proves catches the phantom row.
+          {:ok, p_r, r_node} = Peer.start(aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(r_node)
+          start_remote_muster(p_r, scope, tombstone_window_ms: 200)
+          await_ready([t_node, r_node])
+
+          # X's name is fixed upfront so the victim group can be picked from
+          # ring math: routed to R in {T,R}, moved onto X once X joins.
+          x_name = ~c"muster_fencing_gap_x_#{System.unique_integer([:positive])}"
+          x_node = :"#{x_name}@127.0.0.1"
+          view3 = Enum.sort([t_node, r_node, x_node])
+          hash3 = :erlang.phash2(view3)
+          group = pick_group([{[t_node, r_node], r_node}, {view3, x_node}])
+
+          # Park the occupied INSERT on R before it writes the row — the
+          # delayed-RPC arm of the race. The :start anchor fires before the ETS
+          # write (same anchor the reverse-race test above uses), so the row is
+          # genuinely absent while parked.
+          force_ordering(
+            %{:"$kind" => :test_release_occupied},
+            %{
+              :"$kind" => :muster_occupied_apply,
+              :"$span" => :start,
+              node: ^r_node,
+              group: ^group,
+              source: ^t_node
+            }
+          )
+
+          # Claim off to the side: the join call parks in :occupied_pending
+          # (its :occupied RPC to R is parked there), so run it off to the
+          # side — we never use its result.
+          member = spawn(fn -> Process.sleep(:infinity) end)
+          _claimer = spawn(fn -> Muster.join(scope, group, member) end)
+
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_group_state,
+                       node: ^t_node,
+                       group: ^group,
+                       state: {:occupied_pending, _}
+                     },
+                     10_000
+                   )
+
+          # X joins: the group's router moves R -> X. T's rebalance settles the
+          # parked pending join right here (settle_moved_pending) and snapshots
+          # the group onto the fresh router X — never waiting on the worker
+          # still parked against R.
+          {:ok, p_x, ^x_node} = Peer.start(name: x_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(x_node)
+          start_remote_muster(p_x, scope)
+
+          assert {:ok, %{groups: snapshotted}} =
+                   block_until(
+                     %{:"$kind" => :muster_node_state_received, node: ^x_node, source: ^t_node},
+                     15_000
+                   )
+
+          assert group in snapshotted
+
+          # Every node — INCLUDING R — converges to :ready for the 3-node view.
+          # R's own sweep on this transition is a genuine no-op for {group, T}:
+          # it has no row for it yet, the parked INSERT hasn't landed.
+          await_ready(view3)
+
+          assert {:ok, ^x_node} = Muster.router(scope, group)
+          assert t_node in occupancy_on(x_node, scope, group)
+          assert occupancy_on(r_node, scope, group) == []
+
+          # Release the park. The stale INSERT lands on R strictly AFTER R
+          # already agreed on the view that routes `group` away from it.
+          tp(:test_release_occupied, %{})
+
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_occupied_apply,
+                       :"$span" => {:complete, _},
+                       node: ^r_node,
+                       group: ^group,
+                       source: ^t_node
+                     },
+                     10_000
+                   )
+
+          # The gap really opens: with no row to compare against, insert_new
+          # wins unconditionally and plants a phantom present row.
+          wait_until(fn -> occupancy_on(r_node, scope, group) != [] end)
+          assert t_node in occupancy_on(r_node, scope, group)
+
+          # No further churn happens from here on — the only thing left that
+          # can ever touch this row is the periodic backstop. Give it a few
+          # ticks (tombstone_window_ms: 200) to catch and drop it.
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_drop_stale_entry,
+                       node: ^r_node,
+                       group: ^group,
+                       source: ^t_node
+                     },
+                     5_000
+                   )
+
+          wait_until(fn -> occupancy_on(r_node, scope, group) == [] end)
+
+          %{group: group, r_node: r_node, x_node: x_node, t_node: t_node, hash3: hash3}
+        end,
+        fn result, trace ->
+          group = result.group
+          r_node = result.r_node
+          hash3 = result.hash3
+
+          # The choreography really held: R's genuine :ready-for-view3 sweep
+          # happened BEFORE the delayed INSERT applied on it, so that sweep is
+          # not what caught the phantom row (it ran before the row existed).
+          assert causality(
+                   %{
+                     :"$kind" => :muster_status_change,
+                     node: ^r_node,
+                     to: :ready,
+                     view_hash: ^hash3
+                   },
+                   %{
+                     :"$kind" => :muster_occupied_apply,
+                     :"$span" => {:complete, _},
+                     node: ^r_node,
+                     group: ^group
+                   },
+                   trace
+                 )
+
+          # And the delayed INSERT really did land before the drop that caught
+          # it — this is the periodic backstop catching a row that did not
+          # exist at either of the earlier sweep points (do_rebalance's own,
+          # and the :ready transition's), not a coincidence of test timing.
+          assert causality(
+                   %{
+                     :"$kind" => :muster_occupied_apply,
+                     :"$span" => {:complete, _},
+                     node: ^r_node,
+                     group: ^group
+                   },
+                   %{:"$kind" => :muster_drop_stale_entry, node: ^r_node, group: ^group},
+                   trace
+                 )
+
+          # Exactly one drop for this key: the backstop caught it once and it
+          # never came back (T never re-asserts to R; it now only talks to X).
+          assert of_kind(:muster_drop_stale_entry, trace)
+                 |> Enum.count(&(&1.node == r_node and &1.group == group)) == 1
+
+          refute result.t_node in occupancy_on(r_node, scope, group),
+                 "the periodic backstop sweep should have caught and dropped the phantom row"
+        end
+      )
+    end
+
+    # The mirror of the test above, for the OTHER unfenced write: vacant_batch/4.
+    # It is structurally the same gap (no view_hash on the wire), but it CANNOT
+    # produce the same permanent-phantom failure mode, because its only possible
+    # write on a missing key is a TOMBSTONE (meta = an integer timestamp), never
+    # `:present` — and reap_tombstones already reaps tombstones unconditionally
+    # on every :sweep_tombstones tick, regardless of :status or churn, even
+    # before this fix. occupancy/2 only ever returns :present rows, so a stray
+    # tombstone can never read as occupancy in the first place.
+    #
+    # This test proves that directly rather than by argument: R has a real,
+    # correct PRESENT row; the group's router moves away and R sweeps that row
+    # for real (a genuine delete, not a tombstone) as part of ordinary
+    # convergence; a `vacant_batch` delayed past that point lands and can only
+    # plant a tombstone — occupancy never once shows the group present — and
+    # this fix's periodic backstop (not merely the age-based reap_tombstones)
+    # promptly cleans that tombstone up too, since drop_stale_router_entries
+    # deletes any stale-under-ring row regardless of its meta.
+    test "a stale vacant_batch delayed past R's sweep can only plant a tombstone, never a phantom present row",
+         %{scope: scope} do
+      t_node = node()
+
+      check_trace(
+        fn ->
+          {:ok, p_r, r_node} = Peer.start(aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(r_node)
+          start_remote_muster(p_r, scope, tombstone_window_ms: 200)
+          await_ready([t_node, r_node])
+
+          x_name = ~c"muster_fencing_gap_vac_x_#{System.unique_integer([:positive])}"
+          x_node = :"#{x_name}@127.0.0.1"
+          view3 = Enum.sort([t_node, r_node, x_node])
+          group = pick_group([{[t_node, r_node], r_node}, {view3, x_node}])
+
+          # T genuinely holds, then vacates, the group -- R carries a real,
+          # correct PRESENT row for it before any of this starts.
+          member = spawn(fn -> Process.sleep(:infinity) end)
+          :ok = Muster.join(scope, group, member)
+          assert t_node in occupancy_on(r_node, scope, group)
+
+          # Park the vacant DELETE on R before it writes -- the same
+          # delayed-RPC arm as the occupied test above, mirrored for the
+          # retraction direction.
+          force_ordering(
+            %{:"$kind" => :test_release_vacant},
+            %{
+              :"$kind" => :muster_vacant_batch,
+              :"$span" => :start,
+              node: ^r_node,
+              source: ^t_node
+            }
+          )
+
+          :ok = Muster.leave(scope, group, member)
+
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_group_state,
+                       node: ^t_node,
+                       group: ^group,
+                       state: :vacant_flushing
+                     },
+                     5_000
+                   )
+
+          # X joins: the group's router moves R -> X. T's rebalance normalizes
+          # the in-flight batch back to :vacant_queued (we no longer hold the
+          # group, so it is not part of the snapshot to X either); R sweeps its
+          # now-stale PRESENT row for {group, T} as part of ordinary
+          # convergence -- a real, correct delete, not a tombstone, since it
+          # is judged genuinely stale under the new ring.
+          {:ok, p_x, ^x_node} = Peer.start(name: x_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(x_node)
+          start_remote_muster(p_x, scope)
+
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_drop_stale_entry,
+                       node: ^r_node,
+                       group: ^group,
+                       source: ^t_node
+                     },
+                     10_000
+                   )
+
+          await_ready(view3)
+          assert occupancy_on(r_node, scope, group) == []
+
+          # Release the parked DELETE. It lands on R strictly after the
+          # PRESENT row is already gone.
+          tp(:test_release_vacant, %{})
+
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_vacant_batch,
+                       :"$span" => {:complete, _},
+                       node: ^r_node,
+                       source: ^t_node
+                     },
+                     10_000
+                   )
+
+          # THE CONTRAST WITH occupied: even freshly applied, this can only be
+          # a tombstone -- occupancy/2 never returns it. Unlike a phantom
+          # :present row, this tombstone is NOT left for the periodic
+          # drop_stale_router_entries backstop to find: reap_tombstones runs
+          # first in the very same :sweep_tombstones tick and, needing no
+          # source-agreement check at all (just age), routinely reaps a fresh
+          # tombstone before drop_stale_router_entries ever sees it -- which is
+          # exactly why a delayed vacant_batch never needed the new backstop to
+          # stay bounded in the first place.
+          assert occupancy_on(r_node, scope, group) == []
+
+          %{group: group, r_node: r_node, t_node: t_node}
+        end,
+        fn result, trace ->
+          group = result.group
+          r_node = result.r_node
+
+          # Exactly one drop for this key: the real PRESENT row, swept as part
+          # of ordinary convergence once its router moved away. The tombstone
+          # the delayed DELETE later planted is not expected to ever surface
+          # as a second :muster_drop_stale_entry -- see the note above.
+          drops =
+            of_kind(:muster_drop_stale_entry, trace)
+            |> Enum.filter(
+              &(&1.node == r_node and &1.group == group and &1.source == result.t_node)
+            )
+
+          assert length(drops) == 1
+
+          # Occupancy on R never once showed the group present after the
+          # vacancy -- a delayed DELETE cannot manufacture a phantom the way a
+          # delayed INSERT can, because a tombstone is never a :present row.
+          refute result.t_node in occupancy_on(r_node, scope, group)
+        end
+      )
+    end
+  end
+
   describe "router-readiness barrier across real nodes (forced ordering)" do
     setup do
       scope = :"muster_barrier_#{System.unique_integer([:positive])}"
