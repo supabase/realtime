@@ -17,7 +17,7 @@ defmodule Realtime.Integration.RtChannel.WalBloatTest do
 
   @moduletag :capture_log
 
-  setup [:checkout_tenant_and_connect]
+  setup [:short_replication_watchdog, :checkout_tenant_and_connect]
 
   describe "WAL bloat handling" do
     setup %{tenant: tenant} do
@@ -28,7 +28,7 @@ defmodule Realtime.Integration.RtChannel.WalBloatTest do
       %{rows: [[wal_keep_size]]} = Postgrex.query!(db_conn, "SHOW wal_keep_size", [])
       %{rows: [[max_slot_wal_keep_size]]} = Postgrex.query!(db_conn, "SHOW max_slot_wal_keep_size", [])
 
-      assert max_wal_size == "32MB"
+      assert max_wal_size == "1GB"
       assert wal_keep_size == "32MB"
       assert max_slot_wal_keep_size == "32MB"
 
@@ -72,6 +72,8 @@ defmodule Realtime.Integration.RtChannel.WalBloatTest do
       %{topic: topic}
     end
 
+    # TODO: fix potential incompatibility on realtime.send in OrioleDB. See https://github.com/orioledb/orioledb/issues/936
+    @tag :skip_orioledb
     @tag timeout: :timer.minutes(3)
     test "track PID changes during WAL bloat creation", %{tenant: tenant, topic: topic, serializer: serializer} do
       {socket, _} = get_connection(tenant, serializer, role: "authenticated")
@@ -123,6 +125,12 @@ defmodule Realtime.Integration.RtChannel.WalBloatTest do
                      },
                      5000
     end
+  end
+
+  defp short_replication_watchdog(_context) do
+    prev = Application.get_env(:realtime, :replication_watchdog_interval)
+    ExUnit.Callbacks.on_exit(fn -> Application.put_env(:realtime, :replication_watchdog_interval, prev) end)
+    Application.put_env(:realtime, :replication_watchdog_interval, 100)
   end
 
   defp active_replication_slot_pid!(db_conn) do

@@ -22,6 +22,9 @@ repo_config = Application.fetch_env!(:realtime, Realtime.Repo)
     "SELECT current_setting('supautils.policy_grants', true) LIKE '%realtime.messages%' AND current_setting('supautils.policy_grants', true) LIKE '%realtime.subscription%'"
   )
 
+%{rows: [[orioledb?]]} =
+  Postgrex.query!(pg_conn, "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'orioledb')")
+
 # `realtime.broadcast_changes(..., NEW record, OLD record, ...)` (introduced in commit 2922658c) called from a trigger via `PERFORM` fails on PG <= 14.5
 requires_pg_140006 = if pg_version_num < 140_006, do: :requires_pg_140006
 
@@ -29,7 +32,15 @@ requires_pg_140006 = if pg_version_num < 140_006, do: :requires_pg_140006
 requires_supautils_policy_grants = if !has_supautils_realtime_grants, do: :requires_supautils_policy_grants
 requires_no_supautils_policy_grants = if has_supautils_realtime_grants, do: :requires_no_supautils_policy_grants
 
-exclude = [:failing, requires_pg_140006, requires_supautils_policy_grants, requires_no_supautils_policy_grants]
+skip_orioledb = if orioledb?, do: :skip_orioledb
+
+exclude = [
+  :failing,
+  requires_pg_140006,
+  requires_supautils_policy_grants,
+  requires_no_supautils_policy_grants,
+  skip_orioledb
+]
 
 ExUnit.start(exclude: exclude, max_cases: max_cases, capture_log: true)
 

@@ -42,7 +42,7 @@ jobs:
       fail-fast: false
       matrix:
         partition: [1, 2, 3, 4]
-        postgres: [pg14, pg15, pg15_latest, pg17, orioledb]
+        postgres: [pg14, pg15, pg15_latest, pg17, orioledb17]
         include:
           - postgres: pg14
             postgres_image: supabase/postgres:14.1.0.82
@@ -53,7 +53,7 @@ jobs:
             postgres_image: supabase/postgres:15.14.1.129
           - postgres: pg17
             postgres_image: supabase/postgres:17.6.1.127
-          - postgres: orioledb
+          - postgres: orioledb17
             postgres_image: supabase/postgres:17.6.0.096-orioledb
 
     steps:
