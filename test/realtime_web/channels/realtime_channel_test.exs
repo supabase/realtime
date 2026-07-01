@@ -1553,6 +1553,191 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
   end
 
+  describe "channel-scoped temp state store" do
+    @describetag policies: [:authenticated_all_topic_read]
+
+    test "opting in on a private channel starts a store and supports put/get round-trips", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      assert {:ok, _, %Socket{} = socket} =
+               subscribe_and_join(socket, "realtime:test", %{config: %{private: true, state: %{enabled: true}}})
+
+      assert is_pid(socket.assigns.temp_state_store)
+
+      ref = push(socket, "state", %{"command" => "put", "key" => "k", "value" => %{"a" => 1}})
+      assert_receive %Socket.Reply{ref: ^ref, status: :ok, payload: %{version: 1}}, 2000
+
+      ref = push(socket, "state", %{"command" => "get", "key" => "k"})
+      assert_receive %Socket.Reply{ref: ^ref, status: :ok, payload: %{value: %{"a" => 1}, version: 1}}, 2000
+    end
+
+    test "get on a missing key replies not_found", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      assert {:ok, _, %Socket{} = socket} =
+               subscribe_and_join(socket, "realtime:test", %{config: %{private: true, state: %{enabled: true}}})
+
+      ref = push(socket, "state", %{"command" => "get", "key" => "missing"})
+      assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{reason: "not_found"}}, 2000
+    end
+
+    test "state is ignored on public channels and commands are rejected", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      # state.enabled is set but the channel is public, so no store must be started
+      assert {:ok, _, %Socket{} = socket} =
+               subscribe_and_join(socket, "realtime:test", %{config: %{private: false, state: %{enabled: true}}})
+
+      assert socket.assigns.temp_state_store == nil
+
+      ref = push(socket, "state", %{"command" => "get", "key" => "k"})
+
+      assert_receive %Socket.Reply{
+                       ref: ^ref,
+                       status: :error,
+                       payload: %{reason: "State store is not enabled for this channel"}
+                     },
+                     2000
+    end
+
+    test "without opt-in there is no store and state commands are rejected", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      assert {:ok, _, %Socket{} = socket} =
+               subscribe_and_join(socket, "realtime:test", %{config: %{private: true}})
+
+      assert socket.assigns.temp_state_store == nil
+
+      ref = push(socket, "state", %{"command" => "get", "key" => "k"})
+
+      assert_receive %Socket.Reply{
+                       ref: ^ref,
+                       status: :error,
+                       payload: %{reason: "State store is not enabled for this channel"}
+                     },
+                     2000
+    end
+
+    test "the store is torn down when the channel terminates", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      assert {:ok, _, %Socket{} = socket} =
+               subscribe_and_join(socket, "realtime:test", %{config: %{private: true, state: %{enabled: true}}})
+
+      store = socket.assigns.temp_state_store
+      assert is_pid(store)
+      ref = Process.monitor(store)
+
+      Process.unlink(socket.channel_pid)
+      Process.exit(socket.channel_pid, :kill)
+
+      assert_receive {:DOWN, ^ref, :process, ^store, _reason}, 2000
+    end
+
+    test "supports compare-and-set updates and replies version_mismatch on conflict", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      assert {:ok, _, %Socket{} = socket} =
+               subscribe_and_join(socket, "realtime:test", %{config: %{private: true, state: %{enabled: true}}})
+
+      ref = push(socket, "state", %{"command" => "put", "key" => "k", "value" => %{"a" => 1}})
+      assert_receive %Socket.Reply{ref: ^ref, status: :ok, payload: %{version: 1}}, 2000
+
+      ref = push(socket, "state", %{"command" => "update", "key" => "k", "value" => %{"a" => 2}, "expected" => 1})
+      assert_receive %Socket.Reply{ref: ^ref, status: :ok, payload: %{version: 2}}, 2000
+
+      ref = push(socket, "state", %{"command" => "update", "key" => "k", "value" => %{"a" => 3}, "expected" => 1})
+      assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{reason: "version_mismatch", version: 2}}, 2000
+    end
+
+    test "pushes a system message and returns unavailable when the store dies", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      assert {:ok, _, %Socket{} = socket} =
+               subscribe_and_join(socket, "realtime:test", %{config: %{private: true, state: %{enabled: true}}})
+
+      store = socket.assigns.temp_state_store
+      assert is_pid(store)
+
+      GenServer.stop(store)
+
+      assert_receive %Socket.Message{event: "system", payload: %{extension: "state", status: "error"}}, 2000
+
+      ref = push(socket, "state", %{"command" => "get", "key" => "k"})
+      assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{reason: "unavailable"}}, 2000
+    end
+
+    test "insert replies with a version and rejects a duplicate key", %{tenant: tenant} do
+      socket = join_state_socket(tenant)
+
+      ref = push(socket, "state", %{"command" => "insert", "key" => "k", "value" => %{"a" => 1}})
+      assert_receive %Socket.Reply{ref: ^ref, status: :ok, payload: %{version: 1}}, 2000
+
+      ref = push(socket, "state", %{"command" => "insert", "key" => "k", "value" => %{"a" => 2}})
+      assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{reason: "already_exists"}}, 2000
+    end
+
+    test "delete replies deleted and not_found for a missing key", %{tenant: tenant} do
+      socket = join_state_socket(tenant)
+
+      ref = push(socket, "state", %{"command" => "put", "key" => "k", "value" => %{"a" => 1}})
+      assert_receive %Socket.Reply{ref: ^ref, status: :ok}, 2000
+
+      ref = push(socket, "state", %{"command" => "delete", "key" => "k"})
+      assert_receive %Socket.Reply{ref: ^ref, status: :ok, payload: %{deleted: true}}, 2000
+
+      ref = push(socket, "state", %{"command" => "delete", "key" => "k"})
+      assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{reason: "not_found"}}, 2000
+    end
+
+    test "clear replies cleared", %{tenant: tenant} do
+      socket = join_state_socket(tenant)
+
+      ref = push(socket, "state", %{"command" => "put", "key" => "k", "value" => %{"a" => 1}})
+      assert_receive %Socket.Reply{ref: ^ref, status: :ok}, 2000
+
+      ref = push(socket, "state", %{"command" => "clear"})
+      assert_receive %Socket.Reply{ref: ^ref, status: :ok, payload: %{cleared: true}}, 2000
+
+      ref = push(socket, "state", %{"command" => "get", "key" => "k"})
+      assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{reason: "not_found"}}, 2000
+    end
+
+    test "rejects an unknown command", %{tenant: tenant} do
+      socket = join_state_socket(tenant)
+
+      ref = push(socket, "state", %{"command" => "nope", "key" => "k"})
+      assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{reason: "invalid_state_command"}}, 2000
+    end
+
+    test "rejects a non-integer expected version", %{tenant: tenant} do
+      socket = join_state_socket(tenant)
+
+      ref = push(socket, "state", %{"command" => "put", "key" => "k", "value" => %{"a" => 1}})
+      assert_receive %Socket.Reply{ref: ^ref, status: :ok}, 2000
+
+      ref = push(socket, "state", %{"command" => "update", "key" => "k", "value" => %{"a" => 2}, "expected" => "1"})
+      assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{reason: "invalid_expected"}}, 2000
+    end
+  end
+
+  defp join_state_socket(tenant) do
+    jwt = Generators.generate_jwt_token(tenant)
+    {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+    {:ok, _, %Socket{} = socket} =
+      subscribe_and_join(socket, "realtime:test", %{config: %{private: true, state: %{enabled: true}}})
+
+    socket
+  end
+
   defp conn_opts(tenant, token) do
     [
       connect_info: %{

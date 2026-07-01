@@ -20,6 +20,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Cache
   alias Realtime.Tenants.Connect
+  alias Realtime.Tenants.TempStateStore
   alias Realtime.UsersCounter
 
   alias RealtimeWeb.Channels.Payloads.Join
@@ -147,7 +148,8 @@ defmodule RealtimeWeb.RealtimeChannel do
         self_broadcast: Join.self_broadcast?(join),
         tenant_topic: tenant_topic,
         channel_name: sub_topic,
-        presence_enabled?: presence_enabled?
+        presence_enabled?: presence_enabled?,
+        temp_state_store: maybe_start_temp_state_store(join, tenant, sub_topic, socket, db_conn)
       }
 
       assigns =
@@ -337,6 +339,21 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
+  def handle_info(
+        {:DOWN, _ref, :process, pid, _reason},
+        %{assigns: %{temp_state_store: pid, channel_name: channel_name}} = socket
+      ) do
+    push_system_message(
+      "state",
+      socket,
+      "error",
+      "State store is no longer available, rejoin to re-enable it",
+      channel_name
+    )
+
+    {:noreply, socket}
+  end
+
   def handle_info(_msg, %{assigns: %{policies: %Policies{broadcast: %BroadcastPolicies{read: false}}}} = socket) do
     Logger.warning("Broadcast message ignored")
     {:noreply, socket}
@@ -515,6 +532,35 @@ defmodule RealtimeWeb.RealtimeChannel do
         log_error(socket, "UnableToHandlePresence", error)
         {:reply, :error, socket}
     end
+  end
+
+  def handle_in("state", payload, %{assigns: %{temp_state_store: store}} = socket) when is_pid(store) do
+    count(socket)
+
+    case RateCounter.get(socket.assigns.rate_counter) do
+      {:ok, %{limit: %{triggered: true}}} ->
+        {:reply, {:error, %{reason: "Rate limit exceeded"}}, socket}
+
+      _ ->
+        case handle_state_command(store, payload) do
+          {:ok, reply} ->
+            {:reply, {:ok, reply}, socket}
+
+          {:error, {:version_mismatch, version}} ->
+            {:reply, {:error, %{reason: "version_mismatch", version: version}}, socket}
+
+          {:error, reason} when is_atom(reason) ->
+            {:reply, {:error, %{reason: to_string(reason)}}, socket}
+
+          {:error, reason} ->
+            log_error(socket, "UnableToHandleStateCommand", reason)
+            {:reply, {:error, %{reason: "Unable to handle state command"}}, socket}
+        end
+    end
+  end
+
+  def handle_in("state", _payload, socket) do
+    {:reply, {:error, %{reason: "State store is not enabled for this channel"}}, socket}
   end
 
   def handle_in("access_token", %{"access_token" => "sb_" <> _}, socket) do
@@ -986,6 +1032,81 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp maybe_replay_messages(_, _, _, _, _), do: {:ok, MapSet.new()}
+
+  # Maps the constrained client command protocol onto a single TempStateStore operation.
+  defp handle_state_command(store, %{"command" => "put", "key" => key, "value" => value}) do
+    with {:ok, version} <- TempStateStore.put(store, key, value), do: {:ok, %{version: version}}
+  end
+
+  defp handle_state_command(store, %{"command" => "insert", "key" => key, "value" => value}) do
+    with {:ok, version} <- TempStateStore.insert(store, key, value), do: {:ok, %{version: version}}
+  end
+
+  defp handle_state_command(store, %{"command" => "update", "key" => key, "value" => value} = payload) do
+    with {:ok, expected} <- expected_version(payload),
+         {:ok, version} <- TempStateStore.update(store, key, value, expected) do
+      {:ok, %{version: version}}
+    end
+  end
+
+  defp handle_state_command(store, %{"command" => "delete", "key" => key} = payload) do
+    with {:ok, expected} <- expected_version(payload),
+         {:ok, :deleted} <- TempStateStore.delete(store, key, expected) do
+      {:ok, %{deleted: true}}
+    end
+  end
+
+  defp handle_state_command(store, %{"command" => "get", "key" => key}) do
+    TempStateStore.get(store, key)
+  end
+
+  defp handle_state_command(store, %{"command" => "clear"}) do
+    with :ok <- TempStateStore.clear(store), do: {:ok, %{cleared: true}}
+  end
+
+  defp handle_state_command(_store, _payload), do: {:error, :invalid_state_command}
+
+  defp expected_version(payload) do
+    case Map.fetch(payload, "expected") do
+      :error -> {:ok, nil}
+      {:ok, version} when is_integer(version) -> {:ok, version}
+      {:ok, _} -> {:error, :invalid_expected}
+    end
+  end
+
+  # Opt-in, channel-scoped temporary state store backed by a PostgreSQL TEMP TABLE.
+  #
+  # Restricted to private channels: it opens a dedicated session against the tenant database, so
+  # allowing it on public (unauthenticated) channels would let anyone spin up sessions and write
+  # to the tenant database. On a public channel the request is ignored with a warning.
+  #
+  # Best-effort otherwise: a failure to start the dedicated session must not prevent the channel
+  # from joining, so we log and continue without a store rather than failing the join.
+  defp maybe_start_temp_state_store(join, tenant, sub_topic, socket, db_conn) do
+    cond do
+      not Join.state_enabled?(join) ->
+        nil
+
+      not socket.assigns.private? ->
+        log_warning(socket, "TempStateStoreRequiresPrivateChannel", "State store is only available on private channels")
+        nil
+
+      true ->
+        case TempStateStore.start(tenant, self(), sub_topic, db_conn) do
+          {:ok, pid} ->
+            Process.monitor(pid)
+            pid
+
+          {:error, :too_many_state_stores} ->
+            log_warning(socket, "TempStateStoreLimitReached", "Per-tenant temp state store limit reached")
+            nil
+
+          error ->
+            log_error(socket, "TempStateStoreStartError", error)
+            nil
+        end
+    end
+  end
 
   defp presence_enabled?(client_enabled?, %Tenant{presence_enabled: tenant_enabled}) do
     client_enabled? || tenant_enabled
