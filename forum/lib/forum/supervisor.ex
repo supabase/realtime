@@ -7,6 +7,14 @@ defmodule Forum.Supervisor do
   def partition_name(scope, partition), do: :"#{scope}_forum_partition_#{partition}"
   def partition_entries_table(partition_name), do: :"#{partition_name}_entries"
 
+  # Forum.Muster claim shard (one per partition index; same phash2 slice).
+  def shard_name(scope, index), do: :"#{scope}_muster_shard_#{index}"
+
+  # Per-shard durable claim-state ETS table. Created and owned by this Supervisor
+  # (not the shard) so the shard's group_states survive a shard crash and are
+  # rebuilt + reconciled on restart. One per shard index, same phash2 slice.
+  def shard_states_table(scope, index), do: :"#{scope}_muster_shard_#{index}_states"
+
   @spec partition(atom, Forum.group()) :: atom
   def partition(scope, group) do
     case :persistent_term.get(scope, :unknown) do
@@ -23,6 +31,24 @@ defmodule Forum.Supervisor do
     end
   end
 
+  # The Forum.Muster claim shard owning `group`: same phash2 slice as the
+  # group's partition, so shard i aligns 1:1 with partition i.
+  @spec shard(atom, Forum.group()) :: atom
+  def shard(scope, group) do
+    case :persistent_term.get({scope, :muster_shards}, :unknown) do
+      :unknown -> raise "Forum.Muster shards for scope #{inspect(scope)} are not started"
+      shard_names -> elem(shard_names, :erlang.phash2(group, tuple_size(shard_names)))
+    end
+  end
+
+  @spec shards(atom) :: [atom]
+  def shards(scope) do
+    case :persistent_term.get({scope, :muster_shards}, :unknown) do
+      :unknown -> raise "Forum.Muster shards for scope #{inspect(scope)} are not started"
+      shard_names -> Tuple.to_list(shard_names)
+    end
+  end
+
   @spec start_link(module, atom, pos_integer(), Keyword.t()) :: Supervisor.on_start()
   def start_link(module, scope, partitions, opts \\ []) do
     args = [module, scope, partitions, opts]
@@ -31,31 +57,136 @@ defmodule Forum.Supervisor do
 
   @impl true
   def init([module, scope, partitions, opts]) do
-    children =
-      for i <- 0..(partitions - 1) do
-        partition_name = partition_name(scope, i)
-        partition_entries_table = partition_entries_table(partition_name)
-
-        ^partition_entries_table =
-          :ets.new(partition_entries_table, [:set, :public, :named_table, read_concurrency: true])
-
-        ^partition_name =
-          :ets.new(partition_name, [:set, :public, :named_table, read_concurrency: true])
-
-        %{
-          id: i,
-          start: {Forum.Partition, :start_link, [scope, partition_name, partition_entries_table]}
-        }
-      end
+    # The per-slice membership tables, created and owned by this long-lived
+    # Supervisor (NOT by the process that writes them) so they survive that
+    # process's crash and are rebuilt on restart. The layout differs per
+    # primitive (see create_membership_tables/3).
+    for i <- 0..(partitions - 1), do: create_membership_tables(module, scope, i)
 
     partition_names = for i <- 0..(partitions - 1), do: partition_name(scope, i)
 
     :persistent_term.put(scope, List.to_tuple(partition_names))
 
-    children = [
-      %{id: :scope, start: {module, :start_link, [scope, opts]}} | children
-    ]
+    scope_child = %{id: :scope, start: {module, :start_link, [scope, opts]}}
 
-    Supervisor.init(children, strategy: :one_for_one)
+    {strategy, children} = scope_children(module, scope, partitions, opts, scope_child)
+
+    Supervisor.init(children, strategy: strategy)
+  end
+
+  # Forum.Muster keeps NO counts table: its Forum.Muster.Shard derives "is there a
+  # member" / "is the group now empty" / the member count from the entries table on
+  # demand. The entries table is an :ordered_set so a group's members are
+  # contiguous and those derivations are bounded prefix scans, not full-table scans.
+  defp create_membership_tables(Forum.Muster.Scope, scope, i) do
+    entries = partition_entries_table(partition_name(scope, i))
+    ^entries = :ets.new(entries, [:ordered_set, :public, :named_table, read_concurrency: true])
+    :ok
+  end
+
+  # Forum.Census's Forum.Partition keeps a denormalized O(1) counts table
+  # (partition_name) alongside the entries table, rebuilt from entries on restart.
+  defp create_membership_tables(_module, scope, i) do
+    partition_name = partition_name(scope, i)
+    entries = partition_entries_table(partition_name)
+
+    ^entries = :ets.new(entries, [:set, :public, :named_table, read_concurrency: true])
+
+    ^partition_name =
+      :ets.new(partition_name, [:set, :public, :named_table, read_concurrency: true])
+
+    :ok
+  end
+
+  # Forum.Muster adds, per scope: a shared ring, the router-role occupancy table,
+  # and N claim shards (one per partition index). A Muster shard absorbs the
+  # membership job Forum.Partition does for Census, so Muster starts NO
+  # Forum.Partition processes: the shard owns the slice's entries table (created in
+  # init/1, no counts table) along with its claim state.
+  #
+  # Supervision shape — a single flat :rest_for_one, ordered to express each
+  # process's dependents as everything listed after it:
+  #
+  #   ring, coordinator (scope), shard_0, shard_1, .. shard_n
+  #
+  # :rest_for_one restarts the crashed child AND every child listed after it,
+  # never anything before it. That one rule gives the whole crash story for
+  # free, straight from this list's order, with no extra supervisor layer:
+  #
+  #   * Ring crash: restarts the ring, the coordinator, AND every shard (all
+  #     listed after it). The ring stores its node set in a process-owned ETS
+  #     table, so a crash brings it back EMPTY, and the coordinator is the only
+  #     writer that could re-seed it (only at init/rebalance, neither of which a
+  #     narrower restart would trigger) — so the coordinator restarting right
+  #     after it is required, not incidental.
+  #   * Coordinator crash: restarts the coordinator AND every shard (all listed
+  #     after it), never the ring. One reset story: "the coordinator restarted"
+  #     always means the shards did too, never a stale shard left running next
+  #     to a fresh coordinator.
+  #   * Shard crash: restarts that shard and every shard listed after it, never
+  #     the ring or the coordinator (both listed before it).
+  #
+  # The occupancy table and the per-shard durable claim-state tables are created
+  # HERE (owned by this long-lived Supervisor, whose init/1 does NOT re-run when
+  # a child below it restarts) rather than inside the coordinator or shard
+  # processes, so they survive any restart in the list above: the shards write
+  # the occupancy table directly and rebuild their group_states from the state
+  # tables. The shards rebuild from these Supervisor-owned tables (created
+  # before any child starts), so they have no start-order dependency on a
+  # membership process. Forum.Census gets none of these.
+  defp scope_children(Forum.Muster.Scope, scope, partitions, opts, scope_child) do
+    # :public so the coordinator, the local shards, and the :erpc workers running
+    # the remote entry points (occupied/4, vacant_batch/4) all write it directly,
+    # bypassing the coordinator mailbox; write_concurrency makes that scale.
+    occupancy_table = Forum.Muster.Scope.occupancy_table_name(scope)
+
+    ^occupancy_table =
+      :ets.new(occupancy_table, [
+        :set,
+        :public,
+        :named_table,
+        read_concurrency: true,
+        write_concurrency: :auto
+      ])
+
+    shard_names = for i <- 0..(partitions - 1), do: shard_name(scope, i)
+    :persistent_term.put({scope, :muster_shards}, List.to_tuple(shard_names))
+
+    shard_children =
+      for i <- 0..(partitions - 1) do
+        # :public (Supervisor owns it, the shard writes it).
+        states_table = shard_states_table(scope, i)
+
+        ^states_table =
+          :ets.new(states_table, [
+            :set,
+            :public,
+            :named_table,
+            read_concurrency: true,
+            write_concurrency: :auto
+          ])
+
+        %{id: {:muster_shard, i}, start: {Forum.Muster.Shard, :start_link, [scope, i, opts]}}
+      end
+
+    {:rest_for_one, [Forum.Muster.Scope.ring_child_spec(scope), scope_child | shard_children]}
+  end
+
+  # Forum.Census: one Forum.Partition process per slice owns membership (entries +
+  # counts tables, created in init/1). No shards, ring, or occupancy table.
+  defp scope_children(_module, scope, partitions, _opts, scope_child) do
+    partition_children =
+      for i <- 0..(partitions - 1) do
+        partition_name = partition_name(scope, i)
+
+        %{
+          id: i,
+          start:
+            {Forum.Partition, :start_link,
+             [scope, partition_name, partition_entries_table(partition_name)]}
+        }
+      end
+
+    {:one_for_one, [scope_child | partition_children]}
   end
 end

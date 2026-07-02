@@ -1,0 +1,330 @@
+defmodule Forum.Muster do
+  @moduledoc """
+  Group-aware fan-out broadcast.
+
+  For every group, exactly one node in the cluster is the **router** node,
+  chosen by consistent hashing (via `ExHashRing`) over the sorted Muster
+  cluster membership. The router node knows which nodes hold local members
+  of that group; callers route a broadcast to it (using their own transport)
+  via `router/2`.
+
+  Use a different scope name than any `Forum.Census` scope on the same node.
+  """
+
+  alias Forum.Muster.Scope
+  alias Forum.Muster.Shard
+
+  @type group :: Forum.group()
+  @type start_option ::
+          {:partitions, pos_integer()}
+          | {:vacancy_cooldown_ms, non_neg_integer()}
+          | {:vacant_flush_interval_ms, pos_integer()}
+          | {:view_heartbeat_interval_ms, pos_integer()}
+          | {:rpc_timeout_ms, timeout()}
+          | {:rebalance_gather_timeout_ms, pos_integer()}
+          | {:message_module, module()}
+
+  # Timeout for the local GenServer.call to the claim shard. Generous because the
+  # underlying RPC timeout is what actually bounds the wait; this just needs
+  # to be longer than that. The supervisor restarts a shard if it crashes, so
+  # callers won't wait forever on a dead shard. During a rebalance, callers
+  # stay parked on this call until the rebalance settles them with :ok.
+  @claim_call_timeout 60_000
+
+  @doc "Returns a supervisor child specification."
+  def child_spec([scope]) when is_atom(scope), do: child_spec([scope, []])
+  def child_spec(scope) when is_atom(scope), do: child_spec([scope, []])
+
+  def child_spec([scope, opts]) when is_atom(scope) and is_list(opts) do
+    %{
+      id: {Forum.Muster, scope},
+      start: {__MODULE__, :start_link, [scope, opts]},
+      type: :supervisor
+    }
+  end
+
+  @doc """
+  Starts the Muster supervision tree for `scope`.
+
+  Options:
+
+  * `:partitions`: number of local partitions (default: schedulers online).
+  * `:vacancy_cooldown_ms`: how long to wait after a group goes vacant locally
+    before queuing it for a vacant flush (default: 30_000).
+  * `:vacant_flush_interval_ms`: how often the queued vacancies are flushed to
+    their router nodes in per-router batches (default: 5_000). A failed
+    batch re-queues its groups, so this also bounds the retry cadence.
+  * `:view_heartbeat_interval_ms`: how often each node re-announces its current
+    cluster-view hash to peers AND re-offers discovery to any connected
+    non-member (default: 10_000). This is the readiness-barrier and re-discovery
+    backstop: it heals a dropped view announcement (and a dropped discovery, e.g.
+    a coordinator that restarted in place, whose one-shot discovery was lost)
+    without a membership change, bounding both the worst-case "router floods
+    instead of targeting" window and the worst-case "restarted but never
+    re-paired" window to one interval.
+  * `:rpc_timeout_ms`: timeout for router-node RPCs (default: 5_000).
+  * `:rebalance_gather_timeout_ms`: timeout for the synchronous in-VM call the
+    coordinator makes to each claim shard to gather its held groups during a
+    rebalance (default: 15_000). A shard that does not reply within this window
+    crashes the coordinator (which then restarts and re-announces from a clean
+    slate); raise it if shards routinely hold very large group sets.
+  * `:message_module`: module implementing `Forum.Adapter` (default:
+    `Forum.Adapter.ErlDist`).
+  """
+  @spec start_link(atom, [start_option]) :: Supervisor.on_start()
+  def start_link(scope, opts \\ []) when is_atom(scope) do
+    {partitions, opts} = Keyword.pop(opts, :partitions, System.schedulers_online())
+
+    if not (is_integer(partitions) and partitions >= 1) do
+      raise ArgumentError,
+            "expected :partitions to be a positive integer, got: #{inspect(partitions)}"
+    end
+
+    cooldown = Keyword.get(opts, :vacancy_cooldown_ms)
+
+    if cooldown != nil and not (is_integer(cooldown) and cooldown >= 0) do
+      raise ArgumentError,
+            "expected :vacancy_cooldown_ms to be a non-negative integer, got: #{inspect(cooldown)}"
+    end
+
+    flush_interval = Keyword.get(opts, :vacant_flush_interval_ms)
+
+    if flush_interval != nil and not (is_integer(flush_interval) and flush_interval > 0) do
+      raise ArgumentError,
+            "expected :vacant_flush_interval_ms to be a positive integer, got: #{inspect(flush_interval)}"
+    end
+
+    heartbeat_interval = Keyword.get(opts, :view_heartbeat_interval_ms)
+
+    if heartbeat_interval != nil and
+         not (is_integer(heartbeat_interval) and heartbeat_interval > 0) do
+      raise ArgumentError,
+            "expected :view_heartbeat_interval_ms to be a positive integer, got: #{inspect(heartbeat_interval)}"
+    end
+
+    gather_timeout = Keyword.get(opts, :rebalance_gather_timeout_ms)
+
+    if gather_timeout != nil and not (is_integer(gather_timeout) and gather_timeout > 0) do
+      raise ArgumentError,
+            "expected :rebalance_gather_timeout_ms to be a positive integer, got: #{inspect(gather_timeout)}"
+    end
+
+    Forum.Supervisor.start_link(Forum.Muster.Scope, scope, partitions, opts)
+  end
+
+  @doc """
+  Join `pid` to `group` in `scope`.
+
+  `pid` is handed to the group's claim shard (`Forum.Muster.Shard`, chosen by
+  `phash2(group)` so a join storm across distinct groups spreads over N shard
+  mailboxes), which both registers the member locally and, if this is the first
+  local member of `group`, notifies the router node via a synchronous `:occupied`
+  RPC. The shard owns the member monitor as well as the claim state, so the router
+  is never told a group is occupied before a monitored local member exists: a
+  caller that dies mid-join can never leave the router believing we hold a group we
+  don't. If the `:occupied` RPC fails the join fails and `pid` is not registered
+  locally; the next call to `join/3` will retry the RPC.
+
+  If the group was recently vacant (in cooldown, or queued/in-flight for a
+  vacant flush), the join reclaims it without re-notifying the router where
+  it can, so a quick leave/join cycle costs no RPC.
+
+  The shard's per-group state lives in a Supervisor-owned ETS table (its single
+  source of truth), so it survives a shard crash: on restart the shard reconciles
+  the table against the live member counts, and never forgets an outstanding router
+  assertion, so a shard crash cannot orphan a `{group, node}` entry on a (local or
+  remote) router.
+  """
+  @spec join(atom, group, pid) :: :ok | {:error, :not_local | :rpc_failed | term}
+  def join(_scope, _group, pid) when is_pid(pid) and node(pid) != node(),
+    do: {:error, :not_local}
+
+  def join(scope, group, pid) when is_atom(scope) and is_pid(pid) do
+    call_shard(scope, group, {:join, group, pid})
+  end
+
+  @doc "Remove `pid` from `group` in `scope`."
+  @spec leave(atom, group, pid) :: :ok | {:error, term}
+  def leave(scope, group, pid) when is_atom(scope) and is_pid(pid) do
+    call_shard(scope, group, {:leave, group, pid})
+  end
+
+  @doc """
+  Returns the router node for `group` in `scope`.
+
+  * `{:ok, node}`: our ring is settled (`:converging` or `:ready`); route to
+    `node`. (If the chosen router's own table isn't complete yet it will fall
+    back to flooding; see `can_decide?/2`.)
+  * `{:rebalancing, [node]}`: the local Scope's ring is in flux. The router
+    mapping is unreliable; callers using their own transport should fan out to
+    every node in the list rather than targeting a single router.
+  """
+  @spec router(atom, group) :: {:ok, node} | {:rebalancing, [node]}
+  def router(scope, group) when is_atom(scope) do
+    case :persistent_term.get({Forum.Muster, scope, :status}) do
+      :rebalancing ->
+        {:ok, members} = ExHashRing.Ring.get_nodes(ring_name(scope))
+        {:rebalancing, members}
+
+      _converging_or_ready ->
+        ExHashRing.Ring.find_node(ring_name(scope), group)
+    end
+  end
+
+  @doc "Returns the current Muster cluster member nodes for `scope`."
+  @spec members(atom) :: [node]
+  def members(scope) when is_atom(scope) do
+    {:ok, ns} = ExHashRing.Ring.get_nodes(ring_name(scope))
+    ns
+  end
+
+  @doc """
+  Returns the current cluster-view hash for `scope`.
+
+  Senders tag each broadcast with this so the router can tell whether it
+  agrees about cluster membership (see `can_decide?/2`).
+  """
+  @spec view_hash(atom) :: non_neg_integer
+  def view_hash(scope) when is_atom(scope) do
+    :persistent_term.get({Forum.Muster, scope, :view_hash})
+  end
+
+  @doc """
+  Whether this node, as the router for a broadcast tagged `sender_view_hash`,
+  can confidently decide its fan-out targets from the occupancy table.
+
+  Returns `false` unless this node is `:ready` (every member's latest announced
+  view agrees with ours, so our occupancy table is complete) AND it agrees with
+  the sender about cluster membership. `:ready` already implies the ring is
+  settled. When false, the caller should fan out to all nodes instead of
+  trusting the occupancy table.
+
+  Most callers want `targets/3`, which folds this check and the occupancy read
+  into one result; use `can_decide?/2` directly only when you need the boolean
+  on its own.
+  """
+  @spec can_decide?(atom, non_neg_integer) :: boolean
+  def can_decide?(scope, sender_view_hash) when is_atom(scope) do
+    :persistent_term.get({Forum.Muster, scope, :status}) == :ready and
+      :persistent_term.get({Forum.Muster, scope, :view_hash}) == sender_view_hash
+  end
+
+  @doc """
+  Returns the fan-out targets for a broadcast to `group` tagged with the
+  sender's `sender_view_hash`. Run this **on the router node** for `group` (see
+  `router/2`).
+
+  This is the single read a router should use to pick its delivery set: it folds
+  the readiness barrier (`can_decide?/2`) and the occupancy lookup into one step,
+  so a caller can never read occupancy without first confirming the table can be
+  trusted.
+
+  * `{:ok, [node]}`: this node is `:ready` and agrees with the sender about
+    cluster membership, so its router-role occupancy table is complete and
+    authoritative. Deliver to exactly these source nodes (may be empty — nobody
+    holds the group).
+  * `{:error, :flood}`: the barrier is not satisfied (still `:converging`, the
+    sender disagrees about membership, or a coordinator restart shrank our view).
+    The occupancy table cannot be trusted, so the caller must over-deliver
+    instead of risking a miss. Muster does not pick the flood set: the caller
+    fans out to whatever "everyone" means for its transport (e.g. all nodes in
+    the region), which is intentionally *not* `members/2` — a freshly-restarted
+    coordinator resets its ring to just `[node()]`, so the ring view can be
+    incomplete in exactly the situation that triggers a flood.
+  """
+  @spec targets(atom, group, non_neg_integer) :: {:ok, [node]} | {:error, :flood}
+  def targets(scope, group, sender_view_hash) when is_atom(scope) do
+    if can_decide?(scope, sender_view_hash) do
+      {:ok, Scope.occupancy(scope, group)}
+    else
+      {:error, :flood}
+    end
+  end
+
+  defp ring_name(scope), do: :"#{scope}_muster_ring"
+
+  @doc "List local pids registered to `group` in `scope`."
+  @spec local_members(atom, group) :: [pid]
+  def local_members(scope, group) when is_atom(scope) do
+    Shard.members(scope, group)
+  end
+
+  @doc "Whether `pid` is a local member of `group` in `scope`."
+  @spec local_member?(atom, group, pid) :: boolean
+  def local_member?(scope, group, pid) when is_atom(scope) and is_pid(pid) do
+    Shard.member?(scope, group, pid)
+  end
+
+  @doc "Local member count for `group` in `scope`."
+  @spec local_member_count(atom, group) :: non_neg_integer
+  def local_member_count(scope, group) when is_atom(scope) do
+    Shard.member_count(scope, group)
+  end
+
+  defp call_shard(scope, group, msg) do
+    GenServer.call(Forum.Supervisor.shard(scope, group), msg, @claim_call_timeout)
+  catch
+    :exit, reason -> {:error, {:scope_exit, reason}}
+  end
+
+  @doc """
+  Prints a human-readable snapshot of `scope`'s Muster state and returns `:ok`.
+
+  Handy from IEx while playing with a cluster: shows the lifecycle status, the
+  cluster-view hash, the ring members, known peers, each peer's last-announced
+  `{view hash, announce watermark}`, the per-group state machine, and the
+  router-role occupancy table
+  (`group => [source_node]`). Pair it with `Logger.configure(level: :debug)` to
+  also watch the per-group churn scroll by.
+  """
+  @spec dump(atom) :: :ok
+  def dump(scope) when is_atom(scope) do
+    snapshot = GenServer.call(Forum.Supervisor.name(scope), :dump)
+    IO.puts(format_dump(snapshot))
+  end
+
+  defp format_dump(s) do
+    grouped =
+      Enum.group_by(s.group_states, fn {_g, st} -> group_state_label(st) end, &elem(&1, 0))
+
+    group_lines =
+      if grouped == %{} do
+        ["  (none)"]
+      else
+        Enum.map(grouped, fn {label, groups} ->
+          "  #{label} (#{length(groups)}): #{inspect(Enum.sort(groups))}"
+        end)
+      end
+
+    occupancy_lines =
+      if s.occupancy == %{} do
+        ["  (empty)"]
+      else
+        Enum.map(s.occupancy, fn {group, nodes} ->
+          "  #{inspect(group)} => #{inspect(Enum.sort(nodes))}"
+        end)
+      end
+
+    [
+      "Muster #{inspect(s.scope)} @ #{inspect(node())}",
+      "  status:       #{inspect(s.status)}",
+      "  view_hash:    #{inspect(s.view_hash)}",
+      "  members:      #{inspect(s.members)}",
+      "  ring_nodes:   #{inspect(s.ring_nodes)}",
+      "  peers:        #{inspect(s.peers)}",
+      "  member_views: #{inspect(s.member_views)}",
+      "  owed_snaps:   #{inspect(s.owed_snapshots)}",
+      "  applied_snap: #{inspect(s.applied_snapshot_seq)}",
+      "  cooldown:     #{inspect(Enum.sort(s.cooldown))}",
+      "group_states:" | group_lines
+    ]
+    |> Kernel.++(["occupancy (as router):" | occupancy_lines])
+    |> Enum.join("\n")
+  end
+
+  defp group_state_label(:occupied), do: ":occupied"
+  defp group_state_label(:cooldown), do: ":cooldown"
+  defp group_state_label(:vacant_queued), do: ":vacant_queued"
+  defp group_state_label({:occupied_pending, _}), do: ":occupied_pending"
+  defp group_state_label(:vacant_flushing), do: ":vacant_flushing"
+end
