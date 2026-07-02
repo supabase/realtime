@@ -986,9 +986,11 @@ defmodule Forum.Muster.Scope do
   # A row may only be judged under our ring if its source demonstrably shares the
   # view the ring implements; otherwise deleting it can lose data. The source's
   # announced view (member_views) must equal ours, and the row's seq must not
-  # exceed the watermark carried by that announcement (snapshot data is committed
-  # straight to ETS by the RPC worker while the matching marker waits in our
-  # mailbox, so the table can be AHEAD of member_views). Skipped rows are harmless
+  # exceed the watermark carried by that announcement (occupied/4 and
+  # vacant_batch/4 write this table straight from their :erpc workers and never
+  # touch member_views, so the table can be AHEAD of member_views). Those same
+  # concurrent writers are also why the delete below is seq-guarded rather than
+  # by key alone (see the note at the select_delete). Skipped rows are harmless
   # and are re-judged on the :ready transition and, as a backstop, on every
   # :sweep_tombstones tick (see handle_info(:sweep_tombstones, _) above) —
   # together these also cover a row that does not exist yet at either point and
@@ -1006,16 +1008,50 @@ defmodule Forum.Muster.Scope do
       # have not announced the new view yet, so their rows are skipped without
       # paying for the ring lookup.
       if source_agrees?(state, n, row_seq, own) and router_under_ring(ring, group) != node() do
-        :ets.delete(state.occupancy_table, {group, n})
-
-        # Emitted AFTER the delete, so a block_until on this event implies the
-        # row is gone.
-        tp(:muster_drop_stale_entry, %{
+        # Emitted BEFORE the delete below and never parked, so a test can
+        # detect that the sweep has judged this row while holding the delete
+        # itself parked (a force_ordering-delayed event stays invisible to the
+        # trace collector until released).
+        tp(:muster_drop_stale_judged, %{
           scope: state.scope,
           node: node(),
           group: group,
-          source: n
+          source: n,
+          seq: row_seq
         })
+
+        # SEQ-GUARDED delete: only remove the row if it still carries the exact
+        # seq that was judged. occupied/4 writes this table from :erpc workers,
+        # concurrently with this sweep, so between the :ets.select above and
+        # this delete the source may have legitimately re-claimed the group
+        # under a newer view (raising the key via upsert_if_newer) — a key-only
+        # delete here would destroy that fresh row, and nothing would ever
+        # re-send it (the source got its :ok; deltas carry moved groups only).
+        # A raised row makes this a no-op; if it is still stale it is re-judged
+        # (under the watermark of the source's newer announcement) on a later
+        # sweep. Wrapped in a span so a test can park the sweep between
+        # judgment and delete (force_ordering on :start) — exactly that window.
+        deleted =
+          tp_span(:muster_drop_stale_apply, %{
+            scope: state.scope,
+            node: node(),
+            group: group,
+            source: n,
+            seq: row_seq
+          }) do
+            :ets.select_delete(state.occupancy_table, [{{{group, n}, row_seq, :_}, [], [true]}])
+          end
+
+        # Emitted AFTER an actual delete, so a block_until on this event
+        # implies the row is gone.
+        if deleted == 1 do
+          tp(:muster_drop_stale_entry, %{
+            scope: state.scope,
+            node: node(),
+            group: group,
+            source: n
+          })
+        end
       end
     end)
   end
