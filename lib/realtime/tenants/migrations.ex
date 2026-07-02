@@ -184,14 +184,14 @@ defmodule Realtime.Tenants.Migrations do
     GenServer.start_link(__MODULE__, attrs, name: name)
   end
 
-  def init(%__MODULE__{tenant_external_id: tenant_external_id, settings: settings}) do
+  def init(%__MODULE__{tenant_external_id: tenant_external_id, settings: settings, migrations_ran: migrations_ran}) do
     Logger.metadata(external_id: tenant_external_id, project: tenant_external_id)
 
-    case migrate(tenant_external_id, settings) do
-      :ok ->
+    case migrate(tenant_external_id, settings, migrations_ran) do
+      {:ok, applied_count} ->
         Task.Supervisor.async_nolink(__MODULE__.TaskSupervisor, Api, :update_migrations_ran, [
           tenant_external_id,
-          Enum.count(migrations(tenant_external_id))
+          applied_count
         ])
 
         :ignore
@@ -201,7 +201,7 @@ defmodule Realtime.Tenants.Migrations do
     end
   end
 
-  defp migrate(tenant_external_id, settings) do
+  defp migrate(tenant_external_id, settings, migrations_ran) do
     platform_region = Map.get(settings, "region")
 
     with {:ok, settings} <- Database.from_settings(settings, "realtime_migrations", :stop) do
@@ -223,9 +223,18 @@ defmodule Realtime.Tenants.Migrations do
         start_time = Telemetry.start(event, metadata)
 
         try do
-          opts = [all: true, prefix: "realtime", dynamic_repo: repo]
-          result = Ecto.Migrator.run(Repo, migrations(tenant_external_id), :up, opts)
-          Telemetry.stop(event, start_time, Map.put(metadata, :migrations_executed, length(result)))
+          {applied_count, migrations_executed} =
+            if migrations_ran == 0 do
+              case load_dump(settings, tenant_external_id) do
+                {:ok, applied_count} -> {applied_count, applied_count}
+                {:error, _} -> run_pending_migrations(repo, tenant_external_id)
+              end
+            else
+              run_pending_migrations(repo, tenant_external_id)
+            end
+
+          Telemetry.stop(event, start_time, Map.put(metadata, :migrations_executed, migrations_executed))
+          {:ok, applied_count}
         rescue
           error ->
             metadata = Map.put(metadata, :error_code, error_code(error))
@@ -248,6 +257,51 @@ defmodule Realtime.Tenants.Migrations do
   defp error_code(%Postgrex.Error{postgres: %{code: code}}), do: code
   defp error_code(%DBConnection.ConnectionError{}), do: :connection_error
   defp error_code(_), do: :other
+
+  @dump_timeout 30_000
+
+  defp load_dump(%Database{} = settings, tenant_external_id) do
+    with {:ok, conn} <- Database.connect_db(%{settings | pool_size: 1}),
+         {:ok, _} <- do_load_dump(conn),
+         :ok <- GenServer.stop(conn) do
+      {:ok, Enum.count(migrations(tenant_external_id))}
+    else
+      {:error, reason} = e ->
+        log_error("TenantMigrationsDumpSkipped", reason)
+        e
+    end
+  end
+
+  defp run_pending_migrations(repo, tenant_external_id) do
+    opts = [all: true, prefix: "realtime", dynamic_repo: repo]
+    result = Ecto.Migrator.run(Repo, migrations(tenant_external_id), :up, opts)
+    {Enum.count(migrations(tenant_external_id)), length(result)}
+  end
+
+  defp do_load_dump(conn) do
+    with {:ok, major} <- fetch_pg_major(conn),
+         {:ok, path} <- dump_path(major),
+         {:ok, sql} <- File.read(path) do
+      Postgrex.query(conn, sql, [], query_type: :text, timeout: @dump_timeout)
+    end
+  end
+
+  defp fetch_pg_major(conn) do
+    query = """
+    SELECT current_setting('server_version_num'), EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'orioledb')
+    """
+
+    case Postgrex.query(conn, query, [], timeout: @dump_timeout) do
+      {:ok, %{rows: [[_version_num, true]]}} -> {:error, :orioledb_not_supported}
+      {:ok, %{rows: [[version_num, false]]}} -> {:ok, version_num |> String.to_integer() |> div(10_000)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp dump_path(major) do
+    path = Application.app_dir(:realtime, "priv/repo/tenant_db_dump_#{major}.sql")
+    if File.exists?(path), do: {:ok, path}, else: {:error, {:dump_not_found, major}}
+  end
 
   @doc """
   Returns the migrations to run.

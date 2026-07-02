@@ -143,7 +143,7 @@ defmodule Realtime.Tenants.MigrationsTest do
     end
 
     test "emits stop event with metadata" do
-      tenant = Containers.checkout_tenant()
+      tenant = %{Containers.checkout_tenant() | migrations_ran: 1}
       external_id = tenant.external_id
 
       assert Migrations.run_migrations(tenant) == :ok
@@ -158,7 +158,7 @@ defmodule Realtime.Tenants.MigrationsTest do
     end
 
     test "emits exception event tagged with postgrex error on postgres errors" do
-      tenant = Containers.checkout_tenant()
+      tenant = %{Containers.checkout_tenant() | migrations_ran: 1}
       external_id = tenant.external_id
 
       error = %Postgrex.Error{postgres: %{code: :undefined_column}}
@@ -171,7 +171,7 @@ defmodule Realtime.Tenants.MigrationsTest do
     end
 
     test "tags connection errors with connection_error code" do
-      tenant = Containers.checkout_tenant()
+      tenant = %{Containers.checkout_tenant() | migrations_ran: 1}
       external_id = tenant.external_id
 
       error = %DBConnection.ConnectionError{message: "ssl send: closed"}
