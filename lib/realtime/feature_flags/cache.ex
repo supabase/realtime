@@ -26,13 +26,13 @@ defmodule Realtime.FeatureFlags.Cache do
 
   @spec get_flag(String.t()) :: FeatureFlag.t() | nil
   def get_flag(name) do
-    with {_, value} <-
-           Cachex.fetch(__MODULE__, cache_key(name), fn _key ->
-             with %FeatureFlag{} = flag <- Api.get_feature_flag(name),
-                  do: {:commit, flag},
-                  else: (_ -> {:ignore, nil})
-           end) do
-      value
+    case Cachex.fetch(__MODULE__, cache_key(name), fn _key ->
+           with %FeatureFlag{} = flag <- Api.get_feature_flag(name),
+                do: {:commit, flag},
+                else: (_ -> {:ignore, nil})
+         end) do
+      {:error, _} -> nil
+      {_, value} -> value
     end
   end
 

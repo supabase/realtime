@@ -16,6 +16,7 @@ services:
       DB_AFTER_CONNECT_QUERY: SET search_path TO _realtime
       DB_ENC_KEY: "1234567890123456"
       DB_HOST: db
+      DB_USER: supabase_admin
       DNS_NODES: "''"
       ELIXIR_ERL_OPTIONS: +hmax 1000000000
       ERL_AFLAGS: -kernel shell_history enabled --proto_dist inet_tcp

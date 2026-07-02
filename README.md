@@ -74,7 +74,7 @@ Once your environment is up and running, check out the following docs to customi
 | < 14                              | -                         | Not officially supported.                                                                                                                                                                                                                   |
 | 14.x                              | `supabase_admin`          | Requires superuser: `log_min_messages` can only be set by a superuser; supautils doesn't expose per-parameter delegation on this version. On <= 14.5, `realtime.broadcast_changes(...)` called from a trigger via `PERFORM` is unsupported. |
 | 15.x < 15.14.1.018                | `supabase_admin`          | Requires superuser: `supautils.policy_grants` on `realtime.subscription` is missing until [supabase/postgres@1b916920](https://github.com/supabase/postgres/commit/1b916920).                                                               |
-| 15.x >= 15.14.1.018, 16.x, 17.x   | `supabase_realtime_admin` | No superuser needed. Role must have `REPLICATION` and policies are managed by supautils.                                                                                                                                                    |
+| 15.x >= 15.14.1.018, 16.x, 17.x   | `supabase_admin`          | Requires superuser to run migrations, no superuser needed for tenant grants. Policies are managed by supautils.                                                                                                                             |
 
 ## Contributing
 

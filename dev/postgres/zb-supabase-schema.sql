@@ -3,7 +3,7 @@
 do $$
 begin
   if not exists (select from pg_roles where rolname = 'supabase_realtime_admin') then
-    create user supabase_realtime_admin noinherit createrole login replication password 'postgres';
+    create role supabase_realtime_admin with noinherit nologin noreplication;
   end if;
 end$$;
 

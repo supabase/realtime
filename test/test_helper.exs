@@ -16,8 +16,11 @@ repo_config = Application.fetch_env!(:realtime, Realtime.Repo)
 
 %{rows: [[pg_version_num]]} = Postgrex.query!(pg_conn, "SELECT current_setting('server_version_num')::int")
 
-%{rows: [[has_supautils_subscription_grants]]} =
-  Postgrex.query!(pg_conn, "SELECT current_setting('supautils.policy_grants', true) LIKE '%realtime.subscription%'")
+%{rows: [[has_supautils_realtime_grants]]} =
+  Postgrex.query!(
+    pg_conn,
+    "SELECT current_setting('supautils.policy_grants', true) LIKE '%realtime.messages%' AND current_setting('supautils.policy_grants', true) LIKE '%realtime.subscription%'"
+  )
 
 %{rows: [[orioledb?]]} =
   Postgrex.query!(pg_conn, "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'orioledb')")
@@ -25,12 +28,19 @@ repo_config = Application.fetch_env!(:realtime, Realtime.Repo)
 # `realtime.broadcast_changes(..., NEW record, OLD record, ...)` (introduced in commit 2922658c) called from a trigger via `PERFORM` fails on PG <= 14.5
 requires_pg_140006 = if pg_version_num < 140_006, do: :requires_pg_140006
 
-# Restriction assertions on the postgres role only hold on builds where supautils.policy_grants includes realtime.subscription (supabase/postgres 15.14.1.018 or higher)
-requires_supautils_policy_grants = if !has_supautils_subscription_grants, do: :requires_supautils_policy_grants
+# Restriction assertions on the postgres role only when supautils.policy_grants includes realtime.messages and realtime.subscription (supabase/postgres >= 15.14.1.018)
+requires_supautils_policy_grants = if !has_supautils_realtime_grants, do: :requires_supautils_policy_grants
+requires_no_supautils_policy_grants = if has_supautils_realtime_grants, do: :requires_no_supautils_policy_grants
 
 skip_orioledb = if orioledb?, do: :skip_orioledb
 
-exclude = [:failing, requires_pg_140006, requires_supautils_policy_grants, skip_orioledb]
+exclude = [
+  :failing,
+  requires_pg_140006,
+  requires_supautils_policy_grants,
+  requires_no_supautils_policy_grants,
+  skip_orioledb
+]
 
 ExUnit.start(exclude: exclude, max_cases: max_cases, capture_log: true)
 
@@ -49,6 +59,7 @@ for tenant <- Api.list_tenants(), do: Api.delete_tenant_by_external_id(tenant.ex
 Ecto.Adapters.SQL.Sandbox.mode(Realtime.Repo, :manual)
 
 Mimic.copy(:syn)
+Mimic.copy(Cachex)
 Mimic.copy(Ecto.Migrator)
 Mimic.copy(Extensions.PostgresCdcRls)
 Mimic.copy(Extensions.PostgresCdcRls.Replications)

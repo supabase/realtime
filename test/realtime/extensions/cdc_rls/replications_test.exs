@@ -121,7 +121,6 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationsTest do
       Postgrex.query!(conn, "CREATE TABLE #{qualified} (name text PRIMARY KEY)", [])
       Postgrex.query!(conn, "GRANT ALL ON TABLE #{qualified} TO anon", [])
       Postgrex.query!(conn, "GRANT ALL ON TABLE #{qualified} TO authenticated", [])
-      Postgrex.query!(conn, "ALTER PUBLICATION #{pub} ADD TABLE #{qualified}", [])
 
       {:ok, _} = Replications.prepare_replication(conn, slot)
 

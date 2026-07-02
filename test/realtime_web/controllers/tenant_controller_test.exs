@@ -90,7 +90,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
       assert Crypto.encrypt!("127.0.0.1") == settings["db_host"]
       assert Crypto.encrypt!("postgres") == settings["db_name"]
-      assert Crypto.encrypt!("supabase_realtime_admin") == settings["db_user"]
+      assert Crypto.encrypt!("supabase_admin") == settings["db_user"]
       refute settings["db_password"]
       Process.sleep(100)
 
@@ -119,7 +119,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
       assert Crypto.encrypt!("127.0.0.1") == settings["db_host"]
       assert Crypto.encrypt!("postgres") == settings["db_name"]
-      assert Crypto.encrypt!("supabase_realtime_admin") == settings["db_user"]
+      assert Crypto.encrypt!("supabase_admin") == settings["db_user"]
       refute settings["db_password"]
       Process.sleep(100)
       %{extensions: [%{settings: settings}]} = tenant = Tenants.get_tenant_by_external_id(external_id)
@@ -668,7 +668,7 @@ defmodule RealtimeWeb.TenantControllerTest do
           "settings" => %{
             "db_host" => "127.0.0.1",
             "db_name" => "postgres",
-            "db_user" => "supabase_realtime_admin",
+            "db_user" => "supabase_admin",
             "db_password" => "postgres",
             "db_port" => "#{port}",
             "poll_interval" => 100,

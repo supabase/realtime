@@ -38,46 +38,6 @@ defmodule Realtime.Api.ExtensionsTest do
       assert settings["slot_name"] == "supabase_realtime_replication_slot"
       assert settings["region"] == "us-east-1"
     end
-
-    test "encrypts optional runtime credentials when provided" do
-      attrs = %{
-        "type" => "postgres_cdc_rls",
-        "settings" => %{
-          "region" => "us-east-1",
-          "db_host" => "localhost",
-          "db_port" => "5432",
-          "db_name" => "postgres",
-          "db_user" => "supabase_admin",
-          "db_password" => "pass",
-          "db_user_realtime" => "supabase_realtime_admin",
-          "db_pass_realtime" => "realtime-pass"
-        }
-      }
-
-      settings = Extensions.changeset(%Extensions{}, attrs).changes[:settings]
-
-      assert Realtime.Crypto.decrypt!(settings["db_user_realtime"]) == "supabase_realtime_admin"
-      assert Realtime.Crypto.decrypt!(settings["db_pass_realtime"]) == "realtime-pass"
-    end
-
-    test "omits runtime credentials when not provided" do
-      attrs = %{
-        "type" => "postgres_cdc_rls",
-        "settings" => %{
-          "region" => "us-east-1",
-          "db_host" => "localhost",
-          "db_port" => "5432",
-          "db_name" => "postgres",
-          "db_user" => "supabase_admin",
-          "db_password" => "pass"
-        }
-      }
-
-      settings = Extensions.changeset(%Extensions{}, attrs).changes[:settings]
-
-      refute Map.has_key?(settings, "db_user_realtime")
-      refute Map.has_key?(settings, "db_pass_realtime")
-    end
   end
 
   describe "validate_required_settings/2" do
@@ -117,31 +77,6 @@ defmodule Realtime.Api.ExtensionsTest do
     end
   end
 
-  describe "validate_optional_settings/2" do
-    test "passes when the optional field is absent" do
-      optional = [{"db_user_realtime", &is_binary/1, true}]
-
-      changeset =
-        %Extensions{}
-        |> Ecto.Changeset.cast(%{type: "test", settings: %{"db_host" => "localhost"}}, [:type, :settings])
-        |> Extensions.validate_optional_settings(optional)
-
-      assert changeset.valid?
-    end
-
-    test "adds error when a present optional field is invalid" do
-      optional = [{"db_user_realtime", &is_binary/1, true}]
-
-      changeset =
-        %Extensions{}
-        |> Ecto.Changeset.cast(%{type: "test", settings: %{"db_user_realtime" => 123}}, [:type, :settings])
-        |> Extensions.validate_optional_settings(optional)
-
-      refute changeset.valid?
-      assert {"db_user_realtime is invalid", []} = changeset.errors[:settings]
-    end
-  end
-
   describe "encrypt_settings/2" do
     test "encrypts fields flagged for encryption" do
       changeset =
@@ -168,10 +103,10 @@ defmodule Realtime.Api.ExtensionsTest do
       changeset =
         %Extensions{}
         |> Ecto.Changeset.cast(%{type: "test", settings: %{"db_host" => "localhost"}}, [:type, :settings])
-        |> Extensions.encrypt_settings([{"db_pass_realtime", &is_binary/1, true}])
+        |> Extensions.encrypt_settings([{"db_password", &is_binary/1, true}])
 
       settings = Ecto.Changeset.get_change(changeset, :settings)
-      refute Map.has_key?(settings, "db_pass_realtime")
+      refute Map.has_key?(settings, "db_password")
     end
   end
 end

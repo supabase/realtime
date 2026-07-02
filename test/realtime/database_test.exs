@@ -1,5 +1,6 @@
 defmodule Realtime.DatabaseTest do
   use Realtime.DataCase, async: true
+  use Mimic
 
   import ExUnit.CaptureLog
 
@@ -7,19 +8,6 @@ defmodule Realtime.DatabaseTest do
 
   doctest Realtime.Database
   def handle_telemetry(event, metadata, content, pid: pid), do: send(pid, {event, metadata, content})
-
-  defp encrypted_settings(extra \\ %{}) do
-    Map.merge(
-      %{
-        "db_host" => Realtime.Crypto.encrypt!("127.0.0.1"),
-        "db_port" => Realtime.Crypto.encrypt!("5432"),
-        "db_name" => Realtime.Crypto.encrypt!("postgres"),
-        "db_user" => Realtime.Crypto.encrypt!("supabase_admin"),
-        "db_password" => Realtime.Crypto.encrypt!("super-pass")
-      },
-      extra
-    )
-  end
 
   setup do
     tenant = Containers.checkout_tenant()
@@ -37,7 +25,7 @@ defmodule Realtime.DatabaseTest do
         "settings" => %{
           "db_host" => "127.0.0.1",
           "db_name" => "postgres",
-          "db_user" => "supabase_realtime_admin",
+          "db_user" => "supabase_admin",
           "db_password" => "postgres",
           "region" => "us-east-1",
           "ssl_enforced" => false,
@@ -124,7 +112,7 @@ defmodule Realtime.DatabaseTest do
         "settings" => %{
           "db_host" => "127.0.0.1",
           "db_name" => "postgres",
-          "db_user" => "supabase_realtime_admin",
+          "db_user" => "supabase_admin",
           "db_password" => "postgres",
           "region" => "us-east-1",
           "ssl_enforced" => false,
@@ -297,10 +285,7 @@ defmodule Realtime.DatabaseTest do
       socket_options = [ip_version]
       settings = Realtime.PostgresCdc.filter_settings("postgres_cdc_rls", tenant.extensions)
 
-      username =
-        Realtime.Env.get_binary("DB_USER_REALTIME", fn ->
-          Realtime.Env.get_binary("DB_USER", "supabase_realtime_admin")
-        end)
+      username = System.get_env("DB_USER", "supabase_admin")
 
       {:ok, settings} = Database.from_settings(settings, application_name, backoff)
       port = settings.port
@@ -339,33 +324,6 @@ defmodule Realtime.DatabaseTest do
       settings = Map.put(settings, "ssl_enforced", false)
       {:ok, settings} = Database.from_settings(settings, application_name, backoff)
       refute settings.ssl
-    end
-
-    test "runtime connections use db_user_realtime when present" do
-      settings =
-        encrypted_settings(%{
-          "db_user_realtime" => Realtime.Crypto.encrypt!("supabase_realtime_admin"),
-          "db_pass_realtime" => Realtime.Crypto.encrypt!("realtime-pass")
-        })
-
-      assert {:ok, %{username: "supabase_realtime_admin", password: "realtime-pass"}} =
-               Database.from_settings(settings, "realtime_connect", :stop)
-    end
-
-    test "runtime connections fall back to db_user when db_user_realtime is absent" do
-      assert {:ok, %{username: "supabase_admin", password: "super-pass"}} =
-               Database.from_settings(encrypted_settings(), "realtime_connect", :stop)
-    end
-
-    test "realtime_migrations always uses db_user even when db_user_realtime is set" do
-      settings =
-        encrypted_settings(%{
-          "db_user_realtime" => Realtime.Crypto.encrypt!("supabase_realtime_admin"),
-          "db_pass_realtime" => Realtime.Crypto.encrypt!("realtime-pass")
-        })
-
-      assert {:ok, %{username: "supabase_admin", password: "super-pass"}} =
-               Database.from_settings(settings, "realtime_migrations", :stop)
     end
   end
 
