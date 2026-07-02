@@ -49,10 +49,16 @@ defmodule Realtime.Telemetry.Logger do
   def handle_event([:realtime, :tenants, :migrations, :stop], measurements, metadata, _config) do
     duration_ms = System.convert_time_unit(measurements.duration, :native, :millisecond)
 
-    Logger.info(
-      "Finished applying #{metadata.migrations_executed} migrations for tenant #{metadata.external_id} in #{duration_ms}ms",
-      project: metadata.external_id
-    )
+    message =
+      case metadata.source do
+        :dump ->
+          "Finished loading the dump of #{metadata.migrations_executed} migrations for tenant #{metadata.external_id} in #{duration_ms}ms"
+
+        :migrator ->
+          "Finished applying #{metadata.migrations_executed} migrations for tenant #{metadata.external_id} in #{duration_ms}ms"
+      end
+
+    Logger.info(message, project: metadata.external_id)
   end
 
   def handle_event([:realtime, :tenants, :migrations, :exception], _measurements, metadata, _config) do

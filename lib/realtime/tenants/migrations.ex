@@ -223,17 +223,22 @@ defmodule Realtime.Tenants.Migrations do
         start_time = Telemetry.start(event, metadata)
 
         try do
-          {applied_count, migrations_executed} =
+          {applied_count, migrations_executed, source} =
             if migrations_ran == 0 do
               case load_dump(settings, tenant_external_id) do
-                {:ok, applied_count} -> {applied_count, applied_count}
+                {:ok, applied_count} -> {applied_count, applied_count, :dump}
                 {:error, _} -> run_pending_migrations(repo, tenant_external_id)
               end
             else
               run_pending_migrations(repo, tenant_external_id)
             end
 
-          Telemetry.stop(event, start_time, Map.put(metadata, :migrations_executed, migrations_executed))
+          metadata =
+            metadata
+            |> Map.put(:migrations_executed, migrations_executed)
+            |> Map.put(:source, source)
+
+          Telemetry.stop(event, start_time, metadata)
           {:ok, applied_count}
         rescue
           error ->
@@ -275,7 +280,7 @@ defmodule Realtime.Tenants.Migrations do
   defp run_pending_migrations(repo, tenant_external_id) do
     opts = [all: true, prefix: "realtime", dynamic_repo: repo]
     result = Ecto.Migrator.run(Repo, migrations(tenant_external_id), :up, opts)
-    {Enum.count(migrations(tenant_external_id)), length(result)}
+    {Enum.count(migrations(tenant_external_id)), length(result), :migrator}
   end
 
   defp do_load_dump(conn) do
