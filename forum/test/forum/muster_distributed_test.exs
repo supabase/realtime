@@ -1370,6 +1370,238 @@ defmodule Forum.MusterDistributedTest do
     end
   end
 
+  describe "round-trip immunity (an orphaned occupied INSERT cannot resurrect a group after a ring round-trip)" do
+    setup do
+      scope = :"muster_roundtrip_#{System.unique_integer([:positive])}"
+
+      # Generous rpc_timeout: the parked, orphaned occupied worker survives
+      # across an entire membership change (X joining, then leaving again)
+      # and its convergence before we release it -- see the "caught by the
+      # next periodic tick" test above for why this must not time out
+      # client-side and confuse the source shard's state machine.
+      start_supervised!(
+        spec(scope,
+          vacancy_cooldown_ms: 50,
+          vacant_flush_interval_ms: 100,
+          rpc_timeout_ms: 30_000
+        )
+      )
+
+      %{scope: scope}
+    end
+
+    # This exercises the exact gap the OLD (hard-delete) sweep left open: a
+    # ring round-trip (R -> X -> R) used to give the sweep a second chance to
+    # destroy a tombstone it should never touch, discarding the seq floor
+    # that guards against a still-in-flight, orphaned `occupied` RPC. The fix
+    # in drop_stale_router_entries/1 closes it by never re-judging a row that
+    # already reads as a tombstone (the `meta == :present` guard) -- this
+    # test proves the round trip no longer has anything to bite into.
+    #
+    #   1. T holds `group`, routed to R. Its occupied RPC is parked
+    #      (force_ordering) before it writes the row -- R has no row for it
+    #      yet.
+    #   2. T's shard is killed while the claim is unconfirmed. The orphaned
+    #      occupied worker (monitored, not linked) survives untouched; the
+    #      restarted shard reconciles the claim straight to :vacant_queued --
+    #      T now genuinely holds nothing.
+    #   3. The natural flush dispatches a real (higher-seq) vacant_batch to
+    #      R. With no existing row, it plants a TOMBSTONE directly -- the seq
+    #      floor that protects against the still-parked, stale occupied.
+    #   4. X joins. `group`'s router moves R -> X; R's :ready-transition
+    #      sweep runs (update_status fires it on every :ready transition) but
+    #      the row already reads as a tombstone, so the guard skips it
+    #      outright -- no judgment, no write, the seq floor is untouched.
+    #   5. X leaves. `group`'s router moves back R -> R -- the round trip
+    #      completes with the tombstone exactly as step 3 left it.
+    #   6. Release the park. The stale occupied lands on R against the
+    #      still-alive tombstone: its seq predates the vacate, so
+    #      upsert_if_newer's guard rejects it outright. No resurrection.
+    test "an orphaned occupied INSERT delayed across a ring round-trip cannot resurrect a vacated group",
+         %{scope: scope} do
+      t_node = node()
+
+      check_trace(
+        fn ->
+          {:ok, p_r, r_node} = Peer.start(aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(r_node)
+          start_remote_muster(p_r, scope)
+          await_ready([t_node, r_node])
+
+          # X's name is fixed upfront so the victim group can be picked from
+          # ring math: routed to R in {T,R}, moved onto X once X joins.
+          x_name = ~c"muster_roundtrip_x_#{System.unique_integer([:positive])}"
+          x_node = :"#{x_name}@127.0.0.1"
+          view2 = Enum.sort([t_node, r_node])
+          view3 = Enum.sort([t_node, r_node, x_node])
+          hash3 = :erlang.phash2(view3)
+          group = pick_group([{view2, r_node}, {view3, x_node}])
+
+          # Park the occupied INSERT on R before it writes -- the
+          # delayed-RPC arm; the orphaned worker survives independently of
+          # the shard that dispatched it.
+          force_ordering(
+            %{:"$kind" => :test_release_occupied},
+            %{
+              :"$kind" => :muster_occupied_apply,
+              :"$span" => :start,
+              node: ^r_node,
+              group: ^group,
+              source: ^t_node
+            }
+          )
+
+          member = spawn(fn -> Process.sleep(:infinity) end)
+          _claimer = spawn(fn -> Muster.join(scope, group, member) end)
+
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_group_state,
+                       node: ^t_node,
+                       group: ^group,
+                       state: {:occupied_pending, _}
+                     },
+                     10_000
+                   )
+
+          # Kill the shard while the claim is unconfirmed. The parked,
+          # orphaned occupied worker survives (monitored, not linked); the
+          # restart reconciles the claim straight to :vacant_queued.
+          shard_name = Forum.Supervisor.shard(scope, group)
+          old_shard = Process.whereis(shard_name)
+          ref = Process.monitor(old_shard)
+          true = Process.exit(old_shard, :kill)
+          assert_receive {:DOWN, ^ref, :process, ^old_shard, :killed}, 5_000
+
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_group_state,
+                       node: ^t_node,
+                       group: ^group,
+                       state: :vacant_queued
+                     },
+                     10_000
+                   )
+
+          # The natural flush dispatches a real, higher-seq vacant_batch to
+          # R. With no existing row (the occupied is still parked), it
+          # plants a tombstone directly -- the seq floor the rest of this
+          # test is about.
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_vacant_batch,
+                       :"$span" => {:complete, _},
+                       node: ^r_node,
+                       source: ^t_node
+                     },
+                     10_000
+                   )
+
+          wait_until(fn -> group_state(scope, group) == nil end)
+          assert occupancy_on(r_node, scope, group) == []
+
+          # X joins: `group`'s router moves R -> X. R's own :ready-transition
+          # sweep runs here (update_status fires it on every :ready
+          # transition, unconditionally), but the row already reads as a
+          # tombstone, so the fix's `meta == :present` guard skips it without
+          # judging or writing anything -- proven below by the total absence
+          # of any :muster_drop_stale_judged/:muster_drop_stale_entry event
+          # for this key across the whole trace.
+          {:ok, p_x, ^x_node} = Peer.start(name: x_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(x_node)
+          start_remote_muster(p_x, scope)
+
+          await_ready(view3)
+          assert occupancy_on(r_node, scope, group) == []
+
+          # X leaves: `group`'s router moves back R -> R -- the round trip
+          # completes with the tombstone exactly as step 3 left it.
+          :ok = stop_supervised({:peer, x_name})
+
+          await_ready(view2, nth: 2, timeout: 20_000)
+          assert {:ok, ^r_node} = Muster.router(scope, group)
+          assert occupancy_on(r_node, scope, group) == []
+
+          # Release the park. The stale occupied lands on R against the
+          # tombstone from step 3, still standing guard.
+          tp(:test_release_occupied, %{})
+
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_occupied_apply,
+                       :"$span" => {:complete, _},
+                       node: ^r_node,
+                       group: ^group,
+                       source: ^t_node
+                     },
+                     10_000
+                   )
+
+          # The seq guard held: the stale INSERT lost to the still-alive
+          # tombstone, so the row never becomes visible as present.
+          refute t_node in occupancy_on(r_node, scope, group)
+
+          %{group: group, r_node: r_node, t_node: t_node, hash3: hash3}
+        end,
+        fn result, trace ->
+          group = result.group
+          r_node = result.r_node
+          t_node = result.t_node
+          hash3 = result.hash3
+
+          # T genuinely forgot the group entirely -- there is nothing left
+          # on its side that will ever retract R's row.
+          assert group_state(scope, group) == nil
+          assert Muster.local_member_count(scope, group) == 0
+
+          # The round trip really completed -- R re-reached :ready for view3
+          # -- BEFORE the stale occupied was released and evaluated, so the
+          # sweep had every opportunity to touch this row and, per the fix,
+          # correctly declined to.
+          assert causality(
+                   %{
+                     :"$kind" => :muster_status_change,
+                     node: ^r_node,
+                     to: :ready,
+                     view_hash: ^hash3
+                   },
+                   %{
+                     :"$kind" => :muster_occupied_apply,
+                     :"$span" => {:complete, _},
+                     node: ^r_node,
+                     group: ^group,
+                     source: ^t_node
+                   },
+                   trace
+                 )
+
+          # THE FIX: the tombstone from step 3 is never re-judged by any
+          # :ready-transition sweep -- not once, across the entire round
+          # trip -- because it no longer reads as :present. Nothing ever
+          # judges or drops this key.
+          assert of_kind(:muster_drop_stale_judged, trace)
+                 |> Enum.count(&(&1.node == r_node and &1.group == group and &1.source == t_node)) ==
+                   0
+
+          assert of_kind(:muster_drop_stale_entry, trace)
+                 |> Enum.count(&(&1.node == r_node and &1.group == group and &1.source == t_node)) ==
+                   0
+
+          # And because the seq floor was never disturbed, the late, orphaned
+          # occupied INSERT has a real tombstone to lose against: it is
+          # rejected rather than resurrecting the group.
+          refute t_node in occupancy_on(r_node, scope, group),
+                 "a ring round-trip let an already-tombstoned row get re-judged, " <>
+                   "destroying the seq floor an orphaned occupied INSERT needed to lose against"
+        end
+      )
+    end
+  end
+
   describe "sweep delete vs. a concurrent fresh claim (forced ordering)" do
     setup do
       scope = :"muster_sweep_toctou_#{System.unique_integer([:positive])}"

@@ -1041,32 +1041,51 @@ defmodule Forum.Muster.Scope do
   # GC of router-role occupancy rows for groups that no longer route to us.
   #
   # A row may only be judged under our ring if its source demonstrably shares the
-  # view the ring implements; otherwise deleting it can lose data. The source's
+  # view the ring implements; otherwise dropping it can lose data. The source's
   # announced view (member_views) must equal ours, and the row's seq must not
   # exceed the watermark carried by that announcement (occupied/4 and
   # vacant_batch/4 write this table straight from their :erpc workers and never
   # touch member_views, so the table can be AHEAD of member_views). Those same
-  # concurrent writers are also why the delete below is seq-guarded rather than
-  # by key alone (see the note at the select_delete). Skipped rows are harmless
+  # concurrent writers are also why the write below is seq-guarded rather than
+  # by key alone (see the note at the select_replace). Skipped rows are harmless
   # and are re-judged on the :ready transition and, as a backstop, on every
   # :sweep_tombstones tick (see handle_info(:sweep_tombstones, _) above) —
   # together these also cover a row that does not exist yet at either point and
   # only appears afterwards (a claim delayed by :erpc past both). Our own rows
   # are always judgeable and must stay in the sweep: a group that moved away (or
   # was vacated while routed elsewhere) leaves a self row nothing else cleans up.
+  #
+  # TOMBSTONE, do not hard-delete: a stale row is downgraded to a tombstone at
+  # its EXISTING seq (see the register note above upsert_if_newer/3) rather than
+  # removed outright. A hard delete discards the seq watermark, and a per-key
+  # RPC carries no view fencing (occupied/4, vacant_batch/4 take no view_hash),
+  # so a claim dispatched before this group's router last flapped away from us
+  # and delivered only after it flapped back would otherwise have nothing to
+  # lose against and resurrect the row via insert_new — permanently, since a
+  # row currently routed TO us is never judged stale again. Only a :present row
+  # is downgraded (the `meta == :present` guard on the match head below); a row
+  # already a tombstone is left completely untouched, on purpose, even though it
+  # is just as "routed away" as a :present one — touching it would refresh its
+  # `created_at` on every tick and starve reap_tombstones/1 forever, since this
+  # sweep and the reap both run on the same :sweep_tombstones tick (reap first,
+  # then this). Skipping already-tombstoned rows means each row is downgraded at
+  # most once, so it ages out on the same bounded schedule as any other
+  # tombstone.
   defp drop_stale_router_entries(state) do
     ring = ring_name(state.scope)
     own = own_view_hash(state)
+    created_at = System.monotonic_time(:millisecond)
 
     state.occupancy_table
-    |> :ets.select([{{{:"$1", :"$2"}, :"$3", :_}, [], [{{:"$1", :"$2", :"$3"}}]}])
-    |> Enum.each(fn {group, n, row_seq} ->
+    |> :ets.select([{{{:"$1", :"$2"}, :"$3", :"$4"}, [], [{{:"$1", :"$2", :"$3", :"$4"}}]}])
+    |> Enum.each(fn {group, n, row_seq, meta} ->
       # Agreement first: it is a map lookup, and at rebalance time most sources
       # have not announced the new view yet, so their rows are skipped without
       # paying for the ring lookup.
-      if source_agrees?(state, n, row_seq, own) and router_under_ring(ring, group) != node() do
-        # Emitted BEFORE the delete below and never parked, so a test can
-        # detect that the sweep has judged this row while holding the delete
+      if meta == :present and source_agrees?(state, n, row_seq, own) and
+           router_under_ring(ring, group) != node() do
+        # Emitted BEFORE the write below and never parked, so a test can
+        # detect that the sweep has judged this row while holding the write
         # itself parked (a force_ordering-delayed event stays invisible to the
         # trace collector until released).
         tp(:muster_drop_stale_judged, %{
@@ -1077,18 +1096,19 @@ defmodule Forum.Muster.Scope do
           seq: row_seq
         })
 
-        # SEQ-GUARDED delete: only remove the row if it still carries the exact
-        # seq that was judged. occupied/4 writes this table from :erpc workers,
-        # concurrently with this sweep, so between the :ets.select above and
-        # this delete the source may have legitimately re-claimed the group
-        # under a newer view (raising the key via upsert_if_newer) — a key-only
-        # delete here would destroy that fresh row, and nothing would ever
-        # re-send it (the source got its :ok; deltas carry moved groups only).
-        # A raised row makes this a no-op; if it is still stale it is re-judged
-        # (under the watermark of the source's newer announcement) on a later
-        # sweep. Wrapped in a span so a test can park the sweep between
-        # judgment and delete (force_ordering on :start) — exactly that window.
-        deleted =
+        # SEQ-GUARDED tombstone: only downgrade the row if it still carries the
+        # exact seq (and is still :present) as judged. occupied/4 writes this
+        # table from :erpc workers, concurrently with this sweep, so between the
+        # :ets.select above and this write the source may have legitimately
+        # re-claimed the group under a newer view (raising the key via
+        # upsert_if_newer) — a key-only write here would destroy that fresh row,
+        # and nothing would ever re-send it (the source got its :ok; deltas
+        # carry moved groups only). A raised row makes this a no-op; if it is
+        # still stale it is re-judged (under the watermark of the source's newer
+        # announcement) on a later sweep. Wrapped in a span so a test can park
+        # the sweep between judgment and write (force_ordering on :start) —
+        # exactly that window.
+        tombstoned =
           tp_span(:muster_drop_stale_apply, %{
             scope: state.scope,
             node: node(),
@@ -1096,12 +1116,16 @@ defmodule Forum.Muster.Scope do
             source: n,
             seq: row_seq
           }) do
-            :ets.select_delete(state.occupancy_table, [{{{group, n}, row_seq, :_}, [], [true]}])
+            :ets.select_replace(state.occupancy_table, [
+              {{{group, n}, row_seq, :present}, [],
+               [{{{:const, {group, n}}, row_seq, created_at}}]}
+            ])
           end
 
-        # Emitted AFTER an actual delete, so a block_until on this event
-        # implies the row is gone.
-        if deleted == 1 do
+        # Emitted AFTER an actual tombstone write, so a block_until on this
+        # event implies the row now reads as absent (occupancy/2 filters to
+        # :present only) — not that it was physically removed.
+        if tombstoned == 1 do
           tp(:muster_drop_stale_entry, %{
             scope: state.scope,
             node: node(),
