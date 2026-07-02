@@ -378,8 +378,10 @@ defmodule Forum.Muster.Scope do
     :ok = :net_kernel.monitor_nodes(true)
 
     # The occupancy table is created and OWNED by Forum.Supervisor (a long-lived
-    # sibling), not by us, so it survives a coordinator restart under the live
-    # shards that write it directly. We only reference it by name. On our restart
+    # sibling), not by us, so it survives a coordinator restart (and the shard
+    # restarts that cascade from it, see Forum.Supervisor's flat :rest_for_one)
+    # under whichever shard processes are running. We only reference it by
+    # name. On our restart
     # the table retains the previous incarnation's rows; that is safe: members
     # resets to [node()] below so our view_hash mismatches every sender and
     # can_decide?/2 is false (callers flood, never trusting occupancy), each

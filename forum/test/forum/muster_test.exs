@@ -273,6 +273,32 @@ defmodule Forum.MusterTest do
     end
   end
 
+  # Retry Muster.join/3 until it succeeds. Right after a coordinator crash, the
+  # supervisor's :rest_for_one restarts the coordinator and then every shard,
+  # one child at a time — so the coordinator's name can already be registered
+  # again while a shard is still being restarted, and a claim landing in that
+  # narrow window can transiently see :scope_exit. The same window any real
+  # caller must already tolerate and retry through.
+  defp wait_until_join_ok(scope, group, pid, timeout \\ 2_000) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+    do_wait_until_join_ok(scope, group, pid, deadline)
+  end
+
+  defp do_wait_until_join_ok(scope, group, pid, deadline) do
+    case Muster.join(scope, group, pid) do
+      :ok ->
+        :ok
+
+      error ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          flunk("join did not succeed in time, last error: #{inspect(error)}")
+        else
+          Process.sleep(5)
+          do_wait_until_join_ok(scope, group, pid, deadline)
+        end
+    end
+  end
+
   describe "start_link/2" do
     test "starts with custom partition count", %{scope: scope, base_opts: opts} do
       pid = start_supervised!(spec(scope, opts))
@@ -1805,6 +1831,47 @@ defmodule Forum.MusterTest do
       assert wait_until(fn -> Muster.members(scope) == [node()] end, 2_000)
     end
 
+    test "a bare coordinator crash also restarts every shard",
+         %{scope: scope} do
+      # The scope's Supervisor is a single flat :rest_for_one listing the ring,
+      # then the coordinator, then the shards. So a coordinator crash restarts
+      # the coordinator AND every child listed after it — i.e. every shard —
+      # with no extra code: it falls straight out of the child order. One
+      # reset story to reason about: "the coordinator restarted" always means
+      # the shards did too, not "sometimes it does (ring crash), sometimes it
+      # doesn't (bare coordinator crash)".
+      ring = Process.whereis(ring_name(scope))
+      coord = Process.whereis(Forum.Supervisor.name(scope))
+      shard_names = Forum.Supervisor.shards(scope)
+      shards = Enum.map(shard_names, &Process.whereis/1)
+
+      ref = Process.monitor(coord)
+      Process.exit(coord, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^coord, :killed}, 1_000
+
+      new_coord = wait_for_new_pid(Forum.Supervisor.name(scope), coord)
+      assert is_pid(new_coord)
+
+      # Every shard restarts too, purely because it is listed after the
+      # coordinator in the supervisor's child order.
+      Enum.zip(shard_names, shards)
+      |> Enum.each(fn {name, old} ->
+        new = wait_for_new_pid(name, old)
+        assert is_pid(new)
+        assert new != old
+      end)
+
+      # The ring is untouched: it is listed BEFORE the coordinator, so nothing
+      # after it in the list cascades back up to it.
+      assert Process.whereis(ring_name(scope)) == ring
+
+      # The rebuilt shards still work end-to-end.
+      g = :coord_crash_restarts_shards_g
+      pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, g, pid)
+      assert :occupied = wait_for_group_state(scope, g, :occupied, 2_000)
+    end
+
     test "a shard crash during the rebalance gather crashes the coordinator and the cluster self-heals",
          %{scope: scope} do
       # The most dangerous moment for a shard crash: the coordinator's SYNCHRONOUS
@@ -1940,10 +2007,13 @@ defmodule Forum.MusterTest do
       # raced a vanished table.
       assert :ets.whereis(table) == tid_before
       # The self row is re-asserted from the partition at coordinator init, and a
-      # fresh claim on another group still works (shards are healthy).
+      # fresh claim on another group still works (shards are healthy) — retried
+      # like any real caller, since the supervisor's :rest_for_one is still
+      # restarting the shards after the coordinator (see "a bare coordinator
+      # crash also restarts every shard") and a claim can transiently race that.
       assert node() in Scope.occupancy(scope, g)
       other = spawn_link(fn -> Process.sleep(:infinity) end)
-      assert :ok = Muster.join(scope, :occ_survives_g2, other)
+      assert :ok = wait_until_join_ok(scope, :occ_survives_g2, other)
       assert :occupied = wait_for_group_state(scope, :occ_survives_g2, :occupied, 2_000)
     end
 
