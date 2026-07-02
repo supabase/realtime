@@ -3591,6 +3591,183 @@ defmodule Forum.MusterDistributedTest do
     end
   end
 
+  describe "rebalance snapshot failure vs. a router that already departed (forced ordering)" do
+    setup do
+      scope = :"muster_departed_#{System.unique_integer([:positive])}"
+      start_supervised!(spec(scope, vacant_flush_interval_ms: 100))
+      %{scope: scope}
+    end
+
+    # Sibling of "the source Scope crashes when its snapshot RPC fails..." above:
+    # THAT test proves the crash-and-heal path is correct when the failed target
+    # is still genuinely a member. This proves the narrower, adjacent case a
+    # membership-blind raise used to get wrong: once do_rebalance has ALREADY
+    # reacted to a router's departure (dropped it from `members`, pruned
+    # `owed_snapshots`), a stale failure report about that SAME departure for a
+    # round dispatched before it must not raise — it is a late echo of news the
+    # coordinator already has, not a fresh failure.
+    #
+    # In real distribution the peer-monitor :DOWN that drops the router and the
+    # worker's own RPC failure are two independent messages caused by the SAME
+    # target death, so which one lands first is an unforced race — that race is
+    # exactly what scope.ex:678's old unconditional raise got wrong on the
+    # "DOWN first" interleaving. To make the test deterministic rather than
+    # relying on that race resolving one way, C's reply is parked before it can
+    # ever complete, C is then killed outright, and — using the
+    # muster_rpc_worker_result test hook (emitted by the worker itself, a
+    # process separate from Scope's own mailbox, so holding it cannot deadlock
+    # Scope's own :DOWN handling) — the worker's report of the resulting failure
+    # is forced to land strictly after T's departure-triggered rebalance has
+    # already dropped C from `members`.
+    test "a snapshot RPC that fails after its target already left membership does not crash the coordinator",
+         %{scope: scope} do
+      t_node = node()
+
+      c_name = ~c"muster_departed_c_#{System.unique_integer([:positive])}"
+      c_node = :"#{c_name}@127.0.0.1"
+      group = pick_group([{[t_node, c_node], c_node}])
+
+      check_trace(
+        fn ->
+          # T holds `group` alone; it will move onto C once C joins, forcing a
+          # FULL snapshot dispatch (C is a brand-new router).
+          member = spawn(fn -> Process.sleep(:infinity) end)
+          :ok = Muster.join(scope, group, member)
+          {:ok, r0} = Muster.router(scope, group)
+          assert r0 == t_node
+
+          # Park C's apply of T's incoming snapshot before it can reply. Never
+          # released by this test — C is about to be killed outright instead,
+          # which is what finally frees this call (with a crash, not a reply).
+          force_ordering(
+            %{:"$kind" => :test_never_release_c},
+            %{
+              :"$kind" => :muster_node_state_received,
+              scope: ^scope,
+              node: ^c_node,
+              source: ^t_node
+            }
+          )
+
+          # Hold T's own report of that RPC's eventual failure until AFTER T's
+          # departure rebalance (triggered below by killing C) has already
+          # dropped C from `members` — this is what removes the real race.
+          force_ordering(
+            %{:"$kind" => :muster_rebalance_start, scope: ^scope, node: ^t_node, to: [^t_node]},
+            %{
+              :"$kind" => :muster_rpc_worker_result,
+              scope: ^scope,
+              node: ^t_node,
+              router: ^c_node
+            }
+          )
+
+          coord = Process.whereis(Forum.Supervisor.name(scope))
+          ref = Process.monitor(coord)
+
+          {:ok, p_c, ^c_node} = Peer.start(name: c_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(c_node)
+          start_remote_muster(p_c, scope)
+
+          # T's snapshot to C is genuinely dispatched and in flight (parked on
+          # C, per the force_ordering above).
+          wait_until(fn ->
+            Forum.Supervisor.name(scope)
+            |> GenServer.call(:dump)
+            |> Map.fetch!(:owed_snapshots)
+            |> Map.has_key?(c_node)
+          end)
+
+          # Kill C outright — the WHOLE peer, not just its coordinator: C's own
+          # Forum.Supervisor would otherwise restart a killed coordinator and
+          # rejoin T within milliseconds (the very self-heal other tests in
+          # this file rely on), undoing the departure before it could be
+          # observed. This is the one real departure in this test: T's peer
+          # monitor on C's coordinator pid fires a genuine :DOWN, and it is
+          # also what finally makes the worker's blocked RPC call fail (C
+          # never replies, and now never can).
+          :ok = stop_supervised({:peer, c_name})
+
+          # T's real :DOWN handling drops C and rebalances down to itself alone
+          # — the event the held worker report above is waiting on.
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_rebalance_start,
+                       scope: ^scope,
+                       node: ^t_node,
+                       to: [^t_node]
+                     },
+                     10_000
+                   )
+
+          # muster_rebalance_start fires at the TOP of do_rebalance, before its
+          # synchronous shard gather updates `state.members` — poll rather than
+          # assert immediately so this isn't racing that internal window.
+          wait_until(fn -> c_node not in Muster.members(scope) end)
+
+          # Released by the ordering above only now: the worker's report that
+          # its snapshot RPC to the (already-departed) C failed.
+          assert {:ok, %{ok?: false}} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_rpc_worker_result,
+                       scope: ^scope,
+                       node: ^t_node,
+                       router: ^c_node
+                     },
+                     10_000
+                   )
+
+          # The stale failure must not have crashed the coordinator.
+          refute_receive {:DOWN, ^ref, :process, ^coord, _reason}, 500
+          assert Process.alive?(coord)
+
+          # And it stays fully functional afterwards.
+          assert :ok =
+                   Muster.join(
+                     scope,
+                     :"departed_recovered_#{System.unique_integer([:positive])}",
+                     spawn(fn -> Process.sleep(:infinity) end)
+                   )
+
+          %{coord: coord, ref: ref, scope: scope, t_node: t_node, c_node: c_node}
+        end,
+        fn result, trace ->
+          %{scope: scope, t_node: t_node, c_node: c_node} = result
+
+          # The coordinator really did receive the stale failure report (not
+          # just avoid crashing on something it never saw)...
+          worker_results =
+            of_kind(:muster_rpc_worker_result, trace)
+            |> Enum.filter(&(&1.scope == scope and &1.node == t_node and &1.router == c_node))
+
+          assert Enum.any?(worker_results, &(&1.ok? == false))
+
+          # ...and it arrived strictly after T's departure rebalance, not
+          # before — proving this test exercised the ordering it claims to,
+          # rather than happening to avoid the race by luck.
+          assert causality(
+                   %{
+                     :"$kind" => :muster_rebalance_start,
+                     scope: ^scope,
+                     node: ^t_node,
+                     to: [^t_node]
+                   },
+                   %{
+                     :"$kind" => :muster_rpc_worker_result,
+                     scope: ^scope,
+                     node: ^t_node,
+                     router: ^c_node,
+                     ok?: false
+                   },
+                   trace
+                 )
+        end
+      )
+    end
+  end
+
   # Find a group that routes to `joiner` in the final cluster view but to
   # `phantom` once the phantom node is added to the ring.
   defp pick_victim_group(joiner, phantom, others) do

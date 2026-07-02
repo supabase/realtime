@@ -660,6 +660,17 @@ defmodule Forum.Muster.Scope do
   # re-owed the same router with a higher seq; clearing on a stale (lower-seq)
   # acknowledgement would let the next heartbeat send a bare marker before the
   # newer snapshot lands. The seq stamp guards against that.
+  #
+  # On failure we only crash (the deliberate "restart re-announces from a clean
+  # slate" recovery) if router_node is still a member. This only matters for a
+  # departure that races an in-flight snapshot/delta TO that same node (i.e. it
+  # was still in owed_snapshots when it died) — most departures have no worker
+  # talking to the departed node at all and never reach this branch. But when
+  # one does race: if the DOWN was already processed while this worker was in
+  # flight, do_rebalance already dropped router_node from members (and pruned
+  # owed_snapshots), so this is a stale, redundant signal about a departure
+  # we've already handled — crashing on it would turn that ordinary race into a
+  # coordinator crash for no reason.
   def handle_info(
         {{:node_state_done, router_node, seq}, _ref, :process, _pid, exit_reason},
         state
@@ -675,7 +686,15 @@ defmodule Forum.Muster.Scope do
         {:noreply, %{state | owed_snapshots: owed}}
 
       other ->
-        raise "Muster rebalance snapshot to #{inspect(router_node)} failed: #{inspect(other)}"
+        if router_node in state.members do
+          raise "Muster rebalance snapshot to #{inspect(router_node)} failed: #{inspect(other)}"
+        else
+          Logger.info(
+            "Muster[#{node()}|#{state.scope}] rebalance snapshot to #{inspect(router_node)} failed: #{inspect(other)}, but it already left membership; dropping"
+          )
+
+          {:noreply, state}
+        end
     end
   end
 
@@ -1239,6 +1258,7 @@ defmodule Forum.Muster.Scope do
     message_module = state.message_module
     scope = state.scope
     rpc_timeout = state.rpc_timeout_ms
+    self_node = node()
 
     {_pid, _ref} =
       :erlang.spawn_opt(
@@ -1249,6 +1269,14 @@ defmodule Forum.Muster.Scope do
             catch
               kind, reason -> {:error, {kind, reason}}
             end
+
+          tp(:muster_rpc_worker_result, %{
+            scope: scope,
+            node: self_node,
+            router: router_node,
+            function: function,
+            ok?: result == :ok
+          })
 
           exit({:rpc_result, result})
         end,
