@@ -1904,6 +1904,36 @@ defmodule Forum.MusterTest do
       assert :occupied = wait_for_group_state(scope, g, :occupied, 2_000)
     end
 
+    test "a shard crash does not restart any other shard, the coordinator, or the ring",
+         %{scope: scope} do
+      # Shards live under their own nested :one_for_one supervisor (the outer
+      # :rest_for_one's last child), so a shard crash is handled entirely inside
+      # it and never reaches the coordinator, the ring, or a sibling shard.
+      ring = Process.whereis(ring_name(scope))
+      coord = Process.whereis(Forum.Supervisor.name(scope))
+      [shard0_name, shard1_name] = Forum.Supervisor.shards(scope)
+      shard0 = Process.whereis(shard0_name)
+      shard1 = Process.whereis(shard1_name)
+
+      ref = Process.monitor(shard0)
+      Process.exit(shard0, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^shard0, :killed}, 1_000
+
+      new_shard0 = wait_for_new_pid(shard0_name, shard0)
+      assert is_pid(new_shard0)
+
+      # Sibling shard, coordinator, and ring are all untouched.
+      assert Process.whereis(shard1_name) == shard1
+      assert Process.whereis(Forum.Supervisor.name(scope)) == coord
+      assert Process.whereis(ring_name(scope)) == ring
+
+      # The restarted shard still works end-to-end.
+      g = :shard_crash_isolated_g
+      pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, g, pid)
+      assert :occupied = wait_for_group_state(scope, g, :occupied, 2_000)
+    end
+
     test "after coordinator restart, local senders flood until singleton promotion fires" do
       scope = :"muster_coord_restart_flood_#{System.unique_integer([:positive])}"
 
