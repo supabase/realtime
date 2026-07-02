@@ -34,7 +34,7 @@ db_ssl = Env.get_boolean("DB_SSL", false)
 db_ssl_ca_cert = System.get_env("DB_SSL_CA_CERT")
 db_user = System.get_env("DB_USER", "supabase_admin")
 disable_healthcheck_logging = Env.get_boolean("DISABLE_HEALTHCHECK_LOGGING", false)
-dns_nodes = System.get_env("DNS_NODES")
+dns_nodes = Env.get_non_empty_binary("DNS_NODES")
 gen_rpc_compress = Env.get_integer("GEN_RPC_COMPRESS", 0)
 gen_rpc_compression_threshold_in_bytes = Env.get_integer("GEN_RPC_COMPRESSION_THRESHOLD_IN_BYTES", 1000)
 gen_rpc_connect_timeout_in_ms = Env.get_integer("GEN_RPC_CONNECT_TIMEOUT_IN_MS", 10_000)
@@ -245,12 +245,16 @@ cluster_topologies =
     |> String.trim()
     |> then(fn
       "DNS" ->
-        [
-          dns: [
-            strategy: Cluster.Strategy.DNSPoll,
-            config: [polling_interval: 5_000, query: dns_nodes, node_basename: app_name]
-          ]
-        ] ++ acc
+        if dns_nodes do
+          [
+            dns: [
+              strategy: Cluster.Strategy.DNSPoll,
+              config: [polling_interval: 5_000, query: dns_nodes, node_basename: app_name]
+            ]
+          ] ++ acc
+        else
+          acc
+        end
 
       "POSTGRES" ->
         [

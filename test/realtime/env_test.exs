@@ -136,6 +136,33 @@ defmodule Realtime.EnvTest do
     end
   end
 
+  describe "get_non_empty_binary/1" do
+    test "returns nil when env is unset", %{env: env} do
+      assert Env.get_non_empty_binary(env) == nil
+    end
+
+    test "returns trimmed env values", %{env: env} do
+      System.put_env(env, " realtime.internal ")
+      assert Env.get_non_empty_binary(env) == "realtime.internal"
+    end
+
+    test "returns nil for empty values", %{env: env} do
+      System.put_env(env, "")
+      assert Env.get_non_empty_binary(env) == nil
+
+      System.put_env(env, "   ")
+      assert Env.get_non_empty_binary(env) == nil
+    end
+
+    test "returns nil for quoted empty placeholders", %{env: env} do
+      System.put_env(env, "''")
+      assert Env.get_non_empty_binary(env) == nil
+
+      System.put_env(env, ~s(""))
+      assert Env.get_non_empty_binary(env) == nil
+    end
+  end
+
   describe "get_list/2" do
     test "returns the default when env is unset", %{env: env} do
       assert Env.get_list(env, ["a", "b"]) == ["a", "b"]
