@@ -20,6 +20,7 @@ defmodule Forum.Muster do
           | {:vacancy_cooldown_ms, non_neg_integer()}
           | {:vacant_flush_interval_ms, pos_integer()}
           | {:view_heartbeat_interval_ms, pos_integer()}
+          | {:singleton_promotion_timeout_ms, pos_integer()}
           | {:rpc_timeout_ms, timeout()}
           | {:rebalance_gather_timeout_ms, pos_integer()}
           | {:message_module, module()}
@@ -62,6 +63,11 @@ defmodule Forum.Muster do
     without a membership change, bounding both the worst-case "router floods
     instead of targeting" window and the worst-case "restarted but never
     re-paired" window to one interval.
+  * `:singleton_promotion_timeout_ms`: on coordinator init/restart, how long a
+    scope that still sees only itself waits before self-promoting to singleton
+    `:ready` (default: 3 * `:view_heartbeat_interval_ms`). Until this fires (or
+    scope discovery/rebalance converges first), routers flood instead of trusting
+    occupancy.
   * `:rpc_timeout_ms`: timeout for router-node RPCs (default: 5_000).
   * `:rebalance_gather_timeout_ms`: timeout for the synchronous in-VM call the
     coordinator makes to each claim shard to gather its held groups during a
@@ -100,6 +106,14 @@ defmodule Forum.Muster do
          not (is_integer(heartbeat_interval) and heartbeat_interval > 0) do
       raise ArgumentError,
             "expected :view_heartbeat_interval_ms to be a positive integer, got: #{inspect(heartbeat_interval)}"
+    end
+
+    singleton_promotion_timeout = Keyword.get(opts, :singleton_promotion_timeout_ms)
+
+    if singleton_promotion_timeout != nil and
+         not (is_integer(singleton_promotion_timeout) and singleton_promotion_timeout > 0) do
+      raise ArgumentError,
+            "expected :singleton_promotion_timeout_ms to be a positive integer, got: #{inspect(singleton_promotion_timeout)}"
     end
 
     gather_timeout = Keyword.get(opts, :rebalance_gather_timeout_ms)

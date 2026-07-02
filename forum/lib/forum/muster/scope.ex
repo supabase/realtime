@@ -33,6 +33,7 @@ defmodule Forum.Muster.Scope do
   @default_rpc_timeout_ms 5_000
   @default_view_heartbeat_interval_ms 10_000
   @default_rebalance_gather_timeout_ms 15_000
+  @singleton_promotion_timeout_multiplier 3
   @ring_replicas 128
   @ring_depth 2
 
@@ -48,6 +49,7 @@ defmodule Forum.Muster.Scope do
             scope: atom,
             message_module: module,
             view_heartbeat_interval_ms: pos_integer,
+            singleton_promotion_timeout_ms: pos_integer,
             rpc_timeout_ms: timeout,
             rebalance_gather_timeout_ms: timeout,
             tombstone_window_ms: pos_integer,
@@ -63,6 +65,7 @@ defmodule Forum.Muster.Scope do
       :scope,
       :message_module,
       :view_heartbeat_interval_ms,
+      :singleton_promotion_timeout_ms,
       :rpc_timeout_ms,
       :rebalance_gather_timeout_ms,
       :tombstone_window_ms,
@@ -362,6 +365,13 @@ defmodule Forum.Muster.Scope do
 
     rpc_timeout_ms = Keyword.get(opts, :rpc_timeout_ms, @default_rpc_timeout_ms)
 
+    singleton_promotion_timeout_ms =
+      Keyword.get(
+        opts,
+        :singleton_promotion_timeout_ms,
+        default_singleton_promotion_timeout(view_heartbeat_interval_ms)
+      )
+
     rebalance_gather_timeout_ms =
       Keyword.get(opts, :rebalance_gather_timeout_ms, @default_rebalance_gather_timeout_ms)
 
@@ -381,11 +391,10 @@ defmodule Forum.Muster.Scope do
     # sibling), not by us, so it survives a coordinator restart (and the shard
     # restarts that cascade from it, see Forum.Supervisor's flat :rest_for_one)
     # under whichever shard processes are running. We only reference it by
-    # name. On our restart
-    # the table retains the previous incarnation's rows; that is safe: members
-    # resets to [node()] below so our view_hash mismatches every sender and
-    # can_decide?/2 is false (callers flood, never trusting occupancy), each
-    # remote source's next snapshot replaces its rows wholesale, and
+    # name. On our restart the table retains the previous incarnation's rows; that
+    # is safe because init starts :converging, so callers flood until either
+    # discovery / rebalance converges first or bounded singleton self-promotion
+    # fires. Each remote source's next snapshot replaces its rows wholesale, and
     # drop_stale_router_entries prunes the rest on the :ready transition. Our own
     # self rows are re-asserted (monotonically) by reannounce_local_groups_at_init.
     occupancy_table = occupancy_table_name(scope)
@@ -400,8 +409,12 @@ defmodule Forum.Muster.Scope do
     # Lifecycle tri-state: :rebalancing (my ring is in flux, senders flood) ->
     # :converging (ring adopted, still waiting for peers to agree on my view) ->
     # :ready (all peers agree; my occupancy table can be trusted as a router).
-    # A single-node cluster has no peers to hear from, so it starts :ready.
-    :persistent_term.put({Forum.Muster, scope, :status}, :ready)
+    # Init/restart begins :converging even with members [node()]: a restarted
+    # local sender would otherwise agree with that one-node view and could trust
+    # incomplete occupancy before scope-level discovery re-pairs. A bounded,
+    # init-only singleton-promotion timer below restores liveness when the scope
+    # really has downsized to one node.
+    :persistent_term.put({Forum.Muster, scope, :status}, :converging)
     # Cluster-view hash senders tag broadcasts with; router compares against its own.
     :persistent_term.put({Forum.Muster, scope, :view_hash}, :erlang.phash2([node()]))
 
@@ -411,6 +424,7 @@ defmodule Forum.Muster.Scope do
       scope: scope,
       message_module: message_module,
       view_heartbeat_interval_ms: view_heartbeat_interval_ms,
+      singleton_promotion_timeout_ms: singleton_promotion_timeout_ms,
       rpc_timeout_ms: rpc_timeout_ms,
       rebalance_gather_timeout_ms: rebalance_gather_timeout_ms,
       tombstone_window_ms: tombstone_window_ms,
@@ -430,6 +444,7 @@ defmodule Forum.Muster.Scope do
   def handle_continue(:discover, state) do
     state.message_module.broadcast(state.scope, discover_msg(state))
 
+    schedule_singleton_promotion(state)
     schedule_view_heartbeat(state)
     schedule_tombstone_sweep(state)
     {:noreply, state}
@@ -716,6 +731,22 @@ defmodule Forum.Muster.Scope do
     {:noreply, state}
   end
 
+  # Bounded liveness backstop for a scope that really is singleton after an
+  # init/restart. Before this fires we stay flood-only; if scope discovery or a
+  # rebalance already expanded membership (or reached :ready) first, this is a
+  # no-op.
+  def handle_info(:singleton_self_promote, state) do
+    should_promote? =
+      state.members == [node()] and state.peers == %{} and
+        :persistent_term.get({Forum.Muster, state.scope, :status}, nil) == :converging
+
+    if should_promote? do
+      {:noreply, publish_status(state, :ready)}
+    else
+      {:noreply, state}
+    end
+  end
+
   # Periodic GC of vacancy tombstones older than the window; see the register
   # note above upsert_if_newer/3. Reaping is the only thing that bounds the
   # tombstones' memory; correctness does not depend on it firing promptly (a
@@ -943,6 +974,11 @@ defmodule Forum.Muster.Scope do
   # :converging; :rebalancing is owned by do_rebalance.
   defp update_status(state) do
     status = if ready?(state), do: :ready, else: :converging
+
+    publish_status(state, status)
+  end
+
+  defp publish_status(state, status) do
     key = {Forum.Muster, state.scope, :status}
     previous = :persistent_term.get(key, nil)
 
@@ -1228,6 +1264,11 @@ defmodule Forum.Muster.Scope do
     :ok
   end
 
+  defp schedule_singleton_promotion(state) do
+    Process.send_after(self(), :singleton_self_promote, state.singleton_promotion_timeout_ms)
+    :ok
+  end
+
   defp schedule_tombstone_sweep(state) do
     Process.send_after(self(), :sweep_tombstones, state.tombstone_window_ms)
     :ok
@@ -1247,6 +1288,14 @@ defmodule Forum.Muster.Scope do
 
   # Tombstone retention window: a multiple of the RPC timeout, the practical upper
   # bound on how late an orphaned, un-cancelled :occupied/snapshot RPC can land.
+  defp default_singleton_promotion_timeout(view_heartbeat_interval_ms)
+       when is_integer(view_heartbeat_interval_ms) do
+    view_heartbeat_interval_ms * @singleton_promotion_timeout_multiplier
+  end
+
+  defp default_singleton_promotion_timeout(_),
+    do: @default_view_heartbeat_interval_ms * @singleton_promotion_timeout_multiplier
+
   defp default_tombstone_window(rpc_timeout_ms) when is_integer(rpc_timeout_ms),
     do: rpc_timeout_ms * @tombstone_window_multiplier
 

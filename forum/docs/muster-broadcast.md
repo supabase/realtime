@@ -61,7 +61,9 @@ Otherwise it returns `{:error, :flood}`, and you fan out to everyone your
 transport knows (e.g. every node in the region), trading a brief burst of extra
 traffic for never missing a holder while the cluster view settles. See the
 README's *Router-readiness barrier* for why this is needed even when `router/2`
-says the cluster is stable.
+says the cluster is stable. That same fallback applies right after a coordinator
+restart: the scope stays not-ready until discovery / rebalance converges or the
+bounded singleton-promotion timeout fires.
 
 ---
 

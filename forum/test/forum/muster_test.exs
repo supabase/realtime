@@ -35,6 +35,7 @@ defmodule Forum.MusterTest do
       # Same: long so the view heartbeat never fires mid-test; the heartbeat
       # test drives it deterministically via trigger_view_heartbeat/1.
       view_heartbeat_interval_ms: Map.get(ctx, :heartbeat_ms, 60_000),
+      singleton_promotion_timeout_ms: Map.get(ctx, :singleton_promotion_timeout_ms, 100),
       rpc_timeout_ms: Map.get(ctx, :rpc_timeout, 500),
       # Long by default so the periodic tombstone sweep never reaps mid-test; the
       # GC test shrinks it and drives the sweep deterministically.
@@ -327,6 +328,12 @@ defmodule Forum.MusterTest do
     test "raises on invalid view_heartbeat_interval_ms", %{scope: scope} do
       assert_raise ArgumentError, ~r/expected :view_heartbeat_interval_ms/, fn ->
         Muster.start_link(scope, view_heartbeat_interval_ms: 0)
+      end
+    end
+
+    test "raises on invalid singleton_promotion_timeout_ms", %{scope: scope} do
+      assert_raise ArgumentError, ~r/expected :singleton_promotion_timeout_ms/, fn ->
+        Muster.start_link(scope, singleton_promotion_timeout_ms: 0)
       end
     end
 
@@ -1512,8 +1519,31 @@ defmodule Forum.MusterTest do
       GenServer.call(Forum.Supervisor.name(scope), :status)
     end
 
-    test "a single-node cluster is ready and can_decide? for its own view", %{scope: scope} do
-      assert ready?(scope)
+    test "a fresh single-node cluster starts flood-only before singleton promotion",
+         %{scope: scope} do
+      refute ready?(scope)
+      refute Muster.can_decide?(scope, Muster.view_hash(scope))
+      assert {:error, :flood} = Muster.targets(scope, :tg, Muster.view_hash(scope))
+    end
+
+    test "a singleton scope self-promotes to ready after the timeout" do
+      scope = :"muster_singleton_promote_#{System.unique_integer([:positive])}"
+
+      start_supervised!(
+        spec(scope,
+          partitions: 2,
+          vacancy_cooldown_ms: 50,
+          vacant_flush_interval_ms: 60_000,
+          view_heartbeat_interval_ms: 60_000,
+          singleton_promotion_timeout_ms: 50,
+          rpc_timeout_ms: 500,
+          tombstone_window_ms: 60_000,
+          message_module: ErlDist
+        )
+      )
+
+      refute ready?(scope)
+      assert_ready(scope, 500)
       assert Muster.can_decide?(scope, Muster.view_hash(scope))
     end
 
@@ -1524,12 +1554,14 @@ defmodule Forum.MusterTest do
     test "targets returns {:ok, occupancy} when the barrier is satisfied", %{scope: scope} do
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
       assert :ok = Muster.join(scope, :tg, pid)
+      assert_ready(scope, 35_000)
 
       assert {:ok, nodes} = Muster.targets(scope, :tg, Muster.view_hash(scope))
       assert node() in nodes
     end
 
     test "targets returns {:ok, []} for a group nobody holds", %{scope: scope} do
+      assert_ready(scope, 35_000)
       assert {:ok, []} = Muster.targets(scope, :nobody, Muster.view_hash(scope))
     end
 
@@ -1870,6 +1902,41 @@ defmodule Forum.MusterTest do
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
       assert :ok = Muster.join(scope, g, pid)
       assert :occupied = wait_for_group_state(scope, g, :occupied, 2_000)
+    end
+
+    test "after coordinator restart, local senders flood until singleton promotion fires" do
+      scope = :"muster_coord_restart_flood_#{System.unique_integer([:positive])}"
+
+      start_supervised!(
+        spec(scope,
+          partitions: 2,
+          vacancy_cooldown_ms: 50,
+          vacant_flush_interval_ms: 60_000,
+          view_heartbeat_interval_ms: 60_000,
+          singleton_promotion_timeout_ms: 200,
+          rpc_timeout_ms: 500,
+          tombstone_window_ms: 60_000,
+          message_module: ErlDist
+        )
+      )
+
+      inject_fake_remote(scope)
+      g = group_for_router(scope, @fake_node)
+      assert g
+
+      pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, g, pid)
+
+      coord = Process.whereis(Forum.Supervisor.name(scope))
+      ref = Process.monitor(coord)
+      Process.exit(coord, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^coord, :killed}, 1_000
+
+      _new_coord = wait_for_new_pid(Forum.Supervisor.name(scope), coord)
+
+      assert {:ok, n} = Muster.router(scope, g)
+      assert n == node()
+      assert {:error, :flood} = Muster.targets(scope, g, Muster.view_hash(scope))
     end
 
     test "a shard crash during the rebalance gather crashes the coordinator and the cluster self-heals",
