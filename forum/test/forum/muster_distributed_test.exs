@@ -3266,6 +3266,111 @@ defmodule Forum.MusterDistributedTest do
     end
   end
 
+  describe "direct disconnect — T loses its own peer, heals on reconnect" do
+    setup do
+      scope = :"muster_direct_split_#{System.unique_integer([:positive])}"
+      start_supervised!(spec(scope, vacant_flush_interval_ms: 100))
+      %{scope: scope}
+    end
+
+    # Every "peer leaves" test elsewhere in this file drives departure via
+    # stop_supervised({:peer, ...}) (kills the whole remote VM) or
+    # Process.exit(pid, :kill) on a single process while the node stays
+    # connected (router Scope crash recovery, the reverse-race tests). The
+    # partition test above splits two OTHER peers while T stays connected to
+    # both, so T's own {:DOWN, ..., :noconnection} path never fires there.
+    #
+    # Here T itself severs the transport to the peer holding its group, with
+    # that peer's Muster process fully alive and never restarted. This proves
+    # the reason-agnostic DOWN handling (scope.ex drops `_reason` outright) on
+    # a genuine disconnect, not just a process/VM death, and that reconnecting
+    # a LIVE peer (whose seq counters never reset, unlike a same-named restart
+    # on a fresh VM) re-pairs and heals cleanly.
+    #
+    # :snabbkaffe.forward_trace/1 cannot stay attached to R across the split:
+    # once forwarded, EVERY tp() on R (Muster ticks fire constantly) performs
+    # a synchronous `rpc:call` back to T, and any such call auto-reconnects a
+    # merely Node.disconnect/1'd node (confirmed by direct repro — Node.list()
+    # was back within 50ms with forwarding left on). Snabbkaffe exposes no
+    # public "unforward" call, but do_forward_trace/1 is nothing more than a
+    # `persistent_term:put(snabbkaffe_tp_fun, fun snabbkaffe:remote_tp/5)` on
+    # R; poking that same key back to `local_tp/5` before disconnecting (and
+    # calling forward_trace/1 again once reconnected) undoes it cleanly and
+    # was confirmed by repro to hold the split for 2s+ with zero reconnects.
+    defp unforward_trace(node) do
+      :ok =
+        :erpc.call(node, :persistent_term, :put, [:snabbkaffe_tp_fun, &:snabbkaffe.local_tp/5])
+    end
+
+    test "T disconnects from the peer holding its group, then reconnects and heals",
+         %{scope: scope} do
+      t_node = node()
+
+      check_trace(
+        fn ->
+          {:ok, p_r, r_node} = Peer.start(aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(r_node)
+          start_remote_muster(p_r, scope)
+
+          view2 = Enum.sort([t_node, r_node])
+          await_ready(view2)
+
+          group = group_routed_to(scope, r_node)
+          member = spawn(fn -> Process.sleep(:infinity) end)
+          :ok = Muster.join(scope, group, member)
+          assert t_node in occupancy_on(r_node, scope, group)
+
+          # Detach R's forwarding, THEN sever the transport outright — R's
+          # Muster process stays alive and running the whole time.
+          unforward_trace(r_node)
+          true = Node.disconnect(r_node)
+
+          # T sees R's coordinator monitor DOWN via :noconnection and
+          # rebalances down to itself.
+          assert {:ok, _} =
+                   block_until(
+                     %{:"$kind" => :muster_rebalance_start, node: ^t_node, to: [^t_node]},
+                     10_000
+                   )
+
+          wait_until(fn -> Muster.members(scope) == [t_node] end)
+
+          # Reconnect and re-attach forwarding: nodeup fires on both sides,
+          # they re-pair via discover, and T's rebalance back into the
+          # 2-node view re-snapshots R — from R's perspective T is a freshly
+          # (re)joined member, so this is a full snapshot, not a delta.
+          true = Node.connect(r_node)
+          :ok = :snabbkaffe.forward_trace(r_node)
+
+          assert {:ok, %{groups: healed}} =
+                   block_until(
+                     %{:"$kind" => :muster_node_state_received, node: ^r_node, source: ^t_node},
+                     10_000
+                   )
+
+          assert group in healed
+
+          # Both re-converge to :ready for the 2-node view — the SECOND time
+          # (the first was the original formation), hence nth: 2.
+          await_ready(view2, nth: 2, timeout: 20_000)
+
+          assert t_node in occupancy_on(r_node, scope, group)
+
+          %{group: group, r_node: r_node, t_node: t_node}
+        end,
+        fn result, trace ->
+          # Exactly one post-heal snapshot from T landed on R and carried the
+          # group.
+          assert [%{groups: groups}] =
+                   of_kind(:muster_node_state_received, trace)
+                   |> Enum.filter(&(&1.node == result.r_node and &1.source == result.t_node))
+
+          assert result.group in groups
+        end
+      )
+    end
+  end
+
   describe "node restart with the same name — announce-watermark seq regression" do
     setup do
       scope = :"muster_restart_#{System.unique_integer([:positive])}"
