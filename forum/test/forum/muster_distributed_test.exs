@@ -1511,6 +1511,260 @@ defmodule Forum.MusterDistributedTest do
     end
   end
 
+  describe "sweep delete vs. a concurrent fresh claim (forced ordering)" do
+    setup do
+      scope = :"muster_sweep_toctou_#{System.unique_integer([:positive])}"
+
+      start_supervised!(
+        spec(scope,
+          vacancy_cooldown_ms: 50,
+          vacant_flush_interval_ms: 100
+        )
+      )
+
+      %{scope: scope}
+    end
+
+    # drop_stale_router_entries judges rows from a snapshot taken by
+    # :ets.select, but occupied/4 writes the SAME table from :erpc worker
+    # processes, concurrently with the sweeping coordinator. Between the
+    # sweep's judgment of a row (at seq_stale) and its physical delete, a
+    # fresh, legitimate occupied INSERT can raise the same {group, source} key
+    # to a newer seq — and a key-only delete then destroys the FRESH row, not
+    # the row that was judged. Every other write to this table is individually
+    # seq-guarded (put_if_newer); the sweep's delete must be too.
+    #
+    # The interleaving, with T = this node, R and X = peers:
+    #
+    #   1. Settled {T, R}; T holds `group`, routed to R — R carries a real
+    #      row {group, T, seq_stale}.
+    #   2. X joins; the group's router moves R -> X, so R's row is genuinely
+    #      stale. The first R sweep able to judge it (T has agreed on the
+    #      3-node view) decides to drop it — and is parked (force_ordering)
+    #      BETWEEN that judgment and the delete.
+    #   3. T vacates the group. The vacancy is dispatched to X (the router
+    #      now); R is never told — its stale row is exactly what only its own
+    #      (parked) sweep may remove.
+    #   4. X dies; the group's router moves BACK to R. T holds nothing, so its
+    #      rebalance sends R only an async marker — no occupancy write rides it.
+    #   5. T re-claims the group fresh. Its shard dispatches occupied(group, T,
+    #      seq_fresh) to R, and the :erpc worker writes R's table directly —
+    #      R's parked coordinator plays no part. The judged key now holds a
+    #      newer, LEGITIMATE row (seq_fresh > watermark of the announcement R
+    #      judged under, so even a re-judgment would skip it).
+    #   6. Release the park. The sweep's key-only :ets.delete fires against a
+    #      row it never judged and destroys it.
+    #
+    # Nothing ever heals the destroyed row: T got its :ok (the RPC succeeded),
+    # so its shard rests in :occupied with nothing queued; T's future
+    # rebalances send deltas of MOVED groups only (the group never moves
+    # again); heartbeats carry markers, not data; the vacant flush re-sends
+    # vacancies only. R converges to :ready as the group's router with no
+    # occupancy row for it — broadcasts to the group silently miss T forever.
+    test "the sweep's delete must not destroy a fresh occupied row raised after judgment",
+         %{scope: scope} do
+      t_node = node()
+
+      check_trace(
+        fn ->
+          # Settled 2-node cluster {T, R}.
+          {:ok, p_r, r_node} = Peer.start(aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(r_node)
+          start_remote_muster(p_r, scope)
+          await_ready([t_node, r_node])
+
+          # X's name is fixed upfront so the victim group can be picked from
+          # ring math: routed to R in {T,R}, moved onto X once X joins.
+          x_name = ~c"muster_sweep_toctou_x_#{System.unique_integer([:positive])}"
+          x_node = :"#{x_name}@127.0.0.1"
+          view3 = Enum.sort([t_node, r_node, x_node])
+          view2 = Enum.sort([t_node, r_node])
+          hash2 = :erlang.phash2(view2)
+          group = pick_group([{view2, r_node}, {view3, x_node}])
+
+          # T holds the group; its occupied lands on R (the router in {T, R}).
+          m1 = spawn(fn -> Process.sleep(:infinity) end)
+          :ok = Muster.join(scope, group, m1)
+          assert t_node in occupancy_on(r_node, scope, group)
+
+          # Park R's sweep between judging {group, T} stale and deleting it.
+          force_ordering(
+            %{:"$kind" => :test_release_drop},
+            %{
+              :"$kind" => :muster_drop_stale_apply,
+              :"$span" => :start,
+              node: ^r_node,
+              group: ^group,
+              source: ^t_node
+            }
+          )
+
+          # X joins: the group's router moves R -> X, making R's row stale.
+          {:ok, p_x, ^x_node} = Peer.start(name: x_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(x_node)
+          start_remote_muster(p_x, scope)
+
+          # R may park inside its own do_rebalance sweep (its view-3 markers
+          # are sent before that sweep, so T and X still converge) and then
+          # never announce :ready for view3 — wait only on T and X.
+          await_ready(view3, nodes: [t_node, x_node])
+
+          # R has judged the stale row and is parked BEFORE the delete.
+          assert {:ok, judged} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_drop_stale_judged,
+                       node: ^r_node,
+                       group: ^group,
+                       source: ^t_node
+                     },
+                     15_000
+                   )
+
+          # T vacates the group; the vacancy goes to X (the router now), so R
+          # keeps its stale row. The shard's group state ending DELETED
+          # (state: nil) implies the flush was acked: the group is fully
+          # vacant on T and will not be a candidate in T's next rebalance.
+          :ok = Muster.leave(scope, group, m1)
+
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_group_state,
+                       node: ^t_node,
+                       group: ^group,
+                       state: nil
+                     },
+                     10_000
+                   )
+
+          assert t_node in occupancy_on(r_node, scope, group)
+
+          # X dies: the group's router moves back to R. T holds nothing, so
+          # its rebalance sends R only a marker; T lands :converging for the
+          # 2-node view (R, parked, cannot have agreed yet) with its ring
+          # already swapped — claims from here on route to R. nth: 2 because
+          # T already passed :converging for this same view hash once, during
+          # the initial {T, R} discovery rebalance at setup.
+          :ok = stop_supervised({:peer, x_name})
+
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_status_change,
+                       node: ^t_node,
+                       to: :converging,
+                       view_hash: ^hash2
+                     },
+                     2,
+                     15_000,
+                     :infinity
+                   )
+
+          # The fresh re-claim: the occupied RPC writes R's table directly
+          # from the :erpc worker (join returning :ok implies the row is
+          # committed on R), raising the judged key to a newer seq.
+          m2 = spawn(fn -> Process.sleep(:infinity) end)
+          :ok = Muster.join(scope, group, m2)
+          assert t_node in occupancy_on(r_node, scope, group)
+
+          # Release the parked delete. It fires against a row it never judged.
+          tp(:test_release_drop, %{})
+
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_drop_stale_apply,
+                       :"$span" => {:complete, _},
+                       node: ^r_node,
+                       group: ^group,
+                       source: ^t_node
+                     },
+                     10_000
+                   )
+
+          # R heals: processes X's nodedown, rebalances to {T, R}, and both
+          # nodes reach :ready for the 2-node view a 2nd time (1st was setup).
+          await_ready(view2, nth: 2, timeout: 20_000)
+          assert {:ok, ^r_node} = Muster.router(scope, group)
+
+          # THE POINT: R is the settled, :ready router for a group T genuinely
+          # holds (m2 is alive, T's shard is :occupied), and nothing will ever
+          # re-send the row. The sweep must have spared it.
+          assert t_node in occupancy_on(r_node, scope, group),
+                 "the sweep's key-only delete destroyed a fresh occupied row " <>
+                   "written between its judgment and its delete"
+
+          %{group: group, r_node: r_node, t_node: t_node, judged_seq: judged.seq}
+        end,
+        fn result, trace ->
+          group = result.group
+          r_node = result.r_node
+          t_node = result.t_node
+
+          # Exactly two occupied INSERTs landed on R for this key: the
+          # original claim (what the sweep judged) and the fresh re-claim
+          # (what the delete must spare).
+          occupied_seqs =
+            of_kind(:muster_occupied_apply, trace)
+            |> Enum.filter(
+              &(&1.node == r_node and &1.group == group and &1.source == t_node and
+                  match?({:complete, _}, Map.get(&1, :"$span")))
+            )
+            |> Enum.map(& &1.seq)
+            |> Enum.sort()
+
+          assert [stale_seq, fresh_seq] = occupied_seqs
+          assert result.judged_seq == stale_seq
+          assert fresh_seq > stale_seq
+
+          # The interleaving really held: the sweep judged the STALE row
+          # first, the FRESH row landed while it was parked, and only then did
+          # its delete fire — the exact select-then-delete TOCTOU window.
+          assert causality(
+                   %{
+                     :"$kind" => :muster_drop_stale_judged,
+                     node: ^r_node,
+                     group: ^group,
+                     source: ^t_node
+                   },
+                   %{
+                     :"$kind" => :muster_occupied_apply,
+                     :"$span" => {:complete, _},
+                     node: ^r_node,
+                     group: ^group,
+                     seq: ^fresh_seq
+                   },
+                   trace
+                 )
+
+          assert causality(
+                   %{
+                     :"$kind" => :muster_occupied_apply,
+                     :"$span" => {:complete, _},
+                     node: ^r_node,
+                     group: ^group,
+                     seq: ^fresh_seq
+                   },
+                   %{
+                     :"$kind" => :muster_drop_stale_apply,
+                     :"$span" => {:complete, _},
+                     node: ^r_node,
+                     group: ^group,
+                     source: ^t_node
+                   },
+                   trace
+                 )
+
+          # The seq-guarded delete was a no-op on the raised key, so the
+          # "row is gone" event never fired for it.
+          assert of_kind(:muster_drop_stale_entry, trace)
+                 |> Enum.filter(&(&1.node == r_node and &1.group == group)) == []
+        end
+      )
+    end
+  end
+
   describe "router-readiness barrier across real nodes (forced ordering)" do
     setup do
       scope = :"muster_barrier_#{System.unique_integer([:positive])}"
