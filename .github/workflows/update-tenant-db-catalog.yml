@@ -6,7 +6,9 @@ on:
       - "lib/realtime/tenants/repo/migrations/**"
       - "lib/realtime/tenants/migrations.ex"
       - "lib/mix/tasks/realtime.export_tenant_db_catalog.ex"
+      - "lib/mix/tasks/realtime.export_tenant_db_dump.ex"
       - "priv/repo/tenant_db_catalog_*.json"
+      - "priv/repo/tenant_db_dump_*.sql"
       - "mix.lock"
       - "mise.toml"
       - "compose.dbs.yml"
@@ -21,13 +23,25 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  POSTGRES_IMAGE: supabase/postgres:17.6.1.127
+  POSTGRES_CLIENT_MAJOR: 17
 
 jobs:
-  update-tenant-db-catalog:
-    name: Maybe regenerate tenant catalog
+  update-tenant-dump:
+    name: Update Tenant Dump (${{ matrix.pg_major }})
     runs-on: blacksmith-2vcpu-ubuntu-2404
     if: github.event.pull_request.head.repo.full_name == github.repository
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pg_major: 14
+            postgres_image: supabase/postgres:14.1.0.82
+          - pg_major: 15
+            postgres_image: supabase/postgres:15.14.1.129
+          - pg_major: 17
+            postgres_image: supabase/postgres:17.6.1.127
+    env:
+      POSTGRES_IMAGE: ${{ matrix.postgres_image }}
 
     steps:
       - name: Generate GitHub App token
@@ -59,12 +73,24 @@ jobs:
       - name: Install dependencies
         run: mix deps.get
 
+      - name: Install PostgreSQL client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -y
+          sudo apt-get install -y "postgresql-client-${{ env.POSTGRES_CLIENT_MAJOR }}"
+          echo "/usr/lib/postgresql/${{ env.POSTGRES_CLIENT_MAJOR }}/bin" >> "$GITHUB_PATH"
+
       - name: Cache Docker images
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         id: docker-cache
         with:
           path: /tmp/docker-images
-          key: docker-images-zstd-${{ env.POSTGRES_IMAGE }}
+          key: docker-images-zstd-${{ matrix.postgres_image }}
 
       - name: Load Docker images from cache
         if: steps.docker-cache.outputs.cache-hit == 'true'
@@ -73,9 +99,9 @@ jobs:
       - name: Pull and save Docker images
         if: steps.docker-cache.outputs.cache-hit != 'true'
         run: |
-          docker pull ${{ env.POSTGRES_IMAGE }}
+          docker pull ${{ matrix.postgres_image }}
           mkdir -p /tmp/docker-images
-          docker image save ${{ env.POSTGRES_IMAGE }} | zstd -T0 -o /tmp/docker-images/postgres.tar.zst
+          docker image save ${{ matrix.postgres_image }} | zstd -T0 -o /tmp/docker-images/postgres.tar.zst
 
       - name: Start Postgres
         run: docker compose -f compose.dbs.yml up -d --wait
@@ -83,25 +109,68 @@ jobs:
       - name: Set up realtime DB and migrate tenant DB
         run: mix ecto.setup
 
-      - name: Export catalog snapshot
+      - name: Export Tenant DB catalog
+        if: matrix.pg_major == 17
         run: mix realtime.export_tenant_db_catalog
 
-      - name: Check if catalog changed
+      - name: Export Tenant DB dump
+        run: mix realtime.export_tenant_db_dump --pg-major ${{ matrix.pg_major }}
+
+      - name: Upload dump artifact
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: tenant-dump-${{ matrix.pg_major }}
+          path: |
+            priv/repo/tenant_db_dump_${{ matrix.pg_major }}.sql
+            priv/repo/tenant_db_catalog_17.json
+          if-no-files-found: ignore
+
+  commit-changes:
+    name: Commit catalog and migrations dumps
+    needs: update-tenant-dump
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    if: github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.GH_APP_MANAGER_ID }}
+          private-key: ${{ secrets.GH_APP_MANAGER_PRIVATE_KEY }}
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Download dump artifacts
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          pattern: tenant-dump-*
+          path: artifacts
+
+      - name: Move artifacts into place
+        run: find artifacts -type f \( -name '*.sql' -o -name '*.json' \) -exec cp {} priv/repo/ \;
+
+      - name: Check if catalog or dumps changed
         id: check-changes
         run: |
-          git add priv/repo/tenant_db_catalog_17.json
+          git add priv/repo/tenant_db_catalog_17.json priv/repo/tenant_db_dump_14.sql \
+            priv/repo/tenant_db_dump_15.sql priv/repo/tenant_db_dump_17.sql
           if git diff --cached --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Commit and push catalog
+      - name: Commit and push catalog and dumps
         if: steps.check-changes.outputs.changed == 'true'
         env:
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore: update tenant_db_catalog_17.json [skip ci]"
+          git commit -m "chore: update tenant db catalog and dumps [skip ci]"
           git push origin "HEAD:$PR_HEAD_REF"
