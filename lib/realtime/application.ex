@@ -145,6 +145,7 @@ defmodule Realtime.Application do
          strategy: :one_for_one,
          name: Connect.DynamicSupervisor,
          partitions: connect_partition_slots},
+        {DynamicSupervisor, name: Realtime.Tenants.TempStateStore.DynamicSupervisor, strategy: :one_for_one},
         {RealtimeWeb.RealtimeChannel.Tracker, check_interval_in_ms: no_channel_timeout_in_ms},
         RealtimeWeb.Endpoint,
         {RealtimeWeb.Presence,

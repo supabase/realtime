@@ -9,6 +9,7 @@ defmodule RealtimeWeb.Channels.Payloads.JoinTest do
   alias RealtimeWeb.Channels.Payloads.Broadcast.Replay
   alias RealtimeWeb.Channels.Payloads.Presence
   alias RealtimeWeb.Channels.Payloads.PostgresChange
+  alias RealtimeWeb.Channels.Payloads.State
 
   describe "validate/1" do
     test "valid payload allows join" do
@@ -286,6 +287,53 @@ defmodule RealtimeWeb.Channels.Payloads.JoinTest do
 
     test "defaults to false when config is nil" do
       refute Join.self_broadcast?(%Join{config: nil})
+    end
+  end
+
+  describe "state config" do
+    test "parses the state opt-in" do
+      config = %{"config" => %{"state" => %{"enabled" => true}}}
+
+      assert {:ok, %Join{config: %Config{state: %State{enabled: true}}} = join} = Join.validate(config)
+      assert Join.state_enabled?(join)
+    end
+
+    test "accepts string 'true' for the enabled field" do
+      config = %{"config" => %{"state" => %{"enabled" => "true"}}}
+
+      assert {:ok, %Join{config: %Config{state: %State{enabled: true}}}} = Join.validate(config)
+    end
+
+    test "defaults enabled to false when omitted" do
+      config = %{"config" => %{"state" => %{}}}
+
+      assert {:ok, %Join{config: %Config{state: %State{enabled: false}}}} = Join.validate(config)
+    end
+
+    test "rejects an invalid boolean string" do
+      config = %{"config" => %{"state" => %{"enabled" => "maybe"}}}
+
+      assert {:error, :invalid_join_payload, %{config: %{state: %{enabled: ["unable to parse, expected boolean"]}}}} =
+               Join.validate(config)
+    end
+  end
+
+  describe "state_enabled?/1" do
+    test "returns enabled value from config" do
+      refute Join.state_enabled?(%Join{config: %Config{state: %State{enabled: false}}})
+      assert Join.state_enabled?(%Join{config: %Config{state: %State{enabled: true}}})
+    end
+
+    test "defaults to false when state config is nil" do
+      refute Join.state_enabled?(%Join{config: %Config{state: nil}})
+    end
+
+    test "defaults to false when config is nil" do
+      refute Join.state_enabled?(%Join{config: nil})
+    end
+
+    test "defaults to false for non-Join struct" do
+      refute Join.state_enabled?(nil)
     end
   end
 

@@ -46,6 +46,13 @@
                         "key": ""
                     }
                 },
+                "state": {
+                    "title": "state",
+                    "$ref": "#/$defs/phx_join_state",
+                    "default": {
+                        "enabled": false
+                    }
+                },
                 "postgres_changes": {
                     "type": "array",
                     "title": "phx_join_postgres_changes",
@@ -77,6 +84,20 @@
                     "type": "boolean",
                     "description": "Boolean, e.g. true",
                     "title": "ack",
+                    "default": false
+                }
+            },
+            "additionalProperties": false
+        },
+        "phx_join_state": {
+            "type": "object",
+            "description": "",
+            "title": "phx_join_state",
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "description": "Boolean, e.g. true",
+                    "title": "enabled",
                     "default": false
                 }
             },

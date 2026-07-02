@@ -7,6 +7,7 @@ defmodule RealtimeWeb.Channels.Payloads.Join do
   alias RealtimeWeb.Channels.Payloads.Config
   alias RealtimeWeb.Channels.Payloads.Broadcast
   alias RealtimeWeb.Channels.Payloads.Presence
+  alias RealtimeWeb.Channels.Payloads.State
 
   embedded_schema do
     embeds_one :config, Config
@@ -47,6 +48,9 @@ defmodule RealtimeWeb.Channels.Payloads.Join do
 
   def private?(%__MODULE__{config: %Config{private: private}}), do: private
   def private?(_), do: false
+
+  def state_enabled?(%__MODULE__{config: %Config{state: %State{enabled: enabled}}}), do: enabled
+  def state_enabled?(_), do: false
 
   def error_message(_field, meta) do
     type = Keyword.get(meta, :type)
