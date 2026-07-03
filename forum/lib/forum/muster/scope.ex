@@ -630,15 +630,42 @@ defmodule Forum.Muster.Scope do
   # the peer). The handshake piggybacks each side's current view hash and announce
   # watermark so member_views is seeded immediately, important after a coordinator
   # restart, where it would otherwise be empty until the next membership change.
+  #
+  # tla/FINDINGS.md finding 3: unlike the view heartbeat (announce_view, which
+  # deliberately skips any node in owed_snapshots -- its marker rides the
+  # snapshot, after the data), this reply used to piggyback unconditionally. A
+  # discoverer we owe a full snapshot to has no trustworthy baseline yet; if the
+  # ack still hands it our post-rebalance view/watermark, the discoverer can
+  # declare the barrier satisfied (and trust its occupancy table) before that
+  # snapshot's data ever lands. So: withhold the piggyback for an owed
+  # discoverer (view_hash/seq -> nil), exactly mirroring announce_view's guard.
   @impl true
   def handle_info({:muster_discover, peer, view_hash, seq}, %State{} = state) do
+    peer_node = node(peer)
+
+    {ack_view_hash, ack_seq} =
+      if Map.has_key?(state.owed_snapshots, peer_node) do
+        {nil, nil}
+      else
+        {own_view_hash(state), state.view_seq}
+      end
+
     state.message_module.send(
       state.scope,
-      node(peer),
-      {:muster_discover_ack, self(), own_view_hash(state), state.view_seq}
+      peer_node,
+      {:muster_discover_ack, self(), ack_view_hash, ack_seq}
     )
 
-    state = put_member_view(state, node(peer), view_hash, seq)
+    state = put_member_view(state, peer_node, view_hash, seq)
+    {:noreply, register_peer(state, peer)}
+  end
+
+  # A withheld piggyback (see above) carries no view/watermark: leave
+  # member_views untouched rather than seed it with `nil` (which, since `nil` is
+  # never "newer" than a real seq under put_member_view's guard, would silently
+  # brick that source's entry until it announces again anyway -- explicit is
+  # clearer than relying on that guard).
+  def handle_info({:muster_discover_ack, peer, nil, nil}, %State{} = state) do
     {:noreply, register_peer(state, peer)}
   end
 

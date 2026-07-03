@@ -1733,6 +1733,63 @@ defmodule Forum.MusterTest do
              end)
     end
 
+    # tla/FINDINGS.md finding 3: the discover-ack piggyback used to hand a
+    # discoverer our CURRENT view/watermark unconditionally, even when that
+    # discoverer is a node we still owe a full snapshot to (owed_snapshots).
+    # This is the same owed-suppression guard as the test right above, on the
+    # OTHER message that carries a view/watermark (announce_view's heartbeat
+    # marker vs. the discover-ack reply).
+    #
+    # A locally-spawned pid can't masquerade as a genuinely remote node
+    # (node/1 always resolves to us -- see muster_distributed_test.exs's note
+    # on why its rebalance-for-test hook exists), so, like set_rebalancing/2
+    # above, we drive the owed_snapshots branch directly instead of pairing a
+    # second real node: the branch under test only inspects
+    # `Map.has_key?(state.owed_snapshots, node(peer))`, and using our own node
+    # as both the "owed" key and the discoverer's node exercises that exact
+    # branch (register_peer/1's self-discovery guard makes the rest of the
+    # handler a safe no-op for a self-sourced pid).
+    test "an ack to a still-owed discoverer withholds the view/watermark piggyback",
+         %{scope: scope} do
+      :sys.replace_state(Forum.Supervisor.name(scope), fn s ->
+        %{
+          s
+          | owed_snapshots:
+              Map.put(s.owed_snapshots, node(), :erlang.unique_integer([:monotonic]))
+        }
+      end)
+
+      _ = drain_sends()
+      send(Forum.Supervisor.name(scope), {:muster_discover, self(), Muster.view_hash(scope), 0})
+      GenServer.call(Forum.Supervisor.name(scope), :status)
+
+      assert [[^scope, dest, {:muster_discover_ack, _pid, view_hash, seq}]] = drain_sends()
+      assert dest == node()
+
+      # BUG (pre-fix): the ack unconditionally carried own_view_hash/view_seq
+      # here, letting a still-owed discoverer fold in a view it agrees with --
+      # and declare the barrier satisfied -- before the snapshot carrying the
+      # actual data ever lands (FINDINGS.md finding 3, the discover-ack race).
+      # Fixed: the piggyback is withheld (nil/nil), mirroring announce_view.
+      assert view_hash == nil
+      assert seq == nil
+    end
+
+    # Companion to the test above: the receiving side of a withheld piggyback
+    # must leave member_views alone rather than seed it with the nil sentinel
+    # (see the handle_info({:muster_discover_ack, _, nil, nil}, _) clause).
+    test "an ack with a withheld piggyback does not clobber member_views",
+         %{scope: scope} do
+      :sys.replace_state(Forum.Supervisor.name(scope), fn s ->
+        %{s | member_views: Map.put(s.member_views, node(), {:sentinel, 12_345})}
+      end)
+
+      send(Forum.Supervisor.name(scope), {:muster_discover_ack, self(), nil, nil})
+      dump = GenServer.call(Forum.Supervisor.name(scope), :dump)
+
+      assert dump.member_views[node()] == {:sentinel, 12_345}
+    end
+
     defp assert_ready(scope, timeout \\ 500) do
       deadline = System.monotonic_time(:millisecond) + timeout
       do_wait_ready(scope, true, deadline)
