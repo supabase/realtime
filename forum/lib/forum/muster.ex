@@ -23,6 +23,7 @@ defmodule Forum.Muster do
           | {:singleton_promotion_timeout_ms, pos_integer()}
           | {:rpc_timeout_ms, timeout()}
           | {:rebalance_gather_timeout_ms, pos_integer()}
+          | {:shards_ready_timeout_ms, pos_integer()}
           | {:message_module, module()}
 
   # Timeout for the local GenServer.call to the claim shard. Generous because the
@@ -74,6 +75,13 @@ defmodule Forum.Muster do
     rebalance (default: 15_000). A shard that does not reply within this window
     crashes the coordinator (which then restarts and re-announces from a clean
     slate); raise it if shards routinely hold very large group sets.
+  * `:shards_ready_timeout_ms`: how long, at init/restart, the coordinator
+    waits for `Forum.Muster.ShardsReadySentinel`'s one-shot signal that every
+    claim shard has finished its own init before doing anything (like a
+    rebalance) that calls into them (default: 5_000). Shard init is local,
+    ETS-only work with no I/O, so this should never come close to firing in a
+    healthy tree; if it does, the coordinator crashes and the supervisor
+    restarts it rather than hanging forever.
   * `:message_module`: module implementing `Forum.Adapter` (default:
     `Forum.Adapter.ErlDist`).
   """
@@ -121,6 +129,14 @@ defmodule Forum.Muster do
     if gather_timeout != nil and not (is_integer(gather_timeout) and gather_timeout > 0) do
       raise ArgumentError,
             "expected :rebalance_gather_timeout_ms to be a positive integer, got: #{inspect(gather_timeout)}"
+    end
+
+    shards_ready_timeout = Keyword.get(opts, :shards_ready_timeout_ms)
+
+    if shards_ready_timeout != nil and
+         not (is_integer(shards_ready_timeout) and shards_ready_timeout > 0) do
+      raise ArgumentError,
+            "expected :shards_ready_timeout_ms to be a positive integer, got: #{inspect(shards_ready_timeout)}"
     end
 
     Forum.Supervisor.start_link(Forum.Muster.Scope, scope, partitions, opts)

@@ -107,33 +107,46 @@ defmodule Forum.Supervisor do
   #
   # Supervision shape — an outer :rest_for_one, ordered to express each
   # process's dependents as everything listed after it, with the shards nested
-  # under their own inner :one_for_one supervisor as the outer's last child:
+  # under their own inner :one_for_one supervisor, and a one-shot readiness
+  # sentinel as the outer's last child:
   #
-  #   rest_for_one: ring, coordinator (scope), shards_supervisor
+  #   rest_for_one: ring, coordinator (scope), shards_supervisor, shards_ready_sentinel
   #                                             `-- one_for_one: shard_0, .. shard_n
   #
   # :rest_for_one restarts the crashed child AND every child listed after it,
   # never anything before it. :one_for_one restarts only the crashed child. That
   # gives the whole crash story for free, straight from this shape:
   #
-  #   * Ring crash: restarts the ring, the coordinator, AND shards_supervisor
-  #     (all listed after it) — restarting a :supervisor child re-runs its
-  #     init, which restarts every shard fresh. The ring stores its node set in
-  #     a process-owned ETS table, so a crash brings it back EMPTY, and the
-  #     coordinator is the only writer that could re-seed it (only at
+  #   * Ring crash: restarts the ring, the coordinator, shards_supervisor, AND
+  #     the sentinel (all listed after it) — restarting a :supervisor child
+  #     re-runs its init, which restarts every shard fresh. The ring stores its
+  #     node set in a process-owned ETS table, so a crash brings it back EMPTY,
+  #     and the coordinator is the only writer that could re-seed it (only at
   #     init/rebalance, neither of which a narrower restart would trigger) — so
   #     the coordinator restarting right after it is required, not incidental.
-  #   * Coordinator crash: restarts the coordinator AND shards_supervisor (all
-  #     shards), never the ring. One reset story: "the coordinator restarted"
-  #     always means the shards did too, never a stale shard left running next
-  #     to a fresh coordinator.
+  #   * Coordinator crash: restarts the coordinator, shards_supervisor (all
+  #     shards), AND the sentinel, never the ring. One reset story: "the
+  #     coordinator restarted" always means the shards did too, never a stale
+  #     shard left running next to a fresh coordinator.
   #   * Shard crash: the inner one_for_one restarts ONLY that shard. The outer
   #     rest_for_one never observes the crash (shards_supervisor itself didn't
-  #     crash), so no other shard, the coordinator, or the ring is touched. If a
-  #     single shard crash-loops past the inner supervisor's own max_restarts,
-  #     shards_supervisor itself terminates — the outer rest_for_one then
-  #     restarts it (all shards), but still never the coordinator or ring,
-  #     since shards_supervisor is still the last child in the outer list.
+  #     crash), so no other shard, the sentinel, the coordinator, or the ring is
+  #     touched. If a single shard crash-loops past the inner supervisor's own
+  #     max_restarts, shards_supervisor itself terminates — the outer
+  #     rest_for_one then restarts it AND the sentinel (all shards, then a
+  #     fresh readiness signal), but still never the coordinator or ring, since
+  #     shards_supervisor is still ahead of the sentinel in the outer list.
+  #
+  # shards_ready_sentinel (Forum.Muster.ShardsReadySentinel) is a one-shot step,
+  # not a real process: its start_link/1 sends the coordinator
+  # :muster_shards_ready and returns :ignore, so Forum.Supervisor keeps no pid
+  # for it. Placed last, its start_link cannot run until shards_supervisor's
+  # own init has returned — which itself only returns once every shard's init
+  # has returned — so the coordinator can block on that message in its own
+  # handle_continue and know, by construction rather than by polling, that
+  # every shard is registered before it does anything (like a rebalance) that
+  # calls into them. Because it sits after shards_supervisor in this same list,
+  # every restart path above that touches the shards also re-arms it.
   #
   # The occupancy table and the per-shard durable claim-state tables are created
   # HERE (owned by this long-lived Supervisor, whose init/1 does NOT re-run when
@@ -189,8 +202,22 @@ defmodule Forum.Supervisor do
       type: :supervisor
     }
 
+    # :ignore's every start (see the comment above scope_children/5's clauses),
+    # so it never has a pid to restart on its own, but the outer :rest_for_one
+    # re-runs its start_link whenever shards_supervisor (or anything before it)
+    # is restarted, re-arming the coordinator's readiness signal.
+    shards_ready_sentinel_spec = %{
+      id: :muster_shards_ready_sentinel,
+      start: {Forum.Muster.ShardsReadySentinel, :start_link, [scope]}
+    }
+
     {:rest_for_one,
-     [Forum.Muster.Scope.ring_child_spec(scope), scope_child, shards_supervisor_spec]}
+     [
+       Forum.Muster.Scope.ring_child_spec(scope),
+       scope_child,
+       shards_supervisor_spec,
+       shards_ready_sentinel_spec
+     ]}
   end
 
   # Forum.Census: one Forum.Partition process per slice owns membership (entries +

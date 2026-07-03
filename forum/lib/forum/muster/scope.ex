@@ -33,6 +33,7 @@ defmodule Forum.Muster.Scope do
   @default_rpc_timeout_ms 5_000
   @default_view_heartbeat_interval_ms 10_000
   @default_rebalance_gather_timeout_ms 15_000
+  @default_shards_ready_timeout_ms 5_000
   @singleton_promotion_timeout_multiplier 3
   @ring_replicas 128
   @ring_depth 2
@@ -52,6 +53,7 @@ defmodule Forum.Muster.Scope do
             singleton_promotion_timeout_ms: pos_integer,
             rpc_timeout_ms: timeout,
             rebalance_gather_timeout_ms: timeout,
+            shards_ready_timeout_ms: pos_integer,
             tombstone_window_ms: pos_integer,
             occupancy_table: atom,
             members: [node],
@@ -68,6 +70,7 @@ defmodule Forum.Muster.Scope do
       :singleton_promotion_timeout_ms,
       :rpc_timeout_ms,
       :rebalance_gather_timeout_ms,
+      :shards_ready_timeout_ms,
       :tombstone_window_ms,
       :occupancy_table,
       members: [],
@@ -375,6 +378,9 @@ defmodule Forum.Muster.Scope do
     rebalance_gather_timeout_ms =
       Keyword.get(opts, :rebalance_gather_timeout_ms, @default_rebalance_gather_timeout_ms)
 
+    shards_ready_timeout_ms =
+      Keyword.get(opts, :shards_ready_timeout_ms, @default_shards_ready_timeout_ms)
+
     tombstone_window_ms =
       Keyword.get(opts, :tombstone_window_ms, default_tombstone_window(rpc_timeout_ms))
 
@@ -427,6 +433,7 @@ defmodule Forum.Muster.Scope do
       singleton_promotion_timeout_ms: singleton_promotion_timeout_ms,
       rpc_timeout_ms: rpc_timeout_ms,
       rebalance_gather_timeout_ms: rebalance_gather_timeout_ms,
+      shards_ready_timeout_ms: shards_ready_timeout_ms,
       tombstone_window_ms: tombstone_window_ms,
       occupancy_table: occupancy_table,
       members: [node()]
@@ -442,12 +449,40 @@ defmodule Forum.Muster.Scope do
 
   @impl true
   def handle_continue(:discover, state) do
+    await_shards_ready(state)
+
     state.message_module.broadcast(state.scope, discover_msg(state))
 
     schedule_singleton_promotion(state)
     schedule_view_heartbeat(state)
     schedule_tombstone_sweep(state)
     {:noreply, state}
+  end
+
+  # Forum.Supervisor starts Forum.Muster.ShardsReadySentinel as the LAST child
+  # of the outer :rest_for_one, right after shards_supervisor: its start_link/1
+  # cannot run until every shard has returned from its own init (a supervisor
+  # blocks its caller until a started child's init returns, and starts children
+  # strictly in list order), so its one-shot :muster_shards_ready send is a
+  # guarantee, not a race. We wait for it here, before doing anything that
+  # could trigger a rebalance (the broadcast right below can draw an immediate
+  # :muster_discover_ack, and a peer's :nodeup races independently of our own
+  # startup), so do_rebalance's synchronous GenServer.call to each shard can
+  # never land before that shard is registered. handle_continue runs to
+  # completion before any other queued message is processed, so this also
+  # defers anything that happened to arrive ahead of the signal.
+  #
+  # A missing signal after the timeout means the tree is unhealthy in a way
+  # nothing above self-heals (e.g. the sentinel's own child spec is broken);
+  # crashing hands off to the supervisor's restart logic instead of hanging
+  # this coordinator forever.
+  defp await_shards_ready(state) do
+    receive do
+      :muster_shards_ready -> :ok
+    after
+      state.shards_ready_timeout_ms ->
+        raise "Muster[#{node()}|#{state.scope}] shards not ready after #{state.shards_ready_timeout_ms}ms"
+    end
   end
 
   ## handle_call
