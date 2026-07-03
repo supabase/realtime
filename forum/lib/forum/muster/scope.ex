@@ -676,18 +676,62 @@ defmodule Forum.Muster.Scope do
 
   # Peer coordinator crashed/disconnected: drop occupancy entries owned by that
   # node and rebalance.
+  #
+  # tla/FINDINGS.md finding 2: `peers` is keyed by PID, not node, and a peer
+  # that restarts IN PLACE can have its fresh discover/ack register a NEW pid
+  # for the same node BEFORE this handler ever runs for the OLD pid's DOWN
+  # (discover travels the adapter channel, DOWN travels the monitor channel,
+  # and nothing orders the two). If that already happened, the occupancy rows
+  # / member_views / applied_snapshot_seq entries keyed by this node may
+  # belong to the NEW, still-live incarnation (which may already have
+  # delivered a fresh snapshot and been acked) rather than the dead one, and
+  # wiping by node alone would destroy them permanently: membership does not
+  # change (the node is still a peer via its new pid), so recompute_members
+  # is a no-op and nothing ever re-announces to repair it.
+  #
+  # So: only wipe when the dying pid was the LAST live peer registered for
+  # this node. If another peer for the same node is still registered, its
+  # data is spared -- the guard the "DOWN wipe" needs at this position is
+  # exactly the finding's "another live incarnation is still registered"
+  # check.
+  #
+  # Wrapped in a span (fires BEFORE the wipe, always -- even when spared) so
+  # a test can force the race onto this exact window
+  # (muster_distributed_test.exs reproduces the wipe destroying a newer
+  # incarnation's already-delivered data).
   def handle_info({:DOWN, ref, :process, pid, _reason}, %State{} = state) do
     case Map.pop(state.peers, pid) do
       {^ref, new_peers} ->
-        Logger.info(
-          "Muster[#{node()}|#{state.scope}] peer down: #{inspect(node(pid))}, dropping its occupancy and rebalancing"
-        )
+        peer_node = node(pid)
+        newer_incarnation_live? = Enum.any?(new_peers, fn {p, _ref} -> node(p) == peer_node end)
 
-        :ets.match_delete(state.occupancy_table, {{:_, node(pid)}, :_, :_})
-        :telemetry.execute([:forum, state.scope, :node, :down], %{}, %{node: node(pid)})
+        tp_span(:muster_peer_down_apply, %{
+          scope: state.scope,
+          node: node(),
+          peer_node: peer_node,
+          spared: newer_incarnation_live?
+        }) do
+          if newer_incarnation_live? do
+            Logger.info(
+              "Muster[#{node()}|#{state.scope}] peer down: #{inspect(peer_node)}, but a newer incarnation is already registered -- sparing its occupancy"
+            )
+          else
+            Logger.info(
+              "Muster[#{node()}|#{state.scope}] peer down: #{inspect(peer_node)}, dropping its occupancy and rebalancing"
+            )
 
-        member_views = Map.delete(state.member_views, node(pid))
-        applied_snapshot_seq = Map.delete(state.applied_snapshot_seq, node(pid))
+            :ets.match_delete(state.occupancy_table, {{:_, peer_node}, :_, :_})
+            :telemetry.execute([:forum, state.scope, :node, :down], %{}, %{node: peer_node})
+          end
+        end
+
+        {member_views, applied_snapshot_seq} =
+          if newer_incarnation_live? do
+            {state.member_views, state.applied_snapshot_seq}
+          else
+            {Map.delete(state.member_views, peer_node),
+             Map.delete(state.applied_snapshot_seq, peer_node)}
+          end
 
         state = %{
           state

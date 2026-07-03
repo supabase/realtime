@@ -3637,6 +3637,159 @@ defmodule Forum.MusterDistributedTest do
     end
   end
 
+  describe "peer DOWN races a fresher re-registration (tla/FINDINGS.md finding 2)" do
+    setup do
+      scope = :"muster_downrace_#{System.unique_integer([:positive])}"
+      start_supervised!(spec(scope, vacant_flush_interval_ms: 60_000))
+      %{scope: scope}
+    end
+
+    # FINDINGS.md finding 2 ("the :DOWN wipe destroys a newer incarnation's
+    # delivered data"): scope.ex's handle_info({:DOWN, ...}) wipes ALL
+    # occupancy/member_views/applied_snapshot_seq entries keyed by the dead
+    # peer's NODE, regardless of which incarnation (pid) produced them. If a
+    # fresher incarnation of that same node has ALREADY re-registered (its
+    # rediscovery can outrun the old pid's monitor DOWN, since discovery
+    # travels the adapter channel while DOWN travels the monitor channel) and
+    # delivered new data before the old pid's DOWN is finally processed, that
+    # fresh data is destroyed permanently: membership does not change (the
+    # node is still a peer via its new pid), so recompute_members is a no-op
+    # and no rebalance/re-announce ever fires again to repair it.
+    #
+    # Reproducing the dangerous ORDER via real message timing is exactly the
+    # "adapter-/ordering-dependent" property FINDINGS documents: with the
+    # default ErlDist adapter, a dead peer's exit signal and a freshly
+    # restarted coordinator's rediscovery share one TCP connection, and the
+    # exit signal is generated essentially the instant the old pid dies while
+    # the new coordinator's rediscovery is only broadcast after a real
+    # init -> await_shards_ready sequence — so DOWN-before-rediscovery is the
+    # OVERWHELMINGLY likely real order, the opposite of the dangerous one.
+    # Forcing the dangerous order by parking T's own DOWN handling would
+    # deadlock T's single-threaded coordinator against the very re-pairing
+    # it's waiting on (the same process cannot dequeue the re-pairing message
+    # while parked handling the DOWN ahead of it in its mailbox).
+    #
+    # So this test drives the exact mailbox STATE the race produces through
+    # Scope's real public entry points, deterministically:
+    #
+    #   1. R holds `group`, routed to T; occupancy lands on T normally.
+    #   2. A stand-in pid, alive on r_node but distinct from R's real Scope
+    #      pid, is registered on T via a genuine :muster_discover message --
+    #      exactly what a freshly-restarted R's coordinator broadcasts on
+    #      rediscovery. This reproduces "T registers R's new pid" without
+    #      racing real message delivery order.
+    #   3. R's post-restart full snapshot is delivered through the SAME public
+    #      RPC entry point (receive_node_state/5) a genuine rebalance
+    #      dispatches, carrying a fresh, higher seq for the group.
+    #   4. R's REAL (original) Scope pid is killed, firing T's genuine monitor
+    #      DOWN for it -- the exact handler under test.
+    #
+    # At the moment the real DOWN fires, T's peers table holds two live
+    # entries for r_node (the stand-in, and the dying real pid) -- exactly
+    # the state the real race produces -- so the freshly-delivered row must
+    # survive it.
+    test "a peer's fresh re-registration and delivered snapshot survive its old pid's later DOWN",
+         %{scope: scope} do
+      t_node = node()
+
+      check_trace(
+        fn ->
+          {:ok, p_r, r_node} = Peer.start(aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(r_node)
+          start_remote_muster(p_r, scope)
+          await_ready(Enum.sort([t_node, r_node]))
+
+          group = group_routed_to(scope, t_node)
+
+          :ok = :peer.call(p_r, MusterPeerAux, :join, [scope, group])
+          assert r_node in occupancy_on(t_node, scope, group)
+
+          # A stand-in for R's post-restart incarnation: alive on r_node, but
+          # NOT R's real Scope pid. Spawned via an MFA (not a closure) so it
+          # does not depend on this test module's bytecode being loaded on
+          # the remote peer.
+          standin = :erlang.spawn(r_node, :timer, :sleep, [:infinity])
+
+          own_view_hash = GenServer.call(Forum.Supervisor.name(scope), :dump).view_hash
+          fresh_seq = :erpc.call(r_node, :erlang, :unique_integer, [[:monotonic]])
+
+          # Step 2: T registers the stand-in as a SECOND live peer for r_node
+          # (peers is keyed by pid), exactly as a fresh coordinator's
+          # rediscovery broadcast would.
+          :erlang.send(
+            {Forum.Supervisor.name(scope), t_node},
+            {:muster_discover, standin, own_view_hash, fresh_seq},
+            [:noconnect]
+          )
+
+          assert {:ok, _} =
+                   block_until(
+                     %{:"$kind" => :muster_peer_registered, node: ^t_node, peer: ^r_node},
+                     5_000
+                   )
+
+          # Step 3: the fresh incarnation's full snapshot lands and applies on
+          # T through the exact public entry point a real rebalance uses.
+          assert :ok =
+                   Forum.Muster.Scope.receive_node_state(
+                     scope,
+                     r_node,
+                     [group],
+                     own_view_hash,
+                     fresh_seq + 1
+                   )
+
+          assert r_node in occupancy_on(t_node, scope, group)
+
+          # Step 4: R's REAL (original) Scope pid dies -- T's genuine monitor
+          # fires the DOWN this test is about.
+          r_scope_pid = :erpc.call(r_node, Process, :whereis, [Forum.Supervisor.name(scope)])
+          Process.monitor(r_scope_pid)
+          true = :erpc.call(r_node, Process, :exit, [r_scope_pid, :kill])
+          assert_receive {:DOWN, _, _, ^r_scope_pid, _}, 5_000
+
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_peer_down_apply,
+                       :"$span" => {:complete, _},
+                       node: ^t_node,
+                       peer_node: ^r_node
+                     },
+                     5_000
+                   )
+
+          # THE PROPERTY UNDER TEST: the row delivered by R's newer, still-
+          # registered incarnation must survive the old pid's DOWN.
+          assert r_node in occupancy_on(t_node, scope, group),
+                 "the old pid's DOWN wiped a row delivered by R's newer, still-registered incarnation"
+
+          %{group: group, r_node: r_node, t_node: t_node}
+        end,
+        fn result, trace ->
+          %{t_node: t_node, r_node: r_node} = result
+
+          # The row really did arrive (via the simulated fresh incarnation's
+          # snapshot) strictly before the DOWN handler ran.
+          assert causality(
+                   %{
+                     :"$kind" => :muster_node_state_received,
+                     node: ^t_node,
+                     source: ^r_node
+                   },
+                   %{
+                     :"$kind" => :muster_peer_down_apply,
+                     :"$span" => :start,
+                     node: ^t_node,
+                     peer_node: ^r_node
+                   },
+                   trace
+                 )
+        end
+      )
+    end
+  end
+
   describe "re-discovery backstop (rediscover/1)" do
     setup do
       scope = :"muster_rediscover_#{System.unique_integer([:positive])}"
