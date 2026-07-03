@@ -350,8 +350,12 @@ defmodule Realtime.Database do
       {:ok, :inet6}
     else
       case :inet.gethostbyname(host) do
-        {:ok, _} -> {:ok, :inet}
-        _ -> {:error, :nxdomain}
+        {:ok, _} ->
+          log_warning("DatabaseIpVersionIsIpv4", "Tenant database host #{host} resolved to an IPv4 address")
+          {:ok, :inet}
+
+        _ ->
+          {:error, :nxdomain}
       end
     end
   end

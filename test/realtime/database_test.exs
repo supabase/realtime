@@ -274,6 +274,16 @@ defmodule Realtime.DatabaseTest do
       # Using invalid domain
       assert Realtime.Database.detect_ip_version("potato") == {:error, :nxdomain}
     end
+
+    test "logs a warning when the host resolves to an IPv4 address" do
+      log =
+        capture_log(fn ->
+          assert Realtime.Database.detect_ip_version("ipv4.google.com") == {:ok, :inet}
+        end)
+
+      assert log =~ "DatabaseIpVersionIsIpv4"
+      assert log =~ "ipv4.google.com"
+    end
   end
 
   describe "from_tenant/3" do
