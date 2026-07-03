@@ -87,8 +87,27 @@ defmodule Forum.MusterDistributedTest do
   defp occupancy_on(n, scope, group) when n == node(), do: Scope.occupancy(scope, group)
   defp occupancy_on(n, scope, group), do: :erpc.call(n, Scope, :occupancy, [scope, group])
 
-  defp group_state(scope, group),
-    do: GenServer.call(Forum.Supervisor.name(scope), :status).group_states[group]
+  # Tolerates the coordinator being transiently unregistered right after a
+  # deliberate restart (Process.exit(coord, :kill) + immediate rejoin tests):
+  # the OLD pid can already be gone while the supervisor hasn't finished
+  # spawning its replacement, so a plain GenServer.call can hit :noproc even
+  # though the shard-level state the caller cares about is already settled.
+  defp group_state(scope, group, timeout \\ 2_000) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+    do_group_state(scope, group, deadline)
+  end
+
+  defp do_group_state(scope, group, deadline) do
+    GenServer.call(Forum.Supervisor.name(scope), :status).group_states[group]
+  catch
+    :exit, reason ->
+      if System.monotonic_time(:millisecond) >= deadline do
+        exit(reason)
+      else
+        Process.sleep(5)
+        do_group_state(scope, group, deadline)
+      end
+  end
 
   # `group_state/2` read on a remote node `n` (the coordinator's :status folds in
   # every shard's per-group state). A shard that is momentarily down mid-restart
@@ -154,6 +173,32 @@ defmodule Forum.MusterDistributedTest do
       true ->
         Process.sleep(20)
         do_wait_until(fun, deadline)
+    end
+  end
+
+  # Like `wait_until/2`, but returns the truthy value `fun` produced instead of
+  # discarding it: needed whenever the caller must assert on exactly the value
+  # that satisfied the poll, not re-read the same condition a moment later. A
+  # separate re-read races anything that can retract the condition right after
+  # it becomes true (e.g. a claim landing and then being immediately swept),
+  # which is indistinguishable from the condition never having held.
+  defp wait_until_value(fun, timeout \\ 5_000) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+    do_wait_until_value(fun, deadline)
+  end
+
+  defp do_wait_until_value(fun, deadline) do
+    case fun.() do
+      falsy when falsy in [nil, false] ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          flunk("condition not met in time")
+        else
+          Process.sleep(20)
+          do_wait_until_value(fun, deadline)
+        end
+
+      value ->
+        value
     end
   end
 
@@ -2015,7 +2060,7 @@ defmodule Forum.MusterDistributedTest do
       # the owning shard, then use a comfortably larger interval than the 50ms
       # cooldown so the vacancy stays queued across the rebalance before the next
       # natural flush dispatches it.
-      start_supervised!(spec(scope, vacancy_cooldown_ms: 50, vacant_flush_interval_ms: 1_000))
+      start_supervised!(spec(scope, vacancy_cooldown_ms: 50, vacant_flush_interval_ms: 5_000))
       %{scope: scope}
     end
 
@@ -2063,8 +2108,11 @@ defmodule Forum.MusterDistributedTest do
           assert is_pid(shard_pid)
 
           # Align the leave to just after a real flush tick on the owning shard.
-          # That gives the next natural tick enough runway to happen after the
-          # rebalance rather than before it.
+          # back_in_time: 0 forces a FRESH tick (the default :infinity would
+          # happily match one already collected from shard startup, long
+          # before this point, giving zero real alignment and letting the
+          # "runway" below shrink to whatever happened to be left in that
+          # earlier period -- sometimes only milliseconds).
           assert {:ok, _} =
                    block_until(
                      %{
@@ -2072,7 +2120,8 @@ defmodule Forum.MusterDistributedTest do
                        node: ^t_node,
                        index: ^shard_index
                      },
-                     5_000
+                     5_000,
+                     0
                    )
 
           # Vacate. The cooldown (50ms) expires and the vacancy is queued, but
@@ -2120,11 +2169,13 @@ defmodule Forum.MusterDistributedTest do
           assert occupancy_on(o_node, scope, group) == []
 
           # The next natural flush must send the vacancy to the CURRENT router, C.
+          # Timeout comfortably exceeds vacant_flush_interval_ms: the aligned
+          # tick above bounds the wait to at most one interval from here.
 
           assert {:ok, batch} =
                    block_until(
                      %{:"$kind" => :muster_vacant_batch, :"$span" => :start, source: ^t_node},
-                     5_000
+                     8_000
                    )
 
           assert batch.node == c_node
@@ -2416,8 +2467,21 @@ defmodule Forum.MusterDistributedTest do
                      10_000
                    )
 
-          wait_until(fn -> occupancy_on(r_node, scope, group) != [] end)
-          assert t_node in occupancy_on(r_node, scope, group)
+          # Capture the occupants from the SAME read that observes the row as
+          # present: rpc_timeout_ms/vacant_flush_interval_ms are both very
+          # short here, so the window between the delayed insert landing and
+          # the queued vacant flush retracting it can be narrower than the gap
+          # between two separate reads -- a wait-then-re-read can straddle the
+          # retraction and see it disappear again before the assert runs.
+          occupants =
+            wait_until_value(fn ->
+              case occupancy_on(r_node, scope, group) do
+                [] -> nil
+                other -> other
+              end
+            end)
+
+          assert t_node in occupants
 
           # The phantom row must eventually be retracted: T should have
           # queued the group for a vacant flush instead of forgetting it, so
