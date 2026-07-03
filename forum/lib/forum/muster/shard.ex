@@ -469,6 +469,22 @@ defmodule Forum.Muster.Shard do
 
         state = cancel_cooldown(state, group)
         state = register_member(state, group, pid)
+
+        # "No RPC" assumes the router already knows we hold this group. That
+        # assumption does not survive a coordinator restart when we are our OWN
+        # router: init/1 resets the ring to `[node()]`, so we can be our own
+        # router again for a group whose self row was tombstoned while it was
+        # routed elsewhere during our downtime, and rebuild_group_states only
+        # re-asserts self rows for groups with LIVE members (this one had none
+        # while cooling down). See tla/FINDINGS.md finding 1. One cheap,
+        # idempotent ETS write closes the gap: a fresh seq either re-raises an
+        # already-correct row (no-op) or repairs a stale one. A REMOTE router
+        # needs no such guard: reaching a multi-node view again implies a
+        # rebalance that re-announced held groups, :cooldown included.
+        if router_from_state(state, group) == node() do
+          Scope.upsert_if_newer(state.occupancy_table, {group, node()}, next_seq())
+        end
+
         {:reply, :ok, put_group_state(state, group, :occupied)}
 
       {:occupied_pending, waiters} ->

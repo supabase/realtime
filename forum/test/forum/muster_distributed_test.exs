@@ -157,6 +157,30 @@ defmodule Forum.MusterDistributedTest do
     end
   end
 
+  # Retries `fun` until it returns `:ok`, for calls made right after a
+  # supervisor restart cascade: the target GenServer name can be transiently
+  # unregistered (mid-:rest_for_one-restart), which surfaces as an
+  # `{:error, {:scope_exit, _}}` from `Forum.Muster.join/3` rather than a block.
+  defp retry_until_ok(fun, timeout \\ 5_000) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+    do_retry_until_ok(fun, deadline)
+  end
+
+  defp do_retry_until_ok(fun, deadline) do
+    case fun.() do
+      :ok ->
+        :ok
+
+      other ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          flunk("condition not met in time: #{inspect(other)}")
+        else
+          Process.sleep(5)
+          do_retry_until_ok(fun, deadline)
+        end
+    end
+  end
+
   describe "distributed convergence barrier" do
     setup do
       scope = :"muster_dist_#{System.unique_integer([:positive])}"
@@ -2638,6 +2662,95 @@ defmodule Forum.MusterDistributedTest do
                    |> Enum.filter(&(&1.node == result.r_node and &1.source == result.t_node))
 
           assert result.group in groups
+        end
+      )
+    end
+  end
+
+  describe "cooldown reclaim across a coordinator restart (tla/FINDINGS.md finding 1)" do
+    setup do
+      scope = :"muster_cooldown_restart_#{System.unique_integer([:positive])}"
+      start_supervised!(spec(scope, vacant_flush_interval_ms: 100))
+      %{scope: scope}
+    end
+
+    # tla/FINDINGS.md finding 1: `Forum.Muster.Shard.handle_join/4`'s
+    # `:cooldown` branch reclaims without notifying the router, on the
+    # assumption "the router already knows we hold this group". That
+    # assumption does not survive a coordinator restart: `init/1` resets the
+    # ring to `[node()]`, so the restarted coordinator briefly IS its own
+    # router again for a group whose self-row was tombstoned while the group
+    # was routed elsewhere. `rebuild_group_states` only re-asserts self rows
+    # for groups with LIVE members, so a group sitting in `:cooldown` (no
+    # members) gets nothing — a client that reclaims it during that window is
+    # told `:ok`, but the router-role occupancy table it just became the
+    # router for stays empty.
+    test "a rejoin during the restart window leaves a live member with no occupancy row",
+         %{scope: scope} do
+      t_node = node()
+
+      check_trace(
+        fn ->
+          # Learn the peer's node name before starting Muster on it, so we can
+          # pick — by consistent-hash probing only, touching no real Muster
+          # state (see `pick_group/1`) — a group that will route to it once it
+          # pairs.
+          {:ok, p_r, r_node} = Peer.start(aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(r_node)
+
+          group = pick_group([{[t_node, r_node], r_node}])
+
+          # T alone: `group` trivially routes to itself. Join (self-row
+          # written) then leave (self-row still present, group now cooling
+          # down).
+          member1 = spawn(fn -> Process.sleep(:infinity) end)
+          :ok = Muster.join(scope, group, member1)
+          assert t_node in occupancy_on(t_node, scope, group)
+          :ok = Muster.leave(scope, group, member1)
+          assert group_state(scope, group) == :cooldown
+
+          # R pairs. `group`'s router moves T -> R: T's rebalance snapshot to
+          # R carries the (cooldown-)held group, and T's own now-stale
+          # self-row is tombstoned by its own drop_stale_router_entries sweep.
+          start_remote_muster(p_r, scope)
+          view2 = Enum.sort([t_node, r_node])
+          await_ready(view2)
+
+          assert t_node in occupancy_on(r_node, scope, group)
+          assert group_state(scope, group) == :cooldown
+          assert occupancy_on(t_node, scope, group) == []
+
+          # Crash T's OWN coordinator in place (never R's). :rest_for_one
+          # restarts it and every shard; the ring (a separate, un-restarted
+          # sibling) gets reset back to `[t_node]` by the new coordinator's
+          # own init/1.
+          coord = Process.whereis(Forum.Supervisor.name(scope))
+          ref = Process.monitor(coord)
+          true = Process.exit(coord, :kill)
+          assert_receive {:DOWN, ^ref, :process, ^coord, _reason}, 5_000
+
+          # A client rejoins immediately, in the window where T's ring is
+          # still (transiently) `[t_node]` and T therefore believes itself the
+          # router for `group` again. The shard's durable :cooldown state
+          # survived the restart (it lives in a Supervisor-owned ETS table),
+          # so the reclaim takes the "router already knows" branch and skips
+          # the occupancy write. retry_until_ok absorbs the brief window where
+          # the shard is still mid-restart.
+          member2 = spawn(fn -> Process.sleep(:infinity) end)
+          assert :ok = retry_until_ok(fn -> Muster.join(scope, group, member2) end)
+
+          %{group: group, member2: member2, t_node: t_node, r_node: r_node}
+        end,
+        fn result, _trace ->
+          # BUG: a live, successfully-joined member with an empty occupancy
+          # row on its own (once again self-)router — the exact
+          # `Muster.targets/3` `{:ok, []}`-for-a-live-member violation
+          # tla/FINDINGS.md finding 1 describes.
+          assert Muster.local_member_count(scope, result.group) == 1
+          assert Muster.local_member?(scope, result.group, result.member2)
+          assert group_state(scope, result.group) == :occupied
+
+          assert result.t_node in occupancy_on(result.t_node, scope, result.group)
         end
       )
     end
