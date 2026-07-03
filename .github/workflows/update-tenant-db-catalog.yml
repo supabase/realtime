@@ -6,7 +6,6 @@ on:
       - "lib/realtime/tenants/repo/migrations/**"
       - "lib/realtime/tenants/migrations.ex"
       - "lib/mix/tasks/realtime.export_tenant_db_catalog.ex"
-      - "priv/repo/tenant_db_catalog_*.json"
       - "mix.lock"
       - "mise.toml"
       - "compose.dbs.yml"
@@ -20,28 +19,24 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
-env:
-  POSTGRES_IMAGE: supabase/postgres:17.6.1.127
-
 jobs:
   update-tenant-db-catalog:
-    name: Maybe regenerate tenant catalog
+    name: Export catalog (pg${{ matrix.pg_major }})
     runs-on: blacksmith-2vcpu-ubuntu-2404
     if: github.event.pull_request.head.repo.full_name == github.repository
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pg_major: 15
+            postgres_image: supabase/postgres:15.14.1.129
+          - pg_major: 17
+            postgres_image: supabase/postgres:17.6.1.127
+    env:
+      POSTGRES_IMAGE: ${{ matrix.postgres_image }}
 
     steps:
-      - name: Generate GitHub App token
-        id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          client-id: ${{ secrets.GH_APP_MANAGER_ID }}
-          private-key: ${{ secrets.GH_APP_MANAGER_PRIVATE_KEY }}
-
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          token: ${{ steps.app-token.outputs.token }}
 
       - name: Setup mise
         uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
@@ -64,7 +59,7 @@ jobs:
         id: docker-cache
         with:
           path: /tmp/docker-images
-          key: docker-images-zstd-${{ env.POSTGRES_IMAGE }}
+          key: docker-images-zstd-${{ matrix.postgres_image }}
 
       - name: Load Docker images from cache
         if: steps.docker-cache.outputs.cache-hit == 'true'
@@ -73,9 +68,9 @@ jobs:
       - name: Pull and save Docker images
         if: steps.docker-cache.outputs.cache-hit != 'true'
         run: |
-          docker pull ${{ env.POSTGRES_IMAGE }}
+          docker pull ${{ matrix.postgres_image }}
           mkdir -p /tmp/docker-images
-          docker image save ${{ env.POSTGRES_IMAGE }} | zstd -T0 -o /tmp/docker-images/postgres.tar.zst
+          docker image save ${{ matrix.postgres_image }} | zstd -T0 -o /tmp/docker-images/postgres.tar.zst
 
       - name: Start Postgres
         run: docker compose -f compose.dbs.yml up -d --wait
@@ -86,10 +81,46 @@ jobs:
       - name: Export catalog snapshot
         run: mix realtime.export_tenant_db_catalog
 
+      - name: Upload catalog artifact
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: tenant-catalog-${{ matrix.pg_major }}
+          path: priv/repo/tenant_db_catalog_${{ matrix.pg_major }}.json
+          if-no-files-found: error
+
+  commit-changes:
+    name: Commit catalog snapshots
+    needs: update-tenant-db-catalog
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    if: github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.GH_APP_MANAGER_ID }}
+          private-key: ${{ secrets.GH_APP_MANAGER_PRIVATE_KEY }}
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Download catalog artifacts
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          pattern: tenant-catalog-*
+          path: artifacts
+
+      - name: Move artifacts into place
+        run: find artifacts -type f -name '*.json' -exec cp {} priv/repo/ \;
+
       - name: Check if catalog changed
         id: check-changes
         run: |
-          git add priv/repo/tenant_db_catalog_17.json
+          git add priv/repo/tenant_db_catalog_15.json priv/repo/tenant_db_catalog_17.json
           if git diff --cached --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
@@ -103,5 +134,5 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore: update tenant_db_catalog_17.json [skip ci]"
+          git commit -m "chore: update tenant db catalog snapshots"
           git push origin "HEAD:$PR_HEAD_REF"
