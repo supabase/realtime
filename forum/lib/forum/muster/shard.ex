@@ -278,7 +278,12 @@ defmodule Forum.Muster.Shard do
     # re-assertion: their row lives on another node, untouched by our crash.
     Enum.each(live, fn group ->
       if router_from_state(state, group) == node() do
-        Scope.upsert_if_newer(state.occupancy_table, {group, node()}, next_seq())
+        Scope.upsert_if_newer(
+          state.occupancy_table,
+          {group, node()},
+          next_seq(),
+          local_scope_pid(state)
+        )
       end
     end)
 
@@ -438,7 +443,14 @@ defmodule Forum.Muster.Shard do
           # a row with no member that nothing retracts.
           state = register_member(state, group, pid)
           state = put_group_state(state, group, :occupied)
-          Scope.upsert_if_newer(state.occupancy_table, {group, node()}, next_seq())
+
+          Scope.upsert_if_newer(
+            state.occupancy_table,
+            {group, node()},
+            next_seq(),
+            local_scope_pid(state)
+          )
+
           {:reply, :ok, state}
         else
           Logger.debug(
@@ -482,7 +494,12 @@ defmodule Forum.Muster.Shard do
         # needs no such guard: reaching a multi-node view again implies a
         # rebalance that re-announced held groups, :cooldown included.
         if router_from_state(state, group) == node() do
-          Scope.upsert_if_newer(state.occupancy_table, {group, node()}, next_seq())
+          Scope.upsert_if_newer(
+            state.occupancy_table,
+            {group, node()},
+            next_seq(),
+            local_scope_pid(state)
+          )
         end
 
         {:reply, :ok, put_group_state(state, group, :occupied)}
@@ -517,7 +534,14 @@ defmodule Forum.Muster.Shard do
           # occupancy row last (crash-safe; see the nil branch above).
           state = register_member(state, group, pid)
           state = put_group_state(state, group, :occupied)
-          Scope.upsert_if_newer(state.occupancy_table, {group, node()}, next_seq())
+
+          Scope.upsert_if_newer(
+            state.occupancy_table,
+            {group, node()},
+            next_seq(),
+            local_scope_pid(state)
+          )
+
           {:reply, :ok, state}
         else
           Logger.debug(
@@ -794,7 +818,7 @@ defmodule Forum.Muster.Shard do
       state,
       router_node,
       :occupied,
-      [state.scope, group, node(), next_seq()],
+      [state.scope, group, node(), next_seq(), local_scope_pid(state)],
       {:occupied_done, group}
     )
 
@@ -819,10 +843,16 @@ defmodule Forum.Muster.Shard do
       state,
       router_node,
       :vacant_batch,
-      [state.scope, groups, node(), next_seq()],
+      [state.scope, groups, node(), next_seq(), local_scope_pid(state)],
       {:vacant_batch_done, groups}
     )
   end
+
+  # The local Scope coordinator's CURRENT incarnation pid, read fresh at
+  # dispatch/write time (never cached) — see the writer-attribution note above
+  # Scope.upsert_if_newer/4. `nil` if Scope has not registered yet (a narrow
+  # startup window); such rows just never match a DOWN's exact-pid wipe.
+  defp local_scope_pid(state), do: Process.whereis(Forum.Supervisor.name(state.scope))
 
   # spawn_opt with monitor + tag gives us atomic spawn+monitor and uses the
   # worker's exit reason as the result channel, so any termination surfaces as a

@@ -117,7 +117,7 @@ defmodule Forum.Muster.Scope do
   @spec occupancy(atom, Forum.group()) :: [node]
   def occupancy(scope, group) do
     # :present rows only (a tombstone, whose meta is an integer timestamp, reads as absent).
-    :ets.select(occupancy_table_name(scope), [{{{group, :"$1"}, :_, :present}, [], [:"$1"]}])
+    :ets.select(occupancy_table_name(scope), [{{{group, :"$1"}, :_, :present, :_}, [], [:"$1"]}])
   end
 
   @doc false
@@ -126,7 +126,7 @@ defmodule Forum.Muster.Scope do
   def occupancy_table_name(scope), do: :"#{scope}_muster_occupancy"
 
   # Occupancy rows are a uniform last-writer-wins-by-seq register, keyed by
-  # {group, source} and shaped {{group, source}, seq, meta}:
+  # {group, source} and shaped {{group, source}, seq, meta, writer}:
   #
   #   * meta == :present        : the source holds local members of the group.
   #   * meta == <created_at ms>  : a TOMBSTONE. The source vacated the group as of
@@ -139,6 +139,12 @@ defmodule Forum.Muster.Scope do
   #     reaped by a periodic, time-windowed sweep (reap_tombstones/1) once older
   #     than the longest an in-flight RPC could still be (a multiple of
   #     rpc_timeout_ms, see default_tombstone_window/1).
+  #   * `writer` is the pid of the source's Scope coordinator INCARNATION that
+  #     produced this row (tla/FINDINGS.md finding 2 — see handle_info({:DOWN,
+  #     ...}) below). Only one Scope can be live per node at a time, so a row
+  #     whose `writer` differs from a dying pid was necessarily produced by a
+  #     different (live or later) incarnation and must not be wiped alongside
+  #     it, regardless of what has or hasn't been registered as a peer yet.
   #
   # `occupancy/2` returns only :present rows, so a tombstone reads as "absent".
 
@@ -148,37 +154,41 @@ defmodule Forum.Muster.Scope do
   # claims. Strict `<`: an equal seq never overwrites (seqs are globally unique per
   # source, so ties do not occur in practice). Public so Forum.Muster.Shard writes
   # it directly.
-  @spec upsert_if_newer(atom, {Forum.group(), node}, integer) :: :ok
-  def upsert_if_newer(table, key, seq), do: put_if_newer(table, key, seq, :present, :lt)
+  @spec upsert_if_newer(atom, {Forum.group(), node}, integer, pid | nil) :: :ok
+  def upsert_if_newer(table, key, seq, writer \\ nil),
+    do: put_if_newer(table, key, seq, :present, :lt, writer)
 
   # Mark the key a TOMBSTONE at `seq` (absent), stamped `created_at` (router-local
   # monotonic ms) for the GC sweep. `=<` so a vacancy at the stored seq still wins
   # a strictly-newer :present row (a re-claim) survives.
-  @spec tombstone_if_newer(atom, {Forum.group(), node}, integer, integer) :: :ok
-  defp tombstone_if_newer(table, key, seq, created_at),
-    do: put_if_newer(table, key, seq, created_at, :lte)
+  @spec tombstone_if_newer(atom, {Forum.group(), node}, integer, integer, pid | nil) :: :ok
+  defp tombstone_if_newer(table, key, seq, created_at, writer),
+    do: put_if_newer(table, key, seq, created_at, :lte, writer)
 
-  # Seq-guarded write of {key, seq, meta}. Atomic against concurrent writers via
-  # select_replace (raise branch) + insert_new (absent branch), retried on the rare
-  # interleaving where a still-older row appears in between. `cmp` is the overwrite
-  # comparison (:lt for a present INSERT, :lte for a tombstone). The replacement
-  # object reconstructs the row; the key tuple is injected as a {:const, _} literal
-  # (a bare tuple in a match-spec body is a construction form, not a value).
-  defp put_if_newer(table, key, seq, meta, cmp) do
-    spec = [{{key, :"$1", :_}, [{op(cmp), :"$1", seq}], [{{{:const, key}, seq, meta}}]}]
+  # Seq-guarded write of {key, seq, meta, writer}. Atomic against concurrent
+  # writers via select_replace (raise branch) + insert_new (absent branch),
+  # retried on the rare interleaving where a still-older row appears in
+  # between. `cmp` is the overwrite comparison (:lt for a present INSERT, :lte
+  # for a tombstone). The replacement object reconstructs the row; the key
+  # tuple is injected as a {:const, _} literal (a bare tuple in a match-spec
+  # body is a construction form, not a value).
+  defp put_if_newer(table, key, seq, meta, cmp, writer) do
+    spec = [
+      {{key, :"$1", :_, :_}, [{op(cmp), :"$1", seq}], [{{{:const, key}, seq, meta, writer}}]}
+    ]
 
     case :ets.select_replace(table, spec) do
       1 ->
         :ok
 
       0 ->
-        if :ets.insert_new(table, {key, seq, meta}) do
+        if :ets.insert_new(table, {key, seq, meta, writer}) do
           :ok
         else
           case :ets.lookup(table, key) do
-            [{^key, existing, _}] ->
+            [{^key, existing, _, _}] ->
               if overwrite?(cmp, existing, seq),
-                do: put_if_newer(table, key, seq, meta, cmp),
+                do: put_if_newer(table, key, seq, meta, cmp, writer),
                 else: :ok
 
             _ ->
@@ -196,10 +206,12 @@ defmodule Forum.Muster.Scope do
   # Convert this `source`'s rows older than `seq` into tombstones at `seq` (used by
   # the rebalance snapshot's full-state replace). Each write is individually
   # seq-guarded, so a row a racing re-claim already raised above `seq` is spared.
-  defp tombstone_stale_source_rows(table, source, seq, created_at) do
+  defp tombstone_stale_source_rows(table, source, seq, created_at, writer) do
     table
-    |> :ets.select([{{{:"$1", source}, :"$2", :_}, [{:<, :"$2", seq}], [:"$1"]}])
-    |> Enum.each(fn group -> tombstone_if_newer(table, {group, source}, seq, created_at) end)
+    |> :ets.select([{{{:"$1", source}, :"$2", :_, :_}, [{:<, :"$2", seq}], [:"$1"]}])
+    |> Enum.each(fn group ->
+      tombstone_if_newer(table, {group, source}, seq, created_at, writer)
+    end)
   end
 
   ## Remote entry points
@@ -224,9 +236,24 @@ defmodule Forum.Muster.Scope do
   # vacant worker exited, its seq is strictly higher, and `vacant_batch` refuses to
   # delete a row stamped newer than itself.
 
-  @doc "Remote: source_node tells us it now holds local members of `group`."
-  @spec occupied(atom, Forum.group(), node, integer) :: :ok
-  def occupied(scope, group, source_node, seq) do
+  @doc """
+  Remote: source_node tells us it now holds local members of `group`.
+
+  `source_pid` (added for tla/FINDINGS.md finding 2) is the pid of the
+  source's Scope coordinator INCARNATION that dispatched this claim — read by
+  the dispatching Shard from its local Scope's registered name right before
+  the RPC. It's stamped on the row so `handle_info({:DOWN, ...})` can tell
+  whether a later-dying pid actually produced this row, without having to
+  know whether that incarnation has been registered as a peer yet (a
+  completely independent, unordered channel — see the handler for why that
+  distinction matters). Callers with no live coordinator to attribute to
+  (chiefly tests exercising the write path directly) must pass an explicit
+  pid anyway — `nil` is only ever produced internally, by `local_scope_pid/1`
+  during the narrow startup window before Scope has registered; such rows are
+  simply never matched by a DOWN's exact-pid wipe.
+  """
+  @spec occupied(atom, Forum.group(), node, integer, pid | nil) :: :ok
+  def occupied(scope, group, source_node, seq, source_pid) do
     # Seq-guarded upsert (not an unconditional insert): a snapshot for this same
     # {group, source} may be applied concurrently by this coordinator during a
     # rebalance, and we must not let an older write clobber a newer one. See
@@ -244,7 +271,7 @@ defmodule Forum.Muster.Scope do
       source: source_node,
       seq: seq
     }) do
-      upsert_if_newer(occupancy_table_name(scope), {group, source_node}, seq)
+      upsert_if_newer(occupancy_table_name(scope), {group, source_node}, seq, source_pid)
     end
 
     # Emitted AFTER the insert, so a forced ordering on this event implies the
@@ -261,9 +288,9 @@ defmodule Forum.Muster.Scope do
     :ok
   end
 
-  @doc "Remote: source_node tells us its last local members of `groups` left."
-  @spec vacant_batch(atom, [Forum.group()], node, integer) :: :ok
-  def vacant_batch(scope, groups, source_node, seq) do
+  @doc "Remote: source_node tells us its last local members of `groups` left. See occupied/5 for `source_pid`."
+  @spec vacant_batch(atom, [Forum.group()], node, integer, pid | nil) :: :ok
+  def vacant_batch(scope, groups, source_node, seq, source_pid) do
     table = occupancy_table_name(scope)
     created_at = System.monotonic_time(:millisecond)
 
@@ -281,7 +308,7 @@ defmodule Forum.Muster.Scope do
       seq: seq
     }) do
       Enum.each(groups, fn group ->
-        tombstone_if_newer(table, {group, source_node}, seq, created_at)
+        tombstone_if_newer(table, {group, source_node}, seq, created_at, source_pid)
       end)
     end
 
@@ -309,12 +336,16 @@ defmodule Forum.Muster.Scope do
   and resumes its view heartbeat to us, our data and marker are already in place.
   We pass `:infinity` for the inner call (it is a few ETS ops that never block);
   the sender's `:erpc` `:rpc_timeout_ms` is the real bound.
+
+  `source_pid` (see occupied/5) is `self()` at the dispatching Scope — it
+  dispatches this RPC itself, so no lookup is needed.
   """
-  @spec receive_node_state(atom, node, [Forum.group()], non_neg_integer, integer) :: :ok
-  def receive_node_state(scope, source_node, groups, view_hash, seq) do
+  @spec receive_node_state(atom, node, [Forum.group()], non_neg_integer, integer, pid | nil) ::
+          :ok
+  def receive_node_state(scope, source_node, groups, view_hash, seq, source_pid) do
     GenServer.call(
       Forum.Supervisor.name(scope),
-      {:apply_snapshot, source_node, groups, view_hash, seq},
+      {:apply_snapshot, source_node, groups, view_hash, seq, source_pid},
       :infinity
     )
   end
@@ -333,11 +364,11 @@ defmodule Forum.Muster.Scope do
   snapshot), and it doubles as the source's rebalance marker (data first, then
   readiness), so the readiness barrier treats it exactly like a snapshot.
   """
-  @spec apply_delta(atom, node, [Forum.group()], non_neg_integer, integer) :: :ok
-  def apply_delta(scope, source_node, adds, view_hash, seq) do
+  @spec apply_delta(atom, node, [Forum.group()], non_neg_integer, integer, pid | nil) :: :ok
+  def apply_delta(scope, source_node, adds, view_hash, seq, source_pid) do
     GenServer.call(
       Forum.Supervisor.name(scope),
-      {:apply_delta, source_node, adds, view_hash, seq},
+      {:apply_delta, source_node, adds, view_hash, seq, source_pid},
       :infinity
     )
   end
@@ -504,20 +535,24 @@ defmodule Forum.Muster.Scope do
   # watermark and fold in the carried view marker (member_views + update_status).
   # Data first, then readiness, in one indivisible step.
   @impl true
-  def handle_call({:apply_snapshot, source, groups, view_hash, seq}, _from, %State{} = state) do
+  def handle_call(
+        {:apply_snapshot, source, groups, view_hash, seq, source_pid},
+        _from,
+        %State{} = state
+      ) do
     applied = Map.get(state.applied_snapshot_seq, source)
 
-    if applied != nil and seq <= applied do
+    if applied != nil and seq <= elem(applied, 0) do
       {:reply, :ok, state}
     else
       table = state.occupancy_table
       created_at = System.monotonic_time(:millisecond)
-      Enum.each(groups, fn group -> upsert_if_newer(table, {group, source}, seq) end)
+      Enum.each(groups, fn group -> upsert_if_newer(table, {group, source}, seq, source_pid) end)
       # Tombstone (not delete) this source's rows that predate the snapshot and are
       # not in it: a late, lower-seq INSERT for a group the source no longer holds
       # must not resurrect it. The just-upserted present rows are at `seq` (not
       # < seq) and are spared.
-      tombstone_stale_source_rows(table, source, seq, created_at)
+      tombstone_stale_source_rows(table, source, seq, created_at, source_pid)
 
       tp(:muster_node_state_received, %{
         scope: state.scope,
@@ -529,10 +564,10 @@ defmodule Forum.Muster.Scope do
 
       state = %{
         state
-        | applied_snapshot_seq: Map.put(state.applied_snapshot_seq, source, seq)
+        | applied_snapshot_seq: Map.put(state.applied_snapshot_seq, source, {seq, source_pid})
       }
 
-      {:reply, :ok, update_status(put_member_view(state, source, view_hash, seq))}
+      {:reply, :ok, update_status(put_member_view(state, source, view_hash, seq, source_pid))}
     end
   end
 
@@ -549,14 +584,18 @@ defmodule Forum.Muster.Scope do
   # a snapshot (data first, then readiness), so the barrier cannot tell the two
   # apart.
   @impl true
-  def handle_call({:apply_delta, source, adds, view_hash, seq}, _from, %State{} = state) do
+  def handle_call(
+        {:apply_delta, source, adds, view_hash, seq, source_pid},
+        _from,
+        %State{} = state
+      ) do
     applied = Map.get(state.applied_snapshot_seq, source)
 
-    if applied != nil and seq <= applied do
+    if applied != nil and seq <= elem(applied, 0) do
       {:reply, :ok, state}
     else
       table = state.occupancy_table
-      Enum.each(adds, fn group -> upsert_if_newer(table, {group, source}, seq) end)
+      Enum.each(adds, fn group -> upsert_if_newer(table, {group, source}, seq, source_pid) end)
 
       tp(:muster_delta_received, %{
         scope: state.scope,
@@ -568,10 +607,10 @@ defmodule Forum.Muster.Scope do
 
       state = %{
         state
-        | applied_snapshot_seq: Map.put(state.applied_snapshot_seq, source, seq)
+        | applied_snapshot_seq: Map.put(state.applied_snapshot_seq, source, {seq, source_pid})
       }
 
-      {:reply, :ok, update_status(put_member_view(state, source, view_hash, seq))}
+      {:reply, :ok, update_status(put_member_view(state, source, view_hash, seq, source_pid))}
     end
   end
 
@@ -599,7 +638,7 @@ defmodule Forum.Muster.Scope do
       state.occupancy_table
       |> :ets.tab2list()
       |> Enum.reduce(%{}, fn
-        {{group, src}, _seq, :present}, acc -> Map.update(acc, group, [src], &[src | &1])
+        {{group, src}, _seq, :present, _writer}, acc -> Map.update(acc, group, [src], &[src | &1])
         _tombstone, acc -> acc
       end)
 
@@ -656,7 +695,7 @@ defmodule Forum.Muster.Scope do
       {:muster_discover_ack, self(), ack_view_hash, ack_seq}
     )
 
-    state = put_member_view(state, peer_node, view_hash, seq)
+    state = put_member_view(state, peer_node, view_hash, seq, peer)
     {:noreply, register_peer(state, peer)}
   end
 
@@ -670,7 +709,7 @@ defmodule Forum.Muster.Scope do
   end
 
   def handle_info({:muster_discover_ack, peer, view_hash, seq}, %State{} = state) do
-    state = put_member_view(state, node(peer), view_hash, seq)
+    state = put_member_view(state, node(peer), view_hash, seq, peer)
     {:noreply, register_peer(state, peer)}
   end
 
@@ -697,67 +736,64 @@ defmodule Forum.Muster.Scope do
   # do NOT gate on it matching our current view: storing it means an announcement
   # that arrives before we adopt that view is retained, so once we catch up the
   # agreement check in ready?/1 sees it.
-  def handle_info({:rebalance_marker, source, view_hash, seq}, %State{} = state) do
-    {:noreply, update_status(put_member_view(state, source, view_hash, seq))}
+  def handle_info({:rebalance_marker, source, source_pid, view_hash, seq}, %State{} = state) do
+    {:noreply, update_status(put_member_view(state, source, view_hash, seq, source_pid))}
   end
 
-  # Peer coordinator crashed/disconnected: drop occupancy entries owned by that
-  # node and rebalance.
+  # Peer coordinator crashed/disconnected: drop occupancy entries, member_views
+  # and applied_snapshot_seq entries ATTRIBUTABLE TO THIS DYING PID, and
+  # rebalance.
   #
-  # tla/FINDINGS.md finding 2: `peers` is keyed by PID, not node, and a peer
-  # that restarts IN PLACE can have its fresh discover/ack register a NEW pid
-  # for the same node BEFORE this handler ever runs for the OLD pid's DOWN
-  # (discover travels the adapter channel, DOWN travels the monitor channel,
-  # and nothing orders the two). If that already happened, the occupancy rows
-  # / member_views / applied_snapshot_seq entries keyed by this node may
-  # belong to the NEW, still-live incarnation (which may already have
-  # delivered a fresh snapshot and been acked) rather than the dead one, and
-  # wiping by node alone would destroy them permanently: membership does not
-  # change (the node is still a peer via its new pid), so recompute_members
-  # is a no-op and nothing ever re-announces to repair it.
+  # tla/FINDINGS.md finding 2: occupancy rows / member_views / applied_snapshot_seq
+  # entries are written from TWO independent, unordered channels -- the
+  # peer-registration messages (discover/discover_ack/rebalance_marker, which
+  # carry the writer's pid) and the data RPCs (occupied/4, vacant_batch/4,
+  # receive_node_state/5, apply_delta/5, which now carry it too). A peer that
+  # restarts in place can have its fresh DATA (a snapshot applied via
+  # receive_node_state/5) land and get written under the NEW pid before this
+  # handler ever runs for the OLD pid's DOWN, with NO discover/ack from the
+  # new incarnation processed yet -- register_peer/peers has no idea a newer
+  # incarnation exists. Wiping by node alone (or by "is some other peer
+  # currently registered", which only watches the registration channel) would
+  # destroy that already-applied, already-correct data permanently: membership
+  # does not change (nothing new got registered), so recompute_members is a
+  # no-op and nothing ever re-announces to repair it.
   #
-  # So: only wipe when the dying pid was the LAST live peer registered for
-  # this node. If another peer for the same node is still registered, its
-  # data is spared -- the guard the "DOWN wipe" needs at this position is
-  # exactly the finding's "another live incarnation is still registered"
-  # check.
-  #
-  # Wrapped in a span (fires BEFORE the wipe, always -- even when spared) so
-  # a test can force the race onto this exact window
-  # (muster_distributed_test.exs reproduces the wipe destroying a newer
-  # incarnation's already-delivered data).
+  # So: wipe only the entries actually attributable to THIS pid -- each of
+  # occupancy / member_views / applied_snapshot_seq carries the writer pid
+  # that produced it, independent of whatever `peers` currently holds. A row
+  # written by any OTHER pid was necessarily written by a different
+  # incarnation (only one Scope can be live per node at a time) and is left
+  # alone, regardless of whether that incarnation has been registered as a
+  # peer yet.
   def handle_info({:DOWN, ref, :process, pid, _reason}, %State{} = state) do
     case Map.pop(state.peers, pid) do
       {^ref, new_peers} ->
         peer_node = node(pid)
-        newer_incarnation_live? = Enum.any?(new_peers, fn {p, _ref} -> node(p) == peer_node end)
+
+        Logger.info(
+          "Muster[#{node()}|#{state.scope}] peer down: #{inspect(peer_node)}, dropping occupancy/view data attributable to this incarnation and rebalancing"
+        )
 
         tp_span(:muster_peer_down_apply, %{
           scope: state.scope,
           node: node(),
-          peer_node: peer_node,
-          spared: newer_incarnation_live?
+          peer_node: peer_node
         }) do
-          if newer_incarnation_live? do
-            Logger.info(
-              "Muster[#{node()}|#{state.scope}] peer down: #{inspect(peer_node)}, but a newer incarnation is already registered -- sparing its occupancy"
-            )
-          else
-            Logger.info(
-              "Muster[#{node()}|#{state.scope}] peer down: #{inspect(peer_node)}, dropping its occupancy and rebalancing"
-            )
-
-            :ets.match_delete(state.occupancy_table, {{:_, peer_node}, :_, :_})
-            :telemetry.execute([:forum, state.scope, :node, :down], %{}, %{node: peer_node})
-          end
+          :ets.match_delete(state.occupancy_table, {{:_, peer_node}, :_, :_, pid})
+          :telemetry.execute([:forum, state.scope, :node, :down], %{}, %{node: peer_node})
         end
 
-        {member_views, applied_snapshot_seq} =
-          if newer_incarnation_live? do
-            {state.member_views, state.applied_snapshot_seq}
-          else
-            {Map.delete(state.member_views, peer_node),
-             Map.delete(state.applied_snapshot_seq, peer_node)}
+        member_views =
+          case Map.get(state.member_views, peer_node) do
+            {_view_hash, _seq, ^pid} -> Map.delete(state.member_views, peer_node)
+            _ -> state.member_views
+          end
+
+        applied_snapshot_seq =
+          case Map.get(state.applied_snapshot_seq, peer_node) do
+            {_seq, ^pid} -> Map.delete(state.applied_snapshot_seq, peer_node)
+            _ -> state.applied_snapshot_seq
           end
 
         state = %{
@@ -1019,7 +1055,7 @@ defmodule Forum.Muster.Scope do
 
     Enum.each(local_targets, fn {_, groups, _} ->
       Enum.each(groups, fn group ->
-        upsert_if_newer(state.occupancy_table, {group, node()}, snapshot_seq)
+        upsert_if_newer(state.occupancy_table, {group, node()}, snapshot_seq, self())
       end)
     end)
 
@@ -1030,7 +1066,7 @@ defmodule Forum.Muster.Scope do
         state,
         router_node,
         function,
-        [state.scope, node(), groups, view_hash, snapshot_seq],
+        [state.scope, node(), groups, view_hash, snapshot_seq, self()],
         {:node_state_done, router_node, snapshot_seq}
       )
     end)
@@ -1047,11 +1083,20 @@ defmodule Forum.Muster.Scope do
     # member_views when applied, after the data write). Every other member gets a
     # cheap async marker so its barrier learns "this source holds nothing for me"
     # rather than "this source has not arrived yet". Self never needs one.
-    Enum.each(new_members -- [node() | snapshot_targets], fn member ->
+    #
+    # tla/FINDINGS.md finding 4: excluding only THIS round's snapshot_targets is
+    # not enough. A member still owed a PREVIOUS round's un-acked snapshot (its
+    # routed groups did not move again this round, so it is not a snapshot_target
+    # now either) would otherwise get a bare marker for the new view and could
+    # count us as agreed before the old round's data lands. So also exclude every
+    # node still in owed_snapshots (this round's plus any carried over): its
+    # marker keeps riding its eventual snapshot, and the heartbeat (announce_view)
+    # resumes covering it once that snapshot is acked.
+    Enum.each(new_members -- [node() | Map.keys(owed_snapshots)], fn member ->
       state.message_module.send(
         state.scope,
         member,
-        {:rebalance_marker, node(), view_hash, snapshot_seq}
+        {:rebalance_marker, node(), self(), view_hash, snapshot_seq}
       )
     end)
 
@@ -1124,7 +1169,7 @@ defmodule Forum.Muster.Scope do
     own = own_view_hash(state)
 
     Enum.all?(state.members, fn member ->
-      member == node() or match?({^own, _}, Map.get(state.member_views, member))
+      member == node() or match?({^own, _, _}, Map.get(state.member_views, member))
     end)
   end
 
@@ -1133,14 +1178,17 @@ defmodule Forum.Muster.Scope do
   # Newest-seq-wins: seqs are per-source monotonic dispatch stamps, so the entry
   # with the highest seq is the source's causally-latest announcement even when
   # markers arrive out of order (they travel both as async dist sends and inside
-  # :receive_node_state RPCs).
-  defp put_member_view(state, source, view_hash, seq) do
+  # :receive_node_state RPCs). `writer` (see the occupancy table note above
+  # upsert_if_newer/4) is stored alongside the view/seq so
+  # handle_info({:DOWN, ...}) can tell whether THIS entry is attributable to a
+  # dying pid, independent of whether that pid is (still, or yet) in `peers`.
+  defp put_member_view(state, source, view_hash, seq, writer) do
     case Map.get(state.member_views, source) do
-      {_hash, newer} when newer > seq ->
+      {_hash, newer, _writer} when newer > seq ->
         state
 
       _ ->
-        %{state | member_views: Map.put(state.member_views, source, {view_hash, seq})}
+        %{state | member_views: Map.put(state.member_views, source, {view_hash, seq, writer})}
     end
   end
 
@@ -1183,8 +1231,10 @@ defmodule Forum.Muster.Scope do
     created_at = System.monotonic_time(:millisecond)
 
     state.occupancy_table
-    |> :ets.select([{{{:"$1", :"$2"}, :"$3", :"$4"}, [], [{{:"$1", :"$2", :"$3", :"$4"}}]}])
-    |> Enum.each(fn {group, n, row_seq, meta} ->
+    |> :ets.select([
+      {{{:"$1", :"$2"}, :"$3", :"$4", :"$5"}, [], [{{:"$1", :"$2", :"$3", :"$4", :"$5"}}]}
+    ])
+    |> Enum.each(fn {group, n, row_seq, meta, writer} ->
       # Agreement first: it is a map lookup, and at rebalance time most sources
       # have not announced the new view yet, so their rows are skipped without
       # paying for the ring lookup.
@@ -1223,8 +1273,8 @@ defmodule Forum.Muster.Scope do
             seq: row_seq
           }) do
             :ets.select_replace(state.occupancy_table, [
-              {{{group, n}, row_seq, :present}, [],
-               [{{{:const, {group, n}}, row_seq, created_at}}]}
+              {{{group, n}, row_seq, :present, writer}, [],
+               [{{{:const, {group, n}}, row_seq, created_at, writer}}]}
             ])
           end
 
@@ -1252,7 +1302,7 @@ defmodule Forum.Muster.Scope do
 
   defp source_agrees?(state, source, row_seq, own) do
     case Map.get(state.member_views, source) do
-      {^own, watermark} -> row_seq <= watermark
+      {^own, watermark, _writer} -> row_seq <= watermark
       _ -> false
     end
   end
@@ -1303,7 +1353,7 @@ defmodule Forum.Muster.Scope do
   # is rebuilt independently by each shard.
   defp reannounce_local_groups_at_init(state) do
     Enum.each(local_groups(state), fn group ->
-      upsert_if_newer(state.occupancy_table, {group, node()}, next_seq())
+      upsert_if_newer(state.occupancy_table, {group, node()}, next_seq(), self())
     end)
 
     state
@@ -1381,7 +1431,7 @@ defmodule Forum.Muster.Scope do
         state.message_module.send(
           state.scope,
           member,
-          {:rebalance_marker, node(), view_hash, state.view_seq}
+          {:rebalance_marker, node(), self(), view_hash, state.view_seq}
         )
       end
     end)
@@ -1412,7 +1462,7 @@ defmodule Forum.Muster.Scope do
     cutoff = System.monotonic_time(:millisecond) - state.tombstone_window_ms
 
     :ets.select_delete(state.occupancy_table, [
-      {{:_, :_, :"$1"}, [{:is_integer, :"$1"}, {:<, :"$1", cutoff}], [true]}
+      {{:_, :_, :"$1", :_}, [{:is_integer, :"$1"}, {:<, :"$1", cutoff}], [true]}
     ])
   end
 
@@ -1444,6 +1494,17 @@ defmodule Forum.Muster.Scope do
     {_pid, _ref} =
       :erlang.spawn_opt(
         fn ->
+          # Fires before the RPC is dispatched, so a test can force_ordering a
+          # delay here to model snapshot-RPC latency without blocking the
+          # coordinator (this is a throwaway worker process, not the coordinator
+          # itself).
+          tp(:muster_rpc_worker_start, %{
+            scope: scope,
+            node: self_node,
+            router: router_node,
+            function: function
+          })
+
           result =
             try do
               message_module.call(scope, router_node, __MODULE__, function, args, rpc_timeout)

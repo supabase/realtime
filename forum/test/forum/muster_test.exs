@@ -105,6 +105,15 @@ defmodule Forum.MusterTest do
   # drain, each as `[scope, node, message]`.
   defp drain_sends, do: Mimic.calls(ErlDist, :send, 3)
 
+  # A stand-in writer pid for tests that call occupied/5, vacant_batch/5,
+  # receive_node_state/6 or apply_delta/6 directly against a fake remote
+  # source (e.g. :src@nowhere) that has no real Scope coordinator to supply
+  # one. What matters to these entry points is that a pid is provided at
+  # all (see tla/FINDINGS.md finding 2) — the writer-attribution behavior
+  # itself is covered separately in muster_distributed_test.exs, with real
+  # coordinator pids.
+  defp fake_pid, do: spawn(fn -> Process.sleep(:infinity) end)
+
   # Poll the drained call log (accumulating across the consuming drains) until a
   # recorded ErlDist.call/6 whose argument list satisfies `pred` appears. Used
   # for RPCs dispatched asynchronously (via the Scope mailbox / spawned worker).
@@ -379,70 +388,77 @@ defmodule Forum.MusterTest do
     end
 
     test "occupied/4 inserts a {group, source_node} row", %{scope: scope} do
-      assert :ok = Scope.occupied(scope, :rg1, :src@nowhere, 1)
+      assert :ok = Scope.occupied(scope, :rg1, :src@nowhere, 1, fake_pid())
       assert :src@nowhere in Scope.occupancy(scope, :rg1)
     end
 
     test "vacant_batch/4 deletes multiple {group, source_node} rows", %{scope: scope} do
-      :ok = Scope.occupied(scope, :rg2a, :src@nowhere, 1)
-      :ok = Scope.occupied(scope, :rg2b, :src@nowhere, 1)
+      src = fake_pid()
+      :ok = Scope.occupied(scope, :rg2a, :src@nowhere, 1, src)
+      :ok = Scope.occupied(scope, :rg2b, :src@nowhere, 1, src)
       assert :src@nowhere in Scope.occupancy(scope, :rg2a)
       assert :src@nowhere in Scope.occupancy(scope, :rg2b)
 
-      assert :ok = Scope.vacant_batch(scope, [:rg2a, :rg2b], :src@nowhere, 2)
+      assert :ok = Scope.vacant_batch(scope, [:rg2a, :rg2b], :src@nowhere, 2, src)
       refute :src@nowhere in Scope.occupancy(scope, :rg2a)
       refute :src@nowhere in Scope.occupancy(scope, :rg2b)
     end
 
     test "vacant_batch/4 only deletes rows for the given source", %{scope: scope} do
-      :ok = Scope.occupied(scope, :rg3, :src_a@nowhere, 1)
-      :ok = Scope.occupied(scope, :rg3, :src_b@nowhere, 1)
+      src_a = fake_pid()
+      src_b = fake_pid()
+      :ok = Scope.occupied(scope, :rg3, :src_a@nowhere, 1, src_a)
+      :ok = Scope.occupied(scope, :rg3, :src_b@nowhere, 1, src_b)
 
-      assert :ok = Scope.vacant_batch(scope, [:rg3], :src_a@nowhere, 2)
+      assert :ok = Scope.vacant_batch(scope, [:rg3], :src_a@nowhere, 2, src_a)
       assert Scope.occupancy(scope, :rg3) == [:src_b@nowhere]
     end
 
     test "vacant_batch/4 with a stale (lower) seq does NOT delete a newer occupied",
          %{scope: scope} do
+      src = fake_pid()
       # The core of the timeout race: a re-claim wrote a fresh, higher-seq
       # occupied; a stale vacant DELETE (lower seq) arrives late and must be
       # ignored so it cannot clobber the live entry.
-      :ok = Scope.occupied(scope, :race_g, :src@nowhere, 10)
-      assert :ok = Scope.vacant_batch(scope, [:race_g], :src@nowhere, 5)
+      :ok = Scope.occupied(scope, :race_g, :src@nowhere, 10, src)
+      assert :ok = Scope.vacant_batch(scope, [:race_g], :src@nowhere, 5, src)
       assert :src@nowhere in Scope.occupancy(scope, :race_g)
 
       # A vacant at or above the stored seq still deletes (the real vacancy).
-      assert :ok = Scope.vacant_batch(scope, [:race_g], :src@nowhere, 10)
+      assert :ok = Scope.vacant_batch(scope, [:race_g], :src@nowhere, 10, src)
       refute :src@nowhere in Scope.occupancy(scope, :race_g)
     end
 
     test "a stale (lower) seq occupied INSERT does NOT resurrect a fresh vacant DELETE",
          %{scope: scope} do
+      src = fake_pid()
       # The reverse of the race above. A fresh, higher-seq vacant DELETE leaves a
       # seq-stamped tombstone; a stale, lower-seq occupied INSERT that lands after
       # it (an orphaned, un-cancelled :occupied RPC) must be a no-op — the
       # tombstone's seq guards the INSERT, so the vacated group is not resurrected.
-      :ok = Scope.occupied(scope, :rev_g, :src@nowhere, 5)
-      assert :ok = Scope.vacant_batch(scope, [:rev_g], :src@nowhere, 10)
+      :ok = Scope.occupied(scope, :rev_g, :src@nowhere, 5, src)
+      assert :ok = Scope.vacant_batch(scope, [:rev_g], :src@nowhere, 10, src)
       refute :src@nowhere in Scope.occupancy(scope, :rev_g)
 
       # Stale INSERT (seq 7 < tombstone seq 10) must not bring it back.
-      assert :ok = Scope.occupied(scope, :rev_g, :src@nowhere, 7)
+      assert :ok = Scope.occupied(scope, :rev_g, :src@nowhere, 7, src)
       refute :src@nowhere in Scope.occupancy(scope, :rev_g)
 
       # A genuine re-claim (seq above the tombstone) DOES win.
-      assert :ok = Scope.occupied(scope, :rev_g, :src@nowhere, 11)
+      assert :ok = Scope.occupied(scope, :rev_g, :src@nowhere, 11, src)
       assert :src@nowhere in Scope.occupancy(scope, :rev_g)
     end
 
     test "receive_node_state/5 replaces all rows for a source", %{scope: scope} do
+      src = fake_pid()
       # Seed something the snapshot should clear.
-      :ok = Scope.occupied(scope, :stale_g, :src@nowhere, 1)
+      :ok = Scope.occupied(scope, :stale_g, :src@nowhere, 1, src)
 
       # receive_node_state applies the snapshot via a synchronous call into
       # Scope (it serializes the apply to keep overlapping rebalances safe), so
       # the occupancy table reflects it by the time this returns.
-      assert :ok = Scope.receive_node_state(scope, :src@nowhere, [:fresh_a, :fresh_b], 0, 2)
+      assert :ok =
+               Scope.receive_node_state(scope, :src@nowhere, [:fresh_a, :fresh_b], 0, 2, src)
 
       refute :src@nowhere in Scope.occupancy(scope, :stale_g)
       assert :src@nowhere in Scope.occupancy(scope, :fresh_a)
@@ -450,13 +466,15 @@ defmodule Forum.MusterTest do
     end
 
     test "writes from different sources don't interfere", %{scope: scope} do
-      :ok = Scope.occupied(scope, :shared, :src_a@nowhere, 1)
-      :ok = Scope.occupied(scope, :shared, :src_b@nowhere, 1)
+      src_a = fake_pid()
+      src_b = fake_pid()
+      :ok = Scope.occupied(scope, :shared, :src_a@nowhere, 1, src_a)
+      :ok = Scope.occupied(scope, :shared, :src_b@nowhere, 1, src_b)
 
       assert Enum.sort(Scope.occupancy(scope, :shared)) ==
                [:src_a@nowhere, :src_b@nowhere]
 
-      :ok = Scope.vacant_batch(scope, [:shared], :src_a@nowhere, 2)
+      :ok = Scope.vacant_batch(scope, [:shared], :src_a@nowhere, 2, src_a)
       assert Scope.occupancy(scope, :shared) == [:src_b@nowhere]
     end
 
@@ -464,9 +482,11 @@ defmodule Forum.MusterTest do
       # If the writes still went through the mailbox, a held :status call
       # would queue behind them. Issue many writes concurrently, then assert
       # :status responds promptly.
+      src = fake_pid()
+
       tasks =
         for i <- 1..200 do
-          Task.async(fn -> Scope.occupied(scope, :"hot_#{i}", :src@nowhere, 1) end)
+          Task.async(fn -> Scope.occupied(scope, :"hot_#{i}", :src@nowhere, 1, src) end)
         end
 
       Task.await_many(tasks, 5_000)
@@ -496,20 +516,21 @@ defmodule Forum.MusterTest do
     test "a tombstone is retained for the window then reaped", %{scope: scope} do
       table = Scope.occupancy_table_name(scope)
       key = {:gc_g, :src@nowhere}
+      src = fake_pid()
 
-      :ok = Scope.occupied(scope, :gc_g, :src@nowhere, 1)
-      assert :ok = Scope.vacant_batch(scope, [:gc_g], :src@nowhere, 2)
+      :ok = Scope.occupied(scope, :gc_g, :src@nowhere, 1, src)
+      assert :ok = Scope.vacant_batch(scope, [:gc_g], :src@nowhere, 2, src)
 
       # Tombstone present immediately after the vacancy (meta is the created_at ms).
-      assert [{^key, 2, created_at}] = :ets.lookup(table, key)
+      assert [{^key, 2, created_at, _writer}] = :ets.lookup(table, key)
       assert is_integer(created_at)
 
       # A sweep before the window elapses must NOT reap it (and a stale, lower-seq
       # INSERT still loses to it).
       Kernel.send(Forum.Supervisor.name(scope), :sweep_tombstones)
-      assert :ok = Scope.occupied(scope, :gc_g, :src@nowhere, 1)
+      assert :ok = Scope.occupied(scope, :gc_g, :src@nowhere, 1, src)
       refute :src@nowhere in Scope.occupancy(scope, :gc_g)
-      assert [{^key, _, _}] = :ets.lookup(table, key)
+      assert [{^key, _, _, _writer}] = :ets.lookup(table, key)
 
       # After the window, the sweep reaps it.
       Process.sleep(500)
@@ -607,7 +628,7 @@ defmodule Forum.MusterTest do
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
       assert :ok = Muster.join(scope, g, pid)
 
-      assert [[^scope, @fake_node, Scope, :occupied, [^scope, ^g, _, _], _]] = drain_calls()
+      assert [[^scope, @fake_node, Scope, :occupied, [^scope, ^g, _, _ | _], _]] = drain_calls()
 
       assert Muster.local_member_count(scope, g) == 1
     end
@@ -655,7 +676,7 @@ defmodule Forum.MusterTest do
       call_count =
         Enum.count(
           drain_calls(),
-          &match?([^scope, _, Scope, :occupied, [^scope, ^g, _, _], _], &1)
+          &match?([^scope, _, Scope, :occupied, [^scope, ^g, _, _ | _], _], &1)
         )
 
       assert call_count == 1
@@ -682,7 +703,7 @@ defmodule Forum.MusterTest do
       stub_call(:ok)
       assert :ok = Muster.join(scope, g, pid)
 
-      assert [[^scope, @fake_node, Scope, :occupied, [^scope, ^g, _, _], _]] = drain_calls()
+      assert [[^scope, @fake_node, Scope, :occupied, [^scope, ^g, _, _ | _], _]] = drain_calls()
 
       assert Muster.local_member_count(scope, g) == 1
     end
@@ -725,7 +746,7 @@ defmodule Forum.MusterTest do
       # then fires, so the group is retracted rather than left orphaned at the
       # router with no live member.
       assert :ok = Muster.join(scope, g, pid)
-      assert_call(&match?([^scope, @fake_node, Scope, :occupied, [^scope, ^g, _, _], _], &1))
+      assert_call(&match?([^scope, @fake_node, Scope, :occupied, [^scope, ^g, _, _ | _], _], &1))
 
       wait_for_group_state(scope, g, fn s -> s in [:cooldown, :vacant_queued] end)
       assert Muster.local_member_count(scope, g) == 0
@@ -805,9 +826,9 @@ defmodule Forum.MusterTest do
       # The flush sends one batched vacant RPC to the router.
       trigger_flush(scope)
 
-      [^scope, @fake_node, Scope, :vacant_batch, [^scope, groups, src, _], _] =
+      [^scope, @fake_node, Scope, :vacant_batch, [^scope, groups, src, _ | _], _] =
         assert_call(fn
-          [^scope, @fake_node, Scope, :vacant_batch, [^scope, _, _, _], _] -> true
+          [^scope, @fake_node, Scope, :vacant_batch, [^scope, _, _, _ | _], _] -> true
           _ -> false
         end)
 
@@ -828,7 +849,7 @@ defmodule Forum.MusterTest do
       trigger_flush(scope)
 
       assert_call(fn
-        [^scope, @fake_node, Scope, :vacant_batch, [^scope, _, _, _], _] -> true
+        [^scope, @fake_node, Scope, :vacant_batch, [^scope, _, _, _ | _], _] -> true
         _ -> false
       end)
 
@@ -840,7 +861,7 @@ defmodule Forum.MusterTest do
       trigger_flush(scope)
 
       assert_call(fn
-        [^scope, @fake_node, Scope, :vacant_batch, [^scope, _, _, _], _] -> true
+        [^scope, @fake_node, Scope, :vacant_batch, [^scope, _, _, _ | _], _] -> true
         _ -> false
       end)
 
@@ -868,7 +889,7 @@ defmodule Forum.MusterTest do
         drain_calls()
         |> Enum.filter(&match?([^scope, @fake_node, Scope, :vacant_batch, _, _], &1))
 
-      flushed = Enum.flat_map(batches, fn [_, _, _, _, [_, groups, _, _], _] -> groups end)
+      flushed = Enum.flat_map(batches, fn [_, _, _, _, [_, groups, _, _ | _], _] -> groups end)
 
       # Both vacancies reach the router. Each shard that holds queued vacancies
       # sends ONE batch per router, so the count is bounded by the shard count
@@ -1065,7 +1086,7 @@ defmodule Forum.MusterTest do
       assert {:ok, _} =
                wait_call(
                  fn
-                   [_s, @fake_node, Scope, :occupied, [_, ^g, _, _], _] -> true
+                   [_s, @fake_node, Scope, :occupied, [_, ^g, _, _ | _], _] -> true
                    _ -> false
                  end,
                  3_000
@@ -1481,7 +1502,17 @@ defmodule Forum.MusterTest do
       # Adopt the source's view and apply its snapshot: the row lands with the
       # source's final-view marker recorded in member_views.
       rebalance_sync(scope, final_view)
-      assert :ok = Scope.receive_node_state(scope, src, [g], :erlang.phash2(final_view), 100)
+
+      assert :ok =
+               Scope.receive_node_state(
+                 scope,
+                 src,
+                 [g],
+                 :erlang.phash2(final_view),
+                 100,
+                 fake_pid()
+               )
+
       assert src in Scope.occupancy(scope, g)
 
       # Adopt the stale view (we learned of D before the source did). The sweep
@@ -1505,7 +1536,7 @@ defmodule Forum.MusterTest do
     defp send_marker(scope, source, members) do
       Kernel.send(
         Forum.Supervisor.name(scope),
-        {:rebalance_marker, source, :erlang.phash2(Enum.sort(members)),
+        {:rebalance_marker, source, self(), :erlang.phash2(Enum.sort(members)),
          :erlang.unique_integer([:monotonic])}
       )
     end
@@ -1654,7 +1685,7 @@ defmodule Forum.MusterTest do
       heartbeat_targets =
         drain_sends()
         |> Enum.flat_map(fn
-          [^scope, target, {:rebalance_marker, src, ^vh, _seq}] when src == node() ->
+          [^scope, target, {:rebalance_marker, src, _pid, ^vh, _seq}] when src == node() ->
             [target]
 
           _ ->
@@ -1676,7 +1707,7 @@ defmodule Forum.MusterTest do
       marker_targets =
         drain_sends()
         |> Enum.flat_map(fn
-          [^scope, target, {:rebalance_marker, src, _hash, _seq}] when src == node() ->
+          [^scope, target, {:rebalance_marker, src, _pid, _hash, _seq}] when src == node() ->
             [target]
 
           _ ->
@@ -1694,7 +1725,16 @@ defmodule Forum.MusterTest do
 
       # A data snapshot from the only peer marks it ready — no separate
       # :rebalance_marker message involved.
-      assert :ok = Scope.receive_node_state(scope, :src@nowhere, [], Muster.view_hash(scope), 1)
+      assert :ok =
+               Scope.receive_node_state(
+                 scope,
+                 :src@nowhere,
+                 [],
+                 Muster.view_hash(scope),
+                 1,
+                 fake_pid()
+               )
+
       assert_ready(scope)
     end
 
@@ -1728,7 +1768,7 @@ defmodule Forum.MusterTest do
       # ...and is NOT also sent a redundant async marker (it is in owed_snapshots
       # while the delta is in flight, so announce_view skips it).
       refute Enum.any?(sends, fn
-               [^scope, :x@nowhere, {:rebalance_marker, _, _, _}] -> true
+               [^scope, :x@nowhere, {:rebalance_marker, _, _, _, _}] -> true
                _ -> false
              end)
     end
@@ -1780,14 +1820,16 @@ defmodule Forum.MusterTest do
     # (see the handle_info({:muster_discover_ack, _, nil, nil}, _) clause).
     test "an ack with a withheld piggyback does not clobber member_views",
          %{scope: scope} do
+      sentinel_pid = self()
+
       :sys.replace_state(Forum.Supervisor.name(scope), fn s ->
-        %{s | member_views: Map.put(s.member_views, node(), {:sentinel, 12_345})}
+        %{s | member_views: Map.put(s.member_views, node(), {:sentinel, 12_345, sentinel_pid})}
       end)
 
       send(Forum.Supervisor.name(scope), {:muster_discover_ack, self(), nil, nil})
       dump = GenServer.call(Forum.Supervisor.name(scope), :dump)
 
-      assert dump.member_views[node()] == {:sentinel, 12_345}
+      assert dump.member_views[node()] == {:sentinel, 12_345, sentinel_pid}
     end
 
     defp assert_ready(scope, timeout \\ 500) do
@@ -1829,16 +1871,21 @@ defmodule Forum.MusterTest do
       # rebalance. Both inserts are seq-guarded, so neither clobbers the newer of
       # the two.
 
-      # A newer :occupied is not lowered by a stale (lower-seq) snapshot.
+      # A newer :occupied is not lowered by a stale (lower-seq) snapshot. Both
+      # writes are attributed to the same pid: on a real node, occupied/5 (a
+      # shard dispatch) and receive_node_state/6 (a coordinator dispatch) for
+      # the same source are always the same live Scope incarnation.
       src1 = :guard1@nowhere
-      :ok = Scope.occupied(scope, :sg1, src1, 100)
-      :ok = Scope.receive_node_state(scope, src1, [:sg1], 0, 50)
+      src1_pid = fake_pid()
+      :ok = Scope.occupied(scope, :sg1, src1, 100, src1_pid)
+      :ok = Scope.receive_node_state(scope, src1, [:sg1], 0, 50, src1_pid)
       assert src1 in Scope.occupancy(scope, :sg1)
 
       # A newer snapshot is not lowered by a stale (late, lower-seq) :occupied.
       src2 = :guard2@nowhere
-      :ok = Scope.receive_node_state(scope, src2, [:sg2], 0, 200)
-      :ok = Scope.occupied(scope, :sg2, src2, 150)
+      src2_pid = fake_pid()
+      :ok = Scope.receive_node_state(scope, src2, [:sg2], 0, 200, src2_pid)
+      :ok = Scope.occupied(scope, :sg2, src2, 150, src2_pid)
       assert src2 in Scope.occupancy(scope, :sg2)
     end
 
@@ -2242,8 +2289,11 @@ defmodule Forum.MusterTest do
       trigger_flush(scope)
 
       assert_call(fn
-        [_s, @fake_node, Scope, :vacant_batch, [_scope, groups, _src, _seq], _t] -> g in groups
-        _ -> false
+        [_s, @fake_node, Scope, :vacant_batch, [_scope, groups, _src, _seq | _], _t] ->
+          g in groups
+
+        _ ->
+          false
       end)
     end
 

@@ -686,6 +686,136 @@ defmodule Forum.MusterDistributedTest do
     end
   end
 
+  describe "rebalance markers respect prior-round owed_snapshots (tla/FINDINGS.md finding 4)" do
+    setup do
+      scope = :"muster_marker_owed_#{System.unique_integer([:positive])}"
+
+      start_supervised!(
+        spec(scope, vacant_flush_interval_ms: 100, view_heartbeat_interval_ms: 200)
+      )
+
+      %{scope: scope}
+    end
+
+    # README rebalance step 8 (bare markers): a member still owed a PREVIOUS
+    # round's un-acked snapshot must never be told "the new view is settled" by
+    # a later round that happens not to move any group its way -- its marker
+    # has to keep riding the still-in-flight snapshot. Driven black-box with
+    # forced ordering: freeze T's round-1 full snapshot to C (a real RPC, an
+    # `:erlang.spawn_opt` worker, not the coordinator) BEFORE it is dispatched,
+    # so C never actually receives it, then make a real second membership
+    # change (O leaves) that does NOT move the group T holds. The buggy code
+    # excludes only THIS round's snapshot targets from the bare-marker send, so
+    # it marks C for the new view anyway; C then satisfies its own barrier and
+    # goes :ready with the group's row still in flight.
+    test "a router still owed a prior round's snapshot must not reach :ready off a bare marker",
+         %{scope: scope} do
+      t_node = node()
+
+      o_name = ~c"muster_marker_owed_o_#{System.unique_integer([:positive])}"
+      o_node = :"#{o_name}@127.0.0.1"
+      c_name = ~c"muster_marker_owed_c_#{System.unique_integer([:positive])}"
+      c_node = :"#{c_name}@127.0.0.1"
+      view_toc = Enum.sort([t_node, o_node, c_node])
+      view_tc = Enum.sort([t_node, c_node])
+      view_tc_hash = :erlang.phash2(view_tc)
+
+      check_trace(
+        fn ->
+          # Settled {T, O}.
+          {:ok, p_o, ^o_node} = Peer.start(name: o_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(o_node)
+          start_remote_muster(p_o, scope)
+          await_ready([t_node, o_node])
+
+          # g routes to C in BOTH {T,O,C} and {T,C}: O's departure must not move
+          # it, so round 2 has nothing new to send C.
+          g = pick_group([{view_toc, c_node}, {view_tc, c_node}])
+
+          # T holds g before C ever joins, so C's join snapshots it in full.
+          :ok = Muster.join(scope, g, spawn(fn -> Process.sleep(:infinity) end))
+
+          # Freeze T's round-1 snapshot dispatch to C before the RPC is even
+          # sent: T's owed_snapshots[C] is set (that happens synchronously in
+          # do_rebalance), but C receives nothing until we release.
+          force_ordering(
+            %{:"$kind" => :test_release_snapshot},
+            %{
+              :"$kind" => :muster_rpc_worker_start,
+              router: ^c_node,
+              function: :receive_node_state
+            }
+          )
+
+          # C joins {T,O,C}: T's rebalance snapshots g onto the new router C
+          # (full, since C is new), and that dispatch freezes -> C is owed on T.
+          {:ok, p_c, ^c_node} = Peer.start(name: c_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(c_node)
+          start_remote_muster(p_c, scope)
+
+          wait_until(fn ->
+            Forum.Supervisor.name(scope)
+            |> GenServer.call(:dump)
+            |> Map.fetch!(:owed_snapshots)
+            |> Map.has_key?(c_node)
+          end)
+
+          # O leaves {T,O,C} -> {T,C} while C is still owed. g's router does not
+          # change, so round 2 has no fresh snapshot for C -- only a candidate
+          # bare marker.
+          :ok = stop_supervised({:peer, o_name})
+
+          assert {:ok, _} =
+                   block_until(
+                     %{:"$kind" => :muster_rebalance_start, node: ^t_node, to: ^view_tc},
+                     10_000
+                   )
+
+          # The crux: with the frozen snapshot never having reached C, C must
+          # not be able to reach :ready for {T,C} by any other means. Give it a
+          # bounded window (the buggy bare marker, if sent, arrives near-
+          # instantly; the fix means this must time out).
+          premature_ready? =
+            case block_until(
+                   %{
+                     :"$kind" => :muster_status_change,
+                     to: :ready,
+                     node: ^c_node,
+                     view_hash: ^view_tc_hash
+                   },
+                   3_000
+                 ) do
+              {:ok, _} -> true
+              :timeout -> false
+            end
+
+          refute premature_ready?,
+                 "C reached :ready for #{inspect(view_tc)} while T's round-1 snapshot " <>
+                   "(carrying #{inspect(g)}) was still frozen in flight -- a bare marker " <>
+                   "must not satisfy the barrier for a still-owed router"
+
+          # Release: C finally receives the (now stale-viewed, but still valid
+          # data) snapshot, T's owed entry clears, and its fast heartbeat
+          # re-announces the current view so C converges for real.
+          tp(:test_release_snapshot, %{})
+          await_ready(view_tc, nodes: [c_node], timeout: 20_000)
+
+          %{g: g, c_node: c_node, t_node: t_node}
+        end,
+        fn result, _trace ->
+          # Final state must be correct: the group's row actually landed on C.
+          %{g: g, c_node: c_node, t_node: t_node} = result
+
+          assert {:ok, ^c_node} = Muster.router(scope, g)
+          assert t_node in occupancy_on(c_node, scope, g)
+
+          assert {:ok, [t_node]} ==
+                   :erpc.call(c_node, Muster, :targets, [scope, g, view_tc_hash])
+        end
+      )
+    end
+  end
+
   describe "delta correctness across multiple rounds" do
     setup do
       scope = :"muster_delta_multi_#{System.unique_integer([:positive])}"
@@ -3684,7 +3814,7 @@ defmodule Forum.MusterDistributedTest do
 
           # T now holds S's HIGH watermark for the {T,S,Z} view. Capture it.
           dump_tsz = GenServer.call(Forum.Supervisor.name(scope), :dump)
-          {^hash_tsz, stale_seq} = dump_tsz.member_views[s_node]
+          {^hash_tsz, stale_seq, _writer} = dump_tsz.member_views[s_node]
 
           # --- Kill S (incarnation #1) then Z, so the final view is {T,S} ----
           # which differs from the stale {T,S,Z} view, exposing the regression
@@ -3766,7 +3896,7 @@ defmodule Forum.MusterDistributedTest do
           # {T,S} view — and carries the lower, post-restart seq, proving the
           # stale high-seq {T,S,Z} watermark was discarded, not merely matched.
           dump_final = GenServer.call(Forum.Supervisor.name(scope), :dump)
-          assert {^hash_ts, healed_seq} = dump_final.member_views[s_node]
+          assert {^hash_ts, healed_seq, _writer} = dump_final.member_views[s_node]
           assert healed_seq < stale_seq
 
           %{
@@ -3906,14 +4036,17 @@ defmodule Forum.MusterDistributedTest do
                    )
 
           # Step 3: the fresh incarnation's full snapshot lands and applies on
-          # T through the exact public entry point a real rebalance uses.
+          # T through the exact public entry point a real rebalance uses,
+          # attributed to the SAME stand-in pid as its discover above (a real
+          # incarnation's discover and its snapshot always share one pid).
           assert :ok =
                    Forum.Muster.Scope.receive_node_state(
                      scope,
                      r_node,
                      [group],
                      own_view_hash,
-                     fresh_seq + 1
+                     fresh_seq + 1,
+                     standin
                    )
 
           assert r_node in occupancy_on(t_node, scope, group)
@@ -3948,6 +4081,118 @@ defmodule Forum.MusterDistributedTest do
 
           # The row really did arrive (via the simulated fresh incarnation's
           # snapshot) strictly before the DOWN handler ran.
+          assert causality(
+                   %{
+                     :"$kind" => :muster_node_state_received,
+                     node: ^t_node,
+                     source: ^r_node
+                   },
+                   %{
+                     :"$kind" => :muster_peer_down_apply,
+                     :"$span" => :start,
+                     node: ^t_node,
+                     peer_node: ^r_node
+                   },
+                   trace
+                 )
+        end
+      )
+    end
+
+    # FINDINGS.md finding 2b ("delayed-ack re-pairing across a departure
+    # wipe"): the pid-liveness heuristic (newer_incarnation_live?) only
+    # consults the PEER-REGISTRATION channel (state.peers, populated by
+    # discover/discover_ack). It has no visibility into the DATA channel
+    # (occupied/4, vacant_batch/4, receive_node_state/5, apply_delta/5) --
+    # none of which identify their sender by pid at all today, only by node.
+    # A node's post-restart full snapshot can land and apply (via
+    # receive_node_state/5, exactly as a real rebalance dispatches it) BEFORE
+    # any discover/ack from its new incarnation has been processed -- these
+    # are two fully independent, unordered channels. When the OLD pid's DOWN
+    # fires in that window, "is another peer pid registered for this node"
+    # reads false (nothing has registered the new incarnation yet), so the
+    # heuristic wipes data that was already correctly, freshly delivered.
+    #
+    # Unlike the test above (which pre-registers a stand-in specifically so
+    # the heuristic's check succeeds), this test never registers any peer for
+    # R at all -- reproducing the case where the DATA channel wins the race
+    # instead of the registration channel, which the heuristic cannot see
+    # either way.
+    test "a fresh snapshot applied with no peer re-registration yet must survive the old pid's DOWN",
+         %{scope: scope} do
+      t_node = node()
+
+      check_trace(
+        fn ->
+          {:ok, p_r, r_node} = Peer.start(aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(r_node)
+          start_remote_muster(p_r, scope)
+          await_ready(Enum.sort([t_node, r_node]))
+
+          group = group_routed_to(scope, t_node)
+
+          :ok = :peer.call(p_r, MusterPeerAux, :join, [scope, group])
+          assert r_node in occupancy_on(t_node, scope, group)
+
+          own_view_hash = GenServer.call(Forum.Supervisor.name(scope), :dump).view_hash
+          fresh_seq = :erpc.call(r_node, :erlang, :unique_integer, [[:monotonic]])
+
+          # R's real (soon to die) Scope pid, captured up front so the
+          # snapshot below can be attributed to a DIFFERENT stand-in pid --
+          # representing R's new incarnation -- rather than to the very pid
+          # this test is about to kill.
+          r_scope_pid = :erpc.call(r_node, Process, :whereis, [Forum.Supervisor.name(scope)])
+          standin = :erlang.spawn(r_node, :timer, :sleep, [:infinity])
+
+          # R's (simulated) post-restart full snapshot lands and applies on T
+          # through the exact public entry point a real rebalance uses --
+          # WITHOUT any discover/ack ever registering a new peer for R. This
+          # is what the RPC channel winning the race against the message
+          # channel looks like.
+          assert :ok =
+                   Forum.Muster.Scope.receive_node_state(
+                     scope,
+                     r_node,
+                     [group],
+                     own_view_hash,
+                     fresh_seq,
+                     standin
+                   )
+
+          assert r_node in occupancy_on(t_node, scope, group)
+
+          # R's REAL Scope pid dies -- T's genuine monitor fires the DOWN
+          # this test is about. T's peers table has never contained any
+          # OTHER pid for r_node, so the pid-liveness heuristic sees no
+          # "newer incarnation live" and wipes unconditionally.
+          Process.monitor(r_scope_pid)
+          true = :erpc.call(r_node, Process, :exit, [r_scope_pid, :kill])
+          assert_receive {:DOWN, _, _, ^r_scope_pid, _}, 5_000
+
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_peer_down_apply,
+                       :"$span" => {:complete, _},
+                       node: ^t_node,
+                       peer_node: ^r_node
+                     },
+                     5_000
+                   )
+
+          # THE PROPERTY UNDER TEST: the row delivered via the data channel
+          # must survive the old pid's DOWN even though nothing ever
+          # registered a peer for it -- the heuristic's blind spot.
+          assert r_node in occupancy_on(t_node, scope, group),
+                 "the old pid's DOWN wiped a freshly-applied row because no discover/ack " <>
+                   "had registered a peer for it yet -- the pid-liveness heuristic only " <>
+                   "watches the registration channel, not the data channel"
+
+          %{group: group, r_node: r_node, t_node: t_node}
+        end,
+        fn result, trace ->
+          %{t_node: t_node, r_node: r_node} = result
+
           assert causality(
                    %{
                      :"$kind" => :muster_node_state_received,
