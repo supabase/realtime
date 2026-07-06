@@ -44,6 +44,16 @@ defmodule Forum.MusterDistributedTest do
                   Forum.Muster.join(scope, group, pid)
                 end
 
+                # Join then immediately leave the SAME (unlinked) pid, both as
+                # ordinary GenServer.calls against the shard, so the group is
+                # left genuinely mid-cooldown on THIS node without ever
+                # exposing the member pid across the wire.
+                def join_and_leave(scope, group) do
+                  pid = spawn(fn -> Process.sleep(:infinity) end)
+                  :ok = Forum.Muster.join(scope, group, pid)
+                  :ok = Forum.Muster.leave(scope, group, pid)
+                end
+
                 def status(scope) do
                   :persistent_term.get({Forum.Muster, scope, :status})
                 end
@@ -3110,6 +3120,139 @@ defmodule Forum.MusterDistributedTest do
     end
   end
 
+  describe "cooldown across a shard crash -- the retraction survives a restart mid-cooldown" do
+    setup do
+      scope = :"muster_cooldown_crash_#{System.unique_integer([:positive])}"
+      start_supervised!(spec(scope, vacant_flush_interval_ms: 100))
+      %{scope: scope}
+    end
+
+    # No existing test crashes a shard while its group sits in :cooldown. The
+    # single-node shard_test.exs restart test only ever kills a shard with a
+    # LIVE member (straight back to :occupied); the cooldown-specific
+    # reconciliation branch -- a durable :occupied/:cooldown claim with NO
+    # live member re-enters :cooldown, not :occupied, on restart -- exists in
+    # shard.ex but is otherwise only proven by the code being there, never
+    # exercised end-to-end across a real crash+restart. This proves it: R's
+    # last member leaves (cooldown starts), R's shard for that group is
+    # killed mid-cooldown, and the restart must re-arm a FRESH cooldown timer
+    # rather than silently forgetting the claim or resurrecting it :occupied.
+    # That fresh timer must also be a real, functioning timer, not just a
+    # state label: left alone, it must still expire, queue the group, and
+    # flush the retraction to the router exactly as an uninterrupted cooldown
+    # would have.
+    test "a shard killed mid-cooldown re-arms the timer on restart and still flushes to vacant",
+         %{scope: scope} do
+      t_node = node()
+
+      check_trace(
+        fn ->
+          {:ok, p_r, r_node} = Peer.start(aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(r_node)
+          start_remote_muster(p_r, scope, vacancy_cooldown_ms: 50)
+          await_ready([t_node, r_node])
+
+          # A group routed to T, held by a member on R: R is the source
+          # carrying the claim state, T is the router whose occupancy row
+          # tracks it.
+          group = group_routed_to(scope, t_node)
+
+          # Join then immediately leave the same pid on R: the group is left
+          # genuinely mid-cooldown on R, with T's occupancy row still intact
+          # (cooldown never sends an RPC -- the router still believes R holds
+          # the group).
+          :ok = :peer.call(p_r, MusterPeerAux, :join_and_leave, [scope, group])
+          assert :cooldown = remote_group_state(r_node, scope, group)
+          assert r_node in occupancy_on(t_node, scope, group)
+
+          # Kill the shard that owns the group ON R, at the worst possible
+          # moment: mid-cooldown, with no live member to fall back on.
+          shard_name = :erpc.call(r_node, Forum.Supervisor, :shard, [scope, group])
+          old_shard = :erpc.call(r_node, Process, :whereis, [shard_name])
+          assert is_pid(old_shard)
+          ref = Process.monitor(old_shard)
+          true = :erpc.call(r_node, Process, :exit, [old_shard, :kill])
+          assert_receive {:DOWN, ^ref, :process, ^old_shard, :killed}, 5_000
+
+          # The supervisor restarts the shard; reconciliation finds a durable
+          # :cooldown claim with no live member and re-enters :cooldown with a
+          # FRESH timer, rather than forgetting the claim or reclaiming it
+          # :occupied. rebuild_group_states emits no trace point of its own,
+          # so poll for the restarted pid + reconciled state.
+          wait_until(fn ->
+            pid = :erpc.call(r_node, Process, :whereis, [shard_name])
+
+            is_pid(pid) and pid != old_shard and
+              remote_group_state(r_node, scope, group) == :cooldown
+          end)
+
+          # Transparent so far: T's occupancy row (and the rest of the
+          # cluster) never saw the crash.
+          assert r_node in occupancy_on(t_node, scope, group)
+          assert remote_status(p_r, scope) == :ready
+          assert status(scope) == :ready
+
+          # The re-armed timer is a REAL timer, not just a state label: left
+          # alone, it expires, queues the group, and the natural flush
+          # retracts T's occupancy row exactly as an uninterrupted cooldown
+          # would have.
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_group_state,
+                       node: ^r_node,
+                       group: ^group,
+                       state: :vacant_queued
+                     },
+                     10_000
+                   )
+
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_group_state,
+                       node: ^r_node,
+                       group: ^group,
+                       state: nil
+                     },
+                     10_000
+                   )
+
+          wait_until(fn -> occupancy_on(t_node, scope, group) == [] end)
+
+          %{group: group, r_node: r_node, t_node: t_node}
+        end,
+        fn result, trace ->
+          # The crash was followed by a genuinely FRESH cooldown, not a reuse
+          # of the pre-crash one: two separate :cooldown entries for this
+          # group on R (the pre-crash one and the post-restart re-arm).
+          cooldown_entries =
+            of_kind(:muster_group_state, trace)
+            |> Enum.filter(
+              &(&1.node == result.r_node and &1.group == result.group and &1.state == :cooldown)
+            )
+
+          assert length(cooldown_entries) >= 2,
+                 "expected the restart to re-arm cooldown, not silently skip it or reclaim :occupied"
+
+          # No rebalance and no snapshot for this group: a shard crash is not
+          # a membership event, and the eventual retraction is shard-local
+          # reconciliation plus one ordinary vacant-batch flush, not cluster
+          # churn.
+          view2_hash = :erlang.phash2(Enum.sort([result.t_node, result.r_node]))
+
+          assert of_kind(:muster_rebalance_start, trace)
+                 |> Enum.all?(&(&1.view_hash == view2_hash or &1.to == [&1.node])),
+                 "a shard crash must not trigger a rebalance into any new view"
+
+          assert of_kind(:muster_node_state_received, trace)
+                 |> Enum.filter(&(result.group in &1.groups)) == [],
+                 "a cooldown retraction across a shard crash must not need a cross-node snapshot"
+        end
+      )
+    end
+  end
+
   describe "cascading joins -- a second node joins before the first rebalance converges" do
     setup do
       scope = :"muster_cascade_#{System.unique_integer([:positive])}"
@@ -4317,6 +4460,151 @@ defmodule Forum.MusterDistributedTest do
                    trace
                  )
         end
+      )
+    end
+  end
+
+  describe "long partition -- both sides settle to :ready independently before healing" do
+    setup do
+      scope = :"muster_longsplit_#{System.unique_integer([:positive])}"
+      start_supervised!(spec(scope, vacant_flush_interval_ms: 100))
+
+      # Unlike the partition test above -- where only the two PEERS split and
+      # T (this node) never loses anyone -- this test has T itself lose both
+      # peers. T runs with :global's default connect_all: true, and :global
+      # periodically re-syncs against every node it still knows via epmd on
+      # this same host; left alone, it silently redials a Node.disconnect/1'd
+      # peer within milliseconds (confirmed by direct repro), undoing the
+      # split before either side can settle. The peers already run with
+      # -connect_all false for the same reason on their end; this does the
+      # equivalent for T for the duration of this test only.
+      Application.put_env(:kernel, :connect_all, false)
+      on_exit(fn -> Application.put_env(:kernel, :connect_all, true) end)
+
+      %{scope: scope}
+    end
+
+    # The partition test above heals almost immediately after the split is
+    # detected -- the readiness barrier is checked mid-:converging. Here T is
+    # cut off from BOTH peers at once (instead of the two peers splitting from
+    # each other while T stays connected to both), and each side is left long
+    # enough to reach a genuinely settled :ready state on its own -- not
+    # mid-rebalance -- before anything heals. While settled and mutually
+    # unaware, EACH side takes on a claim the other side has never seen: T
+    # joins a group that (by ring math) belongs to A once the cluster
+    # re-merges, and A joins a group that belongs back to T. This proves the
+    # merge-on-heal doesn't just restore the OLD occupancy rows (already
+    # covered above) but correctly delivers claims created independently, in
+    # both directions, by two sides that each fully rebalanced elsewhere
+    # first -- with no stale-entry drop along the way.
+    test "occupancy claims made independently on both sides of a settled split survive the merge",
+         %{scope: scope} do
+      t_node = node()
+
+      check_trace(
+        fn ->
+          # Both peers run with -connect_all false, same as the partition test
+          # above: their globals don't auto-mesh or fight the deliberate
+          # disconnect via prevent_overlapping_partitions.
+          args = [~c"-connect_all", ~c"false"]
+
+          {:ok, p_a, a_node} = Peer.start(aux_mod: @aux_mod, args: args)
+          :ok = :snabbkaffe.forward_trace(a_node)
+          start_remote_muster(p_a, scope)
+          await_ready([t_node, a_node])
+
+          {:ok, p_b, b_node} = Peer.start(aux_mod: @aux_mod, args: args)
+          true = :erpc.call(b_node, Node, :connect, [a_node])
+          :ok = :snabbkaffe.forward_trace(b_node)
+          start_remote_muster(p_b, scope)
+
+          view3 = Enum.sort([t_node, a_node, b_node])
+          hash3 = :erlang.phash2(view3)
+          await_ready(view3)
+
+          # Groups whose router in the FINAL (post-heal) view3 sits on the
+          # opposite side of the split from whoever is about to join them --
+          # each claim below can only survive the merge via a real cross-node
+          # delta/snapshot, never by already being local to its eventual
+          # router.
+          #
+          # Deliberately no baseline pre-split occupancy here (unlike the
+          # partition test above): T holding a group already routed to A or B
+          # would force T's own departure rebalance to re-announce it to
+          # whichever peer survives in T's reduced view -- a real RPC racing
+          # the second Node.disconnect/1 below and liable to auto-reconnect
+          # the very node being cut loose. Keeping T empty until after the
+          # split isolates the scenario this test is actually after.
+          g_t_side = pick_group([{view3, a_node}])
+          g_ab_side = pick_group([{view3, t_node}])
+
+          # Detach forwarding before cutting the transport: a forwarded tp()
+          # still RPCs back to T and would silently reconnect a merely
+          # Node.disconnect/1'd peer (see unforward_trace/1 above).
+          unforward_trace(a_node)
+          unforward_trace(b_node)
+          true = Node.disconnect(a_node)
+          true = Node.disconnect(b_node)
+
+          wait_until(
+            fn -> status(scope) == :ready and Muster.members(scope) == [t_node] end,
+            10_000
+          )
+
+          # Both sides detect the split and rebalance apart, all the way to a
+          # settled :ready -- not just "converging" -- before either takes on
+          # new work. Polled via :peer.call, which rides the peer's own
+          # standard-io control channel rather than Erlang distribution, so it
+          # keeps working straight through the cut on both sides.
+
+          wait_until(
+            fn ->
+              remote_status(p_a, scope) == :ready and remote_status(p_b, scope) == :ready and
+                :peer.call(p_a, Muster, :members, [scope]) == Enum.sort([a_node, b_node]) and
+                :peer.call(p_b, Muster, :members, [scope]) == Enum.sort([a_node, b_node])
+            end,
+            10_000
+          )
+
+          # NOW, with both sides fully settled and mutually unaware, each side
+          # takes on a claim the other has never seen.
+          member_t = spawn(fn -> Process.sleep(:infinity) end)
+          :ok = Muster.join(scope, g_t_side, member_t)
+          :ok = :peer.call(p_a, MusterPeerAux, :join, [scope, g_ab_side])
+
+          # Heal both links and re-attach forwarding for the post-heal trace.
+          true = Node.connect(a_node)
+          true = Node.connect(b_node)
+          :ok = :snabbkaffe.forward_trace(a_node)
+          :ok = :snabbkaffe.forward_trace(b_node)
+
+          # All three nodes re-converge into the SAME 3-node view -- the
+          # second time (the first was the original formation), hence nth: 2.
+          await_ready(view3, nth: 2, timeout: 20_000)
+
+          # Both independently-made claims landed on the router their group
+          # hashes to in the merged view, each having necessarily crossed from
+          # the isolated side that made it to the other.
+          assert t_node in occupancy_on(a_node, scope, g_t_side)
+          assert a_node in occupancy_on(t_node, scope, g_ab_side)
+
+          assert Muster.can_decide?(scope, hash3)
+          assert Muster.members(scope) == view3
+          assert :erpc.call(a_node, Muster, :members, [scope]) == view3
+          assert :erpc.call(b_node, Muster, :members, [scope]) == view3
+        end,
+        # Unlike the other describe blocks above, ordering here is entirely
+        # real (no force_ordering) across two independent, uncontrolled
+        # multi-step convergences (T's and A/B's), so a claim can legitimately
+        # be judged stale under a transient intermediate view and be
+        # re-inserted moments later by the causal apply that follows -- that
+        # is the self-heal working as designed, not data loss. What this test
+        # commits to is the property real, uncoordinated timing CAN prove:
+        # the final merged state is correct (checked above). Asserting zero
+        # transient drops would require pinning the interleaving down with
+        # force_ordering, same as every other drops == [] assertion in this
+        # file does; that is a narrower, complementary test, not this one.
+        fn _trace -> :ok end
       )
     end
   end
