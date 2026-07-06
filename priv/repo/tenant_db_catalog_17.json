@@ -898,6 +898,21 @@
           "grantable": false
         },
         {
+          "grantee": "anon",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "authenticated",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "service_role",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
           "grantee": "dashboard_user",
           "privilege": "EXECUTE",
           "grantable": false
@@ -2947,6 +2962,21 @@
     {
       "dependent_stable_id": "acl:procedure:realtime.build_prepared_statement_sql(text,regclass,realtime.wal_column[])::grantee:service_role",
       "referenced_stable_id": "procedure:realtime.build_prepared_statement_sql(text,regclass,realtime.wal_column[])",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:realtime.check_equality_op(realtime.equality_op,regtype,text,text,boolean)::grantee:anon",
+      "referenced_stable_id": "procedure:realtime.check_equality_op(realtime.equality_op,regtype,text,text,boolean)",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:realtime.check_equality_op(realtime.equality_op,regtype,text,text,boolean)::grantee:authenticated",
+      "referenced_stable_id": "procedure:realtime.check_equality_op(realtime.equality_op,regtype,text,text,boolean)",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:realtime.check_equality_op(realtime.equality_op,regtype,text,text,boolean)::grantee:service_role",
+      "referenced_stable_id": "procedure:realtime.check_equality_op(realtime.equality_op,regtype,text,text,boolean)",
       "deptype": "n"
     },
     {
