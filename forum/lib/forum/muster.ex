@@ -24,6 +24,7 @@ defmodule Forum.Muster do
           | {:rpc_timeout_ms, timeout()}
           | {:rebalance_gather_timeout_ms, pos_integer()}
           | {:shards_ready_timeout_ms, pos_integer()}
+          | {:tombstone_window_ms, pos_integer()}
           | {:message_module, module()}
 
   # Timeout for the local GenServer.call to the claim shard. Generous because the
@@ -82,6 +83,13 @@ defmodule Forum.Muster do
     ETS-only work with no I/O, so this should never come close to firing in a
     healthy tree; if it does, the coordinator crashes and the supervisor
     restarts it rather than hanging forever.
+  * `:tombstone_window_ms`: how long a vacancy tombstone is kept in the
+    occupancy table before the periodic GC sweep reaps it (default:
+    `:rpc_timeout_ms` * 5). Must be long enough that an orphaned, un-cancelled
+    `:occupied` or snapshot RPC (whose only delay is scheduling/network,
+    bounded by `:rpc_timeout_ms` in a healthy cluster) can no longer land and
+    resurrect the row; raise it alongside `:rpc_timeout_ms` if RPCs are
+    routinely slower than that.
   * `:message_module`: module implementing `Forum.Adapter` (default:
     `Forum.Adapter.ErlDist`).
   """
@@ -137,6 +145,13 @@ defmodule Forum.Muster do
          not (is_integer(shards_ready_timeout) and shards_ready_timeout > 0) do
       raise ArgumentError,
             "expected :shards_ready_timeout_ms to be a positive integer, got: #{inspect(shards_ready_timeout)}"
+    end
+
+    tombstone_window = Keyword.get(opts, :tombstone_window_ms)
+
+    if tombstone_window != nil and not (is_integer(tombstone_window) and tombstone_window > 0) do
+      raise ArgumentError,
+            "expected :tombstone_window_ms to be a positive integer, got: #{inspect(tombstone_window)}"
     end
 
     Forum.Supervisor.start_link(Forum.Muster.Scope, scope, partitions, opts)

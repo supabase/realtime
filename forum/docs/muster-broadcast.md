@@ -70,13 +70,13 @@ bounded singleton-promotion timeout fires.
 ## 2. Picking the target: `router/2`
 
 Before broadcasting, ask `router/2` for the group's router. It reads a small
-`persistent_term` status flag and either returns a single node (stable cluster)
+`persistent_term` status flag and either returns a single node (settled cluster)
 or signals that the cluster view is in flux and you should fan out to everyone.
 
 ```mermaid
 flowchart TD
     A["Forum.Muster.router(scope, group)"] --> B{"{Forum.Muster, scope, :status}"}
-    B -->|":stable"| C["ExHashRing.Ring.find_node(ring, group)"]
+    B -->|":converging or :ready"| C["ExHashRing.Ring.find_node(ring, group)"]
     C --> D["{:ok, router_node}<br/>route to ONE node"]
     B -->|":rebalancing"| E["ExHashRing.Ring.get_nodes(ring)"]
     E --> F["{:rebalancing, members}<br/>fan out to EVERY member"]
@@ -91,9 +91,10 @@ consistent hashing only remaps ~1/N of groups per node change.
 
 ## 3. The end-to-end broadcast
 
-Putting it together. On a stable cluster you take the cheap single-router path;
-during a rebalance you fan out to all members. In both cases delivery to actual
-pids happens *on the node that owns them*: pids never leave their node.
+Putting it together. On a settled cluster (`:converging` or `:ready`) you take
+the cheap single-router path; during a rebalance you fan out to all members. In
+both cases delivery to actual pids happens *on the node that owns them*: pids
+never leave their node.
 
 ```mermaid
 sequenceDiagram
@@ -105,7 +106,7 @@ sequenceDiagram
 
     Caller->>Caller: Forum.Muster.router(scope, group)
 
-    alt status == :stable → {:ok, router_node}
+    alt status == :converging or :ready → {:ok, router_node}
         Caller->>Router: deliver fan-out request + sender view_hash (your transport, e.g. :erpc)
         Router->>Router: Forum.Muster.targets(scope, group, view_hash)<br/>→ {:ok, [A, C, …]} or {:error, :flood}
         Router-->>Src: forward message to each target node (your transport)

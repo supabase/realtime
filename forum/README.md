@@ -96,6 +96,8 @@ children = [
 ]
 ```
 
+Every inter-node send Muster makes internally — discovery, `:occupied`, `:vacant_batch`, rebalance snapshots/deltas, view heartbeats — goes through a pluggable transport: a module implementing the `Forum.Adapter` behaviour (`register/1`, `broadcast/2,3`, `send/3`, `call/6`), passed as `:message_module` (default `Forum.Adapter.ErlDist`, built on Erlang distribution). Swap it to run Muster's coordination traffic over a different RPC mechanism (e.g. `:gen_rpc`) without touching the claim/rebalance logic.
+
 ### How join works
 
 ```
@@ -108,8 +110,8 @@ caller                       claim shard                 router (remote)
   |                              |                 reply :ok           |
   |                              |   nil (first member):               |
   |                              |     router == self?                 |
-  |                              |       yes: write occupancy,         |
-  |                              |            register, reply :ok      |
+  |                              |       yes: register, write          |
+  |                              |            occupancy, reply :ok     |
   |                              |       no: spawn worker ------------>|
   |                              |                                     | insert {{group, A}}
   |                              | <---- :ok ------------------------- |
@@ -251,7 +253,7 @@ In addition to the retry, two event-driven cleanups still apply:
 * If the source node leaves the cluster, the router's `:DOWN` handler clears the entries keyed by that node that are stamped with the dying pid. A fresher incarnation's already-delivered data (writer-pid stamped, whether or not its discovery has been processed yet) is left alone.
 * A rebalance that moves a group's routing away from the old router triggers `drop_stale_router_entries` there.
 
-**Occupancy rows are a last-writer-wins-by-`seq` register to make this race-free.** `:erpc.call` does **not** cancel the remote execution on timeout, so a write can land on the router long after the source gave up, and in *either* order relative to a competing write for the same key. Every occupancy row is stored as `{{group, source_node}, seq, meta}`, where `seq` is a per-source monotonic stamp (`:erlang.unique_integer([:monotonic])`) assigned by the source **at dispatch time**, and `meta` is `:present` (the source holds the group) or an integer timestamp marking a **tombstone** (the source vacated it). Seqs are only ever compared for the same `{group, source}` key, whose writes all originate on one node, so the comparison is always within a single VM's monotonic sequence and survives coordinator/shard restarts. Both directions of the race are then symmetric:
+**Occupancy rows are a last-writer-wins-by-`seq` register to make this race-free.** `:erpc.call` does **not** cancel the remote execution on timeout, so a write can land on the router long after the source gave up, and in *either* order relative to a competing write for the same key. Every occupancy row is stored as `{{group, source_node}, seq, meta, writer}`, where `seq` is a per-source monotonic stamp (`:erlang.unique_integer([:monotonic])`) assigned by the source **at dispatch time**, `meta` is `:present` (the source holds the group) or an integer timestamp marking a **tombstone** (the source vacated it), and `writer` is the pid of the source's Scope coordinator incarnation that produced the row (see the fresher-incarnation guard above, which compares against this field directly). Seqs are only ever compared for the same `{group, source}` key, whose writes all originate on one node, so the comparison is always within a single VM's monotonic sequence and survives coordinator/shard restarts. Both directions of the race are then symmetric:
 
 * **Stale DELETE after a fresh INSERT.** A re-claim's `:occupied` is dispatched *after* the `vacant_batch` it races (the join arrives later), so it carries a strictly higher `seq`. A timed-out `vacant_batch` whose DELETE lands afterwards would otherwise clobber the live re-claim; instead `vacant_batch` only tombstones a row whose `seq` is **no newer** than the batch's, so the stale, lower-`seq` DELETE is a no-op.
 * **Stale INSERT after a fresh DELETE.** The mirror: an orphaned `:occupied`/snapshot (e.g. its shard crashed and the restart re-routed the claim as a higher-`seq` vacancy) can land *after* the source genuinely vacated. This is why a vacancy **tombstones** the row (keeping its `seq`) rather than deleting it: the stale, lower-`seq` INSERT loses to the tombstone's guard and cannot resurrect the group. Deleting the row outright would discard the high-water `seq` and let the late INSERT win via `insert_new`, leaving a permanent phantom.
@@ -287,6 +289,8 @@ The supervisor restart strategy ensures the cluster eventually re-converges. Dur
 │   └── shard_n
 └── shards_ready_sentinel      # :ignore's every start; no pid
 ```
+
+The sentinel is more than a restart-ordering fixture: because a supervisor starts children strictly in list order and blocks its caller until each child's `init` returns, the sentinel's own `start_link/1` cannot run until every shard has returned from init, so its one-shot `:muster_shards_ready` send to the coordinator is a guarantee, not a race. The coordinator's `init/1` blocks on that signal (bounded by `:shards_ready_timeout_ms`, default 5 s) before broadcasting discovery or doing anything — like a rebalance — that calls into the shards, so `do_rebalance`'s synchronous per-shard gather can never land before a shard is registered. Shard init is local, ETS-only work with no I/O, so this timeout should never come close to firing in a healthy tree; if it does, the coordinator crashes and the supervisor restarts it rather than hanging forever.
 
 `:rest_for_one` restarts the crashed child **and every child listed after it**, never anything before it. `:one_for_one` restarts only the crashed child. That gives the whole crash story for free, straight from this shape, with no extra code:
 
