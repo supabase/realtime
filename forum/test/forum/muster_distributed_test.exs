@@ -4609,6 +4609,30 @@ defmodule Forum.MusterDistributedTest do
     end
   end
 
+  describe "join/3 rejects a genuinely remote pid" do
+    setup do
+      scope = :"muster_not_local_#{System.unique_integer([:positive])}"
+      start_supervised!(spec(scope, vacant_flush_interval_ms: 100))
+      %{scope: scope}
+    end
+
+    # muster_test.exs can only prove join/3 accepts a local pid: a
+    # locally-spawned pid can't masquerade as remote (node/1 always resolves
+    # to us there). The :not_local guard itself -- `node(pid) != node()` --
+    # needs a pid that actually encodes a different node's distribution id, so
+    # this is the one place that can drive it: a bare peer with no Muster of
+    # its own, just to mint a real remote pid.
+    test "a pid belonging to another node is never registered", %{scope: scope} do
+      {:ok, _peer, remote_node} = Peer.start()
+      remote_pid = :erpc.call(remote_node, :erlang, :spawn, [fn -> Process.sleep(:infinity) end])
+
+      assert node(remote_pid) == remote_node
+      assert {:error, :not_local} = Muster.join(scope, :g1, remote_pid)
+      refute Muster.local_member?(scope, :g1, remote_pid)
+      assert Muster.local_member_count(scope, :g1) == 0
+    end
+  end
+
   # Find a group that routes to `joiner` in the final cluster view but to
   # `phantom` once the phantom node is added to the ring.
   defp pick_victim_group(joiner, phantom, others) do

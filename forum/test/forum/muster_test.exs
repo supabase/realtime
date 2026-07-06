@@ -315,6 +315,19 @@ defmodule Forum.MusterTest do
       assert length(Forum.Supervisor.partitions(scope)) == 2
     end
 
+    test "starts with all-default options (start_link/1)", %{scope: scope} do
+      pid =
+        start_supervised!(%{
+          id: scope,
+          start: {Muster, :start_link, [scope]},
+          type: :supervisor
+        })
+
+      assert Process.alive?(pid)
+      assert {:ok, n} = Muster.router(scope, :anything)
+      assert n == node()
+    end
+
     test "raises on invalid partition count", %{scope: scope} do
       assert_raise ArgumentError, ~r/expected :partitions to be a positive integer/, fn ->
         Muster.start_link(scope, partitions: 0)
@@ -345,10 +358,46 @@ defmodule Forum.MusterTest do
       end
     end
 
+    test "raises on invalid rebalance_gather_timeout_ms", %{scope: scope} do
+      assert_raise ArgumentError, ~r/expected :rebalance_gather_timeout_ms/, fn ->
+        Muster.start_link(scope, rebalance_gather_timeout_ms: 0)
+      end
+    end
+
+    test "raises on invalid shards_ready_timeout_ms", %{scope: scope} do
+      assert_raise ArgumentError, ~r/expected :shards_ready_timeout_ms/, fn ->
+        Muster.start_link(scope, shards_ready_timeout_ms: 0)
+      end
+    end
+
     test "exposes router lookup", %{scope: scope, base_opts: opts} do
       start_supervised!(spec(scope, opts))
       assert {:ok, n} = Muster.router(scope, :anything)
       assert n == node()
+    end
+  end
+
+  describe "child_spec/1" do
+    # The sanctioned supervisor-integration surface (`{Forum.Muster, scope}` or
+    # `{Forum.Muster, [scope, opts]}` in a children list resolves through this),
+    # as opposed to the hand-built map `spec/2` every other test in this file
+    # uses to pass per-test options through to start_link.
+
+    test "child_spec(scope) (bare atom) starts a working tree", %{scope: scope} do
+      start_supervised!(Muster.child_spec(scope))
+      assert {:ok, n} = Muster.router(scope, :anything)
+      assert n == node()
+    end
+
+    test "child_spec([scope]) (single-element list) starts a working tree", %{scope: scope} do
+      start_supervised!(Muster.child_spec([scope]))
+      assert {:ok, n} = Muster.router(scope, :anything)
+      assert n == node()
+    end
+
+    test "child_spec([scope, opts]) threads options through", %{scope: scope} do
+      start_supervised!(Muster.child_spec([scope, [partitions: 3]]))
+      assert length(Forum.Supervisor.partitions(scope)) == 3
     end
   end
 
@@ -550,6 +599,7 @@ defmodule Forum.MusterTest do
       assert :ok = Muster.join(scope, :g1, pid)
       assert Muster.local_member?(scope, :g1, pid)
       assert Muster.local_member_count(scope, :g1) == 1
+      assert Muster.local_members(scope, :g1) == [pid]
       assert node() in Scope.occupancy(scope, :g1)
     end
 
@@ -579,10 +629,12 @@ defmodule Forum.MusterTest do
       assert Muster.local_member_count(scope, :g1) == 1
     end
 
-    test "rejects non-local pids", %{scope: scope} do
-      # Construct a pid that nominally belongs to a different node.
-      # We can't easily forge a pid; instead we just confirm the guard:
-      # spawn a process and ensure the join allows it.
+    test "accepts a local pid (contrast: a genuinely remote pid is rejected, see " <>
+           "muster_distributed_test.exs's \"join/3 rejects a genuinely remote pid\")",
+         %{scope: scope} do
+      # A locally-spawned pid can't masquerade as a remote one (node/1 always
+      # resolves to us here), so the :not_local guard itself needs a real
+      # second node; that case lives in the distributed suite.
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
       assert :ok = Muster.join(scope, :g1, pid)
     end
@@ -606,6 +658,43 @@ defmodule Forum.MusterTest do
       trigger_flush(scope)
       wait_for_group_state(scope, :g1, nil)
       refute node() in Scope.occupancy(scope, :g1)
+    end
+  end
+
+  describe "dump/1" do
+    @describetag cooldown_ms: 60_000
+
+    setup %{scope: scope, base_opts: opts} do
+      start_supervised!(spec(scope, opts))
+      :ok
+    end
+
+    # dump/1 is an IEx-only introspection helper with no other caller, so
+    # nothing else in the suite exercises format_dump/1 or
+    # group_state_label/1; a rename of a State field they interpolate (e.g.
+    # `s.ring_nodes`) would only be caught by actually calling this. Drives it
+    # through an empty scope (the "(none)" / "(empty)" branches) and one with
+    # both an :occupied and a :cooldown group (the populated branches and two
+    # of the group_state_label/1 clauses).
+    test "prints a snapshot without crashing, empty and populated", %{scope: scope} do
+      empty_output = ExUnit.CaptureIO.capture_io(fn -> assert :ok = Muster.dump(scope) end)
+      assert empty_output =~ "Muster #{inspect(scope)}"
+      assert empty_output =~ "(none)"
+      assert empty_output =~ "(empty)"
+
+      occupied_pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, :dump_occupied, occupied_pid)
+
+      cooldown_pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, :dump_cooldown, cooldown_pid)
+      assert :ok = Muster.leave(scope, :dump_cooldown, cooldown_pid)
+      assert :cooldown = wait_for_group_state(scope, :dump_cooldown, :cooldown)
+
+      populated_output = ExUnit.CaptureIO.capture_io(fn -> assert :ok = Muster.dump(scope) end)
+      assert populated_output =~ ":occupied (1): [:dump_occupied]"
+      assert populated_output =~ ":cooldown (1): [:dump_cooldown]"
+      assert populated_output =~ "dump_occupied"
+      assert populated_output =~ inspect(node())
     end
   end
 
