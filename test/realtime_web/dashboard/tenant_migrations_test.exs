@@ -66,9 +66,16 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
   end
 
   test "renders pg-delta section header with the resolved catalog major version", %{conn: conn, tenant: tenant} do
+    {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+
+    %{rows: [[version]]} =
+      Postgrex.query!(db_conn, "SELECT current_setting('server_version_num')::int / 10000", [])
+
+    expected_major = if version >= 17, do: 17, else: 15
+
     {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_migrations?external_id=#{tenant.external_id}")
 
-    assert has_element?(view, "h6", "pg-delta plan vs catalog (PG17)")
+    assert has_element?(view, "h6", "pg-delta plan vs catalog (PG#{expected_major})")
   end
 
   test "shows 0 rows instead of an error when realtime.schema_migrations is missing", %{conn: conn, tenant: tenant} do
