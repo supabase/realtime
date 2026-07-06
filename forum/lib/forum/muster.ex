@@ -251,14 +251,14 @@ defmodule Forum.Muster do
 
   * `{:ok, [node]}`: this node is `:ready` and agrees with the sender about
     cluster membership, so its router-role occupancy table is complete and
-    authoritative. Deliver to exactly these source nodes (may be empty — nobody
-    holds the group).
+    authoritative. Deliver to exactly these source nodes (may be empty, meaning
+    nobody holds the group).
   * `{:error, :flood}`: the barrier is not satisfied (still `:converging`, the
     sender disagrees about membership, or a coordinator restart shrank our view).
     The occupancy table cannot be trusted, so the caller must over-deliver
     instead of risking a miss. Muster does not pick the flood set: the caller
     fans out to whatever "everyone" means for its transport (e.g. all nodes in
-    the region), which is intentionally *not* `members/2` — a freshly-restarted
+    the region), which is intentionally *not* `members/2`. A freshly-restarted
     coordinator resets its ring to just `[node()]`, so the ring view can be
     incomplete in exactly the situation that triggers a flood.
   """

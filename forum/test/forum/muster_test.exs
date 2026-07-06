@@ -17,8 +17,8 @@ defmodule Forum.MusterTest do
     scope = :"muster_test_#{System.unique_integer([:positive])}"
 
     # Default transport stubs. `call/6` (the RPC primitive) returns :ok; tests
-    # re-stub it to inject failures or holds. `send/3` is a no-op — its targets
-    # are always fake remote nodes — but it is stubbed so its invocations are
+    # re-stub it to inject failures or holds. `send/3` is a no-op -- its targets
+    # are always fake remote nodes -- but it is stubbed so its invocations are
     # recorded and inspectable via `Mimic.calls/3`. `register/1` and
     # `broadcast/*` are left un-stubbed: they pass through to the real
     # ErlDist (register actually names the Scope process; broadcast is a no-op
@@ -48,8 +48,8 @@ defmodule Forum.MusterTest do
 
   # Stub the RPC transport `ErlDist.call/6`. `response` mirrors the old
   # RecordingAdapter contract:
-  #   * `:ok` / `{:error, term}` — returned directly.
-  #   * `{:fn, fun}` — `fun` is invoked synchronously in the calling (worker)
+  #   * `:ok` / `{:error, term}` -- returned directly.
+  #   * `{:fn, fun}` -- `fun` is invoked synchronously in the calling (worker)
   #     process, letting tests inject sleeps or arbitrary logic.
   defp stub_call({:fn, fun}) do
     stub(ErlDist, :call, fn _scope, _node, _module, _function, _args, _timeout -> fun.() end)
@@ -109,9 +109,8 @@ defmodule Forum.MusterTest do
   # receive_node_state/6 or apply_delta/6 directly against a fake remote
   # source (e.g. :src@nowhere) that has no real Scope coordinator to supply
   # one. What matters to these entry points is that a pid is provided at
-  # all (see tla/FINDINGS.md finding 2) — the writer-attribution behavior
-  # itself is covered separately in muster_distributed_test.exs, with real
-  # coordinator pids.
+  # all -- the writer-attribution behavior itself is covered separately in
+  # muster_distributed_test.exs, with real coordinator pids.
   defp fake_pid, do: spawn(fn -> Process.sleep(:infinity) end)
 
   # Poll the drained call log (accumulating across the consuming drains) until a
@@ -285,7 +284,7 @@ defmodule Forum.MusterTest do
 
   # Retry Muster.join/3 until it succeeds. Right after a coordinator crash, the
   # supervisor's :rest_for_one restarts the coordinator and then every shard,
-  # one child at a time — so the coordinator's name can already be registered
+  # one child at a time -- so the coordinator's name can already be registered
   # again while a shard is still being restarted, and a claim landing in that
   # narrow window can transiently see :scope_exit. The same window any real
   # caller must already tolerate and retry through.
@@ -434,7 +433,7 @@ defmodule Forum.MusterTest do
       src = fake_pid()
       # The reverse of the race above. A fresh, higher-seq vacant DELETE leaves a
       # seq-stamped tombstone; a stale, lower-seq occupied INSERT that lands after
-      # it (an orphaned, un-cancelled :occupied RPC) must be a no-op — the
+      # it (an orphaned, un-cancelled :occupied RPC) must be a no-op -- the
       # tombstone's seq guards the INSERT, so the vacated group is not resurrected.
       :ok = Scope.occupied(scope, :rev_g, :src@nowhere, 5, src)
       assert :ok = Scope.vacant_batch(scope, [:rev_g], :src@nowhere, 10, src)
@@ -511,7 +510,7 @@ defmodule Forum.MusterTest do
 
     # A tombstone is retained for the window (so a late, lower-seq INSERT still
     # loses to it), then reaped by the periodic sweep so it does not leak. We read
-    # the raw row — occupancy/2 reports a tombstone as absent either way, so it
+    # the raw row -- occupancy/2 reports a tombstone as absent either way, so it
     # cannot distinguish "still tombstoned" from "reaped".
     test "a tombstone is retained for the window then reaped", %{scope: scope} do
       table = Scope.occupancy_table_name(scope)
@@ -595,12 +594,12 @@ defmodule Forum.MusterTest do
       assert_receive {:DOWN, ^ref, :process, ^pid, _}, 1_000
 
       # Scope registers the (already-dead) pid as part of the claim, so its
-      # monitor fires and drives retraction — the router is never left occupied
+      # monitor fires and drives retraction -- the router is never left occupied
       # with no live local member.
       assert :ok = Muster.join(scope, :g1, pid)
 
       # Monitor-driven vacancy moves the group out of :occupied, and the
-      # occupancy row is eventually dropped — no permanent orphan.
+      # occupancy row is eventually dropped -- no permanent orphan.
       wait_for_group_state(scope, :g1, :vacant_queued)
       assert Muster.local_member_count(scope, :g1) == 0
 
@@ -773,7 +772,7 @@ defmodule Forum.MusterTest do
 
       assert_receive :rpc_started, 1_000
 
-      # While the slow RPC is in flight, ask Scope for status — should reply quickly.
+      # While the slow RPC is in flight, ask Scope for status -- should reply quickly.
       scope_name = Forum.Supervisor.name(scope)
 
       t0 = System.monotonic_time(:millisecond)
@@ -820,7 +819,7 @@ defmodule Forum.MusterTest do
       _ = drain_calls()
       assert :ok = Muster.leave(scope, g, pid)
 
-      # After cooldown the group is queued — no RPC has been sent yet.
+      # After cooldown the group is queued -- no RPC has been sent yet.
       assert :vacant_queued = wait_for_group_state(scope, g, :vacant_queued)
 
       # The flush sends one batched vacant RPC to the router.
@@ -913,7 +912,7 @@ defmodule Forum.MusterTest do
 
     # Probe a probe-ring built from `members` to find a group whose router
     # would land on `target_node`. We can't query Muster's own ring here yet
-    # because the rebalance has not run — we need a group that will move *to*
+    # because the rebalance has not run -- we need a group that will move *to*
     # the fake node once it does.
     defp group_for_router_under(members, target_node) do
       probe = :"_probe_#{System.unique_integer([:positive])}_muster_ring"
@@ -1012,7 +1011,7 @@ defmodule Forum.MusterTest do
 
       # Hold the batch RPC so the group stays :vacant_flushing across the
       # rebalance. (g is the only group and is excluded from the announce-set,
-      # so the rebalance itself issues no :receive_node_state calls — the held
+      # so the rebalance itself issues no :receive_node_state calls -- the held
       # response only stalls the vacant batch worker.)
       stub_call(
         {:fn,
@@ -1050,7 +1049,7 @@ defmodule Forum.MusterTest do
       inject_fake_remote(scope)
       members_3 = [node(), @fake_node, :third@nowhere]
 
-      # Router stays @fake_node across the rebalance — the formerly-wedging path.
+      # Router stays @fake_node across the rebalance -- the formerly-wedging path.
       g = find_group_flipping_router([node(), @fake_node], @fake_node, members_3, @fake_node)
 
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
@@ -1209,7 +1208,7 @@ defmodule Forum.MusterTest do
     # with sequential rebalance it would be ~600ms. A < 400ms ceiling is a
     # comfortable factor-of-2 margin for CI noise.
     @tag rpc_timeout: 5_000
-    test "parallel rebalance — slow destinations don't block each other",
+    test "parallel rebalance -- slow destinations don't block each other",
          %{scope: scope} do
       # Seed a group occupied locally so the rebalance has something to
       # announce; without any candidates the rebalance is trivially fast
@@ -1484,7 +1483,7 @@ defmodule Forum.MusterTest do
     # apply is serialized through Scope, which kills the old concurrent
     # write-vs-sweep race) is *ahead-of-source membership*: we adopt a view
     # containing a node the source hasn't seen yet, under which the group hashes
-    # away from us — but the source's last-announced view still routes it to us,
+    # away from us -- but the source's last-announced view still routes it to us,
     # so the row is live and deleting it would lose data permanently (the source
     # has no reason to re-announce). The distributed suite covers the real-
     # cluster end-states black-box; this drives the guard deterministically.
@@ -1516,7 +1515,7 @@ defmodule Forum.MusterTest do
       assert src in Scope.occupancy(scope, g)
 
       # Adopt the stale view (we learned of D before the source did). The sweep
-      # sees `g` hash to D, not us — a drop candidate — but the source still
+      # sees `g` hash to D, not us -- a drop candidate -- but the source still
       # agrees only on the final view, so the guard must spare the row.
       rebalance_sync(scope, stale_view)
       assert src in Scope.occupancy(scope, g)
@@ -1723,7 +1722,7 @@ defmodule Forum.MusterTest do
       rebalance_sync(scope, members)
       refute ready?(scope)
 
-      # A data snapshot from the only peer marks it ready — no separate
+      # A data snapshot from the only peer marks it ready -- no separate
       # :rebalance_marker message involved.
       assert :ok =
                Scope.receive_node_state(
@@ -1773,10 +1772,9 @@ defmodule Forum.MusterTest do
              end)
     end
 
-    # tla/FINDINGS.md finding 3: the discover-ack piggyback used to hand a
-    # discoverer our CURRENT view/watermark unconditionally, even when that
-    # discoverer is a node we still owe a full snapshot to (owed_snapshots).
-    # This is the same owed-suppression guard as the test right above, on the
+    # The discover-ack piggyback withholds our current view/watermark from a
+    # discoverer we still owe a full snapshot to (owed_snapshots). This is
+    # the same owed-suppression guard as the test right above, on the
     # OTHER message that carries a view/watermark (announce_view's heartbeat
     # marker vs. the discover-ack reply).
     #
@@ -1806,11 +1804,11 @@ defmodule Forum.MusterTest do
       assert [[^scope, dest, {:muster_discover_ack, _pid, view_hash, seq}]] = drain_sends()
       assert dest == node()
 
-      # BUG (pre-fix): the ack unconditionally carried own_view_hash/view_seq
-      # here, letting a still-owed discoverer fold in a view it agrees with --
-      # and declare the barrier satisfied -- before the snapshot carrying the
-      # actual data ever lands (FINDINGS.md finding 3, the discover-ack race).
-      # Fixed: the piggyback is withheld (nil/nil), mirroring announce_view.
+      # Without this guard, a still-owed discoverer could fold in a view it
+      # already agrees with -- and declare the barrier satisfied -- before
+      # the snapshot carrying the actual data ever lands (the discover-ack
+      # race). The piggyback is withheld (nil/nil) here, mirroring
+      # announce_view.
       assert view_hash == nil
       assert seq == nil
     end
@@ -1903,7 +1901,7 @@ defmodule Forum.MusterTest do
 
       # The supervisor restarts the shard; init rebuilds :occupied from its aligned
       # partition (whose ETS tables are owned by the Supervisor and survive the
-      # shard crash). The live member is untouched — Partition is a separate process.
+      # shard crash). The live member is untouched -- Partition is a separate process.
       assert :occupied = wait_for_group_state(scope, g, :occupied, 2_000)
       assert Muster.local_member?(scope, g, pid)
     end
@@ -1920,7 +1918,7 @@ defmodule Forum.MusterTest do
 
       # The ring is a supervised sibling (not linked to the coordinator), so a
       # coordinator crash does not take it down under the shards that read it
-      # directly — it is the SAME process, so there is no cascade of shard
+      # directly -- it is the SAME process, so there is no cascade of shard
       # ring-read crashes.
       assert Process.alive?(ring)
       assert Process.whereis(ring_name(scope)) == ring
@@ -1971,7 +1969,7 @@ defmodule Forum.MusterTest do
          %{scope: scope} do
       # The scope's Supervisor is a single flat :rest_for_one listing the ring,
       # then the coordinator, then the shards. So a coordinator crash restarts
-      # the coordinator AND every child listed after it — i.e. every shard —
+      # the coordinator AND every child listed after it -- i.e. every shard --
       # with no extra code: it falls straight out of the child order. One
       # reset story to reason about: "the coordinator restarted" always means
       # the shards did too, not "sometimes it does (ring crash), sometimes it
@@ -2107,7 +2105,7 @@ defmodule Forum.MusterTest do
       Process.sleep(20)
 
       # Kill the shard the gather is blocked on. The coordinator's GenServer.call
-      # gets an :exit, which the gather deliberately does NOT catch — so it crashes
+      # gets an :exit, which the gather deliberately does NOT catch -- so it crashes
       # (the documented "restart re-announces from a clean slate" behaviour).
       Process.exit(shard_pid, :kill)
       assert_receive {:DOWN, ^coord_ref, :process, ^coord, _reason}, 1_000
@@ -2156,18 +2154,18 @@ defmodule Forum.MusterTest do
       Process.exit(shard_pid, :kill)
       assert_receive {:DOWN, ^ref, :process, ^shard_pid, :killed}, 1_000
 
-      # The blocked caller is released with a clean error — it does NOT hang for the
+      # The blocked caller is released with a clean error -- it does NOT hang for the
       # full @claim_call_timeout.
       assert_receive {:claim_result, {:error, {:scope_exit, _}}}, 1_000
       assert_receive {:DOWN, ^caller_ref, :process, ^caller, _}, 1_000
 
       # The crash left no member registered for g (the pid is only registered after
       # the router confirms the claim), but the durable states table persisted the
-      # :occupied_pending shape — and the in-flight :occupied RPC may have landed on
+      # :occupied_pending shape -- and the in-flight :occupied RPC may have landed on
       # the router. So the restarted shard reconciles the now-empty group to
       # :vacant_queued, which the next flush turns into a vacant batch that retracts
-      # any row that was written. (It does NOT silently forget the group, which is
-      # what used to leak a stale router entry.)
+      # any row that was written. (It does NOT silently forget the group, which
+      # would otherwise leak a stale router entry.)
       restarted = wait_for_new_pid(shard, shard_pid)
       assert is_pid(restarted)
       assert :vacant_queued = wait_for_group_state(scope, g, :vacant_queued, 2_000)
@@ -2204,11 +2202,11 @@ defmodule Forum.MusterTest do
       new_coord = wait_for_new_pid(Forum.Supervisor.name(scope), coord)
       assert is_pid(new_coord)
 
-      # SAME table identity — it was never recreated, so no shard write could have
+      # SAME table identity -- it was never recreated, so no shard write could have
       # raced a vanished table.
       assert :ets.whereis(table) == tid_before
       # The self row is re-asserted from the partition at coordinator init, and a
-      # fresh claim on another group still works (shards are healthy) — retried
+      # fresh claim on another group still works (shards are healthy) -- retried
       # like any real caller, since the supervisor's :rest_for_one is still
       # restarting the shards after the coordinator (see "a bare coordinator
       # crash also restarts every shard") and a claim can transiently race that.
@@ -2299,13 +2297,13 @@ defmodule Forum.MusterTest do
 
     test "a vacancy dropped while the shard is down is caught by restart reconciliation",
          %{scope: scope} do
-      # BUG #4: when the last member dies while the shard is down, the DOWN that
-      # would retract the group is lost with the shard's mailbox. Now that the shard
-      # OWNS the member monitor (no separate Partition), the merged design recovers
-      # it on restart: rebuild_membership re-monitors the surviving entries table
-      # record, the dead pid's immediate DOWN drives the normal removal, and the
-      # durable :occupied group is driven to retraction instead of trusting it
-      # forever.
+      # If the last member dies while the shard is down, the DOWN that would
+      # retract the group could be lost with the shard's mailbox. Since the
+      # shard owns the member monitor (no separate Partition), restart
+      # recovers it: rebuild_membership re-monitors the surviving entries
+      # table record, the dead pid's immediate DOWN drives the normal
+      # removal, and the durable :occupied group is driven to retraction
+      # instead of trusting it forever.
       g = :dropped_vacant_g
       member = spawn(fn -> Process.sleep(:infinity) end)
       assert :ok = Muster.join(scope, g, member)
@@ -2322,7 +2320,7 @@ defmodule Forum.MusterTest do
       Process.exit(member, :kill)
 
       # Kill the suspended shard: its mailbox (with the unprocessed DOWN) is
-      # discarded — the vacancy is now truly LOST, exactly as in the restart-window
+      # discarded -- the vacancy is now truly LOST, exactly as in the restart-window
       # race. The durable state is still :occupied and the entries record survives.
       ref = Process.monitor(shard_pid)
       Process.exit(shard_pid, :kill)
@@ -2330,7 +2328,7 @@ defmodule Forum.MusterTest do
 
       # The restarted shard re-monitors the surviving (now-dead) entry; its
       # immediate DOWN removes the member, drives the group vacant, and a flush
-      # retracts the row — instead of leaving the durable :occupied trusted forever.
+      # retracts the row -- instead of leaving the durable :occupied trusted forever.
       assert :vacant_queued = wait_for_group_state(scope, g, :vacant_queued, 2_000)
       trigger_flush(scope)
       assert wait_until(fn -> node() not in Scope.occupancy(scope, g) end)
@@ -2355,7 +2353,7 @@ defmodule Forum.MusterTest do
       trigger_rebalance(gt_scope, Enum.sort([node(), :gt@nowhere]))
       wait_status(gt_scope, :rebalancing)
 
-      # Crash arrives ~150ms in — well under the 15s default — proving the timeout
+      # Crash arrives ~150ms in -- well under the 15s default -- proving the timeout
       # is in force.
       assert_receive {:DOWN, ^ref, :process, ^coord, reason}, 1_000
       assert match?({:timeout, _}, reason) or match?(:killed, reason) or is_tuple(reason)

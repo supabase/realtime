@@ -111,7 +111,7 @@ defmodule Forum.Muster.Scope do
 
   @doc false
   # Returns the list of nodes (as known by the local router state) holding
-  # `group`. Internal read backing `Forum.Muster.targets/3` — callers should go
+  # `group`. Internal read backing `Forum.Muster.targets/3`; callers should go
   # through that (or `Forum.Muster.can_decide?/2`) so the readiness barrier is
   # honored, never trusting this table directly.
   @spec occupancy(atom, Forum.group()) :: [node]
@@ -140,11 +140,11 @@ defmodule Forum.Muster.Scope do
   #     than the longest an in-flight RPC could still be (a multiple of
   #     rpc_timeout_ms, see default_tombstone_window/1).
   #   * `writer` is the pid of the source's Scope coordinator INCARNATION that
-  #     produced this row (tla/FINDINGS.md finding 2 — see handle_info({:DOWN,
-  #     ...}) below). Only one Scope can be live per node at a time, so a row
-  #     whose `writer` differs from a dying pid was necessarily produced by a
-  #     different (live or later) incarnation and must not be wiped alongside
-  #     it, regardless of what has or hasn't been registered as a peer yet.
+  #     produced this row (see handle_info({:DOWN, ...}) below). Only one Scope
+  #     can be live per node at a time, so a row whose `writer` differs from a
+  #     dying pid was necessarily produced by a different (live or later)
+  #     incarnation and must not be wiped alongside it, regardless of what has
+  #     or hasn't been registered as a peer yet.
   #
   # `occupancy/2` returns only :present rows, so a tombstone reads as "absent".
 
@@ -239,18 +239,18 @@ defmodule Forum.Muster.Scope do
   @doc """
   Remote: source_node tells us it now holds local members of `group`.
 
-  `source_pid` (added for tla/FINDINGS.md finding 2) is the pid of the
-  source's Scope coordinator INCARNATION that dispatched this claim — read by
-  the dispatching Shard from its local Scope's registered name right before
-  the RPC. It's stamped on the row so `handle_info({:DOWN, ...})` can tell
-  whether a later-dying pid actually produced this row, without having to
-  know whether that incarnation has been registered as a peer yet (a
-  completely independent, unordered channel — see the handler for why that
-  distinction matters). Callers with no live coordinator to attribute to
-  (chiefly tests exercising the write path directly) must pass an explicit
-  pid anyway — `nil` is only ever produced internally, by `local_scope_pid/1`
-  during the narrow startup window before Scope has registered; such rows are
-  simply never matched by a DOWN's exact-pid wipe.
+  `source_pid` is the pid of the source's Scope coordinator INCARNATION that
+  dispatched this claim, read by the dispatching Shard from its local Scope's
+  registered name right before the RPC. It's stamped on the row so
+  `handle_info({:DOWN, ...})` can tell whether a later-dying pid actually
+  produced this row, without having to know whether that incarnation has been
+  registered as a peer yet (a completely independent, unordered channel; see
+  the handler for why that distinction matters). Callers with no live
+  coordinator to attribute to (chiefly tests exercising the write path
+  directly) must pass an explicit pid anyway: `nil` is only ever produced
+  internally, by `local_scope_pid/1` during the narrow startup window before
+  Scope has registered; such rows are simply never matched by a DOWN's
+  exact-pid wipe.
   """
   @spec occupied(atom, Forum.group(), node, integer, pid | nil) :: :ok
   def occupied(scope, group, source_node, seq, source_pid) do
@@ -337,7 +337,7 @@ defmodule Forum.Muster.Scope do
   We pass `:infinity` for the inner call (it is a few ETS ops that never block);
   the sender's `:erpc` `:rpc_timeout_ms` is the real bound.
 
-  `source_pid` (see occupied/5) is `self()` at the dispatching Scope — it
+  `source_pid` (see occupied/5) is `self()` at the dispatching Scope: it
   dispatches this RPC itself, so no lookup is needed.
   """
   @spec receive_node_state(atom, node, [Forum.group()], non_neg_integer, integer, pid | nil) ::
@@ -670,14 +670,13 @@ defmodule Forum.Muster.Scope do
   # watermark so member_views is seeded immediately, important after a coordinator
   # restart, where it would otherwise be empty until the next membership change.
   #
-  # tla/FINDINGS.md finding 3: unlike the view heartbeat (announce_view, which
-  # deliberately skips any node in owed_snapshots -- its marker rides the
-  # snapshot, after the data), this reply used to piggyback unconditionally. A
-  # discoverer we owe a full snapshot to has no trustworthy baseline yet; if the
-  # ack still hands it our post-rebalance view/watermark, the discoverer can
-  # declare the barrier satisfied (and trust its occupancy table) before that
-  # snapshot's data ever lands. So: withhold the piggyback for an owed
-  # discoverer (view_hash/seq -> nil), exactly mirroring announce_view's guard.
+  # Unlike the view heartbeat (announce_view, which deliberately skips any node
+  # in owed_snapshots: its marker rides the snapshot, after the data), the ack
+  # withholds the piggyback for a discoverer we owe a full snapshot to
+  # (view_hash/seq -> nil), exactly mirroring announce_view's guard. Such a
+  # discoverer has no trustworthy baseline yet: handing it our post-rebalance
+  # view/watermark would let it declare the barrier satisfied (and trust its
+  # occupancy table) before that snapshot's data ever lands.
   @impl true
   def handle_info({:muster_discover, peer, view_hash, seq}, %State{} = state) do
     peer_node = node(peer)
@@ -744,22 +743,22 @@ defmodule Forum.Muster.Scope do
   # and applied_snapshot_seq entries ATTRIBUTABLE TO THIS DYING PID, and
   # rebalance.
   #
-  # tla/FINDINGS.md finding 2: occupancy rows / member_views / applied_snapshot_seq
-  # entries are written from TWO independent, unordered channels -- the
-  # peer-registration messages (discover/discover_ack/rebalance_marker, which
-  # carry the writer's pid) and the data RPCs (occupied/4, vacant_batch/4,
-  # receive_node_state/5, apply_delta/5, which now carry it too). A peer that
-  # restarts in place can have its fresh DATA (a snapshot applied via
-  # receive_node_state/5) land and get written under the NEW pid before this
-  # handler ever runs for the OLD pid's DOWN, with NO discover/ack from the
-  # new incarnation processed yet -- register_peer/peers has no idea a newer
-  # incarnation exists. Wiping by node alone (or by "is some other peer
-  # currently registered", which only watches the registration channel) would
-  # destroy that already-applied, already-correct data permanently: membership
-  # does not change (nothing new got registered), so recompute_members is a
-  # no-op and nothing ever re-announces to repair it.
+  # Occupancy rows / member_views / applied_snapshot_seq entries are written
+  # from TWO independent, unordered channels: the peer-registration messages
+  # (discover/discover_ack/rebalance_marker, which carry the writer's pid) and
+  # the data RPCs (occupied/4, vacant_batch/4, receive_node_state/5,
+  # apply_delta/5, which carry it too). A peer that restarts in place can have
+  # its fresh DATA (a snapshot applied via receive_node_state/5) land and get
+  # written under the NEW pid before this handler ever runs for the OLD pid's
+  # DOWN, with NO discover/ack from the new incarnation processed yet:
+  # register_peer/peers has no idea a newer incarnation exists. Wiping by node
+  # alone (or by "is some other peer currently registered", which only watches
+  # the registration channel) would destroy that already-applied,
+  # already-correct data permanently: membership does not change (nothing new
+  # got registered), so recompute_members is a no-op and nothing ever
+  # re-announces to repair it.
   #
-  # So: wipe only the entries actually attributable to THIS pid -- each of
+  # So: wipe only the entries actually attributable to THIS pid. Each of
   # occupancy / member_views / applied_snapshot_seq carries the writer pid
   # that produced it, independent of whatever `peers` currently holds. A row
   # written by any OTHER pid was necessarily written by a different
@@ -823,13 +822,13 @@ defmodule Forum.Muster.Scope do
   # On failure we only crash (the deliberate "restart re-announces from a clean
   # slate" recovery) if router_node is still a member. This only matters for a
   # departure that races an in-flight snapshot/delta TO that same node (i.e. it
-  # was still in owed_snapshots when it died) — most departures have no worker
+  # was still in owed_snapshots when it died); most departures have no worker
   # talking to the departed node at all and never reach this branch. But when
   # one does race: if the DOWN was already processed while this worker was in
   # flight, do_rebalance already dropped router_node from members (and pruned
   # owed_snapshots), so this is a stale, redundant signal about a departure
-  # we've already handled — crashing on it would turn that ordinary race into a
-  # coordinator crash for no reason.
+  # we've already handled, and crashing on it would turn that ordinary race
+  # into a coordinator crash for no reason.
   def handle_info(
         {{:node_state_done, router_node, seq}, _ref, :process, _pid, exit_reason},
         state
@@ -897,7 +896,7 @@ defmodule Forum.Muster.Scope do
   #
   # Piggybacked on the same tick: an UNCONDITIONAL re-run of
   # drop_stale_router_entries, regardless of the current :status. Without this,
-  # a claim (occupied/4, vacant_batch/4 — the only cross-node writes with no
+  # a claim (occupied/4, vacant_batch/4, the only cross-node writes with no
   # view_hash fencing) whose :erpc was delayed past a rebalance can land on a
   # router AFTER it already agreed on the view that routes the group away, with
   # no row yet to judge and no further :ready transition ever coming to re-judge
@@ -1084,14 +1083,14 @@ defmodule Forum.Muster.Scope do
     # cheap async marker so its barrier learns "this source holds nothing for me"
     # rather than "this source has not arrived yet". Self never needs one.
     #
-    # tla/FINDINGS.md finding 4: excluding only THIS round's snapshot_targets is
-    # not enough. A member still owed a PREVIOUS round's un-acked snapshot (its
-    # routed groups did not move again this round, so it is not a snapshot_target
-    # now either) would otherwise get a bare marker for the new view and could
-    # count us as agreed before the old round's data lands. So also exclude every
-    # node still in owed_snapshots (this round's plus any carried over): its
-    # marker keeps riding its eventual snapshot, and the heartbeat (announce_view)
-    # resumes covering it once that snapshot is acked.
+    # Excluding only THIS round's snapshot_targets is not enough: a member still
+    # owed a PREVIOUS round's un-acked snapshot (its routed groups did not move
+    # again this round, so it is not a snapshot_target now either) would
+    # otherwise get a bare marker for the new view and could count us as agreed
+    # before the old round's data lands. So we also exclude every node still in
+    # owed_snapshots (this round's plus any carried over): its marker keeps
+    # riding its eventual snapshot, and the heartbeat (announce_view) resumes
+    # covering it once that snapshot is acked.
     Enum.each(new_members -- [node() | Map.keys(owed_snapshots)], fn member ->
       state.message_module.send(
         state.scope,
@@ -1154,7 +1153,7 @@ defmodule Forum.Muster.Scope do
       # drop_stale_router_entries skips their rows. Re-run the sweep once every
       # member has agreed; now every member's rows are judgeable. This is an
       # additional, prompt sweep on top of the periodic one piggybacked on
-      # :sweep_tombstones (below) — it catches the common case immediately
+      # :sweep_tombstones (below); it catches the common case immediately
       # instead of waiting for the next tick.
       if status == :ready, do: drop_stale_router_entries(state)
     end
@@ -1203,7 +1202,7 @@ defmodule Forum.Muster.Scope do
   # concurrent writers are also why the write below is seq-guarded rather than
   # by key alone (see the note at the select_replace). Skipped rows are harmless
   # and are re-judged on the :ready transition and, as a backstop, on every
-  # :sweep_tombstones tick (see handle_info(:sweep_tombstones, _) above) —
+  # :sweep_tombstones tick (see handle_info(:sweep_tombstones, _) above);
   # together these also cover a row that does not exist yet at either point and
   # only appears afterwards (a claim delayed by :erpc past both). Our own rows
   # are always judgeable and must stay in the sweep: a group that moved away (or
@@ -1215,11 +1214,11 @@ defmodule Forum.Muster.Scope do
   # RPC carries no view fencing (occupied/4, vacant_batch/4 take no view_hash),
   # so a claim dispatched before this group's router last flapped away from us
   # and delivered only after it flapped back would otherwise have nothing to
-  # lose against and resurrect the row via insert_new — permanently, since a
+  # lose against and resurrect the row via insert_new, permanently, since a
   # row currently routed TO us is never judged stale again. Only a :present row
   # is downgraded (the `meta == :present` guard on the match head below); a row
   # already a tombstone is left completely untouched, on purpose, even though it
-  # is just as "routed away" as a :present one — touching it would refresh its
+  # is just as "routed away" as a :present one; touching it would refresh its
   # `created_at` on every tick and starve reap_tombstones/1 forever, since this
   # sweep and the reap both run on the same :sweep_tombstones tick (reap first,
   # then this). Skipping already-tombstoned rows means each row is downgraded at
@@ -1257,12 +1256,12 @@ defmodule Forum.Muster.Scope do
         # table from :erpc workers, concurrently with this sweep, so between the
         # :ets.select above and this write the source may have legitimately
         # re-claimed the group under a newer view (raising the key via
-        # upsert_if_newer) — a key-only write here would destroy that fresh row,
+        # upsert_if_newer): a key-only write here would destroy that fresh row,
         # and nothing would ever re-send it (the source got its :ok; deltas
         # carry moved groups only). A raised row makes this a no-op; if it is
         # still stale it is re-judged (under the watermark of the source's newer
         # announcement) on a later sweep. Wrapped in a span so a test can park
-        # the sweep between judgment and write (force_ordering on :start) —
+        # the sweep between judgment and write (force_ordering on :start),
         # exactly that window.
         tombstoned =
           tp_span(:muster_drop_stale_apply, %{
@@ -1280,7 +1279,7 @@ defmodule Forum.Muster.Scope do
 
         # Emitted AFTER an actual tombstone write, so a block_until on this
         # event implies the row now reads as absent (occupancy/2 filters to
-        # :present only) — not that it was physically removed.
+        # :present only), not that it was physically removed.
         if tombstoned == 1 do
           tp(:muster_drop_stale_entry, %{
             scope: state.scope,

@@ -7,7 +7,7 @@ defmodule Forum.Muster.ShardsReadySentinel do
   # Forum.Supervisor places this as the LAST child of the outer :rest_for_one,
   # right after shards_supervisor_spec. Supervisor.start_link blocks its caller
   # until the started child's own init has returned, and a supervisor starts
-  # its children strictly in list order — so this module's start_link/1 cannot
+  # its children strictly in list order, so this module's start_link/1 cannot
   # run until shards_supervisor's init has returned, which itself only returns
   # once every shard's init has returned. The send below is therefore a
   # guarantee, not a race: by construction every shard is registered and past

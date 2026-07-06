@@ -53,7 +53,7 @@ node A, A sends a synchronous `:occupied` notification to the router; when the
 last leaves (after a cooldown), a periodic flush sends a batched `:vacant_batch`.
 See the README for the join/leave and rebalance details.
 
-You don't read the table directly — `targets/3` does it for you, and only after
+You don't read the table directly. `targets/3` does it for you, and only after
 checking a **readiness barrier**: a broadcast carries the sender's cluster-view
 hash, and the router returns `{:ok, source_nodes}` only when it is `:ready` and
 agrees with the sender about membership (so its table is provably complete).

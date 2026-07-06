@@ -488,12 +488,15 @@ defmodule Forum.Muster.Shard do
         # router again for a group whose self row was tombstoned while it was
         # routed elsewhere during our downtime, and rebuild_group_states only
         # re-asserts self rows for groups with LIVE members (this one had none
-        # while cooling down). See tla/FINDINGS.md finding 1. One cheap,
-        # idempotent ETS write closes the gap: a fresh seq either re-raises an
-        # already-correct row (no-op) or repairs a stale one. A REMOTE router
-        # needs no such guard: reaching a multi-node view again implies a
-        # rebalance that re-announced held groups, :cooldown included.
-        if router_from_state(state, group) == node() do
+        # while cooling down), so the row for this group would otherwise stay
+        # stale. One cheap, idempotent ETS write closes the gap: a fresh seq
+        # either re-raises an already-correct row (no-op) or repairs a stale
+        # one. A REMOTE router needs no such guard: reaching a multi-node view
+        # again implies a rebalance that re-announced held groups, :cooldown
+        # included.
+        router = router_from_state(state, group)
+
+        if router == node() do
           Scope.upsert_if_newer(
             state.occupancy_table,
             {group, node()},
@@ -849,7 +852,7 @@ defmodule Forum.Muster.Shard do
   end
 
   # The local Scope coordinator's CURRENT incarnation pid, read fresh at
-  # dispatch/write time (never cached) — see the writer-attribution note above
+  # dispatch/write time (never cached). See the writer-attribution note above
   # Scope.upsert_if_newer/4. `nil` if Scope has not registered yet (a narrow
   # startup window); such rows just never match a DOWN's exact-pid wipe.
   defp local_scope_pid(state), do: Process.whereis(Forum.Supervisor.name(state.scope))
