@@ -733,9 +733,10 @@ defmodule Forum.Muster.Shard do
   end
 
   # Collect every :vacant_queued group, bucket by current router, and send one
-  # batched RPC per remote router (self-routed groups are pruned locally). The
-  # queued groups stay in :vacant_queued only until a flush moves them to
-  # :vacant_flushing; a failed batch returns them to :vacant_queued.
+  # batched RPC per remote router (self-routed groups are tombstoned locally with
+  # the same seq guard). The queued groups stay in :vacant_queued only until a
+  # flush moves them to :vacant_flushing; a failed batch returns them to
+  # :vacant_queued.
   defp flush_vacant(state) do
     queued = groups_in_state(state, :vacant_queued)
 
@@ -753,10 +754,20 @@ defmodule Forum.Muster.Shard do
         by_router
         |> Enum.reduce(state, fn {router_node, groups}, st ->
           if router_node == node() do
-            # Self-routed: delete our own rows directly. flush and any re-claim
-            # for the same group both run in THIS shard (same group → same
-            # shard), so this delete never races a concurrent local re-insert.
-            Enum.each(groups, fn g -> :ets.delete(st.occupancy_table, {g, node()}) end)
+            # Self-routed: retract our own rows with the SAME seq-guarded tombstone
+            # the remote path uses (Scope.vacant_batch/5), NOT a hard :ets.delete.
+            # flush and any re-claim for the same group both run in THIS shard, so a
+            # hard delete would not race a local re-insert -- but the coordinator's
+            # rebalance self-upsert is a DIFFERENT writer (in Scope) that a hard
+            # delete does race: do_rebalance stamps snapshot_seq, gathers the shards
+            # in order, and only afterwards upserts its local self-rows at that
+            # (older) seq. A group we reported held can vacate and flush while the
+            # coordinator is still blocked gathering a later shard; a hard delete
+            # discards the seq high-water mark, so that late, lower-seq upsert
+            # resurrects the row via insert_new as a permanent member-less phantom.
+            # The tombstone leaves a fresh (higher-seq) high-water mark the stale
+            # upsert loses to, exactly as it does for a remote router.
+            Scope.vacant_batch(st.scope, groups, node(), next_seq(), local_scope_pid(st))
             Enum.reduce(groups, st, fn g, s -> delete_group_state(s, g) end)
           else
             dispatch_vacant_batch(groups, router_node, st)

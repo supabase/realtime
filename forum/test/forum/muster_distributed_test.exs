@@ -2331,6 +2331,158 @@ defmodule Forum.MusterDistributedTest do
     end
   end
 
+  describe "self-routed vacant flush races the rebalance self-row upsert (forced ordering)" do
+    setup do
+      scope = :"muster_phantom_#{System.unique_integer([:positive])}"
+      # partitions: 2 so the victim's shard (index 0) is gathered BEFORE the
+      # shard-1 gather we park. Short cooldown + flush so the vacancy injected
+      # inside the parked gather window drains to a forgotten group promptly; a
+      # large gather timeout so the coordinator can stay parked mid-gather without
+      # its synchronous {:rebalance} call to shard 1 timing out (and crashing it).
+      start_supervised!(
+        spec(scope,
+          partitions: 2,
+          vacancy_cooldown_ms: 50,
+          vacant_flush_interval_ms: 100,
+          rebalance_gather_timeout_ms: 30_000
+        )
+      )
+
+      %{scope: scope}
+    end
+
+    # PERMANENT phantom, below the model's coordinator-atomic granularity (the
+    # gather and the self-row upsert are one step in the spec's Rebalance action;
+    # this came from code review, not the model).
+    #
+    # do_rebalance stamps snapshot_seq, then gathers each shard's held set with
+    # synchronous, in-ORDER GenServer.calls, and only AFTER the gather writes its
+    # local self-router occupancy rows (at that by-then-old snapshot_seq). A group
+    # an early-gathered shard reported held (:occupied / :cooldown) can vacate AND
+    # flush while the coordinator is still blocked gathering a LATER shard: the
+    # self-routed flush branch HARD-DELETES the row (`:ets.delete`), discarding the
+    # seq high-water mark for {group, node()}. The coordinator's subsequent,
+    # lower-seq self-upsert then resurrects the row via `insert_new` as a
+    # member-less phantom -- a self-routed row `drop_stale_router_entries` never
+    # judges (it skips rows that route to us) and no shard claim state remains to
+    # retract. Over-delivery only (broadcasts fan out to a node with no members --
+    # no lost data), but PERMANENT until unrelated churn moves the group away. The
+    # remote path is already immune: a remote flush tombstones via
+    # `vacant_batch` at a fresh seq that beats snapshot_seq.
+    #
+    # Driven deterministically, black-box: T holds `group` (routed to remote R)
+    # with a LIVE member, so the gather reports it held with certainty -- no
+    # cooldown-vs-gather timing luck. R leaves -> T rebalances to [T], where
+    # `group` routes to T (a CHANGED router => a local self-target the coordinator
+    # upserts). A force_ordering parks shard 1's gather so the coordinator blocks
+    # mid-gather right after shard 0 has reported `group` held; the test then kills
+    # the member, driving the whole vacancy (cooldown -> vacant_queued ->
+    # self-routed flush -> forgotten) INSIDE that window, and only then releases
+    # the gather. The fix -- a seq-guarded local tombstone (`Scope.vacant_batch/5`
+    # locally) in place of the hard delete -- leaves a fresh high-water mark the
+    # coordinator's lower-seq upsert loses to, so the phantom never forms. Before
+    # the fix the hard delete discarded the seq and the stale upsert resurrected
+    # the row.
+    test "a self-routed flush during the gather window must not leave a phantom self-row",
+         %{scope: scope} do
+      t_node = node()
+      view_t = [t_node]
+
+      r_name = ~c"muster_phantom_r_#{System.unique_integer([:positive])}"
+      r_node = :"#{r_name}@127.0.0.1"
+
+      check_trace(
+        fn ->
+          # Settled {T, R}.
+          {:ok, p_r, ^r_node} = Peer.start(name: r_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(r_node)
+          start_remote_muster(p_r, scope)
+          await_ready([t_node, r_node])
+
+          # `group` routes to R in {T, R} (so T's claim travels to R and T's OWN
+          # occupancy table holds no {group, T} row) and lives on shard index 0
+          # (gathered before the shard-1 gather we park below).
+          group = pick_phantom_group(t_node, r_node)
+          assert :erlang.phash2(group, 2) == 0
+
+          # T holds `group` with a live member; the claim reached R as :occupied,
+          # so the shard is :occupied -- definitely reported held at gather time.
+          member = spawn(fn -> Process.sleep(:infinity) end)
+          :ok = Muster.join(scope, group, member)
+          assert t_node in occupancy_on(r_node, scope, group)
+          assert Muster.local_member_count(scope, group) == 1
+
+          # Park shard 1's gather so the coordinator, gathering shards in index
+          # order, blocks mid-gather right AFTER shard 0 reported `group` held.
+          # Installed now -- after the {T,R} join rebalance already gathered the
+          # shards -- so it can only catch the R-leave rebalance below.
+          force_ordering(
+            %{:"$kind" => :test_release_gather},
+            %{:"$kind" => :muster_rebalance_gather, node: ^t_node, index: 1}
+          )
+
+          # R leaves -> T rebalances to [T]. `group` now routes to T (a changed
+          # router), so the coordinator self-upserts {group, T} after the gather.
+          :ok = stop_supervised({:peer, r_name})
+
+          # The R-leave rebalance has started (the only rebalance whose target is
+          # [T]; the join went to [T, R]). Its gather of shard 0 fires ~immediately
+          # after and captures `group` as held; shard 1's gather then parks.
+          assert {:ok, _} =
+                   block_until(
+                     %{:"$kind" => :muster_rebalance_start, node: ^t_node, to: ^view_t},
+                     10_000
+                   )
+
+          # Kill the member INSIDE the parked window: the shard enters cooldown
+          # (50ms) -> :vacant_queued -> the self-routed flush (the ring is already
+          # [T]) HARD-DELETES {group, T} and forgets the group -- all while the
+          # coordinator is still blocked on shard 1's parked gather.
+          Process.exit(member, :kill)
+
+          # The group is fully forgotten on the shard (state: nil is the
+          # delete_group_state in the self-routed flush branch).
+          assert {:ok, _} =
+                   block_until(
+                     %{:"$kind" => :muster_group_state, node: ^t_node, group: ^group, state: nil},
+                     10_000
+                   )
+
+          # Release the parked gather: the coordinator finishes gathering (its
+          # reply set still lists `group` as held) and writes its local self-row
+          # upsert for `group` at the now-stale snapshot_seq -- resurrecting the
+          # row on the buggy code.
+          tp(:test_release_gather, %{})
+
+          # T converges to :ready for the single-node view; do_rebalance (and thus
+          # its local self-upsert) has fully run by the time this fires.
+          await_ready(view_t)
+
+          %{group: group, t_node: t_node}
+        end,
+        fn result, trace ->
+          %{group: group, t_node: t_node} = result
+
+          # The group has no local member and no shard claim state, so any
+          # {group, T} occupancy row is necessarily a member-less phantom.
+          assert Muster.local_member_count(scope, group) == 0
+          assert group_state(scope, group) == nil
+
+          # THE ASSERTION: no phantom self-row. Buggy code leaves {group, T}
+          # :present here -- a permanent over-delivery target routing to a node
+          # with no members. The seq-guarded local tombstone fix keeps it absent.
+          assert occupancy_on(t_node, scope, group) == [],
+                 "a self-routed vacant flush racing the rebalance gather left a " <>
+                   "member-less phantom occupancy row {#{inspect(group)}, #{inspect(t_node)}}"
+
+          # Sanity: the scenario really happened -- T rebalanced into [T].
+          assert of_kind(:muster_rebalance_start, trace)
+                 |> Enum.any?(&(&1.node == t_node and &1.to == [t_node]))
+        end
+      )
+    end
+  end
+
   describe "real remote claim/vacancy RPC failures" do
     setup do
       scope = :"muster_rpc_fail_#{System.unique_integer([:positive])}"
@@ -4631,6 +4783,24 @@ defmodule Forum.MusterDistributedTest do
       refute Muster.local_member?(scope, :g1, remote_pid)
       assert Muster.local_member_count(scope, :g1) == 0
     end
+  end
+
+  # A group that routes to `r_node` in {t_node, r_node} (so a claim from T travels
+  # to R as a remote :occupied and T's OWN occupancy table holds no self-row for
+  # it) AND lives on shard index 0, so the coordinator gathers it before the
+  # shard-1 gather the phantom test parks. partitions: 2 there, so the shard index
+  # is `:erlang.phash2(group, 2)` (mirrors Forum.Supervisor.shard/2).
+  defp pick_phantom_group(t_node, r_node) do
+    probe = probe_ring([t_node, r_node])
+
+    group =
+      Enum.find(Stream.map(1..50_000, &:"phantom_group_#{&1}"), fn g ->
+        match?({:ok, ^r_node}, Ring.find_node(probe, g)) and :erlang.phash2(g, 2) == 0
+      end)
+
+    GenServer.stop(probe)
+    assert group, "no group routing to R on shard 0 found in 50k candidates"
+    group
   end
 
   # Find a group that routes to `joiner` in the final cluster view but to
