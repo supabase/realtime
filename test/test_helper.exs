@@ -71,6 +71,7 @@ Mimic.copy(Realtime.UsersCounter)
 Mimic.copy(RealtimeWeb.ChannelsAuthorization)
 Mimic.copy(RealtimeWeb.Endpoint)
 Mimic.copy(RealtimeWeb.JwtVerification)
+Mimic.copy(Realtime.Broker.Syn)
 Mimic.copy(RealtimeWeb.TenantBroadcaster)
 Mimic.copy(NimbleZTA.Cloudflare)
 

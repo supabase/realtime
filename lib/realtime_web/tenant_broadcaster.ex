@@ -1,9 +1,16 @@
 defmodule RealtimeWeb.TenantBroadcaster do
   @moduledoc """
-  gen_rpc broadcaster
+  Broadcasts tenant messages across the cluster.
+
+  * `pubsub_broadcast/5` and `pubsub_broadcast_from/6` fan out through
+    `Realtime.Broker.Syn` via `:syn` process groups, then dispatch locally
+    through Phoenix.PubSub.
+  * `pubsub_direct_broadcast/6` keeps the original targeted path using
+    `Phoenix.PubSub.direct_broadcast/5`.
   """
 
   alias Phoenix.PubSub
+  alias RealtimeWeb.Socket.UserBroadcast
 
   @type message_type :: :broadcast | :presence | :postgres_changes
 
@@ -18,9 +25,7 @@ defmodule RealtimeWeb.TenantBroadcaster do
           :ok
   def pubsub_direct_broadcast(node, tenant_id, topic, message, dispatcher, message_type) do
     collect_payload_size(tenant_id, message, message_type)
-
     do_direct_broadcast(node, topic, message, dispatcher)
-
     :ok
   end
 
@@ -38,7 +43,8 @@ defmodule RealtimeWeb.TenantBroadcaster do
           :ok
   def pubsub_broadcast(tenant_id, topic, message, dispatcher, message_type) do
     collect_payload_size(tenant_id, message, message_type)
-    PubSub.broadcast(Realtime.PubSub, topic, message, dispatcher)
+    message = maybe_pre_encode(message, dispatcher)
+    Realtime.Broker.Syn.publish(topic, message, dispatcher: dispatcher)
     :ok
   end
 
@@ -53,9 +59,16 @@ defmodule RealtimeWeb.TenantBroadcaster do
           :ok
   def pubsub_broadcast_from(tenant_id, from, topic, message, dispatcher, message_type) do
     collect_payload_size(tenant_id, message, message_type)
-    PubSub.broadcast_from(Realtime.PubSub, from, topic, message, dispatcher)
+    message = maybe_pre_encode(message, dispatcher)
+    Realtime.Broker.Syn.publish(topic, message, dispatcher: dispatcher, from: from)
     :ok
   end
+
+  defp maybe_pre_encode(%UserBroadcast{} = broadcast, RealtimeWeb.RealtimeChannel.MessageDispatcher) do
+    UserBroadcast.encode_for(broadcast, Phoenix.Socket.V2.JSONSerializer)
+  end
+
+  defp maybe_pre_encode(message, _dispatcher), do: message
 
   @payload_size_event [:realtime, :tenants, :payload, :size]
 

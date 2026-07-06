@@ -15,7 +15,12 @@ defmodule RealtimeWeb.Socket.UserBroadcast do
   alias Phoenix.Socket.Broadcast
 
   @type t :: %__MODULE__{}
-  defstruct topic: nil, user_event: nil, user_payload: nil, user_payload_encoding: nil, metadata: nil
+  defstruct topic: nil,
+            user_event: nil,
+            user_payload: nil,
+            user_payload_encoding: nil,
+            metadata: nil,
+            encoded_payloads: %{}
 
   @spec convert_to_json_broadcast(t) :: {:ok, Broadcast.t()} | {:error, String.t()}
   def convert_to_json_broadcast(%__MODULE__{user_payload_encoding: :json} = user_broadcast) do
@@ -36,4 +41,20 @@ defmodule RealtimeWeb.Socket.UserBroadcast do
   end
 
   def convert_to_json_broadcast(%__MODULE__{}), do: {:error, "User payload encoding is not JSON"}
+
+  @doc """
+  Pre-encodes this broadcast for the given serializer and returns an updated
+  struct with the encoded frame cached in `encoded_payloads`.
+  """
+  @spec encode_for(t(), module()) :: t()
+  def encode_for(%__MODULE__{encoded_payloads: encoded} = broadcast, Phoenix.Socket.V2.JSONSerializer = serializer) do
+    with {:ok, %Broadcast{} = msg} <- convert_to_json_broadcast(broadcast),
+         encoded_msg <- serializer.fastlane!(msg) do
+      %{broadcast | encoded_payloads: Map.put(encoded, serializer, encoded_msg)}
+    else
+      _ -> broadcast
+    end
+  end
+
+  def encode_for(broadcast, _serializer), do: broadcast
 end
