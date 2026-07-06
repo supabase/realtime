@@ -103,5 +103,5 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore: update tenant_db_catalog_17.json"
+          git commit -m "chore: update tenant_db_catalog_17.json [skip ci]"
           git push origin "HEAD:$PR_HEAD_REF"
