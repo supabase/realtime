@@ -2006,6 +2006,74 @@ defmodule Forum.MusterTest do
       assert :occupied = wait_for_group_state(scope, g, :occupied, 2_000)
     end
 
+    test "a rejoin during a coordinator restart does not leave targets/3 silently dropping a live member",
+         %{scope: scope} do
+      # tla/FINDINGS.md finding 1: Forum.Muster.Shard.handle_join/4's
+      # `:cooldown` branch reclaims a group without notifying the router, on
+      # the assumption "the router already knows we hold this group". That
+      # assumption does not survive a coordinator restart: init/1 resets the
+      # ring to [node()], so the restarted coordinator is (once ready) its
+      # own router again for a group whose self-row was tombstoned while it
+      # was routed elsewhere -- rebuild_group_states's own re-assertion only
+      # covers groups with LIVE members, and this one has none until the
+      # rejoin below. Without the branch's own write, the occupancy row for
+      # this now-self-routed group stays empty, so Muster.targets/3 returns
+      # {:ok, []} for a group with a live local member: broadcasts to it are
+      # silently dropped, permanently -- nothing else is ever going to
+      # re-assert that row for us once we're alone again.
+      #
+      # A fake peer (via `trigger_rebalance/2`, the sanctioned single-node
+      # stand-in for a real one -- see its own comment above) moves `g`'s
+      # router away first, so the row genuinely needs re-asserting rather
+      # than merely surviving untouched from the original claim (cooldown by
+      # itself never retracts it).
+      g = group_for_router_under([node(), @fake_node], @fake_node)
+      shard_name = Forum.Supervisor.shard(scope, g)
+
+      member1 = spawn(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, g, member1)
+      assert :occupied = wait_for_group_state(scope, g, :occupied)
+      assert :ok = Muster.leave(scope, g, member1)
+      assert :cooldown = wait_for_group_state(scope, g, :cooldown)
+
+      # The fake peer joins and `g`'s router moves to it: our own now-stale
+      # self-row is tombstoned by do_rebalance's own drop_stale_router_entries
+      # sweep (unconditional -- our own rows are always judgeable, unlike a
+      # remote source's, which needs its agreement first). The synchronous
+      # :status call right after flushes the coordinator's mailbox (FIFO),
+      # guaranteeing do_rebalance has already run before we check.
+      trigger_rebalance(scope, [node(), @fake_node])
+      _ = GenServer.call(Forum.Supervisor.name(scope), :status)
+      assert Scope.occupancy(scope, g) == []
+
+      old_shard = Process.whereis(shard_name)
+      coord = Process.whereis(Forum.Supervisor.name(scope))
+      ref = Process.monitor(coord)
+      Process.exit(coord, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^coord, :killed}, 1_000
+
+      # Wait for the SHARD's own restart to finish before rejoining, so the
+      # join deterministically lands on the freshly-restarted shard's
+      # `:cooldown` branch: init/1 (rebuild_group_states) sees no live member
+      # yet for `g` and leaves it durably `:cooldown`, so nothing but that
+      # branch's own write can assert the row here. (A join landing mid-crash
+      # on the dying pre-restart shard is the OTHER race --
+      # rebuild_group_states's live-member re-assertion already covers that
+      # one; forcing this ordering isolates the branch actually under test.)
+      # The restarted coordinator's own init/1 also resets the ring to
+      # [node()] -- the fake peer never was a real connection to lose -- so
+      # `g` routes back to us.
+      wait_for_new_pid(shard_name, old_shard)
+
+      member2 = spawn(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, g, member2)
+      assert Muster.local_member?(scope, g, member2)
+
+      assert wait_until(fn -> Muster.can_decide?(scope, Muster.view_hash(scope)) end, 500)
+
+      assert Muster.targets(scope, g, Muster.view_hash(scope)) == {:ok, [node()]}
+    end
+
     test "a shard crash does not restart any other shard, the coordinator, or the ring",
          %{scope: scope} do
       # Shards live under their own nested :one_for_one supervisor (the outer

@@ -494,9 +494,7 @@ defmodule Forum.Muster.Shard do
         # one. A REMOTE router needs no such guard: reaching a multi-node view
         # again implies a rebalance that re-announced held groups, :cooldown
         # included.
-        router = router_from_state(state, group)
-
-        if router == node() do
+        if router_from_state(state, group) == node() do
           Scope.upsert_if_newer(
             state.occupancy_table,
             {group, node()},
