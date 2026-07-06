@@ -97,7 +97,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_260_606_120_000, Migrations.SetupSupabaseRealtimeAdmin},
     {20_260_616_120_000, Migrations.AddPostgrestFilterOps},
     {20_260_624_120_000, Migrations.RevertPostgrestFilterOps},
-    {20_260_626_120_000, Migrations.ReAddPostgrestFilterOps}
+    {20_260_626_120_000, Migrations.ReAddPostgrestFilterOps},
+    {20_260_706_120_000, Migrations.GrantCheckEqualityOp5Arg}
   ]
 
   defstruct [:tenant_external_id, :settings, migrations_ran: 0]
