@@ -1295,4 +1295,74 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
 
     Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
   end
+
+  describe "regression tests" do
+    test "list_changes fails on high peak usage when check_equality_op/5 lacks grants (issue #2001)", %{
+      conn: conn,
+      tenant: tenant
+    } do
+      {:ok, admin_settings} = Database.from_tenant(tenant, "realtime_test", :stop)
+
+      {:ok, admin_conn} =
+        Postgrex.start_link(
+          hostname: admin_settings.hostname,
+          port: admin_settings.port,
+          database: admin_settings.database,
+          username: "supabase_admin",
+          password: admin_settings.password
+        )
+
+      Postgrex.query!(admin_conn, "alter table public.test enable row level security", [])
+      Postgrex.query!(admin_conn, "create policy test_all on public.test for all to authenticated using (true)", [])
+
+      Postgrex.query!(
+        admin_conn,
+        """
+        revoke execute on function
+          realtime.check_equality_op(realtime.equality_op, regtype, text, text, boolean)
+          from public, postgres, anon, authenticated, service_role
+        """,
+        []
+      )
+
+      # apply_rls checks each row twice: a filter pre-check (does the subscriber's postgres_changes
+      # filter match this row?) and a separate RLS check, impersonated to the subscriber's role,
+      # that runs correctly for every row regardless of batch. The leak below is only in the
+      # pre-check. Postgres fetches this loop's cursor 10 rows at a time. Row 1's RLS check
+      # impersonates "authenticated" and isn't reset until the whole loop ends, so that leaked role
+      # is still active when the cursor fetches its next batch. Subscription 11 is the first row in
+      # that second batch, so its filter pre-check runs as "authenticated" instead of the
+      # connecting role. 10 or fewer subscriptions never reach a second batch, so the leak never
+      # shows up.
+      for _ <- 1..11 do
+        {:ok, subscription_params} =
+          Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test", "filter" => "id=eq.1"})
+
+        params_list = [
+          %{claims: %{"role" => "authenticated"}, id: UUID.uuid1(), subscription_params: subscription_params}
+        ]
+
+        assert {:ok, [%Postgrex.Result{}]} =
+                 Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+      end
+
+      slot_name = "test_check_equality_op_grant_#{:rand.uniform(999_999)}"
+      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json')", [slot_name])
+
+      try do
+        Postgrex.query!(conn, "insert into test (id, details) values (1, 'hello')", [])
+
+        assert {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege, message: message}}} =
+                 Postgrex.query(
+                   conn,
+                   "select wal, subscription_ids from realtime.list_changes($1, $2, 100, 1048576)",
+                   ["supabase_realtime_test", slot_name]
+                 )
+
+        assert message =~ "check_equality_op"
+      after
+        Postgrex.query(conn, "SELECT pg_drop_replication_slot($1)", [slot_name])
+      end
+    end
+  end
 end
