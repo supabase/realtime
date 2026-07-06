@@ -1328,12 +1328,14 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
       # apply_rls checks each row twice: a filter pre-check (does the subscriber's postgres_changes
       # filter match this row?) and a separate RLS check, impersonated to the subscriber's role,
       # that runs correctly for every row regardless of batch. The leak below is only in the
-      # pre-check. Postgres fetches this loop's cursor 10 rows at a time. Row 1's RLS check
-      # impersonates "authenticated" and isn't reset until the whole loop ends, so that leaked role
-      # is still active when the cursor fetches its next batch. Subscription 11 is the first row in
-      # that second batch, so its filter pre-check runs as "authenticated" instead of the
-      # connecting role. 10 or fewer subscriptions never reach a second batch, so the leak never
-      # shows up.
+      # pre-check.
+      #
+      # PL/pgSQL's `FOR var IN (SELECT ...) LOOP` fetches its first 10 rows in one batch, then 50
+      # at a time after that (exec_for_query in postgres/src/pl/plpgsql/src/pl_exec.c). Row 1's RLS
+      # check impersonates "authenticated" and isn't reset until the whole loop ends, so that
+      # leaked role is still active for the second fetch. Subscription 11 is the first row of that
+      # second batch, so its filter pre-check runs as "authenticated" instead of the connecting
+      # role. 10 or fewer subscriptions never trigger a second fetch, so the leak never shows up.
       for _ <- 1..11 do
         {:ok, subscription_params} =
           Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test", "filter" => "id=eq.1"})
