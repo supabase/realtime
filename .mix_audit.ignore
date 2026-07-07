@@ -1,5 +1,1 @@
 # mix_audit ignored advisory IDs — one per line, `#` for comments.
-
-# cowlib: Cookie Request Header Injection via Unvalidated Encoder in cow_cookie:cookie/1
-# low severity, no fixed version published yet. Remove once a patched cowlib is released.
-GHSA-g2wm-735q-3f56
