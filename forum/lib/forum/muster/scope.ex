@@ -60,7 +60,7 @@ defmodule Forum.Muster.Scope do
             peers: %{pid => reference},
             member_views: %{node => {non_neg_integer, integer}},
             owed_snapshots: %{node => integer},
-            applied_snapshot_seq: %{node => integer},
+            applied_snapshot_seq: %{node => {integer, pid}},
             view_seq: integer
           }
     defstruct [
