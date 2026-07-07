@@ -164,7 +164,7 @@ defmodule Forum.Supervisor do
 
     ^occupancy_table =
       :ets.new(occupancy_table, [
-        :set,
+        :ordered_set,
         :public,
         :named_table,
         read_concurrency: true,
@@ -180,13 +180,7 @@ defmodule Forum.Supervisor do
         states_table = shard_states_table(scope, i)
 
         ^states_table =
-          :ets.new(states_table, [
-            :set,
-            :public,
-            :named_table,
-            read_concurrency: true,
-            write_concurrency: :auto
-          ])
+          :ets.new(states_table, [:set, :public, :named_table])
 
         %{id: {:muster_shard, i}, start: {Forum.Muster.Shard, :start_link, [scope, i, opts]}}
       end
