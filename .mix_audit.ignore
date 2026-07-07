@@ -3,3 +3,7 @@
 # cowlib: Cookie Request Header Injection via Unvalidated Encoder in cow_cookie:cookie/1
 # low severity, no fixed version published yet. Remove once a patched cowlib is released.
 GHSA-g2wm-735q-3f56
+
+# HTTP Response Splitting via Non-VCHAR Bytes in cow_http_struct_hd:escape_string/2
+# https://osv.dev/vulnerability/EEF-CVE-2026-43966
+CVE-2026-43966
