@@ -65,10 +65,28 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
     assert has_element?(view, "p.text-danger", "Tenant not found")
   end
 
-  test "renders pg-delta section header when tenant is found", %{conn: conn, tenant: tenant} do
+  test "renders pg-delta section header with the resolved catalog major version", %{conn: conn, tenant: tenant} do
+    {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+
+    %{rows: [[version]]} =
+      Postgrex.query!(db_conn, "SELECT current_setting('server_version_num')::int / 10000", [])
+
+    expected_major = if version >= 17, do: 17, else: 15
+
     {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_migrations?external_id=#{tenant.external_id}")
 
-    assert has_element?(view, "h6", "pg-delta plan vs catalog")
+    assert has_element?(view, "h6", "pg-delta plan vs catalog (PG#{expected_major})")
+  end
+
+  test "shows 0 rows instead of an error when realtime.schema_migrations is missing", %{conn: conn, tenant: tenant} do
+    {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
+    {:ok, admin_conn} = Database.connect_db(%{settings | username: "supabase_admin", pool_size: 1})
+    Postgrex.query!(admin_conn, "DROP TABLE realtime.schema_migrations", [])
+
+    {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_migrations?external_id=#{tenant.external_id}")
+
+    assert has_element?(view, "p.text-muted.small.mb-2", "0")
+    refute has_element?(view, "p.text-danger")
   end
 
   describe "apply_pgdelta/2 with nil sql (backfill)" do

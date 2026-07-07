@@ -4,7 +4,8 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
 
   Requires `pgdelta` on `$PATH`.
 
-  Regenerate the catalog snapshot with `mix realtime.export_tenant_db_catalog`.
+  Tenants are diffed against the catalog snapshot matching their own Postgres
+  major version (falling back to the nearest older one).
   """
   use Phoenix.LiveDashboard.PageBuilder
   use Realtime.Logs
@@ -25,13 +26,10 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     ]
   }
   """
-  # Apply changes using a superuser
   @application_name "realtime_migrations"
-  @catalog_major 17
   @query_timeout 60_000
   @pgdelta_timeout @query_timeout * 2
   @rpc_timeout @query_timeout * 3
-  @schema_migrations_query "SELECT version, inserted_at FROM realtime.schema_migrations ORDER BY version DESC"
 
   @impl true
   def menu_link(_, _), do: {:ok, "Tenant Migrations"}
@@ -46,16 +44,13 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     ref = String.trim(ref)
 
     with %Tenant{} = tenant <- Api.get_tenant_by_external_id(ref),
-         {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop) do
-      schema_migrations = with_tenant_conn(settings, &fetch_schema_migrations/1)
-
-      socket =
-        socket
-        |> reset_assigns()
-        |> assign(external_id: ref, tenant: tenant, schema_migrations: schema_migrations)
-        |> start_pgdelta(tenant)
-
-      {:noreply, socket}
+         {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop),
+         {:ok, schema_migrations, catalog_major_version} <- with_tenant_conn(settings, &fetch_tenant_state/1) do
+      socket
+      |> reset_assigns()
+      |> assign(external_id: ref, tenant: tenant, schema_migrations: {:ok, schema_migrations})
+      |> start_pgdelta(tenant, catalog_major_version)
+      |> then(&{:noreply, &1})
     else
       nil ->
         {:noreply, assign_error(socket, ref, "Tenant not found")}
@@ -190,7 +185,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
         <h6 class="mt-4">realtime.schema_migrations</h6>
         <%= schema_migrations(@schema_migrations) %>
 
-        <h6 class="mt-4">pg-delta plan vs catalog (PG<%= @catalog_version %>)</h6>
+        <h6 class="mt-4">pg-delta plan vs catalog<%= if @catalog_major_version, do: " (PG#{@catalog_major_version})", else: "" %></h6>
         <div :if={@pgdelta_running} class="alert alert-info d-flex align-items-center" style="gap: 8px;">
           <div class="spinner-border spinner-border-sm" role="status"></div>
           <span>Processing... (<%= div(@pgdelta_elapsed_ms, 1000) %>s)</span>
@@ -217,7 +212,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
       pgdelta_task: nil,
       applying: false,
       apply_task: nil,
-      catalog_version: nil,
+      catalog_major_version: nil,
       error: nil
     )
   end
@@ -233,26 +228,37 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     socket
   end
 
-  defp start_pgdelta(socket, %Tenant{} = tenant) do
-    task = Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn -> run_pgdelta(tenant) end)
-    running_pgdelta(socket, task)
+  defp fetch_tenant_state(conn) do
+    major_version = fetch_major_version(conn)
+
+    with {:ok, _} <- ensure_realtime_admin_role(conn),
+         {:ok, _} <- ensure_schema_migrations(conn),
+         {:ok, schema_migrations} <- fetch_schema_migrations(conn) do
+      {:ok, schema_migrations, major_version}
+    end
+  end
+
+  defp start_pgdelta(socket, %Tenant{} = tenant, catalog_major_version) do
+    task = Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn -> run_pgdelta(tenant, catalog_major_version) end)
+    running_pgdelta(socket, task, catalog_major_version)
   end
 
   defp start_recheck(socket, %Tenant{} = tenant, %Database{} = settings) do
     task =
       Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn ->
-        {:rechecked, with_tenant_conn(settings, &fetch_schema_migrations/1), run_pgdelta(tenant)}
+        {:rechecked, with_tenant_conn(settings, &fetch_schema_migrations/1),
+         run_pgdelta(tenant, socket.assigns.catalog_major_version)}
       end)
 
     socket
     |> assign(schema_migrations: nil)
-    |> running_pgdelta(task)
+    |> running_pgdelta(task, socket.assigns.catalog_major_version)
   end
 
-  defp running_pgdelta(socket, task) do
+  defp running_pgdelta(socket, task, catalog_major_version) do
     socket
     |> assign(
-      catalog_version: @catalog_major,
+      catalog_major_version: catalog_major_version,
       pgdelta_running: true,
       pgdelta_elapsed_ms: 0,
       pgdelta_started_at: System.monotonic_time(:millisecond),
@@ -420,7 +426,9 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   end
 
   defp fetch_schema_migrations(conn) do
-    case Postgrex.query(conn, @schema_migrations_query, [], timeout: @query_timeout) do
+    schema_migrations_query = "SELECT version, inserted_at FROM realtime.schema_migrations ORDER BY version DESC"
+
+    case Postgrex.query(conn, schema_migrations_query, [], timeout: @query_timeout) do
       {:ok, %{rows: rows}} ->
         {:ok, Enum.map(rows, fn [v, ts] -> [to_string(v), format_ts(ts)] end)}
 
@@ -431,6 +439,27 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
       {:error, reason} ->
         log_error("TenantMigrationsSchemaMigrationsQueryFailed", reason)
         {:error, inspect(reason)}
+    end
+  end
+
+  defp fetch_major_version(conn) do
+    server_major_version_query = "SELECT current_setting('server_version_num')::int / 10000"
+    {:ok, %{rows: [[version]]}} = Postgrex.query(conn, server_major_version_query, [])
+    if version >= 17, do: 17, else: 15
+  end
+
+  defp ensure_schema_migrations(conn) do
+    Postgrex.query(
+      conn,
+      "CREATE TABLE IF NOT EXISTS realtime.schema_migrations (version bigint PRIMARY KEY, inserted_at timestamp)",
+      []
+    )
+  end
+
+  defp ensure_realtime_admin_role(conn) do
+    case Postgrex.query(conn, "SELECT 1 FROM pg_roles WHERE rolname = 'supabase_realtime_admin'", []) do
+      {:ok, %{num_rows: 0}} -> Postgrex.query(conn, "CREATE ROLE supabase_realtime_admin", [])
+      result -> result
     end
   end
 
@@ -468,15 +497,15 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   # Used for debugging
   def pgdelta_filter, do: @pgdelta_filter
 
-  defp catalog_path do
-    Application.app_dir(:realtime, "priv/repo/tenant_db_catalog_#{@catalog_major}.json")
+  defp catalog_path(major) do
+    Application.app_dir(:realtime, "priv/repo/tenant_db_catalog_#{major}.json")
   end
 
   @doc false
-  def run_pgdelta(%Tenant{external_id: external_id} = tenant) do
+  def run_pgdelta(%Tenant{external_id: external_id} = tenant, catalog_major_version) do
     with {:ok, node, _region} <- Nodes.get_node_for_tenant(tenant),
          {:ok, _} = result <-
-           Rpc.enhanced_call(node, __MODULE__, :run_pgdelta_tenant, [tenant],
+           Rpc.enhanced_call(node, __MODULE__, :run_pgdelta_tenant, [tenant, catalog_major_version],
              timeout: @rpc_timeout,
              tenant_id: external_id
            ) do
@@ -487,14 +516,14 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     end
   end
 
-  def run_pgdelta(%Database{} = settings) do
+  def run_pgdelta(%Database{} = settings, catalog_major_version) do
     case System.find_executable("pgdelta") do
       nil ->
         log_error("TenantMigrationsPgDeltaMissing", "pgdelta not found on PATH")
         {:error, "pgdelta not found on PATH"}
 
       path ->
-        catalog = catalog_path()
+        catalog = catalog_path(catalog_major_version)
 
         args = [
           "plan",
@@ -553,9 +582,9 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   end
 
   @doc false
-  def run_pgdelta_tenant(%Tenant{} = tenant) do
+  def run_pgdelta_tenant(%Tenant{} = tenant, catalog_major_version) do
     with {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop) do
-      run_pgdelta(settings)
+      run_pgdelta(settings, catalog_major_version)
     end
   end
 
