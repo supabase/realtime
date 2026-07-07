@@ -155,7 +155,7 @@ defmodule Forum.Muster.Scope do
   # source, so ties do not occur in practice). Public so Forum.Muster.Shard writes
   # it directly.
   @spec upsert_if_newer(atom, {Forum.group(), node}, integer, pid | nil) :: :ok
-  def upsert_if_newer(table, key, seq, writer \\ nil),
+  def upsert_if_newer(table, key, seq, writer),
     do: put_if_newer(table, key, seq, :present, :lt, writer)
 
   # Mark the key a TOMBSTONE at `seq` (absent), stamped `created_at` (router-local
