@@ -97,7 +97,7 @@ defmodule Realtime.MixProject do
       {:opentelemetry_cowboy, "~> 1.0"},
       {:opentelemetry_ecto, "~> 1.2"},
       {:gen_rpc, git: "https://github.com/emqx/gen_rpc.git", tag: "3.6.1"},
-      {:req, "~> 0.5"},
+      {:req, "~> 0.6.2"},
       {:mimic, "~> 1.0", only: :test},
       {:floki, ">= 0.30.0", only: :test},
       {:mint_web_socket, "~> 1.0", only: :test},
