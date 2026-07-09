@@ -7,6 +7,8 @@ defmodule Forum.Census do
           {:partitions, pos_integer()}
           | {:broadcast_interval_in_ms, non_neg_integer()}
           | {:discover_interval_in_ms, non_neg_integer()}
+          | {:max_restarts, non_neg_integer()}
+          | {:max_seconds, pos_integer()}
 
   @doc "Returns a supervisor child specification for a Forum scope"
   def child_spec([scope]) when is_atom(scope), do: child_spec([scope, []])
@@ -29,6 +31,8 @@ defmodule Forum.Census do
   * `:broadcast_interval_in_ms`: - interval in milliseconds to broadcast membership counts to other nodes (default: 5000 ms)
   * `:discover_interval_in_ms`: - interval in milliseconds to re-announce ourselves to the cluster so peers we lost track of re-register us (default: 60000 ms)
   * `:message_module` - module implementing `Forum.Adapter` behaviour (default: `Forum.Adapter.ErlDist`)
+  * `:max_restarts` - max restarts allowed for this scope's own supervision tree within `:max_seconds`, before it gives up and exits (default: 3, matching `Supervisor`'s own default)
+  * `:max_seconds` - the time window `:max_restarts` is measured over (default: 5, matching `Supervisor`'s own default)
   """
   @spec start_link(atom, [start_option]) :: Supervisor.on_start()
   def start_link(scope, opts \\ []) when is_atom(scope) do
@@ -51,6 +55,20 @@ defmodule Forum.Census do
          not (is_integer(discover_interval_in_ms) and discover_interval_in_ms > 0) do
       raise ArgumentError,
             "expected :discover_interval_in_ms to be a positive integer, got: #{inspect(discover_interval_in_ms)}"
+    end
+
+    max_restarts = Keyword.get(opts, :max_restarts)
+
+    if max_restarts != nil and not (is_integer(max_restarts) and max_restarts >= 0) do
+      raise ArgumentError,
+            "expected :max_restarts to be a non-negative integer, got: #{inspect(max_restarts)}"
+    end
+
+    max_seconds = Keyword.get(opts, :max_seconds)
+
+    if max_seconds != nil and not (is_integer(max_seconds) and max_seconds > 0) do
+      raise ArgumentError,
+            "expected :max_seconds to be a positive integer, got: #{inspect(max_seconds)}"
     end
 
     Forum.Supervisor.start_link(Forum.Census.Scope, scope, partitions, opts)

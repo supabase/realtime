@@ -83,6 +83,32 @@ defmodule Forum.CensusTest do
                      Census.start_link(scope, discover_interval_in_ms: :invalid)
                    end
     end
+
+    test "raises on invalid max_restarts", %{scope: scope} do
+      assert_raise ArgumentError, ~r/expected :max_restarts/, fn ->
+        Census.start_link(scope, max_restarts: -1)
+      end
+    end
+
+    test "raises on invalid max_seconds", %{scope: scope} do
+      assert_raise ArgumentError, ~r/expected :max_seconds/, fn ->
+        Census.start_link(scope, max_seconds: 0)
+      end
+    end
+  end
+
+  describe "restart intensity (:max_restarts/:max_seconds)" do
+    test "a tiny :max_restarts terminates the scope's own supervisor once exceeded",
+         %{scope: scope} do
+      sup_pid = start_supervised!(spec(scope, partitions: 2, max_restarts: 0, max_seconds: 1))
+      ref = Process.monitor(sup_pid)
+
+      [partition | _] = Forum.Supervisor.partitions(scope)
+      partition_pid = Process.whereis(partition)
+      Process.exit(partition_pid, :kill)
+
+      assert_receive {:DOWN, ^ref, :process, ^sup_pid, _reason}, 1_000
+    end
   end
 
   describe "join/3 and leave/3" do

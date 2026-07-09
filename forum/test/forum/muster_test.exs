@@ -370,6 +370,18 @@ defmodule Forum.MusterTest do
       end
     end
 
+    test "raises on invalid max_restarts", %{scope: scope} do
+      assert_raise ArgumentError, ~r/expected :max_restarts/, fn ->
+        Muster.start_link(scope, max_restarts: -1)
+      end
+    end
+
+    test "raises on invalid max_seconds", %{scope: scope} do
+      assert_raise ArgumentError, ~r/expected :max_seconds/, fn ->
+        Muster.start_link(scope, max_seconds: 0)
+      end
+    end
+
     test "exposes router lookup", %{scope: scope, base_opts: opts} do
       start_supervised!(spec(scope, opts))
       assert {:ok, n} = Muster.router(scope, :anything)
@@ -2517,6 +2529,39 @@ defmodule Forum.MusterTest do
 
       # Let the suspended shard go so teardown is clean.
       :sys.resume(shard_pid)
+    end
+  end
+
+  describe "restart intensity (:max_restarts/:max_seconds)" do
+    test "a tiny :max_restarts terminates the scope's own supervisor once exceeded",
+         %{scope: scope, base_opts: opts} do
+      sup_pid = start_supervised!(spec(scope, Keyword.merge(opts, max_restarts: 0, max_seconds: 1)))
+      ref = Process.monitor(sup_pid)
+
+      coord = Process.whereis(Forum.Supervisor.name(scope))
+      Process.exit(coord, :kill)
+
+      assert_receive {:DOWN, ^ref, :process, ^sup_pid, _reason}, 1_000
+    end
+
+    test "a generous :max_restarts keeps recovering past the OTP default budget",
+         %{scope: scope, base_opts: opts} do
+      sup_pid = start_supervised!(spec(scope, Keyword.merge(opts, max_restarts: 100, max_seconds: 1)))
+      sup_ref = Process.monitor(sup_pid)
+
+      # OTP's own Supervisor default (3 restarts / 5 seconds) would give up well
+      # before this many kills land within ~1 second; the generous override here
+      # must keep restarting the coordinator instead.
+      for _ <- 1..5 do
+        coord = Process.whereis(Forum.Supervisor.name(scope))
+        coord_ref = Process.monitor(coord)
+        Process.exit(coord, :kill)
+        assert_receive {:DOWN, ^coord_ref, :process, ^coord, :killed}, 1_000
+        assert is_pid(wait_for_new_pid(Forum.Supervisor.name(scope), coord))
+      end
+
+      refute_received {:DOWN, ^sup_ref, :process, ^sup_pid, _reason}
+      assert Process.alive?(sup_pid)
     end
   end
 end

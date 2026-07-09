@@ -80,6 +80,13 @@ defmodule Realtime.Application do
     master_region = Application.get_env(:realtime, :master_region) || region
     user_scope_shards = Application.fetch_env!(:realtime, :users_scope_shards)
     user_scope_broadast_interval_in_ms = Application.get_env(:realtime, :users_scope_broadcast_interval_in_ms, 10_000)
+    muster_scope_shards = Application.fetch_env!(:realtime, :muster_scope_shards)
+
+    # One Muster scope per region: the atom is otherwise just an identifier, so
+    # embedding the region keeps each region's ring/gossip/rebalancing isolated
+    # even though ErlDist's broadcast fans out over the whole distribution mesh.
+    muster_scope = :"realtime_channels_#{region || "local"}"
+    Application.put_env(:realtime, :muster_scope, muster_scope)
 
     :syn.join(RegionNodes, region, self(), node: node())
 
@@ -107,6 +114,17 @@ defmodule Realtime.Application do
              partitions: user_scope_shards,
              broadcast_interval_in_ms: user_scope_broadast_interval_in_ms,
              message_module: Realtime.ForumPubSubAdapter
+           ]
+         ]},
+        {Forum.Muster,
+         [
+           muster_scope,
+           [
+             partitions: muster_scope_shards,
+             message_module: Forum.Adapter.ErlDist,
+             # For now makes it impossible to crash the application due to Muster failures
+             max_restarts: 1_000,
+             max_seconds: 1
            ]
          ]},
         Supervisor.child_spec({Cachex, name: Realtime.RateCounter}, id: Realtime.RateCounter),

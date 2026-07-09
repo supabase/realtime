@@ -72,7 +72,10 @@ defmodule Forum.Supervisor do
 
     {strategy, children} = scope_children(module, scope, partitions, opts, scope_child)
 
-    Supervisor.init(children, strategy: strategy)
+    max_restarts = Keyword.get(opts, :max_restarts, 3)
+    max_seconds = Keyword.get(opts, :max_seconds, 5)
+
+    Supervisor.init(children, strategy: strategy, max_restarts: max_restarts, max_seconds: max_seconds)
   end
 
   # Forum.Muster keeps NO counts table: its Forum.Muster.Shard derives "is there a

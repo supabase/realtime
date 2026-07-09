@@ -26,6 +26,8 @@ defmodule Forum.Muster do
           | {:shards_ready_timeout_ms, pos_integer()}
           | {:tombstone_window_ms, pos_integer()}
           | {:message_module, module()}
+          | {:max_restarts, non_neg_integer()}
+          | {:max_seconds, pos_integer()}
 
   # Timeout for the local GenServer.call to the claim shard. Generous because the
   # underlying RPC timeout is what actually bounds the wait; this just needs
@@ -92,6 +94,13 @@ defmodule Forum.Muster do
     routinely slower than that.
   * `:message_module`: module implementing `Forum.Adapter` (default:
     `Forum.Adapter.ErlDist`).
+  * `:max_restarts`: max restarts allowed for this scope's own supervision
+    tree within `:max_seconds`, before it gives up and exits (default: 3,
+    matching `Supervisor`'s own default). Raise this (and/or `:max_seconds`)
+    to make the scope tolerate a higher crash-loop frequency without
+    propagating an exit to whatever supervises it.
+  * `:max_seconds`: the time window `:max_restarts` is measured over
+    (default: 5, matching `Supervisor`'s own default).
   """
   @spec start_link(atom, [start_option]) :: Supervisor.on_start()
   def start_link(scope, opts \\ []) when is_atom(scope) do
@@ -152,6 +161,20 @@ defmodule Forum.Muster do
     if tombstone_window != nil and not (is_integer(tombstone_window) and tombstone_window > 0) do
       raise ArgumentError,
             "expected :tombstone_window_ms to be a positive integer, got: #{inspect(tombstone_window)}"
+    end
+
+    max_restarts = Keyword.get(opts, :max_restarts)
+
+    if max_restarts != nil and not (is_integer(max_restarts) and max_restarts >= 0) do
+      raise ArgumentError,
+            "expected :max_restarts to be a non-negative integer, got: #{inspect(max_restarts)}"
+    end
+
+    max_seconds = Keyword.get(opts, :max_seconds)
+
+    if max_seconds != nil and not (is_integer(max_seconds) and max_seconds > 0) do
+      raise ArgumentError,
+            "expected :max_seconds to be a positive integer, got: #{inspect(max_seconds)}"
     end
 
     Forum.Supervisor.start_link(Forum.Muster.Scope, scope, partitions, opts)
