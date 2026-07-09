@@ -101,6 +101,68 @@ defmodule RealtimeWeb.FeatureFlagsLive.IndexTest do
     end
   end
 
+  describe "set_rollout event" do
+    test "updates the rollout percentage and persists it, keeping enabled state", %{
+      conn: conn,
+      user: user,
+      password: password
+    } do
+      flag_name = "rollout_#{random_string()}"
+      {:ok, flag} = Api.upsert_feature_flag(%{name: flag_name, enabled: true, rollout_percentage: 100})
+
+      {:ok, view, _} = conn |> using_basic_auth(user, password) |> live(~p"/admin/feature-flags")
+
+      view
+      |> form("#set_rollout_#{flag.id}", %{"rollout_percentage" => "25"})
+      |> render_submit()
+
+      assert %FeatureFlag{enabled: true, rollout_percentage: 25} = Api.get_feature_flag(flag_name)
+    end
+
+    test "ignores a non-integer rollout percentage", %{conn: conn, user: user, password: password} do
+      flag_name = "rollout_invalid_#{random_string()}"
+      {:ok, flag} = Api.upsert_feature_flag(%{name: flag_name, enabled: true, rollout_percentage: 100})
+
+      {:ok, view, _} = conn |> using_basic_auth(user, password) |> live(~p"/admin/feature-flags")
+
+      view
+      |> form("#set_rollout_#{flag.id}", %{"rollout_percentage" => "abc"})
+      |> render_submit()
+
+      assert %FeatureFlag{rollout_percentage: 100} = Api.get_feature_flag(flag_name)
+    end
+
+    test "sets an explicit bucket_key and persists it", %{conn: conn, user: user, password: password} do
+      flag_name = "bucket_key_#{random_string()}"
+      {:ok, flag} = Api.upsert_feature_flag(%{name: flag_name, enabled: true, rollout_percentage: 50})
+
+      {:ok, view, _} = conn |> using_basic_auth(user, password) |> live(~p"/admin/feature-flags")
+
+      view
+      |> form("#set_rollout_#{flag.id}", %{"bucket_key" => "shared_cohort"})
+      |> render_submit()
+
+      assert %FeatureFlag{bucket_key: "shared_cohort"} = Api.get_feature_flag(flag_name)
+    end
+
+    test "blanking the bucket_key field clears it back to the default", %{
+      conn: conn,
+      user: user,
+      password: password
+    } do
+      flag_name = "bucket_key_clear_#{random_string()}"
+      {:ok, flag} = Api.upsert_feature_flag(%{name: flag_name, enabled: true, bucket_key: "shared_cohort"})
+
+      {:ok, view, _} = conn |> using_basic_auth(user, password) |> live(~p"/admin/feature-flags")
+
+      view
+      |> form("#set_rollout_#{flag.id}", %{"bucket_key" => "  "})
+      |> render_submit()
+
+      assert %FeatureFlag{bucket_key: nil} = Api.get_feature_flag(flag_name)
+    end
+  end
+
   describe "delete event" do
     test "removes the flag from the list and DB", %{conn: conn, user: user, password: password} do
       flag_name = "delete_#{random_string()}"

@@ -209,7 +209,11 @@ defmodule Realtime.Api do
     if master_region?() do
       %FeatureFlag{}
       |> FeatureFlag.changeset(attrs)
-      |> Repo.insert(on_conflict: {:replace, [:enabled, :updated_at]}, conflict_target: :name, returning: true)
+      |> Repo.insert(
+        on_conflict: {:replace, [:enabled, :rollout_percentage, :bucket_key, :updated_at]},
+        conflict_target: :name,
+        returning: true
+      )
       |> tap(fn
         {:ok, flag} -> FeatureFlags.Cache.global_update_cache(flag)
         _ -> :ok

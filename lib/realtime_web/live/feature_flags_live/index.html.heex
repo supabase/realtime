@@ -19,6 +19,7 @@
       <tr class="border-b border-gray-200">
         <th class="py-2 pr-4 font-semibold text-gray-700">Name</th>
         <th class="py-2 pr-4 font-semibold text-gray-700">Status</th>
+        <th class="py-2 pr-4 font-semibold text-gray-700">Rollout</th>
         <th class="py-2 font-semibold text-gray-700">Actions</th>
       </tr>
     </thead>
@@ -48,6 +49,31 @@
                 <%= if flag.enabled, do: "Enabled", else: "Disabled" %>
               </span>
             </div>
+          </td>
+          <td class="py-3 pr-4">
+            <form id={"set_rollout_#{flag.id}"} phx-submit="set_rollout" class="flex items-center gap-1">
+              <input type="hidden" name="flag_id" value={flag.id} />
+              <input
+                type="number"
+                name="rollout_percentage"
+                min="0"
+                max="100"
+                value={flag.rollout_percentage}
+                class="border border-gray-300 rounded px-2 py-1 text-sm w-16"
+              />
+              <span class="text-gray-500">%</span>
+              <input
+                type="text"
+                name="bucket_key"
+                value={flag.bucket_key}
+                placeholder={"defaults to \"#{flag.name}\""}
+                title="Bucket key: flags sharing the same bucket key share the same rollout cohort"
+                class="border border-gray-300 rounded px-2 py-1 text-sm w-32"
+              />
+              <button type="submit" class="bg-gray-200 hover:bg-gray-300 text-gray-700 text-xs px-2 py-1 rounded">
+                Save
+              </button>
+            </form>
           </td>
           <td class="py-3">
             <button

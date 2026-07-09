@@ -24,13 +24,43 @@ defmodule RealtimeWeb.Dashboard.FeatureFlags do
   def handle_event("toggle", %{"id" => id}, socket) do
     flag = Enum.find(socket.assigns.flags, &(&1.id == id))
 
-    case Api.upsert_feature_flag(%{name: flag.name, enabled: !flag.enabled}) do
+    attrs = %{
+      name: flag.name,
+      enabled: !flag.enabled,
+      rollout_percentage: flag.rollout_percentage,
+      bucket_key: flag.bucket_key
+    }
+
+    case Api.upsert_feature_flag(attrs) do
       {:ok, updated} ->
         flags = Enum.map(socket.assigns.flags, fn f -> if f.id == id, do: updated, else: f end)
         {:noreply, assign(socket, flags: flags)}
 
       {:error, _} ->
         {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event(
+        "set_rollout",
+        %{"flag_id" => id, "rollout_percentage" => rollout_percentage, "bucket_key" => bucket_key},
+        socket
+      ) do
+    flag = Enum.find(socket.assigns.flags, &(&1.id == id))
+
+    with {pct, ""} <- Integer.parse(rollout_percentage),
+         attrs = %{
+           name: flag.name,
+           enabled: flag.enabled,
+           rollout_percentage: pct,
+           bucket_key: normalize_bucket_key(bucket_key)
+         },
+         {:ok, updated} <- Api.upsert_feature_flag(attrs) do
+      flags = Enum.map(socket.assigns.flags, fn f -> if f.id == id, do: updated, else: f end)
+      {:noreply, assign(socket, flags: flags)}
+    else
+      _ -> {:noreply, socket}
     end
   end
 
@@ -100,6 +130,13 @@ defmodule RealtimeWeb.Dashboard.FeatureFlags do
     assign(socket, [managing_id: nil, tenant_search: "", found_tenant: nil, tenant_error: nil] ++ extra)
   end
 
+  defp normalize_bucket_key(bucket_key) do
+    case String.trim(bucket_key) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -120,9 +157,10 @@ defmodule RealtimeWeb.Dashboard.FeatureFlags do
       <table class="table table-hover">
         <thead>
           <tr>
-            <th style="width: 60%">Name</th>
+            <th style="width: 30%">Name</th>
             <th style="width: 15%">Status</th>
-            <th style="width: 25%">Actions</th>
+            <th style="width: 35%">Rollout</th>
+            <th style="width: 20%">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -147,6 +185,32 @@ defmodule RealtimeWeb.Dashboard.FeatureFlags do
                 </div>
               </td>
               <td class="align-middle">
+                <form id={"set_rollout_#{flag.id}"} phx-submit="set_rollout" class="d-flex align-items-center gap-1">
+                  <input type="hidden" name="flag_id" value={flag.id} />
+                  <input
+                    type="number"
+                    name="rollout_percentage"
+                    min="0"
+                    max="100"
+                    value={flag.rollout_percentage}
+                    class="form-control form-control-sm"
+                    style="width: 70px;"
+                  />
+                  <span class="text-muted">%</span>
+                  <input
+                    type="text"
+                    name="bucket_key"
+                    value={flag.bucket_key}
+                    placeholder={"defaults to \"#{flag.name}\""}
+                    title="Bucket key: flags sharing the same bucket key share the same rollout cohort"
+                    class="form-control form-control-sm"
+                    style="width: 120px;"
+                    autocomplete="off"
+                  />
+                  <button type="submit" class="btn btn-sm btn-outline-secondary">Save</button>
+                </form>
+              </td>
+              <td class="align-middle">
                 <div style="display: flex; gap: 0.5rem;">
                   <button phx-click="open_tenant_manager" phx-value-id={flag.id} class="btn btn-sm btn-outline-primary">
                     Tenants
@@ -164,7 +228,7 @@ defmodule RealtimeWeb.Dashboard.FeatureFlags do
             </tr>
             <%= if @managing_id == flag.id do %>
               <tr>
-                <td colspan="3" style="background: #f8f9fa; padding: 1rem 1.25rem;">
+                <td colspan="4" style="background: #f8f9fa; padding: 1rem 1.25rem;">
                   <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem;">
                     <strong>Tenant flag: <%= flag.name %></strong>
                     <button phx-click="close_tenant_manager" class="btn btn-sm btn-secondary">Close</button>
@@ -187,7 +251,7 @@ defmodule RealtimeWeb.Dashboard.FeatureFlags do
                   <% end %>
 
                   <%= if @found_tenant do %>
-                    <% flag_enabled = Map.get(@found_tenant.feature_flags, flag.name, flag.enabled) %>
+                    <% flag_enabled = Map.get(@found_tenant.feature_flags, flag.name, FeatureFlags.enabled?(flag.name, @found_tenant.external_id)) %>
                     <div style="display: flex; align-items: center; gap: 1rem; padding: 0.5rem 0.75rem; background: white; border-radius: 4px; border: 1px solid #dee2e6;">
                       <code><%= @found_tenant.external_id %></code>
                       <span class="text-muted">—</span>

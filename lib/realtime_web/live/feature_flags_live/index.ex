@@ -20,7 +20,14 @@ defmodule RealtimeWeb.FeatureFlagsLive.Index do
   def handle_event("toggle", %{"id" => id}, socket) do
     flag = Enum.find(socket.assigns.flags, &(&1.id == id))
 
-    case Api.upsert_feature_flag(%{name: flag.name, enabled: !flag.enabled}) do
+    attrs = %{
+      name: flag.name,
+      enabled: !flag.enabled,
+      rollout_percentage: flag.rollout_percentage,
+      bucket_key: flag.bucket_key
+    }
+
+    case Api.upsert_feature_flag(attrs) do
       {:ok, updated} ->
         Endpoint.broadcast_from(self(), "feature_flags", "updated", updated)
         flags = Enum.map(socket.assigns.flags, fn f -> if f.id == id, do: updated, else: f end)
@@ -28,6 +35,30 @@ defmodule RealtimeWeb.FeatureFlagsLive.Index do
 
       {:error, _} ->
         {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event(
+        "set_rollout",
+        %{"flag_id" => id, "rollout_percentage" => rollout_percentage, "bucket_key" => bucket_key},
+        socket
+      ) do
+    flag = Enum.find(socket.assigns.flags, &(&1.id == id))
+
+    with {pct, ""} <- Integer.parse(rollout_percentage),
+         attrs = %{
+           name: flag.name,
+           enabled: flag.enabled,
+           rollout_percentage: pct,
+           bucket_key: normalize_bucket_key(bucket_key)
+         },
+         {:ok, updated} <- Api.upsert_feature_flag(attrs) do
+      Endpoint.broadcast_from(self(), "feature_flags", "updated", updated)
+      flags = Enum.map(socket.assigns.flags, fn f -> if f.id == id, do: updated, else: f end)
+      {:noreply, assign(socket, flags: flags)}
+    else
+      _ -> {:noreply, socket}
     end
   end
 
@@ -77,5 +108,12 @@ defmodule RealtimeWeb.FeatureFlagsLive.Index do
   def handle_info(%Phoenix.Socket.Broadcast{event: "deleted", payload: %{name: name}}, socket) do
     flags = Enum.reject(socket.assigns.flags, &(&1.name == name))
     {:noreply, assign(socket, flags: flags)}
+  end
+
+  defp normalize_bucket_key(bucket_key) do
+    case String.trim(bucket_key) do
+      "" -> nil
+      trimmed -> trimmed
+    end
   end
 end

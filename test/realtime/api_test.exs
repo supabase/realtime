@@ -565,6 +565,48 @@ defmodule Realtime.ApiTest do
       assert {:error, changeset} = Api.upsert_feature_flag(%{enabled: false})
       assert "can't be blank" in errors_on(changeset).name
     end
+
+    test "defaults rollout_percentage to 100 when omitted" do
+      assert {:ok, %FeatureFlag{rollout_percentage: 100}} =
+               Api.upsert_feature_flag(%{name: "default_rollout_flag", enabled: true})
+    end
+
+    test "accepts a rollout_percentage within 0..100" do
+      assert {:ok, %FeatureFlag{rollout_percentage: 25}} =
+               Api.upsert_feature_flag(%{name: "partial_rollout_flag", enabled: true, rollout_percentage: 25})
+    end
+
+    test "rejects a rollout_percentage below 0" do
+      assert {:error, changeset} =
+               Api.upsert_feature_flag(%{name: "invalid_rollout_flag", enabled: true, rollout_percentage: -1})
+
+      assert "must be greater than or equal to 0" in errors_on(changeset).rollout_percentage
+    end
+
+    test "rejects a rollout_percentage above 100" do
+      assert {:error, changeset} =
+               Api.upsert_feature_flag(%{name: "invalid_rollout_flag", enabled: true, rollout_percentage: 101})
+
+      assert "must be less than or equal to 100" in errors_on(changeset).rollout_percentage
+    end
+
+    test "defaults bucket_key to nil when omitted" do
+      assert {:ok, %FeatureFlag{bucket_key: nil}} =
+               Api.upsert_feature_flag(%{name: "default_bucket_key_flag", enabled: true})
+    end
+
+    test "accepts an explicit bucket_key" do
+      assert {:ok, %FeatureFlag{bucket_key: "shared_cohort"}} =
+               Api.upsert_feature_flag(%{name: "bucket_key_flag", enabled: true, bucket_key: "shared_cohort"})
+    end
+
+    test "updating a flag without bucket_key clears any previously set bucket_key" do
+      {:ok, _} =
+        Api.upsert_feature_flag(%{name: "bucket_key_reset_flag", enabled: true, bucket_key: "shared_cohort"})
+
+      assert {:ok, %FeatureFlag{bucket_key: nil}} =
+               Api.upsert_feature_flag(%{name: "bucket_key_reset_flag", enabled: true})
+    end
   end
 
   describe "delete_feature_flag/1" do
