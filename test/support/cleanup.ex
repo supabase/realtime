@@ -10,7 +10,7 @@ defmodule Cleanup do
         hostname: "localhost",
         port: 5433,
         database: "postgres",
-        username: "supabase_realtime_admin",
+        username: "supabase_admin",
         password: "postgres"
       )
 

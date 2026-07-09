@@ -190,8 +190,8 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
     """
   end
 
-  @secret_settings ["db_password", "db_pass_realtime"]
-  @encrypted_settings ["db_host", "db_port", "db_name", "db_user", "db_user_realtime"]
+  @secret_settings ["db_password"]
+  @encrypted_settings ["db_host", "db_port", "db_name", "db_user"]
 
   defp prepare_tenant(tenant) do
     %{tenant | extensions: Enum.map(tenant.extensions, &prepare_extension/1)}

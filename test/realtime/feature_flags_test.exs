@@ -1,5 +1,6 @@
 defmodule Realtime.FeatureFlagsTest do
   use Realtime.DataCase, async: false
+  use Mimic
 
   alias Realtime.Api
   alias Realtime.FeatureFlags
@@ -12,9 +13,21 @@ defmodule Realtime.FeatureFlagsTest do
     :ok
   end
 
+  describe "Cache.get_flag/1" do
+    test "returns nil when the cache/database lookup errors instead of leaking the error" do
+      stub(Cachex, :fetch, fn _cache, _key, _fallback -> {:error, :boom} end)
+      assert Cache.get_flag("any_flag") == nil
+    end
+  end
+
   describe "enabled?/1" do
     test "returns false when flag does not exist" do
       refute FeatureFlags.enabled?("missing_flag")
+    end
+
+    test "returns false when lookup errors" do
+      stub(Cachex, :fetch, fn _cache, _key, _fallback -> {:error, :boom} end)
+      refute FeatureFlags.enabled?("any_flag")
     end
 
     test "returns false when flag is disabled" do

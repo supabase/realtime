@@ -15,7 +15,7 @@ for repo <- [
       Realtime.Repo.Replica.SanJose
     ] do
   config :realtime, repo,
-    username: "supabase_realtime_admin",
+    username: "supabase_admin",
     password: "postgres",
     database: "realtime_test#{partition}",
     hostname: "127.0.0.1",
@@ -45,7 +45,7 @@ config :realtime,
   max_gen_rpc_clients: 5,
   max_gen_rpc_call_clients: 1,
   metrics_pusher_req_options: [
-    plug: {Req.Test, Realtime.MetricsPusher}
+    adapter: &Realtime.ReqTestRawAdapter.call(&1, Realtime.MetricsPusher)
   ]
 
 # Print nothing during tests unless captured or a test failure happens

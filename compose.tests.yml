@@ -31,7 +31,6 @@ services:
       DB_HOST: host.docker.internal
       DB_PORT: 5532
       DB_USER: ${DB_USER:-supabase_admin}
-      DB_USER_REALTIME: ${DB_USER_REALTIME:-supabase_realtime_admin}
       DB_PASSWORD: postgres
       DB_NAME: postgres
       DB_ENC_KEY: 1234567890123456

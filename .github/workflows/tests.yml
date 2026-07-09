@@ -39,7 +39,6 @@ jobs:
     runs-on: blacksmith-8vcpu-ubuntu-2404
     env:
       POSTGRES_IMAGE: ${{ matrix.postgres_image }}
-      DB_USER_REALTIME: ${{ matrix.db_user_realtime }}
     strategy:
       fail-fast: false
       matrix:
@@ -48,20 +47,15 @@ jobs:
         include:
           - postgres: pg14
             postgres_image: supabase/postgres:14.1.0.82
-            db_user_realtime: supabase_admin
           # test before supautils.policy_grants added all necessary grants
           - postgres: pg15
             postgres_image: supabase/postgres:15.1.0.1
-            db_user_realtime: supabase_admin
           - postgres: pg15_latest
             postgres_image: supabase/postgres:15.14.1.129
-            db_user_realtime: supabase_realtime_admin
           - postgres: pg17
             postgres_image: supabase/postgres:17.6.1.127
-            db_user_realtime: supabase_realtime_admin
           - postgres: orioledb17
             postgres_image: supabase/postgres:17.6.0.096-orioledb
-            db_user_realtime: supabase_realtime_admin
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

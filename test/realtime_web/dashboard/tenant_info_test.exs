@@ -68,12 +68,6 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
     refute html =~ "db_password"
   end
 
-  test "does not show db_pass_realtime", %{conn: conn, tenant: tenant} do
-    {:ok, _view, html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
-
-    refute html =~ "db_pass_realtime"
-  end
-
   test "shows decrypted db_host", %{conn: conn, tenant: tenant} do
     {:ok, _view, html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
 

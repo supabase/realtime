@@ -101,8 +101,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
       %{oids: oids2} = :sys.get_state(subscriber_manager_pid)
       assert !Map.equal?(oids, oids2)
 
-      # `for all tables` requires superuser
-      Postgrex.query!(conn, "create publication supabase_realtime_test for table public.test", [])
+      Postgrex.query!(conn, "create publication supabase_realtime_test for all tables", [])
       send(subscriber_manager_pid, :check_oids)
       %{oids: oids3} = :sys.get_state(subscriber_manager_pid)
       assert !Map.equal?(oids2, oids3)
@@ -135,8 +134,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
                Postgrex.query!(conn, "SELECT count(*)::int FROM pg_replication_slots WHERE slot_name = $1", [slot_name])
 
       # Re-create the publication: poller should recreate the slot and repopulate oids.
-      # Use an explicit table (not FOR ALL TABLES, which requires superuser).
-      Postgrex.query!(conn, "create publication supabase_realtime_test for table public.test", [])
+      Postgrex.query!(conn, "create publication supabase_realtime_test for all tables", [])
       send(poller_pid, :check_oids)
       %{oids: oids_after_create} = :sys.get_state(poller_pid)
       refute oids_after_create == %{}

@@ -663,9 +663,8 @@ defmodule Realtime.Tenants.Migrations.AddPostgrestFilterOps do
     $$;
     """)
 
-    # The 5-arg check_equality_op is a new signature created after SetupSupabaseRealtimeAdmin ran,
-    # so its ownership reassignment is not covered there. Align its owner with the existing 4-arg
-    # overload so the realtime schema stays single-owner under the least-privilege setup.
+    # The 5-arg check_equality_op is a new signature, so align its owner with the existing 4-arg
+    # overload to keep the realtime schema single-owner under the least-privilege setup.
     execute("""
     do $$
     declare

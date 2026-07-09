@@ -2352,102 +2352,6 @@
           "privilege": "UPDATE",
           "grantable": false,
           "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "DELETE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "INSERT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "MAINTAIN",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "REFERENCES",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "SELECT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "TRIGGER",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "TRUNCATE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "UPDATE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_realtime_admin",
-          "privilege": "DELETE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_realtime_admin",
-          "privilege": "INSERT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_realtime_admin",
-          "privilege": "MAINTAIN",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_realtime_admin",
-          "privilege": "REFERENCES",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_realtime_admin",
-          "privilege": "SELECT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_realtime_admin",
-          "privilege": "TRIGGER",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_realtime_admin",
-          "privilege": "TRUNCATE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_realtime_admin",
-          "privilege": "UPDATE",
-          "grantable": false,
-          "columns": null
         }
       ],
       "security_labels": []
@@ -3092,11 +2996,6 @@
     {
       "dependent_stable_id": "acl:table:realtime.messages::grantee:service_role",
       "referenced_stable_id": "table:realtime.messages",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:table:realtime.schema_migrations::grantee:supabase_realtime_admin",
-      "referenced_stable_id": "table:realtime.schema_migrations",
       "deptype": "n"
     },
     {

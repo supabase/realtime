@@ -23,11 +23,4 @@ defmodule Extensions.PostgresCdcRls.DbSettings do
       {"db_password", &is_binary/1, true}
     ]
   end
-
-  def optional do
-    [
-      {"db_user_realtime", &is_binary/1, true},
-      {"db_pass_realtime", &is_binary/1, true}
-    ]
-  end
 end

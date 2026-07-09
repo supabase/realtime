@@ -81,8 +81,7 @@ defmodule Integrations do
         "grant all on table public.test to anon;",
         "grant all on table public.test to supabase_realtime_admin;",
         "grant all on table public.test to authenticated;",
-        # `for all tables` requires superuser
-        "create publication #{publication} for table public.test",
+        "create publication #{publication} for all tables",
         """
         DO $$
         DECLARE
