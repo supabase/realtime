@@ -767,7 +767,7 @@
       ],
       "security_labels": []
     },
-    "procedure:realtime.check_equality_op(realtime.equality_op,regtype,text,text)": {
+    "procedure:realtime.check_equality_op(realtime.equality_op,regtype,text,text,boolean)": {
       "schema": "realtime",
       "name": "check_equality_op",
       "kind": "f",
@@ -775,34 +775,36 @@
       "return_type_schema": "pg_catalog",
       "language": "plpgsql",
       "security_definer": false,
-      "volatility": "i",
+      "volatility": "s",
       "parallel_safety": "u",
       "execution_cost": 100,
       "result_rows": 0,
       "is_strict": false,
       "leakproof": false,
       "returns_set": false,
-      "argument_count": 4,
+      "argument_count": 5,
       "argument_default_count": 0,
       "argument_names": [
         "op",
         "type_",
         "val_1",
-        "val_2"
+        "val_2",
+        "negate"
       ],
       "argument_types": [
         "realtime.equality_op",
         "regtype",
         "text",
-        "text"
+        "text",
+        "boolean"
       ],
       "all_argument_types": [],
       "argument_modes": null,
       "argument_defaults": null,
-      "source_code": "\n/*\nCasts *val_1* and *val_2* as type *type_* and check the *op* condition for truthiness\n*/\ndeclare\n    op_symbol text = (\n        case\n            when op = 'eq' then '='\n            when op = 'neq' then '!='\n            when op = 'lt' then '<'\n            when op = 'lte' then '<='\n            when op = 'gt' then '>'\n            when op = 'gte' then '>='\n            when op = 'in' then '= any'\n            else 'UNKNOWN OP'\n        end\n    );\n    res boolean;\nbegin\n    execute format(\n        'select %L::'|| type_::text || ' ' || op_symbol\n        || ' ( %L::'\n        || (\n            case\n                when op = 'in' then type_::text || '[]'\n                else type_::text end\n        )\n        || ')', val_1, val_2) into res;\n    return res;\nend;\n",
+      "source_code": "\ndeclare\n    op_symbol text;\n    res boolean;\nbegin\n    -- IS DISTINCT FROM / IS NOT DISTINCT FROM: infix, both sides typed literals\n    if op = 'isdistinct' then\n        execute format(\n            'select %L::%s %s %L::%s',\n            val_1,\n            type_::text,\n            case when negate then 'IS NOT DISTINCT FROM' else 'IS DISTINCT FROM' end,\n            val_2,\n            type_::text\n        ) into res;\n        return res;\n    end if;\n\n    -- IS requires a keyword RHS (NULL, TRUE, FALSE, UNKNOWN), not a typed literal\n    if op = 'is' then\n        if val_2 not in ('null', 'true', 'false', 'unknown') then\n            raise exception 'invalid value for is filter: must be null, true, false, or unknown';\n        end if;\n        execute format(\n            'select %L::%s %s %s',\n            val_1,\n            type_::text,\n            case when negate then 'IS NOT' else 'IS' end,\n            upper(val_2)\n        ) into res;\n        return res;\n    end if;\n\n    op_symbol = case\n        when op = 'eq'    then '='\n        when op = 'neq'   then '!='\n        when op = 'lt'    then '<'\n        when op = 'lte'   then '<='\n        when op = 'gt'    then '>'\n        when op = 'gte'   then '>='\n        when op = 'in'    then '= any'\n        when op = 'like'   then 'LIKE'\n        when op = 'ilike'  then 'ILIKE'\n        when op = 'match'  then '~'\n        when op = 'imatch' then '~*'\n        else null\n    end;\n\n    if op_symbol is null then\n        raise exception 'unsupported equality operator: %', op::text;\n    end if;\n\n    execute format(\n        'select %L::%s %s (%L::%s)',\n        val_1,\n        type_::text,\n        op_symbol,\n        val_2,\n        case when op = 'in' then type_::text || '[]' else type_::text end\n    ) into res;\n\n    return case when negate then not res else res end;\nend;\n",
       "binary_path": null,
       "sql_body": null,
-      "definition": "CREATE OR REPLACE FUNCTION realtime.check_equality_op(op realtime.equality_op, type_ regtype, val_1 text, val_2 text)\n RETURNS boolean\n LANGUAGE plpgsql\n IMMUTABLE\nAS $function$\n/*\nCasts *val_1* and *val_2* as type *type_* and check the *op* condition for truthiness\n*/\ndeclare\n    op_symbol text = (\n        case\n            when op = 'eq' then '='\n            when op = 'neq' then '!='\n            when op = 'lt' then '<'\n            when op = 'lte' then '<='\n            when op = 'gt' then '>'\n            when op = 'gte' then '>='\n            when op = 'in' then '= any'\n            else 'UNKNOWN OP'\n        end\n    );\n    res boolean;\nbegin\n    execute format(\n        'select %L::'|| type_::text || ' ' || op_symbol\n        || ' ( %L::'\n        || (\n            case\n                when op = 'in' then type_::text || '[]'\n                else type_::text end\n        )\n        || ')', val_1, val_2) into res;\n    return res;\nend;\n$function$\n",
+      "definition": "CREATE OR REPLACE FUNCTION realtime.check_equality_op(op realtime.equality_op, type_ regtype, val_1 text, val_2 text, negate boolean)\n RETURNS boolean\n LANGUAGE plpgsql\n STABLE\nAS $function$\ndeclare\n    op_symbol text;\n    res boolean;\nbegin\n    -- IS DISTINCT FROM / IS NOT DISTINCT FROM: infix, both sides typed literals\n    if op = 'isdistinct' then\n        execute format(\n            'select %L::%s %s %L::%s',\n            val_1,\n            type_::text,\n            case when negate then 'IS NOT DISTINCT FROM' else 'IS DISTINCT FROM' end,\n            val_2,\n            type_::text\n        ) into res;\n        return res;\n    end if;\n\n    -- IS requires a keyword RHS (NULL, TRUE, FALSE, UNKNOWN), not a typed literal\n    if op = 'is' then\n        if val_2 not in ('null', 'true', 'false', 'unknown') then\n            raise exception 'invalid value for is filter: must be null, true, false, or unknown';\n        end if;\n        execute format(\n            'select %L::%s %s %s',\n            val_1,\n            type_::text,\n            case when negate then 'IS NOT' else 'IS' end,\n            upper(val_2)\n        ) into res;\n        return res;\n    end if;\n\n    op_symbol = case\n        when op = 'eq'    then '='\n        when op = 'neq'   then '!='\n        when op = 'lt'    then '<'\n        when op = 'lte'   then '<='\n        when op = 'gt'    then '>'\n        when op = 'gte'   then '>='\n        when op = 'in'    then '= any'\n        when op = 'like'   then 'LIKE'\n        when op = 'ilike'  then 'ILIKE'\n        when op = 'match'  then '~'\n        when op = 'imatch' then '~*'\n        else null\n    end;\n\n    if op_symbol is null then\n        raise exception 'unsupported equality operator: %', op::text;\n    end if;\n\n    execute format(\n        'select %L::%s %s (%L::%s)',\n        val_1,\n        type_::text,\n        op_symbol,\n        val_2,\n        case when op = 'in' then type_::text || '[]' else type_::text end\n    ) into res;\n\n    return case when negate then not res else res end;\nend;\n$function$\n",
       "config": null,
       "owner": "supabase_realtime_admin",
       "comment": null,
@@ -845,7 +847,7 @@
       ],
       "security_labels": []
     },
-    "procedure:realtime.check_equality_op(realtime.equality_op,regtype,text,text,boolean)": {
+    "procedure:realtime.check_equality_op(realtime.equality_op,regtype,text,text)": {
       "schema": "realtime",
       "name": "check_equality_op",
       "kind": "f",
@@ -853,36 +855,34 @@
       "return_type_schema": "pg_catalog",
       "language": "plpgsql",
       "security_definer": false,
-      "volatility": "s",
+      "volatility": "i",
       "parallel_safety": "u",
       "execution_cost": 100,
       "result_rows": 0,
       "is_strict": false,
       "leakproof": false,
       "returns_set": false,
-      "argument_count": 5,
+      "argument_count": 4,
       "argument_default_count": 0,
       "argument_names": [
         "op",
         "type_",
         "val_1",
-        "val_2",
-        "negate"
+        "val_2"
       ],
       "argument_types": [
         "realtime.equality_op",
         "regtype",
         "text",
-        "text",
-        "boolean"
+        "text"
       ],
       "all_argument_types": [],
       "argument_modes": null,
       "argument_defaults": null,
-      "source_code": "\ndeclare\n    op_symbol text;\n    res boolean;\nbegin\n    -- IS DISTINCT FROM / IS NOT DISTINCT FROM: infix, both sides typed literals\n    if op = 'isdistinct' then\n        execute format(\n            'select %L::%s %s %L::%s',\n            val_1,\n            type_::text,\n            case when negate then 'IS NOT DISTINCT FROM' else 'IS DISTINCT FROM' end,\n            val_2,\n            type_::text\n        ) into res;\n        return res;\n    end if;\n\n    -- IS requires a keyword RHS (NULL, TRUE, FALSE, UNKNOWN), not a typed literal\n    if op = 'is' then\n        if val_2 not in ('null', 'true', 'false', 'unknown') then\n            raise exception 'invalid value for is filter: must be null, true, false, or unknown';\n        end if;\n        execute format(\n            'select %L::%s %s %s',\n            val_1,\n            type_::text,\n            case when negate then 'IS NOT' else 'IS' end,\n            upper(val_2)\n        ) into res;\n        return res;\n    end if;\n\n    op_symbol = case\n        when op = 'eq'    then '='\n        when op = 'neq'   then '!='\n        when op = 'lt'    then '<'\n        when op = 'lte'   then '<='\n        when op = 'gt'    then '>'\n        when op = 'gte'   then '>='\n        when op = 'in'    then '= any'\n        when op = 'like'   then 'LIKE'\n        when op = 'ilike'  then 'ILIKE'\n        when op = 'match'  then '~'\n        when op = 'imatch' then '~*'\n        else null\n    end;\n\n    if op_symbol is null then\n        raise exception 'unsupported equality operator: %', op::text;\n    end if;\n\n    execute format(\n        'select %L::%s %s (%L::%s)',\n        val_1,\n        type_::text,\n        op_symbol,\n        val_2,\n        case when op = 'in' then type_::text || '[]' else type_::text end\n    ) into res;\n\n    return case when negate then not res else res end;\nend;\n",
+      "source_code": "\n/*\nCasts *val_1* and *val_2* as type *type_* and check the *op* condition for truthiness\n*/\ndeclare\n    op_symbol text = (\n        case\n            when op = 'eq' then '='\n            when op = 'neq' then '!='\n            when op = 'lt' then '<'\n            when op = 'lte' then '<='\n            when op = 'gt' then '>'\n            when op = 'gte' then '>='\n            when op = 'in' then '= any'\n            else 'UNKNOWN OP'\n        end\n    );\n    res boolean;\nbegin\n    execute format(\n        'select %L::'|| type_::text || ' ' || op_symbol\n        || ' ( %L::'\n        || (\n            case\n                when op = 'in' then type_::text || '[]'\n                else type_::text end\n        )\n        || ')', val_1, val_2) into res;\n    return res;\nend;\n",
       "binary_path": null,
       "sql_body": null,
-      "definition": "CREATE OR REPLACE FUNCTION realtime.check_equality_op(op realtime.equality_op, type_ regtype, val_1 text, val_2 text, negate boolean)\n RETURNS boolean\n LANGUAGE plpgsql\n STABLE\nAS $function$\ndeclare\n    op_symbol text;\n    res boolean;\nbegin\n    -- IS DISTINCT FROM / IS NOT DISTINCT FROM: infix, both sides typed literals\n    if op = 'isdistinct' then\n        execute format(\n            'select %L::%s %s %L::%s',\n            val_1,\n            type_::text,\n            case when negate then 'IS NOT DISTINCT FROM' else 'IS DISTINCT FROM' end,\n            val_2,\n            type_::text\n        ) into res;\n        return res;\n    end if;\n\n    -- IS requires a keyword RHS (NULL, TRUE, FALSE, UNKNOWN), not a typed literal\n    if op = 'is' then\n        if val_2 not in ('null', 'true', 'false', 'unknown') then\n            raise exception 'invalid value for is filter: must be null, true, false, or unknown';\n        end if;\n        execute format(\n            'select %L::%s %s %s',\n            val_1,\n            type_::text,\n            case when negate then 'IS NOT' else 'IS' end,\n            upper(val_2)\n        ) into res;\n        return res;\n    end if;\n\n    op_symbol = case\n        when op = 'eq'    then '='\n        when op = 'neq'   then '!='\n        when op = 'lt'    then '<'\n        when op = 'lte'   then '<='\n        when op = 'gt'    then '>'\n        when op = 'gte'   then '>='\n        when op = 'in'    then '= any'\n        when op = 'like'   then 'LIKE'\n        when op = 'ilike'  then 'ILIKE'\n        when op = 'match'  then '~'\n        when op = 'imatch' then '~*'\n        else null\n    end;\n\n    if op_symbol is null then\n        raise exception 'unsupported equality operator: %', op::text;\n    end if;\n\n    execute format(\n        'select %L::%s %s (%L::%s)',\n        val_1,\n        type_::text,\n        op_symbol,\n        val_2,\n        case when op = 'in' then type_::text || '[]' else type_::text end\n    ) into res;\n\n    return case when negate then not res else res end;\nend;\n$function$\n",
+      "definition": "CREATE OR REPLACE FUNCTION realtime.check_equality_op(op realtime.equality_op, type_ regtype, val_1 text, val_2 text)\n RETURNS boolean\n LANGUAGE plpgsql\n IMMUTABLE\nAS $function$\n/*\nCasts *val_1* and *val_2* as type *type_* and check the *op* condition for truthiness\n*/\ndeclare\n    op_symbol text = (\n        case\n            when op = 'eq' then '='\n            when op = 'neq' then '!='\n            when op = 'lt' then '<'\n            when op = 'lte' then '<='\n            when op = 'gt' then '>'\n            when op = 'gte' then '>='\n            when op = 'in' then '= any'\n            else 'UNKNOWN OP'\n        end\n    );\n    res boolean;\nbegin\n    execute format(\n        'select %L::'|| type_::text || ' ' || op_symbol\n        || ' ( %L::'\n        || (\n            case\n                when op = 'in' then type_::text || '[]'\n                else type_::text end\n        )\n        || ')', val_1, val_2) into res;\n    return res;\nend;\n$function$\n",
       "config": null,
       "owner": "supabase_realtime_admin",
       "comment": null,
@@ -3026,22 +3026,22 @@
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages.binary_payload",
-      "deptype": "n"
+      "deptype": "a"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages.binary_payload",
-      "deptype": "a"
-    },
-    {
-      "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
-      "referenced_stable_id": "column:realtime.messages.payload",
       "deptype": "n"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages.payload",
       "deptype": "a"
+    },
+    {
+      "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
+      "referenced_stable_id": "column:realtime.messages.payload",
+      "deptype": "n"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_pkey",
@@ -3066,12 +3066,12 @@
     {
       "dependent_stable_id": "constraint:realtime.subscription.subscription_action_filter_check",
       "referenced_stable_id": "column:realtime.subscription.action_filter",
-      "deptype": "n"
+      "deptype": "a"
     },
     {
       "dependent_stable_id": "constraint:realtime.subscription.subscription_action_filter_check",
       "referenced_stable_id": "column:realtime.subscription.action_filter",
-      "deptype": "a"
+      "deptype": "n"
     },
     {
       "dependent_stable_id": "defacl:supabase_admin:f:schema:realtime:grantee:dashboard_user",
