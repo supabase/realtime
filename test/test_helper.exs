@@ -34,13 +34,17 @@ requires_no_supautils_policy_grants = if has_supautils_realtime_grants, do: :req
 
 skip_orioledb = if orioledb?, do: :skip_orioledb
 
-exclude = [
-  :failing,
-  requires_pg_140006,
-  requires_supautils_policy_grants,
-  requires_no_supautils_policy_grants,
-  skip_orioledb
-]
+exclude =
+  Enum.reject(
+    [
+      :failing,
+      requires_pg_140006,
+      requires_supautils_policy_grants,
+      requires_no_supautils_policy_grants,
+      skip_orioledb
+    ],
+    &is_nil/1
+  )
 
 ExUnit.start(exclude: exclude, max_cases: max_cases, capture_log: true)
 

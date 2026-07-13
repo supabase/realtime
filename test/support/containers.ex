@@ -33,7 +33,7 @@ defmodule Containers do
 
     partition = System.get_env("MIX_TEST_PARTITION", "1") |> String.to_integer()
     total_partitions = System.get_env("MIX_TEST_TOTAL_PARTITIONS", "4") |> String.to_integer()
-    all_ports = 5501..9000
+    all_ports = 6500..9000
     range_size = div(Enum.count(all_ports), total_partitions)
 
     available_ports =
@@ -230,11 +230,36 @@ defmodule Containers do
         password: settings.password
       )
 
+    # Mirrors supabase/postgres migrations
     try do
       Postgrex.query!(admin_conn, "DROP PUBLICATION IF EXISTS supabase_realtime_test", [])
       Postgrex.query!(admin_conn, "DROP SCHEMA IF EXISTS realtime CASCADE", [])
       Postgrex.query!(admin_conn, "CREATE SCHEMA realtime", [])
-      Postgrex.query!(admin_conn, "GRANT USAGE ON SCHEMA realtime TO postgres, anon, authenticated, service_role", [])
+
+      Postgrex.query!(admin_conn, "GRANT USAGE ON SCHEMA realtime TO postgres", [])
+      Postgrex.query!(admin_conn, "GRANT ALL ON ALL TABLES IN SCHEMA realtime TO postgres, dashboard_user", [])
+      Postgrex.query!(admin_conn, "GRANT ALL ON ALL SEQUENCES IN SCHEMA realtime TO postgres, dashboard_user", [])
+      Postgrex.query!(admin_conn, "GRANT ALL ON ALL ROUTINES IN SCHEMA realtime TO postgres, dashboard_user", [])
+
+      Postgrex.query!(
+        admin_conn,
+        "ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA realtime GRANT ALL ON TABLES TO postgres, dashboard_user",
+        []
+      )
+
+      Postgrex.query!(
+        admin_conn,
+        "ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA realtime GRANT ALL ON SEQUENCES TO postgres, dashboard_user",
+        []
+      )
+
+      Postgrex.query!(
+        admin_conn,
+        "ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA realtime GRANT ALL ON ROUTINES TO postgres, dashboard_user",
+        []
+      )
+
+      Postgrex.query!(admin_conn, "GRANT USAGE ON SCHEMA realtime TO anon, authenticated, service_role", [])
       Postgrex.query!(admin_conn, "GRANT ALL ON SCHEMA realtime TO supabase_realtime_admin WITH GRANT OPTION", [])
     rescue
       # Retry in case of OrioleDB OTablesMetaTranche LWLock
