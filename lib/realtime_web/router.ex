@@ -74,12 +74,6 @@ defmodule RealtimeWeb.Router do
     get("/", OpenApiSpex.Plug.SwaggerUI, path: "/api/openapi")
   end
 
-  scope "/admin", RealtimeWeb do
-    pipe_through [:browser, :dashboard_admin]
-    live("/tenants", TenantsLive.Index, :index)
-    live("/feature-flags", FeatureFlagsLive.Index, :index)
-  end
-
   scope "/metrics", RealtimeWeb do
     pipe_through(:metrics)
 
