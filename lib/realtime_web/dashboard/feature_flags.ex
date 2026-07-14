@@ -157,9 +157,9 @@ defmodule RealtimeWeb.Dashboard.FeatureFlags do
       <table class="table table-hover">
         <thead>
           <tr>
-            <th style="width: 30%">Name</th>
-            <th style="width: 15%">Status</th>
-            <th style="width: 35%">Rollout</th>
+            <th style="width: 25%">Name</th>
+            <th style="width: 12%">Status</th>
+            <th style="width: 43%">Rollout</th>
             <th style="width: 20%">Actions</th>
           </tr>
         </thead>
@@ -185,28 +185,38 @@ defmodule RealtimeWeb.Dashboard.FeatureFlags do
                 </div>
               </td>
               <td class="align-middle">
-                <form id={"set_rollout_#{flag.id}"} phx-submit="set_rollout" class="d-flex align-items-center gap-1">
+                <form id={"set_rollout_#{flag.id}"} phx-submit="set_rollout" class="d-flex align-items-end gap-3">
                   <input type="hidden" name="flag_id" value={flag.id} />
-                  <input
-                    type="number"
-                    name="rollout_percentage"
-                    min="0"
-                    max="100"
-                    value={flag.rollout_percentage}
-                    class="form-control form-control-sm"
-                    style="width: 70px;"
-                  />
-                  <span class="text-muted">%</span>
-                  <input
-                    type="text"
-                    name="bucket_key"
-                    value={flag.bucket_key}
-                    placeholder={"defaults to \"#{flag.name}\""}
-                    title="Bucket key: flags sharing the same bucket key share the same rollout cohort"
-                    class="form-control form-control-sm"
-                    style="width: 120px;"
-                    autocomplete="off"
-                  />
+                  <div>
+                    <label for={"rollout_percentage_#{flag.id}"} class="form-label text-muted small mb-1">Percentage</label>
+                    <div class="d-flex align-items-center gap-1">
+                      <input
+                        id={"rollout_percentage_#{flag.id}"}
+                        type="number"
+                        name="rollout_percentage"
+                        min="0"
+                        max="100"
+                        value={flag.rollout_percentage}
+                        class="form-control form-control-sm"
+                        style="width: 80px;"
+                      />
+                      <span class="text-muted">%</span>
+                    </div>
+                  </div>
+                  <div>
+                    <label for={"bucket_key_#{flag.id}"} class="form-label text-muted small mb-1">Bucket key</label>
+                    <input
+                      id={"bucket_key_#{flag.id}"}
+                      type="text"
+                      name="bucket_key"
+                      value={flag.bucket_key}
+                      placeholder={"defaults to \"#{flag.name}\""}
+                      title="Bucket key: flags sharing the same bucket key share the same rollout cohort"
+                      class="form-control form-control-sm"
+                      style="width: 180px;"
+                      autocomplete="off"
+                    />
+                  </div>
                   <button type="submit" class="btn btn-sm btn-outline-secondary">Save</button>
                 </form>
               </td>
