@@ -4730,9 +4730,22 @@ defmodule Forum.MusterDistributedTest do
           :ok = :snabbkaffe.forward_trace(a_node)
           :ok = :snabbkaffe.forward_trace(b_node)
 
-          # All three nodes re-converge into the SAME 3-node view -- the
-          # second time (the first was the original formation), hence nth: 2.
-          await_ready(view3, nth: 2, timeout: 20_000)
+          # All three nodes re-converge into the SAME 3-node view. Can't use
+          # the event-driven await_ready here: Scope reacts to :nodeup the
+          # instant Node.connect/1 returns, so a side can race through its
+          # second :ready before forward_trace/1 above installs remote_tp on
+          # it -- that tp() call fires under local_tp and is never forwarded,
+          # hanging block_until on an event that already happened and won't
+          # recur. Poll real state instead, which sidesteps the race entirely.
+          wait_until(
+            fn ->
+              status(scope) == :ready and Muster.members(scope) == view3 and
+                remote_status(p_a, scope) == :ready and remote_status(p_b, scope) == :ready and
+                :erpc.call(a_node, Muster, :members, [scope]) == view3 and
+                :erpc.call(b_node, Muster, :members, [scope]) == view3
+            end,
+            20_000
+          )
 
           # Both independently-made claims landed on the router their group
           # hashes to in the merged view, each having necessarily crossed from
