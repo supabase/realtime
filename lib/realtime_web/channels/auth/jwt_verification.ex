@@ -42,7 +42,10 @@ defmodule RealtimeWeb.JwtVerification do
   @doc """
   Verify JWT token and validate claims
   """
-  @spec verify(binary(), binary(), binary() | nil) :: {:ok, map()} | {:error, any()}
+  @spec verify(binary(), binary(), binary() | nil) ::
+          {:ok, map()}
+          | {:error, Joken.error_reason()}
+          | {:error, {:error_generating_signer, binary()}}
   def verify(token, jwt_secret, jwt_jwks) when is_binary(token) do
     with {:ok, _claims} <- check_claims_format(token),
          {:ok, header} <- check_header_format(token),
