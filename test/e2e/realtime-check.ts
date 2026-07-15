@@ -72,8 +72,7 @@ const realtimeLogger = DEBUG
     }
   : undefined;
 
-const REALTIME_OPTS = { heartbeatIntervalMs: 5000, timeout: 5000, ...(DEBUG ? { logger: realtimeLogger, logLevel: "info" } : {}) };
-const REALTIME_OPTS_REPLAY = { heartbeatIntervalMs: 5000, timeout: 10000, ...(DEBUG ? { logger: realtimeLogger, logLevel: "info" } : {}) };
+const REALTIME_OPTS = { ...(DEBUG ? { logger: realtimeLogger, logLevel: "info" } : {}) };
 const BROADCAST_CONFIG = { config: { broadcast: { self: true } } };
 const EVENT_TIMEOUT_MS = 8000;
 const RATE_LIMIT_PAUSE_MS = 2000;
@@ -828,7 +827,7 @@ async function runLoadBroadcastReplayTests(testUser: { email: string; password: 
 
   await sleep(RATE_LIMIT_PAUSE_MS);
   await test("broadcast replay throughput", async () => {
-    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS_REPLAY });
+    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
     try {
       await signInUser(supabase, testUser.email, testUser.password);
       const event = crypto.randomUUID();
@@ -932,7 +931,7 @@ async function runPresenceTests(_testUser: { email: string; password: string }, 
 
       const subscribeMs = await openChannel(channel);
       const trackStart = performance.now();
-      if (await channel.track({ message }, { timeout: 5000 }) === "timed out") throw new Error("track() timed out");
+      if (await channel.track({ message }) === "timed out") throw new Error("track() timed out");
       const trackMs = performance.now() - trackStart;
       const { latencyMs: eventMs } = await waitFor(() => joinEvent, "presence join");
 
@@ -959,7 +958,7 @@ async function runPresenceTests(_testUser: { email: string; password: string }, 
 
       const subscribeMs = await openChannel(channel);
       const trackStart = performance.now();
-      if (await channel.track({ message }, { timeout: 5000 }) === "timed out") throw new Error("track() timed out");
+      if (await channel.track({ message }) === "timed out") throw new Error("track() timed out");
       const trackMs = performance.now() - trackStart;
       const { latencyMs: eventMs } = await waitFor(() => joinEvent, "presence join");
 
