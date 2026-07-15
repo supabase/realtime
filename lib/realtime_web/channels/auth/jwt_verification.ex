@@ -94,7 +94,7 @@ defmodule RealtimeWeb.JwtVerification do
     jwk = Enum.find(keys, fn jwk -> jwk["kty"] == "RSA" and jwk["kid"] == kid end)
 
     case jwk do
-      nil -> {:error, :error_generating_signer}
+      nil -> {:error, {:error_generating_signer, kid}}
       _ -> {:ok, Joken.Signer.create(alg, jwk)}
     end
   end
@@ -104,7 +104,7 @@ defmodule RealtimeWeb.JwtVerification do
     jwk = Enum.find(keys, fn jwk -> jwk["kty"] == "EC" and jwk["kid"] == kid end)
 
     case jwk do
-      nil -> {:error, :error_generating_signer}
+      nil -> {:error, {:error_generating_signer, kid}}
       _ -> {:ok, Joken.Signer.create(alg, jwk)}
     end
   end
@@ -114,7 +114,7 @@ defmodule RealtimeWeb.JwtVerification do
     jwk = Enum.find(keys, fn jwk -> jwk["kty"] == "OKP" and jwk["kid"] == kid end)
 
     case jwk do
-      nil -> {:error, :error_generating_signer}
+      nil -> {:error, {:error_generating_signer, kid}}
       _ -> {:ok, Joken.Signer.create(alg, jwk)}
     end
   end
@@ -131,7 +131,7 @@ defmodule RealtimeWeb.JwtVerification do
     if jwk do
       case Base.url_decode64(jwk["k"], padding: false) do
         {:ok, secret} -> {:ok, Joken.Signer.create(alg, secret)}
-        _ -> {:error, :error_generating_signer}
+        _ -> {:error, {:error_generating_signer, kid}}
       end
     else
       # If there's no JWK, and HS* is being used, instead of erroring, try
