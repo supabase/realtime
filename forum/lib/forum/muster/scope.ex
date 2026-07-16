@@ -61,7 +61,8 @@ defmodule Forum.Muster.Scope do
             member_views: %{node => {non_neg_integer, integer, pid}},
             owed_snapshots: %{node => integer},
             applied_snapshot_seq: %{node => {integer, pid}},
-            view_seq: integer
+            view_seq: integer,
+            pending_round: nil | %{target: [node], awaiting: MapSet.t(), seq: integer}
           }
     defstruct [
       :scope,
@@ -73,6 +74,18 @@ defmodule Forum.Muster.Scope do
       :shards_ready_timeout_ms,
       :tombstone_window_ms,
       :occupancy_table,
+      # Two-phase view adoption (B1). When growing the cluster view we do NOT
+      # swap the ring immediately; we first PREPARE the OLD view's members (the
+      # only nodes that could be stale routers for this transition) via a
+      # `note_transition` RPC that INVALIDATES our member_views entry on them, and
+      # only COMMIT (swap the ring, run do_rebalance) once every one of them has
+      # acked. That orders "every old-view member knows we are leaving the view"
+      # strictly before "we route joins under the new view", closing the
+      # stale-ready-router miss (see TLA_FINDINGS.md Finding A). nil when no view
+      # change is in flight; otherwise the target view, the set of old members we
+      # are still awaiting acks from, and this round's seq (stale-round acks are
+      # dropped). A membership change mid-round supersedes it (fresh seq).
+      pending_round: nil,
       members: [],
       peers: %{},
       # Barrier bookkeeping: each peer's most-recently-announced
@@ -373,6 +386,32 @@ defmodule Forum.Muster.Scope do
     )
   end
 
+  @doc """
+  Remote: source_node is beginning a view change and tells us (one of its OLD
+  view's members) to stop counting it as agreeing to the view we last heard from
+  it (the B1 two-phase prepare; see `begin_view_change`).
+
+  We INVALIDATE our member_views entry for source_node at `seq` (a value that can
+  never equal a real cluster-view hash), so `ready?/1` no longer treats it as
+  agreeing with any view and this node drops to `:converging`/floods as a router
+  for it. Seq-stamped like every other announcement, so a stale, lower-seq
+  asserting marker cannot un-invalidate it; source_node re-establishes agreement
+  only when it COMMITS and re-announces its new view at a higher seq.
+
+  Applied via a synchronous call into this coordinator (like `receive_node_state`)
+  so the update is serialized with snapshot/marker applies; the reply is the ack
+  the sender's prepare worker waits on. `source_pid` is the sender's Scope
+  incarnation (for the DOWN-attribution guard).
+  """
+  @spec note_transition(atom, node, integer, pid | nil) :: :ok
+  def note_transition(scope, source_node, seq, source_pid) do
+    GenServer.call(
+      Forum.Supervisor.name(scope),
+      {:apply_transition, source_node, seq, source_pid},
+      :infinity
+    )
+  end
+
   ## GenServer lifecycle
 
   @spec start_link(atom, Keyword.t()) :: GenServer.on_start()
@@ -614,6 +653,25 @@ defmodule Forum.Muster.Scope do
     end
   end
 
+  # B1 prepare (see note_transition/4): `source` is leaving the view it last
+  # announced to us. Invalidate its member_views entry (hv := :in_transition, a
+  # value no real cluster-view hash equals), seq-guarded via put_member_view, so
+  # ready?/1 stops counting it as agreeing to any view. A stale, lower-seq
+  # asserting marker cannot regress this (newest-seq-wins); `source` re-agrees
+  # only when it commits and re-announces at a higher seq. Serialized here with
+  # every other member_views update; the reply is the sender's ack.
+  @impl true
+  def handle_call({:apply_transition, source, seq, source_pid}, _from, %State{} = state) do
+    tp(:muster_transition_applied, %{
+      scope: state.scope,
+      node: node(),
+      source: source,
+      seq: seq
+    })
+
+    {:reply, :ok, update_status(put_member_view(state, source, :in_transition, seq, source_pid))}
+  end
+
   # For tests / introspection: group_states + cooldown are gathered from the
   # shards, which own the per-group state machine.
   def handle_call(:status, _from, state) do
@@ -682,7 +740,10 @@ defmodule Forum.Muster.Scope do
     peer_node = node(peer)
 
     {ack_view_hash, ack_seq} =
-      if Map.has_key?(state.owed_snapshots, peer_node) do
+      if Map.has_key?(state.owed_snapshots, peer_node) or state.pending_round != nil do
+        # Owed a snapshot, or mid view-change (in transition): withhold our view
+        # so the discoverer does not record us as agreeing to a view whose data
+        # (or ring swap) has not landed yet.
         {nil, nil}
       else
         {own_view_hash(state), state.view_seq}
@@ -736,6 +797,18 @@ defmodule Forum.Muster.Scope do
   # that arrives before we adopt that view is retained, so once we catch up the
   # agreement check in ready?/1 sees it.
   def handle_info({:rebalance_marker, source, source_pid, view_hash, seq}, %State{} = state) do
+    # Emitted BEFORE the member_views/status update, so a test can park a
+    # SPECIFIC source's marker (matched on source + view_hash) and hold this node
+    # on a superseded view while the source races ahead. Used by
+    # muster_distributed_test.exs to reproduce the stale-ready-router window.
+    tp(:muster_rebalance_marker, %{
+      scope: state.scope,
+      node: node(),
+      source: source,
+      view_hash: view_hash,
+      seq: seq
+    })
+
     {:noreply, update_status(put_member_view(state, source, view_hash, seq, source_pid))}
   end
 
@@ -853,6 +926,64 @@ defmodule Forum.Muster.Scope do
 
           {:noreply, state}
         end
+    end
+  end
+
+  # Worker reported back the result of a fire-and-forget `note_transition`
+  # prepare RPC dispatched by begin_view_change. On :ok the old-view member has
+  # recorded our transition (invalidated our member_views entry on it), so it can
+  # no longer be a stale-ready router for the view we are leaving; clear it from
+  # `awaiting`, and once every old-view member has acked, COMMIT (swap the ring
+  # via do_rebalance). We act only on the CURRENT round (seq match): a superseded
+  # round's ack is stale and dropped.
+  #
+  # On failure we crash (the same "restart re-announces from a clean slate"
+  # recovery as a failed snapshot) only if the member is still in the target: a
+  # member being dropped by this round (or one that already left, whose :DOWN
+  # superseded this round to a newer seq that no longer matches here) is a stale,
+  # redundant signal, not a reason to crash.
+  def handle_info(
+        {{:transition_done, member, seq}, _ref, :process, _pid, exit_reason},
+        state
+      ) do
+    case state.pending_round do
+      %{seq: ^seq, target: target, awaiting: awaiting} ->
+        case worker_result(exit_reason) do
+          :ok ->
+            awaiting = MapSet.delete(awaiting, member)
+            state = %{state | pending_round: %{state.pending_round | awaiting: awaiting}}
+
+            if MapSet.size(awaiting) == 0 do
+              {:noreply, commit_view_change(state)}
+            else
+              {:noreply, state}
+            end
+
+          other ->
+            if member in target do
+              raise "Muster view-change prepare to #{inspect(member)} failed: #{inspect(other)}"
+            else
+              # Not in the target (being dropped / already leaving): don't crash,
+              # and stop awaiting it so a departing old member cannot wedge the
+              # round. Commit if it was the last outstanding ack.
+              Logger.info(
+                "Muster[#{node()}|#{state.scope}] view-change prepare to #{inspect(member)} failed: #{inspect(other)}, but it is not in the target view; dropping"
+              )
+
+              awaiting = MapSet.delete(awaiting, member)
+              state = %{state | pending_round: %{state.pending_round | awaiting: awaiting}}
+
+              if MapSet.size(awaiting) == 0 do
+                {:noreply, commit_view_change(state)}
+              else
+                {:noreply, state}
+              end
+            end
+        end
+
+      _ ->
+        # No pending round, or a superseded (stale-seq) one: drop.
+        {:noreply, state}
     end
   end
 
@@ -1105,7 +1236,10 @@ defmodule Forum.Muster.Scope do
       state
       | members: new_members,
         view_seq: snapshot_seq,
-        owed_snapshots: Map.take(owed_snapshots, new_members)
+        owed_snapshots: Map.take(owed_snapshots, new_members),
+        # This IS the commit of any in-flight prepare round; clearing it lets
+        # update_status below resume publishing :ready/:converging.
+        pending_round: nil
     }
 
     drop_stale_router_entries(state)
@@ -1121,7 +1255,15 @@ defmodule Forum.Muster.Scope do
 
   # Recompute the lifecycle status from member_views vs. current membership and
   # publish it (only when it actually changes). Only ever sets :ready or
-  # :converging; :rebalancing is owned by do_rebalance.
+  # :converging; :rebalancing is owned by do_rebalance and by an in-flight
+  # prepare round.
+  #
+  # While a prepare round is in flight (pending_round != nil) we have NOT yet
+  # swapped the ring: our committed view is still the old one and we must keep
+  # flooding (:rebalancing), so an incoming marker that would otherwise recompute
+  # us to :ready for the stale view must not. Hold the status until commit.
+  defp update_status(%{pending_round: pr} = state) when pr != nil, do: state
+
   defp update_status(state) do
     status = if ready?(state), do: :ready, else: :converging
 
@@ -1337,11 +1479,93 @@ defmodule Forum.Muster.Scope do
       |> Enum.uniq()
       |> Enum.sort()
 
-    if new_members == state.members do
-      state
-    else
-      do_rebalance(state, new_members)
+    cond do
+      new_members == state.members ->
+        # No committed-view change. If a prepare round was in flight (its growth
+        # peer left before we committed), cancel it and return to the committed
+        # view; the next announce_view re-syncs the members we had invalidated.
+        if state.pending_round == nil do
+          state
+        else
+          :persistent_term.put({Forum.Muster, state.scope, :view_hash}, own_view_hash(state))
+          update_status(%{state | pending_round: nil})
+        end
+
+      # Growth (or a mixed change that adds a node): prepare-gate the ring swap.
+      Enum.any?(new_members, fn n -> n not in state.members end) ->
+        begin_view_change(state, new_members)
+
+      # Pure shrink (a node left): commit immediately. The departed node's
+      # member_views entry was wiped in the :DOWN handler, which un-readies us for
+      # any view still containing it, so a shrink can never leave us a stale-ready
+      # router; only growth can (Finding A), and only growth needs the prepare.
+      true ->
+        do_rebalance(state, new_members)
     end
+  end
+
+  # Phase 1 of B1: announce our move to `target` to every OLD-view member (the
+  # only possible stale routers for this transition) and await their acks before
+  # committing. Flip to :rebalancing (so we flood as sender and router meanwhile)
+  # and bump :view_hash, but do NOT swap the ring: joins keep routing under the
+  # old committed view (which is safe -- they claim at the old routers). Each
+  # `note_transition` RPC INVALIDATES our member_views entry on the recipient at
+  # this round's seq, so a stale asserting marker cannot un-invalidate it, and the
+  # recipient drops out of :ready for the old view immediately. Also starts (or
+  # SUPERSEDES, with a fresh seq) the pending round; stale-seq acks are ignored.
+  # An empty audience (we were singleton) commits at once.
+  defp begin_view_change(state, target) do
+    round_seq = next_seq()
+    :persistent_term.put({Forum.Muster, state.scope, :status}, :rebalancing)
+    :persistent_term.put({Forum.Muster, state.scope, :view_hash}, :erlang.phash2(target))
+
+    # Old-view members still connected. A member that has already dropped off
+    # distribution (a departing node) is excluded: it can no longer be a stale
+    # router, and awaiting its ack would wedge the round. Its own :DOWN drives the
+    # shrink separately.
+    audience = Enum.filter(state.members -- [node()], &(&1 in Node.list()))
+
+    Logger.info(
+      "Muster[#{node()}|#{state.scope}] view-change prepare: #{inspect(state.members)} -> #{inspect(target)}, preparing #{inspect(audience)}"
+    )
+
+    tp(:muster_view_prepare, %{
+      scope: state.scope,
+      node: node(),
+      from: state.members,
+      target: target,
+      audience: audience,
+      seq: round_seq
+    })
+
+    Enum.each(audience, fn member ->
+      spawn_rpc_worker(
+        state,
+        member,
+        :note_transition,
+        [state.scope, node(), round_seq, self()],
+        {:transition_done, member, round_seq}
+      )
+    end)
+
+    state = %{
+      state
+      | pending_round: %{target: target, awaiting: MapSet.new(audience), seq: round_seq}
+    }
+
+    if audience == [] do
+      commit_view_change(state)
+    else
+      state
+    end
+  end
+
+  # Phase 2 of B1: every old-view member acked -> commit. do_rebalance swaps the
+  # ring, gathers the shards, re-announces held groups to the new routers, and
+  # recomputes :status. It also clears pending_round (below), so update_status
+  # resumes publishing :ready/:converging.
+  defp commit_view_change(%{pending_round: %{target: target}} = state) do
+    do_rebalance(state, target)
   end
 
   ## Init / introspection helpers
@@ -1423,19 +1647,28 @@ defmodule Forum.Muster.Scope do
   # side). Members we still owe a rebalance snapshot are skipped: their marker is
   # carried by the in-flight snapshot, after its data is applied.
   defp announce_view(state) do
-    view_hash = own_view_hash(state)
+    # While a prepare round is in flight we are in transition and must assert
+    # NOTHING: our committed view is the old one, and a bare marker asserting it
+    # would re-create the very staleness the prepare is invalidating on our
+    # old-view members (it would out-seq the invalidation). The round's own RPCs
+    # carry the transition; a lost one fails the worker and crashes us. So skip.
+    if state.pending_round != nil do
+      :ok
+    else
+      view_hash = own_view_hash(state)
 
-    Enum.each(state.members, fn member ->
-      if member != node() and not Map.has_key?(state.owed_snapshots, member) do
-        state.message_module.send(
-          state.scope,
-          member,
-          {:rebalance_marker, node(), self(), view_hash, state.view_seq}
-        )
-      end
-    end)
+      Enum.each(state.members, fn member ->
+        if member != node() and not Map.has_key?(state.owed_snapshots, member) do
+          state.message_module.send(
+            state.scope,
+            member,
+            {:rebalance_marker, node(), self(), view_hash, state.view_seq}
+          )
+        end
+      end)
 
-    :ok
+      :ok
+    end
   end
 
   defp schedule_view_heartbeat(state) do
