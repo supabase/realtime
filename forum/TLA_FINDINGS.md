@@ -3,10 +3,11 @@
 Status: **Finding A found, modeled, reproduced, and FIXED (B1) — fix
 model-checked and shipped. Follow-ups done: the occupancy GC sweep (caveat 1)
 is now modeled and checked clean; liveness (caveat 6) is now machine-checked;
-the fix is corroborated at 4 nodes.** This document is the checkpoint so work can
-resume.
+the fix is corroborated at 4 nodes; the coordinator crash/restart path (part of
+caveat 3) is now modeled — safety holds and the crash-on-prepare-timeout escape
+hatch is liveness-checked.** This document is the checkpoint so work can resume.
 
-Four models:
+Six models:
 
 * `tla/Muster.tla` (+ `.cfg`) — the baseline routing model that **exhibits**
   Finding A (`NoMissedDelivery` is violated).
@@ -19,6 +20,15 @@ Four models:
 * `tla/Muster2Live.tla` (+ `.cfg`) — Muster2 with **fairness** and a
   **liveness** property (every prepare round eventually resolves); holds under
   fairness (see "Follow-up models").
+
+* `tla/Muster2Restart.tla` (+ `.cfg`) — Muster2 **plus a coordinator
+  crash/restart action** (the crash-on-prepare-timeout / crash-on-snapshot
+  escape hatch). Checks `NoMissedDelivery` survives a restart (ring reset +
+  retained occupancy table + wiped `member_views` + start `:converging`). Holds
+  (see "Follow-up models").
+* `tla/Muster2RestartLive.tla` (+ `.cfg`) — the restart hatch under **fairness
+  with a droppable prepare** (up-but-unreachable peer): a wedged prepare round is
+  resolved by the crash-restart. `RoundsResolve` and `<>[]RoundsQuiet` both hold.
 
 Plus two bounded 4-node harnesses (`tla/MusterBounded.tla`,
 `tla/Muster2Bounded.tla`) — see "Follow-up models".
@@ -327,6 +337,93 @@ Runs: **exhaustive** at 2 nodes / `MaxSeq=2` (565 distinct) and at 3 nodes /
 delivered = acked; the real **crash-on-prepare-timeout** escape hatch (for a peer
 that is up but unreachable) is out of scope here and is still argued, not checked.
 
+### `tla/Muster2Restart.tla` — coordinator crash/restart (part of caveat 3)
+
+Models the **crash-on-prepare-timeout / crash-on-snapshot-failure** path: a
+prepare or snapshot RPC to an up-but-unreachable peer fails, the coordinator
+`raise`s (`scope.ex` ~964 / ~921), and the supervisor restarts it under the
+**same live node name**. This is distinct from the excluded "node name reuse
+across deployments" case — the node stays UP, so **peers see no `:DOWN`** and
+keep their occupancy / `member_views` rows for it. `Restart(n)` is modeled
+faithful to `init/1` (`scope.ex` ~435) and `reannounce_local_groups_at_init`:
+
+* the **occupancy table survives** (owned by the `Forum.Supervisor` sibling, not
+  the coordinator): `occ[n][s]` rows are RETAINED — stale rows are over-delivery,
+  which the property ignores; the question is whether a *needed* row can go
+  missing;
+* the **ring resets to `{n}`**; **`member_views` is wiped** (the node forgets
+  every peer's agreement, so it cannot be a stale-ready router on a grown view);
+  `pending_round` / `owed_snapshots` cleared; self rows re-asserted monotonically;
+* it starts **`:converging`, not `:ready`** — even as a singleton — with a
+  bounded, init-only **singleton-promotion** that trusts `{n}` only when the node
+  is genuinely alone. This is the restart analog of the B1 gate (modeled by the
+  `promoted` flag). In-flight messages to `n` survive the restart (writes target
+  the registered scope name / the surviving ETS table, not the dead pid).
+
+**Result: `NoMissedDelivery` holds.**
+
+* `MaxSeq=2`, 3 nodes — **exhaustive**: 1,035,991 distinct states, depth 20, 0
+  left on queue, no violation.
+* `MaxSeq=3`, 3 nodes — partial (state count grows past the heap): **136.5M
+  distinct states with no violation** before a 9-minute cap (23M left on queue).
+
+**Non-vacuity (this is the important part).** A reachability probe
+(`RestartRecoversToRouter`, via the `everRestarted` history var) shows the
+scenario that matters — a node that *has restarted* recovering into a Ready
+multi-node router actually delivering to a live remote holder — is **not reachable
+at `MaxSeq=2`** (that budget only funds a restart, not a full re-pair) but **is
+reachable at `MaxSeq=3` (depth 11)**, well inside the depth-20 partial search. So
+the `MaxSeq=3` partial run genuinely exercised restart recovery; the `MaxSeq=2`
+exhaustive pass alone would have been near-vacuous for it. Reproduce with
+`Muster2Restart_probe.cfg` (MaxSeq=2, probe holds) and `Muster2Restart_probe3.cfg`
+(MaxSeq=3, probe violated = witness printed).
+
+Takeaway: coming back **`:converging` with a wiped `member_views`** is the
+load-bearing mechanism — a restarted node floods until it either re-pairs (grows
++ peers re-announce agreement) or is confirmed alone, so the retained stale table
+is only ever trusted after the current holders have re-asserted. The retained
+rows never cause under-delivery.
+
+### `tla/Muster2RestartLive.tla` — the crash-on-timeout hatch, under fairness
+
+`Muster2Restart` (above) fires restart spontaneously; this model ties it to its
+real trigger and checks **liveness** — the remaining half of caveat 6 (the
+message-reliable `Muster2Live` never drops a prepare, so it never needs the
+hatch). Adds:
+
+* **`DropPrepare`** — a prepare RPC to an up-but-unreachable peer fails (the
+  message is discarded, never acked). An UNFAIR fault. A round with a dropped
+  prepare is **wedged**: `awaiting` never empties, so `Commit` is never enabled.
+* **`RestartOnTimeout`** — enabled precisely when a round is wedged (an awaited
+  member's prepare is no longer outstanding). WEAK-FAIR, so a wedged round is
+  eventually resolved by the crash-restart. The restart self-reassert is
+  decoupled from `CanBump` (a real crash needs no seq); round creation
+  (`Discover`) stays seq-bounded, and a re-grow from the restarted singleton has
+  an **empty prepare audience** so it cannot itself wedge.
+
+**Properties, all hold — exhaustive at 3 nodes, `MaxSeq=2` (647,985 distinct, 0
+left on queue):**
+
+* `RoundsResolve == \A n : (up[n] /\ round[n].active) ~> (~up[n] \/ ~round[n].active)`
+  — the hatch's guarantee: **no prepare round wedges forever** (a dropped-prepare
+  stall is broken by the crash-restart).
+* `Liveness == <>[]RoundsQuiet` — eventually no live node has an active round.
+* `NoMissedDelivery` kept as an invariant (safety sanity under the liveness
+  variant + restart) — holds.
+
+**Non-vacuity confirmed:** probes show both a **wedged round** (`NoWedgeReached`
+violated) and a **fired hatch** (`NoTimeoutRestart` violated) are reachable, so
+the properties are not passing over a hatch that never triggers. Reproduce with
+`Muster2RestartLive_probe.cfg`.
+
+**Caveat.** `<>[]RoundsQuiet` holds here because bounded `MaxSeq` bounds the
+drop→restart→re-grow loop. Under truly unbounded seq a *permanently*
+unreachable-but-up peer would loop forever; in the field such a peer eventually
+crosses net-tick and goes `:DOWN` (→ `DetectDown` prunes it), so the hatch's real
+job is transient unreachability, which `RoundsResolve` captures directly. 2 nodes
+is uninteresting for the hatch (growth from a singleton has an empty audience, so
+no prepare is ever sent).
+
 ### 4-node runs (`tla/MusterBounded.tla`, `tla/Muster2Bounded.tla`)
 
 Both Finding A and the B1 proof were only ever exhaustive at **3 nodes**. A 4th
@@ -362,10 +459,18 @@ function** to recover symmetry reduction (this is caveat 4 below).
    per-`{group,source}`, so single-group covers the register races, but the
    rebalance snapshot/delta *set* logic (full vs delta, `groups_to_reannounce`)
    is not.
-3. **Coordinator restart-in-place** (reset ring to `[node()]`, re-discovery,
-   singleton promotion) is excluded — consistent with the user assumption that
-   nodes do not come back and reset their seq. If that assumption is relaxed,
-   this needs adding.
+3. **Coordinator restart** — split into two cases:
+   * **Restart-in-place under the same live node name** (a coordinator crash from
+     the crash-on-prepare-timeout / snapshot-failure hatch; the node stays up,
+     ring resets to `[node()]`, occupancy table survives, re-discovery, singleton
+     promotion). ~~Excluded.~~ **DONE** — modeled in `tla/Muster2Restart.tla`
+     (safety) and `tla/Muster2RestartLive.tla` (the hatch's liveness);
+     `NoMissedDelivery` holds and `RoundsResolve` / `<>[]RoundsQuiet` hold. This
+     is NOT covered by the no-name-reuse assumption (that is about deployments;
+     this is a supervisor restart of a still-live node). See "Follow-up models".
+   * **Node name reuse across deployments** (a brand-new incarnation reusing a
+     name, resetting seq) remains excluded, consistent with the user assumption
+     that nodes do not come back and reset their seq. If that is relaxed, add it.
 4. **Ring = `min`.** Real consistent hashing satisfies subset-monotonicity (which
    `min` also satisfies) but has richer non-subset behaviour. Finding A does not
    depend on `min` (any ring where growing membership moves a group's router to a
@@ -373,11 +478,18 @@ function** to recover symmetry reduction (this is caveat 4 below).
    more general ring or an explicitly monotone uninterpreted function.
 5. **Message ordering.** Modeled as a fully unordered set (faithful for `:erpc`
    worker calls and cross-channel marker/snapshot interleaving; a safe
-   over-approximation for same-pair dist sends — see Finding A's FIFO note). A
-   dedicated FIFO-channel refinement could tighten which traces are real.
-6. ~~**Liveness.** Only safety is checked.~~ **DONE (with a caveat)** — modeled
-   in `tla/Muster2Live.tla` under explicit fairness; `<>[]RoundsQuiet` and the
+   over-approximation for same-pair dist sends — see Finding A's FIFO note).
+   **Low value to pursue:** the unordered model is a strict *over*-approximation
+   (its trace set is a superset of any FIFO refinement), so a property that
+   *holds* here — which `NoMissedDelivery` does in every fix model — holds under
+   FIFO too. A FIFO refinement cannot surface a new violation; it is only useful
+   for confirming a *found* counterexample is FIFO-real, which was already done by
+   hand for Finding A. Not planned.
+6. ~~**Liveness.** Only safety is checked.~~ **DONE** — modeled in
+   `tla/Muster2Live.tla` under explicit fairness; `<>[]RoundsQuiet` and the
    `RoundsResolve` leads-to both hold (exhaustive at 2 and 3 nodes, `MaxSeq=2`).
-   Still not covered: the crash-on-prepare-timeout hatch for an up-but-
-   unreachable peer (this message-reliable model never drops a prepare). See
-   "Follow-up models" above.
+   The crash-on-prepare-timeout hatch for an up-but-unreachable peer (which
+   `Muster2Live` cannot reach, being message-reliable) is now **also checked** in
+   `tla/Muster2RestartLive.tla`: a droppable prepare wedges a round and the
+   crash-restart resolves it; `RoundsResolve` and `<>[]RoundsQuiet` hold
+   (exhaustive at 3 nodes, `MaxSeq=2`). See "Follow-up models" above.
