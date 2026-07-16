@@ -2535,7 +2535,9 @@ defmodule Forum.MusterTest do
   describe "restart intensity (:max_restarts/:max_seconds)" do
     test "a tiny :max_restarts terminates the scope's own supervisor once exceeded",
          %{scope: scope, base_opts: opts} do
-      sup_pid = start_supervised!(spec(scope, Keyword.merge(opts, max_restarts: 0, max_seconds: 1)))
+      sup_pid =
+        start_supervised!(spec(scope, Keyword.merge(opts, max_restarts: 0, max_seconds: 1)))
+
       ref = Process.monitor(sup_pid)
 
       coord = Process.whereis(Forum.Supervisor.name(scope))
@@ -2546,7 +2548,9 @@ defmodule Forum.MusterTest do
 
     test "a generous :max_restarts keeps recovering past the OTP default budget",
          %{scope: scope, base_opts: opts} do
-      sup_pid = start_supervised!(spec(scope, Keyword.merge(opts, max_restarts: 100, max_seconds: 1)))
+      sup_pid =
+        start_supervised!(spec(scope, Keyword.merge(opts, max_restarts: 100, max_seconds: 1)))
+
       sup_ref = Process.monitor(sup_pid)
 
       # OTP's own Supervisor default (3 restarts / 5 seconds) would give up well
