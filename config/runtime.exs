@@ -7,6 +7,7 @@ api_jwt_secret =
   |> Enum.reject(&is_nil/1)
 
 api_token_blocklist = Env.get_list("API_TOKEN_BLOCKLIST", [])
+api_jwt_validators = System.get_env("API_JWT_VALIDATORS", "[]")
 app_name = System.get_env("APP_NAME", "")
 broadcast_pool_size = Env.get_integer("BROADCAST_POOL_SIZE", 10)
 channel_error_backoff_ms = Env.get_integer("CHANNEL_ERROR_BACKOFF_MS", :timer.seconds(5))
@@ -364,6 +365,7 @@ if config_env() != :test do
   config :realtime,
     request_id_baggage_key: request_id_baggage_key,
     jwt_claim_validators: jwt_claim_validators,
+    api_jwt_validators: api_jwt_validators,
     api_jwt_secret: api_jwt_secret,
     api_blocklist: api_token_blocklist,
     metrics_blocklist: metrics_token_blocklist,

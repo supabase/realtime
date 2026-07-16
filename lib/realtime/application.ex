@@ -14,6 +14,7 @@ defmodule Realtime.Application do
 
   defmodule JwtSecretError, do: defexception([:message])
   defmodule JwtClaimValidatorsError, do: defexception([:message])
+  defmodule ApiJwtValidatorsError, do: defexception([:message])
   defmodule RegionMappingError, do: defexception([:message])
 
   defp check_for_local_ipv6_host() do
@@ -48,6 +49,15 @@ defmodule Realtime.Application do
       _ ->
         raise JwtClaimValidatorsError,
           message: "JWT claim validators is not a valid JSON object"
+    end
+
+    case Application.fetch_env!(:realtime, :api_jwt_validators) |> Realtime.ApiJwt.Validator.parse() do
+      {:ok, validators} ->
+        Application.put_env(:realtime, :api_jwt_validators, validators)
+
+      {:error, reason} ->
+        raise ApiJwtValidatorsError,
+          message: "API_JWT_VALIDATORS is not valid: #{inspect(reason)}"
     end
 
     setup_region_mapping()
@@ -111,6 +121,7 @@ defmodule Realtime.Application do
          ]},
         Supervisor.child_spec({Cachex, name: Realtime.RateCounter}, id: Realtime.RateCounter),
         Supervisor.child_spec({Cachex, name: Realtime.Nodes.Cache}, id: Realtime.Nodes.Cache),
+        Supervisor.child_spec({Cachex, name: Realtime.ApiJwt.Jwks}, id: Realtime.ApiJwt.Jwks),
         Supervisor.child_spec(
           {Cachex,
            name: Realtime.LogThrottle,

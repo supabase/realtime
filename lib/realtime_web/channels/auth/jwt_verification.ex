@@ -87,36 +87,9 @@ defmodule RealtimeWeb.JwtVerification do
     end
   end
 
-  defp generate_signer(%{"alg" => alg, "kid" => kid}, _jwt_secret, %{
-         "keys" => keys
-       })
-       when is_binary(kid) and alg in @rs_algorithms do
-    jwk = Enum.find(keys, fn jwk -> jwk["kty"] == "RSA" and jwk["kid"] == kid end)
-
-    case jwk do
-      nil -> {:error, :error_generating_signer}
-      _ -> {:ok, Joken.Signer.create(alg, jwk)}
-    end
-  end
-
-  defp generate_signer(%{"alg" => alg, "kid" => kid}, _jwt_secret, %{"keys" => keys})
-       when is_binary(kid) and alg in @es_algorithms do
-    jwk = Enum.find(keys, fn jwk -> jwk["kty"] == "EC" and jwk["kid"] == kid end)
-
-    case jwk do
-      nil -> {:error, :error_generating_signer}
-      _ -> {:ok, Joken.Signer.create(alg, jwk)}
-    end
-  end
-
-  defp generate_signer(%{"alg" => alg, "kid" => kid}, _jwt_secret, %{"keys" => keys})
-       when is_binary(kid) and alg in @ed_algorithms do
-    jwk = Enum.find(keys, fn jwk -> jwk["kty"] == "OKP" and jwk["kid"] == kid end)
-
-    case jwk do
-      nil -> {:error, :error_generating_signer}
-      _ -> {:ok, Joken.Signer.create(alg, jwk)}
-    end
+  defp generate_signer(%{"alg" => alg, "kid" => kid} = header, _jwt_secret, %{"keys" => _} = jwks)
+       when is_binary(kid) and (alg in @rs_algorithms or alg in @es_algorithms or alg in @ed_algorithms) do
+    asymmetric_signer_from_jwks(header, jwks)
   end
 
   # Most Supabase Auth JWTs fall in this case, as they're usually signed with
@@ -145,4 +118,31 @@ defmodule RealtimeWeb.JwtVerification do
   end
 
   defp generate_signer(_header, _jwt_secret, _jwt_jwks), do: {:error, :error_generating_signer}
+
+  @doc """
+  Builds a `Joken.Signer` from an asymmetric JWK in a JWKS map, selecting the
+  key by the token header's `alg` and `kid`. Only RS*/ES*/Ed* are supported;
+  anything else (including HS*) returns `{:error, :error_generating_signer}`.
+  """
+  @spec asymmetric_signer_from_jwks(map(), map()) :: {:ok, Joken.Signer.t()} | {:error, :error_generating_signer}
+  def asymmetric_signer_from_jwks(%{"alg" => alg, "kid" => kid}, %{"keys" => keys})
+      when is_binary(kid) and alg in @rs_algorithms,
+      do: find_and_create_signer(keys, "RSA", kid, alg)
+
+  def asymmetric_signer_from_jwks(%{"alg" => alg, "kid" => kid}, %{"keys" => keys})
+      when is_binary(kid) and alg in @es_algorithms,
+      do: find_and_create_signer(keys, "EC", kid, alg)
+
+  def asymmetric_signer_from_jwks(%{"alg" => alg, "kid" => kid}, %{"keys" => keys})
+      when is_binary(kid) and alg in @ed_algorithms,
+      do: find_and_create_signer(keys, "OKP", kid, alg)
+
+  def asymmetric_signer_from_jwks(_header, _jwks), do: {:error, :error_generating_signer}
+
+  defp find_and_create_signer(keys, kty, kid, alg) do
+    case Enum.find(keys, fn jwk -> jwk["kty"] == kty and jwk["kid"] == kid end) do
+      nil -> {:error, :error_generating_signer}
+      jwk -> {:ok, Joken.Signer.create(alg, jwk)}
+    end
+  end
 end

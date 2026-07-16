@@ -114,8 +114,9 @@ defmodule Clustered do
     :ok = :peer.call(pid, Application, :put_env, [:gen_rpc, :tcp_server_port, gen_rpc_tcp_client_port])
     :ok = :peer.call(pid, Application, :put_env, [:gen_rpc, :tcp_client_port, gen_rpc_tcp_server_port])
 
-    # We need to override this value as the current implementation overrides the string with a map leading to errors
+    # We need to override this value as the current implementation overrides the env
     :ok = :peer.call(pid, Application, :put_env, [:realtime, :jwt_claim_validators, "{}"])
+    :ok = :peer.call(pid, Application, :put_env, [:realtime, :api_jwt_validators, "[]"])
 
     # Override with extra config
     for {app_name, key, value} <- extra_config do

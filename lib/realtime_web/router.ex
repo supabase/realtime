@@ -153,7 +153,7 @@ defmodule RealtimeWeb.Router do
     with ["Bearer " <> token] <- get_req_header(conn, "authorization"),
          token <- Regex.replace(~r/\s|\n/, URI.decode(token), ""),
          false <- token in blocklist,
-         {:ok, _claims} <- authorize_any(token, secrets) do
+         {:ok, _claims} <- authorize_token(secret_key, token, secrets) do
       conn
     else
       _ ->
@@ -162,6 +162,15 @@ defmodule RealtimeWeb.Router do
         |> halt()
     end
   end
+
+  defp authorize_token(:api_jwt_secret, token, secrets) do
+    case authorize_any(token, secrets) do
+      {:ok, _claims} = ok -> ok
+      _ -> RealtimeWeb.ApiJwtVerification.verify(token)
+    end
+  end
+
+  defp authorize_token(_secret_key, token, secrets), do: authorize_any(token, secrets)
 
   defp authorize_any(token, secrets) do
     Enum.find_value(secrets, {:error, :unauthorized}, fn secret ->

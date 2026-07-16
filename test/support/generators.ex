@@ -309,6 +309,34 @@ defmodule Generators do
     jwt
   end
 
+  @doc """
+  Generates an RSA keypair for API JWT validation tests. Returns a `Joken.Signer`
+  that signs RS256 tokens with the private key (embedding `kid` in the header)
+  and the public JWKS map to serve/cache for verification.
+  """
+  @spec generate_api_jwt_keys(binary()) :: {Joken.Signer.t(), map()}
+  def generate_api_jwt_keys(kid \\ "api-jwt-kid") do
+    jwk = JOSE.JWK.generate_key({:rsa, 2048})
+    {_, private} = JOSE.JWK.to_map(jwk)
+    {_, public} = JOSE.JWK.to_map(JOSE.JWK.to_public(jwk))
+    public = Map.merge(public, %{"kid" => kid, "alg" => "RS256", "use" => "sig"})
+    signer = Joken.Signer.create("RS256", private, %{"kid" => kid})
+    {signer, %{"keys" => [public]}}
+  end
+
+  @doc "Signs an API JWT with the given signer, merging `claims` over defaults."
+  @spec generate_api_jwt_token(Joken.Signer.t(), map()) :: binary()
+  def generate_api_jwt_token(signer, claims) do
+    defaults = %{
+      "iss" => "https://platform.example",
+      "aud" => "realtime",
+      "sub" => "platform-service",
+      "exp" => Joken.current_time() + 100
+    }
+
+    Joken.generate_and_sign!(%{}, Map.merge(defaults, claims), signer)
+  end
+
   defp test_port do
     :realtime
     |> Application.get_env(RealtimeWeb.Endpoint, %{})
