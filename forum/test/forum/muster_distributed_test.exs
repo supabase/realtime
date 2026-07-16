@@ -2871,10 +2871,13 @@ defmodule Forum.MusterDistributedTest do
           # crashed snapshot already delivered T's marker, so C may or may not
           # have converged once BEFORE it saw T's Scope die -- so an Nth-event
           # block_until has no sound N here: poll its CURRENT state instead.
-          wait_until(fn ->
-            :erpc.call(c_node, Muster, :members, [scope]) == view3 and
-              remote_status(p_c, scope) == :ready
-          end)
+          wait_until(
+            fn ->
+              :erpc.call(c_node, Muster, :members, [scope]) == view3 and
+                remote_status(p_c, scope) == :ready
+            end,
+            15_000
+          )
 
           # The local membership survived the crash -- Partition tables are
           # owned by the Supervisor, not Scope.
