@@ -1,0 +1,205 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 11 and seed -7949124867815615670 with 1 worker on 10 cores with 8192MB heap and 64MB offheap memory [pid: 32112] (Mac OS X 26.5.2 aarch64, Amazon.com Inc. 26.0.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /Users/eduardo/supa/realtime-main/forum/tla/Muster.tla
+Parsing file /private/var/folders/70/f798_cm95bd2rg54vm803pch0000gn/T/Naturals.tla
+Parsing file /private/var/folders/70/f798_cm95bd2rg54vm803pch0000gn/T/FiniteSets.tla
+Parsing file /private/var/folders/70/f798_cm95bd2rg54vm803pch0000gn/T/TLC.tla
+Parsing file /private/var/folders/70/f798_cm95bd2rg54vm803pch0000gn/T/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Muster
+Starting... (2026-07-16 16:01:02)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-07-16 16:01:02.
+Error: Invariant NoMissedDelivery is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ occ = << << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >> >>
+/\ msgs = {}
+/\ view = <<{1}, {2}, {3}>>
+/\ mv = << << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >> >>
+/\ up = <<TRUE, TRUE, TRUE>>
+/\ seqCtr = <<0, 0, 0>>
+/\ owed = <<{}, {}, {}>>
+/\ holds = <<FALSE, FALSE, FALSE>>
+
+State 2: <Discover line 162, col 3 to line 172, col 44 of module Muster>
+/\ occ = << << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >> >>
+/\ msgs = {}
+/\ view = <<{1}, {2}, {2, 3}>>
+/\ mv = << << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >> >>
+/\ up = <<TRUE, TRUE, TRUE>>
+/\ seqCtr = <<0, 0, 0>>
+/\ owed = <<{}, {}, {}>>
+/\ holds = <<FALSE, FALSE, FALSE>>
+
+State 3: <Discover line 162, col 3 to line 172, col 44 of module Muster>
+/\ occ = << << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >> >>
+/\ msgs = {}
+/\ view = <<{1}, {2, 3}, {2, 3}>>
+/\ mv = << << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >> >>
+/\ up = <<TRUE, TRUE, TRUE>>
+/\ seqCtr = <<0, 0, 0>>
+/\ owed = <<{}, {}, {}>>
+/\ holds = <<FALSE, FALSE, FALSE>>
+
+State 4: <SendMarker line 238, col 3 to line 245, col 49 of module Muster>
+/\ occ = << << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >> >>
+/\ msgs = {[hv |-> {2, 3}, t |-> "marker", src |-> 3, dst |-> 2, seq |-> 1]}
+/\ view = <<{1}, {2, 3}, {2, 3}>>
+/\ mv = << << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >> >>
+/\ up = <<TRUE, TRUE, TRUE>>
+/\ seqCtr = <<0, 0, 1>>
+/\ owed = <<{}, {}, {}>>
+/\ holds = <<FALSE, FALSE, FALSE>>
+
+State 5: <Discover line 162, col 3 to line 172, col 44 of module Muster>
+/\ occ = << << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >> >>
+/\ msgs = {[hv |-> {2, 3}, t |-> "marker", src |-> 3, dst |-> 2, seq |-> 1]}
+/\ view = <<{1}, {2, 3}, {1, 2, 3}>>
+/\ mv = << << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >> >>
+/\ up = <<TRUE, TRUE, TRUE>>
+/\ seqCtr = <<0, 0, 1>>
+/\ owed = <<{}, {}, {}>>
+/\ holds = <<FALSE, FALSE, FALSE>>
+
+State 6: <HolderJoin line 122, col 3 to line 130, col 43 of module Muster>
+/\ occ = << << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> TRUE, seq |-> 2] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >> >>
+/\ msgs = {[hv |-> {2, 3}, t |-> "marker", src |-> 3, dst |-> 2, seq |-> 1]}
+/\ view = <<{1}, {2, 3}, {1, 2, 3}>>
+/\ mv = << << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >> >>
+/\ up = <<TRUE, TRUE, TRUE>>
+/\ seqCtr = <<0, 0, 2>>
+/\ owed = <<{}, {}, {}>>
+/\ holds = <<FALSE, FALSE, TRUE>>
+
+State 7: <Next line 307, col 6 to line 307, col 41 of module Muster>
+/\ occ = << << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> TRUE, seq |-> 2] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >> >>
+/\ msgs = {}
+/\ view = <<{1}, {2, 3}, {1, 2, 3}>>
+/\ mv = << << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> TRUE, hv |-> {2, 3}, seq |-> 1] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >> >>
+/\ up = <<TRUE, TRUE, TRUE>>
+/\ seqCtr = <<0, 0, 2>>
+/\ owed = <<{}, {}, {}>>
+/\ holds = <<FALSE, FALSE, TRUE>>
+
+129877 states generated, 45652 distinct states found, 34351 states left on queue.
+The depth of the complete state graph search is 7.
+The average outdegree of the complete state graph is 4 (minimum is 0, the maximum 15 and the 95th percentile is 9).
+Finished in 01s at (2026-07-16 16:01:03)
