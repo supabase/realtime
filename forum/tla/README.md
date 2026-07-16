@@ -10,7 +10,23 @@ steps).
   (`NoMissedDelivery` is violated; see `../TLA_FINDINGS.md`).
 * `Muster2.tla` (+ `.cfg`) — the same model plus the **B1 two-phase view
   adoption** fix. `NoMissedDelivery` **holds** (exhaustive at `MaxSeq=3`).
+* `Muster3.tla` (+ `.cfg`) — Muster2 plus the **occupancy GC sweep**
+  (`drop_stale_router_entries`) and **tombstone reap** (`reap_tombstones`).
+  `NoMissedDelivery` **holds** (exhaustive at `MaxSeq=2`, partial-clean at
+  `MaxSeq=3`).
+* `Muster2Live.tla` (+ `.cfg`) — Muster2 with **fairness** + a **liveness**
+  property (every prepare round eventually resolves). Holds (exhaustive at 2 and
+  3 nodes, `MaxSeq=2`). Run without `-deadlock`? No — keep `-deadlock` (natural
+  seq-bounded termination is not a real deadlock).
+* `MusterBounded.tla` / `Muster2Bounded.tla` (+ `.cfg`) — bounded **4-node**
+  harnesses (`|msgs|` capped via `CONSTRAINT`). The baseline finds Finding A at 4
+  nodes (positive control); the fix shows no violation over a large partial run.
+  Not a proof — 4 nodes is not exhaustible, and `Router == min` breaks node
+  symmetry so no `SYMMETRY` set applies.
 * `trace_finding1.txt` — saved counterexample trace for Finding A.
+
+See `../TLA_FINDINGS.md` → "Follow-up models" for the full write-up and state
+counts.
 
 Run `Muster2` the same way, swapping the file/config:
 

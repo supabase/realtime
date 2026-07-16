@@ -1,18 +1,31 @@
 # Forum.Muster — TLA+ model findings
 
 Status: **Finding A found, modeled, reproduced, and FIXED (B1) — fix
-model-checked and shipped.** This document is the checkpoint so work can resume.
+model-checked and shipped. Follow-ups done: the occupancy GC sweep (caveat 1)
+is now modeled and checked clean; liveness (caveat 6) is now machine-checked;
+the fix is corroborated at 4 nodes.** This document is the checkpoint so work can
+resume.
 
-Two models:
+Four models:
 
 * `tla/Muster.tla` (+ `.cfg`) — the baseline routing model that **exhibits**
   Finding A (`NoMissedDelivery` is violated).
 * `tla/Muster2.tla` (+ `.cfg`) — the same model plus the **B1 two-phase view
   adoption** fix; `NoMissedDelivery` **holds** (see "The B1 fix" below).
+* `tla/Muster3.tla` (+ `.cfg`) — Muster2 **plus the occupancy GC sweep**
+  (`drop_stale_router_entries`) and **tombstone reap** (`reap_tombstones`), the
+  caveat-1 mechanisms. `NoMissedDelivery` still **holds** (see "Follow-up
+  models" below).
+* `tla/Muster2Live.tla` (+ `.cfg`) — Muster2 with **fairness** and a
+  **liveness** property (every prepare round eventually resolves); holds under
+  fairness (see "Follow-up models").
 
-Both model Muster's core **routing-safety** story: *when a broadcast is routed to
-a router that trusts its occupancy table, does it reach every live holder of the
-group?*
+Plus two bounded 4-node harnesses (`tla/MusterBounded.tla`,
+`tla/Muster2Bounded.tla`) — see "Follow-up models".
+
+The first three model Muster's core **routing-safety** story: *when a broadcast
+is routed to a router that trusts its occupancy table, does it reach every live
+holder of the group?* `Muster2Live` targets **convergence** (does churn settle?).
 
 ## How to run
 
@@ -225,12 +238,125 @@ Both gaps are things the real code gets right; reproducing them confirmed the
 model was faithful enough to also surface Finding A, which the code does **not**
 obviously handle.
 
+## Follow-up models (sweep GC, liveness, 4-node)
+
+All runs use the same invocation as "How to run" above, swapping the module/cfg
+(and adding `-fp 7` to re-seed the fingerprint hash where noted).
+
+### `tla/Muster3.tla` — occupancy GC sweep + tombstone reap (was caveat 1)
+
+Adds to the shipped-fix model (Muster2) the two GC mechanisms TLA_FINDINGS.md
+called the **highest-priority** unmodeled code, because they are the only ways a
+router row can go absent *without* a message from the source (the under-delivery
+risk):
+
+* **`DropStale(r, s)`** — `drop_stale_router_entries/1` (`scope.ex` ~1369): the
+  periodic / on-`:ready` / post-rebalance sweep that **downgrades a `:present`
+  row to a tombstone at its EXISTING seq** when the row's source agrees with our
+  committed view (`SourceAgrees`) and the group no longer routes to us
+  (`Router(view[r]) # r`). Own rows are always judgeable.
+* **`Reap(r, s)`** — `reap_tombstones/1` (`scope.ex` ~1693): the time-windowed
+  **hard delete** of a tombstone back to truly-absent (seq 0). Modeled faithful
+  to the retention-window design: a tombstone is reaped only once its
+  `{router,source}` key is **quiescent** (no in-flight message could still land
+  for it), which is exactly the assumption "the window (a multiple of
+  `rpc_timeout_ms`) outlasts every orphaned, un-cancelled RPC". Firing reap while
+  a message is still in flight would model a *window-too-short* timing bug, a
+  separate concern the design explicitly rules out.
+
+**Why a single atomic `DropStale` step is faithful to the select-then-guarded-
+replace race.** The real sweep does an `:ets.select` (judge) then a seq-guarded
+`:ets.select_replace` (write only if still `:present` at the *same* seq). The
+only thing that can change between them is the ROW (`occupied/4`, `vacant_batch/4`
+write ETS straight from `:erpc` workers); `view[r]` cannot, because the whole
+sweep runs to completion inside one coordinator `handle_info`. So any concurrent
+claim is a separate delivery step ordered either before this one (higher seq ⇒
+the `present`/seq precondition fails ⇒ no-op, matching the guarded replace) or
+after it (a fresh higher-seq claim overwrites the tombstone via `ApplyPresent`'s
+strict `>`, matching the live re-claim surviving). No two-step split is needed.
+
+**Result: `NoMissedDelivery` holds.**
+
+* `MaxSeq=2`, 3 nodes — **exhaustive**: 605,694 distinct states, depth 20, 0 left
+  on queue, no violation. Re-confirmed with `-fp 7` (identical count).
+* `MaxSeq=3`, 3 nodes — partial (state count grows past the heap): **79.5M
+  distinct states with no violation** before being killed by memory pressure.
+  Corroborating; the `MaxSeq=2` exhaustive result is the proof.
+
+Takeaway: the sweep's source-agreement + routes-away guard means a node only ever
+tombstones rows for a group it does **not** route, so it can never drop a live
+row on the actual current router — confirmed across the whole `MaxSeq=2` space.
+`Reap` is safety-neutral for under-delivery (it only turns an already-absent
+tombstone into an absent empty; its window matters only for over-delivery, which
+the property intentionally ignores).
+
+### `tla/Muster2Live.tla` — liveness under fairness (was caveat 6)
+
+Turns the prose convergence argument into a machine-checked temporal property.
+
+**The bounded-seq obstacle, handled.** Every seq-consuming action is guarded by
+`CanBump` (a finiteness device), and in Muster2 `Commit`/`DetectDown` also spend
+a seq on their self-row re-assert fold. So for *any* finite `MaxSeq` there is a
+trace where a node spends its last seq on a `Discover` and can then never
+`Commit` — an active round wedged forever. That is a **model artifact**, not a
+real stall (the code's self-reassert is an unconditional local ETS upsert;
+`next_seq()` never runs out). `Muster2Live` therefore **decouples the
+`Commit`/`DetectDown` self-reassert from `CanBump`** (writes at the current seq,
+bumping nothing), so those two are enabled by their real preconditions only.
+Everything that models genuine **churn** (`HolderJoin/Leave`, `Discover`,
+`SelfClaim`, `SendSnapshot/Marker`) still consumes bounded seq and is left
+**unfair**, so churn provably ceases and the convergence question is well posed.
+
+**Fairness:** weak fairness on the convergence-driving steps only — message
+delivery (prepares ack, snapshots/markers/vacants land), `Commit`, `DetectDown`.
+Churn actions are deliberately unfair.
+
+**Properties, both hold:**
+
+* `Liveness == <>[]RoundsQuiet` — eventually, forever, no live node has an active
+  prepare round (the last round drains and commits).
+* `RoundsResolve == \A n : (up[n] /\ round[n].active) ~> (~up[n] \/ ~round[n].active)`
+  — the leads-to form.
+* `NoMissedDelivery` was kept as an invariant here too (sanity: the liveness
+  variant does not break safety) — holds.
+
+Runs: **exhaustive** at 2 nodes / `MaxSeq=2` (565 distinct) and at 3 nodes /
+`MaxSeq=2` (488,867 distinct), no violation of either temporal property.
+
+**Caveat.** The model never *drops* a message, so every prepare is eventually
+delivered = acked; the real **crash-on-prepare-timeout** escape hatch (for a peer
+that is up but unreachable) is out of scope here and is still argued, not checked.
+
+### 4-node runs (`tla/MusterBounded.tla`, `tla/Muster2Bounded.tla`)
+
+Both Finding A and the B1 proof were only ever exhaustive at **3 nodes**. A 4th
+node is the smallest config that exercises cascading / concurrent prepare rounds
+and transitive staleness. A 4-node exhaustive run is infeasible (3 nodes was
+already 57.8M states), so these are **bounded** harnesses (`MaxSeq` low + an
+`|msgs|` cap via a `CONSTRAINT`). A bounded run **cannot prove** 4-node safety; it
+can only surface a shallow 4-node-specific counterexample.
+
+* **Positive control — `MusterBounded` (baseline, has Finding A), 4 nodes,
+  `MaxSeq=2`, `|msgs|≤3`:** ✅ **found** a `NoMissedDelivery` violation in 13s
+  (depth 10). Confirms the bounded 4-node search actually reaches violations, so
+  a clean fix run is meaningful, not vacuous.
+* **`Muster2Bounded` (B1 fix), 4 nodes, `MaxSeq=2`, `|msgs|≤2`:** partial (queue
+  grows past the heap): **71.3M distinct states with no violation** before being
+  killed by memory pressure.
+
+**Symmetry limitation.** `Router == min` makes node id 1 special, so node ids are
+**not** symmetric and no TLC `SYMMETRY` set is valid. A real 4-node (or larger)
+proof would first need `min` replaced by a **monotone uninterpreted ring
+function** to recover symmetry reduction (this is caveat 4 below).
+
 ## Caveats / what is NOT yet modeled (next steps)
 
-1. **`drop_stale_router_entries` sweep + tombstone GC** are not modeled. They
-   affect only over-delivery cleanup and the *seq-guarded delete vs concurrent
-   re-claim* race — a place worth a dedicated model (risk of wrongly deleting a
-   live row ⇒ under-delivery). **High priority next.**
+1. ~~**`drop_stale_router_entries` sweep + tombstone GC** are not modeled.~~
+   **DONE** — modeled in `tla/Muster3.tla`; `NoMissedDelivery` holds (exhaustive
+   at `MaxSeq=2`, partial-clean at `MaxSeq=3`). See "Follow-up models" above. The
+   feared *seq-guarded delete vs concurrent re-claim* under-delivery race does
+   not occur: the sweep's routes-away guard means a node only tombstones rows for
+   groups it does not route.
 2. **Only one group.** Multi-group interactions (batched vacant per shard, a
    snapshot's tombstone-stale-rows pass) are not exercised. The seq register is
    per-`{group,source}`, so single-group covers the register races, but the
@@ -249,5 +375,9 @@ obviously handle.
    worker calls and cross-channel marker/snapshot interleaving; a safe
    over-approximation for same-pair dist sends — see Finding A's FIFO note). A
    dedicated FIFO-channel refinement could tighten which traces are real.
-6. **Liveness.** Only safety (`NoMissedDelivery`, `TypeOK`) is checked. No
-   temporal/eventual-convergence properties yet.
+6. ~~**Liveness.** Only safety is checked.~~ **DONE (with a caveat)** — modeled
+   in `tla/Muster2Live.tla` under explicit fairness; `<>[]RoundsQuiet` and the
+   `RoundsResolve` leads-to both hold (exhaustive at 2 and 3 nodes, `MaxSeq=2`).
+   Still not covered: the crash-on-prepare-timeout hatch for an up-but-
+   unreachable peer (this message-reliable model never drops a prepare). See
+   "Follow-up models" above.
