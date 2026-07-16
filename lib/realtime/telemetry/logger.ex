@@ -17,7 +17,8 @@ defmodule Realtime.Telemetry.Logger do
     [:realtime, :tenants, :migrations, :stop],
     [:realtime, :tenants, :migrations, :exception],
     [:realtime, :tenants, :migrations, :reconcile, :stop],
-    [:realtime, :tenants, :migrations, :reconcile, :exception]
+    [:realtime, :tenants, :migrations, :reconcile, :exception],
+    [:phoenix, :error_rendered]
   ]
 
   def start_link(args) do
@@ -90,9 +91,29 @@ defmodule Realtime.Telemetry.Logger do
     )
   end
 
+  def handle_event([:phoenix, :error_rendered], _measurements, metadata, _config) do
+    %{status: status, kind: kind, reason: reason} = metadata
+    status = status_code(status)
+    message = "Sent #{status} response: #{format_reason(kind, reason)}"
+
+    if status >= 500 do
+      log_error("HttpServerError", message)
+    else
+      log_warning("HttpClientError", message)
+    end
+  end
+
   def handle_event(_event, _measurements, _metadata, _config) do
     :ok
   end
+
+  defp status_code(status) when is_integer(status), do: status
+  defp status_code(status), do: Plug.Conn.Status.code(status)
+
+  defp format_reason(_kind, %mod{__exception__: true} = reason),
+    do: "#{inspect(mod)} - #{Exception.message(reason)}"
+
+  defp format_reason(kind, reason), do: "#{kind} - #{to_log(reason)}"
 
   def handle_info(_msg, state) do
     {:noreply, state}

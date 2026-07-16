@@ -87,4 +87,6 @@ This is the list of operational codes that can help you understand your deployme
 | UnknownErrorOnWebSocketMessage     | An unexpected error occurred while processing an incoming WebSocket message. The connection is kept alive but the message is dropped                                                                  |
 | ReplicationSlotLagTooHigh          | The replication slot WAL lag has exceeded 50% of `max_slot_wal_keep_size`. The replication connection is shut down and will be restarted to prevent the slot from being invalidated by PostgreSQL     |
 | ReplicationSlotLagCheckSkipped     | The periodic replication slot lag check could not be completed, typically because the tenant database connection was unavailable. The check is skipped and retried on the next watchdog interval      |
+| HttpServerError                    | Phoenix converted an unhandled exception into a 5xx HTTP response. The log includes the underlying error and status to explain a server error that request metrics alone would not surface             |
+| HttpClientError                    | Phoenix converted an exception into a 4xx HTTP response (for example a request to an unknown route). The log includes the underlying error and status                                                  |
 

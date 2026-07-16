@@ -43,7 +43,7 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
     test "token required the role key", %{tenant: tenant, serializer: serializer} do
       {:ok, token} = token_no_role(tenant)
 
-      assert {:error, %{status_code: 403}} =
+      assert {:error, %{status_code: 401}} =
                WebsocketClient.connect(self(), uri(tenant, serializer), serializer, [{"x-api-key", token}])
     end
 

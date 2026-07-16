@@ -27,6 +27,62 @@ defmodule Realtime.Telemetry.LoggerTest do
     end
   end
 
+  describe "phoenix error_rendered events" do
+    test "logs 5xx responses at error level with the exception cause" do
+      start_link_supervised!({TelemetryLogger, handler_id: "telemetry-logger-test"})
+
+      log =
+        capture_log(fn ->
+          :telemetry.execute([:phoenix, :error_rendered], %{duration: 1}, %{
+            status: 500,
+            kind: :error,
+            reason: %RuntimeError{message: "boom"},
+            stacktrace: []
+          })
+        end)
+
+      assert log =~ "[error]"
+      assert log =~ "HttpServerError"
+      assert log =~ "Sent 500 response: RuntimeError - boom"
+    end
+
+    test "logs 4xx responses at warning level" do
+      start_link_supervised!({TelemetryLogger, handler_id: "telemetry-logger-test"})
+
+      log =
+        capture_log(fn ->
+          :telemetry.execute([:phoenix, :error_rendered], %{duration: 1}, %{
+            status: 404,
+            kind: :error,
+            reason: %Phoenix.Router.NoRouteError{message: "no route found"},
+            stacktrace: []
+          })
+        end)
+
+      assert log =~ "[warning]"
+      assert log =~ "HttpClientError"
+      assert log =~ "Sent 404 response: Phoenix.Router.NoRouteError - no route found"
+    end
+
+    test "accepts atom statuses" do
+      start_link_supervised!({TelemetryLogger, handler_id: "telemetry-logger-test"})
+
+      log =
+        capture_log(fn ->
+          :telemetry.execute([:phoenix, :error_rendered], %{duration: 1}, %{
+            status: :internal_server_error,
+            kind: :exit,
+            reason: :timeout,
+            stacktrace: []
+          })
+        end)
+
+      assert log =~ "[error]"
+      assert log =~ "HttpServerError"
+      assert log =~ "Sent 500 response: exit - :timeout"
+    end
+  end
+
   describe "handle_info/2" do
     test "ignores unexpected messages" do
       assert {:noreply, []} = TelemetryLogger.handle_info(:unexpected, [])

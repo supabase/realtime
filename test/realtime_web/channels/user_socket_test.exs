@@ -1,6 +1,7 @@
 defmodule RealtimeWeb.UserSocketTest do
   use ExUnit.Case, async: true
   import ExUnit.CaptureLog
+  import Plug.Test
 
   alias RealtimeWeb.Socket.V2Serializer
   alias RealtimeWeb.UserSocket
@@ -97,6 +98,37 @@ defmodule RealtimeWeb.UserSocketTest do
         end)
 
       assert log =~ "UnknownErrorOnWebSocketMessage"
+    end
+  end
+
+  describe "handle_error/2" do
+    for {reason, status, message} <- [
+          {:tenant_not_found, 404, "Tenant not found"},
+          {:tenant_suspended, 403, "Realtime was disabled for this tenant"},
+          {:missing_api_key, 401, "API key is missing"},
+          {:expired_token, 401, "Token has expired"},
+          {:missing_claims, 401, "Fields `role` and `exp` are required in JWT"},
+          {:token_malformed, 401, "The token provided is not a valid JWT"},
+          {:too_many_connections, 429, "Too many connected users"},
+          {:too_many_joins, 429, "Too many joins per second"}
+        ] do
+      test "maps #{reason} to a #{status} JSON response" do
+        conn = UserSocket.handle_error(conn(:get, "/socket/websocket"), unquote(reason))
+
+        assert conn.status == unquote(status)
+        assert Jason.decode!(conn.resp_body) == %{"error" => unquote(message)}
+
+        assert Plug.Conn.get_resp_header(conn, "content-type") == [
+                 "application/json; charset=utf-8"
+               ]
+      end
+    end
+
+    test "maps unknown reasons to a generic 403 JSON response" do
+      conn = UserSocket.handle_error(conn(:get, "/socket/websocket"), {:error, :some_weird_reason})
+
+      assert conn.status == 403
+      assert Jason.decode!(conn.resp_body) == %{"error" => "Error connecting to Realtime"}
     end
   end
 end

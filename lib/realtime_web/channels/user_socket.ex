@@ -129,6 +129,30 @@ defmodule RealtimeWeb.UserSocket do
     end
   end
 
+  @doc """
+  Maps `connect/3` error reasons to proper HTTP responses for the WebSocket handshake.
+
+  Configured as the `:error_handler` for the socket in `RealtimeWeb.Endpoint`.
+  """
+  @spec handle_error(Plug.Conn.t(), term()) :: Plug.Conn.t()
+  def handle_error(conn, reason) do
+    {status, message} = error_response(reason)
+
+    conn
+    |> Plug.Conn.put_resp_content_type("application/json")
+    |> Plug.Conn.send_resp(status, Jason.encode!(%{error: message}))
+  end
+
+  defp error_response(:tenant_not_found), do: {404, "Tenant not found"}
+  defp error_response(:tenant_suspended), do: {403, "Realtime was disabled for this tenant"}
+  defp error_response(:missing_api_key), do: {401, "API key is missing"}
+  defp error_response(:expired_token), do: {401, "Token has expired"}
+  defp error_response(:missing_claims), do: {401, "Fields `role` and `exp` are required in JWT"}
+  defp error_response(:token_malformed), do: {401, "The token provided is not a valid JWT"}
+  defp error_response(:too_many_connections), do: {429, "Too many connected users"}
+  defp error_response(:too_many_joins), do: {429, "Too many joins per second"}
+  defp error_response(_reason), do: {403, "Error connecting to Realtime"}
+
   defp access_token(params, headers) do
     case :proplists.lookup("x-api-key", headers) do
       :none -> Map.get(params, "apikey")
