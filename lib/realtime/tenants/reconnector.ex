@@ -1,11 +1,15 @@
 defmodule Realtime.Tenants.Reconnector do
   @moduledoc """
-  Reactively restarts a tenant's `Realtime.Tenants.Connect` process when it unregisters from
-  `:syn` while this node still has locally-connected websocket clients for that tenant.
+  Periodically ensures every tenant with locally-connected websocket clients has a
+  `Realtime.Tenants.Connect` process running.
 
   `Connect` is started with `restart: :temporary`, so its supervisor never restarts it after
   a crash. Without this module, a tenant whose `Connect` process dies (crash, node move,
   database connection drop) never gets it back unless a client triggers a new join/broadcast.
+
+  Every `@check_interval_ms` this module walks the tenants with local members
+  (`Realtime.UsersCounter.local_tenant_counts/0`) and starts a task to reconnect any tenant
+  that is missing its `Connect` process.
   """
 
   use GenServer
@@ -14,43 +18,30 @@ defmodule Realtime.Tenants.Reconnector do
   alias Realtime.UsersCounter
   alias Realtime.Tenants.Connect
 
-  def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
+  @check_interval_ms :timer.minutes(5)
 
-  def handle_syn_event([:syn, Connect, :unregistered], _measurements, %{name: tenant_id}, pid) do
-    send(pid, {:check_reconnect, tenant_id})
-  end
+  def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
   @impl true
   def init(_opts) do
     Logger.info("Starting Reconnector")
-
-    :ok =
-      :telemetry.attach(
-        [self(), :reconnector],
-        [:syn, Connect, :unregistered],
-        &__MODULE__.handle_syn_event/4,
-        self()
-      )
-
+    schedule_check()
     {:ok, %{}}
   end
 
   @impl true
-  def terminate(_reason, _state) do
-    :telemetry.detach([self(), :reconnector])
-    :ok
-  end
-
-  @impl true
-  def handle_info({:check_reconnect, tenant_id}, state) do
-    if UsersCounter.tenant_users(tenant_id, node()) > 0 do
+  def handle_info(:check, state) do
+    for {tenant_id, _count} <- UsersCounter.local_tenant_counts(), is_nil(Connect.whereis(tenant_id)) do
       Task.Supervisor.start_child(Realtime.TaskSupervisor, fn -> reconnect(tenant_id) end)
     end
 
+    schedule_check()
     {:noreply, state}
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
+
+  defp schedule_check(), do: Process.send_after(self(), :check, @check_interval_ms)
 
   defp reconnect(tenant_id) do
     case Connect.lookup_or_start_connection(tenant_id) do

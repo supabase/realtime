@@ -1,6 +1,5 @@
 defmodule Realtime.Tenants.ReconnectorTest do
-  # Async false since we're spawning real Connect processes and manipulating Census/:syn state
-  use Realtime.DataCase, async: false
+  use Realtime.DataCase, async: true
 
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Reconnector
@@ -18,16 +17,10 @@ defmodule Realtime.Tenants.ReconnectorTest do
     assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, timeout
   end
 
-  describe "handle_syn_event/4" do
-    test "notifies the given pid to check for a reconnect" do
-      Reconnector.handle_syn_event([:syn, Connect, :unregistered], %{}, %{name: "a-tenant"}, self())
-
-      assert_receive {:check_reconnect, "a-tenant"}
-    end
-  end
-
-  describe "reconnect on Connect crash" do
+  describe "periodic reconnect check" do
     test "restarts Connect when this node still has connected users", %{tenant: tenant} do
+      {:ok, reconnector} = Reconnector.start_link([])
+
       assert {:ok, _} = Connect.lookup_or_start_connection(tenant.external_id)
       pid = Connect.whereis(tenant.external_id)
 
@@ -39,12 +32,16 @@ defmodule Realtime.Tenants.ReconnectorTest do
       Process.exit(pid, :kill)
       assert_process_down(pid)
 
+      send(reconnector, :check)
+
       assert_receive %{event: "ready", payload: %{pid: new_pid}}, 5000
       assert new_pid != pid
       assert Connect.whereis(tenant.external_id) == new_pid
     end
 
     test "does not restart Connect when this node has no connected users", %{tenant: tenant} do
+      {:ok, reconnector} = Reconnector.start_link([])
+
       assert {:ok, _} = Connect.lookup_or_start_connection(tenant.external_id)
       pid = Connect.whereis(tenant.external_id)
 
@@ -53,10 +50,10 @@ defmodule Realtime.Tenants.ReconnectorTest do
       Process.exit(pid, :kill)
       assert_process_down(pid)
 
+      send(reconnector, :check)
+
       refute_receive %{event: "ready"}, 500
       refute Connect.whereis(tenant.external_id)
-    after
-      Endpoint.unsubscribe(Connect.syn_topic(tenant.external_id))
     end
   end
 end
