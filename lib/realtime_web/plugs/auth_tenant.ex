@@ -10,6 +10,8 @@ defmodule RealtimeWeb.AuthTenant do
 
   alias RealtimeWeb.ChannelsAuthorization
 
+  require Logger
+
   def init(opts), do: opts
 
   def call(%{assigns: %{tenant: tenant}} = conn, _opts) do
@@ -25,7 +27,15 @@ defmodule RealtimeWeb.AuthTenant do
       |> assign(:role, claims["role"])
       |> assign(:sub, claims["sub"])
     else
-      _error -> unauthorized(conn)
+      {:error, {:error_generating_signer, kid}} ->
+        Logger.error(
+          "JwtSignerError: Failed to generate JWT signer for key ID (kid) #{inspect(kid)}, check your JWT secret or JWKS configuration"
+        )
+
+        unauthorized(conn)
+
+      _error ->
+        unauthorized(conn)
     end
   end
 

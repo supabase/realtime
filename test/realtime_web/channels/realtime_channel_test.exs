@@ -874,6 +874,28 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   end
 
   describe "access_token" do
+    # RS256 token with header kid "key-id-1"
+    @rsa_token "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImtpZCI6ImtleS1pZC0xIn0.eyJpYXQiOjE3MTIwNDc1NjUsInJvbGUiOiJhdXRoZW50aWNhdGVkIiwic3ViIjoidXNlci1pZCIsImV4cCI6MTcxMjA1MTE2NX0.zUeoZrWK1efAc4q9y978_9qkhdXktdjf5H8O9Rw0SHcPaXW8OBcuNR2huRrgORvqFx6_sHn6nCJaWkZGzO-f8wskMD7Z4INq2JUypr6nASie3Qu2lLyeY3WTInaXNAKH-oqlfTLRskbz8zkIxOj2bBJiN9ceQLkJU-c92ndiuiG5D1jyQrGsvRdFem_cemp0yOoEaC0XWdjeV6C_UD-34GIyv3o8H4HZg1GcCiyNnAfDmLAcTOQPmqkwsRDQb-pm5O3HwpQt9WHOB6i1vzf-nmIGyCRA7STPdALK16-aiAyT4SJRxM5WN3iK8yitH7g4JETb9WocBbwIM_zfNnUI5w"
+
+    test "shuts down with JwtSignerError when refresh token kid has no matching JWK", %{tenant: tenant} do
+      jwks = %{"keys" => [%{"kty" => "RSA", "kid" => "some_other_kid"}]}
+      {:ok, tenant} = Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{jwt_jwks: jwks})
+      Realtime.Tenants.Cache.update_cache(tenant)
+
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+      socket = subscribe_and_join!(socket, "realtime:test", %{})
+
+      log =
+        capture_log(fn ->
+          push(socket, "access_token", %{"access_token" => @rsa_token})
+          assert_process_down(socket.channel_pid)
+        end)
+
+      assert log =~ "JwtSignerError"
+      assert log =~ "key-id-1"
+    end
+
     @tag policies: [:authenticated_all_topic_read]
     test "new valid access_token", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
