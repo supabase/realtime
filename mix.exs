@@ -12,6 +12,9 @@ defmodule Realtime.MixProject do
       deps: deps(),
       dialyzer: dialyzer(),
       test_coverage: [tool: ExCoveralls],
+      hex: [
+        ignore_advisories: ["CVE-2026-43969", "CVE-2026-43966"]
+      ],
       releases: [
         realtime: [
           # This will ensure that if opentelemetry terminates, even abnormally, our application will not be terminated.
