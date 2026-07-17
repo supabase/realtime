@@ -9,7 +9,10 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
   import ExUnit.CaptureLog
   import Generators
 
+  alias Forum.Muster
   alias Phoenix.Socket.Message
+  alias Realtime.Api
+  alias Realtime.FeatureFlags
   alias Realtime.Integration.WebsocketClient
   alias Realtime.Tenants
   alias Realtime.Tenants.Connect
@@ -482,5 +485,44 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
 
       assert length(String.split(log, "ClientJoinRateLimitReached")) <= 3
     end
+  end
+
+  describe "Muster channel join" do
+    setup [:rls_context]
+
+    test "registers the joined socket in the real Muster scope when the flag is enabled", %{
+      tenant: tenant,
+      serializer: serializer
+    } do
+      enable_muster_join_flag!()
+
+      scope = Application.fetch_env!(:realtime, :muster_scope)
+      group = tenant.external_id
+
+      # Nothing has joined this tenant's group yet.
+      assert Muster.local_member_count(scope, group) == 0
+
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      topic = "realtime:#{random_string()}"
+      WebsocketClient.join(socket, topic, %{config: %{broadcast: %{self: false}, private: false}})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+
+      # Once we get the reply for the join we 100% sure that the join has been registered
+      assert Muster.local_member_count(scope, group) == 1
+      assert [pid] = Muster.local_members(scope, group)
+      assert Muster.local_member?(scope, group, pid)
+      assert Muster.targets(scope, group, Muster.view_hash(scope)) == {:ok, [node()]}
+    end
+  end
+
+  # Enables the `use_muster_channel_join` flag for real (no Muster mocking): the
+  # flag is created and pushed into the local FeatureFlags cache so the channel
+  # process reads it synchronously, and torn down afterwards so it does not leak
+  # into other async tests via the shared in-memory cache.
+  defp enable_muster_join_flag! do
+    {:ok, flag} = Api.upsert_feature_flag(%{name: "use_muster_channel_join", enabled: true})
+    FeatureFlags.Cache.update_cache(flag)
+    on_exit(fn -> FeatureFlags.Cache.invalidate_cache("use_muster_channel_join") end)
   end
 end

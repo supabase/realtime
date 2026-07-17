@@ -712,8 +712,15 @@ defmodule Forum.Muster.Scope do
     {:noreply, register_peer(state, peer)}
   end
 
-  # A new node connected. Reach out so they can pair.
-  def handle_info({:nodeup, node}, state) when node == node(), do: {:noreply, state}
+  # Restart scope if our own node was renamed after :net_kernel.start
+  # We also check state.members to be extra sure we are a singleton
+  def handle_info({:nodeup, node}, state) when node == node() do
+    if match?([_], state.members) do
+      {:stop, {:shutdown, :node_renamed}, state}
+    else
+      {:noreply, state}
+    end
+  end
 
   def handle_info({:nodeup, node}, state) do
     Logger.info(

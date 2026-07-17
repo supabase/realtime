@@ -24,6 +24,11 @@ end
 
 http_port = if partition, do: 4002 + String.to_integer(partition), else: 4002
 
+# Single-node test scopes have no peers to agree with, so they only reach
+# :ready via the singleton-promotion timer. Keep it short so Muster.targets/3
+# stops flooding almost immediately instead of after the 30s default.
+config :realtime, muster_singleton_promotion_timeout_ms: 100
+
 config :realtime, RealtimeWeb.Endpoint,
   http: [port: http_port],
   server: true

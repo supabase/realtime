@@ -82,6 +82,12 @@ defmodule Realtime.Application do
     user_scope_broadast_interval_in_ms = Application.get_env(:realtime, :users_scope_broadcast_interval_in_ms, 10_000)
     muster_scope_shards = Application.fetch_env!(:realtime, :muster_scope_shards)
 
+    # Only set in :test, where the single-node scope must reach :ready quickly
+    # instead of waiting out Muster's 30s default singleton-promotion timer.
+    # Unset in prod/dev, so Muster keeps its own conservative default.
+    muster_singleton_promotion_timeout_ms =
+      Application.get_env(:realtime, :muster_singleton_promotion_timeout_ms)
+
     # One Muster scope per region: the atom is otherwise just an identifier, so
     # embedding the region keeps each region's ring/gossip/rebalancing isolated
     # even though ErlDist's broadcast fans out over the whole distribution mesh.
@@ -125,7 +131,11 @@ defmodule Realtime.Application do
              # For now makes it impossible to crash the application due to Muster failures
              max_restarts: 1_000,
              max_seconds: 1
-           ]
+           ] ++
+             if(muster_singleton_promotion_timeout_ms,
+               do: [singleton_promotion_timeout_ms: muster_singleton_promotion_timeout_ms],
+               else: []
+             )
          ]},
         Supervisor.child_spec({Cachex, name: Realtime.RateCounter}, id: Realtime.RateCounter),
         Supervisor.child_spec({Cachex, name: Realtime.Nodes.Cache}, id: Realtime.Nodes.Cache),
