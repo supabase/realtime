@@ -58,7 +58,7 @@ defmodule Forum.Muster.Scope do
             occupancy_table: atom,
             members: [node],
             peers: %{pid => reference},
-            member_views: %{node => {non_neg_integer, integer, pid}},
+            member_views: %{node => {non_neg_integer | :in_transition, integer, pid}},
             owed_snapshots: %{node => integer},
             applied_snapshot_seq: %{node => {integer, pid}},
             view_seq: integer,
