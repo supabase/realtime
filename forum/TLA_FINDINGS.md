@@ -5,9 +5,14 @@ model-checked and shipped. Follow-ups done: the occupancy GC sweep (caveat 1)
 is now modeled and checked clean; liveness (caveat 6) is now machine-checked;
 the fix is corroborated at 4 nodes; the coordinator crash/restart path (part of
 caveat 3) is now modeled — safety holds and the crash-on-prepare-timeout escape
-hatch is liveness-checked.** This document is the checkpoint so work can resume.
+hatch is liveness-checked; the ring is now a model parameter, not hard-wired
+`min` (caveat 4) — the exhaustive N=3 proof is shown to hold for any
+single-group total-order ring (relabeling argument + bit-identical
+state counts), and a deeper 4-node bounded search corroborates.** The **sole
+substantive remaining gap is multi-group (caveat 2)**. This document is the
+checkpoint so work can resume.
 
-Six models:
+Seven models:
 
 * `tla/Muster.tla` (+ `.cfg`) — the baseline routing model that **exhibits**
   Finding A (`NoMissedDelivery` is violated).
@@ -29,6 +34,11 @@ Six models:
 * `tla/Muster2RestartLive.tla` (+ `.cfg`) — the restart hatch under **fairness
   with a droppable prepare** (up-but-unreachable peer): a wedged prepare round is
   resolved by the crash-restart. `RoundsResolve` and `<>[]RoundsQuiet` both hold.
+* `tla/Muster2Ring.tla` (+ `.cfg`) — Muster2 with the ring **generalized from
+  hard-wired `min` to a `RingRank` constant** (any total-order ring). Confirms
+  `NoMissedDelivery` does not depend on the `min` artifact (caveat 4), and hosts
+  the deeper 4-node bounded search with non-vacuity witnesses (see "Follow-up
+  models").
 
 Plus two bounded 4-node harnesses (`tla/MusterBounded.tla`,
 `tla/Muster2Bounded.tla`) — see "Follow-up models".
@@ -441,10 +451,77 @@ can only surface a shallow 4-node-specific counterexample.
   grows past the heap): **71.3M distinct states with no violation** before being
   killed by memory pressure.
 
-**Symmetry limitation.** `Router == min` makes node id 1 special, so node ids are
-**not** symmetric and no TLC `SYMMETRY` set is valid. A real 4-node (or larger)
-proof would first need `min` replaced by a **monotone uninterpreted ring
-function** to recover symmetry reduction (this is caveat 4 below).
+**Symmetry limitation (corrected).** An earlier version of this note claimed a
+4-node exhaustive proof "would first need `min` replaced by a monotone
+uninterpreted ring function to recover symmetry reduction." That is **wrong**, and
+the reasoning behind it is what the relabeling argument (next section) actually
+resolves: *any* router that resolves a group to a specific node by identity/ring
+position — `min` or a real hash — inherently distinguishes node ids, so a TLC
+`SYMMETRY` set over node ids is unsound **regardless** of whether the ring is
+`min` or uninterpreted. Generalizing the ring is still worth doing, but for
+**generality** (proving the result is not a `min` artifact), not for symmetry. A
+4-node exhaustive run therefore remains infeasible; the 4-node story is
+necessarily bounded (see `Muster2Ring` below for a deeper bounded run).
+
+### `tla/Muster2Ring.tla` — generalized ring (was caveat 4)
+
+Muster2 with the router generalized from hard-wired `min` to a **`RingRank`
+constant** (an injective `Nodes -> Nat`, i.e. any total order); `Router(V)` is the
+minimum-rank present node. `RingRank = identity` reproduces `min` exactly.
+
+**The relabeling / WLOG argument (the main result).** In the single-group model,
+node identities are compared **nowhere** except inside `Router` (the sole `<=` on
+nodes). `Init` is symmetric (every node a singleton) and every action quantifies
+over `Nodes` uniformly. So for any node-id permutation π, replacing `RingRank` by
+`RingRank ∘ π⁻¹` yields an **isomorphic** transition system, and
+`NoMissedDelivery` (uniform in `u,r,s`) is preserved by π. Hence the systems for
+**any two total-order rings are isomorphic by relabeling**, and the existing N=3
+exhaustive result for `min` (MODULE Muster2) **already implies safety for every
+single-group total-order ring**. Real consistent hashing *is* a fixed total order
+per group (which node is closest to the group's hash), so `min` is WLOG here; the
+genuinely richer *per-group-different-order* behaviour is a **multi-group** concern
+(caveat 2), out of scope for this single-group model.
+
+**Empirically confirmed (guards against a hidden asymmetry the argument missed).**
+Running a non-identity ring (reversed order — node 3 top-of-ring, not node 1):
+
+* `MaxSeq=2`, 3 nodes — **exhaustive**: **439,759 distinct states, depth 20, 0
+  left on queue, no violation** — *bit-identical* to the `min` model at the same
+  bound (also 439,759 distinct / 1,299,335 generated). Isomorphic systems have
+  identical state counts; they do, to the state.
+* `MaxSeq=3`, 3 nodes — **exhaustive**: **57,881,211 distinct states, depth 27, 0
+  left on queue, no violation** — again identical to MODULE Muster2's `min` run
+  (57.8M, depth 27). The full-scale exhaustive proof holds under a non-`min` ring.
+
+**Deeper 4-node bounded search (`Muster2Ring4.cfg`).** 4 nodes, `MaxSeq=2`, a
+shuffled ring (node 3 top), and `|msgs|≤3` — a **looser** bound than
+`Muster2Bounded`'s `|msgs|≤2`, so the search reaches further into the
+concurrent-round region. Partial (queue grows past the heap): **70.4M distinct
+states with no violation** at BFS depth 16 (31M left on queue) before a 9-minute
+cap. Corroborating, not a proof (4-node exhaustive is infeasible; see above).
+
+**Non-vacuity witnesses (the important part — probes expected to be VIOLATED, same
+pattern as `Muster2Restart_probe`).** They prove the bounded 4-node search
+actually reaches the states that make "no violation" meaningful:
+
+* `NoConcurrentRounds` (`_w1`) — **violated**: two live nodes with simultaneously
+  active prepare rounds are reachable, i.e. the search exercises the
+  concurrent/cascading-round machinery B1 introduced (the whole reason 4 nodes
+  matters).
+* `NoLaggingReadyRouter` (`_w2`) — **violated**: a lagging `:ready` router
+  (Ready + routes its own view to itself) coexisting with a strictly-more-advanced
+  live peer is reachable — the exact Finding-A shape the fix must render safe.
+* `NoWideView` (`_w3`) — **violated**: a node's committed view reaches size 3
+  (grown twice). Note size **4** (full convergence) is **unreachable at
+  `MaxSeq=2`** by seq budget — growing the view is a `Discover`, each `Discover`
+  spends a seq, so 2 seq ⇒ at most 2 growths ⇒ committed view ≤ 3. Full 4-node
+  convergence would need `MaxSeq ≥ 3`; the bounded run exercises 3-node views and
+  concurrent rounds *among* 4 nodes, not a fully-converged 4-node cluster.
+
+Takeaway: the `min`-dependence question (caveat 4) is closed for the single-group
+model — the N=3 exhaustive proof is ring-shape-independent by the relabeling
+argument, confirmed to the state at `MaxSeq∈{2,3}` — and the deeper, non-vacuous
+4-node bounded search finds no violation.
 
 ## Caveats / what is NOT yet modeled (next steps)
 
@@ -471,11 +548,19 @@ function** to recover symmetry reduction (this is caveat 4 below).
    * **Node name reuse across deployments** (a brand-new incarnation reusing a
      name, resetting seq) remains excluded, consistent with the user assumption
      that nodes do not come back and reset their seq. If that is relaxed, add it.
-4. **Ring = `min`.** Real consistent hashing satisfies subset-monotonicity (which
-   `min` also satisfies) but has richer non-subset behaviour. Finding A does not
-   depend on `min` (any ring where growing membership moves a group's router to a
-   newly-joined node reproduces it), but the sweep model (step 1) may want a
-   more general ring or an explicitly monotone uninterpreted function.
+4. ~~**Ring = `min`.**~~ **DONE (for the single-group model)** — generalized in
+   `tla/Muster2Ring.tla`: the router is now a `RingRank` constant (any total-order
+   ring). `NoMissedDelivery` does **not** depend on `min` — proven WLOG by a
+   relabeling argument (node ids are compared only inside `Router`, so any two
+   total-order rings are isomorphic by relabeling) and confirmed empirically by
+   *bit-identical* state counts for a non-`min` ring at `MaxSeq∈{2,3}`, N=3
+   (exhaustive). See "Follow-up models" above. **Correction to a prior claim:**
+   generalizing the ring does **not** recover TLC `SYMMETRY` — any position-based
+   router distinguishes node ids, so node-id symmetry is unsound regardless of
+   `min` vs uninterpreted; a 4-node *exhaustive* proof stays infeasible and the
+   4-node story is necessarily bounded (a deeper bounded run is included). The
+   richer *per-group-different-order* behaviour of real hashing is inherently
+   **multi-group** (caveat 2), not reachable in a single-group model.
 5. **Message ordering.** Modeled as a fully unordered set (faithful for `:erpc`
    worker calls and cross-channel marker/snapshot interleaving; a safe
    over-approximation for same-pair dist sends — see Finding A's FIFO note).
