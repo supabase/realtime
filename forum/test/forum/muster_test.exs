@@ -525,6 +525,47 @@ defmodule Forum.MusterTest do
       assert :src@nowhere in Scope.occupancy(scope, :fresh_b)
     end
 
+    test "apply_delta/5 ADDS rows without wiping the existing baseline (add-only)",
+         %{scope: scope} do
+      src = fake_pid()
+      # A prior full snapshot established the previous generation's rows -- the
+      # baseline a later delta relies on. (In the field this is the round the
+      # gaining router acked before it became eligible for a delta.)
+      assert :ok = Scope.receive_node_state(scope, :src@nowhere, [:base_a, :base_b], 0, 2, src)
+      assert :src@nowhere in Scope.occupancy(scope, :base_a)
+      assert :src@nowhere in Scope.occupancy(scope, :base_b)
+
+      # A DELTA carries ONLY a newly-moved group. Unlike receive_node_state it
+      # must NOT wipe: the moved-in group is added and every baseline row survives.
+      # This add-onto-baseline is exactly the property that makes it safe to send
+      # a delta of only the moved groups: the receiver already holds the rest.
+      assert :ok = Scope.apply_delta(scope, :src@nowhere, [:moved_c], 0, 3, src)
+
+      assert :src@nowhere in Scope.occupancy(scope, :moved_c)
+      assert :src@nowhere in Scope.occupancy(scope, :base_a)
+      assert :src@nowhere in Scope.occupancy(scope, :base_b)
+    end
+
+    test "apply_delta/5 with a stale (not-newer) round is dropped WHOLESALE",
+         %{scope: scope} do
+      src = fake_pid()
+      # A prior round from this source advanced the per-source watermark
+      # (applied_snapshot_seq) to seq 5.
+      assert :ok = Scope.receive_node_state(scope, :src@nowhere, [:kept], 0, 5, src)
+      assert :src@nowhere in Scope.occupancy(scope, :kept)
+
+      # A reordered, stale DELTA (seq 5, NOT strictly greater than the watermark)
+      # is dropped ENTIRELY -- even though :late has no row, so its per-row seq
+      # guard alone would admit it. The wholesale per-source guard is what stops a
+      # stale round from adding groups a newer round already superseded.
+      assert :ok = Scope.apply_delta(scope, :src@nowhere, [:late], 0, 5, src)
+      refute :src@nowhere in Scope.occupancy(scope, :late)
+
+      # A genuinely newer DELTA (seq above the watermark) is applied.
+      assert :ok = Scope.apply_delta(scope, :src@nowhere, [:fresh], 0, 6, src)
+      assert :src@nowhere in Scope.occupancy(scope, :fresh)
+    end
+
     test "writes from different sources don't interfere", %{scope: scope} do
       src_a = fake_pid()
       src_b = fake_pid()
@@ -2109,7 +2150,7 @@ defmodule Forum.MusterTest do
 
     test "a rejoin during a coordinator restart does not leave targets/3 silently dropping a live member",
          %{scope: scope} do
-      # tla/FINDINGS.md finding 1: Forum.Muster.Shard.handle_join/4's
+      # Forum.Muster.Shard.handle_join/4's
       # `:cooldown` branch reclaims a group without notifying the router, on
       # the assumption "the router already knows we hold this group". That
       # assumption does not survive a coordinator restart: init/1 resets the
