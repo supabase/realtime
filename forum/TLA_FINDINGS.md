@@ -27,8 +27,21 @@ when a coordinator restarts in place, but peers monitor the coordinator PID and
 DO get a `:DOWN` that wipes the restarted node's stale agreement. With that
 `:DOWN` modeled faithfully (`tla/Muster2DeltaRestartDown.tla`) `NoMissedDelivery`
 holds again. This document is the checkpoint so work can resume.
+**The Finding B residual (the async `:DOWN` window) is now built too**
+(`tla/Muster2RestartDownAsync.tla`): the window is **confirmed real**
+(`NoMissedDelivery` violated, as predicted), it is **broader than pure `:DOWN`
+latency** (two stronger candidate bounds are refuted by real shapes — a
+never-monitored first incarnation whose late marker lands behind a withheld
+discover-ack piggyback, and a restart-triggered peer-side **shrink** re-homing
+a group behind the router's back), and it is **exactly Finding A's class**:
+`MissImpliesViewDivergence` (every miss has the missed holder on a different
+committed view than the router — transient, self-healing asymmetric
+convergence) holds over deep partial searches. Building it also surfaced three
+code-level facts the sync `:DOWN` model simplified (per-pid attribution of the
+wipes, `:DOWN` = pure shrink when the new incarnation is unregistered, and
+markers/data creating no monitor) — see "Follow-up models".
 
-Twelve models:
+Thirteen models:
 
 * `tla/Muster.tla` (+ `.cfg`) — the baseline routing model that **exhibits**
   Finding A (`NoMissedDelivery` is violated).
@@ -93,6 +106,14 @@ Twelve models:
   incarnation's in-flight messages, FIFO-faithfully). `NoMissedDelivery` **holds**
   again (exhaustive at `MaxSeq=2`, partial-clean at `MaxSeq=4` past the depth-12
   where the base violated). See "Finding B".
+* `tla/Muster2RestartDownAsync.tla` (+ `.cfg`, `_char.cfg`, `_char3.cfg`,
+  `_strong.cfg`) — the **async peer-side `:DOWN`** (the Finding B residual),
+  single-group, with the `:DOWN` modeled faithfully to the code (per-incarnation
+  pid attribution; shrink-vs-wipe by registration state; channel-accurate
+  monitor creation and ordering). `NoMissedDelivery` is **violated** (the window
+  is real — `tla/trace_asyncdown_window.txt`); the characterization
+  `MissImpliesViewDivergence` **holds** (partial-clean, deep). See "Follow-up
+  models".
 
 Plus two bounded 4-node harnesses (`tla/MusterBounded.tla`,
 `tla/Muster2Bounded.tla`) — see "Follow-up models".
@@ -283,19 +304,19 @@ depth 20, 0 on queue) and **partial-clean at `MaxSeq=4`** (27.2M distinct, BFS d
 12 — past the depth where the base model violated). So the peer-pid `:DOWN` is the
 mechanism that keeps the restart path safe, and the code has it.
 
-**Residual (bounded, not separately modeled).** The corrected model fires the `:DOWN`
+**Residual (NOW BUILT AND CHARACTERIZED — see `tla/Muster2RestartDownAsync.tla`
+under "Follow-up models").** The corrected model fires the `:DOWN`
 **synchronously** with the restart, collapsing its delivery latency to zero. A peer
 that was legitimately `:ready` on the old view before the restart stays `:ready` until
 it actually **processes** the (async) coordinator-pid `:DOWN`; a `persistent_term`-based
 broadcast in that gap (`Muster.targets` reads status/occupancy directly, not via the
 coordinator mailbox) could still miss a group the restarted node re-homed under its
-reset view. That is a Finding-A-class **transient, self-healing** window bounded by
-`:DOWN` delivery+processing latency, closed by the `:DOWN` just as Finding A's window is
-closed by the superseding marker. Whether it warrants action is the same *zero-miss vs
-eventual-convergence* decision as Finding A. Precisely characterizing it would need an
-**async** peer-`:DOWN` action (a delayed `PeerCoordDown(p, n)` ordered after the old
-incarnation's messages) rather than the synchronous wipe used here — a documented next
-step, not yet built.
+reset view. The async model **confirms this window is real** (`NoMissedDelivery`
+violated, 9-step trace) and shows it is **broader than `:DOWN` latency alone** —
+but every reachable miss is **Finding-A-class**: the missed holder is on a
+different committed view than the router (asymmetric convergence; transient and
+self-healing). Whether it warrants action is the same *zero-miss vs
+eventual-convergence* decision as Finding A.
 
 **Takeaway.** The follow-up did its job: it found that `Muster2Restart` (and hence the
 restart half of caveat 3) was **not faithful** — it omitted the load-bearing peer-pid
@@ -880,9 +901,102 @@ rides alongside a restart. Cross-check: `Muster2Restart_s4.cfg` shows the same
 violation in the single-group restart model at `MaxSeq=4`, confirming Finding B is
 a restart-path (not delta/multi-group) phenomenon.
 
-**Next step (documented, not built):** an **async** peer-`:DOWN` action to
-characterize the residual `:DOWN`-latency transient described in Finding B (the
-corrected model fires the `:DOWN` synchronously, collapsing that window to zero).
+**Next step — DONE:** the **async** peer-`:DOWN` action is now built
+(`tla/Muster2RestartDownAsync.tla`, next section).
+
+### `tla/Muster2RestartDownAsync.tla` — the async peer-`:DOWN` window (the Finding B residual, built)
+
+Single-group (Finding B reproduces single-group), on the `Muster2Restart` base.
+Instead of the sync model's restart-time "blank `mv[p][n]` everywhere + drop all
+old in-flight messages", the `:DOWN` is a **queued per-peer event**
+(`downQ[p][n]` = dead incarnations of `n` whose `:DOWN` peer `p` has not yet
+processed), and its semantics were re-derived from the code rather than assumed.
+That re-derivation surfaced **three facts the sync model simplified** (scope.ex
+`:DOWN` handler ~L841-883, `recompute_members` ~L1476, `register_peer` call
+sites):
+
+1. **Attribution.** The handler wipes only occupancy rows / `member_views` /
+   `applied_snapshot_seq` entries **written by the dying pid**
+   (`:ets.match_delete(occ, {{:_, peer_node}, :_, :_, pid})`); data already
+   re-written by the new incarnation survives. Modeled by an `inc` stamp on
+   every message, occupancy row and `member_views` entry.
+2. **Membership.** `members` is derived from the `peers` **pid map**, so
+   processing the `:DOWN` when no newer incarnation of `n` is registered is a
+   **pure shrink** — the peer drops `n` from its committed view and re-homes
+   `n`'s groups exactly as if `n` had died (`recompute_members` →
+   `do_rebalance`), *not* merely an agreement blank. If a newer incarnation's
+   discover raced ahead (real: different senders, no dist ordering), membership
+   is unchanged and only the attributed wipe happens.
+3. **Monitors.** Only the discover/discover-ack handshake calls
+   `register_peer`; **markers, prepares, snapshots and vacants create no
+   monitor**. A dead incarnation that a peer never registered gets **no `:DOWN`
+   at all**, and its late writes (worker/erpc channels are unordered with the
+   coordinator's death — the code comment at ~L820-832 says exactly this) can
+   land *after* whatever `:DOWN` did fire. Coordinator-sent markers, by
+   contrast, are Erlang-signal-ordered before their incarnation's `:DOWN`
+   (enforced as a delivery guard).
+
+**Results (Nodes = {1,2,3}, MaxSeq = 4):**
+
+* **`NoMissedDelivery` is VIOLATED — the window is real**, found in 14s at
+  depth 9 (`tla/trace_asyncdown_window.txt`): nodes 1,2 pair on `{1,2}` (router
+  1 `:ready`); node 2 heartbeats, then its coordinator restarts (the `:DOWN` is
+  queued at node 1, not yet processed) and re-joins the group under its reset
+  view `{2}`, claiming it on itself; the pre-restart marker lands and node 1 is
+  `:ready` for `{1,2}` with an empty table — a broadcast from node 1 misses
+  node 2's live member. This is the exact transient Finding B predicted.
+* **`MissImpliesPendingDown` ("the window closes when the router's mailbox
+  drains") is REFUTED** — and the witness is a *real* shape, not an artifact: if
+  node 1 had **never registered node 2's first incarnation** (its discover-ack
+  was still in flight), no monitor exists and **no `:DOWN` is ever delivered**
+  for it. Node 1 then registers the *new* incarnation — whose discover/ack
+  piggyback is **withheld** precisely because the new incarnation's re-grow
+  moved the group onto node 1 and owes it a snapshot (scope.ex ~L743-750) — so
+  nothing overwrites the agreement, and the dead incarnation's late marker
+  makes node 1 stale-ready. Heals when the owed snapshot lands (it carries both
+  the row and the newer marker).
+* **`MissImpliesStaleResidue` ("...or the router holds a dead incarnation's
+  agreement entry") is REFUTED too**, by a second-order shape with *no* dead
+  incarnation residue at the router: node **1** restarts; node 2 processes the
+  `:DOWN` with the new pid unregistered → **pure shrink** to `{2}`, re-homing
+  the group onto itself; node 2's *pre-shrink* marker (live incarnation,
+  asserting `{1,2}`) then lands at the re-paired node 1 → node 1 is
+  stale-ready for `{1,2}` while the holder sits on `{2}`. The restart-triggered
+  shrink is a view change racing exactly like Finding A's discovery — and every
+  commit in the trace has an **empty B1 audience** (all growth from
+  singletons), so the prepare gate never engages. Heals when the handshake
+  re-grows node 2 and its owed snapshot lands.
+* **`MissImpliesViewDivergence` HOLDS — the characterization.** Every reachable
+  miss has the missed holder's committed view **different from the router's**:
+  the miss lives strictly inside an asymmetric-convergence window (the holder is
+  mid-churn relative to the router), i.e. **Finding A's class** — transient and
+  self-healing, closed by the holder's convergence re-announcing through the
+  B1/owed-snapshot machinery. A miss between two nodes *settled on the same
+  committed view* would be a genuinely new bug class; none is reachable.
+  Partial-clean (the async dimensions make exhaustion infeasible): `MaxSeq=3` —
+  429M generated / 110.8M distinct, BFS depth 15, no violation (~10 min cap);
+  `MaxSeq=4` — 419M generated / 115M distinct, BFS depth 13, no violation. All
+  three refuted-invariant witnesses live at depths 9-12, well inside both
+  searches, so the clean result is non-vacuous by construction.
+
+**Takeaway.** The Finding B residual is real but no worse than Finding A: the
+async `:DOWN` (plus the never-monitored and shrink-race variants) re-opens only
+**asymmetric-convergence transients**, never a settled-view miss. The healing
+signals are the same machinery the design already leans on (the `:DOWN` itself,
+the owed-snapshot barrier, newest-seq-wins announces). It also sharpens the
+severity discussion: the window is bounded not by `:DOWN` delivery alone but by
+*convergence + owed-snapshot delivery* after a coordinator restart. Whether
+zero-miss-during-restart-churn is required is the same product decision as
+Finding A — no code change made (per the confirm-before-fixes preference).
+
+**Modeling notes.** Known simplifications, judged benign and documented in the
+module header: Discover/Reregister register the *current* incarnation only (a
+stale discover would monitor a dead pid → instant `:DOWN` → net no-op); and
+when a `:DOWN` pops the old pid while a newer incarnation is registered mid
+prepare-round, the code supersedes/cancels the round while the model leaves it
+unchanged (the in-flight prepares still carry their invalidation). The
+`Reregister` action models the withheld-piggyback ack (register without
+asserting a view); the asserting variant is `Reregister` + an ordinary marker.
 
 ## Caveats / what is NOT yet modeled (next steps)
 
@@ -916,8 +1030,10 @@ corrected model fires the `:DOWN` synchronously, collapsing that window to zero)
      restart, which is unfaithful (peers monitor the coordinator PID); the
      restart × delta follow-up exposed this as a spurious `NoMissedDelivery`
      violation at `MaxSeq=4`. With the peer-pid `:DOWN` modeled faithfully
-     (`tla/Muster2DeltaRestartDown.tla`) `NoMissedDelivery` holds again. A narrow
-     async-`:DOWN`-latency transient remains (Finding B residual). This is NOT
+     (`tla/Muster2DeltaRestartDown.tla`) `NoMissedDelivery` holds again. The
+     async-`:DOWN`-latency transient (Finding B residual) is now **also modeled**
+     (`tla/Muster2RestartDownAsync.tla`): real, but characterized as
+     Finding-A-class (`MissImpliesViewDivergence` holds). This is NOT
      covered by the no-name-reuse assumption (that is about deployments; this is a
      supervisor restart of a still-live node). See Finding B and "Follow-up models".
    * **Node name reuse across deployments** (a brand-new incarnation reusing a
@@ -953,3 +1069,27 @@ corrected model fires the `:DOWN` synchronously, collapsing that window to zero)
    `tla/Muster2RestartLive.tla`: a droppable prepare wedges a round and the
    crash-restart resolves it; `RoundsResolve` and `<>[]RoundsQuiet` hold
    (exhaustive at 3 nodes, `MaxSeq=2`). See "Follow-up models" above.
+7. **Remaining cross-mechanism compositions (open, ranked low).** The GC sweep +
+   tombstone reap (`Muster3`) is verified only on the single-group, no-restart
+   Muster2 base — **sweep × restart** and **sweep × delta/multi-group** are
+   unchecked compositions. Assessment: the sweep's under-delivery lever is its
+   routes-away + `SourceAgrees` guard; a restart wipes the very `member_views`
+   agreement `SourceAgrees` reads (fail-safe direction: no agreement ⇒ no
+   sweep), and a delta's baseline rows are exactly the groups that *do* route to
+   the receiver, which the routes-away guard spares. Both arguments are
+   informal; given Finding B came from exactly this kind of composition, worth
+   building if the sweep is ever touched. Similarly, `Muster2RestartDownAsync`
+   is single-group — its composition with delta selection is unchecked (the
+   sync `Muster2DeltaRestartDown` covers restart × delta; the async window is
+   view-level, so multi-group is not expected to change its class).
+8. **Marker seq abstraction (noted, declined).** Every `NoMissedDelivery` model
+   stamps re-announce markers with a fresh per-message seq, while the real
+   heartbeat carries the stable committed `view_seq` — the abstraction
+   `Muster2Cancel` showed can hide *liveness* bugs (stranding). For *safety*
+   it is sound by a content-level simulation: a stable-seq marker that would be
+   rejected (seq ≤ current) maps to "never deliver that marker" in the
+   fresh-bump model (delivery is optional), and one that applies asserts the
+   same content at a seq consistent with the per-node monotonic counter, so
+   every stable-seq `mv`-content evolution is reproducible fresh-bump. The
+   seq-axis behaviour itself (stranding + the `cancel_view_change` fix) is
+   machine-checked separately in `Muster2Cancel`.

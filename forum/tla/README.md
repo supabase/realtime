@@ -50,12 +50,31 @@ steps).
   FIFO-faithfully). `NoMissedDelivery` **holds** (exhaustive `MaxSeq=2`,
   partial-clean `MaxSeq=4` past the depth-12 where the base violated), confirming
   the peer-pid `:DOWN` is the mechanism that keeps the restart path safe.
+* `Muster2RestartDownAsync.tla` (+ `.cfg`, `_char.cfg`, `_char3.cfg`,
+  `_strong.cfg`) — the **async peer-side coordinator-pid `:DOWN`** (the Finding
+  B residual the sync model collapsed to zero latency), single-group, with the
+  `:DOWN` modeled faithfully to scope.ex ~L815-883: per-incarnation **pid
+  attribution** of occ/mv wipes, `:DOWN` = **pure shrink** when no newer
+  incarnation is registered (members derive from the `peers` pid map), only
+  discover/ack register (markers/prepares/snapshots/vacants create no
+  monitor), and coordinator-sent markers ordered before their incarnation's
+  `:DOWN` while worker/erpc channels stay unordered. Results: `NoMissedDelivery`
+  **VIOLATED** (expected — the window is real; trace in
+  `trace_asyncdown_window.txt`); two candidate bounds (`MissImpliesPendingDown`,
+  `MissImpliesStaleResidue`) **REFUTED by real shapes** (never-monitored first
+  incarnation + withheld ack piggyback; restart-triggered peer shrink);
+  the characterization `MissImpliesViewDivergence` (every miss is a Finding-A
+  class asymmetric-convergence window) **holds** partial-clean (MaxSeq=3 depth
+  15 / 110M distinct; MaxSeq=4 depth 13 / 115M distinct). See TLA_FINDINGS.md.
 * `MusterBounded.tla` / `Muster2Bounded.tla` (+ `.cfg`) — bounded **4-node**
   harnesses (`|msgs|` capped via `CONSTRAINT`). The baseline finds Finding A at 4
   nodes (positive control); the fix shows no violation over a large partial run.
   Not a proof — 4 nodes is not exhaustible, and `Router == min` breaks node
   symmetry so no `SYMMETRY` set applies.
 * `trace_finding1.txt` — saved counterexample trace for Finding A.
+* `trace_restart_artifact.txt` — the Finding B (modeling-artifact) trace.
+* `trace_asyncdown_window.txt` — the async-`:DOWN` window miss
+  (Muster2RestartDownAsync, 9 steps).
 
 See `../TLA_FINDINGS.md` → "Follow-up models" for the full write-up and state
 counts.

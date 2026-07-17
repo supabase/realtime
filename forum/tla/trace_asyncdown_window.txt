@@ -1,0 +1,299 @@
+Error: Invariant NoMissedDelivery is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ mv = << << [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0] >> >>
+/\ seqCtr = <<0, 0, 0>>
+/\ regd = <<<<0, 0, 0>>, <<0, 0, 0>>, <<0, 0, 0>>>>
+/\ view = <<{1}, {2}, {3}>>
+/\ promoted = <<TRUE, TRUE, TRUE>>
+/\ msgs = {}
+/\ inc = <<1, 1, 1>>
+/\ holds = <<FALSE, FALSE, FALSE>>
+/\ up = <<TRUE, TRUE, TRUE>>
+/\ occ = << << [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0] >>,
+   << [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0] >>,
+   << [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0] >> >>
+/\ round = << [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}],
+   [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}],
+   [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}] >>
+/\ downQ = <<<<{}, {}, {}>>, <<{}, {}, {}>>, <<{}, {}, {}>>>>
+/\ owed = <<{}, {}, {}>>
+
+State 2: <Discover line 174, col 3 to line 186, col 71 of module Muster2RestartDownAsync>
+/\ mv = << << [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0] >> >>
+/\ seqCtr = <<0, 1, 0>>
+/\ regd = <<<<0, 0, 0>>, <<1, 0, 0>>, <<0, 0, 0>>>>
+/\ view = <<{1}, {2}, {3}>>
+/\ promoted = <<TRUE, TRUE, TRUE>>
+/\ msgs = {}
+/\ inc = <<1, 1, 1>>
+/\ holds = <<FALSE, FALSE, FALSE>>
+/\ up = <<TRUE, TRUE, TRUE>>
+/\ occ = << << [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0] >>,
+   << [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0] >>,
+   << [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0] >> >>
+/\ round = << [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}],
+   [active |-> TRUE, target |-> {1, 2}, seq |-> 1, awaiting |-> {}],
+   [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}] >>
+/\ downQ = <<<<{}, {}, {}>>, <<{}, {}, {}>>, <<{}, {}, {}>>>>
+/\ owed = <<{}, {}, {}>>
+
+State 3: <Discover line 174, col 3 to line 186, col 71 of module Muster2RestartDownAsync>
+/\ mv = << << [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0] >> >>
+/\ seqCtr = <<1, 1, 0>>
+/\ regd = <<<<0, 1, 0>>, <<1, 0, 0>>, <<0, 0, 0>>>>
+/\ view = <<{1}, {2}, {3}>>
+/\ promoted = <<TRUE, TRUE, TRUE>>
+/\ msgs = {}
+/\ inc = <<1, 1, 1>>
+/\ holds = <<FALSE, FALSE, FALSE>>
+/\ up = <<TRUE, TRUE, TRUE>>
+/\ occ = << << [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0] >>,
+   << [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0] >>,
+   << [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0] >> >>
+/\ round = << [active |-> TRUE, target |-> {1, 2}, seq |-> 1, awaiting |-> {}],
+   [active |-> TRUE, target |-> {1, 2}, seq |-> 1, awaiting |-> {}],
+   [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}] >>
+/\ downQ = <<<<{}, {}, {}>>, <<{}, {}, {}>>, <<{}, {}, {}>>>>
+/\ owed = <<{}, {}, {}>>
+
+State 4: <Commit line 218, col 3 to line 231, col 62 of module Muster2RestartDownAsync>
+/\ mv = << << [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0] >> >>
+/\ seqCtr = <<1, 1, 0>>
+/\ regd = <<<<0, 1, 0>>, <<1, 0, 0>>, <<0, 0, 0>>>>
+/\ view = <<{1, 2}, {2}, {3}>>
+/\ promoted = <<TRUE, TRUE, TRUE>>
+/\ msgs = {}
+/\ inc = <<1, 1, 1>>
+/\ holds = <<FALSE, FALSE, FALSE>>
+/\ up = <<TRUE, TRUE, TRUE>>
+/\ occ = << << [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0] >>,
+   << [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0] >>,
+   << [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0] >> >>
+/\ round = << [active |-> FALSE, target |-> {1, 2}, seq |-> 1, awaiting |-> {}],
+   [active |-> TRUE, target |-> {1, 2}, seq |-> 1, awaiting |-> {}],
+   [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}] >>
+/\ downQ = <<<<{}, {}, {}>>, <<{}, {}, {}>>, <<{}, {}, {}>>>>
+/\ owed = <<{}, {}, {}>>
+
+State 5: <Commit line 218, col 3 to line 231, col 62 of module Muster2RestartDownAsync>
+/\ mv = << << [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0] >> >>
+/\ seqCtr = <<1, 1, 0>>
+/\ regd = <<<<0, 1, 0>>, <<1, 0, 0>>, <<0, 0, 0>>>>
+/\ view = <<{1, 2}, {1, 2}, {3}>>
+/\ promoted = <<TRUE, TRUE, TRUE>>
+/\ msgs = {}
+/\ inc = <<1, 1, 1>>
+/\ holds = <<FALSE, FALSE, FALSE>>
+/\ up = <<TRUE, TRUE, TRUE>>
+/\ occ = << << [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0] >>,
+   << [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0] >>,
+   << [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0] >> >>
+/\ round = << [active |-> FALSE, target |-> {1, 2}, seq |-> 1, awaiting |-> {}],
+   [active |-> FALSE, target |-> {1, 2}, seq |-> 1, awaiting |-> {}],
+   [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}] >>
+/\ downQ = <<<<{}, {}, {}>>, <<{}, {}, {}>>, <<{}, {}, {}>>>>
+/\ owed = <<{}, {}, {}>>
+
+State 6: <SendMarker line 382, col 3 to line 390, col 84 of module Muster2RestartDownAsync>
+/\ mv = << << [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0] >> >>
+/\ seqCtr = <<1, 2, 0>>
+/\ regd = <<<<0, 1, 0>>, <<1, 0, 0>>, <<0, 0, 0>>>>
+/\ view = <<{1, 2}, {1, 2}, {3}>>
+/\ promoted = <<TRUE, TRUE, TRUE>>
+/\ msgs = {[inc |-> 1, hv |-> {1, 2}, t |-> "marker", src |-> 2, dst |-> 1, seq |-> 2]}
+/\ inc = <<1, 1, 1>>
+/\ holds = <<FALSE, FALSE, FALSE>>
+/\ up = <<TRUE, TRUE, TRUE>>
+/\ occ = << << [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0] >>,
+   << [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0] >>,
+   << [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0] >> >>
+/\ round = << [active |-> FALSE, target |-> {1, 2}, seq |-> 1, awaiting |-> {}],
+   [active |-> FALSE, target |-> {1, 2}, seq |-> 1, awaiting |-> {}],
+   [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}] >>
+/\ downQ = <<<<{}, {}, {}>>, <<{}, {}, {}>>, <<{}, {}, {}>>>>
+/\ owed = <<{}, {}, {}>>
+
+State 7: <Restart line 278, col 3 to line 299, col 34 of module Muster2RestartDownAsync>
+/\ mv = << << [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0] >> >>
+/\ seqCtr = <<1, 3, 0>>
+/\ regd = <<<<0, 1, 0>>, <<0, 0, 0>>, <<0, 0, 0>>>>
+/\ view = <<{1, 2}, {2}, {3}>>
+/\ promoted = <<TRUE, FALSE, TRUE>>
+/\ msgs = {[inc |-> 1, hv |-> {1, 2}, t |-> "marker", src |-> 2, dst |-> 1, seq |-> 2]}
+/\ inc = <<1, 2, 1>>
+/\ holds = <<FALSE, FALSE, FALSE>>
+/\ up = <<TRUE, TRUE, TRUE>>
+/\ occ = << << [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0] >>,
+   << [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0] >>,
+   << [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0] >> >>
+/\ round = << [active |-> FALSE, target |-> {1, 2}, seq |-> 1, awaiting |-> {}],
+   [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}],
+   [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}] >>
+/\ downQ = <<<<{}, {1}, {}>>, <<{}, {}, {}>>, <<{}, {}, {}>>>>
+/\ owed = <<{}, {}, {}>>
+
+State 8: <HolderJoin line 142, col 3 to line 151, col 78 of module Muster2RestartDownAsync>
+/\ mv = << << [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0] >> >>
+/\ seqCtr = <<1, 4, 0>>
+/\ regd = <<<<0, 1, 0>>, <<0, 0, 0>>, <<0, 0, 0>>>>
+/\ view = <<{1, 2}, {2}, {3}>>
+/\ promoted = <<TRUE, FALSE, TRUE>>
+/\ msgs = {[inc |-> 1, hv |-> {1, 2}, t |-> "marker", src |-> 2, dst |-> 1, seq |-> 2]}
+/\ inc = <<1, 2, 1>>
+/\ holds = <<FALSE, TRUE, FALSE>>
+/\ up = <<TRUE, TRUE, TRUE>>
+/\ occ = << << [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0] >>,
+   << [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 2, present |-> TRUE, seq |-> 4],
+      [inc |-> 0, present |-> FALSE, seq |-> 0] >>,
+   << [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0] >> >>
+/\ round = << [active |-> FALSE, target |-> {1, 2}, seq |-> 1, awaiting |-> {}],
+   [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}],
+   [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}] >>
+/\ downQ = <<<<{}, {1}, {}>>, <<{}, {}, {}>>, <<{}, {}, {}>>>>
+/\ owed = <<{}, {}, {}>>
+
+State 9: <Next line 442, col 6 to line 442, col 41 of module Muster2RestartDownAsync>
+/\ mv = << << [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 1, known |-> TRUE, hv |-> {1, 2}, seq |-> 2],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0],
+      [inc |-> 0, known |-> FALSE, hv |-> {}, seq |-> 0] >> >>
+/\ seqCtr = <<1, 4, 0>>
+/\ regd = <<<<0, 1, 0>>, <<0, 0, 0>>, <<0, 0, 0>>>>
+/\ view = <<{1, 2}, {2}, {3}>>
+/\ promoted = <<TRUE, FALSE, TRUE>>
+/\ msgs = {}
+/\ inc = <<1, 2, 1>>
+/\ holds = <<FALSE, TRUE, FALSE>>
+/\ up = <<TRUE, TRUE, TRUE>>
+/\ occ = << << [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0] >>,
+   << [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 2, present |-> TRUE, seq |-> 4],
+      [inc |-> 0, present |-> FALSE, seq |-> 0] >>,
+   << [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0],
+      [inc |-> 0, present |-> FALSE, seq |-> 0] >> >>
+/\ round = << [active |-> FALSE, target |-> {1, 2}, seq |-> 1, awaiting |-> {}],
+   [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}],
+   [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}] >>
+/\ downQ = <<<<{}, {1}, {}>>, <<{}, {}, {}>>, <<{}, {}, {}>>>>
+/\ owed = <<{}, {}, {}>>
+
