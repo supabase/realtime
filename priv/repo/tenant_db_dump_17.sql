@@ -1,3 +1,16 @@
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_realtime_admin') THEN
+    CREATE ROLE supabase_realtime_admin;
+    ALTER ROLE supabase_realtime_admin WITH NOSUPERUSER NOINHERIT NOCREATEROLE NOCREATEDB NOLOGIN NOREPLICATION NOBYPASSRLS;
+    ALTER ROLE supabase_realtime_admin SET search_path TO 'public', 'extensions', 'realtime';
+    GRANT anon TO supabase_realtime_admin WITH INHERIT FALSE GRANTED BY supabase_admin;
+    GRANT authenticated TO supabase_realtime_admin WITH INHERIT FALSE GRANTED BY supabase_admin;
+    GRANT service_role TO supabase_realtime_admin WITH INHERIT FALSE GRANTED BY supabase_admin;
+    GRANT SET ON PARAMETER log_min_messages TO supabase_realtime_admin;
+  END IF;
+END $$;
+
 --
 -- PostgreSQL database dump
 --
