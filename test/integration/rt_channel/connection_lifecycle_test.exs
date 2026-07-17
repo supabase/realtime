@@ -33,7 +33,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
 
       log =
         capture_log(fn ->
-          assert {:error, _} =
+          assert {:error, %Mint.WebSocket.UpgradeFailureError{status_code: 404}} =
                    WebsocketClient.connect(self(), uri(fake_tenant, serializer), serializer, [
                      {"x-api-key", "some-token"}
                    ])
@@ -47,10 +47,25 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
     test "logs MissingAPIKey and rejects connection when no token provided", %{tenant: tenant, serializer: serializer} do
       log =
         capture_log(fn ->
-          assert {:error, _} = WebsocketClient.connect(self(), uri(tenant, serializer), serializer, [])
+          assert {:error, %Mint.WebSocket.UpgradeFailureError{status_code: 401}} =
+                   WebsocketClient.connect(self(), uri(tenant, serializer), serializer, [])
         end)
 
       assert log =~ "MissingAPIKey"
+    end
+  end
+
+  describe "socket connect - malformed token" do
+    test "logs MalformedJWT and rejects connection with a 401", %{tenant: tenant, serializer: serializer} do
+      log =
+        capture_log(fn ->
+          assert {:error, %Mint.WebSocket.UpgradeFailureError{status_code: 401}} =
+                   WebsocketClient.connect(self(), uri(tenant, serializer), serializer, [
+                     {"x-api-key", "not-a-jwt"}
+                   ])
+        end)
+
+      assert log =~ "MalformedJWT"
     end
   end
 
@@ -115,7 +130,10 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
       log =
         capture_log(fn ->
           change_tenant_configuration(tenant, :suspend, true)
-          {:error, %Mint.WebSocket.UpgradeFailureError{}} = get_connection(tenant, serializer, role: "anon")
+
+          {:error, %Mint.WebSocket.UpgradeFailureError{status_code: 403}} =
+            get_connection(tenant, serializer, role: "anon")
+
           refute_receive _any
         end)
 
@@ -219,11 +237,12 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
     test "invalid JWT with expired token", %{tenant: tenant, serializer: serializer} do
       log =
         capture_log(fn ->
-          get_connection(tenant, serializer,
-            role: "authenticated",
-            claims: %{:exp => System.system_time(:second) - 1000},
-            params: %{log_level: :info}
-          )
+          assert {:error, %Mint.WebSocket.UpgradeFailureError{status_code: 401}} =
+                   get_connection(tenant, serializer,
+                     role: "authenticated",
+                     claims: %{:exp => System.system_time(:second) - 1000},
+                     params: %{log_level: :info}
+                   )
         end)
 
       assert log =~ "InvalidJWTToken: Token has expired"

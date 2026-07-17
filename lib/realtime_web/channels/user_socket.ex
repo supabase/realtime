@@ -151,7 +151,7 @@ defmodule RealtimeWeb.UserSocket do
   defp error_response(:token_malformed), do: {401, "The token provided is not a valid JWT"}
   defp error_response(:too_many_connections), do: {429, "Too many connected users"}
   defp error_response(:too_many_joins), do: {429, "Too many joins per second"}
-  defp error_response(_reason), do: {403, "Error connecting to Realtime"}
+  defp error_response(_reason), do: {500, "Error connecting to Realtime"}
 
   defp access_token(params, headers) do
     case :proplists.lookup("x-api-key", headers) do

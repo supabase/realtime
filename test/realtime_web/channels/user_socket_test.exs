@@ -124,10 +124,10 @@ defmodule RealtimeWeb.UserSocketTest do
       end
     end
 
-    test "maps unknown reasons to a generic 403 JSON response" do
+    test "maps unknown reasons to a generic 500 JSON response" do
       conn = UserSocket.handle_error(conn(:get, "/socket/websocket"), {:error, :some_weird_reason})
 
-      assert conn.status == 403
+      assert conn.status == 500
       assert Jason.decode!(conn.resp_body) == %{"error" => "Error connecting to Realtime"}
     end
   end

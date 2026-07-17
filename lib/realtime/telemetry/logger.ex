@@ -93,7 +93,7 @@ defmodule Realtime.Telemetry.Logger do
 
   def handle_event([:phoenix, :error_rendered], _measurements, metadata, _config) do
     %{status: status, kind: kind, reason: reason} = metadata
-    status = status_code(status)
+    status = Plug.Conn.Status.code(status)
     message = "Sent #{status} response: #{format_reason(kind, reason)}"
 
     if status >= 500 do
@@ -107,11 +107,8 @@ defmodule Realtime.Telemetry.Logger do
     :ok
   end
 
-  defp status_code(status) when is_integer(status), do: status
-  defp status_code(status), do: Plug.Conn.Status.code(status)
-
-  defp format_reason(_kind, %mod{__exception__: true} = reason),
-    do: "#{inspect(mod)} - #{Exception.message(reason)}"
+  defp format_reason(_kind, reason) when is_exception(reason),
+    do: "#{inspect(reason.__struct__)} - #{Exception.message(reason)}"
 
   defp format_reason(kind, reason), do: "#{kind} - #{to_log(reason)}"
 

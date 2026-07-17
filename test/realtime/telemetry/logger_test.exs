@@ -41,9 +41,7 @@ defmodule Realtime.Telemetry.LoggerTest do
           })
         end)
 
-      assert log =~ "[error]"
-      assert log =~ "HttpServerError"
-      assert log =~ "Sent 500 response: RuntimeError - boom"
+      assert log =~ "error_code=HttpServerError [error] HttpServerError: Sent 500 response: RuntimeError - boom"
     end
 
     test "logs 4xx responses at warning level" do
