@@ -23,6 +23,16 @@ steps).
   per-group `holds`/`occ`, snapshots carrying a group-set. `NoMissedDelivery`
   holds **per group** (exhaustive at `MaxSeq=2`, partial-clean at `MaxSeq=3`);
   the `_w1/_w2/_w3` probes are non-vacuity witnesses (expected VIOLATED).
+* `Muster2Delta.tla` (+ `.cfg`, `_s4.cfg`, `_w1.cfg`) — Muster2Multi with the
+  rebalance snapshot **selection modeled faithfully**: the FULL(wipe+replace) vs
+  DELTA(add-only) choice, the `groups_to_reannounce` delta = only-moved-groups
+  payload, and the per-source **wholesale `applied_snapshot_seq` watermark** that
+  Muster2Multi abstracted (it always sent the complete set + add-only apply).
+  `NoMissedDelivery` **holds** (exhaustive at `MaxSeq=2` — the NON-delta baseline;
+  partial-clean at `MaxSeq=4` — the delta-covering run, `_s4.cfg`). Structural
+  finding: with consistent-hashing rings the add-only DELTA path is reachable
+  **only via a ≥3-node shrink** (growth can only route a group onto a *new* node,
+  always a FULL), witnessed by `_w1.cfg` (delta dispatched at BFS depth 10).
 * `MusterBounded.tla` / `Muster2Bounded.tla` (+ `.cfg`) — bounded **4-node**
   harnesses (`|msgs|` capped via `CONSTRAINT`). The baseline finds Finding A at 4
   nodes (positive control); the fix shows no violation over a large partial run.

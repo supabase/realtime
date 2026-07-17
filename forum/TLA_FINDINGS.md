@@ -11,15 +11,16 @@ single-group total-order ring (relabeling argument + bit-identical
 state counts), and a deeper 4-node bounded search corroborates; and
 multi-group (caveat 2) is now modeled — two groups with diverging ring orders
 on top of the B1 fix, `NoMissedDelivery` holds per group (exhaustive at
-`MaxSeq=2`, partial-clean at `MaxSeq=3`).** With that, **every original caveat is
-either closed or soundly declined** (message-ordering is a deliberate
-over-approximation; node-name-reuse is excluded by assumption). The remaining
-sub-gap is narrow: the multi-group model checks the *protocol* is safe given a
-correctly-computed snapshot group-set, but does not itself verify the
-`groups_to_reannounce` delta-vs-full selection logic. This document is the
-checkpoint so work can resume.
+`MaxSeq=2`, partial-clean at `MaxSeq=3`); and the multi-group model's own
+**delta-vs-full snapshot selection sub-gap is now closed** — `tla/Muster2Delta.tla`
+models the FULL(wipe)/DELTA(add-only) choice, the only-moved-groups delta payload,
+and the per-source wholesale `applied_snapshot_seq` watermark faithfully, and
+`NoMissedDelivery` still holds; the selection logic is also directly unit-tested.**
+With that, **every original caveat is either closed or soundly declined**
+(message-ordering is a deliberate over-approximation; node-name-reuse is excluded
+by assumption). This document is the checkpoint so work can resume.
 
-Eight models:
+Nine models:
 
 * `tla/Muster.tla` (+ `.cfg`) — the baseline routing model that **exhibits**
   Finding A (`NoMissedDelivery` is violated).
@@ -52,6 +53,15 @@ Eight models:
   (`RingRank[g]`), per-group `holds`/`occ`, and rebalance snapshots that carry a
   **set** of groups. `NoMissedDelivery` holds **per group** (see "Follow-up
   models").
+
+* `tla/Muster2Delta.tla` (+ `.cfg`, `_s4.cfg`, `_w1.cfg`) — Muster2Multi with the
+  rebalance snapshot **selection modeled faithfully** (closes the sub-gap
+  Muster2Multi left open): the **FULL(wipe+replace) vs DELTA(add-only)** choice,
+  the `groups_to_reannounce` delta payload of **only the moved-in groups**, and
+  the per-source **wholesale `applied_snapshot_seq` watermark** (a stale reordered
+  round is dropped entirely). `NoMissedDelivery` holds (exhaustive at `MaxSeq=2`,
+  partial-clean at `MaxSeq=4` — the delta path is only reachable at `MaxSeq≥4`; see
+  "Follow-up models").
 
 Plus two bounded 4-node harnesses (`tla/MusterBounded.tla`,
 `tla/Muster2Bounded.tla`) — see "Follow-up models".
@@ -586,12 +596,90 @@ old-view member for *any* view containing the mover, group-independent), so it
 closes Finding A for every group simultaneously — divergent per-group routing
 does not reopen it.
 
-**Sub-gap (honest scope).** The model sends the *correct* group-set on each
-snapshot (all held groups routing to the target). It therefore checks the
-**protocol** is safe given a correctly-computed set, but does **not** verify the
-code's `groups_to_reannounce` delta-vs-full *selection* logic — a snapshot that
-wrongly omits a group would be a code bug this abstraction cannot surface. That
-selection logic is the narrow remaining thing to model or unit-test directly.
+**Sub-gap (now closed).** Muster2Multi sends the *correct, complete* group-set on
+every snapshot (all held groups routing to the target) and applies it add-only
+with only a per-row seq guard — so it checks the **protocol** given a correctly
+computed set but does **not** exercise the code's `groups_to_reannounce`
+delta-vs-full *selection* nor the add-only/wholesale apply. That is closed by
+`tla/Muster2Delta.tla` (below) plus direct unit tests.
+
+### `tla/Muster2Delta.tla` — delta-vs-full snapshot selection (the Muster2Multi sub-gap)
+
+Muster2Multi's snapshot was a single abstract "full content, add-only apply"
+step. The real `do_rebalance` (`scope.ex` ~L1112-1169) is richer, and this model
+makes it faithful:
+
+* **Selection.** `groups_to_reannounce` = held groups whose **router changed vs
+  the previous ring generation** (`find_historical_node(_,_,1)`);
+  `changed_routers` = routers that gained ≥1 such group. Each changed router gets
+  **FULL** (`receive_node_state`, wipe+replace; payload = *all* held groups
+  routing to it) when it is **new to the view this round** *or* still **owed** a
+  previous round's snapshot, else **DELTA** (`apply_delta`, add-only; payload =
+  *only the moved-in* groups). Emission is bound to `Commit` (grow) and
+  `DetectDown` (shrink) — both funnel through `do_rebalance` in the code — because
+  the delta is a per-round quantity against the previous committed view.
+* **Wholesale watermark.** A per-source `appliedSeq[r][s]`
+  (`applied_snapshot_seq`): a snapshot/delta whose round seq is **not strictly
+  greater** than the highest already applied from that source is dropped
+  **entirely** (all its adds), not just per-row. Muster2Multi had only the per-row
+  guard.
+
+**The invariant under test.** A delta is add-only and carries only this round's
+moved groups; it is correct **only if** the receiver already holds every group the
+source holds routing to it that did *not* move this round (the *previous-generation
+baseline*). The `owed_snapshots` gate is meant to guarantee this — a delta is sent
+only to a router that **acked** the source's prior round, and any in-flight round
+forces a FULL. `NoMissedDelivery` asks whether that gate (plus the wholesale
+watermark) ever lets a delta leave a router missing a needed group.
+
+**Result: `NoMissedDelivery` holds.**
+
+* `MaxSeq=2`, 3 nodes, 2 groups (diverging rings) — **exhaustive**: 817,825
+  distinct states, depth 20, 0 left on queue, no violation. This is the
+  **non-delta baseline** (see the structural finding below).
+* `MaxSeq=4`, 3 nodes, 2 groups — partial (space grows past the heap): **100.6M
+  states generated, 29.0M distinct with no violation** at BFS depth 13 before a
+  ~4-minute cap. This is the **delta-covering** run (`Muster2Delta_s4.cfg`).
+
+**Structural finding (why the delta path is deep).** With consistent-hashing
+rings the router of a group is the min-rank present node, so **growth** can only
+move a group onto a *newly added* node (adding an element to a set only lowers the
+minimum) — which is always ∉ `old_members`, hence always a **FULL** snapshot. The
+add-only **DELTA path is therefore reachable only via a ≥3-node SHRINK** that
+removes a group's router and promotes an *existing* survivor. In this model that
+first occurs at `MaxSeq=4`, BFS depth 10 — so the exhaustive `MaxSeq=2` run
+contains **no deltas** (it is the non-delta baseline) and the `MaxSeq=4` partial
+run is what actually exercises the add-only path. This is itself a useful fact
+about the code: `apply_delta` is exclusively a shrink-time optimization.
+
+**Non-vacuity.** `NoDeltaSent` (`Muster2Delta_w1.cfg`) is **violated** at
+`MaxSeq=4` (depth 10) — a delta *is* dispatched, so the `MaxSeq=4` safety search
+genuinely covers the add-only branch. Two deeper probes (`NoWholesaleDrop`,
+`NoBaselineDelta`) target the stranded-stale-round and add-onto-baseline states;
+neither surfaced within a multi-minute `MaxSeq=4` search, consistent with the
+owed-gate making a stranded stale delta hard to reach. They are kept as
+documented probes in the module, not claimed as confirmed witnesses.
+
+**Direct unit tests (the selection + receiver apply).** The selection is also
+verified in Elixir (`test/forum/muster_test.exs`), independent of the model:
+
+* *"rebalance full vs. delta dispatch"* — a settled router that gains groups on a
+  leave gets a **delta of only the moved-in groups** (never the ones it already
+  held); an **owed** router falls back to a **full**.
+* *"rebalance occupancy snapshot completeness"* — a leave sends the gaining router
+  a delta of only the moved-in group, not the kept one; a router that gains
+  nothing gets **no** snapshot.
+* *"remote entry points …"* — receiver-side: `receive_node_state/5` **wipes**
+  (replaces all rows for a source); `apply_delta/5` **adds without wiping** (the
+  baseline survives — the property the delta relies on); and a **stale
+  (not-newer) delta is dropped wholesale** even where its per-row guard alone
+  would admit it. (The last two were added with this model.)
+
+**Narrow residual.** The model asserts the mover computes the *right* moved-set
+from the ring generations; the unit tests confirm the code's `find_node` /
+`find_historical_node` selection produces that set. What remains unmodeled is only
+the ExHashRing internals themselves (treated as a faithful total-order oracle,
+per caveat 4).
 
 ## Caveats / what is NOT yet modeled (next steps)
 
@@ -606,10 +694,14 @@ selection logic is the narrow remaining thing to model or unit-test directly.
    snapshots carrying a group-*set*. `NoMissedDelivery` holds per group
    (exhaustive at `MaxSeq=2`, partial-clean at `MaxSeq=3`), with non-vacuity
    witnesses confirming per-group router divergence is exercised. See "Follow-up
-   models". **Narrow sub-gap remaining:** the model assumes a correctly-computed
+   models". ~~**Narrow sub-gap remaining:** the model assumes a correctly-computed
    snapshot group-set, so it does not verify the code's `groups_to_reannounce`
-   delta-vs-full *selection* itself (a wrongly-omitted group is a code bug this
-   abstraction can't reach) — model or unit-test that selection directly.
+   delta-vs-full *selection* itself.~~ **DONE** — modeled in `tla/Muster2Delta.tla`
+   (the FULL/DELTA choice, only-moved-groups delta payload, and per-source
+   wholesale `applied_snapshot_seq` watermark); `NoMissedDelivery` holds
+   (exhaustive `MaxSeq=2` non-delta baseline, partial-clean `MaxSeq=4` delta
+   coverage). The selection + receiver apply are also directly unit-tested. See
+   "Follow-up models".
 3. **Coordinator restart** — split into two cases:
    * **Restart-in-place under the same live node name** (a coordinator crash from
      the crash-on-prepare-timeout / snapshot-failure hatch; the node stays up,
