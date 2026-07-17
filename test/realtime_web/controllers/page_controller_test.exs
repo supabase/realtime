@@ -3,9 +3,19 @@ defmodule RealtimeWeb.PageControllerTest do
 
   import ExUnit.CaptureLog
 
-  test "GET / renders index page", %{conn: conn} do
+  test "GET / renders the console page", %{conn: conn} do
     conn = get(conn, "/")
-    assert html_response(conn, 200) =~ " Supabase Realtime: Multiplayer Edition"
+    assert html_response(conn, 200) =~ "Realtime Control Center"
+  end
+
+  test "GET /inspector redirects to / preserving query params", %{conn: conn} do
+    conn = get(conn, "/inspector?channel=room_a")
+    assert redirected_to(conn) == "/?channel=room_a"
+  end
+
+  test "GET /inspector/new redirects to /", %{conn: conn} do
+    conn = get(conn, "/inspector/new")
+    assert redirected_to(conn) == "/"
   end
 
   test "GET /healthcheck returns ok status", %{conn: conn} do

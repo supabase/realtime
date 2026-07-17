@@ -63,10 +63,10 @@ defmodule RealtimeWeb.Router do
   scope "/", RealtimeWeb do
     pipe_through(:browser)
 
-    live("/", PageLive.Index, :index)
-    live("/inspector", InspectorLive.Index, :index)
-    live("/inspector/new", InspectorLive.Index, :new)
+    live("/", InspectorLive.Index, :index)
     live("/status", StatusLive.Index, :index)
+    get("/inspector", PageController, :redirect_to_root)
+    get("/inspector/new", PageController, :redirect_to_root)
   end
 
   scope "/swaggerui" do
