@@ -18,6 +18,11 @@ steps).
   property (every prepare round eventually resolves). Holds (exhaustive at 2 and
   3 nodes, `MaxSeq=2`). Run without `-deadlock`? No — keep `-deadlock` (natural
   seq-bounded termination is not a real deadlock).
+* `Muster2Multi.tla` (+ `.cfg`, `_w1/_w2/_w3.cfg`) — Muster2 **generalized to
+  many groups** (caveat 2): two groups with diverging per-group ring orders,
+  per-group `holds`/`occ`, snapshots carrying a group-set. `NoMissedDelivery`
+  holds **per group** (exhaustive at `MaxSeq=2`, partial-clean at `MaxSeq=3`);
+  the `_w1/_w2/_w3` probes are non-vacuity witnesses (expected VIOLATED).
 * `MusterBounded.tla` / `Muster2Bounded.tla` (+ `.cfg`) — bounded **4-node**
   harnesses (`|msgs|` capped via `CONSTRAINT`). The baseline finds Finding A at 4
   nodes (positive control); the fix shows no violation over a large partial run.

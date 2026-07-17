@@ -8,11 +8,18 @@ caveat 3) is now modeled — safety holds and the crash-on-prepare-timeout escap
 hatch is liveness-checked; the ring is now a model parameter, not hard-wired
 `min` (caveat 4) — the exhaustive N=3 proof is shown to hold for any
 single-group total-order ring (relabeling argument + bit-identical
-state counts), and a deeper 4-node bounded search corroborates.** The **sole
-substantive remaining gap is multi-group (caveat 2)**. This document is the
+state counts), and a deeper 4-node bounded search corroborates; and
+multi-group (caveat 2) is now modeled — two groups with diverging ring orders
+on top of the B1 fix, `NoMissedDelivery` holds per group (exhaustive at
+`MaxSeq=2`, partial-clean at `MaxSeq=3`).** With that, **every original caveat is
+either closed or soundly declined** (message-ordering is a deliberate
+over-approximation; node-name-reuse is excluded by assumption). The remaining
+sub-gap is narrow: the multi-group model checks the *protocol* is safe given a
+correctly-computed snapshot group-set, but does not itself verify the
+`groups_to_reannounce` delta-vs-full selection logic. This document is the
 checkpoint so work can resume.
 
-Seven models:
+Eight models:
 
 * `tla/Muster.tla` (+ `.cfg`) — the baseline routing model that **exhibits**
   Finding A (`NoMissedDelivery` is violated).
@@ -38,6 +45,12 @@ Seven models:
   hard-wired `min` to a `RingRank` constant** (any total-order ring). Confirms
   `NoMissedDelivery` does not depend on the `min` artifact (caveat 4), and hosts
   the deeper 4-node bounded search with non-vacuity witnesses (see "Follow-up
+  models").
+
+* `tla/Muster2Multi.tla` (+ `.cfg`) — Muster2 **generalized from one group to
+  many** (caveat 2): two groups with **diverging per-group ring orders**
+  (`RingRank[g]`), per-group `holds`/`occ`, and rebalance snapshots that carry a
+  **set** of groups. `NoMissedDelivery` holds **per group** (see "Follow-up
   models").
 
 Plus two bounded 4-node harnesses (`tla/MusterBounded.tla`,
@@ -523,6 +536,63 @@ model — the N=3 exhaustive proof is ring-shape-independent by the relabeling
 argument, confirmed to the state at `MaxSeq∈{2,3}` — and the deeper, non-vacuous
 4-node bounded search finds no violation.
 
+### `tla/Muster2Multi.tla` — multi-group (was caveat 2)
+
+Muster2 generalized from one group to many. This is the caveat the doc long
+called the **sole substantive remaining gap**, because the `Muster2Ring`
+relabeling argument is explicitly *single-group*: it makes one group's ring order
+WLOG, but real consistent hashing routes **different groups to different nodes
+under the same view**, and there is no single total order to relabel to.
+
+**What is per-group vs shared (faithful to the code).** `holds[n][g]` and
+`occ[r][g][s]` become per-group. Everything that is a **cluster-view / node**
+property stays shared, because the code makes it so: `view`, the B1 `round` (a
+view swap re-routes *every* group the node holds at once), `member_views`
+(agreement about the view, not a group), `owed_snapshots` (per-`{holder,router}`
+— one snapshot batches all groups), `seqCtr` (`next_seq()` is one monotonic
+counter per node), and `Ready`/`CanDecide` (status `:ready` + view-hash
+agreement are per node, not per group). The new machinery: each group gets its
+own ring order (`RingRank[g]`; group `"a"` routes to `min`, `"b"` to `max`, so
+under `{1,2,3}` they route to opposite ends); a rebalance snapshot carries the
+**set** of groups the sender holds that route to the target (`SendSnapshot`/
+`DeliverSnapshot` over `grps`); `Commit`/`DetectDown` re-assert self rows for
+**every** held group now routing to self, and `DetectDown` wipes the dead peer's
+rows in **all** groups. Setting `Groups` to a singleton + identity ring recovers
+MODULE Muster2 exactly.
+
+**Result: `NoMissedDelivery` holds for every group.**
+
+* `MaxSeq=2`, 3 nodes, 2 groups (diverging rings) — **exhaustive**: 1,035,377
+  distinct states, depth 20, 0 left on queue, no violation.
+* `MaxSeq=3`, 3 nodes, 2 groups — partial (2-group state space is far larger):
+  **29.5M distinct states with no violation** before a 5-minute cap (13.4M left
+  on queue). Corroborating; the `MaxSeq=2` exhaustive result is the proof.
+
+**Non-vacuity witnesses (probes expected VIOLATED — reproduce with
+`Muster2Multi_w1/w2/w3.cfg`):**
+
+* `NoDivergentReadyRouter` (`_w1`) — **violated**: a `:ready` router whose
+  committed multi-node view routes two groups to *different* nodes is reachable —
+  per-group router divergence is actually exercised in a trusted-routing state
+  (the crux of multi-group).
+* `NoMultiGroupHold` (`_w2`) — **violated**: two different live nodes holding two
+  different groups concurrently is reachable.
+* `NoLaggingReadyRouter` (`_w3`) — **violated**: the Finding-A lagging-`:ready`
+  self-router-behind-an-advanced-peer shape is reachable in the multi-group
+  setting, so the clean safety run is not vacuous.
+
+Takeaway: the B1 gate is a **view-level** invalidation (the prepare un-readies an
+old-view member for *any* view containing the mover, group-independent), so it
+closes Finding A for every group simultaneously — divergent per-group routing
+does not reopen it.
+
+**Sub-gap (honest scope).** The model sends the *correct* group-set on each
+snapshot (all held groups routing to the target). It therefore checks the
+**protocol** is safe given a correctly-computed set, but does **not** verify the
+code's `groups_to_reannounce` delta-vs-full *selection* logic — a snapshot that
+wrongly omits a group would be a code bug this abstraction cannot surface. That
+selection logic is the narrow remaining thing to model or unit-test directly.
+
 ## Caveats / what is NOT yet modeled (next steps)
 
 1. ~~**`drop_stale_router_entries` sweep + tombstone GC** are not modeled.~~
@@ -531,11 +601,15 @@ argument, confirmed to the state at `MaxSeq∈{2,3}` — and the deeper, non-vac
    feared *seq-guarded delete vs concurrent re-claim* under-delivery race does
    not occur: the sweep's routes-away guard means a node only tombstones rows for
    groups it does not route.
-2. **Only one group.** Multi-group interactions (batched vacant per shard, a
-   snapshot's tombstone-stale-rows pass) are not exercised. The seq register is
-   per-`{group,source}`, so single-group covers the register races, but the
-   rebalance snapshot/delta *set* logic (full vs delta, `groups_to_reannounce`)
-   is not.
+2. ~~**Only one group.**~~ **DONE** — modeled in `tla/Muster2Multi.tla`: two
+   groups with **diverging per-group ring orders**, per-group `holds`/`occ`, and
+   snapshots carrying a group-*set*. `NoMissedDelivery` holds per group
+   (exhaustive at `MaxSeq=2`, partial-clean at `MaxSeq=3`), with non-vacuity
+   witnesses confirming per-group router divergence is exercised. See "Follow-up
+   models". **Narrow sub-gap remaining:** the model assumes a correctly-computed
+   snapshot group-set, so it does not verify the code's `groups_to_reannounce`
+   delta-vs-full *selection* itself (a wrongly-omitted group is a code bug this
+   abstraction can't reach) — model or unit-test that selection directly.
 3. **Coordinator restart** — split into two cases:
    * **Restart-in-place under the same live node name** (a coordinator crash from
      the crash-on-prepare-timeout / snapshot-failure hatch; the node stays up,
