@@ -28,7 +28,7 @@ DO get a `:DOWN` that wipes the restarted node's stale agreement. With that
 `:DOWN` modeled faithfully (`tla/Muster2DeltaRestartDown.tla`) `NoMissedDelivery`
 holds again. This document is the checkpoint so work can resume.
 
-Eleven models:
+Twelve models:
 
 * `tla/Muster.tla` (+ `.cfg`) — the baseline routing model that **exhibits**
   Finding A (`NoMissedDelivery` is violated).
@@ -41,6 +41,13 @@ Eleven models:
 * `tla/Muster2Live.tla` (+ `.cfg`) — Muster2 with **fairness** and a
   **liveness** property (every prepare round eventually resolves); holds under
   fairness (see "Follow-up models").
+* `tla/Muster2Cancel.tla` (+ `.cfg`, `_fixed.cfg`) — the **grow-then-shrink
+  cancel** finding: markers carry the node's **stable `view_seq`** (not a fresh
+  per-message bump, the abstraction that hid this from `Muster2Live`), so a
+  cancelled prepare round leaves the members that already acked **stranded**
+  (`NoStranded`/`Repair` VIOLATED). Toggling `Fix` (the shipped
+  `cancel_view_change` that bumps `view_seq`) makes both hold (see "Follow-up
+  models").
 
 * `tla/Muster2Restart.tla` (+ `.cfg`) — Muster2 **plus a coordinator
   crash/restart action** (the crash-on-prepare-timeout / crash-on-snapshot
@@ -457,6 +464,73 @@ Runs: **exhaustive** at 2 nodes / `MaxSeq=2` (565 distinct) and at 3 nodes /
 **Caveat.** The model never *drops* a message, so every prepare is eventually
 delivered = acked; the real **crash-on-prepare-timeout** escape hatch (for a peer
 that is up but unreachable) is out of scope here and is still argued, not checked.
+
+### `tla/Muster2Cancel.tla` — grow-then-shrink cancel (a liveness gap `Muster2Live` masked)
+
+**Finding: a cancelled prepare round strands the members that already acked.**
+This is the bug fixed in `cancel_view_change/1` (`scope.ex` ~1581) and covered by
+the "grow then shrink back to the committed view" tests
+(`test/forum/muster_distributed_test.exs`). A node grows its view and PREPAREs its
+old-view members — each ack **invalidates** that member's `member_views` entry for
+the mover, stamped at the round seq (`next_seq()`, *above* the mover's committed
+`view_seq`). If the growth peer then leaves **before commit**, membership is back to
+the committed view: there is no ring to swap, so the round is **cancelled**. But an
+old-view member that already acked is now invalidated for the mover at a seq above
+the mover's `view_seq`, and a bare heartbeat marker carries that *lower* `view_seq`
+— so `newest-seq-wins` rejects it forever. That member stays `:converging` for the
+mover until the mover's next *committed* rebalance, which in a now-stable cluster
+may never come.
+
+**Why `Muster2Live` did not catch it.** `Muster2Live`'s re-announce (`SendMarker`)
+stamps every marker with a **fresh per-message `Bump`**, so a heartbeat always
+eventually out-seqs a stale invalidation and heals it — the exact failure is
+abstracted away. The real heartbeat (`announce_view`) carries the node's **stable
+committed `view_seq`**, which is *not* advanced merely by running a round. This
+module makes that distinction explicit: a separate `viewSeq[n]` (advanced only at
+`Commit`, and — with the fix — at cancel) is what `Heartbeat` markers carry, while
+a round's prepare invalidation is stamped at the round seq (strictly above
+`viewSeq[n]`). A `CONSTANT Fix` toggles `cancel_view_change`: `Fix=TRUE` bumps
+`viewSeq` past the round seq on cancel; `Fix=FALSE` is the pre-fix code.
+
+**Properties.**
+
+* `NoStranded` (safety) — the crisp characterization: no state where an up member
+  `r` holds an invalidation for an up peer `s` (`~known`, seq `>` `viewSeq[s]`)
+  while `s`'s round is quiet and both sit on the same committed view. In such a
+  state no heartbeat from `s` can ever out-seq the invalidation.
+* `Repair` (liveness) — two committed peers on the same view eventually agree
+  again, unless a node dies or the views legitimately diverge.
+
+**Confirmed results** (`Nodes={1,2,3}`, `MaxSeq=3`):
+
+* **`Fix=FALSE`** — `NoStranded` **VIOLATED** in ~4s. Trace: nodes `1,2` pair →
+  `1` grows toward `{1,2,3}` and prepares `2` → `3` goes down → `1` cancels → `2`'s
+  ack lands, stranding `2` for `1` permanently. `Repair` **VIOLATED** too (~2min):
+  an infinite heartbeat loop that never heals.
+* **`Fix=TRUE`** — `NoStranded` **holds** (exhaustive, ~1.9M states); `Repair`
+  **holds** (bounded, ~20min).
+
+**One modeling correction along the way.** The first `Fix=TRUE` liveness run threw
+a *spurious* `Repair` counterexample: a cycle that endlessly re-delivered an
+already-applied marker while starving the one that heals — weak fairness on
+`\E msg : DeliverMarker(msg)` is satisfied by delivering *any* message. Real
+transport delivers each link independently, so delivery fairness is quantified
+**per `(src,dst)`**. Pre-fix still fails; the spurious cycle is gone.
+
+**Caveat.** `msgs` accumulates idempotent re-announce markers, so exhaustive
+temporal checking is unbounded; a `StateConstraint` (`seqCtr ≤ MaxSeq+1`,
+`|msgs| ≤ 2`) bounds it. `NoStranded` against the fairness-free `Spec` is the
+crisp, cheap reproduction; the bounded `Repair` liveness result corroborates.
+
+Run:
+
+```bash
+cd forum/tla
+mise exec java@corretto-26.0.1.8.1 -- \
+  java -Djava.io.tmpdir="$TMPDIR" -XX:+UseParallelGC -cp ../tla2tools.jar \
+  tlc2.TLC -workers auto -deadlock -config Muster2Cancel.cfg Muster2Cancel.tla        # Fix=FALSE
+# swap in Muster2Cancel_fixed.cfg for Fix=TRUE
+```
 
 ### `tla/Muster2Restart.tla` — coordinator crash/restart (part of caveat 3)
 
