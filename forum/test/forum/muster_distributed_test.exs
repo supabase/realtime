@@ -4906,6 +4906,289 @@ defmodule Forum.MusterDistributedTest do
     end
   end
 
+  describe "grow then shrink back to the committed view -- the prepare round is cancelled" do
+    setup do
+      scope = :"muster_cancel_#{System.unique_integer([:positive])}"
+      # Long rpc_timeout so T's parked prepare RPC to the frozen R does not time
+      # out and crash T while we hold the window open.
+      start_supervised!(spec(scope, vacant_flush_interval_ms: 100, rpc_timeout_ms: 30_000))
+      %{scope: scope}
+    end
+
+    # Growing the view runs a two-phase PREPARE before committing (B1). If the
+    # node that triggered the growth leaves again BEFORE the round commits,
+    # membership is back to the committed view and there is no ring to swap:
+    # recompute_members takes the cancel branch (cancel_view_change/1) instead of
+    # rebalancing. We freeze R fully as a bystander so ONLY T runs a pending
+    # round, grow the view with a throwaway node C, then kill C while T is still
+    # gated, and show T CANCELS -- returning to :ready for the original view with
+    # its ring never swapped.
+    @tag :capture_log
+    test "a growth peer that leaves before commit cancels the round; T stays on the old view",
+         %{scope: scope} do
+      t_node = node()
+
+      c_name = ~c"muster_cancel_c_#{System.unique_integer([:positive])}"
+      c_node = :"#{c_name}@127.0.0.1"
+
+      check_trace(
+        fn ->
+          {:ok, p_r, r_node} = Peer.start(aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(r_node)
+          start_remote_muster(p_r, scope, rpc_timeout_ms: 30_000)
+          two_view = Enum.sort([t_node, r_node])
+          two_hash = :erlang.phash2(two_view)
+          three_view = Enum.sort([t_node, r_node, c_node])
+          await_ready(two_view)
+
+          # Freeze R fully: it can neither register C nor apply T's transition, so
+          # T is the only node that runs (and gets stuck in) a prepare round.
+          force_ordering(
+            %{:"$kind" => :test_release},
+            %{:"$kind" => :muster_peer_registered, node: ^r_node, peer: ^c_node}
+          )
+
+          force_ordering(
+            %{:"$kind" => :test_release},
+            %{:"$kind" => :muster_transition_applied, node: ^r_node, source: ^t_node}
+          )
+
+          # C joins. T grows toward {T,R,C} and PREPAREs R -- frozen, so T's round
+          # can never commit.
+          {:ok, p_c, ^c_node} = Peer.start(name: c_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(c_node)
+          start_remote_muster(p_c, scope, rpc_timeout_ms: 30_000)
+
+          assert {:ok, _} =
+                   block_until(
+                     %{:"$kind" => :muster_view_prepare, node: ^t_node, target: ^three_view},
+                     15_000
+                   )
+
+          # Gated: T has NOT swapped its ring (still {T,R}).
+          assert Muster.members(scope) == two_view
+
+          # C leaves before T commits. T's recompute is back to the committed
+          # {T,R}: the round is CANCELLED, not rebalanced.
+          :ok = stop_supervised({:peer, c_name})
+
+          assert {:ok, _} =
+                   block_until(
+                     %{:"$kind" => :muster_view_cancel, node: ^t_node, target: ^three_view},
+                     15_000
+                   )
+
+          # T returns to :ready for the original view; the ring was never swapped.
+          await_ready(two_view, nodes: [t_node], nth: 2)
+          assert status(scope) == :ready
+          assert Muster.view_hash(scope) == two_hash
+          assert Muster.members(scope) == two_view
+
+          # Release R; the whole cluster settles back on {T,R} :ready.
+          tp(:test_release, %{})
+          await_ready(two_view, nth: 2)
+          assert :erpc.call(r_node, Muster, :members, [scope]) == two_view
+        end,
+        fn _trace -> :ok end
+      )
+    end
+  end
+
+  describe "grow then shrink with a PARTIAL ack -- the cancel must repair the acked member" do
+    setup do
+      scope = :"muster_cancel_repair_#{System.unique_integer([:positive])}"
+      start_supervised!(spec(scope, vacant_flush_interval_ms: 100, rpc_timeout_ms: 30_000))
+      %{scope: scope}
+    end
+
+    # The subtle case cancel_view_change/1 must handle: an old view of THREE
+    # ({T,R,S}) grows toward {T,R,S,C}, so T's prepare audience is {R,S}. R acks
+    # (so R has INVALIDATED its member_views entry for T, stamped at the round's
+    # seq), but S never acks, so T stays pending. When C then leaves, T cancels --
+    # and R is left invalidated for T at a seq ABOVE T's committed view_seq. A bare
+    # heartbeat marker carries the lower view_seq and R's newest-seq-wins guard
+    # rejects it, so without the proactive repair (bump view_seq past the round's
+    # seq + re-announce) R would flood for T forever. Reaching :ready again PROVES
+    # the repair.
+    #
+    # We freeze only S (a full bystander: it neither acks nor starts its own
+    # round). T and R are both live, so they PREPARE each other AND S: each acks
+    # the other (mutual invalidation) but both stay pending on S's missing ack.
+    # Killing C makes BOTH cancel and re-announce, mutually repairing -- so both
+    # return to :ready for {T,R,S} while S is still frozen.
+    @tag :capture_log
+    test "an acked member left invalidated by a cancelled round is re-synced without a heartbeat",
+         %{scope: scope} do
+      t_node = node()
+
+      s_name = ~c"muster_repair_s_#{System.unique_integer([:positive])}"
+      s_node = :"#{s_name}@127.0.0.1"
+      c_name = ~c"muster_repair_c_#{System.unique_integer([:positive])}"
+      c_node = :"#{c_name}@127.0.0.1"
+
+      check_trace(
+        fn ->
+          {:ok, p_r, r_node} = Peer.start(aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(r_node)
+          start_remote_muster(p_r, scope, rpc_timeout_ms: 30_000)
+
+          {:ok, p_s, ^s_node} = Peer.start(name: s_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(s_node)
+          start_remote_muster(p_s, scope, rpc_timeout_ms: 30_000)
+
+          three_view = Enum.sort([t_node, r_node, s_node])
+          four_view = Enum.sort([t_node, r_node, s_node, c_node])
+          await_ready(three_view)
+
+          # Freeze S fully: it can neither register C nor apply anyone's
+          # transition, so it never acks (keeping T and R pending) and never
+          # starts a round of its own that would invalidate T or R.
+          force_ordering(
+            %{:"$kind" => :test_release},
+            %{:"$kind" => :muster_peer_registered, node: ^s_node, peer: ^c_node}
+          )
+
+          force_ordering(
+            %{:"$kind" => :test_release},
+            %{:"$kind" => :muster_transition_applied, node: ^s_node}
+          )
+
+          # C joins. T and R each grow toward {T,R,S,C}, prepare {other, S}, ack
+          # each other, and stay pending on S.
+          {:ok, p_c, ^c_node} = Peer.start(name: c_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(c_node)
+          start_remote_muster(p_c, scope, rpc_timeout_ms: 30_000)
+
+          assert {:ok, _} =
+                   block_until(
+                     %{:"$kind" => :muster_view_prepare, node: ^t_node, target: ^four_view},
+                     15_000
+                   )
+
+          assert {:ok, _} =
+                   block_until(
+                     %{:"$kind" => :muster_view_prepare, node: ^r_node, target: ^four_view},
+                     15_000
+                   )
+
+          # Neither committed: rings still {T,R,S}.
+          assert Muster.members(scope) == three_view
+          assert :erpc.call(r_node, Muster, :members, [scope]) == three_view
+
+          # C leaves. Both T and R cancel their rounds.
+          :ok = stop_supervised({:peer, c_name})
+
+          assert {:ok, _} =
+                   block_until(
+                     %{:"$kind" => :muster_view_cancel, node: ^t_node, target: ^four_view},
+                     15_000
+                   )
+
+          assert {:ok, _} =
+                   block_until(
+                     %{:"$kind" => :muster_view_cancel, node: ^r_node, target: ^four_view},
+                     15_000
+                   )
+
+          # THE REPAIR: with S still frozen, T and R re-sync each other purely off
+          # their cancel's re-announce (bumped seq), returning to :ready for
+          # {T,R,S}. Without the seq bump this times out (each stays invalidated
+          # for the other and floods indefinitely).
+          await_ready(three_view, nodes: [t_node, r_node], nth: 2)
+          assert status(scope) == :ready
+          assert Muster.members(scope) == three_view
+
+          # Release S; the whole cluster settles back on {T,R,S} :ready. S's now
+          # stale (lower-seq) acks land after both rounds are gone and are dropped.
+          tp(:test_release, %{})
+
+          wait_until(fn ->
+            Muster.members(scope) == three_view and status(scope) == :ready and
+              :erpc.call(r_node, Muster, :members, [scope]) == three_view and
+              :erpc.call(s_node, Muster, :members, [scope]) == three_view and
+              remote_status(p_s, scope) == :ready
+          end)
+        end,
+        fn _trace -> :ok end
+      )
+    end
+  end
+
+  describe "view-change prepare RPC failure (injected crash)" do
+    setup do
+      scope = :"muster_prepare_fail_#{System.unique_integer([:positive])}"
+      start_supervised!(spec(scope, vacant_flush_interval_ms: 100))
+      %{scope: scope}
+    end
+
+    # If a note_transition prepare RPC to a member that is STILL in the target
+    # view fails, begin_view_change's transition_done handler re-raises and Scope
+    # CRASHES -- the same "restart re-announces from a clean slate" recovery as a
+    # failed rebalance snapshot (see the rebalance-RPC-failure test). We crash T's
+    # first prepare worker toward R (R is in the target {T,R,C}); T's Scope must
+    # crash, restart, and the retried prepare must let the cluster converge to the
+    # 3-node view.
+    #
+    # Note the mutual prepare: R also prepares T, so when T's coordinator dies R's
+    # prepare-to-T legitimately fails with T still in R's target and R crashes too
+    # (the SAME documented behaviour, not a test artifact). Both restart and
+    # re-converge, so we poll the settled state rather than count status events.
+    @tag :capture_log
+    test "the source Scope crashes when a prepare RPC to a still-targeted member fails, restarts, and re-converges",
+         %{scope: scope} do
+      t_node = node()
+
+      check_trace(
+        fn ->
+          {:ok, p_r, r_node} = Peer.start(aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(r_node)
+          start_remote_muster(p_r, scope)
+          await_ready([t_node, r_node])
+
+          c_name = ~c"muster_prepare_fail_c_#{System.unique_integer([:positive])}"
+          c_node = :"#{c_name}@127.0.0.1"
+          view3 = Enum.sort([t_node, r_node, c_node])
+
+          # Crash T's FIRST prepare worker (R is in the target, so it re-raises).
+          inject_crash(
+            %{:"$kind" => :muster_rpc_worker_start, node: ^t_node, function: :note_transition},
+            :snabbkaffe_nemesis.recover_after(1)
+          )
+
+          {:ok, p_c, ^c_node} = Peer.start(name: c_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(c_node)
+          start_remote_muster(p_c, scope)
+
+          # The injected crash fires on T's prepare worker...
+          assert {:ok, _} =
+                   block_until(
+                     %{:"$kind" => :snabbkaffe_crash, node: ^t_node, function: :note_transition},
+                     10_000
+                   )
+
+          # ...and the whole cluster still converges to the 3-node view only after
+          # the crashed Scope restarts and retries its (recovered) prepare.
+          wait_until(
+            fn ->
+              Muster.members(scope) == view3 and status(scope) == :ready and
+                :erpc.call(r_node, Muster, :members, [scope]) == view3 and
+                :erpc.call(c_node, Muster, :members, [scope]) == view3
+            end,
+            20_000
+          )
+
+          # Fully functional after recovery.
+          assert :ok = Muster.join(scope, :probe_group, spawn(fn -> Process.sleep(:infinity) end))
+        end,
+        fn trace ->
+          # The injected crash fired at least once on T's prepare worker.
+          assert of_kind(:snabbkaffe_crash, trace)
+                 |> Enum.any?(&(&1[:node] == t_node and &1[:function] == :note_transition))
+        end
+      )
+    end
+  end
+
   # A group that routes to `r_node` in {t_node, r_node} (so a claim from T travels
   # to R as a remote :occupied and T's OWN occupancy table holds no self-row for
   # it) AND lives on shard index 0, so the coordinator gathers it before the

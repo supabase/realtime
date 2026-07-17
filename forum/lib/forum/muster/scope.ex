@@ -1483,12 +1483,11 @@ defmodule Forum.Muster.Scope do
       new_members == state.members ->
         # No committed-view change. If a prepare round was in flight (its growth
         # peer left before we committed), cancel it and return to the committed
-        # view; the next announce_view re-syncs the members we had invalidated.
+        # view.
         if state.pending_round == nil do
           state
         else
-          :persistent_term.put({Forum.Muster, state.scope, :view_hash}, own_view_hash(state))
-          update_status(%{state | pending_round: nil})
+          cancel_view_change(state)
         end
 
       # Growth (or a mixed change that adds a node): prepare-gate the ring swap.
@@ -1566,6 +1565,36 @@ defmodule Forum.Muster.Scope do
   # resumes publishing :ready/:converging.
   defp commit_view_change(%{pending_round: %{target: target}} = state) do
     do_rebalance(state, target)
+  end
+
+  # Cancel an in-flight prepare round whose growth peer left before we committed:
+  # membership is back to our committed view, so restore the published view_hash
+  # and drop the round. But the round's `note_transition` RPCs already INVALIDATED
+  # our member_views entry on each old-view member (stamped at the round's seq,
+  # which is ABOVE our committed view_seq). Those members are now flooding for us
+  # and will NOT re-agree off a bare heartbeat marker: it carries the old, lower
+  # view_seq, so their newest-seq-wins guard keeps the invalidation. Left alone
+  # they stay :converging until our next COMMITTED rebalance advances view_seq --
+  # which in a now-stable cluster may never happen. So bump view_seq past the
+  # round's seq (next_seq is monotonic, so this out-ranks the invalidation) and
+  # PROACTIVELY re-announce our unchanged view, re-establishing agreement at once.
+  defp cancel_view_change(%{pending_round: %{target: target, seq: round_seq}} = state) do
+    Logger.info(
+      "Muster[#{node()}|#{state.scope}] view-change cancelled: #{inspect(target)} superseded back to committed #{inspect(state.members)}"
+    )
+
+    tp(:muster_view_cancel, %{
+      scope: state.scope,
+      node: node(),
+      target: target,
+      members: state.members,
+      round_seq: round_seq
+    })
+
+    :persistent_term.put({Forum.Muster, state.scope, :view_hash}, own_view_hash(state))
+    state = update_status(%{state | pending_round: nil, view_seq: next_seq()})
+    announce_view(state)
+    state
   end
 
   ## Init / introspection helpers
