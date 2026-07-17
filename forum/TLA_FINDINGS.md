@@ -18,9 +18,17 @@ and the per-source wholesale `applied_snapshot_seq` watermark faithfully, and
 `NoMissedDelivery` still holds; the selection logic is also directly unit-tested.**
 With that, **every original caveat is either closed or soundly declined**
 (message-ordering is a deliberate over-approximation; node-name-reuse is excluded
-by assumption). This document is the checkpoint so work can resume.
+by assumption). **Cross-mechanism follow-up (restart × delta) surfaced a
+faithfulness gap in the existing restart model — see Finding B.** Composing the
+restart action onto the multi-group/delta model (`tla/Muster2DeltaRestart.tla`)
+produced a `NoMissedDelivery` violation at `MaxSeq=4`; investigation showed it is
+a **modeling artifact**: `Muster2Restart` wrongly assumed peers see no `:DOWN`
+when a coordinator restarts in place, but peers monitor the coordinator PID and
+DO get a `:DOWN` that wipes the restarted node's stale agreement. With that
+`:DOWN` modeled faithfully (`tla/Muster2DeltaRestartDown.tla`) `NoMissedDelivery`
+holds again. This document is the checkpoint so work can resume.
 
-Nine models:
+Eleven models:
 
 * `tla/Muster.tla` (+ `.cfg`) — the baseline routing model that **exhibits**
   Finding A (`NoMissedDelivery` is violated).
@@ -62,6 +70,22 @@ Nine models:
   round is dropped entirely). `NoMissedDelivery` holds (exhaustive at `MaxSeq=2`,
   partial-clean at `MaxSeq=4` — the delta path is only reachable at `MaxSeq≥4`; see
   "Follow-up models").
+
+* `tla/Muster2DeltaRestart.tla` (+ `.cfg`, `_s4.cfg`, `_wr.cfg`, `_wd.cfg`) —
+  **Muster2Delta composed with the coordinator restart action** — the one
+  cross-mechanism interaction previously checked only in isolation (restart in
+  `Muster2Restart` was single-group with no delta; the delta path in
+  `Muster2Delta` had no restart). This composition **exposed Finding B**: a
+  `NoMissedDelivery` violation at `MaxSeq=4` (exhaustive-clean at `MaxSeq=2`),
+  which turned out to be a **faithfulness artifact** of the restart model (it
+  omitted the peer-side coordinator-pid `:DOWN`). See "Finding B" and "Follow-up
+  models".
+* `tla/Muster2DeltaRestartDown.tla` (+ `.cfg`, `_s4.cfg`) — the **corrected**
+  restart model: a coordinator restart also fires the peer-side `:DOWN` (blanks
+  the restarted node's `member_views` agreement on every peer, and drops the old
+  incarnation's in-flight messages, FIFO-faithfully). `NoMissedDelivery` **holds**
+  again (exhaustive at `MaxSeq=2`, partial-clean at `MaxSeq=4` past the depth-12
+  where the base violated). See "Finding B".
 
 Plus two bounded 4-node harnesses (`tla/MusterBounded.tla`,
 `tla/Muster2Bounded.tla`) — see "Follow-up models".
@@ -206,6 +230,70 @@ out that a member has advanced past its view — e.g. gating readiness on a
 liveness/epoch signal, or having a fresh first-member join for a group whose
 router differs across a member's known views trigger a flood until the next
 convergence. Needs discussion.
+
+### Finding B (model faithfulness gap — NOT a code bug): the restart models omit the peer-side coordinator `:DOWN`
+
+Surfaced by the **restart × delta** cross-mechanism follow-up
+(`tla/Muster2DeltaRestart.tla`, this composition being the one place where one
+mechanism — restart — resets exactly the state another — the add-only delta — relies
+on). Composing the coordinator restart onto the multi-group/delta model produced a
+`NoMissedDelivery` **violation at `MaxSeq=4`** (the base was exhaustive-clean only at
+`MaxSeq=2`; the shape needs seq 4, which the original `Muster2Restart` never reached —
+it was exhaustive at `MaxSeq=2`, partial at `MaxSeq=3`). The **same violation
+reproduces in the single-group `Muster2Restart` at `MaxSeq=4`** (found in 6 s; run
+`Muster2Restart_s4.cfg`), so it is neither a delta nor a multi-group phenomenon.
+
+**The counterexample (9 steps, single-group, `tla/trace_restart_artifact.txt`).**
+Nodes 1 and 2 converge to view `{1,2}`; node 1 is group `a`'s router (`min`) and
+becomes `:ready` on node 2's agreement. Node 2's **coordinator restarts in place**
+(view resets to `{2}`, `:converging`, `member_views` wiped) but the model leaves
+node 1's `member_views[2] = {1,2}` untouched. Node 2 then freshly (re)joins group `a`
+under `{2}`, claiming it on **itself**. Node 1 — still `:ready` for `{1,2}`, still the
+router, with no row for node 2 — routes a broadcast to nobody. It is the exact
+**Finding-A stale-ready-router shape, re-created by a restart rather than by
+asymmetric convergence**. Note B1 is not even the relevant defence here: both nodes
+grew to `{1,2}` as singletons (empty prepare audience), so no B1 prepare ever fired.
+
+**Why it is a modeling artifact, not a code bug.** The restart models
+(`Muster2Restart`, `Muster2DeltaRestart`) assume *"the node stays up, so peers see no
+`:DOWN`"* — **false**. Peers monitor the restarting node's **coordinator PID**, so a
+coordinator restart-in-place delivers a `:DOWN` (of the old pid) to every peer. The
+`:DOWN` handler (`scope.ex` ~L815-883) explicitly reasons about *"a peer that restarts
+in place"* and *"the OLD pid's DOWN"*, wiping that pid's `member_views` (and occupancy
+/ `applied_snapshot_seq`) entries. That wipe removes node 1's stale `{1,2}` agreement
+for node 2, so node 1 drops out of `:ready` and floods. Erlang monitor + dist ordering
+also guarantees the `:DOWN` is delivered **after** the old incarnation's last message,
+so no stale pre-restart marker can re-establish the agreement past the `:DOWN` — which
+the base model's **unordered `msgs`** set wrongly allows (caveat 5's over-approximation
+biting: the violation relies on delivering the stale marker *after* the restart, a
+reordering real FIFO forbids).
+
+**The corrected model holds.** `tla/Muster2DeltaRestartDown.tla` makes `Restart(n)`
+also (a) blank `mv[p][n]` on every peer `p` (the peer-side `:DOWN`) and (b) drop the
+old incarnation's in-flight messages (`{m ∈ msgs : m.src = n}`, FIFO faithfulness).
+`NoMissedDelivery` **holds** again: exhaustive at `MaxSeq=2` (1,830,351 distinct,
+depth 20, 0 on queue) and **partial-clean at `MaxSeq=4`** (27.2M distinct, BFS depth
+12 — past the depth where the base model violated). So the peer-pid `:DOWN` is the
+mechanism that keeps the restart path safe, and the code has it.
+
+**Residual (bounded, not separately modeled).** The corrected model fires the `:DOWN`
+**synchronously** with the restart, collapsing its delivery latency to zero. A peer
+that was legitimately `:ready` on the old view before the restart stays `:ready` until
+it actually **processes** the (async) coordinator-pid `:DOWN`; a `persistent_term`-based
+broadcast in that gap (`Muster.targets` reads status/occupancy directly, not via the
+coordinator mailbox) could still miss a group the restarted node re-homed under its
+reset view. That is a Finding-A-class **transient, self-healing** window bounded by
+`:DOWN` delivery+processing latency, closed by the `:DOWN` just as Finding A's window is
+closed by the superseding marker. Whether it warrants action is the same *zero-miss vs
+eventual-convergence* decision as Finding A. Precisely characterizing it would need an
+**async** peer-`:DOWN` action (a delayed `PeerCoordDown(p, n)` ordered after the old
+incarnation's messages) rather than the synchronous wipe used here — a documented next
+step, not yet built.
+
+**Takeaway.** The follow-up did its job: it found that `Muster2Restart` (and hence the
+restart half of caveat 3) was **not faithful** — it omitted the load-bearing peer-pid
+`:DOWN`. The corrected model restores the clean result; the caveat-3 write-up below is
+annotated accordingly.
 
 ## The B1 fix (two-phase view adoption) — modeled and shipped
 
@@ -372,13 +460,24 @@ that is up but unreachable) is out of scope here and is still argued, not checke
 
 ### `tla/Muster2Restart.tla` — coordinator crash/restart (part of caveat 3)
 
+> **⚠️ Superseded on one point — see Finding B.** This model assumes *"peers see
+> no `:DOWN`"* on a coordinator restart-in-place. That is **not faithful**: peers
+> monitor the coordinator PID and DO receive the old pid's `:DOWN`. The omission
+> is invisible at `MaxSeq=2` (this model's exhaustive bound) but produces a
+> spurious `NoMissedDelivery` violation at `MaxSeq=4`. The corrected model is
+> `tla/Muster2DeltaRestartDown.tla`, which restores the clean result. Read the
+> rest of this section together with Finding B.
+
 Models the **crash-on-prepare-timeout / crash-on-snapshot-failure** path: a
 prepare or snapshot RPC to an up-but-unreachable peer fails, the coordinator
 `raise`s (`scope.ex` ~964 / ~921), and the supervisor restarts it under the
 **same live node name**. This is distinct from the excluded "node name reuse
-across deployments" case — the node stays UP, so **peers see no `:DOWN`** and
-keep their occupancy / `member_views` rows for it. `Restart(n)` is modeled
-faithful to `init/1` (`scope.ex` ~435) and `reannounce_local_groups_at_init`:
+across deployments" case — the node stays UP. The model asserted **peers see no
+`:DOWN`** and keep their occupancy / `member_views` rows for it — but that is the
+faithfulness gap Finding B corrects: the BEAM node stays up, yet the coordinator
+*process* dies, so peers monitoring its PID do get a `:DOWN`. `Restart(n)` is
+otherwise modeled faithful to `init/1` (`scope.ex` ~435) and
+`reannounce_local_groups_at_init`:
 
 * the **occupancy table survives** (owned by the `Forum.Supervisor` sibling, not
   the coordinator): `occ[n][s]` rows are RETAINED — stale rows are over-delivery,
@@ -681,6 +780,36 @@ from the ring generations; the unit tests confirm the code's `find_node` /
 the ExHashRing internals themselves (treated as a faithful total-order oracle,
 per caveat 4).
 
+### `tla/Muster2DeltaRestart.tla` + `tla/Muster2DeltaRestartDown.tla` — restart × delta (found + fixed Finding B)
+
+The one cross-mechanism composition where one mechanism resets exactly the state
+another relies on: a coordinator **restart** wipes `member_views`,
+`owed_snapshots` and `applied_snapshot_seq` (all coordinator State) while the
+occupancy ETS **survives** — precisely the watermark/owed bookkeeping the add-only
+**delta** path leans on. `Muster2DeltaRestart.tla` composes the two; it **found a
+`NoMissedDelivery` violation at `MaxSeq=4`** which turned out to be a faithfulness
+artifact of the restart model (missing peer-pid `:DOWN`) — the full analysis is
+**Finding B** above. The corrected `Muster2DeltaRestartDown.tla` (restart also
+blanks peers' agreement for the node and drops its old in-flight messages) **holds**:
+
+* `MaxSeq=2`, 3 nodes, 2 groups — **exhaustive**: 1,830,351 distinct states, depth
+  20, 0 left on queue, no violation.
+* `MaxSeq=4`, 3 nodes, 2 groups — partial: **27.2M distinct states, no violation**
+  at BFS depth 12 (past the depth where the base model violated) before a
+  ~5-minute cap.
+
+Non-vacuity for the base composition (that the search reaches the interesting
+states): `RestartRecoversToRouter` (`_wr.cfg`) is **violated** — a restarted node
+recovers into a Ready multi-node router delivering to a live remote holder; and
+`NoDeltaWithRestart` (`_wd.cfg`) is **violated** at `MaxSeq=4` — a delta genuinely
+rides alongside a restart. Cross-check: `Muster2Restart_s4.cfg` shows the same
+violation in the single-group restart model at `MaxSeq=4`, confirming Finding B is
+a restart-path (not delta/multi-group) phenomenon.
+
+**Next step (documented, not built):** an **async** peer-`:DOWN` action to
+characterize the residual `:DOWN`-latency transient described in Finding B (the
+corrected model fires the `:DOWN` synchronously, collapsing that window to zero).
+
 ## Caveats / what is NOT yet modeled (next steps)
 
 1. ~~**`drop_stale_router_entries` sweep + tombstone GC** are not modeled.~~
@@ -706,11 +835,17 @@ per caveat 4).
    * **Restart-in-place under the same live node name** (a coordinator crash from
      the crash-on-prepare-timeout / snapshot-failure hatch; the node stays up,
      ring resets to `[node()]`, occupancy table survives, re-discovery, singleton
-     promotion). ~~Excluded.~~ **DONE** — modeled in `tla/Muster2Restart.tla`
-     (safety) and `tla/Muster2RestartLive.tla` (the hatch's liveness);
-     `NoMissedDelivery` holds and `RoundsResolve` / `<>[]RoundsQuiet` hold. This
-     is NOT covered by the no-name-reuse assumption (that is about deployments;
-     this is a supervisor restart of a still-live node). See "Follow-up models".
+     promotion). ~~Excluded.~~ **DONE (with a correction — see Finding B)** —
+     modeled in `tla/Muster2Restart.tla` (safety) and `tla/Muster2RestartLive.tla`
+     (the hatch's liveness); `RoundsResolve` / `<>[]RoundsQuiet` hold. **Safety
+     needed a fix:** those models assumed peers see no `:DOWN` on a coordinator
+     restart, which is unfaithful (peers monitor the coordinator PID); the
+     restart × delta follow-up exposed this as a spurious `NoMissedDelivery`
+     violation at `MaxSeq=4`. With the peer-pid `:DOWN` modeled faithfully
+     (`tla/Muster2DeltaRestartDown.tla`) `NoMissedDelivery` holds again. A narrow
+     async-`:DOWN`-latency transient remains (Finding B residual). This is NOT
+     covered by the no-name-reuse assumption (that is about deployments; this is a
+     supervisor restart of a still-live node). See Finding B and "Follow-up models".
    * **Node name reuse across deployments** (a brand-new incarnation reusing a
      name, resetting seq) remains excluded, consistent with the user assumption
      that nodes do not come back and reset their seq. If that is relaxed, add it.

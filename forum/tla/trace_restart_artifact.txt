@@ -1,0 +1,301 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 126 and seed 9188133559049875434 with 10 workers on 10 cores with 7282MB heap and 64MB offheap memory [pid: 48011] (Mac OS X 26.5.2 aarch64, Amazon.com Inc. 26.0.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /Users/eduardo/supa/realtime-main/forum/tla/Muster2Restart.tla
+Parsing file /private/var/folders/70/f798_cm95bd2rg54vm803pch0000gn/T/Naturals.tla
+Parsing file /private/var/folders/70/f798_cm95bd2rg54vm803pch0000gn/T/FiniteSets.tla
+Parsing file /private/var/folders/70/f798_cm95bd2rg54vm803pch0000gn/T/TLC.tla
+Parsing file /private/var/folders/70/f798_cm95bd2rg54vm803pch0000gn/T/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Muster2Restart
+Starting... (2026-07-17 17:12:06)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-07-17 17:12:06.
+Progress(10) at 2026-07-17 17:12:09: 2,767,099 states generated (2,767,099 s/min), 812,625 distinct states found (812,625 ds/min), 613,286 states left on queue.
+Error: Invariant NoMissedDelivery is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ everRestarted = <<FALSE, FALSE, FALSE>>
+/\ mv = << << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >> >>
+/\ seqCtr = <<0, 0, 0>>
+/\ view = <<{1}, {2}, {3}>>
+/\ promoted = <<TRUE, TRUE, TRUE>>
+/\ msgs = {}
+/\ holds = <<FALSE, FALSE, FALSE>>
+/\ up = <<TRUE, TRUE, TRUE>>
+/\ occ = << << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >> >>
+/\ round = << [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}],
+   [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}],
+   [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}] >>
+/\ owed = <<{}, {}, {}>>
+
+State 2: <Discover line 137, col 3 to line 148, col 74 of module Muster2Restart>
+/\ everRestarted = <<FALSE, FALSE, FALSE>>
+/\ mv = << << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >> >>
+/\ seqCtr = <<0, 1, 0>>
+/\ view = <<{1}, {2}, {3}>>
+/\ promoted = <<TRUE, TRUE, TRUE>>
+/\ msgs = {}
+/\ holds = <<FALSE, FALSE, FALSE>>
+/\ up = <<TRUE, TRUE, TRUE>>
+/\ occ = << << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >> >>
+/\ round = << [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}],
+   [active |-> TRUE, target |-> {1, 2}, seq |-> 1, awaiting |-> {}],
+   [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}] >>
+/\ owed = <<{}, {}, {}>>
+
+State 3: <Discover line 137, col 3 to line 148, col 74 of module Muster2Restart>
+/\ everRestarted = <<FALSE, FALSE, FALSE>>
+/\ mv = << << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >> >>
+/\ seqCtr = <<1, 1, 0>>
+/\ view = <<{1}, {2}, {3}>>
+/\ promoted = <<TRUE, TRUE, TRUE>>
+/\ msgs = {}
+/\ holds = <<FALSE, FALSE, FALSE>>
+/\ up = <<TRUE, TRUE, TRUE>>
+/\ occ = << << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >> >>
+/\ round = << [active |-> TRUE, target |-> {1, 2}, seq |-> 1, awaiting |-> {}],
+   [active |-> TRUE, target |-> {1, 2}, seq |-> 1, awaiting |-> {}],
+   [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}] >>
+/\ owed = <<{}, {}, {}>>
+
+State 4: <Commit line 167, col 3 to line 180, col 59 of module Muster2Restart>
+/\ everRestarted = <<FALSE, FALSE, FALSE>>
+/\ mv = << << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >> >>
+/\ seqCtr = <<1, 1, 0>>
+/\ view = <<{1, 2}, {2}, {3}>>
+/\ promoted = <<TRUE, TRUE, TRUE>>
+/\ msgs = {}
+/\ holds = <<FALSE, FALSE, FALSE>>
+/\ up = <<TRUE, TRUE, TRUE>>
+/\ occ = << << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >> >>
+/\ round = << [active |-> FALSE, target |-> {1, 2}, seq |-> 1, awaiting |-> {}],
+   [active |-> TRUE, target |-> {1, 2}, seq |-> 1, awaiting |-> {}],
+   [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}] >>
+/\ owed = <<{}, {}, {}>>
+
+State 5: <Commit line 167, col 3 to line 180, col 59 of module Muster2Restart>
+/\ everRestarted = <<FALSE, FALSE, FALSE>>
+/\ mv = << << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >> >>
+/\ seqCtr = <<1, 1, 0>>
+/\ view = <<{1, 2}, {1, 2}, {3}>>
+/\ promoted = <<TRUE, TRUE, TRUE>>
+/\ msgs = {}
+/\ holds = <<FALSE, FALSE, FALSE>>
+/\ up = <<TRUE, TRUE, TRUE>>
+/\ occ = << << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >> >>
+/\ round = << [active |-> FALSE, target |-> {1, 2}, seq |-> 1, awaiting |-> {}],
+   [active |-> FALSE, target |-> {1, 2}, seq |-> 1, awaiting |-> {}],
+   [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}] >>
+/\ owed = <<{}, {}, {}>>
+
+State 6: <SendMarker line 270, col 3 to line 278, col 81 of module Muster2Restart>
+/\ everRestarted = <<FALSE, FALSE, FALSE>>
+/\ mv = << << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >> >>
+/\ seqCtr = <<1, 2, 0>>
+/\ view = <<{1, 2}, {1, 2}, {3}>>
+/\ promoted = <<TRUE, TRUE, TRUE>>
+/\ msgs = {[hv |-> {1, 2}, t |-> "marker", src |-> 2, dst |-> 1, seq |-> 2]}
+/\ holds = <<FALSE, FALSE, FALSE>>
+/\ up = <<TRUE, TRUE, TRUE>>
+/\ occ = << << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >> >>
+/\ round = << [active |-> FALSE, target |-> {1, 2}, seq |-> 1, awaiting |-> {}],
+   [active |-> FALSE, target |-> {1, 2}, seq |-> 1, awaiting |-> {}],
+   [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}] >>
+/\ owed = <<{}, {}, {}>>
+
+State 7: <Restart line 219, col 3 to line 234, col 34 of module Muster2Restart>
+/\ everRestarted = <<FALSE, TRUE, FALSE>>
+/\ mv = << << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >> >>
+/\ seqCtr = <<1, 3, 0>>
+/\ view = <<{1, 2}, {2}, {3}>>
+/\ promoted = <<TRUE, FALSE, TRUE>>
+/\ msgs = {[hv |-> {1, 2}, t |-> "marker", src |-> 2, dst |-> 1, seq |-> 2]}
+/\ holds = <<FALSE, FALSE, FALSE>>
+/\ up = <<TRUE, TRUE, TRUE>>
+/\ occ = << << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >> >>
+/\ round = << [active |-> FALSE, target |-> {1, 2}, seq |-> 1, awaiting |-> {}],
+   [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}],
+   [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}] >>
+/\ owed = <<{}, {}, {}>>
+
+State 8: <HolderJoin line 108, col 3 to line 116, col 75 of module Muster2Restart>
+/\ everRestarted = <<FALSE, TRUE, FALSE>>
+/\ mv = << << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >> >>
+/\ seqCtr = <<1, 4, 0>>
+/\ view = <<{1, 2}, {2}, {3}>>
+/\ promoted = <<TRUE, FALSE, TRUE>>
+/\ msgs = {[hv |-> {1, 2}, t |-> "marker", src |-> 2, dst |-> 1, seq |-> 2]}
+/\ holds = <<FALSE, TRUE, FALSE>>
+/\ up = <<TRUE, TRUE, TRUE>>
+/\ occ = << << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> TRUE, seq |-> 4],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >> >>
+/\ round = << [active |-> FALSE, target |-> {1, 2}, seq |-> 1, awaiting |-> {}],
+   [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}],
+   [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}] >>
+/\ owed = <<{}, {}, {}>>
+
+State 9: <Next line 324, col 6 to line 324, col 41 of module Muster2Restart>
+/\ everRestarted = <<FALSE, TRUE, FALSE>>
+/\ mv = << << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> TRUE, hv |-> {1, 2}, seq |-> 2],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >>,
+   << [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0],
+      [known |-> FALSE, hv |-> {}, seq |-> 0] >> >>
+/\ seqCtr = <<1, 4, 0>>
+/\ view = <<{1, 2}, {2}, {3}>>
+/\ promoted = <<TRUE, FALSE, TRUE>>
+/\ msgs = {}
+/\ holds = <<FALSE, TRUE, FALSE>>
+/\ up = <<TRUE, TRUE, TRUE>>
+/\ occ = << << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> TRUE, seq |-> 4],
+      [present |-> FALSE, seq |-> 0] >>,
+   << [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0],
+      [present |-> FALSE, seq |-> 0] >> >>
+/\ round = << [active |-> FALSE, target |-> {1, 2}, seq |-> 1, awaiting |-> {}],
+   [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}],
+   [active |-> FALSE, target |-> {}, seq |-> 0, awaiting |-> {}] >>
+/\ owed = <<{}, {}, {}>>
+
+6359191 states generated, 1811742 distinct states found, 1330874 states left on queue.
+The depth of the complete state graph search is 10.
+The average outdegree of the complete state graph is 4 (minimum is 0, the maximum 18 and the 95th percentile is 8).
+Finished in 06s at (2026-07-17 17:12:12)

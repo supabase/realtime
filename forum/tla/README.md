@@ -33,6 +33,23 @@ steps).
   finding: with consistent-hashing rings the add-only DELTA path is reachable
   **only via a ≥3-node shrink** (growth can only route a group onto a *new* node,
   always a FULL), witnessed by `_w1.cfg` (delta dispatched at BFS depth 10).
+* `Muster2DeltaRestart.tla` (+ `.cfg`, `_s4.cfg`, `_wr.cfg`, `_wd.cfg`) —
+  **Muster2Delta composed with the coordinator restart action** (the one
+  cross-mechanism interaction its predecessors checked only in isolation:
+  restart × delta). A restart wipes `member_views`, `owed_snapshots` **and**
+  `applied_snapshot_seq` (all coordinator State) while the occupancy ETS table
+  **survives**. This composition **found a `NoMissedDelivery` violation at
+  `MaxSeq=4`** (exhaustive-clean at `MaxSeq=2`) — see Finding B in
+  `../TLA_FINDINGS.md`. It is a **faithfulness artifact**: the restart models
+  omitted the peer-side coordinator-pid `:DOWN`. Non-vacuity: `_wr.cfg` witnesses
+  a restarted node recovering into a Ready multi-node router; `_wd.cfg` witnesses
+  a DELTA riding alongside a restart (expected VIOLATED).
+* `Muster2DeltaRestartDown.tla` (+ `.cfg`, `_s4.cfg`) — the **corrected** restart
+  model: restart also fires the peer-side `:DOWN` (blanks the restarted node's
+  `member_views` agreement on every peer + drops its old in-flight messages,
+  FIFO-faithfully). `NoMissedDelivery` **holds** (exhaustive `MaxSeq=2`,
+  partial-clean `MaxSeq=4` past the depth-12 where the base violated), confirming
+  the peer-pid `:DOWN` is the mechanism that keeps the restart path safe.
 * `MusterBounded.tla` / `Muster2Bounded.tla` (+ `.cfg`) — bounded **4-node**
   harnesses (`|msgs|` capped via `CONSTRAINT`). The baseline finds Finding A at 4
   nodes (positive control); the fix shows no violation over a large partial run.
