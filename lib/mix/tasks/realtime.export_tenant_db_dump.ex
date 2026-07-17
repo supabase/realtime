@@ -2,8 +2,8 @@ defmodule Mix.Tasks.Realtime.ExportTenantDbDump do
   @shortdoc "Regenerate priv/repo/tenant_db_dump_<pg_major>.sql"
 
   @moduledoc """
-  Dumps the tenant database's `realtime` schema to `priv/repo/tenant_db_dump_<pg_major>.sql`
-  and the `realtime.schema_migrations` rows.
+  Dumps the tenant database's `realtime` schema to `priv/repo/tenant_db_dump_<pg_major>.sql`,
+  the `supabase_realtime_admin` role definition, and the `realtime.schema_migrations` rows.
 
   Usage:
 
@@ -18,9 +18,11 @@ defmodule Mix.Tasks.Realtime.ExportTenantDbDump do
 
   The target DB is read from `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` env vars.
 
-  Requires `pg_dump` matching the target's major version on `$PATH`.
+  Requires `pg_dump` and `pg_dumpall` matching the target's major version on `$PATH`.
   """
   use Mix.Task
+
+  @realtime_admin_role "supabase_realtime_admin"
 
   @impl Mix.Task
   def run(args) do
@@ -38,16 +40,20 @@ defmodule Mix.Tasks.Realtime.ExportTenantDbDump do
 
     Mix.shell().info("[export_tenant_db_dump] target: #{host}:#{port}/#{database} (pg#{pg_major})")
 
-    pg_dump!(host, port, database, user, password, path)
-    append_schema_migrations!(host, port, database, user, password, path)
-    postprocess!(path)
+    lines = [
+      realtime_admin_role_sql!(host, port, database, user, password),
+      pg_dump!(host, port, database, user, password) |> postprocess(),
+      schema_migrations_sql!(host, port, database, user, password)
+    ]
+
+    File.write!(path, lines)
 
     Mix.shell().info("[export_tenant_db_dump] wrote #{path}")
   end
 
   defp dump_path(pg_major), do: Application.app_dir(:realtime, "priv/repo/tenant_db_dump_#{pg_major}.sql")
 
-  defp pg_dump!(host, port, database, user, password, path) do
+  defp pg_dump!(host, port, database, user, password) do
     pg_dump = System.find_executable("pg_dump") || Mix.raise("pg_dump not found on $PATH")
 
     args = [
@@ -61,18 +67,67 @@ defmodule Mix.Tasks.Realtime.ExportTenantDbDump do
       database,
       "--schema-only",
       "--schema",
-      "realtime",
-      "--file",
-      path
+      "realtime"
     ]
 
-    case System.cmd(pg_dump, args, env: [{"PGPASSWORD", password}], stderr_to_stdout: true) do
-      {_output, 0} -> :ok
-      {output, code} -> Mix.raise("pg_dump exited #{code}:\n#{output}")
+    case System.cmd(pg_dump, args, env: [{"PGPASSWORD", password}]) do
+      {output, 0} -> output
+      {_output, code} -> Mix.raise("pg_dump exited #{code} - see output above")
     end
   end
 
-  defp append_schema_migrations!(host, port, database, user, password, path) do
+  defp realtime_admin_role_sql!(host, port, database, user, password) do
+    pg_dumpall = System.find_executable("pg_dumpall") || Mix.raise("pg_dumpall not found on $PATH")
+
+    args = [
+      "--host",
+      host,
+      "--port",
+      to_string(port),
+      "--username",
+      user,
+      "--database",
+      database,
+      "--roles-only"
+    ]
+
+    output =
+      case System.cmd(pg_dumpall, args, env: [{"PGPASSWORD", password}], stderr_to_stdout: true) do
+        {output, 0} -> output
+        {output, code} -> Mix.raise("pg_dumpall exited #{code}:\n#{output}")
+      end
+
+    lines =
+      output
+      |> String.split("\n")
+      |> Enum.filter(&realtime_admin_role_line?/1)
+      |> Enum.uniq()
+
+    if lines == [] do
+      Mix.raise(
+        "[export_tenant_db_dump] found no #{@realtime_admin_role} role statements in pg_dumpall --roles-only output"
+      )
+    end
+
+    """
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '#{@realtime_admin_role}') THEN
+        #{Enum.join(lines, "\n    ")}
+      END IF;
+    END $$;
+
+    """
+  end
+
+  # include only role bootstrap queries
+  defp realtime_admin_role_line?(line) do
+    String.starts_with?(line, "CREATE ROLE #{@realtime_admin_role}") or
+      String.starts_with?(line, "ALTER ROLE #{@realtime_admin_role}") or
+      Regex.match?(~r/^GRANT .*TO #{@realtime_admin_role}/, line)
+  end
+
+  defp schema_migrations_sql!(host, port, database, user, password) do
     {:ok, conn} =
       Postgrex.start_link(hostname: host, port: port, database: database, username: user, password: password)
 
@@ -86,24 +141,17 @@ defmodule Mix.Tasks.Realtime.ExportTenantDbDump do
         "INSERT INTO realtime.\"schema_migrations\" (version) VALUES (#{version});\n"
       end)
 
-    sql = "ALTER TABLE realtime.schema_migrations ALTER COLUMN inserted_at SET DEFAULT now();\n" <> inserts
-
-    File.write!(path, sql, [:append])
+    "ALTER TABLE realtime.schema_migrations ALTER COLUMN inserted_at SET DEFAULT now();\n" <> inserts
   end
 
-  defp postprocess!(path) do
-    tmp_path = path <> ".tmp"
-
-    path
-    |> File.stream!()
-    |> Stream.reject(&String.starts_with?(&1, ["\\restrict ", "\\unrestrict "]))
-    |> Stream.map(fn
-      "CREATE SCHEMA realtime;\n" -> "CREATE SCHEMA IF NOT EXISTS realtime;\n"
+  defp postprocess(content) do
+    content
+    |> String.split("\n")
+    |> Enum.reject(&String.starts_with?(&1, ["\\restrict ", "\\unrestrict "]))
+    |> Enum.map(fn
+      "CREATE SCHEMA realtime;" -> "CREATE SCHEMA IF NOT EXISTS realtime;"
       line -> line
     end)
-    |> Stream.into(File.stream!(tmp_path))
-    |> Stream.run()
-
-    File.rename!(tmp_path, path)
+    |> Enum.intersperse("\n")
   end
 end
