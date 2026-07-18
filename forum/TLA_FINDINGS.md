@@ -40,8 +40,19 @@ convergence) holds over deep partial searches. Building it also surfaced three
 code-level facts the sync `:DOWN` model simplified (per-pid attribution of the
 wipes, `:DOWN` = pure shrink when the new incarnation is unregistered, and
 markers/data creating no monitor) — see "Follow-up models".
+**The caveat-7 cross-mechanism compositions are now built and checked too**
+(`tla/Muster3RestartDown.tla` = sweep × restart, single-group;
+`tla/Muster3DeltaRestartDown.tla` = sweep × delta/multi-group × restart):
+`NoMissedDelivery` **holds** in both (exhaustive at `MaxSeq=2`, partial-clean at
+`MaxSeq=3`/`MaxSeq=4` with confirmed sweep/delta/post-restart-sweep witnesses),
+so the sweep's informal fail-safe arguments are now machine-checked and
+**every caveat is closed or soundly declined**. One structural finding: in the
+multi-group composition the sweep is **unreachable at `MaxSeq=2`** (snapshot
+emission is bound to `Commit` and costs a seq), so the `MaxSeq=2` exhaustive
+baseline is sweep-vacuous there and the sweep-covering runs are the
+`MaxSeq≥3` partials — see "Follow-up models".
 
-Thirteen models:
+Fifteen models:
 
 * `tla/Muster.tla` (+ `.cfg`) — the baseline routing model that **exhibits**
   Finding A (`NoMissedDelivery` is violated).
@@ -114,6 +125,21 @@ Thirteen models:
   is real — `tla/trace_asyncdown_window.txt`); the characterization
   `MissImpliesViewDivergence` **holds** (partial-clean, deep). See "Follow-up
   models".
+
+* `tla/Muster3RestartDown.tla` (+ `.cfg`, `_s4.cfg`, `_w1.cfg`, `_w2.cfg`) —
+  **caveat-7 composition #1: the occupancy GC sweep × the (Finding-B-corrected)
+  coordinator restart**, single-group. Muster3's `DropStale`/`Reap` composed
+  with the peer-`:DOWN`-faithful `Restart`. `NoMissedDelivery` **holds**
+  (exhaustive at `MaxSeq=2`, partial-clean at `MaxSeq=4` past Finding B's
+  depth-12), with confirmed witnesses that sweeps fire, including after a
+  restart (see "Follow-up models").
+* `tla/Muster3DeltaRestartDown.tla` (+ `.cfg`, `_s3.cfg`, `_s4.cfg`,
+  `_w1.cfg`, `_w2.cfg`, `_w3.cfg`) — **caveat-7 composition #2: the sweep ×
+  the multi-group delta selection × the corrected restart**. Muster2DeltaRestartDown
+  plus `DropStale`/`Reap` lifted to per-group rows. `NoMissedDelivery` **holds**
+  (exhaustive at `MaxSeq=2`; sweep-covering partial at `MaxSeq=3`; delta-covering
+  partial at `MaxSeq=4`). Structural finding: the sweep is unreachable at
+  `MaxSeq=2` here (see "Follow-up models").
 
 Plus two bounded 4-node harnesses (`tla/MusterBounded.tla`,
 `tla/Muster2Bounded.tla`) — see "Follow-up models".
@@ -998,6 +1024,88 @@ unchanged (the in-flight prepares still carry their invalidation). The
 `Reregister` action models the withheld-piggyback ack (register without
 asserting a view); the asserting variant is `Reregister` + an ordinary marker.
 
+### `tla/Muster3RestartDown.tla` + `tla/Muster3DeltaRestartDown.tla` — sweep × restart, sweep × delta (was caveat 7)
+
+The two remaining cross-mechanism compositions: the GC sweep (`Muster3`) had
+only been verified on the single-group, no-restart base, with informal
+fail-safe arguments for its interaction with the restart and the delta. Given
+Finding B came from exactly this kind of composition, both are now built:
+
+* **`Muster3RestartDown`** (composition #1, single-group): Muster3's
+  `DropStale`/`Reap` verbatim, composed with the **Finding-B-corrected**
+  restart (peer-side coordinator-pid `:DOWN` blanks the restarted node's
+  agreement everywhere; old-incarnation in-flight messages dropped,
+  FIFO-faithfully; occupancy ETS survives; `:converging` + singleton-promotion
+  gate). The question: can the sweep, fed post-restart agreement state
+  (`mv` wiped on the restarted node; its agreement blanked on every peer while
+  they may still be `:ready` on the old shared view), tombstone a row a Ready
+  router still needs?
+* **`Muster3DeltaRestartDown`** (composition #2): Muster2DeltaRestartDown
+  verbatim, plus `DropStale`/`Reap` **lifted to per-group rows** faithful to
+  the code (the judge is per `{group, source}` row: `:present` ∧
+  `source_agrees?(source, row_seq)` ∧ `find_node(group) != self`; agreement is
+  per **source** with own rows always judgeable — `scope.ex` ~L1369-1449).
+  This is the sweep × delta check: a delta's add-only apply is correct only if
+  the receiver keeps its previous-generation **baseline**, and the sweep is the
+  one mechanism that removes rows without a message from the source. The
+  fail-safe argument (a baseline group by definition routes to the receiver, so
+  the routes-away guard spares it) is judged under the *receiver's* committed
+  view while the source computes the delta under *its own* ring generations —
+  `NoMissedDelivery` checks whether `SourceAgrees` really makes the judge
+  abstain across every mid-churn divergence, including post-restart (restart
+  wipes the very `member_views` agreement `SourceAgrees` reads, and resets
+  `applied_snapshot_seq`, while swept/reaped rows survive in the ETS table).
+
+**Result: `NoMissedDelivery` holds in both.**
+
+* `Muster3RestartDown`, `MaxSeq=2`, 3 nodes — **exhaustive**: 1,418,590
+  distinct states, depth 20, 0 left on queue, no violation.
+* `Muster3RestartDown`, `MaxSeq=4` — partial: **74.3M distinct (309.7M
+  generated), BFS depth 14, no violation** at a 6-minute cap — past the
+  depth-12 where the uncorrected restart model (Finding B) violated at
+  `MaxSeq=4`.
+* `Muster3DeltaRestartDown`, `MaxSeq=2`, 3 nodes, 2 groups (diverging rings) —
+  **exhaustive**: 1,891,411 distinct states, depth 20, 0 left on queue, no
+  violation. **Sweep-vacuous** (see the structural finding below).
+* `Muster3DeltaRestartDown`, `MaxSeq=3`, no message bound (`_s3.cfg`) —
+  partial: **35.2M distinct (142.1M generated), BFS depth 13, no violation**
+  (6-minute cap). This is the **sweep-covering** run.
+* `Muster3DeltaRestartDown`, `MaxSeq=4`, `|msgs|≤3` (`_s4.cfg`) — partial:
+  **37.1M distinct (142.3M generated), BFS depth 12, no violation** (6-minute
+  cap). This is the **delta-covering** run.
+
+**Structural finding (why the multi-group sweep is deep).** In the multi-group
+models snapshot emission is bound to `Commit` (`do_rebalance` is a per-round
+quantity), so a commit that re-routes a held group **costs a seq** — and "a
+held group re-routes away from me" is exactly the sweep's enabling condition
+for own rows. At `MaxSeq=2` the budget (join + discover already spend 2) can
+never fund such a commit, so **`DropStale` is unreachable and the exhaustive
+`MaxSeq=2` run is sweep-vacuous** — unlike the single-group models, where
+`Commit` emits no snapshot and the sweep fires at depth 6. First sweep:
+`MaxSeq=3`, depth 7 (`_w1.cfg`). Same genre as Muster2Delta's
+"delta needs `MaxSeq≥4`" finding; both are documented in the cfgs.
+
+**Non-vacuity witnesses:**
+
+* `Muster3RestartDown`: `NoSweep` (`_w1`) **violated** (depth 6) — a sweep
+  fires; `NoSweepAfterRestart` (`_w2`) **violated** (depth 7) — a sweep fires
+  *after* a coordinator restart, i.e. it judges post-restart agreement state.
+* `Muster3DeltaRestartDown`: `NoSweepEver` (`_w1`, `MaxSeq=3`) **violated**
+  (depth 7) — a sweep fires in the multi-group composition; `NoDeltaSent`
+  (`_w3`, `MaxSeq=4`) **violated** (depth 10) — a delta is dispatched, well
+  inside the depth-12 clean `_s4` search. `NoDeltaToSweptRouter` (`_w2` — a
+  delta in flight to a router that has already swept) did **not** surface
+  within a multi-minute `MaxSeq=4` search (depth 12, 46.4M distinct); kept as
+  a documented probe, not a confirmed witness (same status as Muster2Delta's
+  `NoWholesaleDrop`/`NoBaselineDelta`).
+
+**Takeaway.** The informal caveat-7 arguments are now machine-checked: the
+sweep's `SourceAgrees` + routes-away guard stays fail-safe under both a
+coordinator restart (no agreement ⇒ no sweep; post-restart sweeps *do* happen
+and stay safe) and the delta's baseline dependency (a baseline group routes to
+the receiver, so the guard spares it, across every reachable mid-churn view
+divergence). No code change needed.
+
 ## Caveats / what is NOT yet modeled (next steps)
 
 1. ~~**`drop_stale_router_entries` sweep + tombstone GC** are not modeled.~~
@@ -1069,18 +1177,22 @@ asserting a view); the asserting variant is `Reregister` + an ordinary marker.
    `tla/Muster2RestartLive.tla`: a droppable prepare wedges a round and the
    crash-restart resolves it; `RoundsResolve` and `<>[]RoundsQuiet` hold
    (exhaustive at 3 nodes, `MaxSeq=2`). See "Follow-up models" above.
-7. **Remaining cross-mechanism compositions (open, ranked low).** The GC sweep +
-   tombstone reap (`Muster3`) is verified only on the single-group, no-restart
-   Muster2 base — **sweep × restart** and **sweep × delta/multi-group** are
-   unchecked compositions. Assessment: the sweep's under-delivery lever is its
-   routes-away + `SourceAgrees` guard; a restart wipes the very `member_views`
-   agreement `SourceAgrees` reads (fail-safe direction: no agreement ⇒ no
-   sweep), and a delta's baseline rows are exactly the groups that *do* route to
-   the receiver, which the routes-away guard spares. Both arguments are
-   informal; given Finding B came from exactly this kind of composition, worth
-   building if the sweep is ever touched. Similarly, `Muster2RestartDownAsync`
-   is single-group — its composition with delta selection is unchecked (the
-   sync `Muster2DeltaRestartDown` covers restart × delta; the async window is
+7. ~~**Remaining cross-mechanism compositions (open, ranked low).**~~ **DONE**
+   — both compositions are now modeled and checked clean:
+   **sweep × restart** in `tla/Muster3RestartDown.tla` (`NoMissedDelivery`
+   holds; exhaustive at `MaxSeq=2`, partial-clean at `MaxSeq=4` past Finding
+   B's depth) and **sweep × delta/multi-group × restart** in
+   `tla/Muster3DeltaRestartDown.tla` (holds; exhaustive at `MaxSeq=2`,
+   sweep-covering partial at `MaxSeq=3`, delta-covering partial at `MaxSeq=4`),
+   with confirmed sweep / post-restart-sweep / delta witnesses. The informal
+   fail-safe arguments (no agreement ⇒ no sweep; baseline groups route to the
+   receiver so the routes-away guard spares them) are machine-checked. See
+   "Follow-up models". One narrow residual, noted there: the
+   delta-to-an-already-swept-router probe (`_w2`) did not surface within its
+   search budget, so that exact shape is covered by the clean partials, not by
+   a confirmed witness. Still open (unchanged): `Muster2RestartDownAsync` is
+   single-group — its composition with delta selection is unchecked (the sync
+   `Muster2DeltaRestartDown` covers restart × delta; the async window is
    view-level, so multi-group is not expected to change its class).
 8. **Marker seq abstraction (noted, declined).** Every `NoMissedDelivery` model
    stamps re-announce markers with a fresh per-message seq, while the real
