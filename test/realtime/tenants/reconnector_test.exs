@@ -12,11 +12,6 @@ defmodule Realtime.Tenants.ReconnectorTest do
     %{tenant: tenant}
   end
 
-  defp assert_process_down(pid, timeout \\ 100) do
-    ref = Process.monitor(pid)
-    assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, timeout
-  end
-
   describe "periodic reconnect check" do
     test "restarts Connect when this node still has connected users", %{tenant: tenant} do
       {:ok, reconnector} = Reconnector.start_link([])
@@ -30,7 +25,7 @@ defmodule Realtime.Tenants.ReconnectorTest do
       Endpoint.subscribe(Connect.syn_topic(tenant.external_id))
 
       Process.exit(pid, :kill)
-      assert_process_down(pid)
+      assert_receive %{event: "connect_down"}, 5000
 
       send(reconnector, :check)
 
@@ -48,7 +43,7 @@ defmodule Realtime.Tenants.ReconnectorTest do
       Endpoint.subscribe(Connect.syn_topic(tenant.external_id))
 
       Process.exit(pid, :kill)
-      assert_process_down(pid)
+      assert_receive %{event: "connect_down"}, 5000
 
       send(reconnector, :check)
 
