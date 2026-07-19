@@ -3415,12 +3415,13 @@ defmodule Forum.MusterDistributedTest do
       %{scope: scope}
     end
 
-    # B1 (two-phase view adoption) characterization of the rolling-deploy cascade.
-    # In the pre-B1 model, a holder T could race ahead to the 4-node view while an
-    # old peer R lagged, obliviously :ready for a superseded view -- the window
-    # that produced Finding A. B1 removes that window by GATING: T cannot commit
-    # (and route joins under) a grown view until every OLD-view member has acked
-    # its move. So freezing R now freezes T's ADOPTION, not just R's.
+    # Two-phase view adoption characterization of the rolling-deploy cascade.
+    # Without gating, a holder T could race ahead to the 4-node view while an
+    # old peer R lagged, obliviously :ready for a superseded view -- a window
+    # where a broadcast could be missed. Two-phase adoption removes that window
+    # by GATING: T cannot commit (and route joins under) a grown view until every
+    # OLD-view member has acked its move. So freezing R now freezes T's ADOPTION,
+    # not just R's.
     #
     # We freeze R (parking both ways it could act on the cascade: registering C,
     # and applying T's transition) and show:
@@ -3552,7 +3553,7 @@ defmodule Forum.MusterDistributedTest do
           status_changes = of_kind(:muster_status_change, trace)
 
           # T never trusted (went :ready for) the intermediate 3-node view --
-          # stronger under B1: it never committed it, so it could not.
+          # it never committed it, so it could not.
           assert Enum.count(
                    status_changes,
                    &(&1.node == result.t_node and &1.to == :ready and &1.view_hash == result.hash3)
@@ -4780,7 +4781,7 @@ defmodule Forum.MusterDistributedTest do
     end
   end
 
-  describe "two-phase view adoption closes the stale-ready router window (TLA Finding A)" do
+  describe "two-phase view adoption closes the stale-ready router window" do
     setup do
       scope = :"muster_stale_ready_#{System.unique_integer([:positive])}"
       # Long rpc_timeout so the parked view-change PREPARE RPC does not time out
@@ -4789,14 +4790,14 @@ defmodule Forum.MusterDistributedTest do
       %{scope: scope}
     end
 
-    # The TLA+ model (forum/TLA_FINDINGS.md, "Finding A") surfaced a missed
-    # delivery: a router R that is :ready for view {R,S} and is `group`'s router
-    # there could miss a member S that had advanced to {R,S,T} and freshly joined
-    # `group` (which routes to T under {R,S,T}, never reaching R). The B1 fix
-    # (two-phase view adoption) makes S PREPARE its old-view members (here R)
-    # before it may COMMIT {R,S,T} and route joins under it.
+    # The window this guards against is a missed delivery: a router R that is
+    # :ready for view {R,S} and is `group`'s router there could miss a member S
+    # that had advanced to {R,S,T} and freshly joined `group` (which routes to T
+    # under {R,S,T}, never reaching R). Two-phase view adoption makes S PREPARE
+    # its old-view members (here R) before it may COMMIT {R,S,T} and route joins
+    # under it.
     #
-    # This test drives the exact adversarial interleaving and shows the miss is
+    # This test drives the adversarial interleaving and shows the miss is
     # now impossible. We freeze R on {R,S}-ready (parking BOTH its un-readying
     # paths: registering T, and applying S's transition -- the same coordinator
     # loop drives both, so it stays frozen ready). Because R never acks S's
@@ -4906,6 +4907,160 @@ defmodule Forum.MusterDistributedTest do
     end
   end
 
+  describe "coordinator restart behind an unprocessed :DOWN" do
+    setup do
+      scope = :"muster_asyncdown_#{System.unique_integer([:positive])}"
+      # Long rpc_timeout so nothing on the frozen router can time out (and crash
+      # a coordinator) while the window is held open.
+      start_supervised!(spec(scope, vacant_flush_interval_ms: 100, rpc_timeout_ms: 30_000))
+      %{scope: scope}
+    end
+
+    # Peers learn about a coordinator restart-in-place through the old pid's
+    # monitor :DOWN, which is ASYNC -- a peer that was legitimately :ready on
+    # the shared view stays :ready until it actually processes that :DOWN. A
+    # delivery can be missed in that window: the restarted node's view resets to
+    # {S}, so a FRESH local join routes to S itself and R -- still :ready for
+    # {R,S} and still `group`'s router there -- fans out to nobody.
+    #
+    # This test reproduces that window on a real 2-node cluster:
+    #
+    #   1. R and S pair on {R,S}; R is `group`'s router and :ready. Nobody has
+    #      joined `group` yet.
+    #   2. S's coordinator is killed and supervisor-restarted in place (node
+    #      stays up): its ring resets to {S}, member_views wiped, occupancy
+    #      table retained, status :converging.
+    #   3. R's processing of the old pid's :DOWN is parked (as is its
+    #      registration of the new incarnation, whose rediscovery could race
+    #      ahead of the monitor channel) -- the real async window, held open.
+    #   4. A member freshly joins `group` on S: under S's reset view the group
+    #      routes to S itself, so the claim is written locally and R is never
+    #      told.
+    #   5. R: still :ready for {R,S}, still `group`'s router, table empty for
+    #      `group` -- `Muster.targets/3` returns {:ok, []}. That empty delivery
+    #      set is the missed broadcast (S holds a live member).
+    #
+    # Releasing the parks lets R process the :DOWN (wiping the dead
+    # incarnation's agreement, so R floods) and the queued rediscovery; the
+    # pair re-converges and S's rebalance re-announces the group to R: the
+    # window is transient and self-healing.
+    #
+    # STATUS: this is a CHARACTERIZATION of a known, documented, accepted
+    # window (README.md, "Known transient window: peers learn of a restart
+    # asynchronously"). It asserts the CURRENT (miss) behavior on purpose. When a
+    # fix ships (the
+    # deferred restart-claim guard, or a simpler design), flip the miss
+    # assertion below to the no-miss property: `targets` on R must either
+    # include s_node or be {:error, :flood}.
+    @tag :capture_log
+    test "a fresh join re-homed by a restarted coordinator is missed by a peer that has not processed the old pid's :DOWN",
+         %{scope: scope} do
+      r_node = node()
+
+      s_name = ~c"muster_asyncdown_s_#{System.unique_integer([:positive])}"
+      s_node = :"#{s_name}@127.0.0.1"
+
+      two_view = Enum.sort([r_node, s_node])
+      two_hash = :erlang.phash2(two_view)
+
+      # `group` routes to R in {R,S}; under S's post-restart singleton view it
+      # trivially routes to S itself.
+      group = pick_group([{two_view, r_node}])
+
+      check_trace(
+        fn ->
+          # 1. Healthy 2-node cluster {R,S}; R is :ready and is `group`'s router.
+          {:ok, p_s, ^s_node} = Peer.start(name: s_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(s_node)
+          start_remote_muster(p_s, scope, rpc_timeout_ms: 30_000)
+          await_ready(two_view)
+          assert {:ok, ^r_node} = Muster.router(scope, group)
+
+          # 2. Park R's :DOWN handling for S's dying coordinator (the tp fires
+          #    at the top of the handler, before any wipe) AND R's registration
+          #    of S's new incarnation (rediscovery travels the adapter channel
+          #    and can beat the monitor :DOWN). Whichever arrives first freezes
+          #    R's single coordinator loop with its :ready-for-{R,S} state
+          #    intact; the other queues behind it. Both released together by
+          #    one :test_release_down.
+          force_ordering(
+            %{:"$kind" => :test_release_down},
+            %{
+              :"$kind" => :muster_peer_down_apply,
+              :"$span" => :start,
+              node: ^r_node,
+              peer_node: ^s_node
+            }
+          )
+
+          force_ordering(
+            %{:"$kind" => :test_release_down},
+            %{:"$kind" => :muster_peer_registered, node: ^r_node, peer: ^s_node}
+          )
+
+          # 3. Kill S's coordinator. The supervisor restarts it under the same
+          #    live node name: ring reset to {S}, member_views wiped, occupancy
+          #    table retained, :converging.
+          old_coord = :erpc.call(s_node, Process, :whereis, [Forum.Supervisor.name(scope)])
+          Process.monitor(old_coord)
+          true = :erpc.call(s_node, Process, :exit, [old_coord, :kill])
+          assert_receive {:DOWN, _, _, ^old_coord, _}, 5_000
+
+          # 4. A member freshly joins `group` on S's new incarnation (retried
+          #    while the restarted shards finish booting). Under S's reset view
+          #    the group routes to S itself: the claim is local, R is never told.
+          retry(100, 50, fn ->
+            :ok = :peer.call(p_s, MusterPeerAux, :join, [scope, group])
+          end)
+
+          assert :peer.call(p_s, Forum.Muster, :local_member_count, [scope, group]) == 1
+          assert s_node in occupancy_on(s_node, scope, group)
+
+          # --- THE MISS (a missed delivery, live). ---
+          # R is still :ready for {R,S} and still `group`'s router there, S
+          # holds a live member of `group` -- yet R's delivery set is EMPTY.
+          # A broadcast fanned out by R right now silently misses S.
+          assert status(scope) == :ready
+          assert Muster.view_hash(scope) == two_hash
+          assert {:ok, ^r_node} = Muster.router(scope, group)
+          assert {:ok, []} = Muster.targets(scope, group, two_hash)
+
+          # --- Release: R processes the :DOWN (the dead incarnation's
+          #     agreement is wiped, so R stops trusting its table) and the
+          #     queued rediscovery; the pair re-converges and S's rebalance
+          #     into {R,S} re-announces the group to R. Self-heal, as modeled.
+          tp(:test_release_down, %{})
+          await_ready(two_view, nth: 2)
+
+          wait_until(fn ->
+            case Muster.targets(scope, group, two_hash) do
+              {:ok, targets} -> s_node in targets
+              _ -> false
+            end
+          end)
+
+          %{r_node: r_node, s_node: s_node}
+        end,
+        fn result, trace ->
+          # The park engaged: R applied the old pid's :DOWN only after the
+          # release event, i.e. every miss assertion ran strictly inside the
+          # held-open window (not racing a :DOWN that was about to land).
+          release_idx = Enum.find_index(trace, &(&1[:"$kind"] == :test_release_down))
+
+          down_idx =
+            Enum.find_index(trace, fn e ->
+              e[:"$kind"] == :muster_peer_down_apply and e[:node] == result.r_node and
+                e[:peer_node] == result.s_node and e[:"$span"] == :start
+            end)
+
+          assert release_idx, "release event missing from trace"
+          assert down_idx, "R never applied the old pid's :DOWN"
+          assert release_idx < down_idx, "the :DOWN was applied before the release -- window not held"
+        end
+      )
+    end
+  end
+
   describe "grow then shrink back to the committed view -- the prepare round is cancelled" do
     setup do
       scope = :"muster_cancel_#{System.unique_integer([:positive])}"
@@ -4915,7 +5070,7 @@ defmodule Forum.MusterDistributedTest do
       %{scope: scope}
     end
 
-    # Growing the view runs a two-phase PREPARE before committing (B1). If the
+    # Growing the view runs a two-phase PREPARE before committing. If the
     # node that triggered the growth leaves again BEFORE the round commits,
     # membership is back to the committed view and there is no ring to swap:
     # recompute_members takes the cancel branch (cancel_view_change/1) instead of

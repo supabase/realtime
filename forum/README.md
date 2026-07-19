@@ -281,6 +281,18 @@ After a crash the supervisor restarts the **coordinator**, whose `init/1`:
 
 The supervisor restart strategy ensures the cluster eventually re-converges. During the restart window, between the crash and `init/1` running, the `:status` persistent_term is left at `:rebalancing`, so `Muster.router/2` returns `{:rebalancing, members}` and callers correctly fan out. (See `test/forum/muster_distributed_test.exs`.)
 
+#### Known transient window: peers learn of a restart asynchronously
+
+Everything above describes what the **restarted node** does; its *peers* only learn about the restart from the old coordinator pid's monitor `:DOWN`, which is delivered and processed **asynchronously**. Until a peer processes that `:DOWN` (or the new incarnation's discovery), nothing it holds has changed: it can still be `:ready` for the pre-restart view, holding the dead incarnation's agreement. That opens a **known, accepted missed-delivery window**, model-checked in `tla/Muster2RestartDownAsync.tla` and reproduced end-to-end on a real cluster (`test/forum/muster_distributed_test.exs`, describe `"coordinator restart behind an unprocessed :DOWN (TLA Finding B residual)"`):
+
+1. R and S are converged on `{R, S}`; R is `group`'s router there and `:ready`. Nobody holds `group` yet.
+2. S's coordinator crashes and restarts in place. S's ring resets to `{S}`; R's `:DOWN` for the old pid is still queued behind other work in R's coordinator mailbox.
+3. A member freshly joins `group` on S. Under S's reset view the group routes to **S itself**, so the claim is written locally — R is never told.
+4. A sender **on R** still carries the `{R, S}` view hash, and R is still `:ready` for it: `can_decide?/2` passes and `targets/3` returns `{:ok, []}` — the broadcast silently misses S's live member.
+5. R processes the `:DOWN` (or the new incarnation's discovery): it drops the dead pid's agreement, stops trusting its table, floods, re-pairs, and S's rebalance re-announces the group. **Self-healed.**
+
+The window is bounded by the peer's coordinator mailbox latency plus re-convergence, and every reachable miss in the model has the missed holder on a *different committed view* than the router (`MissImpliesViewDivergence` holds) — the same transient, asymmetric-convergence class as Finding A (`TLA_FINDINGS.md`), never a miss between two settled nodes. The B1 two-phase view adoption does not cover it because the restarted coordinator lost the very state (its old view) that B1's prepare round needs. **No fix is shipped yet**; the leading candidate (a "restart-claim guard": persist the last committed view across coordinator restarts and have fresh joins during the post-restart window also assert their claim, acked, at the group's pre-restart router — one targeted, direct-ETS write that lands even while the peer's coordinator is wedged) is sketched in `TLA_FINDINGS.md` under "Finding B residual — status", pending a simpler design.
+
 ### Coordinator, shard, or ring crash for other reasons
 
 **An outer `:rest_for_one` supervisor holds the ring, the coordinator, a shards-supervisor, and a one-shot shards-ready sentinel; the shards themselves live under their own inner `:one_for_one` supervisor:**

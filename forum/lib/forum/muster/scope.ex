@@ -74,15 +74,16 @@ defmodule Forum.Muster.Scope do
       :shards_ready_timeout_ms,
       :tombstone_window_ms,
       :occupancy_table,
-      # Two-phase view adoption (B1). When growing the cluster view we do NOT
+      # Two-phase view adoption. When growing the cluster view we do NOT
       # swap the ring immediately; we first PREPARE the OLD view's members (the
       # only nodes that could be stale routers for this transition) via a
       # `note_transition` RPC that INVALIDATES our member_views entry on them, and
       # only COMMIT (swap the ring, run do_rebalance) once every one of them has
       # acked. That orders "every old-view member knows we are leaving the view"
-      # strictly before "we route joins under the new view", closing the
-      # stale-ready-router miss (see TLA_FINDINGS.md Finding A). nil when no view
-      # change is in flight; otherwise the target view, the set of old members we
+      # strictly before "we route joins under the new view", closing the window
+      # where an old-view member could still route joins to us as a stale ready
+      # router. nil when no view change is in flight; otherwise the target view,
+      # the set of old members we
       # are still awaiting acks from, and this round's seq (stale-round acks are
       # dropped). A membership change mid-round supersedes it (fresh seq).
       pending_round: nil,
@@ -389,7 +390,7 @@ defmodule Forum.Muster.Scope do
   @doc """
   Remote: source_node is beginning a view change and tells us (one of its OLD
   view's members) to stop counting it as agreeing to the view we last heard from
-  it (the B1 two-phase prepare; see `begin_view_change`).
+  it (the two-phase prepare; see `begin_view_change`).
 
   We INVALIDATE our member_views entry for source_node at `seq` (a value that can
   never equal a real cluster-view hash), so `ready?/1` no longer treats it as
@@ -653,7 +654,7 @@ defmodule Forum.Muster.Scope do
     end
   end
 
-  # B1 prepare (see note_transition/4): `source` is leaving the view it last
+  # Prepare (see note_transition/4): `source` is leaving the view it last
   # announced to us. Invalidate its member_views entry (hv := :in_transition, a
   # value no real cluster-view hash equals), seq-guarded via put_member_view, so
   # ready?/1 stops counting it as agreeing to any view. A stale, lower-seq
@@ -1497,13 +1498,13 @@ defmodule Forum.Muster.Scope do
       # Pure shrink (a node left): commit immediately. The departed node's
       # member_views entry was wiped in the :DOWN handler, which un-readies us for
       # any view still containing it, so a shrink can never leave us a stale-ready
-      # router; only growth can (Finding A), and only growth needs the prepare.
+      # router; only growth can, and only growth needs the prepare.
       true ->
         do_rebalance(state, new_members)
     end
   end
 
-  # Phase 1 of B1: announce our move to `target` to every OLD-view member (the
+  # Phase 1: announce our move to `target` to every OLD-view member (the
   # only possible stale routers for this transition) and await their acks before
   # committing. Flip to :rebalancing (so we flood as sender and router meanwhile)
   # and bump :view_hash, but do NOT swap the ring: joins keep routing under the
@@ -1559,7 +1560,7 @@ defmodule Forum.Muster.Scope do
     end
   end
 
-  # Phase 2 of B1: every old-view member acked -> commit. do_rebalance swaps the
+  # Phase 2: every old-view member acked -> commit. do_rebalance swaps the
   # ring, gathers the shards, re-announces held groups to the new routers, and
   # recomputes :status. It also clears pending_round (below), so update_status
   # resumes publishing :ready/:converging.

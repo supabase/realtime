@@ -39,7 +39,13 @@ committed view than the router — transient, self-healing asymmetric
 convergence) holds over deep partial searches. Building it also surfaced three
 code-level facts the sync `:DOWN` model simplified (per-pid attribution of the
 wipes, `:DOWN` = pure shrink when the new incarnation is unregistered, and
-markers/data creating no monitor) — see "Follow-up models".
+markers/data creating no monitor) — see "Follow-up models". **The residual is
+now also reproduced end-to-end** (a snabbkaffe-parked distributed test drives
+the model's exact 9-step counterexample on a real 2-node cluster) **and its
+disposition is decided: documented and accepted for now** — README.md
+describes the window; a candidate fix (the "restart-claim guard" dual-claim)
+was prototyped, judged too complex, backed out, and recorded for later. See
+"Finding B residual — status".
 **The caveat-7 cross-mechanism compositions are now built and checked too**
 (`tla/Muster3RestartDown.tla` = sweep × restart, single-group;
 `tla/Muster3DeltaRestartDown.tla` = sweep × delta/multi-group × restart):
@@ -342,7 +348,10 @@ violated, 9-step trace) and shows it is **broader than `:DOWN` latency alone** �
 but every reachable miss is **Finding-A-class**: the missed holder is on a
 different committed view than the router (asymmetric convergence; transient and
 self-healing). Whether it warrants action is the same *zero-miss vs
-eventual-convergence* decision as Finding A.
+eventual-convergence* decision as Finding A. **Decided: documented and
+accepted for now** — reproduced end-to-end by a distributed test and written
+up in README.md; the candidate fix is recorded but deferred (see "Finding B
+residual — status" under "Follow-up models").
 
 **Takeaway.** The follow-up did its job: it found that `Muster2Restart` (and hence the
 restart half of caveat 3) was **not faithful** — it omitted the load-bearing peer-pid
@@ -1013,7 +1022,50 @@ the owed-snapshot barrier, newest-seq-wins announces). It also sharpens the
 severity discussion: the window is bounded not by `:DOWN` delivery alone but by
 *convergence + owed-snapshot delivery* after a coordinator restart. Whether
 zero-miss-during-restart-churn is required is the same product decision as
-Finding A — no code change made (per the confirm-before-fixes preference).
+Finding A.
+
+**Finding B residual — status (decided): reproduced end-to-end, DOCUMENTED,
+fix deferred.** The model's 9-step counterexample now reproduces on a real
+2-node cluster: `test/forum/muster_distributed_test.exs`, describe
+`"coordinator restart behind an unprocessed :DOWN (TLA Finding B residual)"`,
+kills S's coordinator, parks R's handling of both the old pid's `:DOWN` and
+the new incarnation's registration (whichever arrives first freezes R's
+coordinator loop `:ready` for `{R,S}`; both released by one event), freshly
+joins the group on the restarted S (it self-routes under the reset ring), and
+asserts the live miss — R `:ready`, R the group's router for the shared view,
+S holding a live member, yet `Muster.targets/3` returning `{:ok, []}` — then
+releases the parks and asserts the self-heal (both nodes re-converge and R's
+delivery set includes S). A trace check asserts the `:DOWN` was applied only
+after the release, i.e. the miss assertions ran strictly inside the held-open
+window. The test is kept as a **characterization** of the accepted window
+(it will fail — correctly — when a fix ships). The window is documented in
+`README.md` ("Known transient window: peers learn of a restart
+asynchronously").
+
+A fix was designed, prototyped, and **deliberately backed out as too complex
+for now**. For the record, the leading candidate ("restart-claim guard",
+dual-claim): (a) for a `:ready` router to miss, sender and router must share a
+view, so the only router that can miss a group freshly joined on the restarted
+node S is the group's router under **S's last committed pre-restart view**;
+(b) persist that view across coordinator restarts (written at every rebalance
+commit, erased on a committed singleton view and on a fresh
+`Forum.Supervisor` start) and load it into a second, normally-empty "guard
+ring" sibling at init; (c) while armed (init → the first `:ready` that
+accounts for every guard-view member as re-agreed or disconnected), a fresh
+join claims on the current router AND, acked, on the guard router — **one
+targeted `occupied/5`**, a direct ETS write on the peer that lands even while
+the peer's coordinator is wedged (an init-time B1-style prepare round would
+instead block all joins on the slowest peer *coordinator*, the exact
+replicated failure mode); failures follow the existing remote-claim story.
+Known residual even with the guard: the shrink-re-home shape (no join
+involved, third refuted-invariant witness above) stays open in every design
+considered — it is the irreducible Finding-A-class transient, healed by the
+owed-snapshot barrier. If the fix is revived: flip the characterization
+test's miss assertion to a no-miss assertion, and model the guard on
+`tla/Muster2RestartDownAsync.tla` (arm at `Restart`, dual-write in
+`HolderJoin` while armed, sticky disarm at first ready; check "no miss whose
+holder's claim was an armed-window fresh join" — expected to hold — alongside
+`MissImpliesViewDivergence`).
 
 **Modeling notes.** Known simplifications, judged benign and documented in the
 module header: Discover/Reregister register the *current* incarnation only (a
@@ -1191,9 +1243,15 @@ divergence). No code change needed.
    delta-to-an-already-swept-router probe (`_w2`) did not surface within its
    search budget, so that exact shape is covered by the clean partials, not by
    a confirmed witness. Still open (unchanged): `Muster2RestartDownAsync` is
-   single-group — its composition with delta selection is unchecked (the sync
-   `Muster2DeltaRestartDown` covers restart × delta; the async window is
-   view-level, so multi-group is not expected to change its class).
+   single-group and sweep-less — its composition with the delta selection is
+   unchecked (the sync `Muster2DeltaRestartDown` covers restart × delta; the
+   async window is view-level, so multi-group is not expected to change its
+   class), and its composition with the occupancy GC sweep is unchecked too
+   (`Muster3RestartDown` composes the sweep with the *sync* corrected restart
+   only; the async residual could in principle let the sweep judge under a
+   dead incarnation's not-yet-wiped agreement, though the routes-away guard's
+   fail-safe argument is unchanged). Both are expected Finding-A-class at
+   worst; neither is built.
 8. **Marker seq abstraction (noted, declined).** Every `NoMissedDelivery` model
    stamps re-announce markers with a fresh per-message seq, while the real
    heartbeat carries the stable committed `view_seq` — the abstraction
