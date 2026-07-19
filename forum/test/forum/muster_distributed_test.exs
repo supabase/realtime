@@ -3418,12 +3418,12 @@ defmodule Forum.MusterDistributedTest do
       %{scope: scope}
     end
 
-    # B1 (two-phase view adoption) characterization of the rolling-deploy cascade.
-    # In the pre-B1 model, a holder T could race ahead to the 4-node view while an
-    # old peer R lagged, obliviously :ready for a superseded view -- the window
-    # that produced Finding A. B1 removes that window by GATING: T cannot commit
-    # (and route joins under) a grown view until every OLD-view member has acked
-    # its move. So freezing R now freezes T's ADOPTION, not just R's.
+    # Two-phase view adoption characterization of the rolling-deploy cascade.
+    # Without the gate, a holder T could race ahead to the 4-node view while an
+    # old peer R lagged, obliviously :ready for a superseded view -- the missed-
+    # delivery window. The gate removes that window: T cannot commit (and route
+    # joins under) a grown view until every OLD-view member has acked its move.
+    # So freezing R now freezes T's ADOPTION, not just R's.
     #
     # We freeze R (parking both ways it could act on the cascade: registering C,
     # and applying T's transition) and show:
@@ -3555,7 +3555,7 @@ defmodule Forum.MusterDistributedTest do
           status_changes = of_kind(:muster_status_change, trace)
 
           # T never trusted (went :ready for) the intermediate 3-node view --
-          # stronger under B1: it never committed it, so it could not.
+          # with the gate it never committed it, so it could not.
           assert Enum.count(
                    status_changes,
                    &(&1.node == result.t_node and &1.to == :ready and &1.view_hash == result.hash3)
@@ -4783,7 +4783,7 @@ defmodule Forum.MusterDistributedTest do
     end
   end
 
-  describe "two-phase view adoption closes the stale-ready router window (TLA Finding A)" do
+  describe "two-phase view adoption closes the stale-ready router window" do
     setup do
       scope = :"muster_stale_ready_#{System.unique_integer([:positive])}"
       # Long rpc_timeout so the parked view-change PREPARE RPC does not time out
@@ -4792,12 +4792,11 @@ defmodule Forum.MusterDistributedTest do
       %{scope: scope}
     end
 
-    # The TLA+ model (forum/TLA_FINDINGS.md, "Finding A") surfaced a missed
-    # delivery: a router R that is :ready for view {R,S} and is `group`'s router
-    # there could miss a member S that had advanced to {R,S,T} and freshly joined
-    # `group` (which routes to T under {R,S,T}, never reaching R). The B1 fix
-    # (two-phase view adoption) makes S PREPARE its old-view members (here R)
-    # before it may COMMIT {R,S,T} and route joins under it.
+    # The missed delivery this guards against: a router R that is :ready for view
+    # {R,S} and is `group`'s router there could miss a member S that had advanced
+    # to {R,S,T} and freshly joined `group` (which routes to T under {R,S,T},
+    # never reaching R). Two-phase view adoption makes S PREPARE its old-view
+    # members (here R) before it may COMMIT {R,S,T} and route joins under it.
     #
     # This test drives the exact adversarial interleaving and shows the miss is
     # now impossible. We freeze R on {R,S}-ready (parking BOTH its un-readying
