@@ -5191,6 +5191,134 @@ defmodule Forum.MusterDistributedTest do
     end
   end
 
+  describe "total coordinator wipe -- every Scope on the cluster crashes at once" do
+    setup do
+      scope = :"muster_wipe_#{System.unique_integer([:positive])}"
+      # Fast heartbeat so the re-discovery backstop re-pairs the cold-restarted
+      # coordinators promptly: after a whole-layer crash no node's :nodeup fires
+      # (the node connections never dropped, only the processes died), so
+      # re-pairing leans on the init discover broadcast plus rediscover/1.
+      start_supervised!(
+        spec(scope, vacant_flush_interval_ms: 100, view_heartbeat_interval_ms: 200)
+      )
+
+      %{scope: scope}
+    end
+
+    # README "Scope crash for other reasons": the single-crash tests all kill ONE
+    # coordinator against healthy :ready peers that act as the source of truth and
+    # re-snapshot the casualty. This proves the harder case -- EVERY coordinator on
+    # a 3-node cluster dies at once, so there is no :ready anchor to lean on. Each
+    # restarts cold (empty occupancy table, members [node()], :converging) but with
+    # its Partition tables intact, and the cluster must re-converge purely from each
+    # node re-asserting its OWN held groups (reannounce_local_groups_at_init) plus
+    # mutual re-discovery. This is the whole-layer liveness guarantee: three nodes
+    # restarting simultaneously must not wedge each other in a mutual :converging
+    # standoff, and every source row must be rebuilt on its new router.
+    @tag :capture_log
+    test "all three coordinators crash together and the cluster re-converges from cold",
+         %{scope: scope} do
+      t_node = node()
+
+      check_trace(
+        fn ->
+          {:ok, p1, n1} = Peer.start(aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(n1)
+          start_remote_muster(p1, scope, view_heartbeat_interval_ms: 200)
+
+          {:ok, p2, n2} = Peer.start(aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(n2)
+          start_remote_muster(p2, scope, view_heartbeat_interval_ms: 200)
+
+          view3 = Enum.sort([t_node, n1, n2])
+          view_hash = :erlang.phash2(view3)
+          await_ready(view3)
+
+          # One group held by each node, each routed to a DIFFERENT node than its
+          # holder, so healing every row requires a real cross-node re-announce
+          # (not just a self-row re-assert):
+          #   g_t held by T, routed to n1
+          #   g_1 held by n1, routed to n2
+          #   g_2 held by n2, routed to T
+          g_t = pick_group([{view3, n1}])
+          g_1 = pick_group([{view3, n2}])
+          g_2 = pick_group([{view3, t_node}])
+          assert g_t != g_1 and g_1 != g_2 and g_t != g_2
+
+          :ok = Muster.join(scope, g_t, spawn(fn -> Process.sleep(:infinity) end))
+          :ok = :peer.call(p1, MusterPeerAux, :join, [scope, g_1])
+          :ok = :peer.call(p2, MusterPeerAux, :join, [scope, g_2])
+
+          # Every router knows its group (join/3 only returns once it has been told).
+          assert t_node in occupancy_on(n1, scope, g_t)
+          assert n1 in occupancy_on(n2, scope, g_1)
+          assert n2 in occupancy_on(t_node, scope, g_2)
+
+          # Kill all three coordinators at once. Each takes its occupancy table with
+          # it; the Partition tables (owned by the surviving Forum.Supervisor) and
+          # the member pids live on, so each node still HOLDS its group.
+          coords = [
+            {t_node, Process.whereis(Forum.Supervisor.name(scope))},
+            {n1, :erpc.call(n1, Process, :whereis, [Forum.Supervisor.name(scope)])},
+            {n2, :erpc.call(n2, Process, :whereis, [Forum.Supervisor.name(scope)])}
+          ]
+
+          refs =
+            for {n, pid} <- coords do
+              ref = Process.monitor(pid)
+
+              if n == t_node,
+                do: Process.exit(pid, :kill),
+                else: :erpc.call(n, Process, :exit, [pid, :kill])
+
+              {pid, ref}
+            end
+
+          for {pid, ref} <- refs do
+            assert_receive {:DOWN, ^ref, :process, ^pid, _}, 5_000
+          end
+
+          # No :ready anchor survives: the whole layer must re-pair and re-converge
+          # from cold. Each node reaches :ready for the 3-node view a SECOND time
+          # (the first was the original formation), hence nth: 2.
+          await_ready(view3, nth: 2, timeout: 30_000)
+
+          # All three agree on the full membership again.
+          assert Muster.members(scope) == view3
+          assert :erpc.call(n1, Muster, :members, [scope]) == view3
+          assert :erpc.call(n2, Muster, :members, [scope]) == view3
+
+          # Every source row was rebuilt on its router with no healthy peer to lean
+          # on -- each holder re-announced its own group after the cold restart.
+          assert t_node in occupancy_on(n1, scope, g_t)
+          assert n1 in occupancy_on(n2, scope, g_1)
+          assert n2 in occupancy_on(t_node, scope, g_2)
+
+          # Fully functional: a fresh join succeeds against the healed cluster.
+          assert :ok =
+                   Muster.join(scope, :wipe_probe, spawn(fn -> Process.sleep(:infinity) end))
+
+          %{view3: view3, view_hash: view_hash}
+        end,
+        fn result, trace ->
+          # The trace independently confirms all three nodes reached :ready for the
+          # 3-node view at least twice: once at formation, once after the total
+          # crash. Anything less means a node stayed wedged in :converging.
+          ready_by_node =
+            of_kind(:muster_status_change, trace)
+            |> Enum.filter(&(&1.to == :ready and &1.view_hash == result.view_hash))
+            |> Enum.group_by(& &1.node)
+
+          for n <- result.view3 do
+            assert length(Map.get(ready_by_node, n, [])) >= 2,
+                   "#{inspect(n)} did not reach :ready for the 3-node view both at formation " <>
+                     "and after the total coordinator crash"
+          end
+        end
+      )
+    end
+  end
+
   # A group that routes to `r_node` in {t_node, r_node} (so a claim from T travels
   # to R as a remote :occupied and T's OWN occupancy table holds no self-row for
   # it) AND lives on shard index 0, so the coordinator gathers it before the
