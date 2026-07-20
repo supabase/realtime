@@ -22,6 +22,9 @@ Hooks.payload = {
     const { channel: channelName, host, log_level, token, schema, table, filter, bearer, enable_presence, enable_db_changes, private_channel } =
       connection;
 
+    if (this.channel) this.channel.unsubscribe();
+    if (this.realtimeSocket) this.realtimeSocket.realtime.disconnect();
+
     this.realtimeSocket = createClient(host, token, {
       realtime: {
         params: { log_level },
@@ -112,6 +115,21 @@ Hooks.payload = {
     this.handleEvent("send_message", ({ message }) => this.sendRealtime(message.event, message.payload));
     this.handleEvent("disconnect", () => this.disconnectRealtime());
     this.handleEvent("clear_local_storage", () => this.clearLocalStorage());
+  },
+};
+
+Hooks.copyToClipboard = {
+  mounted() {
+    this.label = this.el.querySelector("#share-button-label");
+    this.originalLabel = this.label.textContent;
+
+    this.el.addEventListener("click", () => {
+      navigator.clipboard.writeText(this.el.dataset.url).then(() => {
+        clearTimeout(this.resetTimer);
+        this.label.textContent = "Copied URL";
+        this.resetTimer = setTimeout(() => (this.label.textContent = this.originalLabel), 1500);
+      });
+    });
   },
 };
 

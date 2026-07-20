@@ -40,10 +40,10 @@ defmodule RealtimeWeb.InspectorLive.ConnComponentTest do
       |> render_submit()
 
       html = render(view)
-      [share_href] = html |> Floki.parse_document!() |> Floki.attribute("a[target='_blank']", "href")
+      [share_url] = html |> Floki.parse_document!() |> Floki.attribute("#share-button", "data-url")
 
-      refute share_href =~ "secret-token"
-      refute share_href =~ "secret-bearer"
+      refute share_url =~ "secret-token"
+      refute share_url =~ "secret-bearer"
     end
   end
 

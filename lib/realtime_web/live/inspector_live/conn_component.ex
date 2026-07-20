@@ -68,6 +68,7 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
       |> assign(subscribed_state: "Connect")
       |> assign(changeset: changeset)
       |> assign(url_params: %{})
+      |> assign(connected_snapshot: nil)
 
     {:ok, socket}
   end
@@ -117,12 +118,14 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
 
   def handle_event("connect", %{"connection" => conn} = params, socket) do
     case Ecto.Changeset.apply_action(Connection.submit_changeset(%Connection{}, conn), :validate) do
-      {:ok, _connection} ->
+      {:ok, connection} ->
         send_share_url(conn)
 
         socket =
           socket
+          |> assign(changeset: Connection.changeset(%Connection{}, conn))
           |> assign(subscribed_state: "Connecting...")
+          |> assign(connected_snapshot: connection)
           |> push_event("connect", params)
 
         {:noreply, socket}
@@ -136,6 +139,7 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
     socket =
       socket
       |> assign(subscribed_state: "Connect")
+      |> assign(connected_snapshot: nil)
       |> push_event("disconnect", %{})
 
     {:noreply, socket}
@@ -144,6 +148,7 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
   def handle_event("clear_local_storage", _params, socket) do
     socket =
       socket
+      |> assign(:changeset, Connection.changeset(%Connection{}))
       |> push_event("clear_local_storage", %{})
       |> push_patch(
         to: Routes.inspector_index_path(RealtimeWeb.Endpoint, :index),
@@ -166,6 +171,12 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
     {:noreply, assign(socket, changeset: changeset)}
   end
 
+  defp stale_connection?(_changeset, nil), do: false
+
+  defp stale_connection?(changeset, connected_snapshot) do
+    Ecto.Changeset.apply_changes(changeset) != connected_snapshot
+  end
+
   defp derive_host(%{"project" => project} = conn) when project not in [nil, ""] do
     Map.put(conn, "host", "https://#{project}.supabase.co")
   end
@@ -173,7 +184,7 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
   defp derive_host(conn), do: conn
 
   defp send_share_url(conn) do
-    url = Routes.inspector_index_path(RealtimeWeb.Endpoint, :index, Map.take(conn, @url_params))
+    url = Routes.inspector_index_url(RealtimeWeb.Endpoint, :index, Map.take(conn, @url_params))
     send(self(), {:share_url, url})
   end
 end

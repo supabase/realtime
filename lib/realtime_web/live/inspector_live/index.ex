@@ -31,10 +31,11 @@ defmodule RealtimeWeb.InspectorLive.Index do
 
     socket =
       socket
+      |> assign(active_nav: :inspector)
       |> assign(changeset: changeset)
       |> assign(page_title: "Inspector - Supabase Realtime")
       |> assign(health: health_idle())
-      |> assign(share_url: Routes.inspector_index_path(socket, :index))
+      |> assign(share_url: nil)
 
     {:ok, socket}
   end
@@ -139,7 +140,7 @@ defmodule RealtimeWeb.InspectorLive.Index do
     update(socket, :health, &Map.update!(&1, key, fun))
   end
 
-  defp subscribed_state("joined"), do: "Connected"
+  defp subscribed_state("joined"), do: "Reconnect"
   defp subscribed_state("joining"), do: "Connecting..."
   defp subscribed_state(_), do: "Connect"
 

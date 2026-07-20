@@ -14,6 +14,8 @@
     </div>
 
     <details
+      id="connection_settings"
+      phx-hook="detailsKeepState"
       class="mb-4"
       open={
         Ecto.Changeset.get_field(@changeset, :host) in [nil, ""] and
@@ -61,15 +63,18 @@
       </div>
     </details>
 
-    <div class="flex flex-row justify-between items-center py-2">
-      <div>
-        <.button type="submit" phx-disable-with="Sending..."><%= @subscribed_state %></.button>
-      </div>
-      <div>
-        <.button variant={:secondary} phx-click="clear_local_storage" phx-target={@myself}>
-          Reset
-        </.button>
-      </div>
+    <p
+      :if={stale_connection?(@changeset, @connected_snapshot)}
+      class="text-xs text-warning-700 dark:text-warning-300 mb-2"
+    >
+      Settings changed since you connected — click Reconnect to apply them.
+    </p>
+
+    <div class="flex flex-row justify-end items-center gap-2 py-2">
+      <.button type="submit" phx-disable-with="Sending..."><%= @subscribed_state %></.button>
+      <.button variant={:secondary} phx-click="clear_local_storage" phx-target={@myself}>
+        Reset
+      </.button>
     </div>
   </.form>
 </div>

@@ -4,8 +4,15 @@
       <.h1>Realtime Control Center</.h1>
       <p class="text-gray-600 dark:text-neutral-400">Connect, watch events, and debug your channel.</p>
     </div>
-    <.button variant={:secondary} href={@share_url} target="_blank">
-      <.icon name="hero-share-mini" /> Share
+    <.button
+      :if={@share_url}
+      id="share-button"
+      type="button"
+      phx-hook="copyToClipboard"
+      data-url={@share_url}
+      variant={:secondary}
+    >
+      <.icon name="hero-share-mini" /> <span id="share-button-label">Share</span>
     </.button>
   </div>
 

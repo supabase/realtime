@@ -309,7 +309,7 @@ defmodule RealtimeWeb.Components do
 
   attr :field, Phoenix.HTML.FormField, doc: "a %Phoenix.HTML.FormField{} struct, for form fields"
   attr :errors, :list, default: []
-  attr :checked, :boolean, default: false
+  attr :checked, :boolean
   attr :prompt, :string, default: nil
   attr :options, :list, default: []
   attr :multiple, :boolean, default: false

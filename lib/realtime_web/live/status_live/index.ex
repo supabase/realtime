@@ -21,6 +21,7 @@ defmodule RealtimeWeb.StatusLive.Index do
 
     socket =
       socket
+      |> assign(:active_nav, :status)
       |> assign(:node_ids, node_ids)
       |> assign(:node_regions, %{})
       |> assign(:pair_status, default_pair_status(node_ids))

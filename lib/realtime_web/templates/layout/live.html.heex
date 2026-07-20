@@ -76,7 +76,28 @@
       </a>
     </div>
     <nav class="flex items-center gap-4 text-sm">
-      <.link navigate={~p"/status"} class="font-medium text-gray-700 dark:text-neutral-200 hover:underline">
+      <.link
+        navigate={~p"/"}
+        class={[
+          "hover:underline",
+          if(assigns[:active_nav] == :inspector,
+            do: "font-medium text-gray-700 dark:text-neutral-200",
+            else: "text-gray-500 dark:text-neutral-400"
+          )
+        ]}
+      >
+        Inspector
+      </.link>
+      <.link
+        navigate={~p"/status"}
+        class={[
+          "hover:underline",
+          if(assigns[:active_nav] == :status,
+            do: "font-medium text-gray-700 dark:text-neutral-200",
+            else: "text-gray-500 dark:text-neutral-400"
+          )
+        ]}
+      >
         Status
       </.link>
       <.link
