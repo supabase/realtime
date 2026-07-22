@@ -765,6 +765,30 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                )
     end
 
+    test "caches the subscription insert statement and reuses it across calls", %{conn: conn} do
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test"})
+
+      for _ <- 1..2 do
+        params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
+
+        assert {:ok, [%Postgrex.Result{}]} =
+                 Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+      end
+
+      # pg_prepared_statements is session-scoped and this pool has a single connection, so this
+      # query observes the same backend session that ran the inserts. Only the cached insert holds
+      # a named statement (nothing else on this connection caches), executed once per create above.
+      assert {:ok, %Postgrex.Result{rows: rows}} =
+               Postgrex.query(
+                 conn,
+                 "SELECT name, generic_plans + custom_plans FROM pg_prepared_statements",
+                 []
+               )
+
+      assert [["realtime_subscription_insert", 2]] = rows
+    end
+
     test "user can subscribe to only INSERT events", %{conn: conn} do
       {:ok, subscription_params} =
         Subscriptions.parse_subscription_params(%{"event" => "INSERT", "schema" => "public"})

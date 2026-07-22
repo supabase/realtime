@@ -4,7 +4,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   """
   use Realtime.Logs
 
-  import Postgrex, only: [transaction: 3, query: 3, rollback: 2]
+  import Postgrex, only: [transaction: 3, query: 3, query: 4, rollback: 2]
 
   @type conn() :: Postgrex.conn()
   # A filter written to realtime.subscription.filters: column, operator, value, and a `negate`
@@ -116,19 +116,24 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
     values = Enum.map(filters, &elem(&1, 2))
     negates = Enum.map(filters, &elem(&1, 3))
 
-    query(conn, sql, [
-      publication,
-      schema,
-      table,
-      id,
-      claims,
-      columns,
-      ops,
-      values,
-      negates,
-      action_filter,
-      selected_columns
-    ])
+    query(
+      conn,
+      sql,
+      [
+        publication,
+        schema,
+        table,
+        id,
+        claims,
+        columns,
+        ops,
+        values,
+        negates,
+        action_filter,
+        selected_columns
+      ],
+      cache_statement: "realtime_subscription_insert"
+    )
   end
 
   defp params_to_log({action_filter, schema, table, filters, selected_columns}) do
