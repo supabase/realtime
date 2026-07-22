@@ -180,6 +180,29 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
       assert slot_changes_count == 1
     end
 
+    test "caches the prepared statement and reuses it across calls", %{conn: conn, tenant: tenant} do
+      slot_name = "test_slot_#{System.unique_integer([:positive])}"
+      drop_slot_on_exit(tenant, slot_name)
+
+      {:ok, _} = Replications.prepare_replication(conn, slot_name)
+
+      assert {:ok, _} = Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+      assert {:ok, _} = Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+
+      # pg_prepared_statements is session-scoped and the "realtime_rls" pool has a
+      # single connection, so this query observes the same backend session that ran
+      # list_changes. It must hold exactly one named statement (nothing else on this
+      # connection caches), executed once per list_changes call above.
+      assert {:ok, %Postgrex.Result{rows: rows}} =
+               Postgrex.query(
+                 conn,
+                 "SELECT name, generic_plans + custom_plans FROM pg_prepared_statements",
+                 []
+               )
+
+      assert [["realtime_list_changes", 2]] = rows
+    end
+
     test "slot has changes but no subscribers: returns only the sentinel row with slot_changes_count of 1", %{
       conn: conn,
       tenant: tenant

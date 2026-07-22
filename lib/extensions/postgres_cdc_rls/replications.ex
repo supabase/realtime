@@ -3,7 +3,7 @@ defmodule Extensions.PostgresCdcRls.Replications do
   SQL queries that use PostgresCdcRls.ReplicationPoller to create a temporary slot and poll the write-ahead log.
   """
 
-  import Postgrex, only: [query: 3]
+  import Postgrex, only: [query: 3, query: 4]
 
   @spec prepare_replication(pid(), String.t()) ::
           {:ok, Postgrex.Result.t()} | {:error, Postgrex.Error.t()}
@@ -105,7 +105,8 @@ defmodule Extensions.PostgresCdcRls.Replications do
         slot_name,
         max_changes,
         max_record_bytes
-      ]
+      ],
+      cache_statement: "realtime_list_changes"
     )
   end
 end
