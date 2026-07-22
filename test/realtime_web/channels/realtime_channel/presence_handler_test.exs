@@ -2,6 +2,8 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
   use Realtime.DataCase, async: true
   use Mimic
 
+  setup :set_mimic_from_context
+
   import ExUnit.CaptureLog
   import Generators
 

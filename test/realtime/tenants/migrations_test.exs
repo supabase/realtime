@@ -3,6 +3,8 @@ defmodule Realtime.Tenants.MigrationsTest do
   use Realtime.DataCase, async: false
   use Mimic
 
+  setup :set_mimic_from_context
+
   import ExUnit.CaptureLog
 
   alias Realtime.Database
@@ -16,8 +18,6 @@ defmodule Realtime.Tenants.MigrationsTest do
   end
 
   describe "run_migrations/1" do
-    setup :set_mimic_global
-
     test "migrations for a given tenant only run once" do
       tenant = Containers.checkout_tenant()
 
@@ -198,8 +198,6 @@ defmodule Realtime.Tenants.MigrationsTest do
   end
 
   describe "telemetry" do
-    setup :set_mimic_global
-
     setup do
       events = [
         [:realtime, :tenants, :migrations, :start],

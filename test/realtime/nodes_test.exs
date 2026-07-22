@@ -2,6 +2,9 @@ defmodule Realtime.NodesTest do
   # async: false due to use of Clustered and tweaking Application env
   use Realtime.DataCase, async: false
   use Mimic
+
+  setup :set_mimic_from_context
+
   alias Realtime.Nodes
   alias Realtime.Tenants
 

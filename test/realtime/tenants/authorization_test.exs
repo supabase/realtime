@@ -2,6 +2,8 @@ defmodule Realtime.Tenants.AuthorizationTest do
   use RealtimeWeb.ConnCase, async: true
   use Mimic
 
+  setup :set_mimic_from_context
+
   import ExUnit.CaptureLog
 
   alias Realtime.Api.Message

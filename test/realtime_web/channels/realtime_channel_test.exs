@@ -2,6 +2,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   use RealtimeWeb.ChannelCase, async: true
   use Mimic
 
+  setup :set_mimic_from_context
+
   import ExUnit.CaptureLog
 
   alias Phoenix.Channel.Server

@@ -2,6 +2,8 @@ defmodule RealtimeWeb.BroadcastControllerTest do
   use RealtimeWeb.ConnCase, async: true
   use Mimic
 
+  setup :set_mimic_from_context
+
   alias Realtime.Crypto
   alias Realtime.GenCounter
   alias Realtime.RateCounter

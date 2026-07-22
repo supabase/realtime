@@ -3,6 +3,8 @@ defmodule RealtimeWeb.ChannelsAuthorizationTest do
 
   use Mimic
 
+  setup :set_mimic_from_context
+
   import Generators
 
   alias RealtimeWeb.ChannelsAuthorization

@@ -6,6 +6,8 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
 
   use Mimic
 
+  setup :set_mimic_from_context
+
   @topic "test_topic"
 
   setup do

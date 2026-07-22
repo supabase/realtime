@@ -2,6 +2,8 @@ defmodule Realtime.FeatureFlagsTest do
   use Realtime.DataCase, async: false
   use Mimic
 
+  setup :set_mimic_from_context
+
   alias Realtime.Api
   alias Realtime.FeatureFlags
   alias Realtime.FeatureFlags.Cache

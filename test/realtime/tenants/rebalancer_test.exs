@@ -6,6 +6,8 @@ defmodule Realtime.Tenants.RebalancerTest do
 
   use Mimic
 
+  setup :set_mimic_from_context
+
   setup do
     tenant = Containers.checkout_tenant(run_migrations: true)
     # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues

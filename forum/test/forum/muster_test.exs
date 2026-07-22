@@ -11,7 +11,7 @@ defmodule Forum.MusterTest do
 
   @fake_node :fake@nowhere
 
-  setup :set_mimic_global
+  setup :set_mimic_from_context
 
   setup ctx do
     scope = :"muster_test_#{System.unique_integer([:positive])}"

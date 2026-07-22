@@ -2,6 +2,8 @@ defmodule Realtime.Integration.RegionAwareRoutingTest do
   use Realtime.DataCase, async: false
   use Mimic
 
+  setup :set_mimic_from_context
+
   import Ecto.Query
 
   alias Realtime.Api

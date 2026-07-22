@@ -6,7 +6,7 @@ defmodule RealtimeWeb.RealtimeChannelReplicationReadyTest do
   alias Realtime.Tenants.Connect
   alias RealtimeWeb.UserSocket
 
-  setup :set_mimic_global
+  setup :set_mimic_from_context
 
   setup do
     tenant = Containers.checkout_tenant(run_migrations: true)

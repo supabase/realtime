@@ -3,7 +3,7 @@ defmodule Realtime.Tenants.ConnectTest do
   use Realtime.DataCase, async: false
   use Mimic
 
-  setup :set_mimic_global
+  setup :set_mimic_from_context
 
   import ExUnit.CaptureLog
 

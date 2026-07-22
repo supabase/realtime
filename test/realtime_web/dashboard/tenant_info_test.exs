@@ -8,7 +8,7 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
   alias Realtime.Tenants.Connect
   alias Realtime.UsersCounter
 
-  setup :set_mimic_global
+  setup :set_mimic_from_context
 
   setup do
     Application.put_env(:realtime, :dashboard_auth, :basic_auth)

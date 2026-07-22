@@ -3,6 +3,8 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
   use Realtime.DataCase, async: false
   use Mimic
 
+  setup :set_mimic_from_context
+
   alias Extensions.PostgresCdcRls
   alias Extensions.PostgresCdcRls.SubscriptionManager
   alias Extensions.PostgresCdcRls.Subscriptions
@@ -309,8 +311,6 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
   end
 
   describe "message handling" do
-    setup :set_mimic_global
-
     test "re-subscribes all subscribers when publication oids change", %{pid: pid, args: args} do
       # Force state to have different oids so the new_oids branch is triggered when
       # fetch_publication_tables returns the real oids from the database
@@ -402,8 +402,6 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
   end
 
   describe "error handling" do
-    setup :set_mimic_global
-
     test "stops cleanly when database connection fails", %{args: args} do
       stub(Database, :connect_db, fn _settings -> {:error, :econnrefused} end)
 
@@ -558,8 +556,6 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
   end
 
   describe "not_alive_pids_dist/1" do
-    setup :set_mimic_global
-
     test "handles remote node RPC error gracefully" do
       remote_node = :some_remote@node
 

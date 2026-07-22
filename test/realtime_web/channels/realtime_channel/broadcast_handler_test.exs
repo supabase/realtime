@@ -5,6 +5,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
   use Mimic
 
+  setup :set_mimic_from_context
+
   import Generators
   import ExUnit.CaptureLog
 
