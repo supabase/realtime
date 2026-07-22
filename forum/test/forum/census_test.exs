@@ -63,6 +63,26 @@ defmodule Forum.CensusTest do
                      Census.start_link(scope, broadcast_interval_in_ms: :invalid)
                    end
     end
+
+    test "raises on invalid discover_interval_in_ms", %{scope: scope} do
+      assert_raise ArgumentError,
+                   ~r/expected :discover_interval_in_ms to be a positive integer/,
+                   fn ->
+                     Census.start_link(scope, discover_interval_in_ms: 0)
+                   end
+
+      assert_raise ArgumentError,
+                   ~r/expected :discover_interval_in_ms to be a positive integer/,
+                   fn ->
+                     Census.start_link(scope, discover_interval_in_ms: -1)
+                   end
+
+      assert_raise ArgumentError,
+                   ~r/expected :discover_interval_in_ms to be a positive integer/,
+                   fn ->
+                     Census.start_link(scope, discover_interval_in_ms: :invalid)
+                   end
+    end
   end
 
   describe "join/3 and leave/3" do
@@ -341,6 +361,28 @@ defmodule Forum.CensusTest do
 
       assert partition1 == partition2
       assert partition2 == partition3
+    end
+  end
+
+  describe "sync gating" do
+    setup %{scope: scope} do
+      start_supervised!(spec(scope, partitions: 2))
+      :ok
+    end
+
+    test "ignores counts from a peer it has not registered", %{scope: scope} do
+      scope_proc = Process.whereis(Forum.Supervisor.name(scope))
+      assert is_pid(scope_proc)
+
+      # Simulate a `:sync` racing ahead of (or arriving after) registration,
+      # e.g. a late broadcast after the peer's `:DOWN` was already handled.
+      fake_peer = spawn(fn -> Process.sleep(:infinity) end)
+      send(scope_proc, {:sync, fake_peer, %{group1: 5}})
+
+      # Flush the mailbox: this call is handled after the :sync above.
+      _ = :sys.get_state(scope_proc)
+
+      assert Forum.Census.Scope.member_counts(scope) == %{}
     end
   end
 

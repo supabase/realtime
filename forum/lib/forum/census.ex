@@ -4,7 +4,9 @@ defmodule Forum.Census do
 
   @type group :: Forum.group()
   @type start_option ::
-          {:partitions, pos_integer()} | {:broadcast_interval_in_ms, non_neg_integer()}
+          {:partitions, pos_integer()}
+          | {:broadcast_interval_in_ms, non_neg_integer()}
+          | {:discover_interval_in_ms, non_neg_integer()}
 
   @doc "Returns a supervisor child specification for a Forum scope"
   def child_spec([scope]) when is_atom(scope), do: child_spec([scope, []])
@@ -25,12 +27,14 @@ defmodule Forum.Census do
 
   * `:partitions` - number of partitions to use (default: number of schedulers online)
   * `:broadcast_interval_in_ms`: - interval in milliseconds to broadcast membership counts to other nodes (default: 5000 ms)
+  * `:discover_interval_in_ms`: - interval in milliseconds to re-announce ourselves to the cluster so peers we lost track of re-register us (default: 60000 ms)
   * `:message_module` - module implementing `Forum.Adapter` behaviour (default: `Forum.Adapter.ErlDist`)
   """
   @spec start_link(atom, [start_option]) :: Supervisor.on_start()
   def start_link(scope, opts \\ []) when is_atom(scope) do
     {partitions, opts} = Keyword.pop(opts, :partitions, System.schedulers_online())
     broadcast_interval_in_ms = Keyword.get(opts, :broadcast_interval_in_ms)
+    discover_interval_in_ms = Keyword.get(opts, :discover_interval_in_ms)
 
     if not (is_integer(partitions) and partitions >= 1) do
       raise ArgumentError,
@@ -41,6 +45,12 @@ defmodule Forum.Census do
          not (is_integer(broadcast_interval_in_ms) and broadcast_interval_in_ms > 0) do
       raise ArgumentError,
             "expected :broadcast_interval_in_ms to be a positive integer, got: #{inspect(broadcast_interval_in_ms)}"
+    end
+
+    if discover_interval_in_ms != nil and
+         not (is_integer(discover_interval_in_ms) and discover_interval_in_ms > 0) do
+      raise ArgumentError,
+            "expected :discover_interval_in_ms to be a positive integer, got: #{inspect(discover_interval_in_ms)}"
     end
 
     Forum.Supervisor.start_link(Forum.Census.Scope, scope, partitions, opts)

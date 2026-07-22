@@ -50,6 +50,8 @@ iex> Forum.Census.member_counts(:users)
 
 When to use Census: you want counts, totals, presence-of-anyone signals, dashboards. You don't need millisecond precision and you don't want to fan out per-event traffic.
 
+Peers find each other with a discovery handshake and monitor each other's Scope process. Counts are only recorded from a **registered** peer. This matters because the count broadcast and process monitoring can travel over independent transports (e.g. a `:gen_rpc`-backed `:message_module` for broadcasts while monitoring rides Erlang distribution), so a peer's `:sync` and its `:DOWN` are unordered: a `:sync` that arrives after the `:DOWN` was already handled would otherwise re-insert a ghost entry that nothing would ever clean up. Dropping counts from unregistered peers closes that window; to keep registration self-healing (so a dropped or reordered discovery doesn't strand a peer's counts permanently), every node re-announces itself to the cluster every `discover_interval_in_ms` (default 60 s), well above the count broadcast interval since it only heals the rare missed-registration case.
+
 ---
 
 ## `Forum.Muster`: group-routed fan-out broadcast
