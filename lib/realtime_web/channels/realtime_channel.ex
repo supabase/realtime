@@ -33,7 +33,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias RealtimeWeb.RealtimeChannel.Tracker
 
   @confirm_token_ms_interval :timer.minutes(5)
-  @replication_ready_check_interval 10
+  @replication_ready_check_interval 500
   @fullsweep_after Application.compile_env!(:realtime, :websocket_fullsweep_after)
 
   @impl true
@@ -157,7 +157,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       assigns =
         if replication_ready_opt_in? do
-          Process.send_after(self(), :notify_replication_ready, @replication_ready_check_interval)
+          send(self(), :notify_replication_ready)
 
           Map.merge(assigns, %{
             replication_ready_notified?: false,
