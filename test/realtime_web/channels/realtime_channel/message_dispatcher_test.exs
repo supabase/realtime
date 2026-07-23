@@ -642,5 +642,97 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
 
       refute_receive _any
     end
+
+    test "dispatches batched messages" do
+      parent = self()
+
+      subscriber_pid =
+        spawn(fn ->
+          loop = fn loop ->
+            receive do
+              msg ->
+                send(parent, {:subscriber, msg})
+                loop.(loop)
+            end
+          end
+
+          loop.(loop)
+        end)
+
+      from_pid = :erlang.list_to_pid(~c'<0.2.1>')
+
+      subscribers = [
+        {subscriber_pid,
+         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :info, "tenant123", MapSet.new(), true}}
+      ]
+
+      msg1 = %Broadcast{topic: "realtime:topic", event: "e1", payload: %{n: 1}}
+      msg2 = %Broadcast{topic: "realtime:topic", event: "e2", payload: %{n: 2}}
+
+      batch = %Broadcast{
+        topic: "realtime:topic",
+        event: "__batch__",
+        payload: [{msg1, nil}, {msg2, nil}]
+      }
+
+      assert MessageDispatcher.dispatch(subscribers, from_pid, batch) == :ok
+
+      assert_receive {:encoded, %Broadcast{event: "e1", payload: %{n: 1}, topic: "realtime:topic"}}
+      assert_receive {:encoded, %Broadcast{event: "e2", payload: %{n: 2}, topic: "realtime:topic"}}
+
+      assert Agent.get(TestSerializer, & &1) == 2
+
+      assert_receive {:subscriber, :update_rate_counter}
+      assert_receive {:subscriber, :update_rate_counter}
+
+      refute_receive _any
+    end
+
+    test "uses pre-encoded V2 payload when topic matches join topic" do
+      parent = self()
+
+      subscriber_pid =
+        spawn(fn ->
+          loop = fn loop ->
+            receive do
+              msg ->
+                send(parent, {:subscriber, msg})
+                loop.(loop)
+            end
+          end
+
+          loop.(loop)
+        end)
+
+      from_pid = :erlang.list_to_pid(~c'<0.2.1>')
+
+      subscribers = [
+        {subscriber_pid,
+         {:rc_fastlane, self(), V2Serializer, "realtime:topic", :info, "tenant123", MapSet.new(), true}},
+        {subscriber_pid,
+         {:rc_fastlane, self(), V2Serializer, "realtime:topic", :info, "tenant123", MapSet.new(), true}}
+      ]
+
+      pre_encoded = {:socket_push, :binary, <<4, 14, 8, 2, 1, "realtime:topic", "event123">> <> Jason.encode!(%{"id" => "123"}) <> Jason.encode!(%{data: "test"})}
+
+      msg = %UserBroadcast{
+        topic: "realtime:topic",
+        user_event: "event123",
+        user_payload: Jason.encode!(%{data: "test"}),
+        user_payload_encoding: :json,
+        metadata: %{"id" => "123"},
+        encoded_payloads: %{V2Serializer => pre_encoded}
+      }
+
+      assert MessageDispatcher.dispatch(subscribers, from_pid, msg) == :ok
+
+      assert_receive ^pre_encoded
+      assert_receive ^pre_encoded
+
+      assert_receive {:subscriber, :update_rate_counter}
+      assert_receive {:subscriber, :update_rate_counter}
+
+      refute_receive _any
+    end
   end
 end

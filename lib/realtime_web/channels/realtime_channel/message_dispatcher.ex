@@ -20,6 +20,9 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
   end
 
   @presence_diff "presence_diff"
+  @batch_event "__batch__"
+
+  def batch_dispatch?, do: true
 
   @doc """
   This dispatch function caches encoded messages if fastlane is used
@@ -28,6 +31,14 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
   fastlane_pid is the actual socket transport pid
   """
   @spec dispatch(list, pid, Broadcast.t() | UserBroadcast.t()) :: :ok
+  def dispatch(subscribers, _from, %Broadcast{event: @batch_event, payload: messages}) when is_list(messages) do
+    Enum.each(messages, fn {msg, msg_from} ->
+      dispatch(subscribers, msg_from, msg)
+    end)
+
+    :ok
+  end
+
   def dispatch(subscribers, from, %Broadcast{event: @presence_diff} = msg) do
     {_cache, count} =
       Enum.reduce(subscribers, {%{}, 0}, fn
@@ -109,6 +120,21 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
   end
 
   defp maybe_log(_level, _join_topic, _msg, _tenant_id), do: :ok
+
+  defp do_dispatch(
+         %UserBroadcast{topic: topic, encoded_payloads: encoded_payloads},
+         fastlane_pid,
+         serializer,
+         join_topic,
+         cache,
+         _tenant_id,
+         _log_level
+       )
+       when topic == join_topic and is_map_key(encoded_payloads, serializer) do
+    encoded_msg = Map.fetch!(encoded_payloads, serializer)
+    send(fastlane_pid, encoded_msg)
+    cache
+  end
 
   defp do_dispatch(msg, fastlane_pid, serializer, join_topic, cache, tenant_id, log_level) do
     case cache do
