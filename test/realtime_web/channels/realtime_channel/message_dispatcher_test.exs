@@ -109,6 +109,64 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
       refute_receive _any
     end
 
+    test "strips the {:tb, tenant_id, msg} tenant tag before dispatching to fastlane subscribers" do
+      parent = self()
+
+      subscriber_pid =
+        spawn(fn ->
+          loop = fn loop ->
+            receive do
+              msg ->
+                send(parent, {:subscriber, msg})
+                loop.(loop)
+            end
+          end
+
+          loop.(loop)
+        end)
+
+      from_pid = :erlang.list_to_pid(~c'<0.2.1>')
+
+      subscribers = [
+        {subscriber_pid,
+         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :info, "tenant123", MapSet.new(), true}}
+      ]
+
+      msg = %Broadcast{topic: "some:other:topic", event: "event", payload: %{data: "test"}}
+
+      # TenantBroadcaster tags broadcasts with their tenant_id; dispatch/3 must unwrap so the
+      # downstream fastlane path (and the client) only ever sees the underlying struct.
+      assert MessageDispatcher.dispatch(subscribers, from_pid, {:tb, "tenant123", msg}) == :ok
+
+      assert_receive {:encoded, %Broadcast{event: "event", payload: %{data: "test"}, topic: "realtime:topic"}}
+      assert Agent.get(TestSerializer, & &1) == 1
+
+      assert_receive {:subscriber, :update_rate_counter}
+
+      # The {:tb, ...} wrapper never reaches subscribers
+      refute_receive {:tb, _, _}
+      refute_receive _any
+    end
+
+    test "strips the {:tb, tenant_id, msg} tenant tag before dispatching to non fastlane subscribers" do
+      from_pid = :erlang.list_to_pid(~c'<0.2.1>')
+
+      subscribers = [
+        {self(), :not_fastlane},
+        {self(), :not_fastlane}
+      ]
+
+      msg = %Broadcast{topic: "some:other:topic", event: "event", payload: %{data: "test"}}
+
+      assert MessageDispatcher.dispatch(subscribers, from_pid, {:tb, "tenant123", msg}) == :ok
+
+      assert_receive %Broadcast{topic: "some:other:topic", event: "event", payload: %{data: "test"}}
+      assert_receive %Broadcast{topic: "some:other:topic", event: "event", payload: %{data: "test"}}
+
+      refute_receive {:tb, _, _}
+      assert Agent.get(TestSerializer, & &1) == 0
+    end
+
     test "dispatches 'presence_diff' messages to fastlane subscribers" do
       parent = self()
 

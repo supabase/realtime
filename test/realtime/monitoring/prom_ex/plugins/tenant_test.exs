@@ -301,6 +301,32 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       assert metric_value("realtime_payload_size_bucket", le: "250.0") > 0
     end
 
+    test "broadcast fan-out counter increments tagged by tenant and hit", %{tenant: %{external_id: external_id}} do
+      metric = "realtime_broadcast_fanout_node_delivery_total"
+      metric_value = metric_value(metric, tenant: external_id, hit: true) || 0
+
+      :telemetry.execute([:realtime, :broadcast, :fanout, :node_delivery], %{local_tenant_users: 2}, %{
+        tenant: external_id,
+        hit: true
+      })
+
+      Process.sleep(100)
+      assert metric_value(metric, tenant: external_id, hit: true) == metric_value + 1
+    end
+
+    test "global broadcast fan-out counter increments tagged by hit only", %{tenant: %{external_id: external_id}} do
+      metric = "realtime_broadcast_global_fanout_node_delivery_total"
+      metric_value = metric_value(metric, hit: false) || 0
+
+      :telemetry.execute([:realtime, :broadcast, :fanout, :node_delivery], %{local_tenant_users: 0}, %{
+        tenant: external_id,
+        hit: false
+      })
+
+      Process.sleep(100)
+      assert metric_value(metric, hit: false) == metric_value + 1
+    end
+
     test "channel input bytes", context do
       external_id = context.tenant.external_id
 

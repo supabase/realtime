@@ -21,8 +21,24 @@ defmodule Realtime.PromEx.Plugins.Tenant do
       channel_events(),
       payload_size_metrics(),
       replication_metrics(),
-      subscription_metrics()
+      subscription_metrics(),
+      broadcast_fanout_metrics()
     ]
+  end
+
+  defp broadcast_fanout_metrics do
+    Event.build(
+      :realtime_tenant_broadcast_fanout_metrics,
+      [
+        counter(
+          [:realtime, :broadcast, :fanout, :node_delivery, :total],
+          event_name: [:realtime, :broadcast, :fanout, :node_delivery],
+          description:
+            "Cross-cluster broadcast deliveries to this node for the tenant, split by whether the node held a connection for the tenant. hit=false means the send could have been avoided.",
+          tags: [:tenant, :hit]
+        )
+      ]
+    )
   end
 
   defmodule PayloadSize.Buckets do

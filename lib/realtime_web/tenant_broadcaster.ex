@@ -4,6 +4,7 @@ defmodule RealtimeWeb.TenantBroadcaster do
   """
 
   alias Phoenix.PubSub
+  alias RealtimeWeb.RealtimeChannel.MessageDispatcher
 
   @type message_type :: :broadcast | :presence | :postgres_changes
 
@@ -38,7 +39,7 @@ defmodule RealtimeWeb.TenantBroadcaster do
           :ok
   def pubsub_broadcast(tenant_id, topic, message, dispatcher, message_type) do
     collect_payload_size(tenant_id, message, message_type)
-    PubSub.broadcast(Realtime.PubSub, topic, message, dispatcher)
+    PubSub.broadcast(Realtime.PubSub, topic, tag_tenant(tenant_id, message, dispatcher, message_type), dispatcher)
     :ok
   end
 
@@ -53,9 +54,24 @@ defmodule RealtimeWeb.TenantBroadcaster do
           :ok
   def pubsub_broadcast_from(tenant_id, from, topic, message, dispatcher, message_type) do
     collect_payload_size(tenant_id, message, message_type)
-    PubSub.broadcast_from(Realtime.PubSub, from, topic, message, dispatcher)
+
+    PubSub.broadcast_from(
+      Realtime.PubSub,
+      from,
+      topic,
+      tag_tenant(tenant_id, message, dispatcher, message_type),
+      dispatcher
+    )
+
     :ok
   end
+
+  # Tag broadcast messages with their tenant_id so the receiving node can attribute the fan-out
+  # (see the telemetry in Realtime.GenRpcPubSub.Worker). Only tag when MessageDispatcher is the
+  # dispatcher, since it is the component that unwraps the tag before delivery
+  # Presence/postgres_changes stay untagged.
+  defp tag_tenant(tenant_id, message, MessageDispatcher, :broadcast), do: {:tb, tenant_id, message}
+  defp tag_tenant(_tenant_id, message, _dispatcher, _message_type), do: message
 
   @payload_size_event [:realtime, :tenants, :payload, :size]
 

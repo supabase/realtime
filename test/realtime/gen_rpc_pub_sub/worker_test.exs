@@ -70,4 +70,62 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       refute_receive _any
     end
   end
+
+  describe "broadcast fan-out telemetry" do
+    @fanout_event [:realtime, :broadcast, :fanout, :node_delivery]
+
+    setup do
+      %{ref: :telemetry_test.attach_event_handlers(self(), [@fanout_event])}
+    end
+
+    test "forward to local emits hit=true when the node holds a connection for the tenant",
+         %{worker: worker, ref: ref} do
+      tenant_id = "worker-hit-#{System.unique_integer([:positive])}"
+      :ok = Realtime.UsersCounter.add(self(), tenant_id)
+
+      message = {:tb, tenant_id, %Phoenix.Socket.Broadcast{topic: @topic, event: "e", payload: %{}}}
+      send(worker, Worker.forward_to_local(@topic, message, Phoenix.PubSub))
+
+      assert_receive {@fanout_event, ^ref, %{local_tenant_users: count}, %{tenant: ^tenant_id, hit: true}}
+      assert count >= 1
+      refute_receive _any
+    end
+
+    test "forward to local emits hit=false when the node holds no connection for the tenant",
+         %{worker: worker, ref: ref} do
+      tenant_id = "worker-miss-#{System.unique_integer([:positive])}"
+
+      message = {:tb, tenant_id, %Phoenix.Socket.Broadcast{topic: @topic, event: "e", payload: %{}}}
+      send(worker, Worker.forward_to_local(@topic, message, Phoenix.PubSub))
+
+      assert_receive {@fanout_event, ^ref, %{local_tenant_users: 0}, %{tenant: ^tenant_id, hit: false}}
+      refute_receive _any
+    end
+
+    test "does not emit for untagged messages", %{worker: worker, ref: ref} do
+      send(worker, Worker.forward_to_local(@topic, "untagged message", Phoenix.PubSub))
+
+      refute_receive _any
+    end
+
+    test "forward to region also measures fan-out on the receiving node", %{worker: worker, ref: ref} do
+      GenRpc
+      |> stub()
+      |> allow(self(), worker)
+
+      Nodes
+      |> stub()
+      |> allow(self(), worker)
+
+      expect(Nodes, :region_nodes, fn "us-east-1" -> [node()] end)
+
+      tenant_id = "worker-region-#{System.unique_integer([:positive])}"
+
+      message = {:tb, tenant_id, %Phoenix.Socket.Broadcast{topic: @topic, event: "e", payload: %{}}}
+      send(worker, Worker.forward_to_region(@topic, message, Phoenix.PubSub))
+
+      assert_receive {@fanout_event, ^ref, %{local_tenant_users: 0}, %{tenant: ^tenant_id, hit: false}}
+      refute_receive _any
+    end
+  end
 end
