@@ -5,6 +5,7 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
   alias Phoenix.Socket.Broadcast
 
   alias RealtimeWeb.Endpoint
+  alias RealtimeWeb.RealtimeChannel.MessageDispatcher
   alias RealtimeWeb.TenantBroadcaster
 
   @topic "test-topic" <> to_string(__MODULE__)
@@ -22,6 +23,22 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
                         send(subscriber, {:relay, node(), msg})
                     end
                   end)
+                end
+
+                # Relay the fan-out telemetry emitted on this (receiving) node back to the test process.
+                def attach_fanout(dest) do
+                  :telemetry.attach(
+                    {__MODULE__, dest},
+                    [:realtime, :broadcast, :fanout, :node_delivery],
+                    &__MODULE__.relay_fanout/4,
+                    dest
+                  )
+                end
+
+                def detach_fanout(dest), do: :telemetry.detach({__MODULE__, dest})
+
+                def relay_fanout(_event, measurements, metadata, dest) do
+                  send(dest, {:fanout, measurements, metadata})
                 end
               end
             end)
@@ -227,6 +244,40 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
 
       assert_receive {:telemetry, [:realtime, :tenants, :payload, :size], %{size: 15},
                       %{tenant: ^tenant_id, message_type: :presence}}
+    end
+  end
+
+  describe "broadcast fan-out tagging" do
+    setup %{node: node} do
+      :ok = :erpc.call(node, Subscriber, :attach_fanout, [self()])
+      on_exit(fn -> :erpc.call(node, Subscriber, :detach_fanout, [self()]) end)
+      :ok
+    end
+
+    test "tags :broadcast messages dispatched via MessageDispatcher so the receiving node measures fan-out",
+         %{tenant_id: tenant_id} do
+      message = %Broadcast{topic: @topic, event: "an event", payload: %{"a" => "b"}}
+
+      TenantBroadcaster.pubsub_broadcast(tenant_id, @topic, message, MessageDispatcher, :broadcast)
+
+      # The receiving node holds no connection for this tenant -> hit=false
+      assert_receive {:fanout, %{local_tenant_users: 0}, %{tenant: ^tenant_id, hit: false}}
+    end
+
+    test "does not tag :broadcast messages dispatched by another dispatcher", %{tenant_id: tenant_id} do
+      message = %Broadcast{topic: @topic, event: "an event", payload: %{"a" => "b"}}
+
+      TenantBroadcaster.pubsub_broadcast(tenant_id, @topic, message, Phoenix.PubSub, :broadcast)
+
+      refute_receive {:fanout, _, _}
+    end
+
+    test "does not tag non-broadcast message types", %{tenant_id: tenant_id} do
+      message = %Broadcast{topic: @topic, event: "an event", payload: %{"a" => "b"}}
+
+      TenantBroadcaster.pubsub_broadcast(tenant_id, @topic, message, MessageDispatcher, :presence)
+
+      refute_receive {:fanout, _, _}
     end
   end
 
