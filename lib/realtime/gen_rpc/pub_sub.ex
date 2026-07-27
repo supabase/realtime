@@ -102,14 +102,14 @@ defmodule Realtime.GenRpcPubSub.Worker do
   @impl true
   # Forward to local
   def handle_info({:ftl, topic, message, dispatcher}, {pubsub, worker}) do
-    maybe_measure_broadcast_fanout(message)
+    RealtimeWeb.TenantBroadcaster.measure_broadcast_fanout(message)
     Phoenix.PubSub.local_broadcast(pubsub, topic, message, dispatcher)
     {:noreply, {pubsub, worker}}
   end
 
   # Forward to the rest of the region
   def handle_info({:ftr, topic, message, dispatcher}, {pubsub, worker}) do
-    maybe_measure_broadcast_fanout(message)
+    RealtimeWeb.TenantBroadcaster.measure_broadcast_fanout(message)
 
     # Forward to local first
     Phoenix.PubSub.local_broadcast(pubsub, topic, message, dispatcher)
@@ -128,17 +128,4 @@ defmodule Realtime.GenRpcPubSub.Worker do
 
   @impl true
   def handle_info(_, pubsub), do: {:noreply, pubsub}
-
-  @fanout_event [:realtime, :broadcast, :fanout, :node_delivery]
-
-  # A broadcast forwarded to this node: record whether the node holds any connection for the
-  # tenant, so aggregating hit=false tells us how many cross-cluster sends could be avoided.
-  # Only broadcast messages are tagged (see RealtimeWeb.TenantBroadcaster); everything else is a no-op.
-  defp maybe_measure_broadcast_fanout({:tb, tenant_id, _message}) do
-    count = Forum.Census.local_member_count(:users, tenant_id)
-
-    :telemetry.execute(@fanout_event, %{local_tenant_users: count}, %{tenant: tenant_id, hit: count > 0})
-  end
-
-  defp maybe_measure_broadcast_fanout(_message), do: :ok
 end

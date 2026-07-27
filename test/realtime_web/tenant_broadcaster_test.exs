@@ -281,6 +281,89 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
     end
   end
 
+  describe "measure_broadcast_fanout/1 on the sending node" do
+    setup do
+      ref = :telemetry_test.attach_event_handlers(self(), [[:realtime, :broadcast, :fanout, :node_delivery]])
+      %{ref: ref}
+    end
+
+    test "pubsub_broadcast measures the sender's own local fan-out", %{ref: ref, tenant_id: tenant_id} do
+      message = %Broadcast{topic: @topic, event: "an event", payload: %{"a" => "b"}}
+
+      TenantBroadcaster.pubsub_broadcast(tenant_id, @topic, message, MessageDispatcher, :broadcast)
+
+      # The sending node dispatches locally without going through the Worker, but still measures.
+      assert_receive {[:realtime, :broadcast, :fanout, :node_delivery], ^ref, %{local_tenant_users: 0},
+                      %{tenant: ^tenant_id, hit: false}}
+    end
+
+    test "pubsub_broadcast measures hit=true when the sender holds a connection for the tenant",
+         %{ref: ref, tenant_id: tenant_id} do
+      :ok = Realtime.UsersCounter.add(self(), tenant_id)
+      message = %Broadcast{topic: @topic, event: "an event", payload: %{"a" => "b"}}
+
+      TenantBroadcaster.pubsub_broadcast(tenant_id, @topic, message, MessageDispatcher, :broadcast)
+
+      assert_receive {[:realtime, :broadcast, :fanout, :node_delivery], ^ref, %{local_tenant_users: count},
+                      %{tenant: ^tenant_id, hit: true}}
+
+      assert count >= 1
+    end
+
+    test "pubsub_broadcast_from measures the sender's own local fan-out", %{ref: ref, tenant_id: tenant_id} do
+      message = %Broadcast{topic: @topic, event: "an event", payload: %{"a" => "b"}}
+
+      TenantBroadcaster.pubsub_broadcast_from(tenant_id, self(), @topic, message, MessageDispatcher, :broadcast)
+
+      assert_receive {[:realtime, :broadcast, :fanout, :node_delivery], ^ref, %{local_tenant_users: 0},
+                      %{tenant: ^tenant_id, hit: false}}
+    end
+
+    test "does not measure when dispatched by another dispatcher", %{ref: ref, tenant_id: tenant_id} do
+      message = %Broadcast{topic: @topic, event: "an event", payload: %{"a" => "b"}}
+
+      TenantBroadcaster.pubsub_broadcast(tenant_id, @topic, message, Phoenix.PubSub, :broadcast)
+
+      refute_receive {[:realtime, :broadcast, :fanout, :node_delivery], ^ref, _, _}
+    end
+  end
+
+  describe "measure_broadcast_fanout/1" do
+    setup do
+      ref = :telemetry_test.attach_event_handlers(self(), [[:realtime, :broadcast, :fanout, :node_delivery]])
+      %{ref: ref}
+    end
+
+    test "emits hit=false when the node holds no connection for the tenant", %{ref: ref, tenant_id: tenant_id} do
+      message = %Broadcast{topic: @topic, event: "an event", payload: %{"a" => "b"}}
+
+      assert :ok = TenantBroadcaster.measure_broadcast_fanout({:tb, tenant_id, message})
+
+      assert_receive {[:realtime, :broadcast, :fanout, :node_delivery], ^ref, %{local_tenant_users: 0},
+                      %{tenant: ^tenant_id, hit: false}}
+    end
+
+    test "emits hit=true and the connection count when the node holds a connection for the tenant",
+         %{ref: ref, tenant_id: tenant_id} do
+      :ok = Realtime.UsersCounter.add(self(), tenant_id)
+      message = %Broadcast{topic: @topic, event: "an event", payload: %{"a" => "b"}}
+
+      assert :ok = TenantBroadcaster.measure_broadcast_fanout({:tb, tenant_id, message})
+
+      assert_receive {[:realtime, :broadcast, :fanout, :node_delivery], ^ref, %{local_tenant_users: count},
+                      %{tenant: ^tenant_id, hit: true}}
+
+      assert count >= 1
+    end
+
+    test "is a no-op for untagged messages", %{ref: ref} do
+      assert :ok = TenantBroadcaster.measure_broadcast_fanout(%Broadcast{topic: @topic, event: "e", payload: %{}})
+      assert :ok = TenantBroadcaster.measure_broadcast_fanout("untagged message")
+
+      refute_receive {[:realtime, :broadcast, :fanout, :node_delivery], ^ref, _, _}
+    end
+  end
+
   def handle_telemetry(event, measures, metadata, %{pid: pid, tenant: tenant}) do
     if metadata[:tenant] == tenant do
       send(pid, {:telemetry, event, measures, metadata})
