@@ -27,8 +27,7 @@ defmodule Realtime.PromEx.Plugins.Muster do
         last_value(
           [:muster, :node_status],
           event_name: @event_status,
-          description:
-            "1 for the node's current Muster lifecycle state (ready/converging/rebalancing), 0 otherwise.",
+          description: "1 for the node's current Muster lifecycle state (ready/converging/rebalancing), 0 otherwise.",
           measurement: :value,
           tags: [:state]
         )

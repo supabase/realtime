@@ -2,8 +2,9 @@ defmodule Realtime.PromEx.Plugins.MusterTest do
   # async: false - mutates the :muster_scope app env and a shared persistent_term
   use ExUnit.Case, async: false
   alias Realtime.PromEx.Plugins
+  use Mimic
 
-  @scope :muster_prom_ex_test
+  setup :set_mimic_from_context
 
   defmodule MetricsTest do
     use PromEx, otp_app: :metrics_test
@@ -14,38 +15,30 @@ defmodule Realtime.PromEx.Plugins.MusterTest do
   end
 
   setup_all do
-    previous_scope = Application.get_env(:realtime, :muster_scope)
-    Application.put_env(:realtime, :muster_scope, @scope)
     start_supervised!(MetricsTest)
-
-    on_exit(fn ->
-      Application.put_env(:realtime, :muster_scope, previous_scope)
-      :persistent_term.erase({Forum.Muster, @scope, :status})
-    end)
-
     :ok
   end
 
   describe "polling metrics" do
     test "emits a one-hot gauge: 1 for the current state, 0 for the others" do
-      :persistent_term.put({Forum.Muster, @scope, :status}, :converging)
+      stub(Forum.Muster, :status, fn _ -> :converging end)
 
       metrics = poll()
 
-      assert value(metrics, state: "ready") == 0
       assert value(metrics, state: "converging") == 1
+      assert value(metrics, state: "ready") == 0
       assert value(metrics, state: "rebalancing") == 0
     end
 
     test "reflects a state transition on the next poll" do
-      :persistent_term.put({Forum.Muster, @scope, :status}, :ready)
+      stub(Forum.Muster, :status, fn _ -> :ready end)
 
       metrics = poll()
       assert value(metrics, state: "ready") == 1
       assert value(metrics, state: "converging") == 0
       assert value(metrics, state: "rebalancing") == 0
 
-      :persistent_term.put({Forum.Muster, @scope, :status}, :rebalancing)
+      stub(Forum.Muster, :status, fn _ -> :rebalancing end)
 
       metrics = poll()
       assert value(metrics, state: "ready") == 0
@@ -54,7 +47,7 @@ defmodule Realtime.PromEx.Plugins.MusterTest do
     end
 
     test "reports every state as 0 before the coordinator has published a status" do
-      :persistent_term.erase({Forum.Muster, @scope, :status})
+      stub(Forum.Muster, :status, fn _ -> :unknown end)
 
       metrics = poll()
 
@@ -71,6 +64,5 @@ defmodule Realtime.PromEx.Plugins.MusterTest do
     PromEx.get_metrics(MetricsTest)
   end
 
-  defp value(metrics, tags),
-    do: MetricsHelper.search(metrics, "muster_node_status", Keyword.put(tags, :scope, @scope))
+  defp value(metrics, tags), do: MetricsHelper.search(metrics, "muster_node_status", tags)
 end
