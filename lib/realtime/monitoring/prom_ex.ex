@@ -2,6 +2,7 @@ defmodule Realtime.PromEx do
   alias Realtime.PromEx.Plugins.Distributed
   alias Realtime.PromEx.Plugins.GenRpc
   alias Realtime.PromEx.Plugins.Migrations
+  alias Realtime.PromEx.Plugins.Muster
   alias Realtime.PromEx.Plugins.OsMon
   alias Realtime.PromEx.Plugins.Phoenix
   alias Realtime.PromEx.Plugins.TenantGlobal
@@ -106,7 +107,8 @@ defmodule Realtime.PromEx do
       {Tenants, poll_rate: poll_rate},
       {TenantGlobal, poll_rate: poll_rate},
       {Distributed, poll_rate: poll_rate},
-      {GenRpc, poll_rate: poll_rate}
+      {GenRpc, poll_rate: poll_rate},
+      {Muster, poll_rate: poll_rate}
     ]
   end
 
