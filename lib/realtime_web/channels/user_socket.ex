@@ -143,14 +143,28 @@ defmodule RealtimeWeb.UserSocket do
     |> Plug.Conn.send_resp(status, Jason.encode!(%{error: message}))
   end
 
-  defp error_response(:tenant_not_found), do: {404, "Tenant not found"}
-  defp error_response(:tenant_suspended), do: {403, "Realtime was disabled for this tenant"}
+  defp error_response({:error, reason}), do: error_response(reason)
   defp error_response(:missing_api_key), do: {401, "API key is missing"}
   defp error_response(:expired_token), do: {401, "Token has expired"}
   defp error_response(:missing_claims), do: {401, "Fields `role` and `exp` are required in JWT"}
   defp error_response(:token_malformed), do: {401, "The token provided is not a valid JWT"}
+  defp error_response(:invalid_token), do: {401, "The token provided is not a valid JWT"}
+  defp error_response(:signature_error), do: {401, "Failed to validate JWT signature"}
+
+  defp error_response(:error_generating_signer),
+    do: {401, "Failed to generate JWT signer, check your JWT secret or JWKS configuration"}
+
+  defp error_response({:error_generating_signer, kid}) do
+    {401, "Failed to generate JWT signer for key ID (kid) #{inspect(kid)}, check your JWT secret or JWKS configuration"}
+  end
+
+  defp error_response(:tenant_suspended), do: {403, "Realtime was disabled for this tenant"}
+
+  defp error_response(:tenant_not_found), do: {404, "Tenant not found"}
+
   defp error_response(:too_many_connections), do: {429, "Too many connected users"}
   defp error_response(:too_many_joins), do: {429, "Too many joins per second"}
+
   defp error_response(_reason), do: {500, "Error connecting to Realtime"}
 
   defp access_token(params, headers) do

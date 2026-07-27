@@ -103,12 +103,15 @@ defmodule RealtimeWeb.UserSocketTest do
 
   describe "handle_error/2" do
     for {reason, status, message} <- [
-          {:tenant_not_found, 404, "Tenant not found"},
-          {:tenant_suspended, 403, "Realtime was disabled for this tenant"},
           {:missing_api_key, 401, "API key is missing"},
           {:expired_token, 401, "Token has expired"},
           {:missing_claims, 401, "Fields `role` and `exp` are required in JWT"},
           {:token_malformed, 401, "The token provided is not a valid JWT"},
+          {:invalid_token, 401, "The token provided is not a valid JWT"},
+          {:signature_error, 401, "Failed to validate JWT signature"},
+          {:error_generating_signer, 401, "Failed to generate JWT signer, check your JWT secret or JWKS configuration"},
+          {:tenant_suspended, 403, "Realtime was disabled for this tenant"},
+          {:tenant_not_found, 404, "Tenant not found"},
           {:too_many_connections, 429, "Too many connected users"},
           {:too_many_joins, 429, "Too many joins per second"}
         ] do
@@ -122,6 +125,28 @@ defmodule RealtimeWeb.UserSocketTest do
                  "application/json; charset=utf-8"
                ]
       end
+    end
+
+    test "unwraps {:error, reason} tuples returned by connect/3" do
+      conn = UserSocket.handle_error(conn(:get, "/socket/websocket"), {:error, :signature_error})
+      assert conn.status == 401
+      assert Jason.decode!(conn.resp_body) == %{"error" => "Failed to validate JWT signature"}
+    end
+
+    test "display kid on bad signer error" do
+      conn =
+        UserSocket.handle_error(
+          conn(:get, "/socket/websocket"),
+          {:error, {:error_generating_signer, "19de8c2c"}}
+        )
+
+      assert conn.status == 401
+
+      assert Jason.decode!(conn.resp_body) ==
+               %{
+                 "error" =>
+                   "Failed to generate JWT signer for key ID (kid) \"19de8c2c\", check your JWT secret or JWKS configuration"
+               }
     end
 
     test "maps unknown reasons to a generic 500 JSON response" do
