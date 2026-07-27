@@ -439,6 +439,16 @@ defmodule Forum.MusterTest do
       set_rebalancing(scope, false)
       assert {:ok, _node} = Muster.router(scope, :any_group)
     end
+
+    test "status/1 reflects the lifecycle flag and defaults to :unknown", %{scope: scope} do
+      set_rebalancing(scope, true)
+      assert Muster.status(scope) == :rebalancing
+
+      set_rebalancing(scope, false)
+      assert Muster.status(scope) == :ready
+
+      assert Muster.status(:muster_scope_never_started) == :unknown
+    end
   end
 
   describe "remote entry points write directly to occupancy_table (no Scope mailbox)" do
@@ -748,6 +758,47 @@ defmodule Forum.MusterTest do
       assert populated_output =~ ":cooldown (1): [:dump_cooldown]"
       assert populated_output =~ "dump_occupied"
       assert populated_output =~ inspect(node())
+    end
+  end
+
+  describe "summary/1" do
+    @describetag cooldown_ms: 60_000
+
+    setup %{scope: scope, base_opts: opts} do
+      start_supervised!(spec(scope, opts))
+      :ok
+    end
+
+    test "returns cheap counts (no per-shard gather, no occupancy copy)", %{scope: scope} do
+      # Empty scope: everything zero, one process hop only.
+      summary = Muster.summary(scope)
+      assert summary.scope == scope
+      assert summary.members == [node()]
+      assert summary.peers == 0
+      assert summary.owed_snapshots == 0
+      assert summary.occupancy_row_count == 0
+      assert summary.group_state_counts.total == 0
+      assert summary.group_state_counts.occupied == 0
+
+      # One occupied group (self router -> writes an occupancy row).
+      occupied_pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, :s_occupied, occupied_pid)
+
+      # One cooldown group: it kept its claim (and its occupancy row) while cooling.
+      cooldown_pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, :s_cooldown, cooldown_pid)
+      assert :ok = Muster.leave(scope, :s_cooldown, cooldown_pid)
+      assert :cooldown = wait_for_group_state(scope, :s_cooldown, :cooldown)
+
+      summary = Muster.summary(scope)
+      assert summary.group_state_counts.occupied == 1
+      assert summary.group_state_counts.cooldown == 1
+      assert summary.group_state_counts.total == 2
+      # Both self-routed groups still hold a present occupancy row, attributed to
+      # this node as the source.
+      assert summary.occupancy_row_count == 2
+      assert summary.occupancy_rows_by_node == %{node() => 2}
+      assert summary.status in [:ready, :converging]
     end
   end
 
