@@ -802,6 +802,143 @@ defmodule Forum.MusterTest do
     end
   end
 
+  describe "Scope.occupancy_row_count/1 and Scope.occupancy_rows_by_node/1" do
+    # These back summary/1 but are exercised directly here for the edge cases the
+    # happy-path summary test cannot reach: tombstone exclusion, per-source
+    # bucketing, and a source that is no longer a ring member (its present rows
+    # count toward the total but not toward any per-node bucket).
+    setup %{scope: scope, base_opts: opts} do
+      start_supervised!(spec(scope, opts))
+      # Ring becomes [node(), @fake_node]; occupancy_rows_by_node only buckets
+      # over these two.
+      inject_fake_remote(scope)
+      :ok
+    end
+
+    test "counts present rows, buckets by source, and excludes tombstones", %{scope: scope} do
+      src = fake_pid()
+
+      # Two present rows from a ring member, one from a node that is NOT in the
+      # ring (a stale source whose rebalance has not landed / that has left).
+      :ok = Scope.occupied(scope, :a, @fake_node, 1, src)
+      :ok = Scope.occupied(scope, :b, @fake_node, 1, src)
+      :ok = Scope.occupied(scope, :c, :src@nowhere, 1, src)
+
+      # Every present row is counted, regardless of whether its source is still
+      # a ring member.
+      assert Scope.occupancy_row_count(scope) == 3
+
+      # Per-node buckets cover only the ring's members. node() holds none; the
+      # off-ring :src@nowhere row is invisible here, so the per-node sum (2)
+      # trails occupancy_row_count (3) exactly by that orphaned row -- the
+      # behavior summary/1's docstring calls out.
+      by_node = Scope.occupancy_rows_by_node(scope)
+      assert by_node == %{node() => 0, @fake_node => 2}
+      assert by_node |> Map.values() |> Enum.sum() == 2
+
+      # Vacating leaves a tombstone (a non-:present row). It must not be counted
+      # by either function.
+      :ok = Scope.vacant_batch(scope, [:b], @fake_node, 2, src)
+      assert Scope.occupancy_row_count(scope) == 2
+      assert Scope.occupancy_rows_by_node(scope) == %{node() => 0, @fake_node => 1}
+    end
+  end
+
+  describe "Scope.group_state_counts/1" do
+    setup %{scope: scope, base_opts: opts} do
+      start_supervised!(spec(scope, opts))
+      :ok
+    end
+
+    @tag cooldown_ms: 60_000
+    test "an empty scope is all-zero with a zero total", %{scope: scope} do
+      counts = Scope.group_state_counts(scope)
+
+      assert counts == %{
+               occupied: 0,
+               cooldown: 0,
+               vacant_queued: 0,
+               vacant_flushing: 0,
+               occupied_pending: 0,
+               total: 0
+             }
+    end
+
+    @tag cooldown_ms: 60_000
+    test "counts :occupied and :cooldown groups; total is the sum of the parts",
+         %{scope: scope} do
+      occupied_pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, :gsc_occupied, occupied_pid)
+
+      # Long cooldown keeps this group in :cooldown after the leave.
+      cooldown_pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, :gsc_cooldown, cooldown_pid)
+      assert :ok = Muster.leave(scope, :gsc_cooldown, cooldown_pid)
+      assert :cooldown = wait_for_group_state(scope, :gsc_cooldown, :cooldown)
+
+      counts = Scope.group_state_counts(scope)
+      assert counts.occupied == 1
+      assert counts.cooldown == 1
+      assert counts.vacant_queued == 0
+      assert counts.vacant_flushing == 0
+      assert counts.occupied_pending == 0
+      assert counts.total == 2
+
+      # The documented invariant: total is exactly the sum of the labelled parts.
+      labelled = Map.delete(counts, :total)
+      assert counts.total == labelled |> Map.values() |> Enum.sum()
+    end
+
+    @tag cooldown_ms: 50
+    test "counts :vacant_queued groups (past cooldown, not yet flushed)", %{scope: scope} do
+      pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, :gsc_vacant, pid)
+      assert :ok = Muster.leave(scope, :gsc_vacant, pid)
+
+      # Short cooldown: the group moves cooldown -> vacant_queued, and the long
+      # default flush interval leaves it parked there.
+      assert :vacant_queued = wait_for_group_state(scope, :gsc_vacant, :vacant_queued)
+
+      counts = Scope.group_state_counts(scope)
+      assert counts.vacant_queued == 1
+      assert counts.total == 1
+      assert counts.occupied == 0
+      assert counts.cooldown == 0
+    end
+
+    # The `:occupied_pending` state is stored as a `{:occupied_pending, waiters}`
+    # tuple, counted by a distinct match spec from the bare-atom labels; this is
+    # the only test that exercises that branch.
+    @tag rpc_timeout: 5_000
+    test "counts :occupied_pending groups (claim RPC in flight)", %{scope: scope} do
+      inject_fake_remote(scope)
+      g = group_for_router(scope, @fake_node)
+
+      # Hold the :occupied RPC so the claim stays in flight and the group parks
+      # in :occupied_pending.
+      stub_call(
+        {:fn,
+         fn ->
+           Process.sleep(2_000)
+           :ok
+         end}
+      )
+
+      pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      join = Task.async(fn -> Muster.join(scope, g, pid) end)
+
+      assert {:occupied_pending, [_]} =
+               wait_for_group_state(scope, g, &match?({:occupied_pending, [_]}, &1))
+
+      counts = Scope.group_state_counts(scope)
+      assert counts.occupied_pending == 1
+      assert counts.total == 1
+      assert counts.occupied == 0
+
+      assert :ok = Task.await(join, 5_000)
+    end
+  end
+
   describe "router == remote (fake node injection)" do
     setup %{scope: scope, base_opts: opts} do
       start_supervised!(spec(scope, opts))
