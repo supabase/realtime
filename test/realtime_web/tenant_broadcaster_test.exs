@@ -26,20 +26,24 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
                 end
 
                 # Relay the fan-out telemetry emitted on this (receiving) node back to the test process.
-                def attach_fanout(dest) do
+                # Filter by tenant so an in-flight tagged broadcast from a prior test (different
+                # tenant) can't leak into a later test's mailbox.
+                def attach_fanout(dest, tenant) do
                   :telemetry.attach(
                     {__MODULE__, dest},
                     [:realtime, :broadcast, :fanout, :node_delivery],
                     &__MODULE__.relay_fanout/4,
-                    dest
+                    %{dest: dest, tenant: tenant}
                   )
                 end
 
                 def detach_fanout(dest), do: :telemetry.detach({__MODULE__, dest})
 
-                def relay_fanout(_event, measurements, metadata, dest) do
+                def relay_fanout(_event, measurements, %{tenant: tenant} = metadata, %{dest: dest, tenant: tenant}) do
                   send(dest, {:fanout, measurements, metadata})
                 end
+
+                def relay_fanout(_event, _measurements, _metadata, _config), do: :ok
               end
             end)
 
@@ -51,9 +55,10 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
 
   setup context do
     tenant_id = random_string()
-    Endpoint.subscribe(@topic)
+    topic = "#{@topic}:#{tenant_id}"
+    Endpoint.subscribe(topic)
 
-    :erpc.call(context.node, Subscriber, :subscribe, [self(), @topic])
+    :erpc.call(context.node, Subscriber, :subscribe, [self(), topic])
     assert_receive :ready
 
     on_exit(fn -> :telemetry.detach(__MODULE__) end)
@@ -65,13 +70,14 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
       %{pid: self(), tenant: tenant_id}
     )
 
-    {:ok, tenant_id: tenant_id}
+    {:ok, tenant_id: tenant_id, topic: topic}
   end
 
   describe "pubsub_broadcast/5" do
-    test "pubsub_broadcast", %{node: node, tenant_id: tenant_id} do
-      message = %Broadcast{topic: @topic, event: "an event", payload: %{"a" => "b"}}
-      TenantBroadcaster.pubsub_broadcast(tenant_id, @topic, message, Phoenix.PubSub, :broadcast)
+    test "pubsub_broadcast", %{node: node, tenant_id: tenant_id, topic: topic} do
+      message = %Broadcast{topic: topic, event: "an event", payload: %{"a" => "b"}}
+      expected_size = payload_size(message)
+      TenantBroadcaster.pubsub_broadcast(tenant_id, topic, message, Phoenix.PubSub, :broadcast)
 
       assert_receive ^message
 
@@ -81,14 +87,15 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
       assert_receive {
         :telemetry,
         [:realtime, :tenants, :payload, :size],
-        %{size: 114},
+        %{size: ^expected_size},
         %{tenant: ^tenant_id, message_type: :broadcast}
       }
     end
 
-    test "pubsub_broadcast list payload", %{node: node, tenant_id: tenant_id} do
-      message = %Broadcast{topic: @topic, event: "an event", payload: ["a", %{"b" => "c"}, 1, 23]}
-      TenantBroadcaster.pubsub_broadcast(tenant_id, @topic, message, Phoenix.PubSub, :broadcast)
+    test "pubsub_broadcast list payload", %{node: node, tenant_id: tenant_id, topic: topic} do
+      message = %Broadcast{topic: topic, event: "an event", payload: ["a", %{"b" => "c"}, 1, 23]}
+      expected_size = payload_size(message)
+      TenantBroadcaster.pubsub_broadcast(tenant_id, topic, message, Phoenix.PubSub, :broadcast)
 
       assert_receive ^message
 
@@ -98,14 +105,15 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
       assert_receive {
         :telemetry,
         [:realtime, :tenants, :payload, :size],
-        %{size: 130},
+        %{size: ^expected_size},
         %{tenant: ^tenant_id, message_type: :broadcast}
       }
     end
 
-    test "pubsub_broadcast string payload", %{node: node, tenant_id: tenant_id} do
-      message = %Broadcast{topic: @topic, event: "an event", payload: "some text payload"}
-      TenantBroadcaster.pubsub_broadcast(tenant_id, @topic, message, Phoenix.PubSub, :broadcast)
+    test "pubsub_broadcast string payload", %{node: node, tenant_id: tenant_id, topic: topic} do
+      message = %Broadcast{topic: topic, event: "an event", payload: "some text payload"}
+      expected_size = payload_size(message)
+      TenantBroadcaster.pubsub_broadcast(tenant_id, topic, message, Phoenix.PubSub, :broadcast)
 
       assert_receive ^message
 
@@ -115,18 +123,18 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
       assert_receive {
         :telemetry,
         [:realtime, :tenants, :payload, :size],
-        %{size: 119},
+        %{size: ^expected_size},
         %{tenant: ^tenant_id, message_type: :broadcast}
       }
     end
   end
 
   describe "pubsub_broadcast_from/6" do
-    test "pubsub_broadcast_from", %{node: node, tenant_id: tenant_id} do
+    test "pubsub_broadcast_from", %{node: node, tenant_id: tenant_id, topic: topic} do
       parent = self()
 
       spawn_link(fn ->
-        Endpoint.subscribe(@topic)
+        Endpoint.subscribe(topic)
         send(parent, :ready)
 
         receive do
@@ -136,9 +144,10 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
 
       assert_receive :ready
 
-      message = %Broadcast{topic: @topic, event: "an event", payload: %{"a" => "b"}}
+      message = %Broadcast{topic: topic, event: "an event", payload: %{"a" => "b"}}
+      expected_size = payload_size(message)
 
-      TenantBroadcaster.pubsub_broadcast_from(tenant_id, self(), @topic, message, Phoenix.PubSub, :broadcast)
+      TenantBroadcaster.pubsub_broadcast_from(tenant_id, self(), topic, message, Phoenix.PubSub, :broadcast)
 
       assert_receive {:other_process, ^message}
 
@@ -148,7 +157,7 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
       assert_receive {
         :telemetry,
         [:realtime, :tenants, :payload, :size],
-        %{size: 114},
+        %{size: ^expected_size},
         %{tenant: ^tenant_id, message_type: :broadcast}
       }
 
@@ -158,11 +167,12 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
   end
 
   describe "pubsub_direct_broadcast/6" do
-    test "pubsub_direct_broadcast", %{node: node, tenant_id: tenant_id} do
-      message = %Broadcast{topic: @topic, event: "an event", payload: %{"a" => "b"}}
+    test "pubsub_direct_broadcast", %{node: node, tenant_id: tenant_id, topic: topic} do
+      message = %Broadcast{topic: topic, event: "an event", payload: %{"a" => "b"}}
+      expected_size = payload_size(message)
 
-      TenantBroadcaster.pubsub_direct_broadcast(node(), tenant_id, @topic, message, Phoenix.PubSub, :broadcast)
-      TenantBroadcaster.pubsub_direct_broadcast(node, tenant_id, @topic, message, Phoenix.PubSub, :broadcast)
+      TenantBroadcaster.pubsub_direct_broadcast(node(), tenant_id, topic, message, Phoenix.PubSub, :broadcast)
+      TenantBroadcaster.pubsub_direct_broadcast(node, tenant_id, topic, message, Phoenix.PubSub, :broadcast)
 
       assert_receive ^message
 
@@ -172,16 +182,17 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
       assert_receive {
         :telemetry,
         [:realtime, :tenants, :payload, :size],
-        %{size: 114},
+        %{size: ^expected_size},
         %{tenant: ^tenant_id, message_type: :broadcast}
       }
     end
 
-    test "pubsub_direct_broadcast list payload", %{node: node, tenant_id: tenant_id} do
-      message = %Broadcast{topic: @topic, event: "an event", payload: ["a", %{"b" => "c"}, 1, 23]}
+    test "pubsub_direct_broadcast list payload", %{node: node, tenant_id: tenant_id, topic: topic} do
+      message = %Broadcast{topic: topic, event: "an event", payload: ["a", %{"b" => "c"}, 1, 23]}
+      expected_size = payload_size(message)
 
-      TenantBroadcaster.pubsub_direct_broadcast(node(), tenant_id, @topic, message, Phoenix.PubSub, :broadcast)
-      TenantBroadcaster.pubsub_direct_broadcast(node, tenant_id, @topic, message, Phoenix.PubSub, :broadcast)
+      TenantBroadcaster.pubsub_direct_broadcast(node(), tenant_id, topic, message, Phoenix.PubSub, :broadcast)
+      TenantBroadcaster.pubsub_direct_broadcast(node, tenant_id, topic, message, Phoenix.PubSub, :broadcast)
 
       assert_receive ^message
 
@@ -191,16 +202,17 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
       assert_receive {
         :telemetry,
         [:realtime, :tenants, :payload, :size],
-        %{size: 130},
+        %{size: ^expected_size},
         %{tenant: ^tenant_id, message_type: :broadcast}
       }
     end
 
-    test "pubsub_direct_broadcast string payload", %{node: node, tenant_id: tenant_id} do
-      message = %Broadcast{topic: @topic, event: "an event", payload: "some text payload"}
+    test "pubsub_direct_broadcast string payload", %{node: node, tenant_id: tenant_id, topic: topic} do
+      message = %Broadcast{topic: topic, event: "an event", payload: "some text payload"}
+      expected_size = payload_size(message)
 
-      TenantBroadcaster.pubsub_direct_broadcast(node(), tenant_id, @topic, message, Phoenix.PubSub, :broadcast)
-      TenantBroadcaster.pubsub_direct_broadcast(node, tenant_id, @topic, message, Phoenix.PubSub, :broadcast)
+      TenantBroadcaster.pubsub_direct_broadcast(node(), tenant_id, topic, message, Phoenix.PubSub, :broadcast)
+      TenantBroadcaster.pubsub_direct_broadcast(node, tenant_id, topic, message, Phoenix.PubSub, :broadcast)
 
       assert_receive ^message
 
@@ -210,7 +222,7 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
       assert_receive {
         :telemetry,
         [:realtime, :tenants, :payload, :size],
-        %{size: 119},
+        %{size: ^expected_size},
         %{tenant: ^tenant_id, message_type: :broadcast}
       }
     end
@@ -248,36 +260,123 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
   end
 
   describe "broadcast fan-out tagging" do
-    setup %{node: node} do
-      :ok = :erpc.call(node, Subscriber, :attach_fanout, [self()])
+    setup %{node: node, tenant_id: tenant_id} do
+      :ok = :erpc.call(node, Subscriber, :attach_fanout, [self(), tenant_id])
       on_exit(fn -> :erpc.call(node, Subscriber, :detach_fanout, [self()]) end)
       :ok
     end
 
     test "tags :broadcast messages dispatched via MessageDispatcher so the receiving node measures fan-out",
-         %{tenant_id: tenant_id} do
-      message = %Broadcast{topic: @topic, event: "an event", payload: %{"a" => "b"}}
+         %{tenant_id: tenant_id, topic: topic} do
+      message = %Broadcast{topic: topic, event: "an event", payload: %{"a" => "b"}}
 
-      TenantBroadcaster.pubsub_broadcast(tenant_id, @topic, message, MessageDispatcher, :broadcast)
+      TenantBroadcaster.pubsub_broadcast(tenant_id, topic, message, MessageDispatcher, :broadcast)
 
       # The receiving node holds no connection for this tenant -> hit=false
       assert_receive {:fanout, %{local_tenant_users: 0}, %{tenant: ^tenant_id, hit: false}}
     end
 
-    test "does not tag :broadcast messages dispatched by another dispatcher", %{tenant_id: tenant_id} do
-      message = %Broadcast{topic: @topic, event: "an event", payload: %{"a" => "b"}}
+    test "does not tag :broadcast messages dispatched by another dispatcher", %{tenant_id: tenant_id, topic: topic} do
+      message = %Broadcast{topic: topic, event: "an event", payload: %{"a" => "b"}}
 
-      TenantBroadcaster.pubsub_broadcast(tenant_id, @topic, message, Phoenix.PubSub, :broadcast)
+      TenantBroadcaster.pubsub_broadcast(tenant_id, topic, message, Phoenix.PubSub, :broadcast)
 
       refute_receive {:fanout, _, _}
     end
 
-    test "does not tag non-broadcast message types", %{tenant_id: tenant_id} do
-      message = %Broadcast{topic: @topic, event: "an event", payload: %{"a" => "b"}}
+    test "does not tag non-broadcast message types", %{tenant_id: tenant_id, topic: topic} do
+      message = %Broadcast{topic: topic, event: "an event", payload: %{"a" => "b"}}
 
-      TenantBroadcaster.pubsub_broadcast(tenant_id, @topic, message, MessageDispatcher, :presence)
+      TenantBroadcaster.pubsub_broadcast(tenant_id, topic, message, MessageDispatcher, :presence)
 
       refute_receive {:fanout, _, _}
+    end
+  end
+
+  describe "measure_broadcast_fanout/1 on the sending node" do
+    setup do
+      ref = :telemetry_test.attach_event_handlers(self(), [[:realtime, :broadcast, :fanout, :node_delivery]])
+      %{ref: ref}
+    end
+
+    test "pubsub_broadcast measures the sender's own local fan-out", %{ref: ref, tenant_id: tenant_id, topic: topic} do
+      message = %Broadcast{topic: topic, event: "an event", payload: %{"a" => "b"}}
+
+      TenantBroadcaster.pubsub_broadcast(tenant_id, topic, message, MessageDispatcher, :broadcast)
+
+      # The sending node dispatches locally without going through the Worker, but still measures.
+      assert_receive {[:realtime, :broadcast, :fanout, :node_delivery], ^ref, %{local_tenant_users: 0},
+                      %{tenant: ^tenant_id, hit: false}}
+    end
+
+    test "pubsub_broadcast measures hit=true when the sender holds a connection for the tenant",
+         %{ref: ref, tenant_id: tenant_id, topic: topic} do
+      :ok = Realtime.UsersCounter.add(self(), tenant_id)
+      message = %Broadcast{topic: topic, event: "an event", payload: %{"a" => "b"}}
+
+      TenantBroadcaster.pubsub_broadcast(tenant_id, topic, message, MessageDispatcher, :broadcast)
+
+      assert_receive {[:realtime, :broadcast, :fanout, :node_delivery], ^ref, %{local_tenant_users: count},
+                      %{tenant: ^tenant_id, hit: true}}
+
+      assert count >= 1
+    end
+
+    test "pubsub_broadcast_from measures the sender's own local fan-out", %{
+      ref: ref,
+      tenant_id: tenant_id,
+      topic: topic
+    } do
+      message = %Broadcast{topic: topic, event: "an event", payload: %{"a" => "b"}}
+
+      TenantBroadcaster.pubsub_broadcast_from(tenant_id, self(), topic, message, MessageDispatcher, :broadcast)
+
+      assert_receive {[:realtime, :broadcast, :fanout, :node_delivery], ^ref, %{local_tenant_users: 0},
+                      %{tenant: ^tenant_id, hit: false}}
+    end
+
+    test "does not measure when dispatched by another dispatcher", %{ref: ref, tenant_id: tenant_id, topic: topic} do
+      message = %Broadcast{topic: topic, event: "an event", payload: %{"a" => "b"}}
+
+      TenantBroadcaster.pubsub_broadcast(tenant_id, topic, message, Phoenix.PubSub, :broadcast)
+
+      refute_receive {[:realtime, :broadcast, :fanout, :node_delivery], ^ref, _, _}
+    end
+  end
+
+  describe "measure_broadcast_fanout/1" do
+    setup do
+      ref = :telemetry_test.attach_event_handlers(self(), [[:realtime, :broadcast, :fanout, :node_delivery]])
+      %{ref: ref}
+    end
+
+    test "emits hit=false when the node holds no connection for the tenant", %{ref: ref, tenant_id: tenant_id} do
+      message = %Broadcast{topic: @topic, event: "an event", payload: %{"a" => "b"}}
+
+      assert :ok = TenantBroadcaster.measure_broadcast_fanout({:tb, tenant_id, message})
+
+      assert_receive {[:realtime, :broadcast, :fanout, :node_delivery], ^ref, %{local_tenant_users: 0},
+                      %{tenant: ^tenant_id, hit: false}}
+    end
+
+    test "emits hit=true and the connection count when the node holds a connection for the tenant",
+         %{ref: ref, tenant_id: tenant_id} do
+      :ok = Realtime.UsersCounter.add(self(), tenant_id)
+      message = %Broadcast{topic: @topic, event: "an event", payload: %{"a" => "b"}}
+
+      assert :ok = TenantBroadcaster.measure_broadcast_fanout({:tb, tenant_id, message})
+
+      assert_receive {[:realtime, :broadcast, :fanout, :node_delivery], ^ref, %{local_tenant_users: count},
+                      %{tenant: ^tenant_id, hit: true}}
+
+      assert count >= 1
+    end
+
+    test "is a no-op for untagged messages", %{ref: ref} do
+      assert :ok = TenantBroadcaster.measure_broadcast_fanout(%Broadcast{topic: @topic, event: "e", payload: %{}})
+      assert :ok = TenantBroadcaster.measure_broadcast_fanout("untagged message")
+
+      refute_receive {[:realtime, :broadcast, :fanout, :node_delivery], ^ref, _, _}
     end
   end
 
@@ -286,4 +385,9 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
       send(pid, {:telemetry, event, measures, metadata})
     end
   end
+
+  # Mirrors TenantBroadcaster.collect_payload_size/3: the wire size depends on the message
+  # (including its per-test topic), so derive it rather than hardcoding. Exact-size regressions
+  # for fixed inputs are covered by the "collect_payload_size/3" describe block.
+  defp payload_size(%_{} = message), do: :erlang.external_size(Map.from_struct(message))
 end

@@ -18,6 +18,8 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
 
   @moduletag :capture_log
 
+  @fanout_event [:realtime, :broadcast, :fanout, :node_delivery]
+
   setup [:checkout_tenant_and_connect]
 
   describe "public broadcast" do
@@ -251,6 +253,56 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
         end)
 
       assert log =~ "UnableToHandleBroadcast"
+    end
+  end
+
+  describe "broadcast fan-out telemetry" do
+    setup [:rls_context, :attach_fanout_telemetry]
+
+    test "a broadcast sent by a connected client is measured locally with hit=true", %{
+      tenant: tenant,
+      serializer: serializer,
+      fanout_ref: ref
+    } do
+      external_id = tenant.external_id
+      {socket, _} = get_connection(tenant, serializer)
+      config = %{broadcast: %{self: true}, private: false}
+      topic = "realtime:any"
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+
+      payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+      WebsocketClient.send_event(socket, topic, "broadcast", payload)
+
+      assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 500
+
+      # The sending node dispatches locally without going through the Worker, but must still
+      # emit the fan-out metric. hit=true because the node holds the client's connection.
+      assert_receive {@fanout_event, ^ref, %{local_tenant_users: count}, %{tenant: ^external_id, hit: true}}, 500
+      assert count >= 1
+    end
+
+    test "a broadcast with no local subscribers is measured locally with hit=false", %{
+      tenant: tenant,
+      topic: topic,
+      db_conn: db_conn,
+      fanout_ref: ref
+    } do
+      external_id = tenant.external_id
+      assert ReplicationConnection.ready?(external_id)
+
+      # No socket is connected for this tenant, so the publishing node holds no connection -> hit=false.
+      value = random_string()
+      event = random_string()
+
+      Postgrex.query!(
+        db_conn,
+        "SELECT realtime.send (json_build_object ('value', $1 :: text)::jsonb, $2 :: text, $3 :: text, FALSE::bool);",
+        [value, event, topic]
+      )
+
+      assert_receive {@fanout_event, ^ref, %{local_tenant_users: 0}, %{tenant: ^external_id, hit: false}}, 2000
     end
   end
 
@@ -511,6 +563,10 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
                      },
                      1000
     end
+  end
+
+  defp attach_fanout_telemetry(_context) do
+    %{fanout_ref: :telemetry_test.attach_event_handlers(self(), [@fanout_event])}
   end
 
   defp setup_trigger(%{tenant: tenant, topic: topic}) do
