@@ -125,6 +125,63 @@ defmodule Forum.Muster.Scope do
   @spec occupancy_table_name(atom) :: atom
   def occupancy_table_name(scope), do: :"#{scope}_muster_occupancy"
 
+  # Group-state labels held in each shard's states table as bare atoms
+  # (`{:occupied_pending, _}` is a tuple and counted separately).
+  @atom_group_states [:occupied, :cooldown, :vacant_queued, :vacant_flushing]
+
+  @doc false
+  # Count of present occupancy rows (router-role table size). tombstones
+  # are excluded
+  @spec occupancy_row_count(atom) :: non_neg_integer
+  def occupancy_row_count(scope) do
+    :ets.select_count(occupancy_table_name(scope), [{{{:_, :_}, :_, :present, :_}, [], [true]}])
+  end
+
+  @doc false
+  @spec occupancy_rows_by_node(atom) :: %{node => non_neg_integer}
+  def occupancy_rows_by_node(scope) do
+    table = occupancy_table_name(scope)
+    {:ok, nodes} = Ring.get_nodes(ring_name(scope))
+
+    Map.new(nodes, fn n ->
+      {n, :ets.select_count(table, [{{{:_, n}, :_, :present, :_}, [], [true]}])}
+    end)
+  end
+
+  @doc false
+  # Per-label group-state counts, summed across every shard's tables.
+  #
+  # `:total` is the SUM of the per-label counts, NOT a separate :ets.info(:size)
+  # read. The labels are exhaustive (every value the states table can hold), so
+  # the sum equals the row count, and deriving it this way keeps the breakdown
+  # internally consistent (total == sum of parts) rather than racing a separate
+  # size read against the concurrently-mutated table.
+  @spec group_state_counts(atom) :: %{atom => non_neg_integer}
+  def group_state_counts(scope) do
+    tables = state_tables(scope)
+
+    atom_counts =
+      Map.new(@atom_group_states, fn label ->
+        {label, sum_over(tables, &:ets.select_count(&1, [{{:_, label}, [], [true]}]))}
+      end)
+
+    counts =
+      Map.put(
+        atom_counts,
+        :occupied_pending,
+        sum_over(tables, &:ets.select_count(&1, [{{:_, {:occupied_pending, :_}}, [], [true]}]))
+      )
+
+    Map.put(counts, :total, counts |> Map.values() |> Enum.sum())
+  end
+
+  defp state_tables(scope) do
+    n = length(Forum.Supervisor.shards(scope))
+    for i <- 0..(n - 1), do: Forum.Supervisor.shard_states_table(scope, i)
+  end
+
+  defp sum_over(tables, fun), do: Enum.reduce(tables, 0, fn t, acc -> acc + fun.(t) end)
+
   # Occupancy rows are a uniform last-writer-wins-by-seq register, keyed by
   # {group, source} and shaped {{group, source}, seq, meta, writer}:
   #
@@ -624,6 +681,21 @@ defmodule Forum.Muster.Scope do
       peers: Map.keys(state.peers) |> Enum.map(&node/1),
       group_states: group_states,
       cooldown: for({g, :cooldown} <- group_states, do: g)
+    }
+
+    {:reply, reply, state}
+  end
+
+  # Lightweight snapshot for `Forum.Muster.summary/1`: ONLY the small fields that
+  # live in the coordinator's own state. It deliberately does NOT gather group
+  # states from the shards or copy the occupancy table (the caller reads those as
+  # cheap ETS counts), so this call is O(1) and safe to poll.
+  def handle_call(:summary, _from, state) do
+    reply = %{
+      members: state.members,
+      peers: map_size(state.peers),
+      owed_snapshots: map_size(state.owed_snapshots),
+      applied_snapshot_seq: state.applied_snapshot_seq
     }
 
     {:reply, reply, state}

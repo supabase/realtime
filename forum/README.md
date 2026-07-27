@@ -83,9 +83,11 @@ Forum.Muster.leave(scope, group, pid)       # :ok | {:error, term}
 Forum.Muster.router(scope, group)           # {:ok, node} | {:rebalancing, [node]}
 Forum.Muster.targets(scope, group, sender_view_hash)  # (on router) {:ok, [node]} | {:error, :flood}
 Forum.Muster.members(scope)                 # [node]
+Forum.Muster.status(scope)                   # :ready | :converging | :rebalancing | :unknown
 Forum.Muster.local_members(scope, group)    # [pid]
 Forum.Muster.local_member?(scope, group, pid)
 Forum.Muster.local_member_count(scope, group)
+Forum.Muster.summary(scope)                  # cheap, poll-safe summary map
 Forum.Muster.dump(scope)                     # prints a state snapshot, returns :ok
 ```
 
