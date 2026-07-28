@@ -29,6 +29,34 @@ defmodule Forum.Muster do
           | {:max_restarts, non_neg_integer()}
           | {:max_seconds, pos_integer()}
 
+  @typedoc "Lifecycle status of a scope's coordinator (see `status/1`)."
+  @type lifecycle_status :: :ready | :converging | :rebalancing | :unknown
+
+  @typedoc "Per-label counts of the local claim state machine, plus `:total`."
+  @type group_state_counts :: %{
+          occupied: non_neg_integer(),
+          cooldown: non_neg_integer(),
+          vacant_queued: non_neg_integer(),
+          vacant_flushing: non_neg_integer(),
+          occupied_pending: non_neg_integer(),
+          total: non_neg_integer()
+        }
+
+  @typedoc "Cheap, poll-safe snapshot of a scope on this node (see `summary/1`)."
+  @type summary :: %{
+          scope: atom(),
+          status: lifecycle_status(),
+          view_hash: non_neg_integer(),
+          members: [node()],
+          ring_nodes: [node()],
+          peers: non_neg_integer(),
+          owed_snapshots: non_neg_integer(),
+          applied_snapshot_seq: %{node() => {integer(), pid()}},
+          occupancy_row_count: non_neg_integer(),
+          occupancy_rows_by_node: %{node() => non_neg_integer()},
+          group_state_counts: group_state_counts()
+        }
+
   # Timeout for the local GenServer.call to the claim shard. Generous because the
   # underlying RPC timeout is what actually bounds the wait; this just needs
   # to be longer than that. The supervisor restarts a shard if it crashes, so
@@ -247,6 +275,24 @@ defmodule Forum.Muster do
   end
 
   @doc """
+  Returns the current lifecycle status for `scope`.
+
+  * `:ready`: every member's latest announced view agrees with ours, so this
+    node's router-role occupancy table is complete and can be trusted (see
+    `can_decide?/2`). `:ready` also implies the ring is settled.
+  * `:converging`: the ring is adopted but not every peer has agreed on our view
+    yet; as a router this node floods rather than trust its occupancy table.
+  * `:rebalancing`: the ring is in flux; `router/2` returns the full member list
+    so callers fan out to everyone.
+  * `:unknown`: the scope's coordinator has not published a status yet (e.g. it
+    is still starting up, or `scope` names no running Muster).
+  """
+  @spec status(atom) :: lifecycle_status()
+  def status(scope) when is_atom(scope) do
+    :persistent_term.get({Forum.Muster, scope, :status}, :unknown)
+  end
+
+  @doc """
   Returns the current cluster-view hash for `scope`.
 
   Senders tag each broadcast with this so the router can tell whether it
@@ -349,6 +395,43 @@ defmodule Forum.Muster do
   def dump(scope) when is_atom(scope) do
     snapshot = GenServer.call(Forum.Supervisor.name(scope), :dump)
     IO.puts(format_dump(snapshot))
+  end
+
+  @doc """
+  Returns a cheap, summarised snapshot of `scope`, safe to poll (e.g. from an
+  admin dashboard or metrics).
+
+  Unlike `dump/1` this never gathers per-group state from the shards or copies
+  the occupancy table.
+
+  Returns a map with:
+
+    * `:scope`, `:status`, `:view_hash` - lifecycle identity (persistent_term).
+    * `:members` - the coordinator's current member list.
+    * `:ring_nodes` - the ring's current node set.
+    * `:peers`, `:owed_snapshots` - counts of connected peers / outstanding
+      owed snapshots.
+    * `:applied_snapshot_seq` - last applied snapshot sequence.
+    * `:occupancy_row_count` - present rows in the router-role occupancy table.
+    * `:occupancy_rows_by_node` - `%{source_node => count}` of those rows over
+      the ring's members (the per-node sum can trail `:occupancy_row_count` by
+      any rows whose source has since left the ring).
+    * `:group_state_counts` - `%{state => count}` across all shards, plus
+      `:total`.
+  """
+  @spec summary(atom) :: summary()
+  def summary(scope) when is_atom(scope) do
+    coord = GenServer.call(Forum.Supervisor.name(scope), :summary)
+
+    Map.merge(coord, %{
+      scope: scope,
+      status: status(scope),
+      view_hash: view_hash(scope),
+      ring_nodes: members(scope),
+      occupancy_row_count: Scope.occupancy_row_count(scope),
+      occupancy_rows_by_node: Scope.occupancy_rows_by_node(scope),
+      group_state_counts: Scope.group_state_counts(scope)
+    })
   end
 
   defp format_dump(s) do
