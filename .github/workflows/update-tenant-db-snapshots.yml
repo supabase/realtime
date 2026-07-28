@@ -1,4 +1,4 @@
-name: Update Tenant DB Catalog
+name: Update Tenant DB Snapshots
 
 on:
   pull_request:
@@ -10,7 +10,7 @@ on:
       - "mix.lock"
       - "mise.toml"
       - "compose.dbs.yml"
-      - ".github/workflows/update-tenant-db-catalog.yml"
+      - ".github/workflows/update-tenant-db-snapshots.yml"
 
 permissions:
   contents: read
@@ -21,7 +21,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  update-tenant-dump:
+  export-snapshots:
     name: Export catalog & dump (pg${{ matrix.pg_major }})
     runs-on: blacksmith-2vcpu-ubuntu-2404
     if: github.event.pull_request.head.repo.full_name == github.repository
@@ -112,7 +112,7 @@ jobs:
 
   commit-changes:
     name: Commit catalog and dump snapshots
-    needs: update-tenant-dump
+    needs: export-snapshots
     runs-on: blacksmith-2vcpu-ubuntu-2404
     if: github.event.pull_request.head.repo.full_name == github.repository
 
