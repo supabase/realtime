@@ -17,7 +17,7 @@ defmodule RealtimeWeb.Dashboard.FeatureFlags do
 
   @impl true
   def mount(_params, _, socket) do
-    {:ok, reset_tenant_state(assign(socket, flags: Api.list_feature_flags()))}
+    {:ok, reset_tenant_state(assign(socket, flags: Api.list_feature_flags(), create_error: nil))}
   end
 
   @impl true
@@ -66,13 +66,31 @@ defmodule RealtimeWeb.Dashboard.FeatureFlags do
 
   @impl true
   def handle_event("create", %{"name" => name}, socket) when name != "" do
-    case Api.upsert_feature_flag(%{name: String.trim(name), enabled: false}) do
-      {:ok, flag} ->
-        flags = Enum.sort_by([flag | socket.assigns.flags], & &1.name)
-        {:noreply, assign(socket, flags: flags)}
+    trimmed = String.trim(name)
 
-      {:error, _} ->
+    cond do
+      trimmed == "" ->
         {:noreply, socket}
+
+      Enum.any?(socket.assigns.flags, &(&1.name == trimmed)) ->
+        {:noreply, assign(socket, create_error: "Flag \"#{trimmed}\" already exists")}
+
+      true ->
+        case Api.create_feature_flag(%{name: trimmed, enabled: false}) do
+          {:ok, flag} ->
+            flags = Enum.sort_by([flag | socket.assigns.flags], & &1.name)
+            {:noreply, assign(socket, flags: flags, create_error: nil)}
+
+          {:error, %Ecto.Changeset{} = changeset} ->
+            if Keyword.has_key?(changeset.errors, :name) do
+              {:noreply, assign(socket, create_error: "Flag \"#{trimmed}\" already exists")}
+            else
+              {:noreply, assign(socket, create_error: "Failed to create flag \"#{trimmed}\"")}
+            end
+
+          {:error, _} ->
+            {:noreply, assign(socket, create_error: "Failed to create flag \"#{trimmed}\"")}
+        end
     end
   end
 
@@ -143,7 +161,7 @@ defmodule RealtimeWeb.Dashboard.FeatureFlags do
     <div class="phx-dashboard-section">
       <h5 class="card-title">Feature Flags</h5>
 
-      <form phx-submit="create" class="mb-4 d-flex gap-2">
+      <form phx-submit="create" class="mb-2 d-flex gap-2">
         <input
           type="text"
           name="name"
@@ -153,6 +171,10 @@ defmodule RealtimeWeb.Dashboard.FeatureFlags do
         />
         <button type="submit" class="btn btn-primary">Add</button>
       </form>
+
+      <%= if @create_error do %>
+        <p class="text-danger mb-4"><%= @create_error %></p>
+      <% end %>
 
       <table class="table table-hover">
         <thead>

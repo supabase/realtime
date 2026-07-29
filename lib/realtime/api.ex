@@ -204,6 +204,21 @@ defmodule Realtime.Api do
   def get_feature_flag(name) when is_binary(name),
     do: Replica.replica().get_by(FeatureFlag, name: name)
 
+  @spec create_feature_flag(map()) :: {:ok, FeatureFlag.t()} | {:error, Ecto.Changeset.t()}
+  def create_feature_flag(attrs) do
+    if master_region?() do
+      %FeatureFlag{}
+      |> FeatureFlag.changeset(attrs)
+      |> Repo.insert()
+      |> tap(fn
+        {:ok, flag} -> FeatureFlags.Cache.global_update_cache(flag)
+        _ -> :ok
+      end)
+    else
+      call(:create_feature_flag, [attrs])
+    end
+  end
+
   @spec upsert_feature_flag(map()) :: {:ok, FeatureFlag.t()} | {:error, Ecto.Changeset.t()}
   def upsert_feature_flag(attrs) do
     if master_region?() do

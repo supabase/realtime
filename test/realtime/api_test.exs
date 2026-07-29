@@ -611,6 +611,30 @@ defmodule Realtime.ApiTest do
     end
   end
 
+  describe "create_feature_flag/1" do
+    test "inserts a new flag" do
+      assert {:ok, %FeatureFlag{name: "brand_new_flag", enabled: false}} =
+               Api.create_feature_flag(%{name: "brand_new_flag", enabled: false})
+    end
+
+    test "returns an error changeset when a flag with the same name already exists" do
+      {:ok, existing} = Api.create_feature_flag(%{name: "dup_flag", enabled: true, rollout_percentage: 42})
+
+      assert {:error, changeset} = Api.create_feature_flag(%{name: "dup_flag", enabled: false})
+      assert "has already been taken" in errors_on(changeset).name
+
+      # The existing flag must be left untouched (unlike upsert, which would clobber it).
+      assert %FeatureFlag{enabled: true, rollout_percentage: 42} = reloaded = Api.get_feature_flag("dup_flag")
+      assert reloaded.id == existing.id
+      assert Api.list_feature_flags() |> Enum.count(&(&1.name == "dup_flag")) == 1
+    end
+
+    test "returns error changeset when name is missing" do
+      assert {:error, changeset} = Api.create_feature_flag(%{enabled: false})
+      assert "can't be blank" in errors_on(changeset).name
+    end
+  end
+
   describe "delete_feature_flag/1" do
     test "removes the flag" do
       {:ok, flag} = Api.upsert_feature_flag(%{name: "to_delete", enabled: false})
