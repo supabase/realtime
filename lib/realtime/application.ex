@@ -27,8 +27,10 @@ defmodule Realtime.Application do
   end
 
   def start(_type, _args) do
-    check_for_local_ipv6_host()
-    opentelemetry_setup()
+    if Application.get_env(:logflare_logger_backend, :url) do
+      LoggerBackends.add(LogflareLogger.HttpBackend)
+    end
+
     Realtime.LogFilter.setup()
     primary_config = :logger.get_primary_config()
 
@@ -38,6 +40,9 @@ defmodule Realtime.Application do
         :metadata,
         Enum.into([region: System.get_env("REGION"), cluster: System.get_env("CLUSTER")], primary_config.metadata)
       )
+
+    opentelemetry_setup()
+    check_for_local_ipv6_host()
 
     topologies = Application.get_env(:libcluster, :topologies) || []
 

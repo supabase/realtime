@@ -63,8 +63,8 @@ jobs:
         id: beam
         uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1.24.0
         with:
-          otp-version: 27.x # Define the OTP version [required]
-          elixir-version: 1.18.x # Define the elixir version [required]
+          otp-version: 28.5.0.4 # Define the OTP version [required]
+          elixir-version: 1.19.5 # Define the elixir version [required]
       - name: Cache Mix
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
@@ -137,8 +137,8 @@ jobs:
       - name: Setup elixir
         uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1.24.0
         with:
-          otp-version: 27.x
-          elixir-version: 1.18.x
+          otp-version: 28.5.0.4
+          elixir-version: 1.19.5
       - name: Cache Mix
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
