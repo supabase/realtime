@@ -37,7 +37,7 @@ defmodule RealtimeWeb.RealtimeChannelReplicationReadyTest do
 
   test "does not push while replication is unavailable", %{tenant: tenant} do
     expect(Connect, :lookup_or_start_connection, fn _ -> {:ok, self()} end)
-    expect(Connect, :replication_status, fn _ -> {:error, :not_connected} end)
+    stub(Connect, :replication_status, fn _ -> {:error, :not_connected} end)
 
     assert {:ok, _, _} = join(tenant)
 
@@ -61,7 +61,7 @@ defmodule RealtimeWeb.RealtimeChannelReplicationReadyTest do
     on_exit(fn -> Application.put_env(:realtime, :replication_ready_timeout, previous) end)
 
     expect(Connect, :lookup_or_start_connection, fn _ -> {:ok, self()} end)
-    expect(Connect, :replication_status, fn _ -> {:error, :not_connected} end)
+    stub(Connect, :replication_status, fn _ -> {:error, :not_connected} end)
 
     assert {:ok, _, socket} = join(tenant)
     ref = Process.monitor(socket.channel_pid)

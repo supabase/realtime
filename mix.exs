@@ -105,7 +105,7 @@ defmodule Realtime.MixProject do
       # gen_rpc uses a git dependency
       {:snabbkaffe, "~> 1.0", override: true},
       {:req, "~> 0.6.2"},
-      {:mimic, "~> 1.0", only: :test},
+      {:mimic, "~> 2.0", only: :test},
       {:floki, ">= 0.30.0", only: :test},
       {:mint_web_socket, "~> 1.0", only: :test},
       {:postgres_replication, git: "https://github.com/filipecabaco/postgres_replication.git", only: :test},

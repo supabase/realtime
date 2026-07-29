@@ -102,7 +102,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       refute_receive _any
     end
 
-    test "does not emit for untagged messages", %{worker: worker, ref: ref} do
+    test "does not emit for untagged messages", %{worker: worker} do
       send(worker, Worker.forward_to_local(@topic, "untagged message", Phoenix.PubSub))
 
       refute_receive _any
