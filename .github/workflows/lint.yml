@@ -59,6 +59,8 @@ jobs:
         run: mix credo
       - name: Run hex audit
         run: mix hex.audit
+      - name: Check for unused deps
+        run: mix deps.unlock --check-unused
       - name: Run sobelow
         run: mix sobelow --config .sobelow-conf
       - name: Retrieve PLT Cache
