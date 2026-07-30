@@ -2,20 +2,24 @@ defmodule Realtime.Tenants.Authorization.Policies do
   @moduledoc """
   Policies structure that holds the required authorization information for a given connection.
 
-  Currently there are two types of policies:
+  Currently there are three types of policies:
   * Realtime.Tenants.Authorization.Policies.BroadcastPolicies - Used to store the access to Broadcast feature on a given Topic
   * Realtime.Tenants.Authorization.Policies.PresencePolicies - Used to store the access to Presence feature on a given Topic
+  * Realtime.Tenants.Authorization.Policies.PersistencePolicies - Used to store whether messages may be persisted on a given Topic
   """
 
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
+  alias Realtime.Tenants.Authorization.Policies.PersistencePolicies
 
   defstruct broadcast: %BroadcastPolicies{},
-            presence: %PresencePolicies{}
+            presence: %PresencePolicies{},
+            persistence: %PersistencePolicies{}
 
   @type t :: %__MODULE__{
           broadcast: BroadcastPolicies.t(),
-          presence: PresencePolicies.t()
+          presence: PresencePolicies.t(),
+          persistence: PersistencePolicies.t()
         }
 
   @doc """

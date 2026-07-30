@@ -4,7 +4,6 @@ defmodule Generators do
   """
 
   alias Realtime.Api.Tenant
-  alias Realtime.Channels
   alias Realtime.Crypto
   alias Realtime.Database
   alias Realtime.Integration.WebsocketClient
@@ -110,23 +109,6 @@ defmodule Generators do
         []
       )
     end)
-  end
-
-  def enable_broadcast_storage(db_conn, tenant, topic) do
-    with {:ok, _result} <- Postgrex.query(db_conn, "SELECT realtime.enable_broadcast_storage($1)", [topic]) do
-      invalidate_broadcast_storage_cache(tenant, topic)
-    end
-  end
-
-  def disable_broadcast_storage(db_conn, tenant, topic) do
-    with {:ok, _result} <- Postgrex.query(db_conn, "SELECT realtime.disable_broadcast_storage($1)", [topic]) do
-      invalidate_broadcast_storage_cache(tenant, topic)
-    end
-  end
-
-  def invalidate_broadcast_storage_cache(tenant, topic) do
-    Cachex.del(Channels, {tenant.external_id, topic})
-    :ok
   end
 
   @doc """

@@ -11,6 +11,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
+  alias Realtime.Tenants.Authorization.Policies.PersistencePolicies
 
   setup [:checkout_tenant_and_connect, :rls_context]
 
@@ -29,7 +30,8 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
       assert %Policies{
                broadcast: %BroadcastPolicies{read: true, write: true},
-               presence: %PresencePolicies{read: true, write: true}
+               presence: %PresencePolicies{read: true, write: true},
+               persistence: %PersistencePolicies{write: false}
              } == policies
     end
 
@@ -74,7 +76,8 @@ defmodule Realtime.Tenants.AuthorizationTest do
       # presence.read is left unevaluated (nil) since presence was not checked; write is false.
       assert %Policies{
                broadcast: %BroadcastPolicies{read: true, write: true},
-               presence: %PresencePolicies{read: nil, write: false}
+               presence: %PresencePolicies{read: nil, write: false},
+               persistence: %PersistencePolicies{write: false}
              } == policies
     end
 
@@ -92,7 +95,8 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
       assert %Policies{
                broadcast: %BroadcastPolicies{read: false, write: false},
-               presence: %PresencePolicies{read: false, write: false}
+               presence: %PresencePolicies{read: false, write: false},
+               persistence: %PersistencePolicies{write: false}
              } == policies
     end
 

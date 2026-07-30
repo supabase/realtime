@@ -4,8 +4,6 @@ defmodule Realtime.Messages do
   """
 
   alias Realtime.Api.Message
-  alias Realtime.Channels
-  alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Repo
 
   import Ecto.Query, only: [from: 2]
@@ -14,50 +12,32 @@ defmodule Realtime.Messages do
   @default_timeout 5_000
 
   @doc """
-  Persists a broadcast sent over WebSocket for `topic` if storage is enabled for such topic.
+  Persists a broadcast sent over WebSocket for `topic` as a `persistence` message.
 
-  Bypass RLS because the check has already been done on the message broadcast,
-  and then set `broadcasted_at` to avoid re-broadcasting the message twice.
+  Only called after the sender's `persistence` policy authorized it, so the persisted row is always
+  private. Bypasses RLS because that authorization already happened on the broadcast, and sets
+  `broadcasted_at` to avoid re-broadcasting the message twice.
 
   Automatically uses RPC if the database connection is not on the same node.
   """
-  @spec store(DBConnection.conn(), String.t(), String.t(), String.t(), term(), boolean()) ::
-          {:ok, binary()} | {:error, any()} | {:error, :rpc_error, term} | {:error, :storage_disabled}
-  def store(conn, tenant_id, topic, event, payload, private) when node(conn) == node() do
-    if Channels.storage_enabled?(conn, tenant_id, topic) do
-      insert(conn, topic, event, payload, private)
-    else
-      {:error, :storage_disabled}
-    end
+  @spec persist(DBConnection.conn(), String.t(), String.t(), term()) ::
+          {:ok, binary()} | {:error, any()} | {:error, :rpc_error, term}
+  def persist(conn, topic, event, payload) when node(conn) == node() do
+    insert(conn, topic, event, payload)
   end
 
-  def store(conn, tenant_id, topic, event, payload, private) do
-    Realtime.GenRpc.call(node(conn), __MODULE__, :store, [conn, tenant_id, topic, event, payload, private], key: topic)
+  def persist(conn, topic, event, payload) do
+    Realtime.GenRpc.call(node(conn), __MODULE__, :persist, [conn, topic, event, payload], key: topic)
   end
 
-  @doc """
-  Similar to `store/6` but runs asynchronously for callers that don't already hold a connection.
-  """
-  @spec store_async(String.t(), String.t(), String.t(), term()) :: :ok
-  def store_async(tenant_id, topic, event, payload) do
-    Task.Supervisor.start_child(Realtime.TaskSupervisor, fn ->
-      case Connect.lookup_or_start_connection(tenant_id) do
-        {:ok, conn} -> store(conn, tenant_id, topic, event, payload, false)
-        {:error, _reason} -> :skip
-      end
-    end)
-
-    :ok
-  end
-
-  defp insert(conn, topic, event, payload, private) do
+  defp insert(conn, topic, event, payload) do
     changeset =
       Message.changeset(%Message{}, %{
         topic: topic,
-        extension: :broadcast,
+        extension: :persistence,
         event: event,
         payload: payload,
-        private: private,
+        private: true,
         broadcasted_at: NaiveDateTime.utc_now(:microsecond)
       })
 
@@ -110,7 +90,7 @@ defmodule Realtime.Messages do
         where:
           m.topic == ^topic and
             m.private == true and
-            m.extension == :broadcast and
+            m.extension in [:broadcast, :persistence] and
             m.inserted_at >= ^since and
             m.inserted_at < ^now,
         limit: ^limit,

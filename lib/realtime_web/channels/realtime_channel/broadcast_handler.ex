@@ -15,12 +15,18 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
+  alias Realtime.Tenants.Authorization.Policies.PersistencePolicies
 
-  @type payload :: map | {String.t(), :json | :binary, binary}
+  @type payload :: map | {String.t(), :json | :binary, binary, map()}
 
   @event_type "broadcast"
 
-  @spec handle(payload, pid() | nil, Socket.t()) ::
+  @doc """
+  Handles an outgoing broadcast for a channel.
+
+  `db_conn` is `nil` for public channels which don't write authorization nor persist messages.  is the tenant database connection, used to run write authorization and to persist the
+  """
+  @spec handle(payload, db_conn :: pid() | nil, Socket.t()) ::
           {:reply, :ok, Socket.t()}
           | {:reply, {:ok, map()}, Socket.t()}
           | {:reply, {:error, any()}, Socket.t()}
@@ -41,29 +47,19 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
            run_authorization_check(policies || %Policies{}, db_conn, authorization_context),
          socket = socket |> assign(:policies, policies) |> increment_rate_counter(),
          :ok <- Tenants.validate_payload_size(tenant_id, payload) do
-      # Store before broadcasting to permit recovering/replaying messages in case of failure.
-      store_result =
-        case convert_to_storable_fields(payload) do
-          {:ok, event, event_payload} ->
-            Messages.store(db_conn, tenant_id, authorization_context.topic, event, event_payload, true)
-
-          :error ->
-            :skip
-        end
+      # Persist before broadcasting to permit recovering/replaying messages in case of failure.
+      persist_result = maybe_persist(policies, db_conn, authorization_context.topic, payload)
 
       send_message(tenant_id, self_broadcast, tenant_topic, payload)
 
       cond do
-        store_result == {:error, :storage_disabled} ->
+        match?({:error, _reason}, persist_result) ->
+          {:error, reason} = persist_result
+          log_error("UnableToPersistBroadcast", reason)
           if ack_broadcast, do: {:reply, :ok, socket}, else: {:noreply, socket}
 
-        match?({:error, _reason}, store_result) ->
-          {:error, reason} = store_result
-          log_error("UnableToStoreBroadcast", reason)
-          if ack_broadcast, do: {:reply, {:error, %{reason: "unable_to_store"}}, socket}, else: {:noreply, socket}
-
-        ack_broadcast and match?({:ok, _id}, store_result) ->
-          {:ok, id} = store_result
+        ack_broadcast and match?({:ok, _id}, persist_result) ->
+          {:ok, id} = persist_result
           {:reply, {:ok, %{id: id}}, socket}
 
         ack_broadcast ->
@@ -110,8 +106,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
         tenant_topic: tenant_topic,
         self_broadcast: self_broadcast,
         ack_broadcast: ack_broadcast,
-        tenant: tenant_id,
-        authorization_context: authorization_context
+        tenant: tenant_id
       }
     } = socket
 
@@ -120,15 +115,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
     case Tenants.validate_payload_size(tenant_id, payload) do
       :ok ->
         send_message(tenant_id, self_broadcast, tenant_topic, payload)
-
-        case convert_to_storable_fields(payload) do
-          {:ok, event, event_payload} ->
-            Messages.store_async(tenant_id, authorization_context.topic, event, event_payload)
-
-          :error ->
-            :ok
-        end
-
         if ack_broadcast, do: {:reply, :ok, socket}, else: {:noreply, socket}
 
       {:error, :payload_size_exceeded} ->
@@ -179,12 +165,27 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
     %Phoenix.Socket.Broadcast{topic: topic, event: @event_type, payload: payload}
   end
 
-  # Same two payload shapes `build_broadcast/2` branches on above, but for storage: only the
-  # JSON-protocol map shape carries an event/payload that fits `realtime.messages.payload`
-  # (jsonb). The V2 binary protocol's `user_payload` is an arbitrary client-chosen binary blob,
-  # not necessarily even valid JSON, so there's nothing storable to extract from it yet.
-  defp convert_to_storable_fields(%{"event" => event, "payload" => payload}), do: {:ok, event, payload}
-  defp convert_to_storable_fields(_payload), do: :error
+  defp maybe_persist(%Policies{persistence: %PersistencePolicies{write: true}}, db_conn, topic, payload) do
+    case convert_to_persistable_fields(payload) do
+      {:ok, event, event_payload} -> Messages.persist(db_conn, topic, event, event_payload)
+      :error -> :skip
+    end
+  end
+
+  defp maybe_persist(_policies, _db_conn, _topic, _payload), do: :skip
+
+  defp convert_to_persistable_fields(%{"event" => event, "payload" => payload}), do: {:ok, event, payload}
+
+  defp convert_to_persistable_fields({event, :json, user_payload, _metadata}) do
+    case Jason.decode(user_payload) do
+      {:ok, payload} -> {:ok, event, payload}
+      {:error, _} -> :error
+    end
+  end
+
+  defp convert_to_persistable_fields(_payload), do: :error
+
+
 
   defp increment_rate_counter(%{assigns: %{policies: %Policies{broadcast: %BroadcastPolicies{write: false}}}} = socket) do
     socket

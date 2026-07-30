@@ -15,6 +15,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
+  alias Realtime.Tenants.Authorization.Policies.PersistencePolicies
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Repo
   alias RealtimeWeb.Endpoint
@@ -95,7 +96,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:reply, :ok, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+          {:reply, {:ok, %{id: _id}}, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
           socket
       end
 
@@ -134,7 +135,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:reply, :ok, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+          {:reply, {:ok, %{id: _id}}, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
           socket
       end
 
@@ -458,13 +459,18 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
   end
 
   describe "broadcast storage" do
-    test "private channel with storage enabled stores the message and acks with its id", %{
+    test "broadcast authorized to persist is stored and acks with its id", %{
       topic: topic,
       tenant: tenant,
       db_conn: db_conn
     } do
-      enable_broadcast_storage(db_conn, tenant, topic)
-      socket = socket_fixture(tenant, topic, policies: %Policies{broadcast: %BroadcastPolicies{write: true}})
+      socket =
+        socket_fixture(tenant, topic,
+          policies: %Policies{
+            broadcast: %BroadcastPolicies{write: true},
+            persistence: %PersistencePolicies{write: true}
+          }
+        )
 
       assert {:reply, {:ok, %{id: id}}, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
       expected_payload = @payload["payload"]
@@ -475,6 +481,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
                   id: ^id,
                   topic: ^topic,
                   event: "test",
+                  extension: :persistence,
                   private: true,
                   payload: ^expected_payload,
                   broadcasted_at: %NaiveDateTime{}
@@ -482,31 +489,121 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
               ]} = Repo.all(db_conn, Message, Message)
     end
 
-    test "private channel without storage enabled acks without storing anything", %{
+    test "V2 json user broadcast authorized to persist is stored with the decoded payload", %{
       topic: topic,
       tenant: tenant,
       db_conn: db_conn
     } do
-      socket = socket_fixture(tenant, topic, policies: %Policies{broadcast: %BroadcastPolicies{write: true}})
+      socket =
+        socket_fixture(tenant, topic,
+          policies: %Policies{
+            broadcast: %BroadcastPolicies{write: true},
+            persistence: %PersistencePolicies{write: true}
+          }
+        )
+
+      v2_payload = {"event123", :json, Jason.encode!(%{"a" => "b"}), %{}}
+
+      assert {:reply, {:ok, %{id: id}}, _socket} = BroadcastHandler.handle(v2_payload, db_conn, socket)
+
+      assert {:ok,
+              [
+                %Message{
+                  id: ^id,
+                  topic: ^topic,
+                  event: "event123",
+                  extension: :persistence,
+                  private: true,
+                  payload: %{"a" => "b"}
+                }
+              ]} = Repo.all(db_conn, Message, Message)
+    end
+
+    test "V2 binary user broadcast is delivered but not persisted", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket =
+        socket_fixture(tenant, topic,
+          policies: %Policies{
+            broadcast: %BroadcastPolicies{write: true},
+            persistence: %PersistencePolicies{write: true}
+          }
+        )
+
+      v2_payload = {"event123", :binary, <<0, 1, 2, 3>>, %{}}
+
+      assert {:reply, :ok, _socket} = BroadcastHandler.handle(v2_payload, db_conn, socket)
+
+      assert {:ok, []} = Repo.all(db_conn, Message, Message)
+    end
+
+    test "persistence failure still delivers the broadcast and acks ok", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      expect(Repo, :insert, fn _conn, _changeset, _module -> {:error, :boom} end)
+
+      socket =
+        socket_fixture(tenant, topic,
+          policies: %Policies{
+            broadcast: %BroadcastPolicies{write: true},
+            persistence: %PersistencePolicies{write: true}
+          }
+        )
+
+      log =
+        capture_log(fn ->
+          assert {:reply, :ok, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+        end)
+
+      assert_receive {:socket_push, :text, _data}
+      assert log =~ "UnableToPersistBroadcast"
+      assert {:ok, []} = Repo.all(db_conn, Message, Message)
+    end
+
+    test "broadcast without a persistence policy is sent but not stored", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket =
+        socket_fixture(tenant, topic,
+          policies: %Policies{
+            broadcast: %BroadcastPolicies{write: true},
+            persistence: %PersistencePolicies{write: false}
+          }
+        )
 
       assert {:reply, :ok, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
 
       assert {:ok, []} = Repo.all(db_conn, Message, Message)
     end
 
-    test "public channel with storage enabled stores the message asynchronously and still acks plainly", %{
+    test "unauthorized private broadcast is not stored", %{
       topic: topic,
       tenant: tenant,
       db_conn: db_conn
     } do
-      enable_broadcast_storage(db_conn, tenant, topic)
+      socket = socket_fixture(tenant, topic, policies: %Policies{broadcast: %BroadcastPolicies{write: false}})
+
+      assert {:noreply, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+
+      assert {:ok, []} = Repo.all(db_conn, Message, Message)
+    end
+
+    test "public channel broadcasts and acks but is not stored", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
       socket = socket_fixture(tenant, topic, private?: false, policies: nil)
 
-      # Storage for public channels is fire-and-forget, so the ack never carries an id.
       assert {:reply, :ok, _socket} = BroadcastHandler.handle(@payload, nil, socket)
 
-      assert eventually(fn -> match?({:ok, [_]}, Repo.all(db_conn, Message, Message)) end)
-      assert {:ok, [%Message{private: false, broadcasted_at: %NaiveDateTime{}}]} = Repo.all(db_conn, Message, Message)
+      assert {:ok, []} = Repo.all(db_conn, Message, Message)
     end
 
     test "public channel without a database connection still broadcasts and acks", %{
@@ -516,21 +613,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       socket = socket_fixture(tenant, topic, private?: false, policies: nil)
 
       assert {:reply, :ok, _socket} = BroadcastHandler.handle(@payload, nil, socket)
-    end
-
-    test "disabling storage stops new messages from being stored", %{
-      topic: topic,
-      tenant: tenant,
-      db_conn: db_conn
-    } do
-      enable_broadcast_storage(db_conn, tenant, topic)
-      socket = socket_fixture(tenant, topic, policies: %Policies{broadcast: %BroadcastPolicies{write: true}})
-      assert {:reply, {:ok, %{id: _id}}, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
-
-      disable_broadcast_storage(db_conn, tenant, topic)
-
-      assert {:reply, :ok, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
-      assert {:ok, [_only_one]} = Repo.all(db_conn, Message, Message)
     end
   end
 
