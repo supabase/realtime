@@ -509,6 +509,45 @@ defmodule RealtimeWeb.JwtVerificationTest do
       assert {:ok, _claims} = JwtVerification.verify(token, @jwt_secret, jwks)
     end
 
+    test "using an Ed25519 JWK with the RFC 8037 EdDSA alg" do
+      {pub, priv} = :crypto.generate_key(:eddsa, :ed25519)
+
+      jwk = %{
+        "kty" => "OKP",
+        "crv" => "Ed25519",
+        "x" => Base.url_encode64(pub, padding: false),
+        "d" => Base.url_encode64(priv, padding: false),
+        "kid" => "ed-key-1"
+      }
+
+      jwks = %{"keys" => [jwk]}
+
+      # Signed with the curve-named signer, but the header says EdDSA — what
+      # RFC 8037 libraries emit.
+      signer = Joken.Signer.create("Ed25519", jwk, %{"kid" => "ed-key-1", "alg" => "EdDSA"})
+
+      Mock.freeze()
+      current_time = Mock.current_time()
+
+      token =
+        Joken.generate_and_sign!(
+          %{"exp" => %Joken.Claim{generate: fn -> current_time + 100 end}},
+          %{},
+          signer
+        )
+
+      assert {:ok, _claims} = JwtVerification.verify(token, @jwt_secret, jwks)
+    end
+
+    test "returns error for an EdDSA alg whose JWK has no supported curve" do
+      jwk = %{"kty" => "OKP", "crv" => "X25519", "kid" => "ed-key-1"}
+      header = Base.url_encode64(Jason.encode!(%{"alg" => "EdDSA", "kid" => "ed-key-1"}), padding: false)
+      claims = Base.url_encode64(Jason.encode!(%{"exp" => 9_999_999_999}), padding: false)
+      token = "#{header}.#{claims}.signature"
+
+      assert {:error, _} = JwtVerification.verify(token, @jwt_secret, %{"keys" => [jwk]})
+    end
+
     test "returns error for unsupported algorithm with kid and jwks" do
       header = Base.url_encode64(Jason.encode!(%{"alg" => "PS256", "kid" => "key-1"}), padding: false)
       claims = Base.url_encode64(Jason.encode!(%{"exp" => 9_999_999_999}), padding: false)
