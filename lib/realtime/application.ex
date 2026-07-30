@@ -28,7 +28,7 @@ defmodule Realtime.Application do
 
   def start(_type, _args) do
     if Application.get_env(:logflare_logger_backend, :url) do
-      LoggerBackends.add(LogflareLogger.HttpBackend)
+      Logger.add_backend(LogflareLogger.HttpBackend)
     end
 
     Realtime.LogFilter.setup()

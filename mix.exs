@@ -89,7 +89,6 @@ defmodule Realtime.MixProject do
       {:recon, "~> 2.5"},
       {:mint, "~> 1.4"},
       {:logflare_logger_backend, "~> 0.11"},
-      {:logger_backends, "~> 1.0"},
       {:syn, "~> 3.3"},
       {:forum, path: "./forum"},
       {:cachex, "~> 4.0"},
