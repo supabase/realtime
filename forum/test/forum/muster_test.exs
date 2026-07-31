@@ -462,6 +462,13 @@ defmodule Forum.MusterTest do
       assert :src@nowhere in Scope.occupancy(scope, :rg1)
     end
 
+    test "Muster.occupancy/2 exposes the raw router-held rows", %{scope: scope} do
+      assert :ok = Scope.occupied(scope, :rg_pub, :src@nowhere, 1, fake_pid())
+      # Public, non-barrier-gated read; delegates to Scope.occupancy/2.
+      assert Muster.occupancy(scope, :rg_pub) == Scope.occupancy(scope, :rg_pub)
+      assert :src@nowhere in Muster.occupancy(scope, :rg_pub)
+    end
+
     test "vacant_batch/4 deletes multiple {group, source_node} rows", %{scope: scope} do
       src = fake_pid()
       :ok = Scope.occupied(scope, :rg2a, :src@nowhere, 1, src)
