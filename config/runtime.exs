@@ -301,7 +301,8 @@ if logs_engine == "logflare" do
 
   config :logger,
     sync_threshold: 6_000,
-    discard_threshold: 6_000
+    discard_threshold: 6_000,
+    default_handler: false
 end
 
 # Setup production and development environments
