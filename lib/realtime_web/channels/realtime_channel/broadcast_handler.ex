@@ -185,8 +185,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
 
   defp convert_to_persistable_fields(_payload), do: :error
 
-
-
   defp increment_rate_counter(%{assigns: %{policies: %Policies{broadcast: %BroadcastPolicies{write: false}}}} = socket) do
     socket
   end
