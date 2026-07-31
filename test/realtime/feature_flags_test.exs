@@ -5,8 +5,10 @@ defmodule Realtime.FeatureFlagsTest do
   setup :set_mimic_from_context
 
   alias Realtime.Api
+  alias Realtime.Api.FeatureFlag
   alias Realtime.FeatureFlags
   alias Realtime.FeatureFlags.Cache
+  alias Realtime.Repo
   alias Realtime.Tenants.Cache, as: TenantsCache
 
   setup do
@@ -19,6 +21,58 @@ defmodule Realtime.FeatureFlagsTest do
     test "returns nil when the cache/database lookup errors instead of leaking the error" do
       stub(Cachex, :fetch, fn _cache, _key, _fallback -> {:error, :boom} end)
       assert Cache.get_flag("any_flag") == nil
+    end
+
+    test "returns the flag when it exists" do
+      {:ok, flag} = Api.upsert_feature_flag(%{name: "present_flag", enabled: true})
+      assert %FeatureFlag{name: "present_flag", enabled: true} = Cache.get_flag("present_flag")
+      assert Cache.get_flag("present_flag").id == flag.id
+    end
+
+    test "caches a miss so the flag is not re-read from the database" do
+      # First lookup misses and caches the "not found" sentinel.
+      assert Cache.get_flag("ghost_flag") == nil
+
+      # The sentinel is what's actually stored: Cachex holds :not_found (not nil,
+      # which it would treat as absent and re-fetch). The key mirrors cache_key/1.
+      assert {:ok, :not_found} = Cachex.get(Cache, {:get_flag, "ghost_flag"})
+
+      # Insert directly, bypassing upsert_feature_flag/1's global_update_cache broadcast,
+      # so the only way to observe the new row is a fresh database read.
+      %FeatureFlag{}
+      |> FeatureFlag.changeset(%{name: "ghost_flag", enabled: true})
+      |> Repo.insert!()
+
+      # Still nil: the negative result was cached, so no fresh read happens. A plain
+      # `nil` sentinel would fail here, since Cachex re-runs the fallback for `nil`.
+      assert Cache.get_flag("ghost_flag") == nil
+    end
+  end
+
+  describe "Cache.update_cache/1" do
+    test "overwrites a cached miss (as global_update_cache/1 does on create)" do
+      # Cache the "not found" sentinel first.
+      assert Cache.get_flag("late_flag") == nil
+
+      # update_cache/1 is what global_update_cache/1 invokes on every node.
+      Cache.update_cache(%FeatureFlag{name: "late_flag", enabled: true})
+
+      assert %FeatureFlag{name: "late_flag", enabled: true} = Cache.get_flag("late_flag")
+      assert FeatureFlags.enabled?("late_flag")
+    end
+  end
+
+  describe "Cache.invalidate_cache/1" do
+    test "drops a cached flag so the next lookup reads the database again" do
+      {:ok, _} = Api.upsert_feature_flag(%{name: "drop_flag", enabled: true})
+      assert %FeatureFlag{name: "drop_flag"} = Cache.get_flag("drop_flag")
+
+      Repo.delete_all(from(f in FeatureFlag, where: f.name == "drop_flag"))
+      # Still served from cache until invalidated.
+      assert %FeatureFlag{name: "drop_flag"} = Cache.get_flag("drop_flag")
+
+      Cache.invalidate_cache("drop_flag")
+      assert Cache.get_flag("drop_flag") == nil
     end
   end
 
