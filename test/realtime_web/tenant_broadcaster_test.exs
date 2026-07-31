@@ -272,8 +272,9 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
 
       TenantBroadcaster.pubsub_broadcast(tenant_id, topic, message, MessageDispatcher, :broadcast)
 
-      # The receiving node holds no connection for this tenant -> hit=false
-      assert_receive {:fanout, %{local_tenant_users: 0}, %{tenant: ^tenant_id, hit: false}}
+      # The receiving node holds no connection for this tenant -> hit=false. Generous timeout: the
+      # telemetry is emitted on the remote node and relayed back across the cluster hop.
+      assert_receive {:fanout, %{local_tenant_users: 0}, %{tenant: ^tenant_id, hit: false}}, 5000
     end
 
     test "does not tag :broadcast messages dispatched by another dispatcher", %{tenant_id: tenant_id, topic: topic} do
