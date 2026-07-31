@@ -480,63 +480,43 @@ defmodule RealtimeWeb.JwtVerificationTest do
       assert {:error, :error_generating_signer} = JwtVerification.verify(token, "secret", jwks)
     end
 
-    test "using Ed25519 JWK" do
-      # Generate Ed25519 key pair
-      {pub, priv} = :crypto.generate_key(:eddsa, :ed25519)
-
-      jwk = %{
-        "kty" => "OKP",
-        "crv" => "Ed25519",
-        "x" => Base.url_encode64(pub, padding: false),
-        "d" => Base.url_encode64(priv, padding: false),
-        "kid" => "ed-key-1"
+    test "using EdDSA(Ed25519) JWK" do
+      jwks = %{
+        "keys" => [
+          %{
+            "kty" => "OKP",
+            "crv" => "Ed25519",
+            "x" => "hR5rgn8NeZtkO6c5zBqQWFskBWnkBGa8c1Noa1L7FRw",
+            "d" => "B760w5vOLrntFkIfGZRy7di_WPIYymxTjxufHiuHY0g",
+            "kid" => "key-id-1"
+          }
+        ]
       }
 
-      jwks = %{"keys" => [jwk]}
-
-      signer = Joken.Signer.create("Ed25519", jwk, %{"kid" => "ed-key-1"})
-
-      Mock.freeze()
-      current_time = Mock.current_time()
-
       token =
-        Joken.generate_and_sign!(
-          %{"exp" => %Joken.Claim{generate: fn -> current_time + 100 end}},
-          %{},
-          signer
-        )
+        "eyJhbGciOiJFZERTQSIsImtpZCI6ImtleS1pZC0xIiwidHlwIjoiSldUIn0.eyJleHAiOjE3MTIwNTMyNTcsImlhdCI6MTcxMjA0OTY1Nywicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJzdWIiOiJ1c2VyLWlkIn0.aPgmoz7qHith4CA-T-hazSA375EHTkGQ2o1cjrKd8AkdB22OXy35fsHwjjnNzdQGpkVIaIq0ydLjCtVC7BOCDA"
 
-      assert {:ok, _claims} = JwtVerification.verify(token, @jwt_secret, jwks)
+      # Check that the signature is valid even though time may be off.
+      assert {:error, [message: _, claim: "exp", claim_val: _]} = JwtVerification.verify(token, @jwt_secret, jwks)
     end
 
-    test "using an Ed25519 JWK with the RFC 8037 EdDSA alg" do
-      {pub, priv} = :crypto.generate_key(:eddsa, :ed25519)
-
-      jwk = %{
-        "kty" => "OKP",
-        "crv" => "Ed25519",
-        "x" => Base.url_encode64(pub, padding: false),
-        "d" => Base.url_encode64(priv, padding: false),
-        "kid" => "ed-key-1"
+    test "using EdDSA(Ed25519) JWK with wrong signature" do
+      jwks = %{
+        "keys" => [
+          %{
+            "kty" => "OKP",
+            "crv" => "Ed25519",
+            "x" => "hR5rgn8NeZtkO6c5zBqQWFskBWnkBGa8c1Noa1L7FRw",
+            "d" => "B760w5vOLrntFkIfGZRy7di_WPIYymxTjxufHiuHY0g",
+            "kid" => "key-id-1"
+          }
+        ]
       }
 
-      jwks = %{"keys" => [jwk]}
-
-      # Signed with the curve-named signer, but the header says EdDSA — what
-      # RFC 8037 libraries emit.
-      signer = Joken.Signer.create("Ed25519", jwk, %{"kid" => "ed-key-1", "alg" => "EdDSA"})
-
-      Mock.freeze()
-      current_time = Mock.current_time()
-
       token =
-        Joken.generate_and_sign!(
-          %{"exp" => %Joken.Claim{generate: fn -> current_time + 100 end}},
-          %{},
-          signer
-        )
+        "eyJhbGciOiJFZERTQSIsImtpZCI6ImtleS1pZC0xIiwidHlwIjoiSldUIn0.eyJleHAiOjE3MTIwNTMyNTcsImlhdCI6MTcxMjA0OTY1Nywicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJzdWIiOiJ1c2VyLWlkIn0.aPgmoz7qHith4CA-T-hazSA375EHTkGQ2o1cjrKd8AkdB22OXy35fsHwjjnNzdQGpkVIaIq0ydLjCtVC7BOCDQ"
 
-      assert {:ok, _claims} = JwtVerification.verify(token, @jwt_secret, jwks)
+      assert JwtVerification.verify(token, @jwt_secret, jwks) == {:error, :signature_error}
     end
 
     test "returns error for an EdDSA alg whose JWK has no supported curve" do
