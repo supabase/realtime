@@ -767,84 +767,6 @@
       ],
       "security_labels": []
     },
-    "procedure:realtime.check_equality_op(realtime.equality_op,regtype,text,text)": {
-      "schema": "realtime",
-      "name": "check_equality_op",
-      "kind": "f",
-      "return_type": "boolean",
-      "return_type_schema": "pg_catalog",
-      "language": "plpgsql",
-      "security_definer": false,
-      "volatility": "i",
-      "parallel_safety": "u",
-      "execution_cost": 100,
-      "result_rows": 0,
-      "is_strict": false,
-      "leakproof": false,
-      "returns_set": false,
-      "argument_count": 4,
-      "argument_default_count": 0,
-      "argument_names": [
-        "op",
-        "type_",
-        "val_1",
-        "val_2"
-      ],
-      "argument_types": [
-        "realtime.equality_op",
-        "regtype",
-        "text",
-        "text"
-      ],
-      "all_argument_types": [],
-      "argument_modes": null,
-      "argument_defaults": null,
-      "source_code": "\n/*\nCasts *val_1* and *val_2* as type *type_* and check the *op* condition for truthiness\n*/\ndeclare\n    op_symbol text = (\n        case\n            when op = 'eq' then '='\n            when op = 'neq' then '!='\n            when op = 'lt' then '<'\n            when op = 'lte' then '<='\n            when op = 'gt' then '>'\n            when op = 'gte' then '>='\n            when op = 'in' then '= any'\n            else 'UNKNOWN OP'\n        end\n    );\n    res boolean;\nbegin\n    execute format(\n        'select %L::'|| type_::text || ' ' || op_symbol\n        || ' ( %L::'\n        || (\n            case\n                when op = 'in' then type_::text || '[]'\n                else type_::text end\n        )\n        || ')', val_1, val_2) into res;\n    return res;\nend;\n",
-      "binary_path": null,
-      "sql_body": null,
-      "definition": "CREATE OR REPLACE FUNCTION realtime.check_equality_op(op realtime.equality_op, type_ regtype, val_1 text, val_2 text)\n RETURNS boolean\n LANGUAGE plpgsql\n IMMUTABLE\nAS $function$\n/*\nCasts *val_1* and *val_2* as type *type_* and check the *op* condition for truthiness\n*/\ndeclare\n    op_symbol text = (\n        case\n            when op = 'eq' then '='\n            when op = 'neq' then '!='\n            when op = 'lt' then '<'\n            when op = 'lte' then '<='\n            when op = 'gt' then '>'\n            when op = 'gte' then '>='\n            when op = 'in' then '= any'\n            else 'UNKNOWN OP'\n        end\n    );\n    res boolean;\nbegin\n    execute format(\n        'select %L::'|| type_::text || ' ' || op_symbol\n        || ' ( %L::'\n        || (\n            case\n                when op = 'in' then type_::text || '[]'\n                else type_::text end\n        )\n        || ')', val_1, val_2) into res;\n    return res;\nend;\n$function$\n",
-      "config": null,
-      "owner": "supabase_realtime_admin",
-      "comment": null,
-      "privileges": [
-        {
-          "grantee": "PUBLIC",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "anon",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "authenticated",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "service_role",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "supabase_realtime_admin",
-          "privilege": "EXECUTE",
-          "grantable": false
-        }
-      ],
-      "security_labels": []
-    },
     "procedure:realtime.check_equality_op(realtime.equality_op,regtype,text,text,boolean)": {
       "schema": "realtime",
       "name": "check_equality_op",
@@ -925,36 +847,42 @@
       ],
       "security_labels": []
     },
-    "procedure:realtime.disable_broadcast_storage(text)": {
+    "procedure:realtime.check_equality_op(realtime.equality_op,regtype,text,text)": {
       "schema": "realtime",
-      "name": "disable_broadcast_storage",
+      "name": "check_equality_op",
       "kind": "f",
       "return_type": "boolean",
       "return_type_schema": "pg_catalog",
       "language": "plpgsql",
       "security_definer": false,
-      "volatility": "v",
+      "volatility": "i",
       "parallel_safety": "u",
       "execution_cost": 100,
       "result_rows": 0,
       "is_strict": false,
       "leakproof": false,
       "returns_set": false,
-      "argument_count": 1,
+      "argument_count": 4,
       "argument_default_count": 0,
       "argument_names": [
-        "topic"
+        "op",
+        "type_",
+        "val_1",
+        "val_2"
       ],
       "argument_types": [
+        "realtime.equality_op",
+        "regtype",
+        "text",
         "text"
       ],
       "all_argument_types": [],
       "argument_modes": null,
       "argument_defaults": null,
-      "source_code": "\nBEGIN\n  UPDATE realtime.channels\n  SET broadcast_storage_enabled_at = NULL, updated_at = now()\n  WHERE channels.topic = disable_broadcast_storage.topic;\n\n  RETURN true;\nEND;\n",
+      "source_code": "\n/*\nCasts *val_1* and *val_2* as type *type_* and check the *op* condition for truthiness\n*/\ndeclare\n    op_symbol text = (\n        case\n            when op = 'eq' then '='\n            when op = 'neq' then '!='\n            when op = 'lt' then '<'\n            when op = 'lte' then '<='\n            when op = 'gt' then '>'\n            when op = 'gte' then '>='\n            when op = 'in' then '= any'\n            else 'UNKNOWN OP'\n        end\n    );\n    res boolean;\nbegin\n    execute format(\n        'select %L::'|| type_::text || ' ' || op_symbol\n        || ' ( %L::'\n        || (\n            case\n                when op = 'in' then type_::text || '[]'\n                else type_::text end\n        )\n        || ')', val_1, val_2) into res;\n    return res;\nend;\n",
       "binary_path": null,
       "sql_body": null,
-      "definition": "CREATE OR REPLACE FUNCTION realtime.disable_broadcast_storage(topic text)\n RETURNS boolean\n LANGUAGE plpgsql\nAS $function$\nBEGIN\n  UPDATE realtime.channels\n  SET broadcast_storage_enabled_at = NULL, updated_at = now()\n  WHERE channels.topic = disable_broadcast_storage.topic;\n\n  RETURN true;\nEND;\n$function$\n",
+      "definition": "CREATE OR REPLACE FUNCTION realtime.check_equality_op(op realtime.equality_op, type_ regtype, val_1 text, val_2 text)\n RETURNS boolean\n LANGUAGE plpgsql\n IMMUTABLE\nAS $function$\n/*\nCasts *val_1* and *val_2* as type *type_* and check the *op* condition for truthiness\n*/\ndeclare\n    op_symbol text = (\n        case\n            when op = 'eq' then '='\n            when op = 'neq' then '!='\n            when op = 'lt' then '<'\n            when op = 'lte' then '<='\n            when op = 'gt' then '>'\n            when op = 'gte' then '>='\n            when op = 'in' then '= any'\n            else 'UNKNOWN OP'\n        end\n    );\n    res boolean;\nbegin\n    execute format(\n        'select %L::'|| type_::text || ' ' || op_symbol\n        || ' ( %L::'\n        || (\n            case\n                when op = 'in' then type_::text || '[]'\n                else type_::text end\n        )\n        || ')', val_1, val_2) into res;\n    return res;\nend;\n$function$\n",
       "config": null,
       "owner": "supabase_realtime_admin",
       "comment": null,
@@ -970,59 +898,17 @@
           "grantable": false
         },
         {
-          "grantee": "dashboard_user",
+          "grantee": "anon",
           "privilege": "EXECUTE",
           "grantable": false
         },
         {
-          "grantee": "supabase_realtime_admin",
-          "privilege": "EXECUTE",
-          "grantable": false
-        }
-      ],
-      "security_labels": []
-    },
-    "procedure:realtime.enable_broadcast_storage(text)": {
-      "schema": "realtime",
-      "name": "enable_broadcast_storage",
-      "kind": "f",
-      "return_type": "boolean",
-      "return_type_schema": "pg_catalog",
-      "language": "plpgsql",
-      "security_definer": false,
-      "volatility": "v",
-      "parallel_safety": "u",
-      "execution_cost": 100,
-      "result_rows": 0,
-      "is_strict": false,
-      "leakproof": false,
-      "returns_set": false,
-      "argument_count": 1,
-      "argument_default_count": 0,
-      "argument_names": [
-        "topic"
-      ],
-      "argument_types": [
-        "text"
-      ],
-      "all_argument_types": [],
-      "argument_modes": null,
-      "argument_defaults": null,
-      "source_code": "\nBEGIN\n  INSERT INTO realtime.channels (topic, broadcast_storage_enabled_at)\n  VALUES (topic, now())\n  ON CONFLICT ON CONSTRAINT channels_topic_index DO UPDATE\n    SET broadcast_storage_enabled_at = now(),\n        updated_at = now();\n\n  RETURN true;\nEND;\n",
-      "binary_path": null,
-      "sql_body": null,
-      "definition": "CREATE OR REPLACE FUNCTION realtime.enable_broadcast_storage(topic text)\n RETURNS boolean\n LANGUAGE plpgsql\nAS $function$\nBEGIN\n  INSERT INTO realtime.channels (topic, broadcast_storage_enabled_at)\n  VALUES (topic, now())\n  ON CONFLICT ON CONSTRAINT channels_topic_index DO UPDATE\n    SET broadcast_storage_enabled_at = now(),\n        updated_at = now();\n\n  RETURN true;\nEND;\n$function$\n",
-      "config": null,
-      "owner": "supabase_realtime_admin",
-      "comment": null,
-      "privileges": [
-        {
-          "grantee": "PUBLIC",
+          "grantee": "authenticated",
           "privilege": "EXECUTE",
           "grantable": false
         },
         {
-          "grantee": "postgres",
+          "grantee": "service_role",
           "privilege": "EXECUTE",
           "grantable": false
         },
@@ -1698,6 +1584,46 @@
       "comment": null,
       "owner": "supabase_realtime_admin"
     },
+    "index:realtime.subscription.ix_realtime_subscription_entity": {
+      "schema": "realtime",
+      "table_name": "subscription",
+      "name": "ix_realtime_subscription_entity",
+      "storage_params": [],
+      "statistics_target": [
+        -1
+      ],
+      "index_type": "btree",
+      "tablespace": null,
+      "is_unique": false,
+      "is_primary": false,
+      "is_exclusion": false,
+      "nulls_not_distinct": false,
+      "immediate": true,
+      "is_clustered": false,
+      "is_replica_identity": false,
+      "key_columns": [
+        4
+      ],
+      "column_collations": [
+        null
+      ],
+      "operator_classes": [
+        "default"
+      ],
+      "column_options": [
+        0
+      ],
+      "index_expressions": null,
+      "partial_predicate": null,
+      "table_relkind": "r",
+      "is_owned_by_constraint": false,
+      "is_partitioned_index": false,
+      "is_index_partition": false,
+      "parent_index_name": null,
+      "definition": "CREATE INDEX ix_realtime_subscription_entity ON realtime.subscription USING btree (entity)",
+      "comment": null,
+      "owner": "supabase_realtime_admin"
+    },
     "index:realtime.subscription.subscription_subscription_id_entity_filters_action_filter_selec": {
       "schema": "realtime",
       "table_name": "subscription",
@@ -1757,46 +1683,6 @@
       "definition": "CREATE UNIQUE INDEX subscription_subscription_id_entity_filters_action_filter_selec ON realtime.subscription USING btree (subscription_id, entity, filters, action_filter, COALESCE(selected_columns, '{}'::text[]))",
       "comment": null,
       "owner": "supabase_realtime_admin"
-    },
-    "index:realtime.subscription.ix_realtime_subscription_entity": {
-      "schema": "realtime",
-      "table_name": "subscription",
-      "name": "ix_realtime_subscription_entity",
-      "storage_params": [],
-      "statistics_target": [
-        -1
-      ],
-      "index_type": "btree",
-      "tablespace": null,
-      "is_unique": false,
-      "is_primary": false,
-      "is_exclusion": false,
-      "nulls_not_distinct": false,
-      "immediate": true,
-      "is_clustered": false,
-      "is_replica_identity": false,
-      "key_columns": [
-        4
-      ],
-      "column_collations": [
-        null
-      ],
-      "operator_classes": [
-        "default"
-      ],
-      "column_options": [
-        0
-      ],
-      "index_expressions": null,
-      "partial_predicate": null,
-      "table_relkind": "r",
-      "is_owned_by_constraint": false,
-      "is_partitioned_index": false,
-      "is_index_partition": false,
-      "parent_index_name": null,
-      "definition": "CREATE INDEX ix_realtime_subscription_entity ON realtime.subscription USING btree (entity)",
-      "comment": null,
-      "owner": "supabase_realtime_admin"
     }
   },
   "materializedViews": {},
@@ -1854,495 +1740,8 @@
       "security_labels": []
     }
   },
-  "sequences": {
-    "sequence:realtime.channels_id_seq": {
-      "schema": "realtime",
-      "name": "channels_id_seq",
-      "data_type": "bigint",
-      "start_value": 1,
-      "minimum_value": "1",
-      "maximum_value": "9223372036854775807",
-      "increment": 1,
-      "cycle_option": false,
-      "cache_size": 1,
-      "persistence": "p",
-      "owned_by_schema": "realtime",
-      "owned_by_table": "channels",
-      "owned_by_column": "id",
-      "comment": null,
-      "privileges": [
-        {
-          "grantee": "postgres",
-          "privilege": "SELECT",
-          "grantable": false
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "UPDATE",
-          "grantable": false
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "USAGE",
-          "grantable": false
-        },
-        {
-          "grantee": "anon",
-          "privilege": "USAGE",
-          "grantable": false
-        },
-        {
-          "grantee": "authenticated",
-          "privilege": "USAGE",
-          "grantable": false
-        },
-        {
-          "grantee": "service_role",
-          "privilege": "USAGE",
-          "grantable": false
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "SELECT",
-          "grantable": false
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "UPDATE",
-          "grantable": false
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "USAGE",
-          "grantable": false
-        },
-        {
-          "grantee": "supabase_realtime_admin",
-          "privilege": "SELECT",
-          "grantable": false
-        },
-        {
-          "grantee": "supabase_realtime_admin",
-          "privilege": "UPDATE",
-          "grantable": false
-        },
-        {
-          "grantee": "supabase_realtime_admin",
-          "privilege": "USAGE",
-          "grantable": false
-        }
-      ],
-      "owner": "supabase_realtime_admin",
-      "security_labels": []
-    }
-  },
+  "sequences": {},
   "tables": {
-    "table:realtime.channels": {
-      "schema": "realtime",
-      "name": "channels",
-      "persistence": "p",
-      "row_security": false,
-      "force_row_security": false,
-      "has_indexes": true,
-      "has_rules": false,
-      "has_triggers": false,
-      "has_subclasses": false,
-      "is_populated": true,
-      "replica_identity": "d",
-      "replica_identity_index": null,
-      "is_partition": false,
-      "options": null,
-      "partition_bound": null,
-      "partition_by": null,
-      "owner": "supabase_realtime_admin",
-      "comment": null,
-      "parent_schema": null,
-      "parent_name": null,
-      "columns": [
-        {
-          "name": "id",
-          "position": 1,
-          "data_type": "bigint",
-          "data_type_str": "bigint",
-          "is_custom_type": false,
-          "custom_type_type": null,
-          "custom_type_category": null,
-          "custom_type_schema": null,
-          "custom_type_name": null,
-          "not_null": true,
-          "is_identity": false,
-          "is_identity_always": false,
-          "is_generated": false,
-          "collation": null,
-          "default": "nextval('realtime.channels_id_seq'::regclass)",
-          "comment": null,
-          "security_labels": []
-        },
-        {
-          "name": "topic",
-          "position": 2,
-          "data_type": "text",
-          "data_type_str": "text",
-          "is_custom_type": false,
-          "custom_type_type": null,
-          "custom_type_category": null,
-          "custom_type_schema": null,
-          "custom_type_name": null,
-          "not_null": true,
-          "is_identity": false,
-          "is_identity_always": false,
-          "is_generated": false,
-          "collation": null,
-          "default": null,
-          "comment": null,
-          "security_labels": []
-        },
-        {
-          "name": "broadcast_storage_enabled_at",
-          "position": 3,
-          "data_type": "timestamp without time zone",
-          "data_type_str": "timestamp without time zone",
-          "is_custom_type": false,
-          "custom_type_type": null,
-          "custom_type_category": null,
-          "custom_type_schema": null,
-          "custom_type_name": null,
-          "not_null": false,
-          "is_identity": false,
-          "is_identity_always": false,
-          "is_generated": false,
-          "collation": null,
-          "default": null,
-          "comment": null,
-          "security_labels": []
-        },
-        {
-          "name": "inserted_at",
-          "position": 4,
-          "data_type": "timestamp without time zone",
-          "data_type_str": "timestamp without time zone",
-          "is_custom_type": false,
-          "custom_type_type": null,
-          "custom_type_category": null,
-          "custom_type_schema": null,
-          "custom_type_name": null,
-          "not_null": true,
-          "is_identity": false,
-          "is_identity_always": false,
-          "is_generated": false,
-          "collation": null,
-          "default": "now()",
-          "comment": null,
-          "security_labels": []
-        },
-        {
-          "name": "updated_at",
-          "position": 5,
-          "data_type": "timestamp without time zone",
-          "data_type_str": "timestamp without time zone",
-          "is_custom_type": false,
-          "custom_type_type": null,
-          "custom_type_category": null,
-          "custom_type_schema": null,
-          "custom_type_name": null,
-          "not_null": true,
-          "is_identity": false,
-          "is_identity_always": false,
-          "is_generated": false,
-          "collation": null,
-          "default": "now()",
-          "comment": null,
-          "security_labels": []
-        }
-      ],
-      "constraints": [
-        {
-          "name": "channels_pkey",
-          "constraint_type": "p",
-          "deferrable": false,
-          "initially_deferred": false,
-          "validated": true,
-          "is_local": true,
-          "no_inherit": true,
-          "is_temporal": false,
-          "is_partition_clone": false,
-          "parent_constraint_schema": null,
-          "parent_constraint_name": null,
-          "parent_table_schema": null,
-          "parent_table_name": null,
-          "key_columns": [
-            "id"
-          ],
-          "foreign_key_columns": null,
-          "foreign_key_table": null,
-          "foreign_key_schema": null,
-          "foreign_key_table_is_partition": null,
-          "foreign_key_parent_schema": null,
-          "foreign_key_parent_table": null,
-          "foreign_key_effective_schema": null,
-          "foreign_key_effective_table": null,
-          "on_update": null,
-          "on_delete": null,
-          "match_type": null,
-          "check_expression": null,
-          "owner": "supabase_realtime_admin",
-          "definition": "PRIMARY KEY (id)",
-          "comment": null
-        },
-        {
-          "name": "channels_topic_index",
-          "constraint_type": "u",
-          "deferrable": false,
-          "initially_deferred": false,
-          "validated": true,
-          "is_local": true,
-          "no_inherit": true,
-          "is_temporal": false,
-          "is_partition_clone": false,
-          "parent_constraint_schema": null,
-          "parent_constraint_name": null,
-          "parent_table_schema": null,
-          "parent_table_name": null,
-          "key_columns": [
-            "topic"
-          ],
-          "foreign_key_columns": null,
-          "foreign_key_table": null,
-          "foreign_key_schema": null,
-          "foreign_key_table_is_partition": null,
-          "foreign_key_parent_schema": null,
-          "foreign_key_parent_table": null,
-          "foreign_key_effective_schema": null,
-          "foreign_key_effective_table": null,
-          "on_update": null,
-          "on_delete": null,
-          "match_type": null,
-          "check_expression": null,
-          "owner": "supabase_realtime_admin",
-          "definition": "UNIQUE (topic)",
-          "comment": null
-        }
-      ],
-      "privileges": [
-        {
-          "grantee": "postgres",
-          "privilege": "DELETE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "INSERT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "MAINTAIN",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "REFERENCES",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "SELECT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "TRIGGER",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "TRUNCATE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "UPDATE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "anon",
-          "privilege": "DELETE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "anon",
-          "privilege": "INSERT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "anon",
-          "privilege": "SELECT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "anon",
-          "privilege": "UPDATE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "authenticated",
-          "privilege": "DELETE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "authenticated",
-          "privilege": "INSERT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "authenticated",
-          "privilege": "SELECT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "authenticated",
-          "privilege": "UPDATE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "service_role",
-          "privilege": "DELETE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "service_role",
-          "privilege": "INSERT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "service_role",
-          "privilege": "SELECT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "service_role",
-          "privilege": "UPDATE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "DELETE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "INSERT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "MAINTAIN",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "REFERENCES",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "SELECT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "TRIGGER",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "TRUNCATE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "UPDATE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_realtime_admin",
-          "privilege": "DELETE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_realtime_admin",
-          "privilege": "INSERT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_realtime_admin",
-          "privilege": "MAINTAIN",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_realtime_admin",
-          "privilege": "REFERENCES",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_realtime_admin",
-          "privilege": "SELECT",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_realtime_admin",
-          "privilege": "TRIGGER",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_realtime_admin",
-          "privilege": "TRUNCATE",
-          "grantable": false,
-          "columns": null
-        },
-        {
-          "grantee": "supabase_realtime_admin",
-          "privilege": "UPDATE",
-          "grantable": false,
-          "columns": null
-        }
-      ],
-      "security_labels": []
-    },
     "table:realtime.messages": {
       "schema": "realtime",
       "name": "messages",
@@ -3604,36 +3003,6 @@
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "acl:sequence:realtime.channels_id_seq::grantee:anon",
-      "referenced_stable_id": "sequence:realtime.channels_id_seq",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:sequence:realtime.channels_id_seq::grantee:authenticated",
-      "referenced_stable_id": "sequence:realtime.channels_id_seq",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:sequence:realtime.channels_id_seq::grantee:service_role",
-      "referenced_stable_id": "sequence:realtime.channels_id_seq",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:table:realtime.channels::grantee:anon",
-      "referenced_stable_id": "table:realtime.channels",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:table:realtime.channels::grantee:authenticated",
-      "referenced_stable_id": "table:realtime.channels",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "acl:table:realtime.channels::grantee:service_role",
-      "referenced_stable_id": "table:realtime.channels",
-      "deptype": "n"
-    },
-    {
       "dependent_stable_id": "acl:table:realtime.messages::grantee:anon",
       "referenced_stable_id": "table:realtime.messages",
       "deptype": "n"
@@ -3664,11 +3033,6 @@
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "column:realtime.channels.id",
-      "referenced_stable_id": "sequence:realtime.channels_id_seq",
-      "deptype": "n"
-    },
-    {
       "dependent_stable_id": "column:realtime.subscription.claims_role",
       "referenced_stable_id": "column:realtime.subscription.claims",
       "deptype": "n"
@@ -3679,24 +3043,14 @@
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "constraint:realtime.channels.channels_pkey",
-      "referenced_stable_id": "column:realtime.channels.id",
-      "deptype": "a"
-    },
-    {
-      "dependent_stable_id": "constraint:realtime.channels.channels_topic_index",
-      "referenced_stable_id": "column:realtime.channels.topic",
+      "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
+      "referenced_stable_id": "column:realtime.messages.binary_payload",
       "deptype": "a"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages.binary_payload",
       "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
-      "referenced_stable_id": "column:realtime.messages.binary_payload",
-      "deptype": "a"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
@@ -3731,12 +3085,12 @@
     {
       "dependent_stable_id": "constraint:realtime.subscription.subscription_action_filter_check",
       "referenced_stable_id": "column:realtime.subscription.action_filter",
-      "deptype": "n"
+      "deptype": "a"
     },
     {
       "dependent_stable_id": "constraint:realtime.subscription.subscription_action_filter_check",
       "referenced_stable_id": "column:realtime.subscription.action_filter",
-      "deptype": "a"
+      "deptype": "n"
     },
     {
       "dependent_stable_id": "defacl:supabase_admin:f:schema:realtime:grantee:dashboard_user",
@@ -3864,16 +3218,6 @@
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "procedure:realtime.disable_broadcast_storage(text)",
-      "referenced_stable_id": "schema:realtime",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "procedure:realtime.enable_broadcast_storage(text)",
-      "referenced_stable_id": "schema:realtime",
-      "deptype": "n"
-    },
-    {
       "dependent_stable_id": "procedure:realtime.is_visible_through_filters(realtime.wal_column[],realtime.user_defined_filter[])",
       "referenced_stable_id": "schema:realtime",
       "deptype": "n"
@@ -3915,21 +3259,6 @@
     },
     {
       "dependent_stable_id": "procedure:realtime.wal2json_escape_identifier(text)",
-      "referenced_stable_id": "schema:realtime",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "sequence:realtime.channels_id_seq",
-      "referenced_stable_id": "column:realtime.channels.id",
-      "deptype": "a"
-    },
-    {
-      "dependent_stable_id": "sequence:realtime.channels_id_seq",
-      "referenced_stable_id": "schema:realtime",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "table:realtime.channels",
       "referenced_stable_id": "schema:realtime",
       "deptype": "n"
     },
