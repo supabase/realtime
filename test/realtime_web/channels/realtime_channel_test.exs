@@ -2,6 +2,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   use RealtimeWeb.ChannelCase, async: true
   use Mimic
 
+  setup :set_mimic_from_context
+
   import ExUnit.CaptureLog
 
   alias Phoenix.Channel.Server
@@ -873,7 +875,124 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
   end
 
+  describe "Muster join" do
+    test "joins the Muster scope when the feature flag is enabled for the tenant", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      expect(Realtime.FeatureFlags, :enabled?, fn "use_muster_channel_join", tenant_id ->
+        tenant_id == tenant.external_id
+      end)
+
+      expect(Forum.Muster, :local_member?, fn _scope, _tenant_id, _pid -> false end)
+
+      expect(Forum.Muster, :join, fn _scope, tenant_id, pid ->
+        assert tenant_id == tenant.external_id
+        assert pid == socket.transport_pid
+        :ok
+      end)
+
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
+    end
+
+    test "does not join the Muster scope when the feature flag is disabled", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      expect(Realtime.FeatureFlags, :enabled?, fn "use_muster_channel_join", _tenant_id -> false end)
+      reject(&Forum.Muster.local_member?/3)
+      reject(&Forum.Muster.join/3)
+
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
+    end
+
+    test "does not join again when the transport_pid is already a local member", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      expect(Realtime.FeatureFlags, :enabled?, fn "use_muster_channel_join", _tenant_id -> true end)
+      expect(Forum.Muster, :local_member?, fn _scope, _tenant_id, _pid -> true end)
+      reject(&Forum.Muster.join/3)
+
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
+    end
+
+    test "join still succeeds when Muster.join raises", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "error"}, conn_opts(tenant, jwt))
+
+      expect(Realtime.FeatureFlags, :enabled?, fn "use_muster_channel_join", _tenant_id -> true end)
+      expect(Forum.Muster, :local_member?, fn _scope, _tenant_id, _pid -> false end)
+      expect(Forum.Muster, :join, fn _scope, _tenant_id, _pid -> raise "boom" end)
+
+      log =
+        capture_log(fn ->
+          assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
+        end)
+
+      assert log =~ "MusterJoinError"
+    end
+
+    test "join still succeeds when Muster.join exits", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "error"}, conn_opts(tenant, jwt))
+
+      expect(Realtime.FeatureFlags, :enabled?, fn "use_muster_channel_join", _tenant_id -> true end)
+      expect(Forum.Muster, :local_member?, fn _scope, _tenant_id, _pid -> false end)
+      expect(Forum.Muster, :join, fn _scope, _tenant_id, _pid -> exit(:boom) end)
+
+      log =
+        capture_log(fn ->
+          assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
+        end)
+
+      assert log =~ "MusterJoinError"
+    end
+
+    test "join still succeeds when Muster.join times out", %{tenant: tenant} do
+      # @muster_join_await_ms (4s) is a private constant, not overridable from
+      # tests, so this pays the real timeout in wall-clock time rather than
+      # shrinking it.
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "error"}, conn_opts(tenant, jwt))
+
+      expect(Realtime.FeatureFlags, :enabled?, fn "use_muster_channel_join", _tenant_id -> true end)
+      expect(Forum.Muster, :local_member?, fn _scope, _tenant_id, _pid -> false end)
+      expect(Forum.Muster, :join, fn _scope, _tenant_id, _pid -> Process.sleep(4_200) end)
+
+      log =
+        capture_log(fn ->
+          assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
+        end)
+
+      assert log =~ "MusterJoinError"
+      assert log =~ "timed out"
+    end
+  end
+
   describe "access_token" do
+    # RS256 token with header kid "key-id-1"
+    @rsa_token "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImtpZCI6ImtleS1pZC0xIn0.eyJpYXQiOjE3MTIwNDc1NjUsInJvbGUiOiJhdXRoZW50aWNhdGVkIiwic3ViIjoidXNlci1pZCIsImV4cCI6MTcxMjA1MTE2NX0.zUeoZrWK1efAc4q9y978_9qkhdXktdjf5H8O9Rw0SHcPaXW8OBcuNR2huRrgORvqFx6_sHn6nCJaWkZGzO-f8wskMD7Z4INq2JUypr6nASie3Qu2lLyeY3WTInaXNAKH-oqlfTLRskbz8zkIxOj2bBJiN9ceQLkJU-c92ndiuiG5D1jyQrGsvRdFem_cemp0yOoEaC0XWdjeV6C_UD-34GIyv3o8H4HZg1GcCiyNnAfDmLAcTOQPmqkwsRDQb-pm5O3HwpQt9WHOB6i1vzf-nmIGyCRA7STPdALK16-aiAyT4SJRxM5WN3iK8yitH7g4JETb9WocBbwIM_zfNnUI5w"
+
+    test "shuts down with JwtSignerError when refresh token kid has no matching JWK", %{tenant: tenant} do
+      jwks = %{"keys" => [%{"kty" => "RSA", "kid" => "some_other_kid"}]}
+      {:ok, tenant} = Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{jwt_jwks: jwks})
+      Realtime.Tenants.Cache.update_cache(tenant)
+
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+      socket = subscribe_and_join!(socket, "realtime:test", %{})
+
+      log =
+        capture_log(fn ->
+          push(socket, "access_token", %{"access_token" => @rsa_token})
+          assert_process_down(socket.channel_pid)
+        end)
+
+      assert log =~ "JwtSignerError"
+      assert log =~ "key-id-1"
+    end
+
     @tag policies: [:authenticated_all_topic_read]
     test "new valid access_token", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
@@ -1180,6 +1299,45 @@ defmodule RealtimeWeb.RealtimeChannelTest do
           channel: "test"
         }
       }
+    end
+
+    test "shuts down cleanly with JwtSignerError when the signer can no longer be generated", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+      %Socket{channel_pid: channel_pid} = subscribe_and_join!(socket, "realtime:test", %{})
+
+      log =
+        capture_log(fn ->
+          # The periodic re-confirmation re-validates the token; simulate the JWK backing the
+          # token's kid disappearing, which makes authorization fail to build a signer.
+          expect(RealtimeWeb.ChannelsAuthorization, :authorize_conn, fn _, _, _ ->
+            {:error, {:error_generating_signer, "key-id-1"}}
+          end)
+
+          allow(RealtimeWeb.ChannelsAuthorization, self(), channel_pid)
+
+          send(channel_pid, :confirm_token)
+          assert_process_down(channel_pid)
+        end)
+
+      assert log =~ "JwtSignerError"
+
+      # A clean shutdown (not a crash) pushes a system error message and closes normally.
+      assert_receive %Socket.Message{
+        topic: "realtime:test",
+        event: "system",
+        payload: %{
+          message: message,
+          status: "error",
+          extension: "system",
+          channel: "test"
+        }
+      }
+
+      assert message =~ "Failed to generate JWT signer for key ID (kid)"
+      assert message =~ "key-id-1"
+
+      assert_receive {:socket_close, ^channel_pid, :normal}
     end
   end
 

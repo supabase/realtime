@@ -3,7 +3,7 @@ defmodule Realtime.Tenants.ConnectTest do
   use Realtime.DataCase, async: false
   use Mimic
 
-  setup :set_mimic_global
+  setup :set_mimic_from_context
 
   import ExUnit.CaptureLog
 
@@ -565,7 +565,11 @@ defmodule Realtime.Tenants.ConnectTest do
           end)
         end
 
-      for i <- 0..4, do: assert_receive({:replication_ready, ^i}, 5000)
+      # Bringing up 5 real replication connections can take well over 5s on
+      # loaded CI runners, so allow generous time for each to report ready.
+      # All 5 are required: they must occupy every WAL sender so that Connect's
+      # own replication attempt below is the one that trips max_wal_senders.
+      for i <- 0..4, do: assert_receive({:replication_ready, ^i}, 30_000)
 
       on_exit(fn ->
         Enum.each(pids, &send(&1, :stop))

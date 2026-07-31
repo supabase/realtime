@@ -28,6 +28,8 @@ repo_config = Application.fetch_env!(:realtime, Realtime.Repo)
 # `realtime.broadcast_changes(..., NEW record, OLD record, ...)` (introduced in commit 2922658c) called from a trigger via `PERFORM` fails on PG <= 14.5
 requires_pg_140006 = if pg_version_num < 140_006, do: :requires_pg_140006
 
+requires_pg_150000 = if pg_version_num < 150_000, do: :requires_pg_150000
+
 # Restriction assertions on the postgres role only when supautils.policy_grants includes realtime.messages and realtime.subscription (supabase/postgres >= 15.14.1.018)
 requires_supautils_policy_grants = if !has_supautils_realtime_grants, do: :requires_supautils_policy_grants
 requires_no_supautils_policy_grants = if has_supautils_realtime_grants, do: :requires_no_supautils_policy_grants
@@ -39,6 +41,7 @@ exclude =
     [
       :failing,
       requires_pg_140006,
+      requires_pg_150000,
       requires_supautils_policy_grants,
       requires_no_supautils_policy_grants,
       skip_orioledb
@@ -68,11 +71,13 @@ Mimic.copy(Ecto.Migrator)
 Mimic.copy(Extensions.PostgresCdcRls)
 Mimic.copy(Extensions.PostgresCdcRls.Replications)
 Mimic.copy(Extensions.PostgresCdcRls.Subscriptions)
+Mimic.copy(Forum.Muster)
 Mimic.copy(Realtime.Database)
 Mimic.copy(Realtime.FeatureFlags)
 Mimic.copy(Realtime.GenCounter)
 Mimic.copy(Realtime.GenRpc)
 Mimic.copy(Realtime.Nodes)
+Mimic.copy(Realtime.Repo)
 Mimic.copy(Realtime.Repo.Replica)
 Mimic.copy(Realtime.RateCounter)
 Mimic.copy(Realtime.Tenants.Authorization)

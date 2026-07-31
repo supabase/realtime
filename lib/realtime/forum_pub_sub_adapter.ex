@@ -30,4 +30,14 @@ defmodule Realtime.ForumPubSubAdapter do
   end
 
   defp topic(scope), do: "forum:#{scope}"
+
+  # Unused for Census but we have to implement it for now
+  @impl true
+  def call(_scope, node, module, function, args, timeout) do
+    :erpc.call(node, module, function, args, timeout)
+  catch
+    :error, {:erpc, reason} -> {:error, reason}
+    :exit, reason -> {:error, reason}
+    kind, reason -> {:error, {kind, reason}}
+  end
 end

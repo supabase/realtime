@@ -1,6 +1,8 @@
 defmodule RealtimeWeb.InspectorLive.ConnComponent do
   use RealtimeWeb, :live_component
 
+  @url_params ~w(host project channel schema table filter enable_presence enable_db_changes private_channel log_level)
+
   defmodule Connection do
     use Ecto.Schema
     import Ecto.Changeset
@@ -40,6 +42,21 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
       ])
       |> validate_required([:channel])
     end
+
+    def submit_changeset(form, params \\ %{}) do
+      form
+      |> changeset(params)
+      |> validate_required([:token])
+      |> validate_host_or_project()
+    end
+
+    defp validate_host_or_project(changeset) do
+      if get_field(changeset, :host) in [nil, ""] and get_field(changeset, :project) in [nil, ""] do
+        add_error(changeset, :project, "can't be blank")
+      else
+        changeset
+      end
+    end
   end
 
   @impl true
@@ -51,68 +68,48 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
       |> assign(subscribed_state: "Connect")
       |> assign(changeset: changeset)
       |> assign(url_params: %{})
+      |> assign(connected_snapshot: nil)
 
     {:ok, socket}
   end
 
   @impl true
+  def update(%{url_params: params} = assigns, socket) do
+    # Preserve any already-entered secrets (they never travel in the URL) while applying the
+    # non-secret shape coming from the URL.
+    current = socket.assigns.changeset
+    token = Ecto.Changeset.get_field(current, :token)
+    bearer = Ecto.Changeset.get_field(current, :bearer)
+
+    merged =
+      params
+      |> Map.put("token", token)
+      |> Map.put("bearer", bearer)
+      |> Map.reject(fn {_k, v} -> v in [nil, ""] end)
+
+    socket =
+      socket
+      |> assign(Map.delete(assigns, :url_params))
+      |> assign(:changeset, Connection.changeset(%Connection{}, merged))
+      |> assign(:url_params, params)
+
+    {:ok, socket}
+  end
+
   def update(assigns, socket) do
-    socket = assign(socket, assigns)
-
-    {:ok, socket}
+    {:ok, assign(socket, assigns)}
   end
 
   @impl true
-  def handle_event(
-        "validate",
-        %{"_target" => ["connection", "host"], "connection" => conn},
-        socket
-      ) do
-    conn = Map.drop(conn, ["project"])
-
-    changeset = Connection.changeset(%Connection{}, conn)
-
-    socket =
-      socket
-      |> assign(changeset: changeset)
-      |> push_patch(
-        to: Routes.inspector_index_path(RealtimeWeb.Endpoint, :new, conn),
-        replace: true
-      )
-
-    {:noreply, socket}
-  end
-
-  def handle_event(
-        "validate",
-        %{"_target" => ["connection", "project"], "connection" => %{"project" => project} = conn},
-        socket
-      ) do
-    host = "https://#{project}.supabase.co"
-
-    conn = conn |> Map.put("host", host) |> Map.put("project", project)
-
-    changeset = Connection.changeset(%Connection{}, conn)
-
-    socket =
-      socket
-      |> assign(changeset: changeset)
-      |> push_patch(
-        to: Routes.inspector_index_path(RealtimeWeb.Endpoint, :new, conn),
-        replace: true
-      )
-
-    {:noreply, socket}
-  end
-
   def handle_event("validate", %{"connection" => conn}, socket) do
+    conn = derive_host(conn)
     changeset = Connection.changeset(%Connection{}, conn)
 
     socket =
       socket
       |> assign(changeset: changeset)
       |> push_patch(
-        to: Routes.inspector_index_path(RealtimeWeb.Endpoint, :new, conn),
+        to: Routes.inspector_index_path(RealtimeWeb.Endpoint, :index, Map.take(conn, @url_params)),
         replace: true
       )
 
@@ -120,20 +117,29 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
   end
 
   def handle_event("connect", %{"connection" => conn} = params, socket) do
-    send_share_url(conn)
+    case Ecto.Changeset.apply_action(Connection.submit_changeset(%Connection{}, conn), :validate) do
+      {:ok, connection} ->
+        send_share_url(conn)
 
-    socket =
-      socket
-      |> assign(subscribed_state: "Connecting...")
-      |> push_event("connect", params)
+        socket =
+          socket
+          |> assign(changeset: Connection.changeset(%Connection{}, conn))
+          |> assign(subscribed_state: "Connecting...")
+          |> assign(connected_snapshot: connection)
+          |> push_event("connect", params)
 
-    {:noreply, socket}
+        {:noreply, socket}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :changeset, changeset)}
+    end
   end
 
   def handle_event("disconnect", _params, socket) do
     socket =
       socket
       |> assign(subscribed_state: "Connect")
+      |> assign(connected_snapshot: nil)
       |> push_event("disconnect", %{})
 
     {:noreply, socket}
@@ -142,48 +148,10 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
   def handle_event("clear_local_storage", _params, socket) do
     socket =
       socket
+      |> assign(:changeset, Connection.changeset(%Connection{}))
       |> push_event("clear_local_storage", %{})
       |> push_patch(
-        to: Routes.inspector_index_path(RealtimeWeb.Endpoint, :new),
-        replace: true
-      )
-
-    {:noreply, socket}
-  end
-
-  def handle_event("local_storage", _params, %{assigns: %{url_params: url_params}} = socket)
-      when url_params != %{} do
-    {:noreply, socket}
-  end
-
-  def handle_event(
-        "local_storage",
-        %{
-          "channel" => nil,
-          "host" => nil,
-          "schema" => nil,
-          "table" => nil,
-          "token" => nil,
-          "filter" => nil,
-          "bearer" => nil,
-          "enable_presence" => nil,
-          "enable_db_changes" => nil,
-          "private_channel" => nil
-        },
-        socket
-      ) do
-    {:noreply, socket}
-  end
-
-  def handle_event("local_storage", %{"log_level" => nil} = params, socket) do
-    params = Map.drop(params, ["log_level"])
-    changeset = Connection.changeset(%Connection{}, params)
-
-    socket =
-      socket
-      |> assign(changeset: changeset)
-      |> push_patch(
-        to: Routes.inspector_index_path(RealtimeWeb.Endpoint, :new, params),
+        to: Routes.inspector_index_path(RealtimeWeb.Endpoint, :index),
         replace: true
       )
 
@@ -191,17 +159,10 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
   end
 
   def handle_event("local_storage", params, socket) do
-    changeset = Connection.changeset(%Connection{}, params)
+    params = Map.reject(params, fn {_, v} -> v in [nil, ""] end)
+    changeset = Connection.changeset(socket.assigns.changeset, params)
 
-    socket =
-      socket
-      |> assign(changeset: changeset)
-      |> push_patch(
-        to: Routes.inspector_index_path(RealtimeWeb.Endpoint, :new, params),
-        replace: true
-      )
-
-    {:noreply, socket}
+    {:noreply, assign(socket, :changeset, changeset)}
   end
 
   def handle_event("cancel", params, socket) do
@@ -210,9 +171,20 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
     {:noreply, assign(socket, changeset: changeset)}
   end
 
+  defp stale_connection?(_changeset, nil), do: false
+
+  defp stale_connection?(changeset, connected_snapshot) do
+    Ecto.Changeset.apply_changes(changeset) != connected_snapshot
+  end
+
+  defp derive_host(%{"project" => project} = conn) when project not in [nil, ""] do
+    Map.put(conn, "host", "https://#{project}.supabase.co")
+  end
+
+  defp derive_host(conn), do: conn
+
   defp send_share_url(conn) do
-    conn = Map.drop(conn, ["token"])
-    url = Routes.inspector_index_path(RealtimeWeb.Endpoint, :new, conn)
+    url = Routes.inspector_index_url(RealtimeWeb.Endpoint, :index, Map.take(conn, @url_params))
     send(self(), {:share_url, url})
   end
 end

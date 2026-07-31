@@ -3,6 +3,8 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
   use RealtimeWeb.ConnCase, async: false
   use Mimic
 
+  setup :set_mimic_from_context
+
   import ExUnit.CaptureLog
 
   alias Realtime.Database

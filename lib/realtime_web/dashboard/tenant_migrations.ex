@@ -22,7 +22,8 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     "and": [
       {"*/schema": "realtime"},
       {"not": {"table/is_partition": true}},
-      {"not": {"and": [{"objectType": "rls_policy"}, {"operation": "drop"}]}}
+      {"not": {"and": [{"objectType": "rls_policy"}, {"operation": "drop"}]}},
+      {"not": {"and": [{"table/schema": "realtime"}, {"table/name": "schema_migrations"}]}}
     ]
   }
   """

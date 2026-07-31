@@ -4,7 +4,7 @@ defmodule Realtime.MixProject do
   def project do
     [
       app: :realtime,
-      version: "2.113.2",
+      version: "2.121.3",
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -12,6 +12,9 @@ defmodule Realtime.MixProject do
       deps: deps(),
       dialyzer: dialyzer(),
       test_coverage: [tool: ExCoveralls],
+      hex: [
+        ignore_advisories: ["CVE-2026-43969", "CVE-2026-43966"]
+      ],
       releases: [
         realtime: [
           # This will ensure that if opentelemetry terminates, even abnormally, our application will not be terminated.
@@ -66,6 +69,8 @@ defmodule Realtime.MixProject do
       {:phoenix_view, "~> 2.0"},
       {:esbuild, "~> 0.4", runtime: Mix.env() == :dev},
       {:tailwind, "~> 0.1", runtime: Mix.env() == :dev},
+      {:heroicons,
+       github: "tailwindlabs/heroicons", tag: "v2.1.1", sparse: "optimized", app: false, compile: false, depth: 1},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
       {:gettext, "~> 0.19"},
@@ -97,8 +102,10 @@ defmodule Realtime.MixProject do
       {:opentelemetry_cowboy, "~> 1.0"},
       {:opentelemetry_ecto, "~> 1.2"},
       {:gen_rpc, git: "https://github.com/emqx/gen_rpc.git", tag: "3.6.1"},
+      # gen_rpc uses a git dependency
+      {:snabbkaffe, "~> 1.0", override: true},
       {:req, "~> 0.6.2"},
-      {:mimic, "~> 1.0", only: :test},
+      {:mimic, "~> 2.0", only: :test},
       {:floki, ">= 0.30.0", only: :test},
       {:mint_web_socket, "~> 1.0", only: :test},
       {:postgres_replication, git: "https://github.com/filipecabaco/postgres_replication.git", only: :test},

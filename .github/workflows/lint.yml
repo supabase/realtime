@@ -59,6 +59,8 @@ jobs:
         run: mix credo
       - name: Run hex audit
         run: mix hex.audit
+      - name: Check for unused deps
+        run: mix deps.unlock --check-unused
       - name: Run sobelow
         run: mix sobelow --config .sobelow-conf
       - name: Retrieve PLT Cache
@@ -66,7 +68,7 @@ jobs:
         id: plt-cache
         with:
           path: priv/plts
-          key: ${{ runner.os }}-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-plts-${{ hashFiles(format('{0}{1}', github.workspace, '/mix.lock')) }}
+          key: ${{ runner.os }}-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-plts-${{ hashFiles('mix.lock', 'forum/mix.lock', 'forum/mix.exs', 'forum/lib/**/*.ex') }}
       - name: Create PLTs
         if: steps.plt-cache.outputs.cache-hit != 'true'
         run: |

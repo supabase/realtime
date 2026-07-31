@@ -2,6 +2,7 @@ defmodule Realtime.PromEx.Plugins.Tenant do
   @moduledoc false
 
   use PromEx.Plugin
+  alias Realtime.FeatureFlags
   alias Realtime.Telemetry
   alias Realtime.Tenants
   alias Realtime.UsersCounter
@@ -21,9 +22,33 @@ defmodule Realtime.PromEx.Plugins.Tenant do
       channel_events(),
       payload_size_metrics(),
       replication_metrics(),
-      subscription_metrics()
+      subscription_metrics(),
+      broadcast_fanout_metrics()
     ]
   end
+
+  defp broadcast_fanout_metrics do
+    Event.build(
+      :realtime_tenant_broadcast_fanout_metrics,
+      [
+        counter(
+          [:realtime, :broadcast, :fanout, :node_delivery, :total],
+          event_name: [:realtime, :broadcast, :fanout, :node_delivery],
+          description:
+            "Cross-cluster broadcast deliveries to this node for the tenant, split by whether the node held a connection for the tenant. hit=false means the send could have been avoided.",
+          tags: [:tenant, :hit],
+          keep: &__MODULE__.track_fanout_metric?/1
+        )
+      ]
+    )
+  end
+
+  @doc false
+  def track_fanout_metric?(%{tenant: tenant_id}) when is_binary(tenant_id) do
+    FeatureFlags.enabled?("track_fanout_metric", tenant_id)
+  end
+
+  def track_fanout_metric?(_), do: false
 
   defmodule PayloadSize.Buckets do
     @moduledoc false

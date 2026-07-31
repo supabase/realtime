@@ -27,7 +27,19 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
 
   fastlane_pid is the actual socket transport pid
   """
-  @spec dispatch(list, pid, Broadcast.t() | UserBroadcast.t()) :: :ok
+  @spec dispatch(
+          list,
+          pid,
+          Broadcast.t()
+          | UserBroadcast.t()
+          | {:tb, String.t(), Broadcast.t() | UserBroadcast.t()}
+        ) :: :ok
+  # Broadcast messages are tagged with their tenant_id by RealtimeWeb.TenantBroadcaster so the
+  # receiving node can attribute the fan-out before delivery. Strip the tag here so every
+  # downstream clause (and the client) only ever sees the underlying struct.
+  def dispatch(subscribers, from, {:tb, _tenant_id, msg}),
+    do: dispatch(subscribers, from, msg)
+
   def dispatch(subscribers, from, %Broadcast{event: @presence_diff} = msg) do
     {_cache, count} =
       Enum.reduce(subscribers, {%{}, 0}, fn

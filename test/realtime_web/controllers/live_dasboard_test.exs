@@ -3,6 +3,8 @@ defmodule RealtimeWeb.LiveDashboardTest do
   import Generators
   import Mimic
 
+  setup :set_mimic_from_context
+
   describe "live_dashboard with basic_auth" do
     setup do
       user = random_string()

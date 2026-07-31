@@ -258,7 +258,6 @@ defmodule Realtime.Api do
     end
   end
 
-  @spec preload_counters(nil | Realtime.Api.Tenant.t(), any()) :: nil | Realtime.Api.Tenant.t()
   @doc """
   Updates the migrations_ran field for a tenant.
   """
@@ -285,6 +284,7 @@ defmodule Realtime.Api do
     end
   end
 
+  @spec preload_counters(nil | Realtime.Api.Tenant.t(), any()) :: nil | Realtime.Api.Tenant.t()
   def preload_counters(nil), do: nil
 
   def preload_counters(%Tenant{} = tenant) do

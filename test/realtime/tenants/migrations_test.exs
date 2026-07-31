@@ -3,6 +3,12 @@ defmodule Realtime.Tenants.MigrationsTest do
   use Realtime.DataCase, async: false
   use Mimic
 
+  setup :set_mimic_from_context
+
+  import ExUnit.CaptureLog
+
+  alias Realtime.Database
+  alias Realtime.Repo
   alias Realtime.Tenants.Cache
   alias Realtime.Tenants.Migrations
 
@@ -29,14 +35,132 @@ defmodule Realtime.Tenants.MigrationsTest do
       tenant = Containers.checkout_tenant()
 
       assert Migrations.run_migrations(tenant) == :ok
-      # Sleeping waiting for Cache to be invalided
-      Process.sleep(100)
-      assert Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == Enum.count(Migrations.migrations())
+
+      assert eventually(fn ->
+               Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == Enum.count(Migrations.migrations())
+             end)
     end
 
     test "migrations do not run if tenant has migrations_ran at the count of all migrations" do
       tenant = tenant_fixture(%{migrations_ran: Enum.count(Migrations.migrations())})
       assert Migrations.run_migrations(tenant) == :noop
+    end
+
+    test "runs every migration step sequentially when migrations_ran is already greater than 0" do
+      tenant = %{Containers.checkout_tenant() | migrations_ran: 1}
+      total = Enum.count(Migrations.migrations())
+
+      :telemetry.attach(
+        "sequential-migrator-test",
+        [:realtime, :tenants, :migrations, :stop],
+        fn _event, _measurements, metadata, %{pid: pid} ->
+          send(pid, {:migrations_metadata, metadata.source, metadata.migrations_executed})
+        end,
+        %{pid: self()}
+      )
+
+      on_exit(fn -> :telemetry.detach("sequential-migrator-test") end)
+
+      assert Migrations.run_migrations(tenant) == :ok
+      assert_receive {:migrations_metadata, :migrator, ^total}
+      assert eventually(fn -> Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total end)
+    end
+
+    test "reconciles migrations_ran instead of reloading the dump when the database is already migrated" do
+      tenant = Containers.checkout_tenant()
+      total = Enum.count(Migrations.migrations())
+
+      assert Migrations.run_migrations(tenant) == :ok
+      assert eventually(fn -> Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total end)
+
+      :telemetry.attach(
+        "reconcile-test",
+        [:realtime, :tenants, :migrations, :stop],
+        fn _event, _measurements, metadata, %{pid: pid} ->
+          send(pid, {:migrations_metadata, metadata.source, metadata.migrations_executed})
+        end,
+        %{pid: self()}
+      )
+
+      on_exit(fn -> :telemetry.detach("reconcile-test") end)
+
+      stale_tenant = %{tenant | migrations_ran: 0}
+      assert Migrations.run_migrations(stale_tenant) == :ok
+      assert_receive {:migrations_metadata, :migrator, 0}
+      assert eventually(fn -> Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total end)
+    end
+
+    @tag :skip_orioledb
+    @tag :requires_pg_150000
+    test "loads the bundled dump for a brand-new tenant" do
+      tenant = Containers.checkout_tenant()
+      total = Enum.count(Migrations.migrations())
+
+      :telemetry.attach(
+        "tenant-db-dump-test",
+        [:realtime, :tenants, :migrations, :stop],
+        fn _event, _measurements, metadata, %{pid: pid} ->
+          send(pid, {:migrations_metadata, metadata.source, metadata.migrations_executed})
+        end,
+        %{pid: self()}
+      )
+
+      on_exit(fn -> :telemetry.detach("tenant-db-dump-test") end)
+
+      assert Migrations.run_migrations(tenant) == :ok
+      assert_receive {:migrations_metadata, :dump, ^total}
+    end
+
+    @tag :skip_orioledb
+    @tag :requires_pg_150000
+    test "treats a missing schema_migrations table as empty and loads the dump for a new tenant" do
+      tenant = Containers.checkout_tenant()
+      total = Enum.count(Migrations.migrations())
+
+      {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+      Postgrex.query!(conn, "DROP TABLE IF EXISTS realtime.schema_migrations", [])
+      GenServer.stop(conn)
+
+      :telemetry.attach(
+        "undefined-table-test",
+        [:realtime, :tenants, :migrations, :stop],
+        fn _event, _measurements, metadata, %{pid: pid} ->
+          send(pid, {:migrations_metadata, metadata.source, metadata.migrations_executed})
+        end,
+        %{pid: self()}
+      )
+
+      on_exit(fn -> :telemetry.detach("undefined-table-test") end)
+
+      assert Migrations.run_migrations(tenant) == :ok
+      assert_receive {:migrations_metadata, :dump, ^total}
+      assert eventually(fn -> Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total end)
+    end
+
+    test "falls back to sequential migrations without crashing when the schema_migrations check errors unexpectedly" do
+      tenant = Containers.checkout_tenant()
+      total = Enum.count(Migrations.migrations())
+
+      expect(Repo, :query, fn "SELECT count(*)::int FROM realtime.schema_migrations", [], _opts ->
+        {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}}
+      end)
+
+      log =
+        capture_log(fn ->
+          assert Migrations.run_migrations(tenant) == :ok
+        end)
+
+      assert log =~ "TenantMigrationsRanCheckFailed"
+
+      assert eventually(fn -> Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total end)
+    end
+
+    test "does not check the database when migrations_ran is already greater than 0" do
+      tenant = %{Containers.checkout_tenant() | migrations_ran: 1}
+
+      reject(&Repo.query/3)
+
+      assert Migrations.run_migrations(tenant) == :ok
     end
   end
 
@@ -74,8 +198,6 @@ defmodule Realtime.Tenants.MigrationsTest do
   end
 
   describe "telemetry" do
-    setup :set_mimic_global
-
     setup do
       events = [
         [:realtime, :tenants, :migrations, :start],
@@ -102,7 +224,7 @@ defmodule Realtime.Tenants.MigrationsTest do
     end
 
     test "emits stop event with metadata" do
-      tenant = Containers.checkout_tenant()
+      tenant = %{Containers.checkout_tenant() | migrations_ran: 1}
       external_id = tenant.external_id
 
       assert Migrations.run_migrations(tenant) == :ok
@@ -117,7 +239,7 @@ defmodule Realtime.Tenants.MigrationsTest do
     end
 
     test "emits exception event tagged with postgrex error on postgres errors" do
-      tenant = Containers.checkout_tenant()
+      tenant = %{Containers.checkout_tenant() | migrations_ran: 1}
       external_id = tenant.external_id
 
       error = %Postgrex.Error{postgres: %{code: :undefined_column}}
@@ -130,7 +252,7 @@ defmodule Realtime.Tenants.MigrationsTest do
     end
 
     test "tags connection errors with connection_error code" do
-      tenant = Containers.checkout_tenant()
+      tenant = %{Containers.checkout_tenant() | migrations_ran: 1}
       external_id = tenant.external_id
 
       error = %DBConnection.ConnectionError{message: "ssl send: closed"}

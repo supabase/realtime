@@ -3,6 +3,8 @@ defmodule Realtime.Tenants.ReplicationConnection.WatchdogTest do
 
   use Mimic
 
+  setup :set_mimic_from_context
+
   import ExUnit.CaptureLog
 
   alias Realtime.Database

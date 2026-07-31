@@ -181,14 +181,14 @@ defmodule Realtime.Tenants.Migrations do
     GenServer.start_link(__MODULE__, attrs, name: name)
   end
 
-  def init(%__MODULE__{tenant_external_id: tenant_external_id, settings: settings}) do
+  def init(%__MODULE__{tenant_external_id: tenant_external_id, settings: settings, migrations_ran: migrations_ran}) do
     Logger.metadata(external_id: tenant_external_id, project: tenant_external_id)
 
-    case migrate(tenant_external_id, settings) do
-      :ok ->
+    case migrate(tenant_external_id, settings, migrations_ran) do
+      {:ok, applied_count} ->
         Task.Supervisor.async_nolink(__MODULE__.TaskSupervisor, Api, :update_migrations_ran, [
           tenant_external_id,
-          Enum.count(migrations())
+          applied_count
         ])
 
         :ignore
@@ -198,7 +198,7 @@ defmodule Realtime.Tenants.Migrations do
     end
   end
 
-  defp migrate(tenant_external_id, settings) do
+  defp migrate(tenant_external_id, settings, migrations_ran) do
     platform_region = Map.get(settings, "region")
 
     with {:ok, settings} <- Database.from_settings(settings, "realtime_migrations", :stop) do
@@ -220,9 +220,23 @@ defmodule Realtime.Tenants.Migrations do
         start_time = Telemetry.start(event, metadata)
 
         try do
-          opts = [all: true, prefix: "realtime", dynamic_repo: repo]
-          result = Ecto.Migrator.run(Repo, migrations(), :up, opts)
-          Telemetry.stop(event, start_time, Map.put(metadata, :migrations_executed, length(result)))
+          {applied_count, migrations_executed, source} =
+            if load_db_dump?(migrations_ran, repo) do
+              case load_db_dump(repo) do
+                {:ok, applied_count} -> {applied_count, applied_count, :dump}
+                {:error, _} -> run_pending_migrations(repo)
+              end
+            else
+              run_pending_migrations(repo)
+            end
+
+          metadata =
+            metadata
+            |> Map.put(:migrations_executed, migrations_executed)
+            |> Map.put(:source, source)
+
+          Telemetry.stop(event, start_time, metadata)
+          {:ok, applied_count}
         rescue
           error ->
             metadata = Map.put(metadata, :error_code, error_code(error))
@@ -245,6 +259,72 @@ defmodule Realtime.Tenants.Migrations do
   defp error_code(%Postgrex.Error{postgres: %{code: code}}), do: code
   defp error_code(%DBConnection.ConnectionError{}), do: :connection_error
   defp error_code(_), do: :other
+
+  @dump_timeout 30_000
+
+  defp load_db_dump(repo) do
+    with {:ok, _} <- do_load_dump(repo) do
+      {:ok, Enum.count(migrations())}
+    else
+      {:error, reason} = e ->
+        log_error("TenantMigrationsDumpSkipped", reason)
+        e
+    end
+  end
+
+  defp run_pending_migrations(repo) do
+    opts = [all: true, prefix: "realtime", dynamic_repo: repo]
+    result = Ecto.Migrator.run(Repo, migrations(), :up, opts)
+    {Enum.count(migrations()), length(result), :migrator}
+  end
+
+  # Best-effort checking to find if it should load the DB dump or fallback to sequential migrations.
+  # `migrations_ran` can be stale on DB restore or cluster migration operations,
+  # so it needs to also query `realtime.schema_migrations` to make sure.
+  defp load_db_dump?(0 = _migrations_ran, repo), do: schema_migrations_empty?(repo)
+  defp load_db_dump?(_migrations_ran, _repo), do: false
+
+  defp schema_migrations_empty?(repo) do
+    case Repo.query("SELECT count(*)::int FROM realtime.schema_migrations", [], dynamic_repo: repo) do
+      {:ok, %{rows: [[0]]}} ->
+        true
+
+      {:ok, %{rows: [[_count]]}} ->
+        false
+
+      {:error, %Postgrex.Error{postgres: %{code: :undefined_table}}} ->
+        true
+
+      {:error, error} ->
+        log_warning("TenantMigrationsRanCheckFailed", error)
+        false
+    end
+  end
+
+  defp do_load_dump(repo) do
+    with {:ok, major} <- fetch_pg_major(repo),
+         {:ok, path} <- dump_path(major),
+         {:ok, sql} <- File.read(path) do
+      Repo.query(sql, [], dynamic_repo: repo, query_type: :text, timeout: @dump_timeout)
+    end
+  end
+
+  defp fetch_pg_major(repo) do
+    query = """
+    SELECT current_setting('server_version_num'), EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'orioledb')
+    """
+
+    case Repo.query(query, [], dynamic_repo: repo, timeout: @dump_timeout) do
+      {:ok, %{rows: [[_version_num, true]]}} -> {:error, :orioledb_not_supported}
+      {:ok, %{rows: [[version_num, false]]}} -> {:ok, version_num |> String.to_integer() |> div(10_000)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp dump_path(major) do
+    path = Application.app_dir(:realtime, "priv/repo/tenant_db_dump_#{major}.sql")
+    if File.exists?(path), do: {:ok, path}, else: {:error, {:dump_not_found, major}}
+  end
 
   @doc """
   Returns the migrations to run.

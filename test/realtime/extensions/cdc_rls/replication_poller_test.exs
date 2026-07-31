@@ -22,7 +22,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
   import Poller, only: [generate_record: 1]
 
-  setup :set_mimic_global
+  setup :set_mimic_from_context
 
   @change_json ~s({"table":"test","type":"INSERT","record":{"id": 34, "details": "test"},"columns":[{"name": "id", "type": "int4"}, {"name": "details", "type": "text"}],"errors":null,"schema":"public","commit_timestamp":"2025-10-13T07:50:28.066Z"})
 

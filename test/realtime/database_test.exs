@@ -2,6 +2,8 @@ defmodule Realtime.DatabaseTest do
   use Realtime.DataCase, async: true
   use Mimic
 
+  setup :set_mimic_from_context
+
   import ExUnit.CaptureLog
 
   alias Realtime.Database

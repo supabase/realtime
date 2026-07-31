@@ -16,13 +16,14 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
   alias Realtime.UsersCounter
 
   @application_name "realtime_dashboard_tenant_info"
+  @cdc_rls_stop_timeout 5_000
 
   @impl true
   def menu_link(_, _), do: {:ok, "Tenant Info"}
 
   @impl true
   def mount(_params, _, socket) do
-    {:ok, assign(socket, external_id: "", tenant: nil, pg_version: nil, runtime: nil, error: nil)}
+    {:ok, assign(socket, external_id: "", tenant: nil, pg_version: nil, runtime: nil, error: nil, action_msg: nil)}
   end
 
   @impl true
@@ -32,7 +33,14 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
     case Api.get_tenant_by_external_id(ref) do
       nil ->
         {:noreply,
-         assign(socket, external_id: ref, tenant: nil, pg_version: nil, runtime: nil, error: "Tenant not found")}
+         assign(socket,
+           external_id: ref,
+           tenant: nil,
+           pg_version: nil,
+           runtime: nil,
+           error: "Tenant not found",
+           action_msg: nil
+         )}
 
       %Tenant{} = tenant ->
         {:noreply,
@@ -41,19 +49,33 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
            tenant: prepare_tenant(tenant),
            pg_version: fetch_pg_version(tenant),
            runtime: runtime_info(ref),
-           error: nil
+           error: nil,
+           action_msg: nil
          )}
     end
   end
 
   def handle_params(_params, _uri, socket) do
-    {:noreply, assign(socket, external_id: "", tenant: nil, pg_version: nil, runtime: nil, error: nil)}
+    {:noreply, assign(socket, external_id: "", tenant: nil, pg_version: nil, runtime: nil, error: nil, action_msg: nil)}
   end
 
   @impl true
   def handle_event("lookup", %{"external_id" => ref}, socket) do
     ref = String.trim(ref)
     {:noreply, push_patch(socket, to: "/admin/dashboard/tenant_info?external_id=#{URI.encode(ref)}")}
+  end
+
+  def handle_event("shutdown_connect", _params, %{assigns: %{external_id: ref}} = socket) when ref != "" do
+    Connect.shutdown(ref)
+    {:noreply, assign(socket, action_msg: "Attempting to shutdown Connect for #{ref}...")}
+  end
+
+  def handle_event("shutdown_cdc_rls", _params, %{assigns: %{external_id: ref}} = socket) when ref != "" do
+    Task.Supervisor.start_child(Realtime.TaskSupervisor, fn ->
+      PostgresCdcRls.handle_stop(ref, @cdc_rls_stop_timeout)
+    end)
+
+    {:noreply, assign(socket, action_msg: "Attempting to shutdown Postgres Replication (CDC RLS) for #{ref}...")}
   end
 
   @impl true
@@ -90,6 +112,10 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
 
       <%= if @error do %>
         <p class="text-danger"><%= @error %></p>
+      <% end %>
+
+      <%= if @action_msg do %>
+        <p class="text-success"><%= @action_msg %></p>
       <% end %>
 
       <%= if @tenant do %>
@@ -140,14 +166,33 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
             <tr>
               <td>connect</td>
               <td><%= status_cell(@runtime.connect) %></td>
+              <td>
+                <button
+                  phx-click="shutdown_connect"
+                  data-confirm={"Shutdown Connect for #{@external_id}?"}
+                  class="btn btn-sm btn-danger"
+                >
+                  Shutdown
+                </button>
+              </td>
             </tr>
             <tr>
               <td>replication_connection</td>
               <td><%= status_cell(@runtime.replication) %></td>
+              <td></td>
             </tr>
             <tr>
               <td>postgres_cdc_rls</td>
               <td><%= status_cell(@runtime.cdc_rls) %></td>
+              <td>
+                <button
+                  phx-click="shutdown_cdc_rls"
+                  data-confirm={"Shutdown Postgres Replication (CDC RLS) for #{@external_id}?"}
+                  class="btn btn-sm btn-danger"
+                >
+                  Shutdown
+                </button>
+              </td>
             </tr>
           </tbody>
         </table>

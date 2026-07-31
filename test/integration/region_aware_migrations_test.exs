@@ -2,6 +2,8 @@ defmodule Realtime.Integration.RegionAwareMigrationsTest do
   use Realtime.DataCase, async: false
   use Mimic
 
+  setup :set_mimic_from_context
+
   alias Containers
   alias Realtime.Tenants
   alias Realtime.Tenants.Migrations

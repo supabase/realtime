@@ -2,6 +2,8 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
   use RealtimeWeb.ConnCase, async: true
   use Mimic
 
+  setup :set_mimic_from_context
+
   alias Realtime.Database
   alias Realtime.GenCounter
   alias Realtime.RateCounter

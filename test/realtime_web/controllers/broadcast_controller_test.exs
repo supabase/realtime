@@ -2,6 +2,8 @@ defmodule RealtimeWeb.BroadcastControllerTest do
   use RealtimeWeb.ConnCase, async: true
   use Mimic
 
+  setup :set_mimic_from_context
+
   alias Realtime.Crypto
   alias Realtime.GenCounter
   alias Realtime.RateCounter
@@ -52,7 +54,9 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
       GenCounter
       |> expect(:add, fn ^request_events_key -> :ok end)
-      |> expect(:add, 2, fn ^broadcast_events_key -> :ok end)
+      |> expect(:add, 3, fn ^broadcast_events_key -> :ok end)
+
+      # |> stub(:add, fn key -> call_original(GenCounter, :add, [key]) end)
 
       sub_topic_1 = "sub_topic_1"
       sub_topic_2 = "sub_topic_2"

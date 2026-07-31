@@ -102,16 +102,20 @@ defmodule Realtime.GenRpcPubSub.Worker do
   @impl true
   # Forward to local
   def handle_info({:ftl, topic, message, dispatcher}, {pubsub, worker}) do
+    RealtimeWeb.TenantBroadcaster.measure_broadcast_fanout(message)
     Phoenix.PubSub.local_broadcast(pubsub, topic, message, dispatcher)
     {:noreply, {pubsub, worker}}
   end
 
   # Forward to the rest of the region
   def handle_info({:ftr, topic, message, dispatcher}, {pubsub, worker}) do
+    RealtimeWeb.TenantBroadcaster.measure_broadcast_fanout(message)
+
     # Forward to local first
     Phoenix.PubSub.local_broadcast(pubsub, topic, message, dispatcher)
 
-    # Then broadcast to the rest of my region
+    # Then broadcast to the rest of my region, keeping the message intact so the
+    # downstream :ftl handlers can attribute the fan-out too.
     my_region = Application.get_env(:realtime, :region)
     other_nodes = for node <- Realtime.Nodes.region_nodes(my_region), node != node(), do: node
 

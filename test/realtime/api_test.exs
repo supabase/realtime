@@ -3,6 +3,8 @@ defmodule Realtime.ApiTest do
 
   use Mimic
 
+  setup :set_mimic_from_context
+
   alias Realtime.Api
   alias Realtime.Api.Extensions, as: ApiExtensions
   alias Realtime.Api.FeatureFlag

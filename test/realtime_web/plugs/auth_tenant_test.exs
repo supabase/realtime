@@ -2,6 +2,7 @@ defmodule RealtimeWeb.AuthTenantTest do
   use RealtimeWeb.ConnCase, async: true
 
   import Plug.Conn
+  import ExUnit.CaptureLog
 
   alias RealtimeWeb.AuthTenant
 
@@ -98,6 +99,31 @@ defmodule RealtimeWeb.AuthTenantTest do
       assert conn.assigns.role == "test"
       assert %{"exp" => exp, "iat" => iat, "role" => "test"} = conn.assigns.claims
       assert is_integer(exp) and is_integer(iat)
+    end
+  end
+
+  describe "with JWKS that does not match the token kid" do
+    # RS256 token with header kid "key-id-1"
+    @rsa_token "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImtpZCI6ImtleS1pZC0xIn0.eyJpYXQiOjE3MTIwNDc1NjUsInJvbGUiOiJhdXRoZW50aWNhdGVkIiwic3ViIjoidXNlci1pZCIsImV4cCI6MTcxMjA1MTE2NX0.zUeoZrWK1efAc4q9y978_9qkhdXktdjf5H8O9Rw0SHcPaXW8OBcuNR2huRrgORvqFx6_sHn6nCJaWkZGzO-f8wskMD7Z4INq2JUypr6nASie3Qu2lLyeY3WTInaXNAKH-oqlfTLRskbz8zkIxOj2bBJiN9ceQLkJU-c92ndiuiG5D1jyQrGsvRdFem_cemp0yOoEaC0XWdjeV6C_UD-34GIyv3o8H4HZg1GcCiyNnAfDmLAcTOQPmqkwsRDQb-pm5O3HwpQt9WHOB6i1vzf-nmIGyCRA7STPdALK16-aiAyT4SJRxM5WN3iK8yitH7g4JETb9WocBbwIM_zfNnUI5w"
+
+    setup %{conn: conn} do
+      jwks = %{"keys" => [%{"kty" => "RSA", "kid" => "some_other_kid"}]}
+      tenant = tenant_fixture(%{jwt_jwks: jwks})
+      %{conn: assign(conn, :tenant, tenant)}
+    end
+
+    test "logs JwtSignerError with the kid and returns 401", %{conn: conn} do
+      conn = put_req_header(conn, "authorization", "Bearer " <> @rsa_token)
+
+      log =
+        capture_log(fn ->
+          conn = AuthTenant.call(conn, %{})
+          assert conn.status == 401
+          assert conn.halted
+        end)
+
+      assert log =~ "JwtSignerError"
+      assert log =~ "key-id-1"
     end
   end
 end

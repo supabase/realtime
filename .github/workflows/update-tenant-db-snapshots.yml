@@ -1,4 +1,4 @@
-name: Update Tenant DB Catalog
+name: Update Tenant DB Snapshots
 
 on:
   pull_request:
@@ -6,10 +6,11 @@ on:
       - "lib/realtime/tenants/repo/migrations/**"
       - "lib/realtime/tenants/migrations.ex"
       - "lib/mix/tasks/realtime.export_tenant_db_catalog.ex"
+      - "lib/mix/tasks/realtime.export_tenant_db_dump.ex"
       - "mix.lock"
       - "mise.toml"
       - "compose.dbs.yml"
-      - ".github/workflows/update-tenant-db-catalog.yml"
+      - ".github/workflows/update-tenant-db-snapshots.yml"
 
 permissions:
   contents: read
@@ -20,8 +21,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  update-tenant-db-catalog:
-    name: Export catalog (pg${{ matrix.pg_major }})
+  export-snapshots:
+    name: Export catalog & dump (pg${{ matrix.pg_major }})
     runs-on: blacksmith-2vcpu-ubuntu-2404
     if: github.event.pull_request.head.repo.full_name == github.repository
     strategy:
@@ -54,6 +55,18 @@ jobs:
       - name: Install dependencies
         run: mix deps.get
 
+      - name: Install PostgreSQL client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -y
+          sudo apt-get install -y "postgresql-client-${{ matrix.pg_major }}"
+          echo "/usr/lib/postgresql/${{ matrix.pg_major }}/bin" >> "$GITHUB_PATH"
+
       - name: Cache Docker images
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         id: docker-cache
@@ -75,22 +88,31 @@ jobs:
       - name: Start Postgres
         run: docker compose -f compose.dbs.yml up -d --wait
 
+      # Force re-generating fresh dump and catalogs
+      - name: Remove committed db dump
+        run: rm -f priv/repo/tenant_db_dump_${{ matrix.pg_major }}.sql
+
       - name: Set up realtime DB and migrate tenant DB
         run: mix ecto.setup
 
-      - name: Export catalog snapshot
+      - name: Export Tenant DB catalog
         run: mix realtime.export_tenant_db_catalog
 
-      - name: Upload catalog artifact
+      - name: Export Tenant DB dump
+        run: mix realtime.export_tenant_db_dump --pg-major ${{ matrix.pg_major }}
+
+      - name: Upload artifact
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
-          name: tenant-catalog-${{ matrix.pg_major }}
-          path: priv/repo/tenant_db_catalog_${{ matrix.pg_major }}.json
-          if-no-files-found: error
+          name: tenant-dump-${{ matrix.pg_major }}
+          path: |
+            priv/repo/tenant_db_dump_${{ matrix.pg_major }}.sql
+            priv/repo/tenant_db_catalog_${{ matrix.pg_major }}.json
+          if-no-files-found: ignore
 
   commit-changes:
-    name: Commit catalog snapshots
-    needs: update-tenant-db-catalog
+    name: Commit catalog and dump snapshots
+    needs: export-snapshots
     runs-on: blacksmith-2vcpu-ubuntu-2404
     if: github.event.pull_request.head.repo.full_name == github.repository
 
@@ -108,31 +130,32 @@ jobs:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           token: ${{ steps.app-token.outputs.token }}
 
-      - name: Download catalog artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
-          pattern: tenant-catalog-*
+          pattern: tenant-dump-*
           path: artifacts
 
       - name: Move artifacts into place
-        run: find artifacts -type f -name '*.json' -exec cp {} priv/repo/ \;
+        run: find artifacts -type f \( -name '*.sql' -o -name '*.json' \) -exec cp {} priv/repo/ \;
 
-      - name: Check if catalog changed
+      - name: Check if catalog or dumps changed
         id: check-changes
         run: |
-          git add priv/repo/tenant_db_catalog_15.json priv/repo/tenant_db_catalog_17.json
+          git add priv/repo/tenant_db_catalog_15.json priv/repo/tenant_db_catalog_17.json \
+            priv/repo/tenant_db_dump_15.sql priv/repo/tenant_db_dump_17.sql
           if git diff --cached --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Commit and push catalog
+      - name: Commit and push catalog and dumps
         if: steps.check-changes.outputs.changed == 'true'
         env:
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore: update tenant db catalog snapshots"
+          git commit -m "chore: update tenant db catalog and dumps"
           git push origin "HEAD:$PR_HEAD_REF"

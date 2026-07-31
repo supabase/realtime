@@ -4,204 +4,77 @@
     id="conn_form"
     for={@changeset}
     phx-change="validate"
-    class="bg-white rounded"
+    class="bg-white dark:bg-transparent rounded"
     phx-submit="connect"
     phx-target={@myself}
   >
-    <div class="my-4">
-      <%= label(f, :enable_broadcast, class: "block text-gray-700 text-sm font-bold mb-2") %>
-      <%= checkbox(f, :enable_broadcast, disabled: true, class: "
-                    disabled:opacity-50
-                    my-1
-                    block
-                    rounded-md
-                    border-gray-300
-                    shadow-sm
-                    focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
-                  ") %>
-      <%= error_tag(f, :enable_broadcast) %>
-      <p class="text-gray-600 text-xs italic">
-        Broadcast is always enabled when successfully connected to a Channel
-      </p>
+    <div class="grid grid-cols-2 gap-4">
+      <.input field={f[:channel]} label="Channel" placeholder="room_a" />
+      <.input field={f[:token]} label="Token" placeholder="anon or service_role key" />
     </div>
-    <div class="mb-4">
-      <%= label(f, :enable_presence, class: "block text-gray-700 text-sm font-bold mb-2") %>
-      <%= checkbox(f, :enable_presence, class: "
-                    my-1
-                    block
-                    rounded-md
-                    border-gray-300
-                    shadow-sm
-                    focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
-                  ") %>
-      <%= error_tag(f, :enable_presence) %>
-      <p class="text-gray-600 text-xs italic">Enable Presence on this Channel</p>
-    </div>
-    <div class="mb-4">
-      <%= label(f, :enable_db_changes, class: "block text-gray-700 text-sm font-bold mb-2") %>
-      <%= checkbox(f, :enable_db_changes, class: "
-                    my-1
-                    block
-                    rounded-md
-                    border-gray-300
-                    shadow-sm
-                    focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
-                  ") %>
-      <%= error_tag(f, :enable_db_changes) %>
-      <p class="text-gray-600 text-xs italic">Enable Database Changes on this Channel</p>
-    </div>
-    <div class="mb-4">
-      <%= label(f, :private_channel, class: "block text-gray-700 text-sm font-bold mb-2") %>
-      <%= checkbox(f, :private_channel, class: "
-                    my-1
-                    block
-                    rounded-md
-                    border-gray-300
-                    shadow-sm
-                    focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
-                  ") %>
-      <%= error_tag(f, :private_channel) %>
-      <p class="text-gray-600 text-xs italic">Is it using a channel?</p>
-    </div>
-    <div class="mb-4">
-      <%= label(f, :project, class: "block text-gray-700 text-sm font-bold mb-2") %>
-      <%= text_input(f, :project, placeholder: "project_ref", class: "
-                    my-1
-                    block
-                    w-full
-                    rounded-md
-                    border-gray-300
-                    shadow-sm
-                    focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
-                  ") %>
-      <%= error_tag(f, :project) %>
-      <p class="text-gray-600 text-xs italic">Supabase platform project `Reference ID` or...</p>
-    </div>
-    <div class="mb-4">
-      <%= label(f, :host, class: "block text-gray-700 text-sm font-bold mb-2") %>
-      <%= text_input(f, :host, placeholder: "https://project_ref.supabase.co", class: "
-                    my-1
-                    block
-                    w-full
-                    rounded-md
-                    border-gray-300
-                    shadow-sm
-                    focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
-                  ") %>
-      <%= error_tag(f, :host) %>
-      <p class="text-gray-600 text-xs italic">The host to connect to</p>
-    </div>
-    <div class="mb-4">
-      <%= label(f, :channel, class: "block text-gray-700 text-sm font-bold mb-2") %>
-      <%= text_input(f, :channel, placeholder: "room_a", class: "
-                    my-1
-                    block
-                    w-full
-                    rounded-md
-                    border-gray-300
-                    shadow-sm
-                    focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
-                  ") %>
-      <%= error_tag(f, :channel) %>
-      <p class="text-gray-600 text-xs italic">The Channel to connect to</p>
-    </div>
-    <div class="mb-4">
-      <%= label(f, :schema, class: "block text-gray-700 text-sm font-bold mb-2") %>
-      <%= text_input(f, :schema, placeholder: "public", class: "
-                    my-1
-                    block
-                    w-full
-                    rounded-md
-                    border-gray-300
-                    shadow-sm
-                    focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
-                  ") %>
-      <%= error_tag(f, :schema) %>
-      <p class="text-gray-600 text-xs italic">Listen to changes from tables in this schema</p>
-    </div>
-    <div class="mb-4">
-      <%= label(f, :table, class: "block text-gray-700 text-sm font-bold mb-2") %>
-      <%= text_input(f, :table, placeholder: "*", class: "
-                    my-1
-                    block
-                    w-full
-                    rounded-md
-                    border-gray-300
-                    shadow-sm
-                    focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
-                  ") %>
-      <%= error_tag(f, :table) %>
-      <p class="text-gray-600 text-xs italic">Listen to changes from this table</p>
-    </div>
-    <div class="mb-4">
-      <%= label(f, :filter, class: "block text-gray-700 text-sm font-bold mb-2") %>
-      <%= text_input(f, :filter, placeholder: "body=eq.hey", class: "
-                    my-1
-                    block
-                    w-full
-                    rounded-md
-                    border-gray-300
-                    shadow-sm
-                    focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
-                  ") %>
-      <%= error_tag(f, :filter) %>
-      <p class="text-gray-600 text-xs italic">Match records with a filter</p>
-    </div>
-    <div class="mb-4">
-      <%= label(f, :log_level, class: "block text-gray-700 text-sm font-bold mb-2") %>
-      <%= select(f, :log_level, ["debug", "info", "warning", "error"], selected: "info", class: "
-                    my-1
-                    block
-                    w-full
-                    rounded-md
-                    border-gray-300
-                    shadow-sm
-                    focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
-                  ") %>
-      <%= error_tag(f, :log_level) %>
-      <p class="text-gray-600 text-xs italic">Set the backend log level for this connection</p>
-    </div>
-    <div class="mb-4">
-      <%= label(f, :token, class: "block text-gray-700 text-sm font-bold mb-2") %>
-      <%= text_input(f, :token, value: Ecto.Changeset.get_field(@changeset, :token), class: "
-                    my-1
-                    block
-                    w-full
-                    rounded-md
-                    border-gray-300
-                    shadow-sm
-                    focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
-                  ") %>
-      <%= error_tag(f, :token) %>
-      <p class="text-gray-600 text-xs italic">Your Supabase `anon` or `service_role` key</p>
-    </div>
-    <div class="mb-4">
-      <%= label(f, :bearer, class: "block text-gray-700 text-sm font-bold mb-2") %>
-      <%= text_input(f, :bearer, value: Ecto.Changeset.get_field(@changeset, :bearer), class: "
-                    my-1
-                    block
-                    w-full
-                    rounded-md
-                    border-gray-300
-                    shadow-sm
-                    focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
-                  ") %>
-      <%= error_tag(f, :bearer) %>
-      <p class="text-gray-600 text-xs italic">
-        An Auth user JWT optionally signed with custom claims
-      </p>
-    </div>
-    <div class="flex flex-row justify-between items-center py-6">
-      <div>
-        <%= submit(@subscribed_state,
-          class: "bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded focus:outline-none"
-        ) %>
+
+    <details
+      id="connection_settings"
+      phx-hook="detailsKeepState"
+      class="mb-4"
+      open={
+        Ecto.Changeset.get_field(@changeset, :host) in [nil, ""] and
+          Ecto.Changeset.get_field(@changeset, :project) in [nil, ""]
+      }
+    >
+      <summary class="cursor-pointer text-sm font-bold text-gray-700 dark:text-neutral-200 mb-2">
+        Connection settings
+      </summary>
+      <div class="mt-3">
+        <div class="flex flex-wrap gap-x-6 gap-y-1 mb-4">
+          <.input field={f[:enable_presence]} type="checkbox" label="Presence" />
+          <.input field={f[:enable_db_changes]} type="checkbox" label="Database changes" />
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <.input field={f[:project]} label="Project" placeholder="project_ref" />
+            <p class="text-gray-500 dark:text-neutral-500 text-xs -mt-3 mb-4">or set a Host directly, to the right</p>
+          </div>
+          <.input field={f[:host]} label="Host" placeholder="https://project_ref.supabase.co" />
+        </div>
+
+        <div :if={Ecto.Changeset.get_field(@changeset, :enable_db_changes)} class="grid grid-cols-3 gap-4">
+          <.input field={f[:schema]} label="Schema" placeholder="public" />
+          <.input field={f[:table]} label="Table" placeholder="*" />
+          <.input field={f[:filter]} label="Filter" placeholder="body=eq.hey" />
+        </div>
+
+        <details id="advanced" phx-hook="detailsKeepState" class="mb-4">
+          <summary class="cursor-pointer text-sm font-bold text-gray-700 dark:text-neutral-200 mb-2">
+            Advanced
+          </summary>
+          <div class="mt-3 grid grid-cols-3 gap-4 items-start">
+            <.input field={f[:private_channel]} type="checkbox" label="Private channel" />
+            <.input field={f[:bearer]} label="Bearer" placeholder="Auth user JWT" />
+            <.input
+              field={f[:log_level]}
+              type="select"
+              label="Log level"
+              options={["debug", "info", "warning", "error"]}
+            />
+          </div>
+        </details>
       </div>
-      <div>
-        <.gray_link_button phx-click="clear_local_storage" phx-target={@myself}>
-          Reset
-        </.gray_link_button>
-      </div>
+    </details>
+
+    <p
+      :if={stale_connection?(@changeset, @connected_snapshot)}
+      class="text-xs text-warning-700 dark:text-warning-300 mb-2"
+    >
+      Settings changed since you connected — click Reconnect to apply them.
+    </p>
+
+    <div class="flex flex-row justify-end items-center gap-2 py-2">
+      <.button type="submit" phx-disable-with="Sending..."><%= @subscribed_state %></.button>
+      <.button variant={:secondary} phx-click="clear_local_storage" phx-target={@myself}>
+        Reset
+      </.button>
     </div>
   </.form>
 </div>

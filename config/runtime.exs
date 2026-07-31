@@ -100,6 +100,7 @@ tenant_max_concurrent_users = Env.get_integer("TENANT_MAX_CONCURRENT_USERS", 200
 tenant_max_events_per_second = Env.get_integer("TENANT_MAX_EVENTS_PER_SECOND", 100)
 tenant_max_joins_per_second = Env.get_integer("TENANT_MAX_JOINS_PER_SECOND", 100)
 users_scope_shards = Env.get_integer("USERS_SCOPE_SHARDS", 5)
+muster_scope_shards = Env.get_integer("MUSTER_SCOPE_SHARDS", 5)
 websocket_max_heap_size = div(Env.get_integer("WEBSOCKET_MAX_HEAP_SIZE", 50_000_000), :erlang.system_info(:wordsize))
 
 cluster_strategies =
@@ -205,6 +206,7 @@ config :realtime,
   presence_broadcast_period: presence_broadcast_period_in_ms,
   presence_permdown_period: presence_permdown_period_in_ms,
   users_scope_shards: users_scope_shards,
+  muster_scope_shards: muster_scope_shards,
   postgres_cdc_scope_shards: postgres_cdc_scope_shards,
   master_region: db_master_region,
   region_mapping: region_mapping,

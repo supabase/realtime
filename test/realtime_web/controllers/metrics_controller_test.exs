@@ -6,6 +6,8 @@ defmodule RealtimeWeb.MetricsControllerTest do
   import ExUnit.CaptureLog
   use Mimic
 
+  setup :set_mimic_from_context
+
   # {help_metric, value_metric, tags}
   # help_metric: base name checked against "# HELP <name>" in the response
   # value_metric: metric name passed to MetricsHelper.search (distributions use _count suffix); nil = skip value check

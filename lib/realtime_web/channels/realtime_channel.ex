@@ -7,8 +7,11 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   alias DBConnection.Backoff
 
+  alias Forum.Muster
+
   alias Realtime.Api.Tenant
   alias Realtime.Crypto
+  alias Realtime.FeatureFlags
   alias Realtime.GenCounter
   alias Realtime.Helpers
   alias Realtime.PostgresCdc
@@ -30,7 +33,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias RealtimeWeb.RealtimeChannel.Tracker
 
   @confirm_token_ms_interval :timer.minutes(5)
-  @replication_ready_check_interval 10
+  @replication_ready_check_interval 500
   @fullsweep_after Application.compile_env!(:realtime, :websocket_fullsweep_after)
 
   @impl true
@@ -53,6 +56,8 @@ defmodule RealtimeWeb.RealtimeChannel do
     Tracker.track(socket.transport_pid)
     Logger.metadata(external_id: tenant_id, project: tenant_id)
     Logger.put_process_level(self(), log_level)
+
+    muster_join_task = maybe_start_muster_join(tenant_id, transport_pid)
 
     join =
       case Join.validate(params) do
@@ -152,7 +157,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       assigns =
         if replication_ready_opt_in? do
-          Process.send_after(self(), :notify_replication_ready, @replication_ready_check_interval)
+          send(self(), :notify_replication_ready)
 
           Map.merge(assigns, %{
             replication_ready_notified?: false,
@@ -172,6 +177,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       if presence_enabled?, do: send(self(), :sync_presence)
 
       UsersCounter.add(transport_pid, tenant_id)
+      await_muster_join(muster_join_task, socket)
 
       {:ok, state, assign(socket, assigns)}
     else
@@ -264,6 +270,13 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       {:error, :invalid_replay_channel} ->
         log_error(socket, "UnableToReplayMessages", "Replay is not allowed for public channels")
+
+      {:error, {:error_generating_signer, kid}} ->
+        log_error(
+          socket,
+          "JwtSignerError",
+          "Failed to generate JWT signer for key ID (kid) #{inspect(kid)}, check your JWT secret or JWKS configuration"
+        )
 
       {:error, :error_generating_signer} ->
         log_error(
@@ -419,6 +432,13 @@ defmodule RealtimeWeb.RealtimeChannel do
         shutdown_response(socket, "Fields `role` and `exp` are required in JWT")
 
       {:error, :expired_token, msg} ->
+        shutdown_response(socket, msg)
+
+      {:error, {:error_generating_signer, kid}} ->
+        msg =
+          "Failed to generate JWT signer for key ID (kid) #{inspect(kid)}, check your JWT secret or JWKS configuration"
+
+        log_error(socket, "JwtSignerError", msg)
         shutdown_response(socket, msg)
 
       {:error, error} ->
@@ -598,6 +618,13 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, :rpc_error, reason} ->
         shutdown_response(socket, "RPC call error: " <> inspect(reason))
 
+      {:error, {:error_generating_signer, kid}} ->
+        msg =
+          "Failed to generate JWT signer for key ID (kid) #{inspect(kid)}, check your JWT secret or JWKS configuration"
+
+        log_error(socket, "JwtSignerError", msg)
+        shutdown_response(socket, msg)
+
       {:error, error} ->
         shutdown_response(socket, inspect(error))
     end
@@ -667,6 +694,53 @@ defmodule RealtimeWeb.RealtimeChannel do
         Registry.register(Realtime.Registry, key, pid)
         :ok
     end
+  end
+
+  # Started as early as possible in join/3 (before the `with` chain) so the
+  # RPC Muster.join/3 may need to make overlaps with the rest of the join
+  # (DB connect, auth checks, ...) instead of adding pure tail latency.
+  # Plain Task.async/1 (no shared Task.Supervisor) avoids serializing a join
+  # storm through one process; the try/rescue/catch inside guarantees the
+  # task always returns a plain term instead of exiting abnormally, so its
+  # link to this process can never propagate a crash back to the channel.
+  defp maybe_start_muster_join(tenant_id, transport_pid) do
+    if FeatureFlags.enabled?("use_muster_channel_join", tenant_id) do
+      scope = Application.get_env(:realtime, :muster_scope)
+
+      unless Muster.local_member?(scope, tenant_id, transport_pid) do
+        Task.async(fn ->
+          try do
+            Muster.join(scope, tenant_id, transport_pid)
+          rescue
+            e -> {:error, Exception.message(e)}
+          catch
+            :exit, reason -> {:error, reason}
+          end
+        end)
+      end
+    end
+  end
+
+  defp await_muster_join(nil, _socket), do: :ok
+
+  # Bounds how long a channel join waits on the Muster registration started by
+  # maybe_start_muster_join/2, so the client is only told "joined" once Muster
+  # membership has actually landed (avoiding a window where an early broadcast
+  # fanned out through Muster would miss this pid) - except in the rare case
+  # the join is genuinely slow, where we cut our losses instead of blocking
+  # the reply on Muster's own much larger worst-case timeout (its internal
+  # :claim_call_timeout ceiling is 60s).
+  @muster_join_await_ms 4_000
+
+  defp await_muster_join(task, socket) do
+    case Task.yield(task, @muster_join_await_ms) || Task.shutdown(task, :brutal_kill) do
+      {:ok, :ok} -> :ok
+      {:ok, {:error, reason}} -> log_error(socket, "MusterJoinError", inspect(reason))
+      {:exit, reason} -> log_error(socket, "MusterJoinError", inspect(reason))
+      nil -> log_error(socket, "MusterJoinError", "timed out after #{@muster_join_await_ms}ms")
+    end
+
+    :ok
   end
 
   defp limit_max_users(tenant, transport_pid) do

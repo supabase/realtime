@@ -445,7 +445,7 @@ defmodule RealtimeWeb.JwtVerificationTest do
       jwt_secret = "secret"
       jwks = %{"keys" => [%{"kty" => "RSA", "kid" => "some_other_kid"}]}
 
-      assert {:error, :error_generating_signer} = JwtVerification.verify(token, jwt_secret, jwks)
+      assert {:error, {:error_generating_signer, "key-id-1"}} = JwtVerification.verify(token, jwt_secret, jwks)
     end
 
     test "returns error when no matching JWK is found for EC algorithm" do
@@ -456,7 +456,7 @@ defmodule RealtimeWeb.JwtVerificationTest do
       jwt_secret = "secret"
       jwks = %{"keys" => [%{"kty" => "EC", "kid" => "some_other_kid"}]}
 
-      assert {:error, :error_generating_signer} = JwtVerification.verify(token, jwt_secret, jwks)
+      assert {:error, {:error_generating_signer, "key-id-1"}} = JwtVerification.verify(token, jwt_secret, jwks)
     end
 
     test "returns error when no matching JWK is found for OKP algorithm" do
@@ -467,7 +467,17 @@ defmodule RealtimeWeb.JwtVerificationTest do
       jwt_secret = "secret"
       jwks = %{"keys" => [%{"kty" => "OKP", "kid" => "some_other_kid"}]}
 
-      assert {:error, :error_generating_signer} = JwtVerification.verify(token, jwt_secret, jwks)
+      assert {:error, {:error_generating_signer, "key-id-1"}} = JwtVerification.verify(token, jwt_secret, jwks)
+    end
+
+    test "returns error without kid when the header has no kid" do
+      header = Base.url_encode64(Jason.encode!(%{"alg" => "RS256", "typ" => "JWT"}), padding: false)
+      claims = Base.url_encode64(Jason.encode!(%{"exp" => 9_999_999_999}), padding: false)
+      token = "#{header}.#{claims}.signature"
+
+      jwks = %{"keys" => [%{"kty" => "RSA", "kid" => "some_kid"}]}
+
+      assert {:error, :error_generating_signer} = JwtVerification.verify(token, "secret", jwks)
     end
 
     test "using Ed25519 JWK" do

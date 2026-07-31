@@ -5,7 +5,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
 
   import ExUnit.CaptureLog
 
-  setup :set_mimic_global
+  setup :set_mimic_from_context
 
   alias Extensions.PostgresCdcRls
   alias Extensions.PostgresCdcRls.ReplicationPoller
