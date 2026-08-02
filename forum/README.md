@@ -82,6 +82,7 @@ Forum.Muster.join(scope, group, pid)        # :ok | {:error, :rpc_failed | :not_
 Forum.Muster.leave(scope, group, pid)       # :ok | {:error, term}
 Forum.Muster.router(scope, group)           # {:ok, node} | {:rebalancing, [node]}
 Forum.Muster.targets(scope, group, sender_view_hash)  # (on router) {:ok, [node]} | {:error, :flood}
+Forum.Muster.occupancy(scope, group)        # (on router) raw held [node], NOT barrier-gated
 Forum.Muster.members(scope)                 # [node]
 Forum.Muster.status(scope)                   # :ready | :converging | :rebalancing | :unknown
 Forum.Muster.local_members(scope, group)    # [pid]
