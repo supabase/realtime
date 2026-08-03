@@ -244,10 +244,10 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
 
   defp prepare_extension(ext) do
     settings =
-      ext.settings
+      (ext.settings_gcm || ext.settings)
       |> Map.drop(@secret_settings)
       |> Enum.map(fn
-        {key, value} when key in @encrypted_settings -> {key, Crypto.decrypt!(value)}
+        {key, value} when key in @encrypted_settings -> {key, Crypto.decrypt_any!(value)}
         {key, value} -> {key, value}
       end)
 

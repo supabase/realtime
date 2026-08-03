@@ -420,11 +420,18 @@ defmodule Realtime.ApiTest do
   end
 
   describe "rename_settings_field/2" do
-    @tag skip: "** (Postgrex.Error) ERROR 0A000 (feature_not_supported) cached plan must not change result type"
-    test "renames setting fields" do
+    test "renames the field in both the legacy and the GCM settings columns" do
       tenant = tenant_fixture()
+
       Api.rename_settings_field("poll_interval_ms", "poll_interval")
-      assert %{extensions: [%{settings: %{"poll_interval" => _}}]} = tenant
+
+      # Both columns have to move together, otherwise settings_gcm keeps the old key name and the
+      # field silently disappears now that reads prefer it.
+      assert %{extensions: [extension]} = Api.get_tenant_by_external_id(tenant.external_id)
+      assert Map.has_key?(extension.settings, "poll_interval")
+      refute Map.has_key?(extension.settings, "poll_interval_ms")
+      assert Map.has_key?(extension.settings_gcm, "poll_interval")
+      refute Map.has_key?(extension.settings_gcm, "poll_interval_ms")
     end
   end
 

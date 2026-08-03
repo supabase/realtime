@@ -41,6 +41,26 @@ defmodule RealtimeWeb.AuthTenantTest do
       assert conn.halted
     end
 
+    @tag header: "authorization"
+    test "authorizes against the GCM secret in preference to the legacy one", %{conn: conn} do
+      # Point the legacy column at a different secret. Authorization only succeeds if the plug read
+      # the GCM column, since the token was signed with the tenant's real secret.
+      tenant = %{conn.assigns.tenant | jwt_secret: Realtime.Crypto.encrypt!("a-different-secret")}
+      conn = assign(conn, :tenant, tenant) |> AuthTenant.call(%{})
+
+      refute conn.status
+      refute conn.halted
+    end
+
+    @tag header: "authorization"
+    test "authorizes against the legacy secret when the tenant has no GCM secret yet", %{conn: conn} do
+      tenant = %{conn.assigns.tenant | jwt_secret_gcm: nil}
+      conn = assign(conn, :tenant, tenant) |> AuthTenant.call(%{})
+
+      refute conn.status
+      refute conn.halted
+    end
+
     @tag api_key: "Bearer invalid", header: "authorization"
     test "returns 401 if token in authorization header isn't valid", %{conn: conn} do
       conn = AuthTenant.call(conn, %{})

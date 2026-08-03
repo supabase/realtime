@@ -15,6 +15,7 @@ defmodule Realtime.Api.Tenant do
     field(:name, :string)
     field(:external_id, :string)
     field(:jwt_secret, :string)
+    field(:jwt_secret_gcm, :string)
     field(:jwt_jwks, :map)
     field(:postgres_cdc_default, :string)
     field(:max_concurrent_users, :integer)
@@ -111,8 +112,22 @@ defmodule Realtime.Api.Tenant do
     end
   end
 
-  def encrypt_jwt_secret(%Ecto.Changeset{valid?: true} = changeset),
-    do: update_change(changeset, :jwt_secret, &Crypto.encrypt!/1)
+  def encrypt_jwt_secret(%Ecto.Changeset{valid?: true, changes: %{jwt_secret: plaintext}} = changeset)
+      when is_binary(plaintext) do
+    change(changeset, Crypto.encrypt_jwt_secret!(plaintext))
+  end
+
+  # Clearing jwt_secret (e.g. moving a tenant to jwt_jwks) has to clear jwt_secret_gcm too, otherwise
+  # the old secret survives in the GCM column and keeps validating tokens.
+  def encrypt_jwt_secret(%Ecto.Changeset{valid?: true, changes: %{jwt_secret: nil}} = changeset),
+    do: change(changeset, %{jwt_secret_gcm: nil})
 
   def encrypt_jwt_secret(changeset), do: changeset
+
+  @doc false
+  def reconcile_encryption_changeset(tenant, attrs) do
+    tenant
+    |> cast(attrs, [:jwt_secret_gcm])
+    |> validate_required([:jwt_secret_gcm])
+  end
 end

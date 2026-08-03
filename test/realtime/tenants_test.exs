@@ -1,9 +1,17 @@
 defmodule Realtime.TenantsTest do
   # async: false due to cache usage
   use Realtime.DataCase, async: false
+  use Mimic
 
+  setup :set_mimic_from_context
+
+  alias Realtime.Api
+  alias Realtime.Api.Tenant
+  alias Realtime.Crypto
   alias Realtime.Database
+  alias Realtime.FeatureFlags
   alias Realtime.GenCounter
+  alias Realtime.Repo
   alias Realtime.Tenants
   doctest Realtime.Tenants
 
@@ -94,5 +102,169 @@ defmodule Realtime.TenantsTest do
                  []
                )
     end
+  end
+
+  describe "reconcile_encryption/1" do
+    setup do
+      stub(FeatureFlags, :enabled?, fn "gcm_encryption_backfill", _tenant_id -> true end)
+      :ok
+    end
+
+    test "does nothing when the gcm_encryption_backfill flag is disabled for the tenant" do
+      tenant = Containers.checkout_tenant()
+      tenant = simulate_pre_migration_state(tenant)
+      stub(FeatureFlags, :enabled?, fn "gcm_encryption_backfill", _tenant_id -> false end)
+
+      assert :ok = Tenants.reconcile_encryption(tenant)
+      Process.sleep(200)
+
+      reloaded = Api.get_tenant_by_external_id(tenant.external_id)
+      assert is_nil(reloaded.jwt_secret_gcm)
+      assert Enum.all?(reloaded.extensions, &is_nil(&1.settings_gcm))
+    end
+
+    test "backfills jwt_secret_gcm and each extension's settings_gcm without blocking the caller" do
+      tenant = Containers.checkout_tenant()
+      legacy_jwt_secret = tenant.jwt_secret
+      [legacy_extension] = tenant.extensions
+      legacy_db_password = legacy_extension.settings["db_password"]
+
+      tenant = simulate_pre_migration_state(tenant)
+
+      assert :ok = Tenants.reconcile_encryption(tenant)
+
+      assert eventually(fn ->
+               reloaded = Api.get_tenant_by_external_id(tenant.external_id)
+               not is_nil(reloaded.jwt_secret_gcm) and Enum.all?(reloaded.extensions, & &1.settings_gcm)
+             end)
+
+      reloaded = Api.get_tenant_by_external_id(tenant.external_id)
+      assert Crypto.decrypt_gcm!(reloaded.jwt_secret_gcm) == Crypto.decrypt!(legacy_jwt_secret)
+      assert reloaded.jwt_secret == legacy_jwt_secret
+
+      [reloaded_extension] = reloaded.extensions
+      assert Crypto.decrypt_gcm!(reloaded_extension.settings_gcm["db_password"]) == Crypto.decrypt!(legacy_db_password)
+      assert reloaded_extension.settings["db_password"] == legacy_db_password
+    end
+
+    test "does nothing for a tenant that already has jwt_secret_gcm and settings_gcm" do
+      tenant = Containers.checkout_tenant()
+
+      assert :ok = Tenants.reconcile_encryption(tenant)
+      Process.sleep(200)
+
+      reloaded = Api.get_tenant_by_external_id(tenant.external_id)
+      assert reloaded.updated_at == tenant.updated_at
+      assert Enum.map(reloaded.extensions, & &1.updated_at) == Enum.map(tenant.extensions, & &1.updated_at)
+    end
+
+    test "does nothing for a tenant authenticated via jwt_jwks only (no jwt_secret to migrate)" do
+      tenant = Containers.checkout_tenant()
+      tenant = simulate_pre_migration_state(tenant)
+      tenant = %{tenant | jwt_secret: nil, jwt_secret_gcm: nil}
+
+      assert :ok = Tenants.reconcile_encryption(tenant)
+      Process.sleep(200)
+
+      reloaded = Api.get_tenant_by_external_id(tenant.external_id)
+      assert is_nil(reloaded.jwt_secret_gcm)
+    end
+
+    test "leaves a required field's ciphertext absent in settings_gcm when it was already missing from settings" do
+      tenant = Containers.checkout_tenant()
+      tenant = simulate_pre_migration_state(tenant)
+      [extension] = tenant.extensions
+
+      settings = Map.delete(extension.settings, "db_password")
+      {:ok, extension} = extension |> Ecto.Changeset.change(%{settings: settings}) |> Repo.update()
+      tenant = %{tenant | extensions: [extension]}
+
+      assert :ok = Tenants.reconcile_encryption(tenant)
+
+      assert eventually(fn ->
+               reloaded = Api.get_tenant_by_external_id(tenant.external_id)
+               Enum.all?(reloaded.extensions, & &1.settings_gcm)
+             end)
+
+      [reloaded_extension] = Api.get_tenant_by_external_id(tenant.external_id).extensions
+      refute Map.has_key?(reloaded_extension.settings_gcm, "db_password")
+    end
+
+    test "logs telemetry and does not crash when the tenant has been deleted before the async write lands" do
+      tenant = Containers.checkout_tenant()
+      tenant = simulate_pre_migration_state(tenant)
+
+      handler_id = {__MODULE__, self()}
+
+      :telemetry.attach_many(
+        handler_id,
+        [[:realtime, :tenants, :encryption, :reconcile, :exception]],
+        &__MODULE__.handle_telemetry/4,
+        %{test_pid: self()}
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      assert Api.delete_tenant_by_external_id(tenant.external_id)
+
+      assert :ok = Tenants.reconcile_encryption(tenant)
+
+      assert_receive {:telemetry_exception, %{reason: :tenant_not_found}}, 1000
+      assert_receive {:telemetry_exception, %{reason: :extension_not_found}}, 1000
+    end
+  end
+
+  # Deliberately does not stub FeatureFlags: `enabled?/2` reads the tenant cache, and
+  # `get_tenant_by_external_id/1` is the fallback Cachex runs for that key. Checking the flag from
+  # inside the fallback re-enters the Cachex courier for an in-flight key and blocks on `:infinity`.
+  describe "get_tenant_by_external_id/1 with the real feature flag lookup" do
+    test "returns a legacy tenant through the cache while the backfill flag row exists" do
+      tenant = Containers.checkout_tenant()
+      external_id = tenant.external_id
+      simulate_pre_migration_state(tenant)
+
+      {:ok, _flag} = Api.upsert_feature_flag(%{name: "gcm_encryption_backfill", enabled: false})
+      Tenants.Cache.invalidate_tenant_cache(external_id)
+
+      task =
+        Task.async(fn ->
+          Ecto.Adapters.SQL.Sandbox.allow(Repo, self(), self())
+          Tenants.Cache.get_tenant_by_external_id(external_id)
+        end)
+
+      assert {:ok, %Tenant{external_id: ^external_id}} = Task.yield(task, 5_000),
+             "get_tenant_by_external_id/1 deadlocked re-entering the tenant cache"
+    end
+
+    test "backfills the tenant when the flag is enabled for it" do
+      tenant = Containers.checkout_tenant()
+      external_id = tenant.external_id
+      simulate_pre_migration_state(tenant)
+
+      {:ok, _flag} = Api.upsert_feature_flag(%{name: "gcm_encryption_backfill", enabled: true})
+      Tenants.Cache.invalidate_tenant_cache(external_id)
+
+      assert %Tenant{} = Tenants.Cache.get_tenant_by_external_id(external_id)
+
+      assert eventually(fn ->
+               reloaded = Api.get_tenant_by_external_id(external_id)
+               not is_nil(reloaded.jwt_secret_gcm) and Enum.all?(reloaded.extensions, & &1.settings_gcm)
+             end)
+    end
+  end
+
+  def handle_telemetry(_event, _measurements, metadata, %{test_pid: pid}),
+    do: send(pid, {:telemetry_exception, metadata})
+
+  defp simulate_pre_migration_state(tenant) do
+    {:ok, tenant} = tenant |> Ecto.Changeset.change(%{jwt_secret_gcm: nil}) |> Repo.update()
+
+    extensions =
+      Enum.map(tenant.extensions, fn extension ->
+        {:ok, extension} = extension |> Ecto.Changeset.change(%{settings_gcm: nil}) |> Repo.update()
+        extension
+      end)
+
+    %{tenant | extensions: extensions}
   end
 end
