@@ -71,8 +71,7 @@ defmodule Realtime.Tenants.Janitor do
         task =
           Task.Supervisor.async_nolink(
             __MODULE__.TaskSupervisor,
-            fn -> perform_maintenance_tasks(chunks) end,
-            ordered: false
+            fn -> perform_maintenance_tasks(chunks) end
           )
 
         {task.ref, chunks}

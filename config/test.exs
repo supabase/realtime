@@ -58,11 +58,6 @@ config :logger,
   default_handler: false,
   level: :info
 
-# Configures Elixir's Logger
-config :logger, :console,
-  format: "$time $metadata[$level] $message\n",
-  metadata: [:error_code, :request_id, :project, :external_id, :application_name, :sub, :iss, :exp]
-
 config :opentelemetry,
   span_processor: :simple,
   traces_exporter: :none,
