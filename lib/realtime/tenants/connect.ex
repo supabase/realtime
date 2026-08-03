@@ -494,7 +494,7 @@ defmodule Realtime.Tenants.Connect do
 
   ## Private functions
   defp call_external_node(tenant_id, opts) do
-    Logger.warning("Connection process starting up")
+    Logger.info("Connection process starting up", external_id: tenant_id, project: tenant_id)
     rpc_timeout = Keyword.get(opts, :rpc_timeout, @rpc_timeout_default)
 
     with tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
