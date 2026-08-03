@@ -19,6 +19,7 @@ dashboard_password = System.get_env("DASHBOARD_PASSWORD", :crypto.strong_rand_by
 dashboard_user = System.get_env("DASHBOARD_USER", :crypto.strong_rand_bytes(12) |> Base.encode16(case: :lower))
 db_after_connect_query = System.get_env("DB_AFTER_CONNECT_QUERY")
 db_enc_key = System.get_env("DB_ENC_KEY")
+db_enc_key_gcm = System.get_env("DB_ENC_KEY_GCM")
 db_host = System.get_env("DB_HOST", "127.0.0.1")
 db_ip_version = System.get_env("DB_IP_VERSION")
 db_master_region = System.get_env("DB_MASTER_REGION")
@@ -147,6 +148,12 @@ metrics_pusher_extra_labels =
 
 if !(db_ip_version in [nil, "ipv6", "ipv4"]),
   do: raise("Invalid IP version, please set either ipv6 or ipv4")
+
+if config_env() == :prod and is_nil(db_enc_key_gcm),
+  do: raise("DB_ENC_KEY_GCM environment variable is required")
+
+if db_enc_key_gcm && byte_size(db_enc_key_gcm) != 32,
+  do: raise("DB_ENC_KEY_GCM must be exactly 32 bytes for AES-256-GCM, got #{byte_size(db_enc_key_gcm)} bytes")
 
 socket_options =
   cond do
@@ -371,6 +378,7 @@ if config_env() != :test do
     metrics_blocklist: metrics_token_blocklist,
     metrics_jwt_secret: metrics_jwt_secret,
     db_enc_key: db_enc_key,
+    db_enc_key_gcm: db_enc_key_gcm,
     region: region,
     prom_poll_rate: prom_poll_rate,
     slot_name_suffix: slot_name_suffix,

@@ -67,7 +67,7 @@ defmodule Realtime.Database do
         "db_user",
         "db_password"
       ])
-      |> Enum.map(fn {k, v} -> {k, Crypto.decrypt!(v)} end)
+      |> Enum.map(fn {k, v} -> {k, Crypto.decrypt_any!(v)} end)
       |> Map.new()
       |> then(&Map.merge(settings, &1))
 

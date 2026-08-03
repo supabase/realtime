@@ -61,7 +61,9 @@ defmodule Realtime.Integration.RegionAwareMigrationsTest do
         arg = hd(args)
         assert arg.tenant_external_id == tenant.external_id
         assert arg.migrations_ran == tenant.migrations_ran
-        assert arg.settings == hd(tenant.extensions).settings
+        # Migrations read the GCM settings column by default, falling back to the legacy one.
+        extension = hd(tenant.extensions)
+        assert arg.settings == (extension.settings_gcm || extension.settings)
 
         assert opts[:timeout] == 50_000
 

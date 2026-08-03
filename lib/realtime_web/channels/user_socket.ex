@@ -70,16 +70,18 @@ defmodule RealtimeWeb.UserSocket do
     with {:ok,
           %Tenant{
             jwt_secret: jwt_secret,
+            jwt_secret_gcm: jwt_secret_gcm,
             jwt_jwks: jwt_jwks,
             suspend: false
           } = tenant} <- Tenants.Cache.fetch_tenant_by_external_id(external_id),
          {:ok, token} <- validate_token(token),
-         jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
+         jwt_secret_dec <- Crypto.decrypt_jwt_secret!(tenant),
          {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec, jwt_jwks),
          :ok <- TenantRateLimiters.check_tenant(tenant) do
       assigns = %RealtimeChannel.Assigns{
         claims: claims,
         jwt_secret: jwt_secret,
+        jwt_secret_gcm: jwt_secret_gcm,
         jwt_jwks: jwt_jwks,
         tenant: external_id,
         log_level: log_level,
