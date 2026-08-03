@@ -1,7 +1,14 @@
 start_time = :os.system_time(:millisecond)
 
 alias Realtime.Api
-max_cases = String.to_integer(System.get_env("MAX_CASES", "4"))
+
+# External-tenant-db mode (USE_EXTERNAL_TENANT_DB=true): all tests share the
+# one external DB, so they MUST run serially — concurrent tenant setup (DROP
+# SCHEMA realtime CASCADE) would stomp on each other.
+max_cases =
+  if Containers.external_tenant_db?(),
+    do: 1,
+    else: String.to_integer(System.get_env("MAX_CASES", "4"))
 
 repo_config = Application.fetch_env!(:realtime, Realtime.Repo)
 
@@ -49,14 +56,24 @@ exclude =
     &is_nil/1
   )
 
-ExUnit.start(exclude: exclude, max_cases: max_cases, capture_log: true)
+ExUnit.start(
+  exclude: exclude,
+  max_cases: max_cases,
+  capture_log: System.get_env("CAPTURE_LOG", "true") == "true"
+)
 
 max_cases = ExUnit.configuration()[:max_cases]
 
-Containers.pull()
+# In external mode no supabase/postgres image is used, so skip the pull and
+# the container teardown. The Containers GenServer still starts (tests call
+# Containers.port()), but its eager poolboy pool is skipped (see
+# handle_continue in containers.ex).
+unless Containers.external_tenant_db?() do
+  Containers.pull()
 
-if System.get_env("REUSE_CONTAINERS") != "true" do
-  Containers.stop_containers()
+  if System.get_env("REUSE_CONTAINERS") != "true" do
+    Containers.stop_containers()
+  end
 end
 
 {:ok, _pid} = Containers.start_link(max_cases)

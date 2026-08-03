@@ -3,10 +3,27 @@ defmodule Containers do
   alias Realtime.Tenants.Connect
   alias Containers.Container
   alias Realtime.Database
+  alias Realtime.Env
   alias Realtime.Tenants
   alias Realtime.Tenants.Migrations
 
   use GenServer
+
+  # External-tenant-DB mode (USE_EXTERNAL_TENANT_DB=true): instead of starting
+  # a per-test supabase/postgres container, point DB-backed tenant tests at an
+  # already-running, external Postgres-wire-compatible server (e.g. Multigres)
+  # on EXTERNAL_TENANT_DB_PORT, host fixed at 127.0.0.1. Unset, behavior is
+  # unchanged. Uses Env.get_boolean/2 for consistency with the rest of the
+  # codebase (e.g. DB_SSL) — accepts true/1/false/0 (case-insensitive), raises
+  # on anything else rather than silently treating a typo as false.
+  def external_tenant_db?, do: Env.get_boolean("USE_EXTERNAL_TENANT_DB", false)
+
+  def external_tenant_db_port! do
+    case System.get_env("EXTERNAL_TENANT_DB_PORT") do
+      nil -> raise "USE_EXTERNAL_TENANT_DB=true requires EXTERNAL_TENANT_DB_PORT to be set"
+      port -> String.to_integer(port)
+    end
+  end
 
   defp image, do: System.get_env("POSTGRES_IMAGE", "supabase/postgres:17.6.1.127")
 
@@ -43,17 +60,23 @@ defmodule Containers do
   end
 
   def handle_continue({:pool, max_cases}, state) do
-    {:ok, _pid} =
-      :poolboy.start_link(
-        [
-          strategy: :fifo,
-          name: {:local, Containers.Pool},
-          size: max_cases + 2,
-          max_overflow: 0,
-          worker_module: Containers.Container
-        ],
-        []
-      )
+    # In external mode there are no containers to pool — a poolboy worker
+    # would `docker run` a supabase/postgres image that's never checked out.
+    # Skip the pool; the external-mode branches of checkout/do_checkout_tenant
+    # never touch it.
+    unless external_tenant_db?() do
+      {:ok, _pid} =
+        :poolboy.start_link(
+          [
+            strategy: :fifo,
+            name: {:local, Containers.Pool},
+            size: max_cases + 2,
+            max_overflow: 0,
+            worker_module: Containers.Container
+          ],
+          []
+        )
+    end
 
     {:noreply, state}
   end
@@ -121,20 +144,36 @@ defmodule Containers do
     tenant
   end
 
-  @doc "Return port for a container that can be used"
+  @doc "Return port for a container (or the external tenant DB) that can be used"
   def checkout() do
-    with container when is_pid(container) <- :poolboy.checkout(Containers.Pool, true, 5_000),
-         port <- Container.port(container) do
-      # Automatically checkin the container at the end of the test
-      ExUnit.Callbacks.on_exit(fn -> :poolboy.checkin(Containers.Pool, container) end)
-
-      {:ok, port}
+    if external_tenant_db?() do
+      {:ok, external_tenant_db_port!()}
     else
-      _ -> {:error, "failed to checkout a container"}
+      with container when is_pid(container) <- :poolboy.checkout(Containers.Pool, true, 5_000),
+           port <- Container.port(container) do
+        # Automatically checkin the container at the end of the test
+        ExUnit.Callbacks.on_exit(fn -> :poolboy.checkin(Containers.Pool, container) end)
+
+        {:ok, port}
+      else
+        _ -> {:error, "failed to checkout a container"}
+      end
     end
   end
 
+  # In external-tenant-db mode the tenant DB is the external server's
+  # pre-existing `postgres` database; there's nothing to create, and some
+  # Postgres-wire-compatible servers don't implement CREATE DATABASE (or
+  # mishandle Ecto's zero-column existence probe), so skip this entirely.
   defp storage_up!(tenant) do
+    if external_tenant_db?() do
+      :ok
+    else
+      do_storage_up!(tenant)
+    end
+  end
+
+  defp do_storage_up!(tenant) do
     {:ok, db_settings} = Database.from_tenant(tenant, "realtime_test", :stop)
 
     settings =
@@ -152,9 +191,25 @@ defmodule Containers do
   def checkout_tenant(opts \\ []), do: do_checkout_tenant(opts, :sandbox)
   def checkout_tenant_unboxed(opts \\ []), do: do_checkout_tenant(opts, :unboxed)
 
+  # Acquire a tenant database for one test. In external mode this is the
+  # shared external server (no checkout/checkin, checkin is a no-op);
+  # otherwise it checks out a pooled supabase/postgres container.
+  defp acquire_tenant_db do
+    if external_tenant_db?() do
+      {:ok, external_tenant_db_port!(), fn -> :ok end}
+    else
+      case :poolboy.checkout(Containers.Pool, true, 5_000) do
+        container when is_pid(container) ->
+          {:ok, Container.port(container), fn -> :poolboy.checkin(Containers.Pool, container) end}
+
+        _ ->
+          :error
+      end
+    end
+  end
+
   defp do_checkout_tenant(opts, mode) do
-    with container when is_pid(container) <- :poolboy.checkout(Containers.Pool, true, 5_000),
-         port <- Container.port(container) do
+    with {:ok, port, checkin} <- acquire_tenant_db() do
       tenant = repo_run(mode, fn -> Generators.tenant_fixture(%{port: port, migrations_ran: 0}) end)
 
       run_migrations? = Keyword.get(opts, :run_migrations, false)
@@ -186,7 +241,7 @@ defmodule Containers do
             repo_run(:unboxed, fn -> Realtime.Api.delete_tenant_by_external_id(tenant.external_id) end)
           end
 
-          :poolboy.checkin(Containers.Pool, container)
+          checkin.()
         end)
 
         if run_migrations? do
@@ -213,7 +268,7 @@ defmodule Containers do
         GenServer.stop(conn)
       end
     else
-      _ -> {:error, "failed to checkout a container"}
+      :error -> {:error, "failed to checkout a container"}
     end
   end
 
