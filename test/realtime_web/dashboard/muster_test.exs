@@ -64,6 +64,32 @@ defmodule RealtimeWeb.Dashboard.MusterTest do
     end
   end
 
+  describe "gather_local_group_info/1" do
+    test "returns the inspected node's scope, view hash, router and local count" do
+      # Local-only reads (no router RPC); each happens once, so expect pins the count.
+      expect(Forum.Muster, :view_hash, fn _scope -> 123_456 end)
+      expect(Forum.Muster, :router, fn _scope, _group -> {:ok, node()} end)
+      expect(Forum.Muster, :local_member_count, fn _scope, _group -> 3 end)
+      # The local reader must not touch the router; that is group_data/2's job.
+      reject(&Forum.Muster.targets/3)
+      reject(&Forum.Muster.occupancy/2)
+
+      assert {:ok, info} = Muster.gather_local_group_info("tenant-1")
+
+      assert is_atom(info.scope)
+      assert info.view_hash == 123_456
+      assert info.router == {:ok, node()}
+      assert info.local_member_count == 3
+    end
+
+    test "returns an error when the scope has published no state yet" do
+      expect(Forum.Muster, :view_hash, fn _scope -> raise ArgumentError end)
+
+      assert {:error, msg} = Muster.gather_local_group_info("tenant-1")
+      assert msg =~ "no published state"
+    end
+  end
+
   describe "rendered page" do
     test "renders the live summary for the current node", %{conn: conn} do
       # No stub: Muster runs in the test app, so the real summary renders.
@@ -114,6 +140,81 @@ defmodule RealtimeWeb.Dashboard.MusterTest do
       assert html =~ "a@127.0.0.1"
       assert html =~ "z@127.0.0.1"
       assert html =~ "total present"
+    end
+
+    test "the group lookup form renders the router, targets and counts", %{conn: conn} do
+      # summary runs on every render (static + connected mount, refreshes), so it
+      # stays a stub; the group reads fire exactly once, on the submit below.
+      stub(Forum.Muster, :summary, fn _scope -> summary() end)
+      expect(Forum.Muster, :view_hash, fn _scope -> 123_456 end)
+      expect(Forum.Muster, :router, fn _scope, _group -> {:ok, node()} end)
+      expect(Forum.Muster, :local_member_count, fn _scope, _group -> 7 end)
+      expect(Forum.Muster, :targets, fn _scope, _group, _vh -> {:ok, [:"a@127.0.0.1", :"z@127.0.0.1"]} end)
+      expect(Forum.Muster, :occupancy, fn _scope, _group -> [:"a@127.0.0.1", :"z@127.0.0.1"] end)
+
+      {:ok, view, _html} = live(conn, "/admin/dashboard/muster")
+
+      html = view |> form("form[phx-submit='lookup_group']", %{group: "tenant-1"}) |> render_submit()
+
+      assert html =~ "Group lookup"
+      assert html =~ "tenant-1"
+      # Local member count for the inspected node.
+      assert html =~ "Local members here"
+      assert html =~ "7"
+      # targets/3 result with its node count.
+      assert html =~ "a@127.0.0.1"
+      assert html =~ "(2 nodes)"
+    end
+
+    test "the Clear button resets the group lookup", %{conn: conn} do
+      # Group reads fire once on submit; clearing takes the nil path (no reads).
+      stub(Forum.Muster, :summary, fn _scope -> summary() end)
+      expect(Forum.Muster, :view_hash, fn _scope -> 123_456 end)
+      expect(Forum.Muster, :router, fn _scope, _group -> {:ok, node()} end)
+      expect(Forum.Muster, :local_member_count, fn _scope, _group -> 7 end)
+      expect(Forum.Muster, :targets, fn _scope, _group, _vh -> {:ok, [:"a@127.0.0.1"]} end)
+      expect(Forum.Muster, :occupancy, fn _scope, _group -> [:"a@127.0.0.1"] end)
+
+      {:ok, view, _html} = live(conn, "/admin/dashboard/muster")
+
+      html = view |> form("form[phx-submit='lookup_group']", %{group: "tenant-1"}) |> render_submit()
+      assert html =~ "Local members here"
+
+      cleared = view |> element("button[phx-click='clear_group']") |> render_click()
+      # The lookup result is gone and the Clear button hides once there is no query.
+      refute cleared =~ "Local members here"
+      refute cleared =~ "phx-click=\"clear_group\""
+    end
+
+    test "the group lookup form surfaces a flood result", %{conn: conn} do
+      stub(Forum.Muster, :summary, fn _scope -> summary() end)
+      expect(Forum.Muster, :view_hash, fn _scope -> 1 end)
+      expect(Forum.Muster, :router, fn _scope, _group -> {:ok, node()} end)
+      expect(Forum.Muster, :local_member_count, fn _scope, _group -> 0 end)
+      expect(Forum.Muster, :targets, fn _scope, _group, _vh -> {:error, :flood} end)
+      expect(Forum.Muster, :occupancy, fn _scope, _group -> [] end)
+
+      {:ok, view, _html} = live(conn, "/admin/dashboard/muster")
+      html = view |> form("form[phx-submit='lookup_group']", %{group: "tenant-1"}) |> render_submit()
+
+      assert html =~ "flood"
+    end
+
+    test "the group lookup surfaces a rebalancing router without asking any router", %{conn: conn} do
+      nodes = [:"a@127.0.0.1", :"b@127.0.0.1"]
+      stub(Forum.Muster, :summary, fn _scope -> summary() end)
+      expect(Forum.Muster, :view_hash, fn _scope -> 1 end)
+      expect(Forum.Muster, :router, fn _scope, _group -> {:rebalancing, nodes} end)
+      expect(Forum.Muster, :local_member_count, fn _scope, _group -> 0 end)
+      # No single router while rebalancing, so neither router RPC is consulted.
+      reject(&Forum.Muster.targets/3)
+      reject(&Forum.Muster.occupancy/2)
+
+      {:ok, view, _html} = live(conn, "/admin/dashboard/muster")
+      html = view |> form("form[phx-submit='lookup_group']", %{group: "tenant-1"}) |> render_submit()
+
+      assert html =~ "rebalancing"
+      assert html =~ "a@127.0.0.1"
     end
 
     test "renders the unavailable state when the coordinator is down", %{conn: conn} do

@@ -355,6 +355,19 @@ defmodule Forum.Muster do
     end
   end
 
+  @doc """
+  Returns the source nodes this node's router-role occupancy table currently
+  holds for `group` in `scope` — the raw table content.
+
+  Unlike `targets/3` this is **not** barrier-gated: it does not consult
+  `can_decide?/2`, so it reflects what this node believes about `group` even when
+  a broadcast would flood. Intended for inspection/debugging
+  """
+  @spec occupancy(atom, group) :: [node]
+  def occupancy(scope, group) when is_atom(scope) do
+    Scope.occupancy(scope, group)
+  end
+
   defp ring_name(scope), do: :"#{scope}_muster_ring"
 
   @doc "List local pids registered to `group` in `scope`."
