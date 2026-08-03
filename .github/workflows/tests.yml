@@ -63,8 +63,8 @@ jobs:
         id: beam
         uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1.24.0
         with:
-          otp-version: 27.x # Define the OTP version [required]
-          elixir-version: 1.18.x # Define the elixir version [required]
+          otp-version: 28.5.0.4 # Define the OTP version [required]
+          elixir-version: 1.19.5 # Define the elixir version [required]
       - name: Cache Mix
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
@@ -72,9 +72,9 @@ jobs:
             deps
             _build
             priv/native
-          key: ${{ github.workflow }}-${{ runner.os }}-mix-${{ env.elixir }}-${{ env.otp }}-${{ hashFiles('**/mix.lock') }}
+          key: ${{ github.workflow }}-${{ runner.os }}-mix-${{ steps.beam.outputs.elixir-version }}-${{ steps.beam.outputs.otp-version }}-${{ hashFiles('**/mix.lock') }}
           restore-keys: |
-            ${{ github.workflow }}-${{ runner.os }}-mix-${{ env.elixir }}-${{ env.otp }}-
+            ${{ github.workflow }}-${{ runner.os }}-mix-${{ steps.beam.outputs.elixir-version }}-${{ steps.beam.outputs.otp-version }}-
 
       - name: Cache Docker images
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
@@ -135,10 +135,11 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Setup elixir
+        id: beam
         uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1.24.0
         with:
-          otp-version: 27.x
-          elixir-version: 1.18.x
+          otp-version: 28.5.0.4
+          elixir-version: 1.19.5
       - name: Cache Mix
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
@@ -146,9 +147,9 @@ jobs:
             deps
             _build
             priv/native
-          key: ${{ github.workflow }}-${{ runner.os }}-mix-${{ env.elixir }}-${{ env.otp }}-${{ hashFiles('**/mix.lock') }}
+          key: ${{ github.workflow }}-${{ runner.os }}-mix-${{ steps.beam.outputs.elixir-version }}-${{ steps.beam.outputs.otp-version }}-${{ hashFiles('**/mix.lock') }}
           restore-keys: |
-            ${{ github.workflow }}-${{ runner.os }}-mix-${{ env.elixir }}-${{ env.otp }}-
+            ${{ github.workflow }}-${{ runner.os }}-mix-${{ steps.beam.outputs.elixir-version }}-${{ steps.beam.outputs.otp-version }}-
       - name: Install dependencies
         run: mix deps.get
       - name: Download coverage artifacts
@@ -158,10 +159,15 @@ jobs:
           path: coverage
       - name: Build CRAP report
         run: |
+          mix compile
+
           {
             echo '## CRAP Score Report'
             echo '```'
-            mix crap.ci 2>&1 | sed -r 's/\x1b\[[0-9;]*m//g' || true
+            mix crap.ci 2>&1 |
+              sed -r 's/\x1b\[[0-9;]*m//g' |
+              sed -n '/^Summary:/,$p' ||
+              true
             echo '```'
           } > crap-report.md
       - name: Post CRAP report comment

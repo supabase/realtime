@@ -72,7 +72,7 @@ config :realtime, RealtimeWeb.Endpoint,
   ]
 
 # Do not include metadata nor timestamps in development logs
-config :logger, :console,
+config :logger, :default_formatter,
   format: "$time [$level] $message $metadata\n",
   metadata: [
     :error_code,
