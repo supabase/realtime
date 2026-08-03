@@ -159,10 +159,15 @@ jobs:
           path: coverage
       - name: Build CRAP report
         run: |
+          mix compile
+
           {
             echo '## CRAP Score Report'
             echo '```'
-            mix crap.ci 2>&1 | sed -r 's/\x1b\[[0-9;]*m//g' || true
+            mix crap.ci 2>&1 |
+              sed -r 's/\x1b\[[0-9;]*m//g' |
+              sed -n '/^Summary:/,$p' ||
+              true
             echo '```'
           } > crap-report.md
       - name: Post CRAP report comment
