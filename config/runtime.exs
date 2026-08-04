@@ -290,8 +290,6 @@ cluster_topologies =
 # Setup Logging
 
 if logs_engine == "logflare" do
-  config :logflare_logger_backend, url: logflare_logger_backend_url
-
   if !System.get_env("LOGFLARE_API_KEY") or !System.get_env("LOGFLARE_SOURCE_ID") do
     raise """
     Environment variable LOGFLARE_API_KEY or LOGFLARE_SOURCE_ID is missing.
@@ -299,10 +297,12 @@ if logs_engine == "logflare" do
     """
   end
 
+  config :logflare_logger_backend, url: logflare_logger_backend_url
+
   config :logger,
     sync_threshold: 6_000,
     discard_threshold: 6_000,
-    backends: [LogflareLogger.HttpBackend]
+    default_handler: false
 end
 
 # Setup production and development environments

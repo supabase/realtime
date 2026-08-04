@@ -4,8 +4,8 @@ defmodule Realtime.MixProject do
   def project do
     [
       app: :realtime,
-      version: "2.122.0",
-      elixir: "~> 1.18",
+      version: "2.123.3",
+      elixir: "~> 1.19",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
@@ -95,9 +95,9 @@ defmodule Realtime.MixProject do
       {:open_api_spex, "~> 3.16"},
       {:corsica, "~> 2.0"},
       {:observer_cli, "~> 1.7"},
-      {:opentelemetry_exporter, "~> 1.6"},
-      {:opentelemetry, "~> 1.3"},
-      {:opentelemetry_api, "~> 1.2"},
+      {:opentelemetry_exporter, "~> 1.10"},
+      {:opentelemetry, "~> 1.7"},
+      {:opentelemetry_api, "~> 1.5"},
       {:opentelemetry_phoenix, "~> 2.0"},
       {:opentelemetry_cowboy, "~> 1.0"},
       {:opentelemetry_ecto, "~> 1.2"},

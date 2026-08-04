@@ -1135,11 +1135,37 @@ defmodule Forum.Muster.Scope do
 
   ## Rebalance
 
+  # Render a membership change as a compact delta for logging. A single
+  # transition can add and/or remove any number of nodes at once (recompute_members
+  # rederives the whole set), so both `added` and `removed` may be non-empty. The
+  # full before/after sets stay in the telemetry events; humans get signed counts
+  # plus the (usually tiny) diff instead of two walls of node names.
+  defp member_delta(from, to) do
+    added = to -- from
+    removed = from -- to
+
+    summary =
+      [added != [] && "+#{length(added)}", removed != [] && "-#{length(removed)}"]
+      |> Enum.filter(& &1)
+      |> case do
+        [] -> "no change"
+        parts -> Enum.join(parts, "/")
+      end
+
+    detail =
+      [added != [] && "added #{inspect(added)}", removed != [] && "removed #{inspect(removed)}"]
+      |> Enum.filter(& &1)
+      |> Enum.join(", ")
+
+    base = "#{length(to)} members (was #{length(from)}), #{summary}"
+    if detail == "", do: base, else: "#{base}: #{detail}"
+  end
+
   defp do_rebalance(state, new_members) do
     ring = ring_name(state.scope)
 
     Logger.info(
-      "Muster[#{node()}|#{state.scope}] rebalance start: members #{inspect(state.members)} -> #{inspect(new_members)} (view_hash #{:erlang.phash2(new_members)})"
+      "Muster[#{node()}|#{state.scope}] rebalance start: #{member_delta(state.members, new_members)} (view_hash #{:erlang.phash2(new_members)})"
     )
 
     tp(:muster_rebalance_start, %{
@@ -1604,7 +1630,7 @@ defmodule Forum.Muster.Scope do
     audience = Enum.filter(state.members -- [node()], &(&1 in Node.list()))
 
     Logger.info(
-      "Muster[#{node()}|#{state.scope}] view-change prepare: #{inspect(state.members)} -> #{inspect(target)}, preparing #{inspect(audience)}"
+      "Muster[#{node()}|#{state.scope}] view-change prepare: #{member_delta(state.members, target)}, preparing #{inspect(audience)}"
     )
 
     tp(:muster_view_prepare, %{

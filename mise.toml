@@ -1,6 +1,6 @@
 [tools]
-elixir = "1.18.4-otp-27"
-erlang = "27"
+elixir = "1.19.5-otp-28"
+erlang = "28.5.0.4"
 node = "24"
 supabase = "2.105.0"
 "npm:@supabase/pg-delta" = "1.0.0-alpha.33"
