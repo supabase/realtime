@@ -53,30 +53,32 @@ defmodule ContainersTest do
     end
   end
 
-  describe "external_tenant_db_port!/0" do
-    test "returns the configured port as an integer" do
-      put_env_restoring("EXTERNAL_TENANT_DB_PORT", "15432")
-      assert Containers.external_tenant_db_port!() == 15432
+  describe "external_tenant_db_ports!/0" do
+    test "parses a comma-separated EXTERNAL_TENANT_DB_PORTS list" do
+      delete_env_restoring("EXTERNAL_TENANT_DB_PORT")
+      put_env_restoring("EXTERNAL_TENANT_DB_PORTS", "15432, 15433,15434")
+      assert Containers.external_tenant_db_ports!() == [15432, 15433, 15434]
     end
 
-    test "raises a clear error when unset" do
+    test "falls back to singular EXTERNAL_TENANT_DB_PORT as a one-port list" do
+      delete_env_restoring("EXTERNAL_TENANT_DB_PORTS")
+      put_env_restoring("EXTERNAL_TENANT_DB_PORT", "15432")
+      assert Containers.external_tenant_db_ports!() == [15432]
+    end
+
+    test "prefers EXTERNAL_TENANT_DB_PORTS when both are set" do
+      put_env_restoring("EXTERNAL_TENANT_DB_PORTS", "15432,15433")
+      put_env_restoring("EXTERNAL_TENANT_DB_PORT", "9999")
+      assert Containers.external_tenant_db_ports!() == [15432, 15433]
+    end
+
+    test "raises a clear error when neither is set" do
+      delete_env_restoring("EXTERNAL_TENANT_DB_PORTS")
       delete_env_restoring("EXTERNAL_TENANT_DB_PORT")
 
-      assert_raise RuntimeError, ~r/EXTERNAL_TENANT_DB_PORT/, fn ->
-        Containers.external_tenant_db_port!()
+      assert_raise RuntimeError, ~r/EXTERNAL_TENANT_DB_PORTS/, fn ->
+        Containers.external_tenant_db_ports!()
       end
-    end
-  end
-
-  describe "handle_continue({:pool, _}, state) in external mode" do
-    test "does not attempt to start a poolboy pool" do
-      put_env_restoring("USE_EXTERNAL_TENANT_DB", "true")
-
-      # Without the guard this raises a MatchError, because the real
-      # Containers GenServer (started by test_helper.exs before this test
-      # ran) has already registered Containers.Pool, and a second
-      # :poolboy.start_link/2 with the same name fails to match {:ok, _pid}.
-      assert {:noreply, %{}} = Containers.handle_continue({:pool, 4}, %{})
     end
   end
 end

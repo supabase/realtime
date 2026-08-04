@@ -2,13 +2,15 @@ start_time = :os.system_time(:millisecond)
 
 alias Realtime.Api
 
-# External-tenant-db mode (USE_EXTERNAL_TENANT_DB=true): all tests share the
-# one external DB, so they MUST run serially — concurrent tenant setup (DROP
-# SCHEMA realtime CASCADE) would stomp on each other.
-max_cases =
-  if Containers.external_tenant_db?(),
-    do: 1,
-    else: String.to_integer(System.get_env("MAX_CASES", "4"))
+# External-tenant-db mode (USE_EXTERNAL_TENANT_DB=true): the checkout pool
+# hands out one of EXTERNAL_TENANT_DB_PORTS/EXTERNAL_TENANT_DB_PORT per
+# concurrent test (see Containers.pool_worker_opts/2), so running with more
+# than one configured port is safe. MAX_CASES still defaults to 1 here —
+# with a single external DB (the common case), concurrent tenant setup
+# (DROP SCHEMA realtime CASCADE) would stomp on each other — but is
+# overridable, and safe to raise once more ports are configured.
+default_max_cases = if Containers.external_tenant_db?(), do: "1", else: "4"
+max_cases = String.to_integer(System.get_env("MAX_CASES", default_max_cases))
 
 repo_config = Application.fetch_env!(:realtime, Realtime.Repo)
 
