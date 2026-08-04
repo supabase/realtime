@@ -18,8 +18,25 @@ defmodule Containers.ExternalTarget do
 
   @impl true
   def handle_continue(:assign_port, _state) do
-    port = Containers.start_external_target()
-    {:noreply, %{port: port}}
+    {:noreply, %{port: assign_port(10)}}
+  end
+
+  # A replacement worker (started by poolboy after a crash) can momentarily
+  # find no port available if it asks before Containers has processed the
+  # dead worker's :DOWN and reclaimed its port. Retry briefly instead of
+  # crashing this worker outright.
+  defp assign_port(attempts) do
+    case Containers.start_external_target() do
+      {:error, :no_external_ports_available} when attempts > 1 ->
+        Process.sleep(100)
+        assign_port(attempts - 1)
+
+      {:error, :no_external_ports_available} ->
+        raise "Containers.ExternalTarget: no external port became available after retrying"
+
+      port ->
+        port
+    end
   end
 
   @impl true

@@ -1,11 +1,16 @@
 defmodule ContainersTest do
-  use ExUnit.Case, async: true
+  # These tests mutate the process-wide USE_EXTERNAL_TENANT_DB/
+  # EXTERNAL_TENANT_DB_PORT(S) env vars that Containers.checkout/0,
+  # storage_up!/1, and acquire_tenant_db/0 read at call time from any test in
+  # the suite. Two consequences:
+  #   - async: true would let those mutations race with concurrently running
+  #     tenant-checkout tests elsewhere (e.g. skipping CREATE DATABASE, or an
+  #     unrelated test raising ArgumentError mid-checkout) — hence async: false.
+  #   - every mutation must restore the exact prior value on exit — not just
+  #     delete it — or a later test file inherits the wrong mode for the rest
+  #     of the run (see the put/delete_env_restoring helpers below).
+  use ExUnit.Case, async: false
 
-  # These tests mutate process-wide env vars that the whole test run may
-  # depend on (e.g. invoked with USE_EXTERNAL_TENANT_DB=true set globally), so
-  # every mutation must restore the exact prior value on exit — not just
-  # delete it — or a later test file inherits the wrong mode for the rest of
-  # the run.
   defp put_env_restoring(name, value) do
     restore_env_on_exit(name)
     System.put_env(name, value)
@@ -70,6 +75,21 @@ defmodule ContainersTest do
       put_env_restoring("EXTERNAL_TENANT_DB_PORTS", "15432,15433")
       put_env_restoring("EXTERNAL_TENANT_DB_PORT", "9999")
       assert Containers.external_tenant_db_ports!() == [15432, 15433]
+    end
+
+    test "falls back to EXTERNAL_TENANT_DB_PORT when EXTERNAL_TENANT_DB_PORTS is an empty string" do
+      put_env_restoring("EXTERNAL_TENANT_DB_PORTS", "")
+      put_env_restoring("EXTERNAL_TENANT_DB_PORT", "15432")
+      assert Containers.external_tenant_db_ports!() == [15432]
+    end
+
+    test "raises the clear error when both are set but empty" do
+      put_env_restoring("EXTERNAL_TENANT_DB_PORTS", "")
+      put_env_restoring("EXTERNAL_TENANT_DB_PORT", "")
+
+      assert_raise RuntimeError, ~r/EXTERNAL_TENANT_DB_PORTS/, fn ->
+        Containers.external_tenant_db_ports!()
+      end
     end
 
     test "raises a clear error when neither is set" do
