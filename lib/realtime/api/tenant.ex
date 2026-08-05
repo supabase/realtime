@@ -35,6 +35,7 @@ defmodule Realtime.Api.Tenant do
     field(:client_presence_window_ms, :integer)
     field(:presence_enabled, :boolean, default: false)
     field(:feature_flags, :map, default: %{})
+    field(:gcm_migrated_at, :utc_datetime)
 
     has_many(:extensions, Realtime.Api.Extensions,
       foreign_key: :tenant_external_id,
@@ -129,5 +130,12 @@ defmodule Realtime.Api.Tenant do
     tenant
     |> cast(attrs, [:jwt_secret_gcm])
     |> validate_required([:jwt_secret_gcm])
+  end
+
+  @doc false
+  def gcm_migrated_at_changeset(tenant, attrs) do
+    tenant
+    |> cast(attrs, [:gcm_migrated_at])
+    |> validate_required([:gcm_migrated_at])
   end
 end

@@ -528,8 +528,14 @@ defmodule Realtime.Tenants do
   end
 
   defp do_reconcile_encryption(tenant) do
-    reconcile_jwt_secret(tenant)
-    Enum.each(tenant.extensions, &reconcile_extension_settings(tenant.external_id, &1))
+    jwt_result = reconcile_jwt_secret(tenant)
+    extensions_result = Enum.map(tenant.extensions, &reconcile_extension_settings(tenant.external_id, &1))
+
+    if jwt_result == :ok and Enum.all?(extensions_result, &(&1 == :ok)) do
+      Api.update_tenant_gcm_migrated_at(tenant.external_id)
+    end
+
+    :ok
   end
 
   defp reconcile_jwt_secret(%Tenant{jwt_secret_gcm: nil, jwt_secret: jwt_secret, external_id: external_id})
@@ -539,8 +545,13 @@ defmodule Realtime.Tenants do
     jwt_secret_gcm = Crypto.migrate_to_gcm!(jwt_secret)
 
     case Api.update_tenant_jwt_secret_gcm(external_id, jwt_secret_gcm) do
-      {:ok, _updated_tenant} -> Telemetry.stop(@encryption_reconcile_event, start_time, metadata)
-      {:error, error} -> Telemetry.exception(@encryption_reconcile_event, start_time, :error, error, [], metadata)
+      {:ok, _updated_tenant} ->
+        Telemetry.stop(@encryption_reconcile_event, start_time, metadata)
+        :ok
+
+      {:error, error} ->
+        Telemetry.exception(@encryption_reconcile_event, start_time, :error, error, [], metadata)
+        :error
     end
   end
 
@@ -557,8 +568,13 @@ defmodule Realtime.Tenants do
         settings_gcm = Crypto.migrate_settings_to_gcm!(extension.settings, keys)
 
         case Api.update_extension_settings_gcm(external_id, extension.id, settings_gcm) do
-          {:ok, _updated_extension} -> Telemetry.stop(@encryption_reconcile_event, start_time, metadata)
-          {:error, error} -> Telemetry.exception(@encryption_reconcile_event, start_time, :error, error, [], metadata)
+          {:ok, _updated_extension} ->
+            Telemetry.stop(@encryption_reconcile_event, start_time, metadata)
+            :ok
+
+          {:error, error} ->
+            Telemetry.exception(@encryption_reconcile_event, start_time, :error, error, [], metadata)
+            :error
         end
     end
   end

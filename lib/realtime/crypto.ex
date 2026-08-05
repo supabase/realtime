@@ -84,7 +84,11 @@ defmodule Realtime.Crypto do
   @doc """
   Decrypts a tenant's jwt_secret, preferring jwt_secret_gcm when present.
   """
-  @spec decrypt_jwt_secret!(%{jwt_secret_gcm: binary() | nil, jwt_secret: binary() | nil}) :: binary()
+  @spec decrypt_jwt_secret!(%{
+          :jwt_secret_gcm => binary() | nil,
+          :jwt_secret => binary() | nil,
+          optional(any()) => any()
+        }) :: binary()
   def decrypt_jwt_secret!(%{jwt_secret_gcm: jwt_secret_gcm}) when is_binary(jwt_secret_gcm),
     do: decrypt_gcm!(jwt_secret_gcm)
 
@@ -101,7 +105,9 @@ defmodule Realtime.Crypto do
   @doc """
   Decrypts the given keys of an extension's settings, preferring settings_gcm when present.
   """
-  @spec decrypt_settings!(%{settings_gcm: map() | nil, settings: map()}, [String.t()]) :: map()
+  @spec decrypt_settings!(%{:settings_gcm => map() | nil, :settings => map(), optional(any()) => any()}, [
+          String.t()
+        ]) :: map()
   def decrypt_settings!(%{settings_gcm: settings_gcm}, keys) when is_map(settings_gcm),
     do: crypt_settings_fields(settings_gcm, keys, &decrypt_gcm!/1)
 
