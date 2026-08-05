@@ -121,8 +121,8 @@ defmodule Realtime.Database do
       with {:ok, probe_settings} <- from_settings(settings, "realtime_connect_probe", :stop),
            {:ok, probe_conn} <- connect_db(%{probe_settings | max_restarts: 0}),
            {:ok, [available_connections, migrations_ran]} <- query_connection_info(probe_conn),
+           GenServer.stop(probe_conn),
            {:ok, settings} <- from_settings(settings, "realtime_connect", :rand_exp) do
-        :ok = GenServer.stop(probe_conn)
         requirement = ceil(required_pool * @available_connection_factor)
 
         if requirement < available_connections do
