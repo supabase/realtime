@@ -54,6 +54,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       expect(TenantBroadcaster, :pubsub_broadcast, fn _, topic, _, _, _ ->
         refute String.contains?(topic, "-private")
+        :ok
       end)
 
       assert :ok = BatchBroadcast.broadcast(nil, tenant, messages, false)
@@ -80,6 +81,8 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
                    "meta" => %{"id" => "msg-123"}
                  }
                } = broadcast
+
+        :ok
       end)
 
       assert :ok = BatchBroadcast.broadcast(nil, tenant, messages, false)
@@ -117,6 +120,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       expect(TenantBroadcaster, :pubsub_broadcast, fn _, topic, _, _, _ ->
         assert String.contains?(topic, "-private")
+        :ok
       end)
 
       assert :ok = BatchBroadcast.broadcast(nil, tenant, messages, true)
@@ -145,7 +149,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       expect(GenCounter, :add, 1, fn ^broadcast_events_key -> :ok end)
 
       Authorization
-      |> expect(:build_authorization_params, fn params -> params end)
+      |> expect(:build_authorization_params, fn params -> struct(Realtime.Tenants.Authorization, params) end)
       |> expect(:get_write_authorizations, fn _, _ -> {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}} end)
 
       expect(TenantBroadcaster, :pubsub_broadcast, 1, fn _, _, _, _, _ -> :ok end)
@@ -168,7 +172,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       }
 
       Authorization
-      |> expect(:build_authorization_params, 1, fn params -> params end)
+      |> expect(:build_authorization_params, 1, fn params -> struct(Realtime.Tenants.Authorization, params) end)
       |> expect(:get_write_authorizations, 1, fn _, _ ->
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: false}}}
       end)
@@ -209,7 +213,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       expect(GenCounter, :add, fn ^broadcast_events_key -> :ok end)
 
       Authorization
-      |> expect(:build_authorization_params, 2, fn params -> params end)
+      |> expect(:build_authorization_params, 2, fn params -> struct(Realtime.Tenants.Authorization, params) end)
       |> expect(:get_write_authorizations, 2, fn
         _, %{topic: ^topic} -> %Policies{broadcast: %BroadcastPolicies{write: true}}
         _, _ -> %Policies{broadcast: %BroadcastPolicies{write: false}}
@@ -250,7 +254,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       expect(GenCounter, :add, 3, fn ^broadcast_events_key -> :ok end)
 
       Authorization
-      |> expect(:build_authorization_params, 2, fn params -> params end)
+      |> expect(:build_authorization_params, 2, fn params -> struct(Realtime.Tenants.Authorization, params) end)
       |> expect(:get_write_authorizations, 2, fn _, _ ->
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
       end)
@@ -265,7 +269,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       RateCounter
       |> stub(:new, fn _ -> {:ok, nil} end)
-      |> stub(:get, fn ^events_per_second_rate -> {:ok, %RateCounter{avg: 0}} end)
+      |> stub(:get, fn ^events_per_second_rate -> {:ok, %RateCounter{avg: 0.0}} end)
 
       reject(&TenantBroadcaster.pubsub_broadcast/5)
       reject(&Connect.lookup_or_start_connection/1)
@@ -309,12 +313,12 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       |> stub(:new, fn _ -> {:ok, nil} end)
       |> stub(:get, fn
         ^events_per_second_rate ->
-          {:ok, %RateCounter{avg: 0}}
+          {:ok, %RateCounter{avg: 0.0}}
 
         _ ->
           {:ok,
            %RateCounter{
-             avg: 0,
+             avg: 0.0,
              limit: %{log: true, value: 10, measurement: :sum, triggered: false, log_fn: fn -> :ok end}
            }}
       end)
@@ -323,7 +327,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       expect(Connect, :lookup_or_start_connection, fn _ -> {:ok, db_conn} end)
 
       Authorization
-      |> expect(:build_authorization_params, fn params -> params end)
+      |> expect(:build_authorization_params, fn params -> struct(Realtime.Tenants.Authorization, params) end)
       |> expect(:get_write_authorizations, fn _, _ ->
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
       end)
@@ -412,7 +416,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       RateCounter
       |> stub(:new, fn _ -> {:ok, nil} end)
-      |> stub(:get, fn ^events_per_second_rate -> {:ok, %RateCounter{avg: tenant.max_events_per_second + 1}} end)
+      |> stub(:get, fn ^events_per_second_rate -> {:ok, %RateCounter{avg: tenant.max_events_per_second + 1.0}} end)
 
       reject(&TenantBroadcaster.pubsub_broadcast/5)
 
@@ -433,7 +437,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       RateCounter
       |> stub(:new, fn _ -> {:ok, nil} end)
       |> stub(:get, fn ^events_per_second_rate ->
-        {:ok, %RateCounter{avg: tenant.max_events_per_second - 5}}
+        {:ok, %RateCounter{avg: tenant.max_events_per_second - 5.0}}
       end)
 
       reject(&TenantBroadcaster.pubsub_broadcast/5)
@@ -458,7 +462,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       RateCounter
       |> stub(:new, fn _ -> {:ok, nil} end)
       |> stub(:get, fn ^events_per_second_rate ->
-        {:ok, %RateCounter{avg: current_rate}}
+        {:ok, %RateCounter{avg: current_rate * 1.0}}
       end)
 
       expect(GenCounter, :add, 2, fn ^broadcast_events_key -> :ok end)
@@ -523,7 +527,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       RateCounter
       |> stub(:new, fn _ -> {:ok, nil} end)
-      |> stub(:get, fn ^events_per_second_rate -> {:ok, %RateCounter{avg: 0}} end)
+      |> stub(:get, fn ^events_per_second_rate -> {:ok, %RateCounter{avg: 0.0}} end)
 
       expect(Connect, :lookup_or_start_connection, fn _ -> {:error, :connection_failed} end)
 

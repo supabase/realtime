@@ -55,8 +55,17 @@ defmodule RealtimeWeb.Dashboard.MusterTest do
       assert info.occupancy_row_count == 3
     end
 
-    test "defaults group_total to 0 when the summary omits :total" do
-      expect(Forum.Muster, :summary, fn _scope -> summary(%{group_state_counts: %{}}) end)
+    test "renders zeroed group counts and total when every state count is 0" do
+      zero_counts = %{
+        occupied: 0,
+        cooldown: 0,
+        vacant_queued: 0,
+        vacant_flushing: 0,
+        occupied_pending: 0,
+        total: 0
+      }
+
+      expect(Forum.Muster, :summary, fn _scope -> summary(%{group_state_counts: zero_counts}) end)
 
       assert {:ok, info} = Muster.gather_local_info()
       assert info.group_total == 0
@@ -244,7 +253,14 @@ defmodule RealtimeWeb.Dashboard.MusterTest do
         applied_snapshot_seq: %{},
         occupancy_row_count: 3,
         occupancy_rows_by_node: %{"z@127.0.0.1": 1, "a@127.0.0.1": 2},
-        group_state_counts: %{occupied: 4, cooldown: 1, total: 5}
+        group_state_counts: %{
+          occupied: 4,
+          cooldown: 1,
+          vacant_queued: 0,
+          vacant_flushing: 0,
+          occupied_pending: 0,
+          total: 5
+        }
       },
       overrides
     )

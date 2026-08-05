@@ -203,8 +203,8 @@ defmodule RealtimeWeb.BroadcastControllerTest do
       RateCounter
       |> stub(:new, fn _ -> {:ok, nil} end)
       |> stub(:get, fn
-        ^requests_rate -> {:ok, %RateCounter{avg: 0}}
-        ^events_rate -> {:ok, %RateCounter{avg: 10}}
+        ^requests_rate -> {:ok, %RateCounter{avg: 0.0}}
+        ^events_rate -> {:ok, %RateCounter{avg: 10.0}}
       end)
 
       conn =
@@ -235,8 +235,8 @@ defmodule RealtimeWeb.BroadcastControllerTest do
       RateCounter
       |> stub(:new, fn _ -> {:ok, nil} end)
       |> stub(:get, fn
-        ^requests_rate -> {:ok, %RateCounter{avg: 0}}
-        ^events_rate -> {:ok, %RateCounter{avg: 1000}}
+        ^requests_rate -> {:ok, %RateCounter{avg: 0.0}}
+        ^events_rate -> {:ok, %RateCounter{avg: 1000.0}}
       end)
 
       messages = [

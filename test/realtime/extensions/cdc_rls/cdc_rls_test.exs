@@ -216,7 +216,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
       log =
         capture_log(fn ->
           assert {:error, "Too many database timeouts"} =
-                   PostgresCdcRls.handle_after_connect({:manager_pid, self()}, postgres_extension, %{}, external_id)
+                   PostgresCdcRls.handle_after_connect({self(), self()}, postgres_extension, %{}, external_id)
         end)
 
       assert log =~ "RateCounterError"
@@ -233,7 +233,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
       # Now try to subscribe to the Postgres Changes
       for _x <- 1..6 do
         assert {:error, "Too many database timeouts"} =
-                 PostgresCdcRls.handle_after_connect({:manager_pid, self()}, postgres_extension, %{}, external_id)
+                 PostgresCdcRls.handle_after_connect({self(), self()}, postgres_extension, %{}, external_id)
       end
 
       rate = Realtime.Tenants.subscription_errors_per_second_rate(external_id, 4)
@@ -245,7 +245,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
       reject(&Subscriptions.create/5)
 
       assert {:error, "Too many database timeouts"} =
-               PostgresCdcRls.handle_after_connect({:manager_pid, self()}, postgres_extension, %{}, external_id)
+               PostgresCdcRls.handle_after_connect({self(), self()}, postgres_extension, %{}, external_id)
     end
   end
 

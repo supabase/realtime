@@ -72,8 +72,10 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
     test "handles prepare_replication failure and retries", %{args: args} do
       tenant_id = args["id"]
 
-      stub(Replications, :prepare_replication, fn _, _ -> {:ok, %Postgrex.Result{}} end)
-      expect(Replications, :prepare_replication, fn _, _ -> {:error, "prepare failed"} end)
+      stub(Replications, :prepare_replication, fn _, _ ->
+        {:ok, %Postgrex.Result{command: :create_replication_slot, num_rows: 0, connection_id: 1, messages: []}}
+      end)
+      expect(Replications, :prepare_replication, fn _, _ -> {:error, %Postgrex.Error{message: "prepare failed"}} end)
 
       start_link_supervised!({Poller, args})
 
@@ -87,7 +89,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
     end
 
     test "gives up and stops when prepare_replication keeps failing", %{args: args} do
-      stub(Replications, :prepare_replication, fn _, _ -> {:error, "prepare failed"} end)
+      stub(Replications, :prepare_replication, fn _, _ -> {:error, %Postgrex.Error{message: "prepare failed"}} end)
 
       pid = start_supervised!({Poller, args}, restart: :temporary)
       ref = Process.monitor(pid)
@@ -503,7 +505,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
       assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, _}, 500
 
       expect(Subscriptions, :fetch_publication_tables, fn _, _ -> {:ok, %{}} end)
-      expect(Replications, :drop_replication_slot, fn _, _ -> {:error, :boom} end)
+      expect(Replications, :drop_replication_slot, fn _, _ -> {:error, %Postgrex.Error{message: "boom"}} end)
 
       ref = Process.monitor(pid)
       send(pid, :check_oids)

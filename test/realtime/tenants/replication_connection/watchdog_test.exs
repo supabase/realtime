@@ -160,7 +160,7 @@ defmodule Realtime.Tenants.ReplicationConnection.WatchdogTest do
     end
 
     test "continues when slot lag is below threshold", %{fake_pid: fake_pid} do
-      stub(Connect, :get_status, fn _tenant_id -> {:ok, :fake_conn} end)
+      stub(Connect, :get_status, fn _tenant_id -> {:ok, self()} end)
       stub(Database, :check_replication_slot_lag, fn _conn, _slot -> :ok end)
 
       watchdog_pid =
@@ -182,7 +182,7 @@ defmodule Realtime.Tenants.ReplicationConnection.WatchdogTest do
     end
 
     test "stops with :slot_lag_too_high when lag exceeds threshold", %{fake_pid: fake_pid} do
-      stub(Connect, :get_status, fn _tenant_id -> {:ok, :fake_conn} end)
+      stub(Connect, :get_status, fn _tenant_id -> {:ok, self()} end)
       stub(Database, :check_replication_slot_lag, fn _conn, _slot -> {:error, :lag_too_high} end)
 
       logs =

@@ -51,9 +51,9 @@ defmodule Forum.Muster do
           ring_nodes: [node()],
           peers: non_neg_integer(),
           owed_snapshots: non_neg_integer(),
-          applied_snapshot_seq: %{node() => {integer(), pid()}},
+          applied_snapshot_seq: %{optional(node()) => {integer(), pid()}},
           occupancy_row_count: non_neg_integer(),
-          occupancy_rows_by_node: %{node() => non_neg_integer()},
+          occupancy_rows_by_node: %{optional(node()) => non_neg_integer()},
           group_state_counts: group_state_counts()
         }
 

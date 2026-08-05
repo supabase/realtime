@@ -301,7 +301,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
 
       RateCounter
       |> stub(:new, fn _ -> {:ok, nil} end)
-      |> stub(:get, fn ^events_per_second_rate -> {:ok, %RateCounter{avg: tenant.max_events_per_second + 1}} end)
+      |> stub(:get, fn ^events_per_second_rate -> {:ok, %RateCounter{avg: tenant.max_events_per_second + 1.0}} end)
 
       reject(&TenantBroadcaster.pubsub_broadcast/5)
 
@@ -317,7 +317,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
       RateCounter
       |> stub(:new, fn _ -> {:ok, nil} end)
       |> stub(:get, fn ^events_per_second_rate ->
-        {:ok, %RateCounter{avg: current_rate}}
+        {:ok, %RateCounter{avg: current_rate * 1.0}}
       end)
 
       expect(GenCounter, :add, fn ^broadcast_events_key -> :ok end)
@@ -379,7 +379,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
 
       RateCounter
       |> stub(:new, fn _ -> {:ok, nil} end)
-      |> stub(:get, fn ^events_per_second_rate -> {:ok, %RateCounter{avg: 0}} end)
+      |> stub(:get, fn ^events_per_second_rate -> {:ok, %RateCounter{avg: 0.0}} end)
 
       expect(Connect, :lookup_or_start_connection, fn _ -> {:error, :tenant_database_unavailable} end)
 
@@ -420,8 +420,8 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
       RateCounter
       |> stub(:new, fn _ -> {:ok, nil} end)
       |> stub(:get, fn
-        ^events_per_second_rate -> {:ok, %RateCounter{avg: 0}}
-        _ -> {:ok, %RateCounter{avg: 0}}
+        ^events_per_second_rate -> {:ok, %RateCounter{avg: 0.0}}
+        _ -> {:ok, %RateCounter{avg: 0.0}}
       end)
 
       expect(GenCounter, :add, fn ^broadcast_events_key -> :ok end)

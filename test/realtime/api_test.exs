@@ -67,6 +67,7 @@ defmodule Realtime.ApiTest do
 
       expect(Realtime.Tenants.Cache, :global_cache_update, fn tenant ->
         assert tenant.external_id == external_id
+        :ok
       end)
 
       valid_attrs = %{
@@ -236,6 +237,7 @@ defmodule Realtime.ApiTest do
 
       expect(Realtime.Tenants.Cache, :global_cache_update, fn tenant ->
         assert tenant.max_concurrent_users == 101
+        :ok
       end)
 
       assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{max_concurrent_users: 101})
@@ -310,6 +312,7 @@ defmodule Realtime.ApiTest do
     test "valid data and change to tenant data will refresh cache", %{tenants: [tenant | _]} do
       expect(Realtime.Tenants.Cache, :global_cache_update, fn tenant ->
         assert tenant.name == "new_name"
+        :ok
       end)
 
       assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{name: "new_name"})
@@ -323,10 +326,12 @@ defmodule Realtime.ApiTest do
     test "change to max_events_per_second publishes update to respective rate counters", %{tenants: [tenant | _]} do
       expect(RateCounter, :publish_update, fn key ->
         assert key == Realtime.Tenants.events_per_second_key(tenant.external_id)
+        :ok
       end)
 
       expect(RateCounter, :publish_update, fn key ->
         assert key == Realtime.Tenants.db_events_per_second_key(tenant.external_id)
+        :ok
       end)
 
       reject(&RateCounter.publish_update/1)
@@ -337,6 +342,7 @@ defmodule Realtime.ApiTest do
     test "change to max_joins_per_second publishes update to rate counters", %{tenants: [tenant | _]} do
       expect(RateCounter, :publish_update, fn key ->
         assert key == Realtime.Tenants.joins_per_second_key(tenant.external_id)
+        :ok
       end)
 
       reject(&RateCounter.publish_update/1)
@@ -347,6 +353,7 @@ defmodule Realtime.ApiTest do
     test "change to max_presence_events_per_second publishes update to rate counters", %{tenants: [tenant | _]} do
       expect(RateCounter, :publish_update, fn key ->
         assert key == Realtime.Tenants.presence_events_per_second_key(tenant.external_id)
+        :ok
       end)
 
       reject(&RateCounter.publish_update/1)
@@ -377,14 +384,17 @@ defmodule Realtime.ApiTest do
 
       expect(RateCounter, :publish_update, fn key ->
         assert key == Realtime.Tenants.connect_errors_per_second_key(tenant.external_id)
+        :ok
       end)
 
       expect(RateCounter, :publish_update, fn key ->
         assert key == Realtime.Tenants.subscription_errors_per_second_key(tenant.external_id)
+        :ok
       end)
 
       expect(RateCounter, :publish_update, fn key ->
         assert key == Realtime.Tenants.authorization_errors_per_second_key(tenant.external_id)
+        :ok
       end)
 
       reject(&RateCounter.publish_update/1)
@@ -410,7 +420,7 @@ defmodule Realtime.ApiTest do
       assert Api.preload_counters(nil) == nil
 
       expect(GenCounter, :get, fn _ -> 1 end)
-      expect(RateCounter, :get, fn _ -> {:ok, %RateCounter{avg: 2}} end)
+      expect(RateCounter, :get, fn _ -> {:ok, %RateCounter{avg: 2.0}} end)
       counters = Api.preload_counters(tenant)
       assert counters.events_per_second_rolling == 2
       assert counters.events_per_second_now == 1

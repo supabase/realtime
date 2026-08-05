@@ -26,7 +26,12 @@ defmodule RealtimeWeb.TenantRateLimitersTest do
     end
 
     test "max joins is exceeded", %{tenant: tenant} do
-      expect(Realtime.RateCounter, :get, fn _ -> {:ok, %{limit: %{triggered: true}}} end)
+      expect(Realtime.RateCounter, :get, fn _ ->
+        {:ok,
+         %Realtime.RateCounter{
+           limit: %{log: true, value: 0, measurement: :sum, triggered: true, log_fn: fn -> :ok end}
+         }}
+      end)
 
       assert TenantRateLimiters.check_tenant(tenant) == {:error, :too_many_joins}
     end

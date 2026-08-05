@@ -172,7 +172,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
     :exit, reason -> log_error("SubscriptionDeletionFailed", {:exit, reason})
   end
 
-  @spec delete_multi(conn(), [Ecto.UUID.t()]) ::
+  @spec delete_multi(conn(), [Ecto.UUID.t() | Ecto.UUID.raw()]) ::
           {:ok, Postgrex.Result.t()} | {:error, Exception.t()}
   def delete_multi(conn, ids) do
     Logger.debug("Delete multi ids subscriptions")
@@ -208,11 +208,9 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   @spec fetch_publication_tables(conn(), String.t()) ::
           {:ok,
            %{
-             {<<_::1>>} => [integer()],
-             {String.t()} => [integer()],
-             {String.t(), String.t()} => [integer()]
-           }
-           | %{}}
+             optional({String.t()}) => [integer()],
+             optional({String.t(), String.t()}) => [integer()]
+           }}
           | {:error, term()}
   def fetch_publication_tables(conn, publication) do
     sql = "select

@@ -4,4 +4,4 @@ ExUnit.start(capture_log: true)
 
 # Copy the real messaging adapter so tests can stub its transport functions
 # (`call/6`, `send/3`) with Mimic instead of a bespoke recording adapter.
-Mimic.copy(Forum.Adapter.ErlDist)
+Mimic.copy(Forum.Adapter.ErlDist, type_check: true)

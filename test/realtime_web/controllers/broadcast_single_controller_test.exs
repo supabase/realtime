@@ -448,10 +448,10 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       |> stub(:get, fn rate ->
         case rate do
           ^events_per_second_rate ->
-            {:ok, %RateCounter{avg: tenant.max_events_per_second + 1}}
+            {:ok, %RateCounter{avg: tenant.max_events_per_second + 1.0}}
 
           _ ->
-            {:ok, %RateCounter{avg: 0}}
+            {:ok, %RateCounter{avg: 0.0}}
         end
       end)
 

@@ -354,7 +354,7 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
       Subscriptions.create(conn, publication, [pg_change_params], pid, subscriber)
       :sys.get_state(pid)
 
-      stub(Subscriptions, :delete_multi, fn _conn, _ids -> {:error, :delete_failed} end)
+      stub(Subscriptions, :delete_multi, fn _conn, _ids -> {:error, %RuntimeError{message: "delete_failed"}} end)
 
       send(subscriber, :stop)
       Process.sleep(100)
