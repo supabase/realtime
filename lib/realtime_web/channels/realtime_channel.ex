@@ -89,6 +89,7 @@ defmodule RealtimeWeb.RealtimeChannel do
          socket = assign_authorization_context(socket, sub_topic, claims),
          {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
          {:ok, socket} <- maybe_assign_policies(sub_topic, db_conn, socket),
+         :ok <- can_replay?(params["config"], sub_topic, socket),
          {:ok, replayed_message_ids} <-
            maybe_replay_messages(params["config"], sub_topic, db_conn, tenant_id, socket.assigns.private?) do
       tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, !socket.assigns.private?)
@@ -107,6 +108,12 @@ defmodule RealtimeWeb.RealtimeChannel do
           %Policies{presence: %{read: read}} -> read
         end
 
+      broadcast_read? =
+        case socket.assigns.policies do
+          nil -> true
+          %Policies{broadcast: %{read: read}} -> read
+        end
+
       # fastlane subscription
       metadata =
         MessageDispatcher.fastlane_metadata(
@@ -116,7 +123,8 @@ defmodule RealtimeWeb.RealtimeChannel do
           log_level,
           tenant_id,
           replayed_message_ids,
-          presence_read?
+          presence_read?,
+          broadcast_read?
         )
 
       RealtimeWeb.Endpoint.subscribe(tenant_topic, metadata: metadata)
@@ -350,7 +358,10 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  def handle_info(_msg, %{assigns: %{policies: %Policies{broadcast: %BroadcastPolicies{read: false}}}} = socket) do
+  def handle_info(
+        %{event: "broadcast"},
+        %{assigns: %{policies: %Policies{broadcast: %BroadcastPolicies{read: false}}}} = socket
+      ) do
     Logger.warning("Broadcast message ignored")
     {:noreply, socket}
   end
@@ -989,9 +1000,11 @@ defmodule RealtimeWeb.RealtimeChannel do
            ) do
       socket = assign(socket, :policies, policies)
 
-      if match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, socket.assigns.policies),
-        do: {:error, :unauthorized, "You do not have permissions to read from this Channel topic: #{topic}"},
-        else: {:ok, socket}
+      %Policies{broadcast: %{read: broadcast_read?}, presence: %{read: presence_read?}} = socket.assigns.policies
+
+      if broadcast_read? || presence_read?,
+        do: {:ok, socket},
+        else: {:error, :unauthorized, "You do not have permissions to read from this Channel topic: #{topic}"}
     else
       {:error, :increase_connection_pool} ->
         {:error, :increase_connection_pool}
@@ -1010,6 +1023,13 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp maybe_assign_policies(_, _, socket), do: {:ok, assign(socket, policies: nil)}
+
+  defp can_replay?(%{"broadcast" => %{"replay" => _}}, topic, %{
+         assigns: %{policies: %Policies{broadcast: %BroadcastPolicies{read: false}}}
+       }),
+       do: {:error, :unauthorized, "You do not have permissions to read from this Channel topic: #{topic}"}
+
+  defp can_replay?(_config, _topic, _socket), do: :ok
 
   # Detects read permissions that were granted under the previous token but are no longer allowed
   # after re-evaluating the policies with the new token. When that happens we disconnect the channel.

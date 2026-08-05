@@ -127,6 +127,77 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
       assert get_in(join_payload, ["t"]) == payload.payload.t
     end
 
+    @tag policies: [:authenticated_read_presence, :authenticated_write_presence]
+    test "private presence with presence only permissions can join, track and never sees broadcasts",
+         %{tenant: tenant, topic: topic, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      {service_role_socket, _} = get_connection(tenant, serializer, role: "service_role")
+      topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, topic, %{config: %{presence: %{key: "", enabled: true}, private: true}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+      assert_receive %Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
+
+      WebsocketClient.join(service_role_socket, topic, %{config: %{private: true}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+
+      payload = %{name: "realtime_presence_96", t: 1814.7000000029802}
+      WebsocketClient.send_event(socket, topic, "presence", %{type: "presence", event: "TRACK", payload: payload})
+
+      assert_receive %Message{event: "presence_diff", payload: %{"joins" => joins, "leaves" => %{}}, topic: ^topic}, 500
+      join_payload = joins |> Map.values() |> hd() |> get_in(["metas"]) |> hd()
+      assert get_in(join_payload, ["name"]) == payload.name
+
+      broadcast = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+
+      # Broadcast write is denied, so service_role never sees it either
+      WebsocketClient.send_event(socket, topic, "broadcast", broadcast)
+      refute_receive %Message{event: "broadcast", topic: ^topic}, 500
+
+      # Broadcast read is denied, so the presence only member never sees service_role's message
+      WebsocketClient.send_event(service_role_socket, topic, "broadcast", broadcast)
+      refute_receive %Message{event: "broadcast", topic: ^topic}, 500
+    end
+
+    @tag policies: [:authenticated_read_presence]
+    test "private presence with presence read only permissions receives presence but can't track or read broadcasts",
+         %{tenant: tenant, topic: topic, serializer: serializer} do
+      parent = self()
+      other_inbox = spawn_link(fn -> forward_frames(parent, :other) end)
+
+      topic = "realtime:#{topic}"
+      config = fn key -> %{presence: %{key: key, enabled: true}, private: true} end
+
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+
+      {:ok, other_token} = token_valid(tenant, "service_role")
+
+      {:ok, other} =
+        WebsocketClient.connect(other_inbox, uri(tenant, serializer), serializer, [{"x-api-key", other_token}])
+
+      WebsocketClient.join(socket, topic, %{config: config.("authenticated")})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+      assert_receive %Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
+
+      # Presence write is denied, so no diff is produced
+      track = fn payload -> %{type: "presence", event: "TRACK", payload: payload} end
+      WebsocketClient.send_event(socket, topic, "presence", track.(%{name: "denied"}))
+      refute_receive %Message{event: "presence_diff", topic: ^topic}, 500
+
+      # Presence tracked by an authorized member is received
+      WebsocketClient.join(other, topic, %{config: config.("service_role")})
+      WebsocketClient.send_event(other, topic, "presence", track.(%{name: "service_role"}))
+
+      assert_receive %Message{event: "presence_diff", payload: %{"joins" => joins, "leaves" => %{}}, topic: ^topic}, 500
+      meta = joins |> get_in(["service_role", "metas"]) |> hd()
+      assert get_in(meta, ["name"]) == "service_role"
+
+      # Broadcast read is denied
+      broadcast = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+      WebsocketClient.send_event(other, topic, "broadcast", broadcast)
+      refute_receive %Message{event: "broadcast", topic: ^topic}, 500
+    end
+
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence],
          mode: :distributed
     test "private presence with read and write permissions will be able to track and receive presence changes using a remote node",
@@ -230,7 +301,7 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
       {:ok, other} =
         WebsocketClient.connect(other_inbox, other_uri, serializer, [{"x-api-key", other_token}])
 
-      # Both join successfully: the join gate only enforces broadcast.read.
+      # Both join successfully: either read grant is enough for the join gate.
       WebsocketClient.join(other, topic, %{config: config})
       assert_receive {:other, %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}}, 500
       # Should not receive presence_state

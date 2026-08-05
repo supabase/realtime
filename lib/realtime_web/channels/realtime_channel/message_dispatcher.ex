@@ -14,12 +14,15 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
         log_level,
         tenant_id,
         replayed_message_ids \\ MapSet.new(),
-        presence_read? \\ true
+        presence_read? \\ true,
+        broadcast_read? \\ true
       ) do
-    {:rc_fastlane, fastlane_pid, serializer, topic, log_level, tenant_id, replayed_message_ids, presence_read?}
+    {:rc_fastlane, fastlane_pid, serializer, topic, log_level, tenant_id, replayed_message_ids, presence_read?,
+     broadcast_read?}
   end
 
   @presence_diff "presence_diff"
+  @broadcast "broadcast"
 
   @doc """
   This dispatch function caches encoded messages if fastlane is used
@@ -46,9 +49,10 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
         {pid, _}, {cache, count} when pid == from ->
           {cache, count}
 
-        # Subscriber is authorized for broadcast.read but denied presence.read: withhold the
-        # presence_diff. Mirrors the can_read_presence?/1 gate on the presence_state push.
-        {_pid, {:rc_fastlane, _fastlane_pid, _serializer, _join_topic, _log_level, _tenant_id, _replayed, false}},
+        # Subscriber is denied presence.read: withhold the presence_diff. Mirrors the
+        # can_read_presence?/1 gate on the presence_state push.
+        {_pid,
+         {:rc_fastlane, _fastlane_pid, _serializer, _join_topic, _log_level, _tenant_id, _replayed, false, _bcast}},
         {cache, count} ->
           {cache, count}
 
@@ -56,12 +60,13 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
         # process so it can consult presence.read at delivery time. Wrapped in a
         # tuple so it is handled by RealtimeChannel.handle_info rather than intercepted and pushed by
         # Phoenix.Channel.Server's built-in %Broadcast{} handling.
-        {pid, {:rc_fastlane, _fastlane_pid, _serializer, _join_topic, _log_level, _tenant_id, _replayed, nil}},
+        {pid, {:rc_fastlane, _fastlane_pid, _serializer, _join_topic, _log_level, _tenant_id, _replayed, nil, _bcast}},
         {cache, count} ->
           send(pid, {:authorize_presence_diff, msg})
           {cache, count}
 
-        {_pid, {:rc_fastlane, fastlane_pid, serializer, join_topic, log_level, tenant_id, _replayed_message_ids, true}},
+        {_pid,
+         {:rc_fastlane, fastlane_pid, serializer, join_topic, log_level, tenant_id, _replayed_message_ids, true, _bcast}},
         {cache, count} ->
           maybe_log(log_level, join_topic, msg, tenant_id)
 
@@ -81,6 +86,7 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
 
   def dispatch(subscribers, from, msg) do
     message_id = message_id(msg)
+    broadcast? = broadcast?(msg)
 
     _ =
       Enum.reduce(subscribers, %{}, fn
@@ -89,10 +95,9 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
 
         {pid,
          {:rc_fastlane, fastlane_pid, serializer, join_topic, log_level, tenant_id, replayed_message_ids,
-          _presence_read?}},
+          _presence_read?, broadcast_read?}},
         cache ->
-          if already_replayed?(message_id, replayed_message_ids) do
-            # skip already replayed message
+          if (broadcast? and broadcast_read? != true) or already_replayed?(message_id, replayed_message_ids) do
             cache
           else
             send(pid, :update_rate_counter)
@@ -109,6 +114,10 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
 
     :ok
   end
+
+  defp broadcast?(%UserBroadcast{}), do: true
+  defp broadcast?(%Broadcast{event: @broadcast}), do: true
+  defp broadcast?(_msg), do: false
 
   defp maybe_log(:info, join_topic, msg, tenant_id) when is_struct(msg) do
     log = "Received message on #{join_topic} with payload: #{inspect(msg, pretty: true)}"
@@ -160,7 +169,7 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
 
   defp fastlane!(serializer, msg), do: {:ok, serializer.fastlane!(msg)}
 
-  defp tenant_id([{_pid, {:rc_fastlane, _, _, _, _, tenant_id, _, _}} | _]), do: tenant_id
+  defp tenant_id([{_pid, {:rc_fastlane, _, _, _, _, tenant_id, _, _, _}} | _]), do: tenant_id
   defp tenant_id(_), do: nil
 
   defp increment_presence_counter(tenant_id, "presence_diff", count) when is_binary(tenant_id) do
