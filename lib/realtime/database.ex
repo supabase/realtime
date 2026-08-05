@@ -101,11 +101,18 @@ defmodule Realtime.Database do
   instant feedback when the database is unreachable. Once validated, the probe is
   torn down and the durable pool that Connect keeps around is started with
   `backoff_type: :rand_exp`, so a momentary blip reconnects instead of crashing the pool.
-  """
-  @spec check_tenant_connection(Tenant.t() | nil) :: {:error, atom()} | {:ok, pid(), non_neg_integer()}
-  def check_tenant_connection(nil), do: {:error, :tenant_not_found}
 
-  def check_tenant_connection(tenant) do
+  `connection_listeners` is forwarded to the durable pool (see DBConnection's
+  `:connection_listeners`) so the caller receives `{:connected, pid, tag}` /
+  `{:disconnected, pid, tag}` messages as the pool's connections come and go. The
+  probe never carries listeners.
+  """
+  @spec check_tenant_connection(Tenant.t() | nil, [pid()] | {[pid()], term()}) ::
+          {:error, atom()} | {:ok, pid(), non_neg_integer()}
+  def check_tenant_connection(tenant, connection_listeners \\ [])
+  def check_tenant_connection(nil, _connection_listeners), do: {:error, :tenant_not_found}
+
+  def check_tenant_connection(tenant, connection_listeners) do
     tenant
     |> then(&PostgresCdc.filter_settings(@cdc, &1.extensions))
     |> then(fn settings ->
@@ -119,7 +126,7 @@ defmodule Realtime.Database do
         requirement = ceil(required_pool * @available_connection_factor)
 
         if requirement < available_connections do
-          connect_durable_pool(settings, migrations_ran)
+          connect_durable_pool(settings, migrations_ran, connection_listeners)
         else
           msg = "Only #{available_connections} available connections. At least #{requirement} connections are required."
           log_error("DatabaseLackOfConnections", msg)
@@ -135,8 +142,8 @@ defmodule Realtime.Database do
 
   # Starts the durable pool Connect holds onto. `:rand_exp` backoff lets each
   # connection ride out momentary blips by reconnecting on its own.
-  defp connect_durable_pool(settings, migrations_ran) do
-    case connect_db(settings) do
+  defp connect_durable_pool(settings, migrations_ran, connection_listeners) do
+    case connect_db(settings, connection_listeners: connection_listeners) do
       {:ok, conn} ->
         {:ok, conn, migrations_ran}
 
@@ -264,8 +271,8 @@ defmodule Realtime.Database do
       {:error, {:exit, reason}}
   end
 
-  @spec connect_db(__MODULE__.t()) :: {:ok, pid()} | {:error, any()}
-  def connect_db(%__MODULE__{} = settings) do
+  @spec connect_db(__MODULE__.t(), keyword()) :: {:ok, pid()} | {:error, any()}
+  def connect_db(%__MODULE__{} = settings, extra_opts \\ []) do
     %__MODULE__{
       hostname: hostname,
       port: port,
@@ -306,6 +313,7 @@ defmodule Realtime.Database do
     |> then(fn opts ->
       if max_restarts, do: Keyword.put(opts, :max_restarts, max_restarts), else: opts
     end)
+    |> Keyword.merge(extra_opts)
     |> Postgrex.start_link()
   end
 

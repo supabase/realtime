@@ -30,6 +30,14 @@ defmodule Realtime.Tenants.Connect do
   @rpc_timeout_default 30_000
   @check_connected_user_interval_default :timer.seconds(60)
   @connected_users_bucket_shutdown [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+  # How long the database pool may stay disconnected before we give up and stop
+  # Connect. The durable pool reconnects forever with backoff, so without a bound
+  # a permanent failure (e.g. rotated credentials, dropped database) would retry
+  # silently forever. Stopping lets the next request re-run the probe and surface
+  # a real error instead.
+  @max_db_recovery_ms :timer.minutes(10)
+
   @type t :: %__MODULE__{
           tenant_id: binary(),
           db_conn_reference: reference(),
@@ -39,6 +47,7 @@ defmodule Realtime.Tenants.Connect do
           replication_start_task: reference() | nil,
           backoff: Backoff.t(),
           replication_recovery_started_at: non_neg_integer() | nil,
+          db_recovery_started_at: non_neg_integer() | nil,
           check_connected_user_interval: non_neg_integer(),
           connected_users_bucket: list(non_neg_integer()),
           check_connect_region_interval: non_neg_integer(),
@@ -53,6 +62,7 @@ defmodule Realtime.Tenants.Connect do
             replication_start_task: nil,
             backoff: nil,
             replication_recovery_started_at: nil,
+            db_recovery_started_at: nil,
             check_connected_user_interval: nil,
             connected_users_bucket: [1],
             check_connect_region_interval: nil,
@@ -387,6 +397,35 @@ defmodule Realtime.Tenants.Connect do
     {:stop, :shutdown, state}
   end
 
+  # Database pool connection listener events (registered in CheckConnection).
+  # A pool connection came up: the pool is usable again, close any recovery window.
+  def handle_info({:connected, _conn_pid, _tag}, state), do: {:noreply, close_db_recovery(state)}
+
+  # A pool connection dropped. The pool reconnects on its own with backoff, but we
+  # open a bounded recovery window so a permanent failure doesn't retry forever.
+  def handle_info({:disconnected, _conn_pid, _tag}, state), do: {:noreply, open_db_recovery(state)}
+
+  # stale timer: window already closed (a reconnect cleared started_at) → ignore it
+  def handle_info(:db_recovery_timeout, %{db_recovery_started_at: nil} = state), do: {:noreply, state}
+
+  # Recovery window elapsed without the pool reconnecting: give up so the tenant
+  # is re-evaluated from scratch on the next request.
+  def handle_info(:db_recovery_timeout, state) do
+    elapsed = System.monotonic_time(:millisecond) - state.db_recovery_started_at
+
+    if elapsed >= @max_db_recovery_ms do
+      log_warning(
+        "DatabaseConnectionRecoveryWindowExceeded",
+        "Database pool could not reconnect within #{@max_db_recovery_ms}ms, terminating connection"
+      )
+
+      {:stop, :shutdown, state}
+    else
+      Process.send_after(self(), :db_recovery_timeout, @max_db_recovery_ms - elapsed)
+      {:noreply, state}
+    end
+  end
+
   # Handle replication connection termination
   def handle_info(
         {:DOWN, replication_connection_reference, _, _, _},
@@ -533,6 +572,25 @@ defmodule Realtime.Tenants.Connect do
   defp tenant_suspended?(_), do: :ok
 
   defp rebalance_check_interval_in_ms(), do: Application.fetch_env!(:realtime, :rebalance_check_interval_in_ms)
+
+  # Opens the database pool recovery window on the first disconnect. Edge-triggered:
+  # a later disconnect while already open keeps the original start time, and any
+  # reconnect (`close_db_recovery/1`) clears it. Only a full window with no reconnect
+  # in between stops Connect.
+  defp open_db_recovery(%{db_recovery_started_at: nil} = state) do
+    log_warning("DatabaseConnectionDown", "Database pool connection lost, recovery window opened")
+    Process.send_after(self(), :db_recovery_timeout, @max_db_recovery_ms)
+    %{state | db_recovery_started_at: System.monotonic_time(:millisecond)}
+  end
+
+  defp open_db_recovery(state), do: state
+
+  defp close_db_recovery(%{db_recovery_started_at: nil} = state), do: state
+
+  defp close_db_recovery(state) do
+    Logger.info("Database pool reconnected, recovery window closed")
+    %{state | db_recovery_started_at: nil}
+  end
 
   defp open_replication_recovery(%{tenant_id: tenant_id} = state) do
     update_syn_replication_conn(tenant_id, nil)
