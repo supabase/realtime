@@ -77,6 +77,24 @@ defmodule Realtime.DatabaseTest do
                assert {:error, :tenant_db_too_many_connections} = Database.check_tenant_connection(tenant)
              end) =~ ~r/Only \d+ available connections\. At least 125 connections are required/
     end
+
+    @tag db_pool: 3
+    test "durable pool opens the configured number of realtime_connect connections", %{tenant: tenant} do
+      assert {:ok, conn, _migrations_ran} = Database.check_tenant_connection(tenant)
+
+      # Postgrex opens the pool connections asynchronously, so give it a moment
+      # to bring all of them up.
+      assert eventually(fn ->
+               %{rows: [[count]]} =
+                 Postgrex.query!(
+                   conn,
+                   "SELECT count(*)::int FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
+                   []
+                 )
+
+               count == 3
+             end)
+    end
   end
 
   describe "replication_slot_teardown/1" do

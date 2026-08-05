@@ -50,6 +50,85 @@ defmodule Realtime.Tenants.ConnectTest do
     end
   end
 
+  describe "database connection resilience" do
+    test "a momentary database blip does not tear down the pool or Connect", %{tenant: tenant} do
+      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      assert Connect.ready?(tenant.external_id)
+      pid = Connect.whereis(tenant.external_id)
+
+      # Terminate the pool's backend connections from a separate connection to
+      # simulate a momentary blip. The durable pool uses :rand_exp backoff so it
+      # reconnects instead of crashing (previously :stop + max_restarts: 0 would
+      # bring the whole pool down and stop Connect).
+      {:ok, killer} = Database.connect(tenant, "realtime_test", :stop)
+
+      Postgrex.query!(
+        killer,
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
+        []
+      )
+
+      GenServer.stop(killer)
+
+      # Neither the pool nor Connect should go down over the blip
+      refute_process_down(db_conn, 1000)
+      assert Process.alive?(pid)
+
+      # And the pool recovers so queries succeed again
+      assert wait_until(fn -> match?({:ok, _}, Postgrex.query(db_conn, "SELECT 1", [])) end)
+      assert Process.alive?(pid)
+    end
+
+    test "a real pool disconnect opens the recovery window and reconnecting closes it", %{tenant: tenant} do
+      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      assert Connect.ready?(tenant.external_id)
+      pid = Connect.whereis(tenant.external_id)
+
+      {:ok, killer} = Database.connect(tenant, "realtime_test", :stop)
+
+      # The window opens on the disconnect and closes again once the pool reconnects.
+      # Since the database itself is healthy, reconnection is near-instant, so we
+      # assert on the logs rather than trying to observe the transient open state.
+      log =
+        capture_log(fn ->
+          Postgrex.query!(
+            killer,
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
+            []
+          )
+
+          GenServer.stop(killer)
+
+          assert wait_until(fn -> match?({:ok, _}, Postgrex.query(db_conn, "SELECT 1", [])) end)
+          assert wait_until(fn -> :sys.get_state(pid).db_recovery_started_at == nil end)
+        end)
+
+      assert log =~ "recovery window opened"
+      assert log =~ "recovery window closed"
+      assert Process.alive?(pid)
+    end
+
+    test "terminates Connect when the pool stays disconnected past the recovery window", %{tenant: tenant} do
+      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      assert Connect.ready?(tenant.external_id)
+      pid = Connect.whereis(tenant.external_id)
+      ref = Process.monitor(pid)
+
+      # Simulate a disconnect that opened the window longer ago than it allows
+      :sys.replace_state(pid, fn state ->
+        %{state | db_recovery_started_at: System.monotonic_time(:millisecond) - :timer.hours(1)}
+      end)
+
+      log =
+        capture_log(fn ->
+          send(pid, :db_recovery_timeout)
+          assert_receive {:DOWN, ^ref, :process, ^pid, _}, 2000
+        end)
+
+      assert log =~ "DatabaseConnectionRecoveryWindowExceeded"
+    end
+  end
+
   describe "list_tenants/0" do
     test "lists all tenants with active connections", %{tenant: tenant1} do
       tenant2 = Containers.checkout_tenant(run_migrations: true)
@@ -98,9 +177,9 @@ defmodule Realtime.Tenants.ConnectTest do
       parent = self()
 
       # Let's slow down Connect starting
-      expect(Database, :check_tenant_connection, fn t ->
+      expect(Database, :check_tenant_connection, fn t, listeners ->
         :timer.sleep(1000)
-        call_original(Database, :check_tenant_connection, [t])
+        call_original(Database, :check_tenant_connection, [t, listeners])
       end)
 
       connect = fn -> send(parent, Connect.lookup_or_start_connection(tenant.external_id)) end
@@ -125,9 +204,9 @@ defmodule Realtime.Tenants.ConnectTest do
       parent = self()
 
       # Let's slow down Connect starting
-      expect(Database, :check_tenant_connection, fn t ->
+      expect(Database, :check_tenant_connection, fn t, listeners ->
         Process.sleep(15500)
-        call_original(Database, :check_tenant_connection, [t])
+        call_original(Database, :check_tenant_connection, [t, listeners])
       end)
 
       connect = fn -> send(parent, Connect.lookup_or_start_connection(tenant.external_id)) end
@@ -168,9 +247,9 @@ defmodule Realtime.Tenants.ConnectTest do
       parent = self()
 
       # Let's slow down Connect starting
-      expect(Database, :check_tenant_connection, fn t ->
+      expect(Database, :check_tenant_connection, fn t, listeners ->
         :timer.sleep(1000)
-        call_original(Database, :check_tenant_connection, [t])
+        call_original(Database, :check_tenant_connection, [t, listeners])
       end)
 
       connect = fn -> send(parent, Connect.lookup_or_start_connection(tenant.external_id)) end
@@ -422,8 +501,8 @@ defmodule Realtime.Tenants.ConnectTest do
       stale_count = tenant.migrations_ran - 5
       parent = self()
 
-      expect(Database, :check_tenant_connection, fn t ->
-        {:ok, conn, _actual_count} = call_original(Database, :check_tenant_connection, [t])
+      expect(Database, :check_tenant_connection, fn t, listeners ->
+        {:ok, conn, _actual_count} = call_original(Database, :check_tenant_connection, [t, listeners])
         {:ok, conn, stale_count}
       end)
 
@@ -664,9 +743,9 @@ defmodule Realtime.Tenants.ConnectTest do
       {:ok, tenant} = update_extension(tenant, extension)
       parent = self()
 
-      expect(Database, :check_tenant_connection, fn t ->
+      expect(Database, :check_tenant_connection, fn t, listeners ->
         :timer.sleep(1000)
-        call_original(Database, :check_tenant_connection, [t])
+        call_original(Database, :check_tenant_connection, [t, listeners])
       end)
 
       connect = fn -> send(parent, Connect.lookup_or_start_connection(tenant.external_id)) end
