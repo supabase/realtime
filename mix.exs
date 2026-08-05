@@ -61,7 +61,7 @@ defmodule Realtime.MixProject do
       {:ecto_sql, "~> 3.11"},
       {:ecto_psql_extras, "~> 0.8"},
       {:postgrex, "~> 0.22"},
-      {:db_connection, github: "elixir-ecto/db_connection", branch: "master", override: true},
+      {:db_connection, "~> 2.10"},
       {:phoenix_html, "~> 3.2"},
       {:phoenix_live_view, "~> 0.18"},
       {:phoenix_live_reload, "~> 1.2", only: :dev},
