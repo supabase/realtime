@@ -95,6 +95,12 @@ defmodule Realtime.Database do
 
   @doc """
   Checks if the Tenant CDC extension information is properly configured and that we're able to query against the tenant database.
+
+  Connectivity and readiness are validated with a short-lived probe pool of a
+  single connection using `backoff_type: :stop` and `max_restarts: 0`, so we get
+  instant feedback when the database is unreachable. Once validated, the probe is
+  torn down and the durable pool that Connect keeps around is started with
+  `backoff_type: :rand_exp`, so a momentary blip reconnects instead of crashing the pool.
   """
   @spec check_tenant_connection(Tenant.t() | nil) :: {:error, atom()} | {:ok, pid(), non_neg_integer()}
   def check_tenant_connection(nil), do: {:error, :tenant_not_found}
@@ -105,18 +111,18 @@ defmodule Realtime.Database do
     |> then(fn settings ->
       required_pool = tenant_pool_requirements(settings)
 
-      with {:ok, base_settings} <- from_settings(settings, "realtime_connect", :stop),
-           check_settings = %{base_settings | max_restarts: 0},
-           {:ok, conn} <- connect_db(check_settings),
-           {:ok, [available_connections, migrations_ran]} <- query_connection_info(conn) do
+      with {:ok, probe_settings} <- from_settings(settings, "realtime_connect_probe", :stop),
+           {:ok, probe_conn} <- connect_db(%{probe_settings | max_restarts: 0}),
+           {:ok, [available_connections, migrations_ran]} <- query_connection_info(probe_conn),
+           {:ok, settings} <- from_settings(settings, "realtime_connect", :rand_exp) do
+        :ok = GenServer.stop(probe_conn)
         requirement = ceil(required_pool * @available_connection_factor)
 
         if requirement < available_connections do
-          {:ok, conn, migrations_ran}
+          connect_durable_pool(settings, migrations_ran)
         else
           msg = "Only #{available_connections} available connections. At least #{requirement} connections are required."
           log_error("DatabaseLackOfConnections", msg)
-          GenServer.stop(conn)
           {:error, :tenant_db_too_many_connections}
         end
       else
@@ -125,6 +131,19 @@ defmodule Realtime.Database do
           {:error, e}
       end
     end)
+  end
+
+  # Starts the durable pool Connect holds onto. `:rand_exp` backoff lets each
+  # connection ride out momentary blips by reconnecting on its own.
+  defp connect_durable_pool(settings, migrations_ran) do
+    case connect_db(settings) do
+      {:ok, conn} ->
+        {:ok, conn, migrations_ran}
+
+      {:error, e} ->
+        log_error("UnableToConnectToTenantDatabase", e)
+        {:error, e}
+    end
   end
 
   @migrations_table_exists_query """
@@ -138,7 +157,7 @@ defmodule Realtime.Database do
   @connections_query """
   SELECT (current_setting('max_connections')::int - count(*))::int
   FROM pg_stat_activity
-  WHERE application_name != 'realtime_connect'
+  WHERE application_name NOT IN ('realtime_connect', 'realtime_connect_probe')
   """
 
   defp query_connection_info(conn) do
@@ -302,6 +321,7 @@ defmodule Realtime.Database do
       "realtime_subscription_manager" -> 1
       "realtime_subscription_manager_pub" -> settings["subs_pool_size"] || 1
       "realtime_connect" -> settings["db_pool"] || 1
+      "realtime_connect_probe" -> 1
       "realtime_health_check" -> 1
       "realtime_janitor" -> 1
       "realtime_migrations" -> 2
