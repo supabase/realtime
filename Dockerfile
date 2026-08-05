@@ -43,14 +43,10 @@ FROM ${BUILDER_IMAGE} AS builder
 
 ENV MIX_ENV="prod"
 
-RUN apt-get update -y \
-    && apt-get install curl -y \
-    && apt-get install -y build-essential git \
-    && apt-get clean
-
 RUN set -uex; \
-    apt-get update; \
-    apt-get install -y ca-certificates curl gnupg; \
+    apt-get update -y; \
+    apt-get install -y --no-install-recommends \
+      build-essential git ca-certificates curl gnupg; \
     mkdir -p /etc/apt/keyrings; \
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
     | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg; \
@@ -58,7 +54,9 @@ RUN set -uex; \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" \
     > /etc/apt/sources.list.d/nodesource.list; \
     apt-get -qy update; \
-    apt-get -qy install nodejs;
+    apt-get -qy install --no-install-recommends nodejs; \
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/*
 
 # prepare build dir
 WORKDIR /app
@@ -101,17 +99,21 @@ RUN mix release
 FROM ${RUNNER_IMAGE}
 ARG SLOT_NAME_SUFFIX
 
+# C.UTF-8 is built into glibc, so we get a UTF-8 locale without the `locales`
+# package and its generated locale data.
 ENV SLOT_NAME_SUFFIX="${SLOT_NAME_SUFFIX}" \
-    LANG="en_US.UTF-8" \
-    LANGUAGE="en_US:en" \
-    LC_ALL="en_US.UTF-8" \
+    LANG="C.UTF-8" \
+    LC_ALL="C.UTF-8" \
     MIX_ENV="prod" \
     ECTO_IPV6="true" \
     ERL_AFLAGS="-proto_dist inet6_tcp"
 
+# ca-certificates is required: run.sh talks to Secrets Manager over HTTPS and
+# the base image ships no trust store. libtinfo6 is the only curses library
+# beam.smp links against, so we do not need all of libncurses6.
 RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
-      libstdc++6 openssl libncurses6 locales iptables sudo tini curl xz-utils && \
+      libstdc++6 openssl libtinfo6 ca-certificates tini curl xz-utils && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY --from=pgdelta-builder /tmp/pgdelta.xz /usr/local/share/pgdelta/pgdelta.xz
@@ -119,15 +121,11 @@ COPY --from=pgdelta-builder /tmp/pgdelta-wrapper /usr/local/bin/pgdelta
 COPY --from=pgdelta-builder /tmp/libpg-query.tar.gz /tmp/libpg-query.tar.gz
 RUN tar -C / -xzf /tmp/libpg-query.tar.gz && rm /tmp/libpg-query.tar.gz
 
-# Set the locale
-RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
-
 WORKDIR "/app"
 
 RUN chown nobody /app && mkdir -p /app/.pgdelta-cache && chown nobody /app/.pgdelta-cache
 
 COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/realtime ./
 COPY run.sh run.sh
-RUN ls -la /app
 ENTRYPOINT ["/usr/bin/tini", "-s", "-g", "--", "/app/run.sh"]
 CMD ["/app/bin/server"]
