@@ -7,6 +7,7 @@ defmodule Realtime.GenRpcPubSubTest do
 
   alias Forum.Muster
   alias Realtime.FeatureFlags
+  alias Realtime.GenRpcPubSub.RegionRings
   alias Realtime.GenRpcPubSub.Worker
   alias RealtimeWeb.RealtimeChannel.MessageDispatcher
 
@@ -298,7 +299,7 @@ defmodule Realtime.GenRpcPubSubTest do
       # The routed message carries the tenant tag, exactly as the adapter forwards it.
       route_to_worker(
         holder_node,
-        Worker.route(scope, tenant_id, topic1, {:tb, tenant_id, message1}, MessageDispatcher, node(), stale_view_hash)
+        Worker.route(tenant_id, topic1, {:tb, tenant_id, message1}, MessageDispatcher, node(), stale_view_hash)
       )
 
       assert_receive {:relay, ^holder_node, ^message1}, 5000
@@ -315,12 +316,95 @@ defmodule Realtime.GenRpcPubSubTest do
 
       route_to_worker(
         bystander_node,
-        Worker.route(scope, tenant_id, topic2, {:tb, tenant_id, message2}, MessageDispatcher, node(), view_hash)
+        Worker.route(tenant_id, topic2, {:tb, tenant_id, message2}, MessageDispatcher, node(), view_hash)
       )
 
       assert_receive {:relay, ^holder_node, ^message2}, 5000
       assert_receive {:relay, ^bystander_node, ^message2}, 5000
     end
+
+    test "routes across regions to the remote region's expected router, pruning bystanders" do
+      %{holder_node: ap_holder, bystander_node: ap_bystander, ap_scope: ap_scope} = start_ap_region_cluster()
+
+      # The origin (us-east-1) must have learned the ap region's membership via syn
+      # and reconciled a local copy of its ring whose view agrees with the ap scope.
+      wait_until(fn -> length(Realtime.Nodes.region_nodes("ap-southeast-2")) == 2 end)
+
+      wait_until(fn ->
+        case RegionRings.expected_router("ap-southeast-2", "probe") do
+          {:ok, _node, vh} -> vh == :erpc.call(ap_holder, Muster, :view_hash, [ap_scope])
+          _ -> false
+        end
+      end)
+
+      # Pick a tenant whose ap-region router is the holder, so the holder is both the
+      # router and the sole occupancy node (the clean, non-flood routed path).
+      tenant_id =
+        Enum.find_value(1..2000, fn i ->
+          id = "xr-#{i}-#{System.unique_integer([:positive])}"
+          if :erpc.call(ap_holder, Muster, :router, [ap_scope, id]) == {:ok, ap_holder}, do: id
+        end) || flunk("no ap group routed to the holder")
+
+      # The origin's reconstructed ring agrees on the router, and its computed
+      # view_hash matches the ap router's, so the router trusts occupancy (no flood).
+      assert {:ok, ^ap_holder, vh} = RegionRings.expected_router("ap-southeast-2", tenant_id)
+      assert vh == :erpc.call(ap_holder, Muster, :view_hash, [ap_scope])
+
+      # Only the holder joins the tenant's ap Muster group.
+      _pid = :erpc.call(ap_holder, Subscriber, :muster_join, [ap_scope, tenant_id])
+
+      enable_broadcast_flag!(tenant_id)
+
+      topic = "muster-xregion-#{System.unique_integer([:positive])}"
+      subscribe_region_relays(ap_holder, ap_bystander, topic)
+
+      message = %Phoenix.Socket.Broadcast{topic: topic, event: "e", payload: %{"scope" => "cross-region"}}
+      Phoenix.PubSub.broadcast(Realtime.PubSub, topic, {:tb, tenant_id, message}, MessageDispatcher)
+
+      # The holder (in the remote region) is routed to; the bystander is pruned.
+      assert_receive {:relay, ^ap_holder, ^message}, 5000
+      refute_receive {:relay, ^ap_bystander, _}, 500
+    end
+  end
+
+  # Start two nodes in a *different* region (ap-southeast-2) than the origin, and
+  # wait until their Muster scope is :ready and agrees on a single view.
+  defp start_ap_region_cluster do
+    gen_rpc_port = Application.fetch_env!(:gen_rpc, :tcp_server_port)
+
+    holder = :ap_holder_node
+    bystander = :ap_bystander_node
+
+    client_config_per_node = %{
+      node() => gen_rpc_port,
+      :"#{holder}@127.0.0.1" => 16990,
+      :"#{bystander}@127.0.0.1" => 16991
+    }
+
+    on_exit(fn -> Application.put_env(:gen_rpc, :client_config_per_node, {:internal, %{}}) end)
+    Application.put_env(:gen_rpc, :client_config_per_node, {:internal, client_config_per_node})
+    extra_config = [{:gen_rpc, :client_config_per_node, {:internal, client_config_per_node}}]
+
+    holder_config = [{:realtime, :region, "ap-southeast-2"}, {:gen_rpc, :tcp_server_port, 16990}] ++ extra_config
+    {:ok, holder_node} = Clustered.start(@aux_mod, name: holder, extra_config: holder_config, phoenix_port: 4026)
+
+    bystander_config = [{:realtime, :region, "ap-southeast-2"}, {:gen_rpc, :tcp_server_port, 16991}] ++ extra_config
+
+    {:ok, bystander_node} =
+      Clustered.start(@aux_mod, name: bystander, extra_config: bystander_config, phoenix_port: 4027)
+
+    ap_scope = :"realtime_channels_ap-southeast-2"
+    ap_nodes = [holder_node, bystander_node]
+
+    wait_until(
+      fn ->
+        Enum.all?(ap_nodes, fn n -> :erpc.call(n, Muster, :status, [ap_scope]) == :ready end) and
+          ap_nodes |> Enum.map(&:erpc.call(&1, Muster, :view_hash, [ap_scope])) |> Enum.uniq() |> length() == 1
+      end,
+      20_000
+    )
+
+    %{holder_node: holder_node, bystander_node: bystander_node, ap_scope: ap_scope}
   end
 
   # Start two extra us-east-1 nodes (holder + bystander) so the origin makes three,

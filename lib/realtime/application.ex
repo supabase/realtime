@@ -115,6 +115,7 @@ defmodule Realtime.Application do
         Realtime.TenantPromEx,
         {Realtime.Telemetry.Logger, handler_id: "telemetry-logger"},
         RealtimeWeb.Telemetry,
+        Realtime.GenRpcPubSub.RegionRings,
         {Cluster.Supervisor, [topologies, [name: Realtime.ClusterSupervisor]]},
         {Phoenix.PubSub,
          name: Realtime.PubSub, pool_size: 10, adapter: pubsub_adapter(), broadcast_pool_size: broadcast_pool_size},

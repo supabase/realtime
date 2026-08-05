@@ -1,0 +1,247 @@
+defmodule Realtime.GenRpcPubSub.RegionRingsTest do
+  # async: false — starts named/supervised processes and sets persistent_terms.
+  use ExUnit.Case, async: false
+
+  alias Realtime.GenRpcPubSub.RegionRings
+  alias Realtime.Nodes
+  alias Forum.Muster
+
+  use Mimic
+  setup :set_mimic_from_context
+
+  @region "ap-southeast-1"
+
+  defp members do
+    Enum.sort([node(), :"rr1@127.0.0.1", :"rr2@127.0.0.1", :"rr3@127.0.0.1"])
+  end
+
+  # Start an isolated RegionRings instance with its own table/name. Defaults to NOT
+  # reconciling on init (so mimic-based tests can install process-scoped Nodes stubs
+  # first) with a long backstop interval; pass opts to override for tests that want
+  # it to reconcile from live syn membership.
+  defp start_region_rings!(opts \\ []) do
+    table = :"rr_table_#{System.unique_integer([:positive])}"
+    name = :"rr_srv_#{System.unique_integer([:positive])}"
+
+    base = [name: name, table: table, reconcile_on_init: false, reconcile_interval_ms: 60_000]
+
+    pid = start_supervised!({RegionRings, Keyword.merge(base, opts)}, id: name)
+
+    %{pid: pid, table: table}
+  end
+
+  describe "expected_router/3 fallbacks" do
+    test "returns :error before any reconcile has populated the ring" do
+      %{table: table} = start_region_rings!()
+      assert RegionRings.expected_router(@region, "tenant_0", table) == :error
+    end
+
+    test "returns :error for a region with no ring" do
+      %{pid: pid, table: table} = start_region_rings!()
+
+      stub(Nodes, :all_node_regions, fn -> [@region] end)
+
+      stub(Nodes, :region_nodes, fn
+        @region -> members()
+        _ -> []
+      end)
+
+      reconcile(pid)
+
+      assert RegionRings.expected_router("no-such-region", "tenant_0", table) == :error
+    end
+  end
+
+  describe "ring process exit" do
+    test "rebuilds a ring that exits and recovers expected_router" do
+      members = members()
+      %{pid: pid, table: table} = start_region_rings!()
+
+      stub(Nodes, :all_node_regions, fn -> [@region] end)
+
+      stub(Nodes, :region_nodes, fn
+        @region -> members
+        _ -> []
+      end)
+
+      state = reconcile(pid)
+      {_name, ring_pid} = Map.fetch!(state.rings, @region)
+      assert {:ok, _node, _vh} = RegionRings.expected_router(@region, "tenant_0", table)
+
+      # Kill the region's ring. RegionRings traps exits, so the propagated
+      # `{:EXIT, ring_pid, :killed}` must drop the dead ring and rebuild it.
+      ref = Process.monitor(ring_pid)
+      Process.exit(ring_pid, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^ring_pid, :killed}
+
+      wait_until(fn ->
+        match?({:ok, _, _}, RegionRings.expected_router(@region, "tenant_0", table))
+      end)
+
+      new_state = :sys.get_state(pid)
+      {_name, new_ring_pid} = Map.fetch!(new_state.rings, @region)
+      assert new_ring_pid != ring_pid
+      assert Process.alive?(new_ring_pid)
+    end
+  end
+
+  describe "resync on syn membership change" do
+    test "a RegionNodes join event refreshes the ring and view_hash" do
+      %{table: table} = start_region_rings!()
+
+      # Attach RegionRings' telemetry handler to a real scope change: emitting the
+      # event must drive a resync. First membership:
+      first = Enum.sort([node(), :"rr1@127.0.0.1"])
+      stub(Nodes, :all_node_regions, fn -> [@region] end)
+
+      stub(Nodes, :region_nodes, fn
+        @region -> first
+        _ -> []
+      end)
+
+      :telemetry.execute([:syn, RegionNodes, :joined], %{}, %{name: @region})
+      wait_until(fn -> match?({:ok, _, _}, RegionRings.expected_router(@region, "tenant_0", table)) end)
+      {:ok, _node1, vh1} = RegionRings.expected_router(@region, "tenant_0", table)
+      assert vh1 == Muster.view_hash_for_members(first)
+
+      # A node joins the region: the emitted event must update the cached view_hash.
+      second = Enum.sort([node(), :"rr1@127.0.0.1", :"rr2@127.0.0.1"])
+      expected_vh2 = Muster.view_hash_for_members(second)
+
+      stub(Nodes, :region_nodes, fn
+        @region -> second
+        _ -> []
+      end)
+
+      :telemetry.execute([:syn, RegionNodes, :joined], %{}, %{name: @region})
+
+      wait_until(fn ->
+        match?({:ok, _, ^expected_vh2}, RegionRings.expected_router(@region, "tenant_0", table))
+      end)
+
+      {:ok, _node2, vh2} = RegionRings.expected_router(@region, "tenant_0", table)
+      assert vh2 == expected_vh2
+      refute vh2 == vh1
+    end
+  end
+
+  # A full distributed check: stand up a real multi-node Muster cluster in a remote
+  # region, then assert the locally-reconstructed ring in RegionRings matches that
+  # scope's live routing exactly — both the router it picks for every group and the
+  # view_hash it tags them with. This is the property RegionRings exists to provide:
+  # reproduce a remote scope's routing without running that scope locally.
+  describe "distributed: mirrors a remote region's live Muster ring" do
+    @remote_region "ap-southeast-2"
+
+    setup do
+      # RegionRings only builds rings for regions other than our own, so pin the
+      # origin to a different region than the remote cluster below.
+      previous_region = Application.get_env(:realtime, :region)
+      Application.put_env(:realtime, :region, "us-east-1")
+      on_exit(fn -> Application.put_env(:realtime, :region, previous_region) end)
+
+      :ok
+    end
+
+    test "expected_router agrees with the remote scope's router and view_hash for every group" do
+      remote_nodes = start_remote_region_cluster()
+      remote_scope = :"realtime_channels_#{@remote_region}"
+      remote = hd(remote_nodes)
+
+      # The origin learns the remote region's membership through syn, exactly as
+      # RegionRings.reconcile/1 reads it.
+      wait_until(fn -> Nodes.region_nodes(@remote_region) == Enum.sort(remote_nodes) end, 20_000)
+
+      # An isolated RegionRings that reconciles from live syn membership, with a short
+      # backstop so any late syn propagation is folded in without a membership event.
+      %{table: table} = start_region_rings!(reconcile_on_init: true, reconcile_interval_ms: 100)
+
+      remote_view_hash = fn -> :erpc.call(remote, Muster, :view_hash, [remote_scope]) end
+
+      # Wait until our reconstructed ring has converged on the view the remote scope
+      # actually publishes — this is the view_hash equality the router relies on to
+      # trust occupancy instead of flooding.
+      wait_until(
+        fn ->
+          case RegionRings.expected_router(@remote_region, "probe", table) do
+            {:ok, _node, vh} -> vh == remote_view_hash.()
+            _ -> false
+          end
+        end,
+        20_000
+      )
+
+      expected_vh = remote_view_hash.()
+
+      # For a spread of groups, our local reconstruction must name the exact router
+      # the remote scope would, tagged with the remote view_hash.
+      for i <- 1..200 do
+        group = "rr-int-#{i}"
+        assert {:ok, remote_router} = :erpc.call(remote, Muster, :router, [remote_scope, group])
+
+        assert RegionRings.expected_router(@remote_region, group, table) ==
+                 {:ok, remote_router, expected_vh},
+               "group #{group} routed differently than the remote scope"
+      end
+    end
+  end
+
+  # Start a real multi-node Muster cluster in @remote_region and wait until every
+  # node's scope is :ready and agrees on a single view. Returns the sorted node list.
+  defp start_remote_region_cluster do
+    gen_rpc_port = Application.fetch_env!(:gen_rpc, :tcp_server_port)
+    remote_scope = :"realtime_channels_#{@remote_region}"
+
+    node_ports = [{:rr_int_a, 16995}, {:rr_int_b, 16996}, {:rr_int_c, 16997}]
+
+    client_config_per_node =
+      Map.new([{node(), gen_rpc_port} | Enum.map(node_ports, fn {n, p} -> {:"#{n}@127.0.0.1", p} end)])
+
+    on_exit(fn -> Application.put_env(:gen_rpc, :client_config_per_node, {:internal, %{}}) end)
+    Application.put_env(:gen_rpc, :client_config_per_node, {:internal, client_config_per_node})
+    extra_config = [{:gen_rpc, :client_config_per_node, {:internal, client_config_per_node}}]
+
+    nodes =
+      Enum.map(Enum.with_index(node_ports), fn {{name, port}, idx} ->
+        config = [{:realtime, :region, @remote_region}, {:gen_rpc, :tcp_server_port, port}] ++ extra_config
+        {:ok, n} = Clustered.start(nil, name: name, extra_config: config, phoenix_port: 4030 + idx)
+        n
+      end)
+
+    wait_until(
+      fn ->
+        Enum.all?(nodes, fn n -> :erpc.call(n, Muster, :status, [remote_scope]) == :ready end) and
+          nodes |> Enum.map(&:erpc.call(&1, Muster, :view_hash, [remote_scope])) |> Enum.uniq() |> length() == 1
+      end,
+      20_000
+    )
+
+    Enum.sort(nodes)
+  end
+
+  defp reconcile(pid) do
+    send(pid, :syn_changed)
+    # calling :sys.get_state/1 ensures that the above message has been processed
+    # as this is a sync call
+    :sys.get_state(pid)
+  end
+
+  defp wait_until(fun, timeout \\ 1_000) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+    do_wait_until(fun, deadline)
+  end
+
+  defp do_wait_until(fun, deadline) do
+    cond do
+      fun.() ->
+        :ok
+
+      System.monotonic_time(:millisecond) > deadline ->
+        flunk("condition not met in time")
+
+      true ->
+        Process.sleep(10)
+        do_wait_until(fun, deadline)
+    end
+  end
+end

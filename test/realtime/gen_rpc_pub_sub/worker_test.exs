@@ -13,6 +13,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
 
   @topic "test_topic"
   @fanout_event [:realtime, :broadcast, :fanout, :node_delivery]
+  @view_hash "vh"
 
   setup do
     worker = start_link_supervised!({Worker, {Realtime.PubSub, __MODULE__}})
@@ -129,10 +130,17 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
     end
   end
 
-  describe "route/7" do
+  describe "route/6" do
     test "builds the routed-broadcast message" do
-      assert Worker.route(:scope, "tenant", "topic", "msg", Phoenix.PubSub, :origin, "vh") ==
-               {:route, :scope, "tenant", "topic", "msg", Phoenix.PubSub, :origin, "vh"}
+      assert Worker.route("tenant", "topic", "msg", Phoenix.PubSub, :origin, "vh") ==
+               {:route, "tenant", "topic", "msg", Phoenix.PubSub, :origin, "vh"}
+    end
+  end
+
+  describe "route_region/5" do
+    test "builds the cross-region routed-broadcast message" do
+      assert Worker.route_region("topic", "tenant", "msg", Phoenix.PubSub, "vh") ==
+               {:route_region, "topic", "tenant", "msg", Phoenix.PubSub, "vh"}
     end
   end
 
@@ -153,10 +161,6 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
   end
 
   describe "routed broadcast" do
-    @fanout_event [:realtime, :broadcast, :fanout, :node_delivery]
-    @scope :scope
-    @view_hash "vh"
-
     setup %{worker: worker} do
       GenRpc
       |> stub()
@@ -177,9 +181,9 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       parent = self()
       tenant_id = "routed-#{System.unique_integer([:positive])}"
 
-      expect(Muster, :router, fn @scope, ^tenant_id -> {:ok, node()} end)
+      expect(Muster, :router, fn _scope, ^tenant_id -> {:ok, node()} end)
       # Targets include this node (local), a remote node, and the origin (must be excluded).
-      expect(Muster, :targets, fn @scope, ^tenant_id, @view_hash ->
+      expect(Muster, :targets, fn _scope, ^tenant_id, @view_hash ->
         {:ok, [node(), :node_us_2, :node_origin]}
       end)
 
@@ -195,7 +199,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
 
       send(
         worker,
-        Worker.route(@scope, tenant_id, @topic, "le message", Phoenix.PubSub, :node_origin, @view_hash)
+        Worker.route(tenant_id, @topic, "le message", Phoenix.PubSub, :node_origin, @view_hash)
       )
 
       assert_receive "le message"
@@ -207,8 +211,8 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       parent = self()
       tenant_id = "routed-#{System.unique_integer([:positive])}"
 
-      expect(Muster, :router, fn @scope, ^tenant_id -> {:ok, node()} end)
-      expect(Muster, :targets, fn @scope, ^tenant_id, @view_hash -> {:error, :flood} end)
+      expect(Muster, :router, fn _scope, ^tenant_id -> {:ok, node()} end)
+      expect(Muster, :targets, fn _scope, ^tenant_id, @view_hash -> {:error, :flood} end)
       expect(Nodes, :region_nodes, fn "us-east-1" -> [node(), :node_us_2, :node_us_3] end)
 
       expect(GenRpc, :abcast, fn nodes,
@@ -223,7 +227,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
 
       send(
         worker,
-        Worker.route(@scope, tenant_id, @topic, "le message", Phoenix.PubSub, :node_origin, @view_hash)
+        Worker.route(tenant_id, @topic, "le message", Phoenix.PubSub, :node_origin, @view_hash)
       )
 
       assert_receive "le message"
@@ -236,7 +240,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       parent = self()
       tenant_id = "routed-#{System.unique_integer([:positive])}"
 
-      expect(Muster, :router, fn @scope, ^tenant_id -> {:ok, :some_other_node} end)
+      expect(Muster, :router, fn _scope, ^tenant_id -> {:ok, :some_other_node} end)
       # The authoritative occupancy set is never consulted once the router changed.
       reject(Muster, :targets, 3)
       expect(Nodes, :region_nodes, fn "us-east-1" -> [node(), :node_us_2, :node_origin] end)
@@ -255,7 +259,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
 
           send(
             worker,
-            Worker.route(@scope, tenant_id, @topic, "le message", Phoenix.PubSub, :node_origin, @view_hash)
+            Worker.route(tenant_id, @topic, "le message", Phoenix.PubSub, :node_origin, @view_hash)
           )
 
           assert_receive "le message"
@@ -269,15 +273,15 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
     test "does not :ftl when there are no remote targets", %{worker: worker} do
       tenant_id = "routed-#{System.unique_integer([:positive])}"
 
-      expect(Muster, :router, fn @scope, ^tenant_id -> {:ok, node()} end)
-      expect(Muster, :targets, fn @scope, ^tenant_id, @view_hash -> {:ok, [node()]} end)
+      expect(Muster, :router, fn _scope, ^tenant_id -> {:ok, node()} end)
+      expect(Muster, :targets, fn _scope, ^tenant_id, @view_hash -> {:ok, [node()]} end)
       reject(GenRpc, :abcast, 4)
 
       :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, @topic)
 
       send(
         worker,
-        Worker.route(@scope, tenant_id, @topic, "le message", Phoenix.PubSub, :node_origin, @view_hash)
+        Worker.route(tenant_id, @topic, "le message", Phoenix.PubSub, :node_origin, @view_hash)
       )
 
       assert_receive "le message"
@@ -287,15 +291,15 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
     test "delivers nothing when the origin is the only target", %{worker: worker} do
       tenant_id = "routed-#{System.unique_integer([:positive])}"
 
-      expect(Muster, :router, fn @scope, ^tenant_id -> {:ok, node()} end)
-      expect(Muster, :targets, fn @scope, ^tenant_id, @view_hash -> {:ok, [:node_origin]} end)
+      expect(Muster, :router, fn _scope, ^tenant_id -> {:ok, node()} end)
+      expect(Muster, :targets, fn _scope, ^tenant_id, @view_hash -> {:ok, [:node_origin]} end)
       reject(GenRpc, :abcast, 4)
 
       :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, @topic)
 
       send(
         worker,
-        Worker.route(@scope, tenant_id, @topic, "le message", Phoenix.PubSub, :node_origin, @view_hash)
+        Worker.route(tenant_id, @topic, "le message", Phoenix.PubSub, :node_origin, @view_hash)
       )
 
       refute_receive _any
@@ -305,11 +309,154 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       tenant_id = "routed-hit-#{System.unique_integer([:positive])}"
       :ok = Realtime.UsersCounter.add(self(), tenant_id)
 
-      expect(Muster, :router, fn @scope, ^tenant_id -> {:ok, node()} end)
-      expect(Muster, :targets, fn @scope, ^tenant_id, @view_hash -> {:ok, [node()]} end)
+      expect(Muster, :router, fn _scope, ^tenant_id -> {:ok, node()} end)
+      expect(Muster, :targets, fn _scope, ^tenant_id, @view_hash -> {:ok, [node()]} end)
 
       message = {:tb, tenant_id, %Phoenix.Socket.Broadcast{topic: @topic, event: "e", payload: %{}}}
-      send(worker, Worker.route(@scope, tenant_id, @topic, message, Phoenix.PubSub, :node_origin, @view_hash))
+      send(worker, Worker.route(tenant_id, @topic, message, Phoenix.PubSub, :node_origin, @view_hash))
+
+      assert_receive {@fanout_event, ^ref, %{local_tenant_users: count}, %{tenant: ^tenant_id, hit: true}}
+      assert count >= 1
+      refute_receive _any
+    end
+  end
+
+  describe "cross-region routed broadcast" do
+    setup %{worker: worker} do
+      GenRpc
+      |> stub()
+      |> allow(self(), worker)
+
+      Nodes
+      |> stub()
+      |> allow(self(), worker)
+
+      Muster
+      |> stub()
+      |> allow(self(), worker)
+
+      %{ref: :telemetry_test.attach_event_handlers(self(), [@fanout_event])}
+    end
+
+    test "as router: delivers locally and :ftl to remote targets", %{worker: worker} do
+      parent = self()
+      tenant_id = "routed-region-#{System.unique_integer([:positive])}"
+
+      expect(Muster, :router, fn _scope, ^tenant_id -> {:ok, node()} end)
+      expect(Muster, :targets, fn _scope, ^tenant_id, @view_hash -> {:ok, [node(), :node_us_2]} end)
+
+      expect(GenRpc, :abcast, fn [:node_us_2],
+                                 Realtime.GenRpcPubSub.WorkerTest,
+                                 {:ftl, "test_topic", "le message", Phoenix.PubSub},
+                                 [] ->
+        send(parent, :abcast_called)
+        :ok
+      end)
+
+      :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, @topic)
+
+      send(worker, Worker.route_region(@topic, tenant_id, "le message", Phoenix.PubSub, @view_hash))
+
+      assert_receive "le message"
+      assert_receive :abcast_called
+      refute_receive _any
+    end
+
+    test "as router: floods the region when Muster.targets returns :flood", %{worker: worker} do
+      parent = self()
+      tenant_id = "routed-region-#{System.unique_integer([:positive])}"
+
+      expect(Muster, :router, fn _scope, ^tenant_id -> {:ok, node()} end)
+      expect(Muster, :targets, fn _scope, ^tenant_id, @view_hash -> {:error, :flood} end)
+      expect(Nodes, :region_nodes, fn "us-east-1" -> [node(), :node_us_2, :node_us_3] end)
+
+      expect(GenRpc, :abcast, fn nodes,
+                                 Realtime.GenRpcPubSub.WorkerTest,
+                                 {:ftl, "test_topic", "le message", Phoenix.PubSub},
+                                 [] ->
+        send(parent, {:abcast_called, nodes})
+        :ok
+      end)
+
+      :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, @topic)
+
+      send(worker, Worker.route_region(@topic, tenant_id, "le message", Phoenix.PubSub, @view_hash))
+
+      assert_receive "le message"
+      assert_receive {:abcast_called, nodes}
+      assert Enum.sort(nodes) == [:node_us_2, :node_us_3]
+      refute_receive _any
+    end
+
+    test "floods the region when this node is not the router", %{worker: worker} do
+      parent = self()
+      tenant_id = "routed-region-#{System.unique_integer([:positive])}"
+
+      expect(Muster, :router, fn _scope, ^tenant_id -> {:ok, :some_other_node} end)
+      # The authoritative occupancy set is never consulted once we are not the router.
+      reject(Muster, :targets, 3)
+      expect(Nodes, :region_nodes, fn "us-east-1" -> [node(), :node_us_2] end)
+
+      expect(GenRpc, :abcast, fn [:node_us_2],
+                                 Realtime.GenRpcPubSub.WorkerTest,
+                                 {:ftl, "test_topic", "le message", Phoenix.PubSub},
+                                 [] ->
+        send(parent, :abcast_called)
+        :ok
+      end)
+
+      log =
+        capture_log(fn ->
+          :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, @topic)
+
+          send(worker, Worker.route_region(@topic, tenant_id, "le message", Phoenix.PubSub, @view_hash))
+
+          assert_receive "le message"
+          assert_receive :abcast_called
+        end)
+
+      assert log =~ "Muster router changed"
+      refute_receive _any
+    end
+
+    test "does not :ftl when there are no remote targets", %{worker: worker} do
+      tenant_id = "routed-region-#{System.unique_integer([:positive])}"
+
+      expect(Muster, :router, fn _scope, ^tenant_id -> {:ok, node()} end)
+      expect(Muster, :targets, fn _scope, ^tenant_id, @view_hash -> {:ok, [node()]} end)
+      reject(GenRpc, :abcast, 4)
+
+      :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, @topic)
+
+      send(worker, Worker.route_region(@topic, tenant_id, "le message", Phoenix.PubSub, @view_hash))
+
+      assert_receive "le message"
+      refute_receive _any
+    end
+
+    test "does not send locally if current node does not have occupancy", %{worker: worker} do
+      tenant_id = "routed-region-#{System.unique_integer([:positive])}"
+
+      expect(Muster, :router, fn _scope, ^tenant_id -> {:ok, node()} end)
+      expect(Muster, :targets, fn _scope, ^tenant_id, @view_hash -> {:ok, []} end)
+      reject(GenRpc, :abcast, 4)
+
+      :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, @topic)
+
+      send(worker, Worker.route_region(@topic, tenant_id, "le message", Phoenix.PubSub, @view_hash))
+
+      refute_receive _any
+    end
+
+    test "local delivery emits hit=true when this node holds a connection", %{worker: worker, ref: ref} do
+      tenant_id = "routed-region-hit-#{System.unique_integer([:positive])}"
+      :ok = Realtime.UsersCounter.add(self(), tenant_id)
+
+      expect(Muster, :router, fn _scope, ^tenant_id -> {:ok, node()} end)
+      expect(Muster, :targets, fn _scope, ^tenant_id, @view_hash -> {:ok, [node()]} end)
+
+      message = {:tb, tenant_id, %Phoenix.Socket.Broadcast{topic: @topic, event: "e", payload: %{}}}
+      send(worker, Worker.route_region(@topic, tenant_id, message, Phoenix.PubSub, @view_hash))
 
       assert_receive {@fanout_event, ^ref, %{local_tenant_users: count}, %{tenant: ^tenant_id, hit: true}}
       assert count >= 1

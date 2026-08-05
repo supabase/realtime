@@ -14,6 +14,12 @@ defmodule Forum.Muster do
   alias Forum.Muster.Scope
   alias Forum.Muster.Shard
 
+  # Canonical consistent-hashing parameters. Every Muster ring is built with these
+  # (see `ring_config/0`), and anything that reconstructs a scope's ring from the
+  # outside must use the same values or it will compute different routers.
+  @ring_replicas 128
+  @ring_depth 2
+
   @type group :: Forum.group()
   @type start_option ::
           {:partitions, pos_integer()}
@@ -302,6 +308,30 @@ defmodule Forum.Muster do
   def view_hash(scope) when is_atom(scope) do
     :persistent_term.get({Forum.Muster, scope, :view_hash})
   end
+
+  @doc """
+  The consistent-hashing parameters every Muster ring is built with.
+
+  Returned as a keyword list ready to pass to `ExHashRing.Ring.start_link/1`
+  (`[replicas: ..., depth: ...]`). Anything outside Muster that reconstructs a
+  scope's ring — e.g. to compute the router a *remote* scope would pick without
+  running that scope locally — must build its ring with exactly these values, or
+  it will hash groups to different nodes.
+  """
+  @spec ring_config() :: [replicas: pos_integer(), depth: pos_integer()]
+  def ring_config, do: [replicas: @ring_replicas, depth: @ring_depth]
+
+  @doc """
+  The cluster-view hash a scope would publish for the member set `members`.
+
+  This is the exact function Muster uses internally to derive the `view_hash`
+  senders tag broadcasts with (see `view_hash/1`), exposed so a caller can
+  reproduce a *remote* scope's hash from that scope's member set without running
+  it. `members` must be the scope's membership as Muster keeps it: de-duplicated
+  and sorted (`Enum.uniq |> Enum.sort`), otherwise the hash will not match.
+  """
+  @spec view_hash_for_members([node()]) :: non_neg_integer()
+  def view_hash_for_members(members) when is_list(members), do: :erlang.phash2(members)
 
   @doc """
   Whether this node, as the router for a broadcast tagged `sender_view_hash`,
