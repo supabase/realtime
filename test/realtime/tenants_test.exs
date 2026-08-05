@@ -212,6 +212,31 @@ defmodule Realtime.TenantsTest do
       assert_receive {:telemetry_exception, %{reason: :tenant_not_found}}, 1000
       assert_receive {:telemetry_exception, %{reason: :extension_not_found}}, 1000
     end
+
+    test "sets gcm_migrated_at once jwt_secret and every extension's settings are backfilled" do
+      tenant = Containers.checkout_tenant()
+      tenant = simulate_pre_migration_state(tenant)
+      assert is_nil(tenant.gcm_migrated_at)
+
+      assert :ok = Tenants.reconcile_encryption(tenant)
+
+      assert eventually(fn ->
+               reloaded = Api.get_tenant_by_external_id(tenant.external_id)
+               not is_nil(reloaded.gcm_migrated_at)
+             end)
+    end
+
+    test "leaves gcm_migrated_at unset when the tenant has been deleted before the async write lands" do
+      tenant = Containers.checkout_tenant()
+      tenant = simulate_pre_migration_state(tenant)
+
+      assert Api.delete_tenant_by_external_id(tenant.external_id)
+
+      assert :ok = Tenants.reconcile_encryption(tenant)
+      Process.sleep(200)
+
+      assert is_nil(Api.get_tenant_by_external_id(tenant.external_id))
+    end
   end
 
   # Deliberately does not stub FeatureFlags: `enabled?/2` reads the tenant cache, and

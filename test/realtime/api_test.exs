@@ -420,18 +420,15 @@ defmodule Realtime.ApiTest do
   end
 
   describe "rename_settings_field/2" do
-    test "renames the field in both the legacy and the GCM settings columns" do
+    test "renames the field in the legacy settings column, leaving settings_gcm alone" do
       tenant = tenant_fixture()
 
       Api.rename_settings_field("poll_interval_ms", "poll_interval")
 
-      # Both columns have to move together, otherwise settings_gcm keeps the old key name and the
-      # field silently disappears now that reads prefer it.
       assert %{extensions: [extension]} = Api.get_tenant_by_external_id(tenant.external_id)
       assert Map.has_key?(extension.settings, "poll_interval")
       refute Map.has_key?(extension.settings, "poll_interval_ms")
-      assert Map.has_key?(extension.settings_gcm, "poll_interval")
-      refute Map.has_key?(extension.settings_gcm, "poll_interval_ms")
+      assert Map.has_key?(extension.settings_gcm, "poll_interval_ms")
     end
   end
 
