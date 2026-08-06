@@ -4,10 +4,13 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
   setup :set_mimic_from_context
 
+  alias Realtime.Api.Message
   alias Realtime.Crypto
   alias Realtime.GenCounter
   alias Realtime.RateCounter
   alias Realtime.Tenants
+  alias Realtime.Tenants.ReplicationConnection
+  alias Realtime.Tenants.Repo
   alias Realtime.Database
 
   alias RealtimeWeb.RealtimeChannel
@@ -504,6 +507,42 @@ defmodule RealtimeWeb.BroadcastControllerTest do
       assert length(broadcast_calls) == length(messages_to_send)
 
       assert conn.status == 202
+    end
+
+    @tag role: "authenticated"
+    test "message authorized to persist is stored and not broadcast again from the database", %{
+      conn: conn,
+      db_conn: db_conn,
+      tenant: tenant
+    } do
+      start_link_supervised!(
+        {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
+        restart: :transient
+      )
+
+      topic = random_string()
+      event = random_string()
+
+      create_rls_policies(
+        db_conn,
+        [:authenticated_read_broadcast, :authenticated_write_broadcast, :authenticated_write_persistence],
+        %{topic: topic}
+      )
+
+      subscribe(Tenants.tenant_topic(tenant.external_id, topic, false), topic)
+
+      messages = [%{"topic" => topic, "payload" => %{"content" => "hello"}, "event" => event, "private" => true}]
+
+      conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
+      assert conn.status == 202
+
+      assert_receive {:socket_push, :text, _data}, 500
+
+      assert {:ok, [%Message{topic: ^topic, event: ^event, skip_broadcast: true}]} =
+               Repo.all(db_conn, Message, Message)
+
+      # The stored row reaches the replication stream but must not be delivered a second time
+      refute_receive {:socket_push, :text, _}, 500
     end
 
     @tag role: "anon"

@@ -543,7 +543,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         end)
 
       assert_receive {:socket_push, _encoding, _data}
-      assert log =~ "UnableToPersistBroadcast"
+      assert log =~ "UnableToPersistMessage"
       assert {:ok, []} = Repo.all(db_conn, Message, Message)
     end
 
@@ -588,7 +588,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         end)
 
       assert_receive {:socket_push, :text, _data}
-      assert log =~ "UnableToPersistBroadcast"
+      assert log =~ "UnableToPersistMessage"
       assert {:ok, []} = Repo.all(db_conn, Message, Message)
     end
 

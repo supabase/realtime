@@ -16,11 +16,13 @@ defmodule Realtime.Tenants.SingleBroadcast do
 
   alias Realtime.Api.Tenant
   alias Realtime.GenCounter
+  alias Realtime.Messages
   alias Realtime.RateCounter
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
+  alias Realtime.Tenants.Authorization.Policies.PersistencePolicies
   alias Realtime.Tenants.Connect
 
   alias RealtimeWeb.RealtimeChannel
@@ -58,7 +60,7 @@ defmodule Realtime.Tenants.SingleBroadcast do
           String.t(),
           String.t(),
           boolean(),
-          any(),
+          map() | binary(),
           content_type()
         ) :: :ok | {:error, term()} | {:error, atom(), String.t()}
   def broadcast(_auth_params, %Tenant{suspend: true}, _topic, _event, _private, _payload, _content_type) do
@@ -152,11 +154,12 @@ defmodule Realtime.Tenants.SingleBroadcast do
 
   defp handle_private_message(tenant, auth_params, topic, event, payload, content_type, rate_counter) do
     case permissions_for_message(tenant, auth_params, topic) do
-      {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}} ->
+      {:ok, db_conn, %Policies{broadcast: %BroadcastPolicies{write: true}} = policies} ->
         send_message_and_count(tenant, rate_counter, topic, event, payload, content_type, false)
+        maybe_persist(policies.persistence, db_conn, tenant, topic, event, payload, content_type)
         :ok
 
-      {:ok, %Policies{broadcast: %BroadcastPolicies{write: _}}} ->
+      {:ok, _db_conn, %Policies{broadcast: %BroadcastPolicies{write: _}}} ->
         {:error, :forbidden, "Unauthorized"}
 
       {:error, :rls_policy_error, error} ->
@@ -201,10 +204,21 @@ defmodule Realtime.Tenants.SingleBroadcast do
     end
   end
 
+  defp maybe_persist(%PersistencePolicies{write: true}, db_conn, tenant, topic, event, payload, :json) do
+    case Messages.persist(db_conn, tenant.external_id, topic, event, payload) do
+      {:ok, _id} -> :ok
+      error -> log_error("UnableToPersistMessage", error)
+    end
+  end
+
+  # TODO: persist binary payloads
+  defp maybe_persist(_persistence, _db_conn, _tenant, _topic, _event, _payload, _content_type), do: :ok
+
   defp permissions_for_message(tenant, auth_params, topic) do
-    with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id) do
-      auth_params = %{auth_params | topic: topic}
-      Authorization.get_write_authorizations(db_conn, auth_params)
+    with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id),
+         auth_params = %{auth_params | topic: topic},
+         {:ok, policies} <- Authorization.get_write_authorizations(db_conn, auth_params) do
+      {:ok, db_conn, policies}
     end
   end
 

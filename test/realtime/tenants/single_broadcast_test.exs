@@ -4,6 +4,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
 
   setup :set_mimic_from_context
 
+  alias Realtime.Api.Message
   alias Realtime.Database
   alias Realtime.GenCounter
   alias Realtime.RateCounter
@@ -12,7 +13,9 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
+  alias Realtime.Tenants.Authorization.Policies.PersistencePolicies
   alias Realtime.Tenants.Connect
+  alias Realtime.Tenants.Repo
 
   alias RealtimeWeb.TenantBroadcaster
   alias RealtimeWeb.Socket.UserBroadcast
@@ -389,6 +392,102 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
                SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, %{"data" => "test"}, :json)
 
       assert calls(&TenantBroadcaster.pubsub_broadcast/5) == []
+    end
+  end
+
+  describe "message persistence" do
+    setup %{tenant: tenant} do
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+      Tenants.create_messages_partitions(db_conn)
+
+      sub = random_string()
+      role = "authenticated"
+
+      auth_params =
+        Authorization.build_authorization_params(%{
+          tenant_id: tenant.external_id,
+          headers: [{"header-1", "value-1"}],
+          claims: %{"sub" => sub, "role" => role, "exp" => Joken.current_time() + 1_000},
+          role: role,
+          sub: sub
+        })
+
+      %{db_conn: db_conn, auth_params: auth_params}
+    end
+
+    test "stores the message when authorized to persist", %{
+      tenant: tenant,
+      db_conn: db_conn,
+      auth_params: auth_params
+    } do
+      topic = random_string()
+      payload = %{"text" => "hello"}
+
+      expect(GenCounter, :add, fn _ -> :ok end)
+      expect(Connect, :lookup_or_start_connection, fn _ -> {:ok, db_conn} end)
+      expect(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _, _ -> :ok end)
+
+      expect(Authorization, :get_write_authorizations, fn _, _ ->
+        {:ok,
+         %Policies{
+           broadcast: %BroadcastPolicies{write: true},
+           persistence: %PersistencePolicies{write: true}
+         }}
+      end)
+
+      assert :ok = SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, payload, :json)
+
+      assert {:ok,
+              [
+                %Message{
+                  topic: ^topic,
+                  event: "event",
+                  payload: ^payload,
+                  extension: :broadcast,
+                  private: true,
+                  skip_broadcast: true
+                }
+              ]} = Repo.all(db_conn, Message, Message)
+    end
+
+    test "does not store the message without a persistence policy", %{
+      tenant: tenant,
+      db_conn: db_conn,
+      auth_params: auth_params
+    } do
+      topic = random_string()
+
+      expect(GenCounter, :add, fn _ -> :ok end)
+      expect(Connect, :lookup_or_start_connection, fn _ -> {:ok, db_conn} end)
+      expect(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _, _ -> :ok end)
+
+      expect(Authorization, :get_write_authorizations, fn _, _ ->
+        {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
+      end)
+
+      assert :ok = SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, %{"a" => "b"}, :json)
+
+      assert {:ok, []} = Repo.all(db_conn, Message, Message)
+    end
+
+    test "does not store binary messages", %{tenant: tenant, db_conn: db_conn, auth_params: auth_params} do
+      topic = random_string()
+
+      expect(GenCounter, :add, fn _ -> :ok end)
+      expect(Connect, :lookup_or_start_connection, fn _ -> {:ok, db_conn} end)
+      expect(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _, _ -> :ok end)
+
+      expect(Authorization, :get_write_authorizations, fn _, _ ->
+        {:ok,
+         %Policies{
+           broadcast: %BroadcastPolicies{write: true},
+           persistence: %PersistencePolicies{write: true}
+         }}
+      end)
+
+      assert :ok = SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, <<0, 1, 2>>, :binary)
+
+      assert {:ok, []} = Repo.all(db_conn, Message, Message)
     end
   end
 

@@ -185,7 +185,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
         :ok
 
       error ->
-        log_error("UnableToPersistBroadcast", error)
+        log_error("UnableToPersistMessage", error)
         :ok
     end
   end

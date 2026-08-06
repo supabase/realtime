@@ -210,6 +210,15 @@ defmodule Generators do
     """
   end
 
+  def policy_query(:authenticated_write_persistence, %{topic: name}) do
+    """
+    CREATE POLICY "authenticated_write_persistence_#{name}"
+    ON realtime.messages FOR INSERT
+    TO authenticated
+    WITH CHECK ( realtime.topic() = '#{name}' AND realtime.messages.extension = 'persistence');
+    """
+  end
+
   def policy_query(:authenticated_read_presence, %{topic: name}) do
     """
     CREATE POLICY "authenticated_read_presence_#{name}"

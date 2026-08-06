@@ -3,15 +3,18 @@ defmodule Realtime.Tenants.BatchBroadcast do
   Virtual schema with a representation of a batched broadcast.
   """
   use Ecto.Schema
+  use Realtime.Logs
   import Ecto.Changeset
 
   alias Realtime.Api.Tenant
   alias Realtime.GenCounter
+  alias Realtime.Messages
   alias Realtime.RateCounter
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
+  alias Realtime.Tenants.Authorization.Policies.PersistencePolicies
   alias Realtime.Tenants.Connect
 
   alias RealtimeWeb.RealtimeChannel
@@ -27,13 +30,20 @@ defmodule Realtime.Tenants.BatchBroadcast do
   end
 
   @spec broadcast(
-          auth_params :: map() | nil,
-          tenant :: Tenant.t(),
+          auth_params :: Plug.Conn.t() | map() | nil,
+          tenant :: Tenant.t() | nil,
           messages :: %{
-            messages: list(%{id: String.t(), topic: String.t(), payload: map(), event: String.t(), private: boolean()})
+            messages:
+              list(%{
+                optional(:id) => String.t(),
+                optional(:private) => boolean(),
+                required(:topic) => String.t(),
+                required(:payload) => map(),
+                required(:event) => String.t()
+              })
           },
           super_user :: boolean()
-        ) :: :ok | {:error, atom() | Ecto.Changeset.t()}
+        ) :: :ok | {:error, atom() | Ecto.Changeset.t()} | {:error, atom(), String.t()}
   def broadcast(auth_params, tenant, messages, super_user \\ false)
 
   def broadcast(%Plug.Conn{} = conn, %Tenant{} = tenant, messages, super_user) do
@@ -78,8 +88,11 @@ defmodule Realtime.Tenants.BatchBroadcast do
           Enum.each(events, fn message -> send_message_and_count(tenant, events_per_second_rate, message, false) end)
         else
           case permissions_for_message(tenant, auth_params, topic) do
-            %Policies{broadcast: %BroadcastPolicies{write: true}} ->
-              Enum.each(events, fn message -> send_message_and_count(tenant, events_per_second_rate, message, false) end)
+            {db_conn, %Policies{broadcast: %BroadcastPolicies{write: true}} = policies} ->
+              Enum.each(events, fn message ->
+                send_message_and_count(tenant, events_per_second_rate, message, false)
+                maybe_persist(policies.persistence, db_conn, tenant, message)
+              end)
 
             _ ->
               nil
@@ -150,6 +163,15 @@ defmodule Realtime.Tenants.BatchBroadcast do
     )
   end
 
+  defp maybe_persist(%PersistencePolicies{write: true}, db_conn, tenant, message) do
+    case Messages.persist(db_conn, tenant.external_id, message.topic, message.event, message.payload) do
+      {:ok, _id} -> :ok
+      error -> log_error("UnableToPersistMessage", error)
+    end
+  end
+
+  defp maybe_persist(_persistence, _db_conn, _tenant, _message), do: :ok
+
   defp permissions_for_message(_, nil, _), do: nil
 
   defp permissions_for_message(tenant, auth_params, topic) do
@@ -160,7 +182,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
         |> Authorization.build_authorization_params()
 
       case Authorization.get_write_authorizations(db_conn, auth_params) do
-        {:ok, policies} -> policies
+        {:ok, policies} -> {db_conn, policies}
         {:error, :not_found} -> nil
         error -> error
       end
