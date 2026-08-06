@@ -324,7 +324,7 @@ defmodule Realtime.GenRpcPubSubTest do
     end
 
     test "routes across regions to the remote region's expected router, pruning bystanders" do
-      %{holder_node: ap_holder, bystander_node: ap_bystander, ap_scope: ap_scope} = start_ap_region_cluster()
+      %{holder_node: ap_holder, bystander_node: ap_bystander, scope: ap_scope} = start_ap_region_cluster()
 
       # The origin (us-east-1) must have learned the ap region's membership via syn
       # and reconciled a local copy of its ring whose view agrees with the ap scope.
@@ -367,49 +367,27 @@ defmodule Realtime.GenRpcPubSubTest do
     end
   end
 
-  # Start two nodes in a *different* region (ap-southeast-2) than the origin, and
-  # wait until their Muster scope is :ready and agrees on a single view.
-  defp start_ap_region_cluster do
-    gen_rpc_port = Application.fetch_env!(:gen_rpc, :tcp_server_port)
-
-    holder = :ap_holder_node
-    bystander = :ap_bystander_node
-
-    client_config_per_node = %{
-      node() => gen_rpc_port,
-      :"#{holder}@127.0.0.1" => 16990,
-      :"#{bystander}@127.0.0.1" => 16991
-    }
-
-    on_exit(fn -> Application.put_env(:gen_rpc, :client_config_per_node, {:internal, %{}}) end)
-    Application.put_env(:gen_rpc, :client_config_per_node, {:internal, client_config_per_node})
-    extra_config = [{:gen_rpc, :client_config_per_node, {:internal, client_config_per_node}}]
-
-    holder_config = [{:realtime, :region, "ap-southeast-2"}, {:gen_rpc, :tcp_server_port, 16990}] ++ extra_config
-    {:ok, holder_node} = Clustered.start(@aux_mod, name: holder, extra_config: holder_config, phoenix_port: 4026)
-
-    bystander_config = [{:realtime, :region, "ap-southeast-2"}, {:gen_rpc, :tcp_server_port, 16991}] ++ extra_config
-
-    {:ok, bystander_node} =
-      Clustered.start(@aux_mod, name: bystander, extra_config: bystander_config, phoenix_port: 4027)
-
-    ap_scope = :"realtime_channels_ap-southeast-2"
-    ap_nodes = [holder_node, bystander_node]
-
-    wait_until(
-      fn ->
-        Enum.all?(ap_nodes, fn n -> :erpc.call(n, Muster, :status, [ap_scope]) == :ready end) and
-          ap_nodes |> Enum.map(&:erpc.call(&1, Muster, :view_hash, [ap_scope])) |> Enum.uniq() |> length() == 1
-      end,
-      20_000
-    )
-
-    %{holder_node: holder_node, bystander_node: bystander_node, ap_scope: ap_scope}
-  end
-
   # Start two extra us-east-1 nodes (holder + bystander) so the origin makes three,
   # and wait until the region's Muster ring is :ready and agrees on a single view.
   defp start_us_east_region_cluster do
+    start_region_cluster("us-east-1", gen_rpc_ports: {16980, 16981}, phoenix_ports: {4024, 4025})
+  end
+
+  # Start two nodes in a *different* region (ap-southeast-2) than the origin, and
+  # wait until their Muster scope is :ready and agrees on a single view.
+  defp start_ap_region_cluster do
+    start_region_cluster("ap-southeast-2", gen_rpc_ports: {16990, 16991}, phoenix_ports: {4026, 4027})
+  end
+
+  # Start a holder + bystander pair in `region` and wait until their Muster scope is
+  # :ready and agrees on a single view. When `region` is the origin's own region the
+  # origin joins the ring too, so it is included in the convergence wait; otherwise
+  # only the two remote nodes are. Ports are passed in so callers can keep clusters on
+  # disjoint ranges, avoiding collisions with a port that has not yet been torn down.
+  defp start_region_cluster(region, opts) do
+    {holder_gen, bystander_gen} = Keyword.fetch!(opts, :gen_rpc_ports)
+    {holder_phx, bystander_phx} = Keyword.fetch!(opts, :phoenix_ports)
+
     gen_rpc_port = Application.fetch_env!(:gen_rpc, :tcp_server_port)
 
     holder = :holder_node
@@ -417,29 +395,33 @@ defmodule Realtime.GenRpcPubSubTest do
 
     client_config_per_node = %{
       node() => gen_rpc_port,
-      :"#{holder}@127.0.0.1" => 16980,
-      :"#{bystander}@127.0.0.1" => 16981
+      :"#{holder}@127.0.0.1" => holder_gen,
+      :"#{bystander}@127.0.0.1" => bystander_gen
     }
 
     on_exit(fn -> Application.put_env(:gen_rpc, :client_config_per_node, {:internal, %{}}) end)
     Application.put_env(:gen_rpc, :client_config_per_node, {:internal, client_config_per_node})
     extra_config = [{:gen_rpc, :client_config_per_node, {:internal, client_config_per_node}}]
 
-    holder_config = [{:realtime, :region, "us-east-1"}, {:gen_rpc, :tcp_server_port, 16980}] ++ extra_config
-    {:ok, holder_node} = Clustered.start(@aux_mod, name: holder, extra_config: holder_config, phoenix_port: 4024)
+    holder_config = [{:realtime, :region, region}, {:gen_rpc, :tcp_server_port, holder_gen}] ++ extra_config
+    {:ok, holder_node} = Clustered.start(@aux_mod, name: holder, extra_config: holder_config, phoenix_port: holder_phx)
 
-    bystander_config = [{:realtime, :region, "us-east-1"}, {:gen_rpc, :tcp_server_port, 16981}] ++ extra_config
+    bystander_config = [{:realtime, :region, region}, {:gen_rpc, :tcp_server_port, bystander_gen}] ++ extra_config
 
     {:ok, bystander_node} =
-      Clustered.start(@aux_mod, name: bystander, extra_config: bystander_config, phoenix_port: 4025)
+      Clustered.start(@aux_mod, name: bystander, extra_config: bystander_config, phoenix_port: bystander_phx)
 
-    scope = Application.fetch_env!(:realtime, :muster_scope)
-    all_nodes = [node(), holder_node, bystander_node]
+    scope = :"realtime_channels_#{region}"
+
+    nodes =
+      if region == Application.fetch_env!(:realtime, :region),
+        do: [node(), holder_node, bystander_node],
+        else: [holder_node, bystander_node]
 
     wait_until(
       fn ->
-        Enum.all?(all_nodes, fn n -> :erpc.call(n, Muster, :status, [scope]) == :ready end) and
-          all_nodes |> Enum.map(&:erpc.call(&1, Muster, :view_hash, [scope])) |> Enum.uniq() |> length() == 1
+        Enum.all?(nodes, fn n -> :erpc.call(n, Muster, :status, [scope]) == :ready end) and
+          nodes |> Enum.map(&:erpc.call(&1, Muster, :view_hash, [scope])) |> Enum.uniq() |> length() == 1
       end,
       20_000
     )
