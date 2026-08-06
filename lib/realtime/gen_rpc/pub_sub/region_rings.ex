@@ -135,7 +135,7 @@ defmodule Realtime.GenRpcPubSub.RegionRings do
   def handle_info(:syn_changed, state), do: {:noreply, reconcile(state)}
 
   # A ring process exited; drop it so the reconcile below restarts it.
-  def handle_info({:EXIT, pid, reason}, state) do
+  def handle_info({:EXIT, pid, reason}, %State{} = state) do
     case Enum.find(state.rings, fn {_region, {_name, ring_pid}} -> ring_pid == pid end) do
       {region, _} ->
         Logger.warning("RegionRings ring for #{region} exited: #{inspect(reason)}; rebuilding")
@@ -171,7 +171,7 @@ defmodule Realtime.GenRpcPubSub.RegionRings do
   ## Internal
 
   @spec reconcile(State.t()) :: State.t()
-  defp reconcile(state) do
+  defp reconcile(%State{} = state) do
     own_region = Application.get_env(:realtime, :region)
     wanted = Nodes.all_node_regions() |> Enum.reject(&(&1 == own_region))
 
