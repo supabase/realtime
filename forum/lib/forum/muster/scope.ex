@@ -480,8 +480,7 @@ defmodule Forum.Muster.Scope do
   def ring_child_spec(scope) do
     %{
       id: :muster_ring,
-      start:
-        {Ring, :start_link, [[{:name, ring_name(scope)} | Forum.Muster.ring_config()]]}
+      start: {Ring, :start_link, [[{:name, ring_name(scope)} | Forum.Muster.ring_config()]]}
     }
   end
 
@@ -546,7 +545,10 @@ defmodule Forum.Muster.Scope do
     # really has downsized to one node.
     :persistent_term.put({Forum.Muster, scope, :status}, :converging)
     # Cluster-view hash senders tag broadcasts with; router compares against its own.
-    :persistent_term.put({Forum.Muster, scope, :view_hash}, Forum.Muster.view_hash_for_members([node()]))
+    :persistent_term.put(
+      {Forum.Muster, scope, :view_hash},
+      Forum.Muster.view_hash_for_members([node()])
+    )
 
     Logger.info("Muster[#{node()}|#{scope}] Starting")
 
@@ -1178,7 +1180,11 @@ defmodule Forum.Muster.Scope do
     #    reset: peers' already-announced views stay and are re-evaluated against
     #    the new hash by update_status at the end.
     :persistent_term.put({Forum.Muster, state.scope, :status}, :rebalancing)
-    :persistent_term.put({Forum.Muster, state.scope, :view_hash}, Forum.Muster.view_hash_for_members(new_members))
+
+    :persistent_term.put(
+      {Forum.Muster, state.scope, :view_hash},
+      Forum.Muster.view_hash_for_members(new_members)
+    )
 
     # 2) Atomically replace the node set; this bumps the ring's generation. After
     #    this call: find_node = NEW routers; find_historical_node(_, _, 1) = OLD.
@@ -1618,7 +1624,11 @@ defmodule Forum.Muster.Scope do
   defp begin_view_change(state, target) do
     round_seq = next_seq()
     :persistent_term.put({Forum.Muster, state.scope, :status}, :rebalancing)
-    :persistent_term.put({Forum.Muster, state.scope, :view_hash}, Forum.Muster.view_hash_for_members(target))
+
+    :persistent_term.put(
+      {Forum.Muster, state.scope, :view_hash},
+      Forum.Muster.view_hash_for_members(target)
+    )
 
     # Old-view members still connected. A member that has already dropped off
     # distribution (a departing node) is excluded: it can no longer be a stale
