@@ -1,5 +1,5 @@
 defmodule Realtime.GenRpcPubSub.RegionRingsTest do
-  # async: false — starts named/supervised processes and sets persistent_terms.
+  # async: false — Mimic global + distributed integration test
   use ExUnit.Case, async: false
 
   alias Realtime.GenRpcPubSub.RegionRings

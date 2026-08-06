@@ -105,7 +105,6 @@ defmodule Realtime.GenRpcPubSub do
 
       {:ok, router_node} ->
         # Remote router: hand it the routing decision over the network. Fire-and-forget,
-        # never a synchronous RPC on the broadcast hot path.
         route = Worker.route(tenant_id, topic, message, dispatcher, node(), Muster.view_hash(scope))
         GenRpc.abcast([router_node], worker, route, key: self())
 
