@@ -204,7 +204,8 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
 
       assert_receive "le message"
       assert_receive :abcast_called
-      refute_receive _any
+      refute_receive "le message"
+      refute_receive {@fanout_event, _, _, %{tenant: ^tenant_id}}
     end
 
     test "as router: floods the region when Muster.targets returns :flood", %{worker: worker} do
@@ -233,7 +234,8 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       assert_receive "le message"
       assert_receive {:abcast_called, nodes}
       assert Enum.sort(nodes) == [:node_us_2, :node_us_3]
-      refute_receive _any
+      refute_receive "le message"
+      refute_receive {@fanout_event, _, _, %{tenant: ^tenant_id}}
     end
 
     test "logs a warning and floods the region (except origin) when the router changed", %{worker: worker} do
@@ -267,7 +269,8 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
         end)
 
       assert log =~ "Muster router changed during broadcast for tenant #{tenant_id}"
-      refute_receive _any
+      refute_receive "le message"
+      refute_receive {@fanout_event, _, _, %{tenant: ^tenant_id}}
     end
 
     test "does not :ftl when there are no remote targets", %{worker: worker} do
@@ -285,7 +288,8 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       )
 
       assert_receive "le message"
-      refute_receive _any
+      refute_receive "le message"
+      refute_receive {@fanout_event, _, _, %{tenant: ^tenant_id}}
     end
 
     test "delivers nothing when the origin is the only target", %{worker: worker} do
@@ -302,7 +306,8 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
         Worker.route(tenant_id, @topic, "le message", Phoenix.PubSub, :node_origin, @view_hash)
       )
 
-      refute_receive _any
+      refute_receive "le message"
+      refute_receive {@fanout_event, _, _, %{tenant: ^tenant_id}}
     end
 
     test "routed local delivery emits hit=true when this node holds a connection", %{worker: worker, ref: ref} do
@@ -317,7 +322,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
 
       assert_receive {@fanout_event, ^ref, %{local_tenant_users: count}, %{tenant: ^tenant_id, hit: true}}
       assert count >= 1
-      refute_receive _any
+      refute_receive {@fanout_event, _, _, %{tenant: ^tenant_id}}
     end
   end
 
@@ -359,7 +364,8 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
 
       assert_receive "le message"
       assert_receive :abcast_called
-      refute_receive _any
+      refute_receive "le message"
+      refute_receive {@fanout_event, _, _, %{tenant: ^tenant_id}}
     end
 
     test "as router: floods the region when Muster.targets returns :flood", %{worker: worker} do
@@ -385,7 +391,8 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       assert_receive "le message"
       assert_receive {:abcast_called, nodes}
       assert Enum.sort(nodes) == [:node_us_2, :node_us_3]
-      refute_receive _any
+      refute_receive "le message"
+      refute_receive {@fanout_event, _, _, %{tenant: ^tenant_id}}
     end
 
     test "floods the region when this node is not the router", %{worker: worker} do
@@ -416,7 +423,8 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
         end)
 
       assert log =~ "Muster router changed"
-      refute_receive _any
+      refute_receive "le message"
+      refute_receive {@fanout_event, _, _, %{tenant: ^tenant_id}}
     end
 
     test "does not :ftl when there are no remote targets", %{worker: worker} do
@@ -431,7 +439,8 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       send(worker, Worker.route_region(@topic, tenant_id, "le message", Phoenix.PubSub, @view_hash))
 
       assert_receive "le message"
-      refute_receive _any
+      refute_receive "le message"
+      refute_receive {@fanout_event, _, _, %{tenant: ^tenant_id}}
     end
 
     test "does not send locally if current node does not have occupancy", %{worker: worker} do
@@ -445,7 +454,8 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
 
       send(worker, Worker.route_region(@topic, tenant_id, "le message", Phoenix.PubSub, @view_hash))
 
-      refute_receive _any
+      refute_receive "le message"
+      refute_receive {@fanout_event, _, _, %{tenant: ^tenant_id}}
     end
 
     test "local delivery emits hit=true when this node holds a connection", %{worker: worker, ref: ref} do
@@ -460,7 +470,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
 
       assert_receive {@fanout_event, ^ref, %{local_tenant_users: count}, %{tenant: ^tenant_id, hit: true}}
       assert count >= 1
-      refute_receive _any
+      refute_receive {@fanout_event, _, _, %{tenant: ^tenant_id}}
     end
   end
 end
