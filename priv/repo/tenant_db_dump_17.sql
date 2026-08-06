@@ -1063,7 +1063,7 @@ CREATE TABLE realtime.messages (
     inserted_at timestamp without time zone DEFAULT now() NOT NULL,
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     binary_payload bytea,
-    broadcasted_at timestamp without time zone
+    skip_broadcast boolean DEFAULT false NOT NULL
 )
 PARTITION BY RANGE (inserted_at);
 
