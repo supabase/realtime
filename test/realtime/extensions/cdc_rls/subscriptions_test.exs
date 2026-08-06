@@ -1275,6 +1275,30 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
       assert msg =~ "invalid column for select nonexistent_column"
     end
 
+    test "user gets an error when select references a column the role cannot read", %{conn: conn} do
+      Postgrex.query!(conn, "revoke select on public.test from anon", [])
+      Postgrex.query!(conn, "grant select (id) on public.test to anon", [])
+
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "test",
+          "select" => ["id", "details"]
+        })
+
+      params_list = [
+        %{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}
+      ]
+
+      assert {:error, {:subscription_insert_failed, msg}} =
+               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+
+      assert msg =~ "invalid column for select details"
+
+      assert %Postgrex.Result{rows: [[0]]} =
+               Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+    end
+
     test "user gets an error when using select with a schema-only (wildcard table) subscription" do
       assert {:error, msg} =
                Subscriptions.parse_subscription_params(%{
