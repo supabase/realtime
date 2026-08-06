@@ -1,7 +1,29 @@
 start_time = :os.system_time(:millisecond)
 
 alias Realtime.Api
-max_cases = String.to_integer(System.get_env("MAX_CASES", "4"))
+
+# External-tenant-db mode (USE_EXTERNAL_TENANT_DB=true): each configured
+# port is an independent DB reused across the whole run, so max_cases must
+# equal the number of configured ports exactly, not just be <= it —
+# oversubscribing beyond the port count causes far worse, cascading
+# failures than running serially (concurrent tenant setup, e.g. DROP SCHEMA
+# realtime CASCADE, stomping on each other once demand exceeds supply).
+# max_cases is therefore forced here rather than read from MAX_CASES.
+max_cases =
+  if Containers.external_tenant_db?() do
+    forced_max_cases = length(Containers.external_tenant_db_ports!())
+
+    if System.get_env("MAX_CASES") do
+      IO.puts(
+        "[test_helper.exs] USE_EXTERNAL_TENANT_DB=true: ignoring MAX_CASES, forcing " <>
+          "max_cases to #{forced_max_cases} (the number of configured external ports)."
+      )
+    end
+
+    forced_max_cases
+  else
+    String.to_integer(System.get_env("MAX_CASES", "4"))
+  end
 
 repo_config = Application.fetch_env!(:realtime, Realtime.Repo)
 
@@ -49,14 +71,24 @@ exclude =
     &is_nil/1
   )
 
-ExUnit.start(exclude: exclude, max_cases: max_cases, capture_log: true)
+ExUnit.start(
+  exclude: exclude,
+  max_cases: max_cases,
+  capture_log: Realtime.Env.get_boolean("CAPTURE_LOG", true)
+)
 
 max_cases = ExUnit.configuration()[:max_cases]
 
-Containers.pull()
+# In external mode no supabase/postgres image is used, so skip the pull and
+# the container teardown. The Containers GenServer still starts (tests call
+# Containers.port()), but its eager poolboy pool is skipped (see
+# handle_continue in containers.ex).
+unless Containers.external_tenant_db?() do
+  Containers.pull()
 
-if System.get_env("REUSE_CONTAINERS") != "true" do
-  Containers.stop_containers()
+  if System.get_env("REUSE_CONTAINERS") != "true" do
+    Containers.stop_containers()
+  end
 end
 
 {:ok, _pid} = Containers.start_link(max_cases)

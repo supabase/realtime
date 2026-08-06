@@ -2,11 +2,49 @@ defmodule Containers do
   alias Extensions.PostgresCdcRls
   alias Realtime.Tenants.Connect
   alias Containers.Container
+  alias Containers.ExternalTarget
   alias Realtime.Database
+  alias Realtime.Env
   alias Realtime.Tenants
   alias Realtime.Tenants.Migrations
 
   use GenServer
+
+  # External-tenant-DB mode (USE_EXTERNAL_TENANT_DB=true): instead of starting
+  # per-test supabase/postgres containers, point DB-backed tenant tests at one
+  # or more already-running, external Postgres-wire-compatible servers (e.g.
+  # Multigres) on EXTERNAL_TENANT_DB_PORTS, host fixed at 127.0.0.1. Each
+  # configured port is an independent DB — the pool hands out exactly one per
+  # concurrent test, same checkout/checkin contract as the container pool.
+  # Unset, behavior is unchanged. Uses Env.get_boolean/2 for consistency with
+  # the rest of the codebase (e.g. DB_SSL) — accepts true/1/false/0
+  # (case-insensitive), raises on anything else rather than silently treating
+  # a typo as false.
+  def external_tenant_db?, do: Env.get_boolean("USE_EXTERNAL_TENANT_DB", false)
+
+  # EXTERNAL_TENANT_DB_PORTS is a comma-separated list, one port per
+  # independent external DB (e.g. one per Multigres cluster). EXTERNAL_TENANT_DB_PORT
+  # (singular) is kept as an alias for a single-port list.
+  def external_tenant_db_ports! do
+    case presence(System.get_env("EXTERNAL_TENANT_DB_PORTS")) || presence(System.get_env("EXTERNAL_TENANT_DB_PORT")) do
+      nil ->
+        raise "USE_EXTERNAL_TENANT_DB=true requires EXTERNAL_TENANT_DB_PORTS (comma-separated) or EXTERNAL_TENANT_DB_PORT to be set"
+
+      value ->
+        value
+        |> String.split(",")
+        |> Enum.map(&String.trim/1)
+        |> Enum.map(&String.to_integer/1)
+    end
+  end
+
+  # Treats an explicitly-empty env var the same as unset, so e.g.
+  # EXTERNAL_TENANT_DB_PORTS="" falls through to EXTERNAL_TENANT_DB_PORT (or
+  # the clear "not set" error) instead of raising a cryptic ArgumentError out
+  # of String.to_integer("").
+  defp presence(nil), do: nil
+  defp presence(""), do: nil
+  defp presence(value), do: value
 
   defp image, do: System.get_env("POSTGRES_IMAGE", "supabase/postgres:17.6.1.127")
 
@@ -23,12 +61,22 @@ defmodule Containers do
   end
 
   def start_container(), do: GenServer.call(__MODULE__, :start_container, 10_000)
+  def start_external_target(), do: GenServer.call(__MODULE__, :start_external_target, 10_000)
   def port(), do: GenServer.call(__MODULE__, :port, 10_000)
 
   def start_link(max_cases), do: GenServer.start_link(__MODULE__, max_cases, name: __MODULE__)
 
   def init(max_cases) do
-    existing_containers = existing_containers("realtime-test-*")
+    # In external mode no containers are ever started, so skip the docker
+    # probe — `docker ps` would otherwise crash Containers.init/1
+    # (ErlangError if docker isn't installed, MatchError if the daemon is
+    # down) before any test can run, defeating the point of this mode. The
+    # port-range computation below stays docker-free either way (it only
+    # excludes already-used ports from existing_containers) — it's still
+    # needed in external mode as the fallback Containers.port/0 uses for
+    # Generators.tenant_fixture/1's default db_port when a test doesn't pass
+    # one explicitly.
+    existing_containers = if external_tenant_db?(), do: [], else: existing_containers("realtime-test-*")
     ports = for {_, port} <- existing_containers, do: port
 
     partition = System.get_env("MIX_TEST_PARTITION", "1") |> String.to_integer()
@@ -39,18 +87,38 @@ defmodule Containers do
     available_ports =
       all_ports |> Enum.slice((partition - 1) * range_size, range_size) |> Enum.shuffle() |> Kernel.--(ports)
 
-    {:ok, %{existing_containers: existing_containers, ports: available_ports}, {:continue, {:pool, max_cases}}}
+    external_ports = if external_tenant_db?(), do: external_tenant_db_ports!(), else: []
+
+    state = %{
+      existing_containers: existing_containers,
+      ports: available_ports,
+      external_ports: external_ports,
+      external_port_owners: %{}
+    }
+
+    {:ok, state, {:continue, {:pool, max_cases}}}
   end
 
   def handle_continue({:pool, max_cases}, state) do
+    # One ExternalTarget worker per configured external port (each just
+    # claims an already-running DB, no docker to start/pull) in external
+    # mode; otherwise one Container worker per max concurrent test plus a
+    # small buffer.
+    {worker_module, size} =
+      if external_tenant_db?() do
+        {Containers.ExternalTarget, length(state.external_ports)}
+      else
+        {Containers.Container, max_cases + 2}
+      end
+
     {:ok, _pid} =
       :poolboy.start_link(
         [
           strategy: :fifo,
           name: {:local, Containers.Pool},
-          size: max_cases + 2,
+          size: size,
           max_overflow: 0,
-          worker_module: Containers.Container
+          worker_module: worker_module
         ],
         []
       )
@@ -71,6 +139,35 @@ defmodule Containers do
       [] ->
         {name, port, ports} = start_available_container(state.ports)
         {:reply, {:ok, name, port}, %{state | ports: ports}}
+    end
+  end
+
+  # Monitors the requesting ExternalTarget worker and tracks which port it
+  # holds, so a crashed worker's port is reclaimed (see handle_info :DOWN
+  # below) instead of being lost forever. Pool size equals
+  # length(external_ports) exactly (no spare), so a poolboy-restarted worker
+  # can otherwise permanently exhaust the list after just one crash.
+  def handle_call(:start_external_target, {pid, _tag}, state) do
+    case state.external_ports do
+      [port | rest] ->
+        Process.monitor(pid)
+        state = %{state | external_ports: rest, external_port_owners: Map.put(state.external_port_owners, pid, port)}
+        {:reply, port, state}
+
+      [] ->
+        # Momentary exhaustion — e.g. a replacement worker asked before the
+        # dead worker's :DOWN reclaimed its port. The caller retries.
+        {:reply, {:error, :no_external_ports_available}, state}
+    end
+  end
+
+  def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
+    case Map.pop(state.external_port_owners, pid) do
+      {nil, _owners} ->
+        {:noreply, state}
+
+      {port, owners} ->
+        {:noreply, %{state | external_ports: [port | state.external_ports], external_port_owners: owners}}
     end
   end
 
@@ -121,10 +218,10 @@ defmodule Containers do
     tenant
   end
 
-  @doc "Return port for a container that can be used"
+  @doc "Return port for a container (or an external tenant DB) that can be used"
   def checkout() do
     with container when is_pid(container) <- :poolboy.checkout(Containers.Pool, true, 5_000),
-         port <- Container.port(container) do
+         port <- port_module().port(container) do
       # Automatically checkin the container at the end of the test
       ExUnit.Callbacks.on_exit(fn -> :poolboy.checkin(Containers.Pool, container) end)
 
@@ -134,7 +231,19 @@ defmodule Containers do
     end
   end
 
+  # In external-tenant-db mode the tenant DB is the external server's
+  # pre-existing `postgres` database; there's nothing to create, and some
+  # Postgres-wire-compatible servers don't implement CREATE DATABASE (or
+  # mishandle Ecto's zero-column existence probe), so skip this entirely.
   defp storage_up!(tenant) do
+    if external_tenant_db?() do
+      :ok
+    else
+      do_storage_up!(tenant)
+    end
+  end
+
+  defp do_storage_up!(tenant) do
     {:ok, db_settings} = Database.from_tenant(tenant, "realtime_test", :stop)
 
     settings =
@@ -152,9 +261,24 @@ defmodule Containers do
   def checkout_tenant(opts \\ []), do: do_checkout_tenant(opts, :sandbox)
   def checkout_tenant_unboxed(opts \\ []), do: do_checkout_tenant(opts, :unboxed)
 
+  # Acquire a tenant database for one test — a pooled supabase/postgres
+  # container, or (in external mode) one of the pre-configured external DBs.
+  # Either way it's a real pool checkout, released via the returned checkin
+  # function once the caller is done.
+  defp acquire_tenant_db do
+    case :poolboy.checkout(Containers.Pool, true, 5_000) do
+      container when is_pid(container) ->
+        {:ok, port_module().port(container), fn -> :poolboy.checkin(Containers.Pool, container) end}
+
+      _ ->
+        :error
+    end
+  end
+
+  defp port_module, do: if(external_tenant_db?(), do: ExternalTarget, else: Container)
+
   defp do_checkout_tenant(opts, mode) do
-    with container when is_pid(container) <- :poolboy.checkout(Containers.Pool, true, 5_000),
-         port <- Container.port(container) do
+    with {:ok, port, checkin} <- acquire_tenant_db() do
       tenant = repo_run(mode, fn -> Generators.tenant_fixture(%{port: port, migrations_ran: 0}) end)
 
       run_migrations? = Keyword.get(opts, :run_migrations, false)
@@ -186,7 +310,7 @@ defmodule Containers do
             repo_run(:unboxed, fn -> Realtime.Api.delete_tenant_by_external_id(tenant.external_id) end)
           end
 
-          :poolboy.checkin(Containers.Pool, container)
+          checkin.()
         end)
 
         if run_migrations? do
@@ -213,7 +337,7 @@ defmodule Containers do
         GenServer.stop(conn)
       end
     else
-      _ -> {:error, "failed to checkout a container"}
+      :error -> {:error, "failed to checkout a container"}
     end
   end
 
