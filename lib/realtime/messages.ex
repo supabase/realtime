@@ -12,33 +12,46 @@ defmodule Realtime.Messages do
   @default_timeout 5_000
 
   @doc """
-  Persists a broadcast sent over WebSocket for `topic` as a `persistence` message.
+  Persists a broadcast sent over WebSocket for `topic`.
 
-  Only called after the sender's `persistence` policy authorized it, so the persisted row is always
-  private. Bypasses RLS because that authorization already happened on the broadcast, and sets
-  `broadcasted_at` to avoid re-broadcasting the message twice.
+  Only called after the sender's `persistence` policy authorized it, so the persisted row is always private.
+  Bypasses RLS because that authorization already happened on the broadcast.
+
+  Check `:persistence` authorization to define if message is persisted,
+  but store with `:broadcast` extension, like any other broadcasted message.
+
+  Set `skip_broadcast` because the message was already delivered over WebSocket, so it must not be
+  broadcast again when it appears on the replication stream.
 
   Automatically uses RPC if the database connection is not on the same node.
   """
-  @spec persist(DBConnection.conn(), String.t(), String.t(), term()) ::
-          {:ok, binary()} | {:error, any()} | {:error, :rpc_error, term}
-  def persist(conn, topic, event, payload) when node(conn) == node() do
+  @spec persist(
+          conn :: DBConnection.conn(),
+          tenant_id :: String.t(),
+          topic :: String.t(),
+          event :: String.t(),
+          payload :: map()
+        ) :: {:ok, binary()} | {:error, any()} | {:error, :rpc_error, term}
+  def persist(conn, _tenant_id, topic, event, payload) when node(conn) == node() do
     insert(conn, topic, event, payload)
   end
 
-  def persist(conn, topic, event, payload) do
-    Realtime.GenRpc.call(node(conn), __MODULE__, :persist, [conn, topic, event, payload], key: topic)
+  def persist(conn, tenant_id, topic, event, payload) do
+    Realtime.GenRpc.call(node(conn), __MODULE__, :persist, [conn, tenant_id, topic, event, payload],
+      key: topic,
+      tenant_id: tenant_id
+    )
   end
 
   defp insert(conn, topic, event, payload) do
     changeset =
       Message.changeset(%Message{}, %{
         topic: topic,
-        extension: :persistence,
+        extension: :broadcast,
         event: event,
         payload: payload,
         private: true,
-        broadcasted_at: NaiveDateTime.utc_now(:microsecond)
+        skip_broadcast: true
       })
 
     case Repo.insert(conn, changeset, Message) do
@@ -90,7 +103,7 @@ defmodule Realtime.Messages do
         where:
           m.topic == ^topic and
             m.private == true and
-            m.extension in [:broadcast, :persistence] and
+            m.extension == :broadcast and
             m.inserted_at >= ^since and
             m.inserted_at < ^now,
         limit: ^limit,

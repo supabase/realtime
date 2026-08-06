@@ -28,31 +28,31 @@ defmodule Realtime.MessagesTest do
   end
 
   describe "persist/4" do
-    test "inserts a message marked as already broadcast", %{conn: conn} do
+    test "inserts a message marked as already broadcast", %{conn: conn, tenant: tenant} do
       topic = random_string()
 
-      assert {:ok, id} = Messages.persist(conn, topic, "test", %{"a" => "b"})
+      assert {:ok, id} = Messages.persist(conn, tenant.id, topic, "test", %{"a" => "b"})
 
       assert {:ok,
               [
                 %Message{
                   id: ^id,
                   topic: ^topic,
-                  extension: :persistence,
+                  extension: :broadcast,
                   private: true,
-                  broadcasted_at: %NaiveDateTime{}
+                  skip_broadcast: true
                 }
               ]} = Repo.all(conn, Message, Message)
     end
 
-    test "distributed store", %{conn: conn} do
+    test "distributed store", %{conn: conn, tenant: tenant} do
       topic = random_string()
 
       {:ok, node} = Clustered.start()
 
       # Call remote node passing the database connection that is local to this node
       assert {:ok, id} =
-               :erpc.call(node, Messages, :persist, [conn, topic, "test", %{"a" => "b"}])
+               :erpc.call(node, Messages, :persist, [conn, tenant.id, topic, "test", %{"a" => "b"}])
 
       assert {:ok, [%Message{id: ^id, topic: ^topic}]} = Repo.all(conn, Message, Message)
     end
@@ -129,15 +129,16 @@ defmodule Realtime.MessagesTest do
       assert Messages.replay(conn, tenant.external_id, "test", 0, 10) == {:ok, [privatem], MapSet.new([privatem.id])}
     end
 
-    test "replay includes broadcast and persistence, excludes presence", %{conn: conn, tenant: tenant} do
-      persistencem =
+    test "replay includes broadcasts already sent over WebSocket, excludes presence", %{conn: conn, tenant: tenant} do
+      broadcastedm =
         message_fixture(tenant, %{
           "private" => true,
           "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-1, :minute),
           "event" => "new",
-          "extension" => "persistence",
+          "extension" => "broadcast",
           "topic" => "test",
-          "payload" => %{"value" => "new"}
+          "payload" => %{"value" => "new"},
+          "skip_broadcast" => true
         })
 
       broadcastm =
@@ -160,7 +161,7 @@ defmodule Realtime.MessagesTest do
       })
 
       assert Messages.replay(conn, tenant.external_id, "test", 0, 10) ==
-               {:ok, [broadcastm, persistencem], MapSet.new([persistencem.id, broadcastm.id])}
+               {:ok, [broadcastm, broadcastedm], MapSet.new([broadcastedm.id, broadcastm.id])}
     end
 
     test "replay respects since", %{conn: conn, tenant: tenant} do

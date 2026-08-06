@@ -320,33 +320,26 @@ defmodule Realtime.Tenants.Authorization do
   end
 
   defp check_write_policies(conn, authorization_context, extensions, policies) do
-    with {:ok, policies} <- check_extension_write_policies(conn, authorization_context, extensions, policies),
-         {:ok, persistence_write?} <- authorize_write(conn, authorization_context, :persistence) do
-      {:ok, Policies.update_policies(policies, :persistence, :write, persistence_write?)}
-    end
-  end
+    extensions = extensions ++ [:persistence]
 
-  defp check_extension_write_policies(conn, authorization_context, extensions, policies) do
-    Enum.reduce_while(@all_extensions, {:ok, policies}, fn extension, {:ok, acc} ->
+    Enum.reduce_while(@all_extensions ++ [:persistence], {:ok, policies}, fn extension, {:ok, acc} ->
       if extension in extensions do
-        case authorize_write(conn, authorization_context, extension) do
-          {:ok, allowed?} -> {:cont, {:ok, Policies.update_policies(acc, extension, :write, allowed?)}}
-          {:error, reason} -> {:halt, {:error, reason}}
+        changeset = Message.changeset(%Message{}, %{topic: authorization_context.topic, extension: extension})
+
+        case Repo.insert(conn, changeset, Message, mode: :savepoint, returning: false) do
+          {:ok, _} ->
+            {:cont, {:ok, Policies.update_policies(acc, extension, :write, true)}}
+
+          {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
+            {:cont, {:ok, Policies.update_policies(acc, extension, :write, false)}}
+
+          {:error, reason} ->
+            {:halt, {:error, reason}}
         end
       else
         {:cont, {:ok, Policies.update_policies(acc, extension, :write, false)}}
       end
     end)
-  end
-
-  defp authorize_write(conn, authorization_context, extension) do
-    changeset = Message.changeset(%Message{}, %{topic: authorization_context.topic, extension: extension})
-
-    case Repo.insert(conn, changeset, Message, mode: :savepoint, returning: false) do
-      {:ok, _} -> {:ok, true}
-      {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} -> {:ok, false}
-      {:error, reason} -> {:error, reason}
-    end
   end
 
   defp rate_counter(tenant_id) do

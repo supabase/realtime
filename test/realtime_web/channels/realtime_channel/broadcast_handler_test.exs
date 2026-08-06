@@ -483,15 +483,15 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
                   id: ^id,
                   topic: ^topic,
                   event: "test",
-                  extension: :persistence,
+                  extension: :broadcast,
                   private: true,
                   payload: ^expected_payload,
-                  broadcasted_at: %NaiveDateTime{}
+                  skip_broadcast: true
                 }
               ]} = Repo.all(db_conn, Message, Message)
     end
 
-    test "V2 json user broadcast authorized to persist is stored with the decoded payload", %{
+    test "V2 json user broadcast authorized to persist stores the user payload", %{
       topic: topic,
       tenant: tenant,
       db_conn: db_conn
@@ -514,11 +514,37 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
                   id: ^id,
                   topic: ^topic,
                   event: "event123",
-                  extension: :persistence,
+                  extension: :broadcast,
                   private: true,
-                  payload: %{"a" => "b"}
+                  payload: %{"a" => "b"},
+                  skip_broadcast: true
                 }
               ]} = Repo.all(db_conn, Message, Message)
+    end
+
+    test "V2 json user broadcast with an invalid user payload is delivered but not persisted", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket =
+        socket_fixture(tenant, topic,
+          policies: %Policies{
+            broadcast: %BroadcastPolicies{write: true},
+            persistence: %PersistencePolicies{write: true}
+          }
+        )
+
+      v2_payload = {"event123", :json, "not json at all", %{}}
+
+      log =
+        capture_log(fn ->
+          assert {:reply, :ok, _socket} = BroadcastHandler.handle(v2_payload, db_conn, socket)
+        end)
+
+      assert_receive {:socket_push, _encoding, _data}
+      assert log =~ "UnableToPersistBroadcast"
+      assert {:ok, []} = Repo.all(db_conn, Message, Message)
     end
 
     test "V2 binary user broadcast is delivered but not persisted", %{

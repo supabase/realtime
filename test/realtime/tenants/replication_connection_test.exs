@@ -266,6 +266,38 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       end
     end
 
+    test "does not broadcast messages already sent over WebSocket", %{tenant: tenant} do
+      start_link_supervised!(
+        {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
+        restart: :transient
+      )
+
+      topic = random_string()
+      tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
+      subscribe(tenant_topic, topic)
+
+      message_fixture(tenant, %{
+        "topic" => topic,
+        "private" => true,
+        "event" => "INSERT",
+        "extension" => "broadcast",
+        "payload" => %{"value" => random_string()},
+        "skip_broadcast" => true
+      })
+
+      refute_receive {:socket_push, :text, _}, 500
+
+      message_fixture(tenant, %{
+        "topic" => topic,
+        "private" => true,
+        "event" => "INSERT",
+        "extension" => "broadcast",
+        "payload" => %{"value" => random_string()}
+      })
+
+      assert_receive {:socket_push, :text, _}, 2000
+    end
+
     test "replicates binary with exactly 16 bytes to test UUID conversion error", %{tenant: tenant} do
       start_link_supervised!(
         {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},

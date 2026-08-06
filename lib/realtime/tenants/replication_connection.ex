@@ -409,7 +409,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
     with %{columns: columns} <- Map.get(relations, relation_id),
          to_broadcast = tuple_to_map(tuple_data, columns),
-         :ok <- check_not_already_broadcasted(to_broadcast),
+         :ok <- check_should_broadcast(to_broadcast),
          {:ok, inserted_at} <- get_or_error(to_broadcast, "inserted_at", :inserted_at_missing),
          {:ok, event} <- get_or_error(to_broadcast, "event", :event_missing),
          {:ok, id} <- get_or_error(to_broadcast, "id", :id_missing),
@@ -450,7 +450,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
       {:noreply, state}
     else
-      {:error, :already_broadcasted} ->
+      {:error, :skip_broadcast} ->
         {:noreply, state}
 
       {:error, error} ->
@@ -509,9 +509,8 @@ defmodule Realtime.Tenants.ReplicationConnection do
     end
   end
 
-  defp check_not_already_broadcasted(%{"broadcasted_at" => nil}), do: :ok
-  defp check_not_already_broadcasted(%{"broadcasted_at" => _}), do: {:error, :already_broadcasted}
-  defp check_not_already_broadcasted(_), do: :ok
+  defp check_should_broadcast(%{"skip_broadcast" => true}), do: {:error, :skip_broadcast}
+  defp check_should_broadcast(_), do: :ok
 
   defp get_or_error(map, key, error_type) do
     case Map.get(map, key) do

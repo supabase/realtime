@@ -16,7 +16,7 @@ defmodule Realtime.Api.Message do
     field(:payload, :map)
     field(:event, :string)
     field(:private, :boolean)
-    field(:broadcasted_at, :naive_datetime_usec)
+    field(:skip_broadcast, :boolean)
 
     timestamps()
   end
@@ -29,7 +29,7 @@ defmodule Realtime.Api.Message do
       :payload,
       :event,
       :private,
-      :broadcasted_at,
+      :skip_broadcast,
       :inserted_at,
       :updated_at
     ])
