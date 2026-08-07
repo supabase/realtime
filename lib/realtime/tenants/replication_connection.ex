@@ -1,20 +1,6 @@
 defmodule Realtime.Tenants.ReplicationConnection do
   @moduledoc """
   ReplicationConnection it's the module that provides a way to stream data from a PostgreSQL database using logical replication.
-
-  ## Struct parameters
-  * `connection_opts` - The connection options to connect to the database.
-  * `table` - The table to replicate. If `:all` is passed, it will replicate all tables.
-  * `schema` - The schema of the table to replicate. If not provided, it will use the `public` schema. If `:all` is passed, this option is ignored.
-  * `opts` - The options to pass to this module
-  * `step` - The current step of the replication process
-  * `publication_name` - The name of the publication to create. If not provided, it will use the schema and table name.
-  * `replication_slot_name` - The name of the replication slot to create. If not provided, it will use the schema and table name.
-  * `output_plugin` - The output plugin to use. Default is `pgoutput`.
-  * `proto_version` - The protocol version to use. Default is `2`.
-  * `handler_module` - The module that will handle the data received from the replication stream.
-  * `metadata` - The metadata to pass to the handler module.
-
   """
   use Postgrex.ReplicationConnection
   use Realtime.Logs
@@ -39,6 +25,20 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
   @default_query_timeout :timer.minutes(4)
 
+  @typedoc """
+  * `tenant_id` - The tenant this connection replicates for.
+  * `opts` - Reserved, defaults to `[]`.
+  * `step` - The current step of the replication process.
+  * `publication_name` - The name of the publication to create. Defaults to `"supabase_\#{schema}_\#{table}_publication"` if not provided.
+  * `replication_slot_name` - The name of the replication slot to create. Defaults to `"supabase_\#{schema}_\#{table}_replication_slot_\#{slot_suffix()}"` if not provided.
+  * `output_plugin` - The output plugin to use. Default is `pgoutput`.
+  * `proto_version` - The protocol version to use. Default is `2`.
+  * `relations` - Cache of decoded relation (table) metadata, keyed by relation id, populated as `Relation` messages stream in.
+  * `buffer` - Reserved, defaults to `[]`.
+  * `monitored_pid` - The process this connection is linked to; the connection stops when it dies.
+  * `latency_committed_at` - Timestamp of the last commit, used to compute broadcast latency.
+  * `query_timeout` - Timeout for queries run during the replication setup steps.
+  """
   @type t :: %__MODULE__{
           tenant_id: String.t(),
           opts: Keyword.t(),
@@ -409,6 +409,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
     with %{columns: columns} <- Map.get(relations, relation_id),
          to_broadcast = tuple_to_map(tuple_data, columns),
+         :ok <- check_should_broadcast(to_broadcast),
          {:ok, inserted_at} <- get_or_error(to_broadcast, "inserted_at", :inserted_at_missing),
          {:ok, event} <- get_or_error(to_broadcast, "event", :event_missing),
          {:ok, id} <- get_or_error(to_broadcast, "id", :id_missing),
@@ -449,6 +450,9 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
       {:noreply, state}
     else
+      {:error, :skip_broadcast} ->
+        {:noreply, state}
+
       {:error, error} ->
         log_error("UnableToBroadcastChanges", error)
         {:noreply, state}
@@ -504,6 +508,9 @@ defmodule Realtime.Tenants.ReplicationConnection do
       _ -> :ok
     end
   end
+
+  defp check_should_broadcast(%{"skip_broadcast" => true}), do: {:error, :skip_broadcast}
+  defp check_should_broadcast(_), do: :ok
 
   defp get_or_error(map, key, error_type) do
     case Map.get(map, key) do

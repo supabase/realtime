@@ -27,6 +27,37 @@ defmodule Realtime.MessagesTest do
     %{conn: conn, tenant: tenant, date_start: date_start, date_end: date_end}
   end
 
+  describe "persist/4" do
+    test "inserts a message marked as already broadcast", %{conn: conn, tenant: tenant} do
+      topic = random_string()
+
+      assert {:ok, id} = Messages.persist(conn, tenant.id, topic, "test", %{"a" => "b"})
+
+      assert {:ok,
+              [
+                %Message{
+                  id: ^id,
+                  topic: ^topic,
+                  extension: :broadcast,
+                  private: true,
+                  skip_broadcast: true
+                }
+              ]} = Repo.all(conn, Message, Message)
+    end
+
+    test "distributed store", %{conn: conn, tenant: tenant} do
+      topic = random_string()
+
+      {:ok, node} = Clustered.start()
+
+      # Call remote node passing the database connection that is local to this node
+      assert {:ok, id} =
+               :erpc.call(node, Messages, :persist, [conn, tenant.id, topic, "test", %{"a" => "b"}])
+
+      assert {:ok, [%Message{id: ^id, topic: ^topic}]} = Repo.all(conn, Message, Message)
+    end
+  end
+
   describe "replay/5" do
     test "invalid replay params", %{tenant: tenant} do
       assert Messages.replay(self(), tenant.external_id, "a topic", "not a number", 123) ==
@@ -98,27 +129,39 @@ defmodule Realtime.MessagesTest do
       assert Messages.replay(conn, tenant.external_id, "test", 0, 10) == {:ok, [privatem], MapSet.new([privatem.id])}
     end
 
-    test "replay extension=broadcast", %{conn: conn, tenant: tenant} do
-      privatem =
+    test "replay includes broadcasts already sent over WebSocket, excludes presence", %{conn: conn, tenant: tenant} do
+      broadcastedm =
         message_fixture(tenant, %{
           "private" => true,
           "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-1, :minute),
           "event" => "new",
           "extension" => "broadcast",
           "topic" => "test",
-          "payload" => %{"value" => "new"}
+          "payload" => %{"value" => "new"},
+          "skip_broadcast" => true
+        })
+
+      broadcastm =
+        message_fixture(tenant, %{
+          "private" => true,
+          "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-2, :minute),
+          "event" => "old",
+          "extension" => "broadcast",
+          "topic" => "test",
+          "payload" => %{"value" => "old"}
         })
 
       message_fixture(tenant, %{
         "private" => true,
-        "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-2, :minute),
-        "event" => "old",
+        "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-3, :minute),
+        "event" => "presence",
         "extension" => "presence",
         "topic" => "test",
-        "payload" => %{"value" => "old"}
+        "payload" => %{"value" => "presence"}
       })
 
-      assert Messages.replay(conn, tenant.external_id, "test", 0, 10) == {:ok, [privatem], MapSet.new([privatem.id])}
+      assert Messages.replay(conn, tenant.external_id, "test", 0, 10) ==
+               {:ok, [broadcastm, broadcastedm], MapSet.new([broadcastedm.id, broadcastm.id])}
     end
 
     test "replay respects since", %{conn: conn, tenant: tenant} do

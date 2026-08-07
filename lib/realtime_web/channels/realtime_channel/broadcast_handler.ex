@@ -6,6 +6,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
 
   import Phoenix.Socket, only: [assign: 3]
 
+  alias Realtime.Messages
   alias Realtime.Tenants
   alias RealtimeWeb.RealtimeChannel
   alias RealtimeWeb.TenantBroadcaster
@@ -14,14 +15,22 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
+  alias Realtime.Tenants.Authorization.Policies.PersistencePolicies
 
-  @type payload :: map | {String.t(), :json | :binary, binary}
+  @type payload :: map | {String.t(), :json | :binary, binary, map()}
 
   @event_type "broadcast"
   @spec handle(payload, Socket.t()) :: {:reply, :ok, Socket.t()} | {:noreply, Socket.t()}
   def handle(payload, %{assigns: %{private?: false}} = socket), do: handle(payload, nil, socket)
 
-  @spec handle(payload, pid() | nil, Socket.t()) :: {:reply, :ok, Socket.t()} | {:noreply, Socket.t()}
+  @doc """
+  Handles an outgoing broadcast for a channel.
+
+  `db_conn` is `nil` for public channels, which don't run write authorization nor persist messages.
+  Otherwise must pass the tenant database conn used to run write authorization and persist the message.
+  """
+  @spec handle(payload, pid() | nil, Socket.t()) ::
+          {:reply, :ok | {:ok, map()} | {:error, any()}, Socket.t()} | {:noreply, Socket.t()}
   def handle(payload, db_conn, %{assigns: %{private?: true}} = socket) do
     %{
       assigns: %{
@@ -44,13 +53,21 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
 
         res =
           case Tenants.validate_payload_size(tenant_id, payload) do
-            :ok -> send_message(tenant_id, self_broadcast, tenant_topic, payload)
-            {:error, error} -> {:error, error}
+            # Broadcast first to prioritize throughput.
+            :ok ->
+              send_message(tenant_id, self_broadcast, tenant_topic, payload)
+              maybe_persist(policies, db_conn, tenant_id, authorization_context.topic, payload)
+
+            {:error, error} ->
+              {:error, error}
           end
 
         cond do
           ack_broadcast && match?({:error, :payload_size_exceeded}, res) ->
             {:reply, {:error, :payload_size_exceeded}, socket}
+
+          ack_broadcast && match?({:ok, _}, res) ->
+            {:reply, res, socket}
 
           ack_broadcast ->
             {:reply, :ok, socket}
@@ -157,6 +174,31 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   defp build_broadcast(topic, payload) do
     %Phoenix.Socket.Broadcast{topic: topic, event: @event_type, payload: payload}
   end
+
+  @spec maybe_persist(Policies.t(), pid(), String.t(), String.t(), payload) :: :ok | {:ok, map()}
+  defp maybe_persist(%Policies{persistence: %PersistencePolicies{write: true}}, db_conn, tenant_id, topic, payload) do
+    with {:ok, event, event_payload} <- convert_to_persistable_fields(payload),
+         {:ok, id} <- Messages.persist(db_conn, tenant_id, topic, event, event_payload) do
+      {:ok, %{id: id}}
+    else
+      error ->
+        log_error("UnableToPersistMessage", error)
+        :ok
+    end
+  end
+
+  defp maybe_persist(_policies, _db_conn, _tenant_id, _topic, _payload), do: :ok
+
+  @spec convert_to_persistable_fields(payload) ::
+          {:ok, String.t(), map() | binary()} | {:error, :unsupported_payload}
+  defp convert_to_persistable_fields(%{"event" => event, "payload" => payload}), do: {:ok, event, payload}
+
+  defp convert_to_persistable_fields({event, :json, user_payload, _metadata}),
+    do: {:ok, event, Jason.Fragment.new(user_payload)}
+
+  defp convert_to_persistable_fields({event, :binary, user_payload, _metadata}), do: {:ok, event, user_payload}
+
+  defp convert_to_persistable_fields(_payload), do: {:error, :unsupported_payload}
 
   defp increment_rate_counter(%{assigns: %{policies: %Policies{broadcast: %BroadcastPolicies{write: false}}}} = socket) do
     socket

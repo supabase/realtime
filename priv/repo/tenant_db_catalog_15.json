@@ -1934,6 +1934,25 @@
           "default": null,
           "comment": null,
           "security_labels": []
+        },
+        {
+          "name": "skip_broadcast",
+          "position": 12,
+          "data_type": "boolean",
+          "data_type_str": "boolean",
+          "is_custom_type": false,
+          "custom_type_type": null,
+          "custom_type_category": null,
+          "custom_type_schema": null,
+          "custom_type_name": null,
+          "not_null": true,
+          "is_identity": false,
+          "is_identity_always": false,
+          "is_generated": false,
+          "collation": null,
+          "default": "false",
+          "comment": null,
+          "security_labels": []
         }
       ],
       "constraints": [

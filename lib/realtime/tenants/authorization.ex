@@ -320,7 +320,9 @@ defmodule Realtime.Tenants.Authorization do
   end
 
   defp check_write_policies(conn, authorization_context, extensions, policies) do
-    Enum.reduce_while(@all_extensions, {:ok, policies}, fn extension, {:ok, acc} ->
+    extensions = extensions ++ [:persistence]
+
+    Enum.reduce_while(@all_extensions ++ [:persistence], {:ok, policies}, fn extension, {:ok, acc} ->
       if extension in extensions do
         changeset = Message.changeset(%Message{}, %{topic: authorization_context.topic, extension: extension})
 
