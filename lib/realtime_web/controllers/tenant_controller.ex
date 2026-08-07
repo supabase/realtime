@@ -132,6 +132,7 @@ defmodule RealtimeWeb.TenantController do
   )
 
   def update(conn, %{"tenant_id" => external_id, "tenant" => tenant_params}) do
+    tenant_params = translate_postgres_changes_pool(tenant_params)
     tenant = Api.get_tenant_by_external_id(external_id, use_replica?: false)
 
     case tenant do
@@ -296,6 +297,17 @@ defmodule RealtimeWeb.TenantController do
       {:error, :tenant_not_found} -> {:error, :not_found}
     end
   end
+
+  # `postgres_changes_pool` it's the naming used in middleware
+  defp translate_postgres_changes_pool(%{"extensions" => extensions} = params) when is_list(extensions),
+    do: %{params | "extensions" => Enum.map(extensions, &translate_extension_pool/1)}
+
+  defp translate_postgres_changes_pool(params), do: params
+
+  defp translate_extension_pool(%{"settings" => %{"postgres_changes_pool" => pool} = settings} = extension),
+    do: %{extension | "settings" => Map.put(settings, "subcriber_pool_size", pool)}
+
+  defp translate_extension_pool(extension), do: extension
 
   defp set_observability_attributes(conn, _opts) do
     tenant_id = conn.path_params["tenant_id"]
