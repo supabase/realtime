@@ -251,6 +251,22 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert updated_tenant.presence_enabled == true
     end
 
+    test "postgres_changes_pool is stored as subcriber_pool_size and overrides it", %{tenant: tenant, conn: conn} do
+      external_id = tenant.external_id
+      port = tenant_db_port(tenant)
+      attrs = default_tenant_attrs(port) |> put_extension_setting("subcriber_pool_size", 3)
+
+      conn = put(conn, ~p"/api/tenants/#{external_id}", tenant: attrs)
+      assert [%{"settings" => %{"subcriber_pool_size" => 3}}] = json_response(conn, 200)["data"]["extensions"]
+
+      attrs = put_extension_setting(attrs, "postgres_changes_pool", 10)
+
+      conn = put(conn, ~p"/api/tenants/#{external_id}", tenant: attrs)
+      assert [%{"settings" => settings}] = json_response(conn, 200)["data"]["extensions"]
+      assert settings["subcriber_pool_size"] == 10
+      refute Map.has_key?(settings, "postgres_changes_pool")
+    end
+
     test "renders errors when data is invalid", %{conn: conn} do
       conn = put(conn, ~p"/api/tenants/#{random_string()}", tenant: @invalid_attrs)
       assert json_response(conn, 422)["errors"] != %{}
@@ -682,6 +698,10 @@ defmodule RealtimeWeb.TenantControllerTest do
       "postgres_cdc_default" => "postgres_cdc_rls",
       "jwt_secret" => "new secret"
     }
+  end
+
+  defp put_extension_setting(%{"extensions" => [extension]} = attrs, key, value) do
+    %{attrs | "extensions" => [update_in(extension, ["settings"], &Map.put(&1, key, value))]}
   end
 
   defp wait_on_postgres_cdc_rls(external_id, attempt \\ 10)
