@@ -1,75 +1,67 @@
-<div>
-  <div class="flex flex-row items-start justify-between gap-2 py-4">
-    <div>
-      <.h1>Realtime Control Center</.h1>
-      <p class="text-gray-600 dark:text-neutral-400">Connect, watch events, and debug your channel.</p>
-    </div>
-    <.button
-      :if={@share_url}
-      id="share-button"
-      type="button"
-      phx-hook="copyToClipboard"
-      data-url={@share_url}
-      variant={:secondary}
-    >
-      <.icon name="hero-share-mini" /> <span id="share-button-label">Share</span>
-    </.button>
-  </div>
-
-  <div class="flex flex-row flex-wrap items-center justify-between gap-2 mb-4">
-    <.h2>Connection</.h2>
-    <div id="conn_info" class="flex items-center gap-2">
+<div class="flex flex-col gap-4 lg:h-[calc(100vh-11rem)]">
+  <header class="flex flex-row items-start justify-between gap-x-4">
+    <div id="conn_info" class="flex flex-wrap items-center gap-x-3 gap-y-2 min-w-0">
       <.badge variant={status_variant(@health.channel.status)} pulse={status_pulse?(@health.channel.status)}>
         <%= channel_label(@health.channel) %>
       </.badge>
       <span :if={@health.transport.rtt_ms} class="text-xs text-gray-500 dark:text-neutral-400 font-mono">
         <%= Float.round(@health.transport.rtt_ms * 1.0, 1) %> ms
       </span>
+      <span :if={channel_detail(@health.channel)} class="text-xs text-gray-500 dark:text-neutral-400">
+        <%= channel_detail(@health.channel) %>
+      </span>
+      <span :if={@health.presence.status == :synced} class="text-xs text-gray-500 dark:text-neutral-400">
+        <%= presence_label(@health.presence) %>
+      </span>
+      <span :if={@health.postgres.status == :subscribed} class="text-xs text-gray-500 dark:text-neutral-400">
+        <%= postgres_label(@health.postgres) %>
+      </span>
     </div>
-  </div>
+
+    <.button id="share-button" type="button" phx-hook="copyToClipboard" variant={:secondary} class="shrink-0">
+      <.icon name="hero-share-mini" /> <span id="share-button-label">Share</span>
+    </.button>
+  </header>
+
   <.live_component module={RealtimeWeb.InspectorLive.ConnComponent} id={:conn} title={@page_title} />
 
-  <div class="flex flex-wrap items-center gap-x-6 gap-y-2 my-6 text-sm">
-    <div class="flex items-center gap-2">
-      <span class="text-gray-500 dark:text-neutral-400">Broadcast</span>
-      <.badge variant={status_variant(@health.broadcast.status)}>
-        <%= if @health.broadcast.status == :active, do: "Subscribed", else: "Not subscribed" %>
-      </.badge>
-    </div>
-    <div class="flex items-center gap-2">
-      <span class="text-gray-500 dark:text-neutral-400">Presence</span>
-      <.badge variant={status_variant(@health.presence.status)}>
-        <%= if @health.presence.status == :synced,
-          do: "Synced (#{@health.presence.count})",
-          else: "Not subscribed" %>
-      </.badge>
-    </div>
-    <div class="flex items-center gap-2">
-      <span class="text-gray-500 dark:text-neutral-400">Database</span>
-      <.badge variant={status_variant(@health.postgres.status)}>
-        <%= postgres_label(@health.postgres) %>
-      </.badge>
-    </div>
-  </div>
-
-  <details id="composer" phx-hook="detailsKeepState" class="mb-6">
-    <summary class="cursor-pointer text-lg font-semibold leading-6 text-brand mb-2">Broadcast an event</summary>
-    <.form :let={m} id="message_form" for={@changeset} class="mt-4" phx-submit="send_message">
-      <div class="flex flex-row items-start gap-4">
-        <div class="flex-1">
-          <.input field={m[:event]} label="Event" />
-        </div>
-        <div class="flex-1">
-          <.input field={m[:payload]} label="Payload" />
-        </div>
-        <.button type="submit" phx-disable-with="Sending..." class="mt-7">Send</.button>
-      </div>
-    </.form>
-  </details>
-
-  <.h3>Event log</.h3>
   <div id="payload" phx-update="ignore" phx-hook="payload" class="hidden"></div>
-  <div class="mt-4">
+
+  <div class="flex flex-col min-h-0 flex-1 border-t border-gray-200 dark:border-neutral-800 pt-4">
     <.live_component module={RealtimeWeb.InspectorLive.EventLogComponent} id="event_log" />
   </div>
+
+  <.form
+    :let={m}
+    id="message_form"
+    for={@changeset}
+    phx-submit="send_message"
+    class="flex flex-wrap items-center gap-2 shrink-0"
+  >
+    <span class="text-brand font-mono text-sm select-none" aria-hidden="true">&gt;</span>
+    <input
+      type="text"
+      id={m[:event].id}
+      name={m[:event].name}
+      value={Phoenix.HTML.Form.normalize_value("text", m[:event].value)}
+      aria-label="Broadcast event name"
+      placeholder="event"
+      autocomplete="off"
+      class="w-40 text-sm font-mono rounded-md border-gray-300 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100"
+    />
+    <input
+      type="text"
+      id={m[:payload].id}
+      name={m[:payload].name}
+      value={Phoenix.HTML.Form.normalize_value("text", m[:payload].value)}
+      aria-label="Broadcast payload"
+      placeholder={~s({"some":"data"})}
+      autocomplete="off"
+      class="flex-1 min-w-[12rem] text-sm font-mono rounded-md border-gray-300 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100"
+    />
+    <.button type="submit" phx-disable-with="Sending...">Send</.button>
+    <p :for={{_field, {message, _}} <- @changeset.errors} class="text-xs text-red-600 dark:text-red-400 w-full">
+      <%= message %>
+    </p>
+  </.form>
 </div>
