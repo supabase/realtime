@@ -39,6 +39,25 @@ defmodule Realtime.SynHandler do
   end
 
   @doc """
+  A process joined a :syn group (e.g. a node advertising itself into its
+  `RegionNodes` region group). Fired on every node once membership propagates.
+
+  We re-emit as telemetry so subscribers (e.g. the region-router ring registry)
+  can react to region membership changes at the moment :syn has the metadata,
+  rather than on raw `:nodeup` (which fires before the metadata is available).
+  """
+  @impl true
+  def on_process_joined(scope, group_name, _pid, meta, _reason) do
+    :telemetry.execute([:syn, scope, :joined], %{}, %{name: group_name, meta: meta})
+  end
+
+  @doc "A process left a :syn group. See `on_process_joined/5`."
+  @impl true
+  def on_process_left(scope, group_name, _pid, meta, _reason) do
+    :telemetry.execute([:syn, scope, :left], %{}, %{name: group_name, meta: meta})
+  end
+
+  @doc """
   When processes registered with :syn are unregistered, either manually or by stopping, this
   callback is invoked.
 
