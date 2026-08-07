@@ -137,6 +137,7 @@ defmodule Realtime.MixProject do
   defp aliases do
     [
       setup: ["deps.get", "ecto.setup", "cmd npm install --prefix assets"],
+      "test.assets": ["cmd node --test assets/js/*.test.mjs"],
       "ecto.setup": ["ecto.create", "ecto.migrate", "seed"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       seed: ["run priv/repo/dev_seeds.exs"],

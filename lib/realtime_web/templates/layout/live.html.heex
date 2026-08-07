@@ -122,8 +122,8 @@
     </nav>
   </div>
 </header>
-<main class="px-4 py-6 sm:px-6 lg:px-8">
-  <div class="mx-auto max-w-6xl">
+<main class="px-4 pt-6 pb-28 sm:px-6 lg:px-8 md:pb-24">
+  <div class="mx-auto max-w-screen-2xl">
     <p :if={Phoenix.Flash.get(@flash, :info)} class="alert alert-info" role="alert">
       <%= Phoenix.Flash.get(@flash, :info) %>
     </p>

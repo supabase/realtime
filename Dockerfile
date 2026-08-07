@@ -80,13 +80,16 @@ COPY config/config.exs config/${MIX_ENV}.exs config/
 RUN mix deps.compile
 COPY priv priv
 COPY lib lib
+
+# install js dependencies before the rest of assets, so editing a stylesheet or a hook does not
+# invalidate the install layer. `npm ci` installs exactly what the lockfile pins.
+COPY assets/package.json assets/package-lock.json assets/
+RUN cd assets && npm ci
+
 COPY assets assets
 
-# compile assets with esbuild and npm
-RUN cd assets \
-    && npm install \
-    && cd .. \
-    && mix assets.deploy
+# compile assets with esbuild and tailwind
+RUN mix assets.deploy
 
 # Compile the release
 RUN mix compile
