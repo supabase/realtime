@@ -37,7 +37,7 @@ defmodule Realtime.Filter do
   def value_placeholder(_), do: "value"
 
   @doc "The only values `is` accepts; Postgres raises on anything else."
-  def is_values, do: ~w(null true false unknown)
+  def allowed_is_values, do: ~w(null true false unknown)
 
   @doc """
   Splits a filter into every condition it carries.
@@ -100,7 +100,8 @@ defmodule Realtime.Filter do
     end
   end
 
-  defp truthy?(value), do: value in [true, "true", "on"]
+  # `fetch/2` stringifies everything, so a boolean `negated` arrives here as "true".
+  defp truthy?(value), do: value in ["true", "on"]
 
   defp parse_condition(segment) do
     with [column, rest] <- String.split(segment, "=", parts: 2),

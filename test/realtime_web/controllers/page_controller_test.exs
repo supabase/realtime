@@ -5,7 +5,7 @@ defmodule RealtimeWeb.PageControllerTest do
 
   test "GET / renders the console page", %{conn: conn} do
     conn = get(conn, "/")
-    assert html_response(conn, 200) =~ "Realtime Control Center"
+    assert html_response(conn, 200) =~ "Inspector - Supabase Realtime"
   end
 
   test "GET /inspector redirects to / preserving query params", %{conn: conn} do

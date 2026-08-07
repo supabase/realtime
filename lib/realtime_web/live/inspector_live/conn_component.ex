@@ -130,9 +130,10 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
 
     defp origin_of(value) do
       case URI.parse(value) do
-        %URI{scheme: scheme, host: host, port: port} when is_binary(scheme) and is_binary(host) and host != "" ->
-          port = if port == URI.default_port(scheme), do: nil, else: port
-          URI.to_string(%URI{scheme: scheme, host: host, port: port})
+        # Updating the parsed struct rather than building a fresh %URI{} keeps the opaque :authority
+        # field owned by URI; to_string/1 ignores it when :host is set and drops the default port.
+        %URI{scheme: scheme, host: host} = uri when is_binary(scheme) and is_binary(host) and host != "" ->
+          URI.to_string(%URI{uri | userinfo: nil, path: nil, query: nil, fragment: nil})
 
         _ ->
           String.trim_trailing(value, "/")
@@ -355,7 +356,7 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
         {:noreply, socket}
 
       column ->
-        error = "#{column} uses `is`, which only accepts #{Enum.join(Realtime.Filter.is_values(), ", ")}."
+        error = "#{column} uses `is`, which only accepts #{Enum.join(Realtime.Filter.allowed_is_values(), ", ")}."
         {:noreply, update_editor(socket, &%{&1 | conditions: conditions, error: error})}
     end
   end
@@ -390,7 +391,7 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
       value = String.trim(condition.value)
       column = String.trim(condition.column)
 
-      if condition.operator == "is" and column != "" and value not in Realtime.Filter.is_values(),
+      if condition.operator == "is" and column != "" and value not in Realtime.Filter.allowed_is_values(),
         do: column
     end)
   end
