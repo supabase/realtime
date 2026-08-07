@@ -134,7 +134,7 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
       {service_role_socket, _} = get_connection(tenant, serializer, role: "service_role")
       topic = "realtime:#{topic}"
 
-      WebsocketClient.join(socket, topic, %{config: %{presence: %{key: "", enabled: true}, private: true}})
+      WebsocketClient.join(socket, topic, %{config: %{presence: %{key: "authenticated", enabled: true}, private: true}})
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
       assert_receive %Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
 
@@ -145,7 +145,7 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
       WebsocketClient.send_event(socket, topic, "presence", %{type: "presence", event: "TRACK", payload: payload})
 
       assert_receive %Message{event: "presence_diff", payload: %{"joins" => joins, "leaves" => %{}}, topic: ^topic}, 500
-      join_payload = joins |> Map.values() |> hd() |> get_in(["metas"]) |> hd()
+      join_payload = joins |> get_in(["authenticated", "metas"]) |> hd()
       assert get_in(join_payload, ["name"]) == payload.name
 
       broadcast = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
@@ -489,6 +489,88 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => new_token})
 
       refute_receive %Message{event: "phx_close", topic: ^realtime_topic}, 500
+    end
+
+    @tag policies: [:authenticated_read_presence_based_on_claim]
+    test "disconnects when a presence only member loses presence read permission on new access_token",
+         %{tenant: tenant, topic: topic, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated", claims: %{presence_read: true})
+
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{
+        config: %{presence: %{key: "authenticated", enabled: true}, private: true}
+      })
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^realtime_topic}, 500
+      assert_receive %Message{event: "presence_state", topic: ^realtime_topic}, 500
+
+      {:ok, new_token} =
+        generate_token(tenant, %{
+          exp: System.system_time(:second) + 1000,
+          role: "authenticated",
+          presence_read: false
+        })
+
+      WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => new_token})
+
+      expected = "You do not have permissions to read from this Channel topic: #{topic}"
+
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{"status" => "error", "message" => ^expected},
+                       topic: ^realtime_topic
+                     },
+                     500
+
+      assert_receive %Message{event: "phx_close", topic: ^realtime_topic}, 500
+    end
+
+    @tag policies: [
+           :authenticated_read_presence,
+           :authenticated_write_presence,
+           :authenticated_read_broadcast_based_on_claim
+         ]
+    test "starts receiving broadcasts when broadcast read permission is granted on new access_token",
+         %{tenant: tenant, topic: topic, serializer: serializer} do
+      parent = self()
+      publisher_inbox = spawn_link(fn -> forward_frames(parent, :publisher) end)
+      {:ok, publisher_token} = token_valid(tenant, "service_role")
+
+      {:ok, publisher} =
+        WebsocketClient.connect(publisher_inbox, uri(tenant, serializer), serializer, [
+          {"x-api-key", publisher_token}
+        ])
+
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated", claims: %{broadcast_read: false})
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{
+        config: %{presence: %{key: "authenticated", enabled: true}, private: true}
+      })
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^realtime_topic}, 500
+      assert_receive %Message{event: "presence_state", topic: ^realtime_topic}, 500
+
+      WebsocketClient.join(publisher, realtime_topic, %{config: %{private: true}})
+      assert_receive {:publisher, %Message{event: "phx_reply", payload: %{"status" => "ok"}}}, 500
+
+      broadcast = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+      WebsocketClient.send_event(publisher, realtime_topic, "broadcast", broadcast)
+      refute_receive %Message{event: "broadcast", topic: ^realtime_topic}, 500
+
+      {:ok, new_token} =
+        generate_token(tenant, %{
+          exp: System.system_time(:second) + 1000,
+          role: "authenticated",
+          broadcast_read: true
+        })
+
+      WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => new_token})
+      refute_receive %Message{event: "phx_close", topic: ^realtime_topic}, 500
+
+      WebsocketClient.send_event(publisher, realtime_topic, "broadcast", broadcast)
+      assert_receive %Message{event: "broadcast", payload: ^broadcast, topic: ^realtime_topic}, 500
     end
   end
 

@@ -94,38 +94,8 @@ defmodule RealtimeWeb.RealtimeChannel do
            maybe_replay_messages(params["config"], sub_topic, db_conn, tenant_id, socket.assigns.private?) do
       tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, !socket.assigns.private?)
 
-      # presence.read gate carried in the fastlane metadata so the dispatcher can withhold
-      # presence_diff from members denied presence.read:
-      #   * public channel (no policies) -> true (no presence authorization, always receive diffs)
-      #   * private + presence enabled at join -> the authorized presence.read value (true/false)
-      #   * private + presence not enabled -> nil (read not evaluated yet). The dispatcher routes
-      #     these diffs to the channel process (handle_info) instead of fastlaning, where presence.read
-      #     is consulted at delivery time (it is authorized on-demand when presence is auto-enabled via
-      #     a track message - see PresenceHandler).
-      presence_read? =
-        case socket.assigns.policies do
-          nil -> true
-          %Policies{presence: %{read: read}} -> read
-        end
-
-      broadcast_read? =
-        case socket.assigns.policies do
-          nil -> true
-          %Policies{broadcast: %{read: read}} -> read
-        end
-
       # fastlane subscription
-      metadata =
-        MessageDispatcher.fastlane_metadata(
-          transport_pid,
-          serializer,
-          topic,
-          log_level,
-          tenant_id,
-          replayed_message_ids,
-          presence_read?,
-          broadcast_read?
-        )
+      metadata = fastlane_metadata(socket, replayed_message_ids)
 
       RealtimeWeb.Endpoint.subscribe(tenant_topic, metadata: metadata)
       RealtimeWeb.Endpoint.subscribe("realtime:operations:" <> tenant_id, metadata: metadata)
@@ -160,7 +130,9 @@ defmodule RealtimeWeb.RealtimeChannel do
         self_broadcast: Join.self_broadcast?(join),
         tenant_topic: tenant_topic,
         channel_name: sub_topic,
-        presence_enabled?: presence_enabled?
+        presence_enabled?: presence_enabled?,
+        fastlane_metadata: metadata,
+        replayed_message_ids: replayed_message_ids
       }
 
       assigns =
@@ -583,6 +555,8 @@ defmodule RealtimeWeb.RealtimeChannel do
          {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
          {:ok, socket} <- maybe_assign_policies(channel_name, db_conn, socket),
          :ok <- check_read_permissions_revoked(previous_policies, socket.assigns.policies) do
+      socket = maybe_resubscribe_fastlane(socket)
+
       Helpers.cancel_timer(pg_sub_ref)
       pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
 
@@ -1023,6 +997,46 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp maybe_assign_policies(_, _, socket), do: {:ok, assign(socket, policies: nil)}
+
+  # presence.read gate carried in the fastlane metadata so the dispatcher can withhold
+  # presence_diff from members denied presence.read:
+  #   * public channel (no policies) -> true (no presence authorization, always receive diffs)
+  #   * private + presence enabled at join -> the authorized presence.read value (true/false)
+  #   * private + presence not enabled -> nil (read not evaluated yet). The dispatcher routes
+  #     these diffs to the channel process (handle_info) instead of fastlaning, where presence.read
+  #     is consulted at delivery time (it is authorized on-demand when presence is auto-enabled via
+  #     a track message - see PresenceHandler).
+  defp fastlane_metadata(socket, replayed_message_ids) do
+    %{assigns: %{tenant: tenant_id, log_level: log_level, policies: policies}} = socket
+
+    MessageDispatcher.fastlane_metadata(
+      socket.transport_pid,
+      socket.serializer,
+      socket.topic,
+      log_level,
+      tenant_id,
+      replayed_message_ids,
+      if(policies, do: policies.presence.read, else: true),
+      if(policies, do: policies.broadcast.read, else: true)
+    )
+  end
+
+  defp maybe_resubscribe_fastlane(socket) do
+    %{assigns: %{fastlane_metadata: current, tenant: tenant_id, tenant_topic: tenant_topic}} = socket
+
+    case fastlane_metadata(socket, socket.assigns.replayed_message_ids) do
+      ^current ->
+        socket
+
+      updated ->
+        for pubsub_topic <- [tenant_topic, "realtime:operations:" <> tenant_id] do
+          RealtimeWeb.Endpoint.unsubscribe(pubsub_topic)
+          RealtimeWeb.Endpoint.subscribe(pubsub_topic, metadata: updated)
+        end
+
+        assign(socket, :fastlane_metadata, updated)
+    end
+  end
 
   defp can_replay?(%{"broadcast" => %{"replay" => _}}, topic, %{
          assigns: %{policies: %Policies{broadcast: %BroadcastPolicies{read: false}}}
