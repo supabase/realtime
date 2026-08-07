@@ -22,7 +22,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
 
   describe "Postgres extensions" do
     setup do
-      tenant = Containers.checkout_tenant(run_migrations: true)
+      tenant = TestTenantDb.checkout_tenant(run_migrations: true)
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
       Integrations.setup_postgres_changes(conn)
       GenServer.stop(conn)
@@ -201,7 +201,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
 
   describe "handle_after_connect/4" do
     setup do
-      tenant = Containers.checkout_tenant(run_migrations: true)
+      tenant = TestTenantDb.checkout_tenant(run_migrations: true)
       %{tenant: tenant}
     end
 
@@ -251,7 +251,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
 
   describe "Region rebalancing" do
     setup do
-      tenant = Containers.checkout_tenant(run_migrations: true)
+      tenant = TestTenantDb.checkout_tenant(run_migrations: true)
       %Tenant{extensions: extensions, external_id: external_id} = tenant
       postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
 
@@ -557,7 +557,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
   end
 
   defp integration(_) do
-    tenant = Containers.checkout_tenant(run_migrations: true)
+    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
     {:ok, conn} = Database.connect(tenant, "realtime_test")
     Integrations.setup_postgres_changes(conn)
 
@@ -577,7 +577,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
   end
 
   defp distributed_integration(_) do
-    tenant = Containers.checkout_tenant_unboxed(run_migrations: true)
+    tenant = TestTenantDb.checkout_tenant_unboxed(run_migrations: true)
     {:ok, conn} = Database.connect(tenant, "realtime_test")
     Integrations.setup_postgres_changes(conn)
 

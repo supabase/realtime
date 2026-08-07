@@ -74,7 +74,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
 
   describe "replication connection establishment" do
     test "Connect signals replication readiness on its syn topic with the replication_conn pid" do
-      tenant = Containers.checkout_tenant(run_migrations: true)
+      tenant = TestTenantDb.checkout_tenant(run_migrations: true)
 
       Phoenix.PubSub.subscribe(Realtime.PubSub, Connect.syn_topic(tenant.external_id))
       {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
@@ -88,7 +88,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
 
     test "clients that opt in receive the replication established system message, even after streaming has started",
          %{serializer: serializer} do
-      tenant = Containers.checkout_tenant(run_migrations: true)
+      tenant = TestTenantDb.checkout_tenant(run_migrations: true)
 
       Phoenix.PubSub.subscribe(Realtime.PubSub, Connect.syn_topic(tenant.external_id))
       {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)

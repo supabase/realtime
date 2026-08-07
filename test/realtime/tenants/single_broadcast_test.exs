@@ -18,7 +18,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
   alias RealtimeWeb.Socket.UserBroadcast
 
   setup do
-    tenant = Containers.checkout_tenant(run_migrations: true)
+    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
     Realtime.Tenants.Cache.update_cache(tenant)
     {:ok, tenant: tenant}
   end

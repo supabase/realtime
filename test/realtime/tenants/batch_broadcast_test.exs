@@ -17,7 +17,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
   alias RealtimeWeb.TenantBroadcaster
 
   setup do
-    tenant = Containers.checkout_tenant(run_migrations: true)
+    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
     Realtime.Tenants.Cache.update_cache(tenant)
     {:ok, tenant: tenant}
   end

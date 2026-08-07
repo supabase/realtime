@@ -6,7 +6,7 @@ defmodule Realtime.Tenants.Connect.ReconcileMigrationsTest do
   alias Realtime.Tenants.Migrations
 
   setup do
-    tenant = Containers.checkout_tenant(run_migrations: true)
+    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
     %{tenant: tenant}
   end
 

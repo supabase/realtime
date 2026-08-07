@@ -12,7 +12,7 @@ defmodule Realtime.DatabaseTest do
   def handle_telemetry(event, metadata, content, pid: pid), do: send(pid, {event, metadata, content})
 
   setup do
-    tenant = Containers.checkout_tenant()
+    tenant = TestTenantDb.checkout_tenant()
     :telemetry.attach(__MODULE__, [:realtime, :database, :transaction], &__MODULE__.handle_telemetry/4, pid: self())
 
     on_exit(fn -> :telemetry.detach(__MODULE__) end)

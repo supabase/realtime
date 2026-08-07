@@ -106,7 +106,7 @@ defmodule Realtime.PromEx.Plugins.TenantsTest do
 
   describe "pooling metrics" do
     setup do
-      local_tenant = Containers.checkout_tenant(run_migrations: true)
+      local_tenant = TestTenantDb.checkout_tenant(run_migrations: true)
       {:ok, %{tenant: local_tenant}}
     end
 

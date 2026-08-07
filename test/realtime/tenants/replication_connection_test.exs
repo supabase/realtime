@@ -20,7 +20,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     on_exit(fn -> Application.put_env(:realtime, :slot_name_suffix, slot) end)
     Application.put_env(:realtime, :slot_name_suffix, "test")
 
-    tenant = Containers.checkout_tenant(run_migrations: true)
+    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
 
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
     Integrations.setup_postgres_changes(db_conn)

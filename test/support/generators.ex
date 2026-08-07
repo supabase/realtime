@@ -7,7 +7,7 @@ defmodule Generators do
   alias Realtime.Crypto
   alias Realtime.Database
   alias Realtime.Integration.WebsocketClient
-  def port(), do: Containers.port()
+  def port(), do: TestTenantDb.port()
 
   @spec tenant_fixture(map()) :: Realtime.Api.Tenant.t()
   def tenant_fixture(override \\ %{}) do

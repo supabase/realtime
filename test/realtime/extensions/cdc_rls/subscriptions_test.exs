@@ -9,7 +9,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
   alias Realtime.Database
 
   setup do
-    tenant = Containers.checkout_tenant(run_migrations: true)
+    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
 
     {:ok, db_settings} = Database.from_tenant(tenant, "realtime_rls")
 

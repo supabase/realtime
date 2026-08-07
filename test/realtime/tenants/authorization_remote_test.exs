@@ -228,7 +228,7 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
   end
 
   defp remote_rls_context(context) do
-    tenant = Containers.checkout_tenant_unboxed(run_migrations: true)
+    tenant = TestTenantDb.checkout_tenant_unboxed(run_migrations: true)
 
     {:ok, local_db_conn} = Database.connect(tenant, "realtime_test", :stop)
     topic = random_string()

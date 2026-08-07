@@ -6,7 +6,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
   alias Realtime.Database
 
   setup do
-    tenant = Containers.checkout_tenant(run_migrations: true)
+    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
     {:ok, conn} = Database.connect(tenant, "realtime_rls", :stop)
     Integrations.setup_postgres_changes(conn)
     %{conn: conn, tenant: tenant}
