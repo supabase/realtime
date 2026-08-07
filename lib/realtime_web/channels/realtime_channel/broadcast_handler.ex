@@ -181,9 +181,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
          {:ok, id} <- Messages.persist(db_conn, tenant_id, topic, event, event_payload) do
       {:ok, %{id: id}}
     else
-      :error ->
-        :ok
-
       error ->
         log_error("UnableToPersistMessage", error)
         :ok
@@ -192,16 +189,16 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
 
   defp maybe_persist(_policies, _db_conn, _tenant_id, _topic, _payload), do: :ok
 
-  @spec convert_to_persistable_fields(payload) :: {:ok, String.t(), map()} | :error
+  @spec convert_to_persistable_fields(payload) ::
+          {:ok, String.t(), map() | binary()} | {:error, :unsupported_payload}
   defp convert_to_persistable_fields(%{"event" => event, "payload" => payload}), do: {:ok, event, payload}
 
   defp convert_to_persistable_fields({event, :json, user_payload, _metadata}),
     do: {:ok, event, Jason.Fragment.new(user_payload)}
 
-  # TODO: persist binary?
-  defp convert_to_persistable_fields({_event, :binary, _user_payload, _metadata}), do: :error
+  defp convert_to_persistable_fields({event, :binary, user_payload, _metadata}), do: {:ok, event, user_payload}
 
-  defp convert_to_persistable_fields(_payload), do: :error
+  defp convert_to_persistable_fields(_payload), do: {:error, :unsupported_payload}
 
   defp increment_rate_counter(%{assigns: %{policies: %Policies{broadcast: %BroadcastPolicies{write: false}}}} = socket) do
     socket

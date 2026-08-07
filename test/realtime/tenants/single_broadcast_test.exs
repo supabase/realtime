@@ -470,8 +470,9 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
       assert {:ok, []} = Repo.all(db_conn, Message, Message)
     end
 
-    test "does not store binary messages", %{tenant: tenant, db_conn: db_conn, auth_params: auth_params} do
+    test "stores binary messages as binary_payload", %{tenant: tenant, db_conn: db_conn, auth_params: auth_params} do
       topic = random_string()
+      binary = <<0, 1, 2>>
 
       expect(GenCounter, :add, fn _ -> :ok end)
       expect(Connect, :lookup_or_start_connection, fn _ -> {:ok, db_conn} end)
@@ -485,9 +486,20 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
          }}
       end)
 
-      assert :ok = SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, <<0, 1, 2>>, :binary)
+      assert :ok = SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, binary, :binary)
 
-      assert {:ok, []} = Repo.all(db_conn, Message, Message)
+      assert {:ok,
+              [
+                %Message{
+                  topic: ^topic,
+                  event: "event",
+                  payload: nil,
+                  binary_payload: ^binary,
+                  extension: :broadcast,
+                  private: true,
+                  skip_broadcast: true
+                }
+              ]} = Repo.all(db_conn, Message, Message)
     end
   end
 

@@ -14,6 +14,7 @@ defmodule Realtime.Api.Message do
     field(:topic, :string)
     field(:extension, Ecto.Enum, values: [:broadcast, :presence, :persistence])
     field(:payload, :map)
+    field(:binary_payload, :binary)
     field(:event, :string)
     field(:private, :boolean)
     field(:skip_broadcast, :boolean)
@@ -27,6 +28,7 @@ defmodule Realtime.Api.Message do
       :topic,
       :extension,
       :payload,
+      :binary_payload,
       :event,
       :private,
       :skip_broadcast,

@@ -30,7 +30,7 @@ defmodule Realtime.Messages do
           tenant_id :: String.t(),
           topic :: String.t(),
           event :: String.t(),
-          payload :: map()
+          payload :: map() | binary()
         ) :: {:ok, binary()} | {:error, any()} | {:error, :rpc_error, term}
   def persist(conn, _tenant_id, topic, event, payload) when node(conn) == node() do
     insert(conn, topic, event, payload)
@@ -44,21 +44,24 @@ defmodule Realtime.Messages do
   end
 
   defp insert(conn, topic, event, payload) do
-    changeset =
-      Message.changeset(%Message{}, %{
-        topic: topic,
-        extension: :broadcast,
-        event: event,
-        payload: payload,
-        private: true,
-        skip_broadcast: true
-      })
+    attrs = %{
+      topic: topic,
+      extension: :broadcast,
+      event: event,
+      private: true,
+      skip_broadcast: true
+    }
+
+    changeset = Message.changeset(%Message{}, Map.merge(attrs, payload_attr(payload)))
 
     case Repo.insert(conn, changeset, Message) do
       {:ok, %Message{id: id}} -> {:ok, id}
       {:error, reason} -> {:error, reason}
     end
   end
+
+  defp payload_attr(payload) when is_binary(payload), do: %{binary_payload: payload}
+  defp payload_attr(payload), do: %{payload: payload}
 
   @doc """
   Fetch last `limit ` messages for a given `topic` inserted after `since`

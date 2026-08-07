@@ -547,7 +547,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       assert {:ok, []} = Repo.all(db_conn, Message, Message)
     end
 
-    test "V2 binary user broadcast is delivered but not persisted", %{
+    test "V2 binary user broadcast authorized to persist is stored as binary_payload", %{
       topic: topic,
       tenant: tenant,
       db_conn: db_conn
@@ -560,10 +560,44 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           }
         )
 
-      v2_payload = {"event123", :binary, <<0, 1, 2, 3>>, %{}}
+      binary = <<0, 1, 2, 3>>
 
-      assert {:reply, :ok, _socket} = BroadcastHandler.handle(v2_payload, db_conn, socket)
+      assert {:reply, {:ok, %{id: id}}, _socket} =
+               BroadcastHandler.handle({"event123", :binary, binary, %{}}, db_conn, socket)
 
+      assert {:ok,
+              [
+                %Message{
+                  id: ^id,
+                  event: "event123",
+                  payload: nil,
+                  binary_payload: ^binary,
+                  extension: :broadcast,
+                  private: true,
+                  skip_broadcast: true
+                }
+              ]} = Repo.all(db_conn, Message, Message)
+    end
+
+    test "unsupported payload shape is delivered, not persisted, and logged", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket =
+        socket_fixture(tenant, topic,
+          policies: %Policies{
+            broadcast: %BroadcastPolicies{write: true},
+            persistence: %PersistencePolicies{write: true}
+          }
+        )
+
+      log =
+        capture_log(fn ->
+          assert {:reply, :ok, _socket} = BroadcastHandler.handle(%{"no" => "event or payload"}, db_conn, socket)
+        end)
+
+      assert log =~ "UnableToPersistMessage"
       assert {:ok, []} = Repo.all(db_conn, Message, Message)
     end
 
