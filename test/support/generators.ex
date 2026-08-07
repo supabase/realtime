@@ -272,6 +272,19 @@ defmodule Generators do
     """
   end
 
+  def policy_query(:authenticated_read_broadcast_based_on_claim, %{topic: name}) do
+    """
+    CREATE POLICY "authenticated_read_broadcast_claim_#{name}"
+    ON realtime.messages FOR SELECT
+    TO authenticated
+    USING (
+      realtime.topic() = '#{name}'
+      AND realtime.messages.extension = 'broadcast'
+      AND coalesce(((current_setting('request.jwt.claims', true))::jsonb ->> 'broadcast_read')::boolean, false)
+    );
+    """
+  end
+
   def policy_query(:broken_read_presence, _) do
     """
     CREATE POLICY "authenticated_read_presence"
