@@ -238,7 +238,7 @@ defmodule Realtime.Api do
   end
 
   defp list_extensions(type) do
-    query = from(e in Extensions, where: e.type == ^type, select: e)
+    query = from(e in Extensions, where: e.type == ^type, select: struct(e, [:id, :settings]))
     replica = Replica.replica()
     replica.all(query)
   end
@@ -281,6 +281,85 @@ defmodule Realtime.Api do
       end
     else
       call(:update_migrations_ran, [external_id, count], tenant_id: external_id)
+    end
+  end
+
+  @doc """
+  Backfills the GCM-encrypted jwt_secret_gcm for a tenant that only has the legacy ECB
+  jwt_secret. Internal-only - used by `Realtime.Tenants.reconcile_encryption/1`.
+
+  Deliberately bypasses `update_tenant/2`'s disconnect/db-restart/rate-counter side effects:
+  the plaintext secret hasn't changed, only its ciphertext, so there's nothing for connected
+  clients or the tenant's db connection to react to.
+  """
+  @spec update_tenant_jwt_secret_gcm(binary(), binary()) :: {:ok, Tenant.t()} | {:error, term()}
+  def update_tenant_jwt_secret_gcm(external_id, jwt_secret_gcm) do
+    if master_region?() do
+      case get_tenant_by_external_id(external_id, use_replica?: false) do
+        nil ->
+          {:error, :tenant_not_found}
+
+        tenant ->
+          tenant
+          |> Tenant.reconcile_encryption_changeset(%{jwt_secret_gcm: jwt_secret_gcm})
+          |> Repo.update()
+          |> tap(fn result ->
+            case result do
+              {:ok, tenant} -> Cache.global_cache_update(tenant)
+              _ -> :ok
+            end
+          end)
+      end
+    else
+      call(:update_tenant_jwt_secret_gcm, [external_id, jwt_secret_gcm], tenant_id: external_id)
+    end
+  end
+
+  @doc """
+  Backfills the GCM-encrypted settings_gcm for an extension whose sensitive settings are only
+  ECB-encrypted. Internal-only - used by `Realtime.Tenants.reconcile_encryption/1`.
+  """
+  @spec update_extension_settings_gcm(binary(), binary(), map()) :: {:ok, Extensions.t()} | {:error, term()}
+  def update_extension_settings_gcm(tenant_id, extension_id, settings_gcm) do
+    if master_region?() do
+      case Repo.get_by(Extensions, id: extension_id, tenant_external_id: tenant_id) do
+        nil ->
+          {:error, :extension_not_found}
+
+        extension ->
+          extension
+          |> Extensions.reconcile_encryption_changeset(%{settings_gcm: settings_gcm})
+          |> Repo.update()
+      end
+    else
+      call(:update_extension_settings_gcm, [tenant_id, extension_id, settings_gcm], tenant_id: tenant_id)
+    end
+  end
+
+  @doc """
+  Records the timestamp at which a tenant finished backfilling to GCM encryption (jwt_secret_gcm
+  and every extension's settings_gcm). Internal-only - used by `Realtime.Tenants.reconcile_encryption/1`.
+  """
+  @spec update_tenant_gcm_migrated_at(binary()) :: {:ok, Tenant.t()} | {:error, term()}
+  def update_tenant_gcm_migrated_at(external_id) do
+    if master_region?() do
+      case get_tenant_by_external_id(external_id, use_replica?: false) do
+        nil ->
+          {:error, :tenant_not_found}
+
+        tenant ->
+          tenant
+          |> Tenant.gcm_migrated_at_changeset(%{gcm_migrated_at: DateTime.utc_now()})
+          |> Repo.update()
+          |> tap(fn result ->
+            case result do
+              {:ok, tenant} -> Cache.global_cache_update(tenant)
+              _ -> :ok
+            end
+          end)
+      end
+    else
+      call(:update_tenant_gcm_migrated_at, [external_id], tenant_id: external_id)
     end
   end
 

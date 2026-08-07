@@ -301,6 +301,30 @@ defmodule Realtime.DatabaseTest do
     end
   end
 
+  describe "from_settings/3 encryption" do
+    test "reads the GCM settings column by default", %{tenant: tenant} do
+      [extension] = tenant.extensions
+      # A value only reachable through settings_gcm proves the GCM column is the one being read.
+      settings_gcm = Map.put(extension.settings_gcm, "db_name", Realtime.Crypto.encrypt_gcm!("gcm_only_db"))
+      {:ok, _} = extension |> Ecto.Changeset.change(%{settings_gcm: settings_gcm}) |> Repo.update()
+
+      tenant = Realtime.Api.get_tenant_by_external_id(tenant.external_id)
+      settings = Realtime.PostgresCdc.filter_settings("postgres_cdc_rls", tenant.extensions)
+
+      assert {:ok, %Realtime.Database{database: "gcm_only_db"}} = Database.from_settings(settings, "realtime_connect")
+    end
+
+    test "falls back to the legacy ECB column for a tenant the backfill has not reached", %{tenant: tenant} do
+      [extension] = tenant.extensions
+      {:ok, _} = extension |> Ecto.Changeset.change(%{settings_gcm: nil}) |> Repo.update()
+
+      tenant = Realtime.Api.get_tenant_by_external_id(tenant.external_id)
+      settings = Realtime.PostgresCdc.filter_settings("postgres_cdc_rls", tenant.extensions)
+
+      assert {:ok, %Realtime.Database{hostname: "127.0.0.1"}} = Database.from_settings(settings, "realtime_connect")
+    end
+  end
+
   describe "from_settings/3" do
     test "uses default backoff when not provided", %{tenant: tenant} do
       settings = Realtime.PostgresCdc.filter_settings("postgres_cdc_rls", tenant.extensions)
