@@ -262,7 +262,9 @@ defmodule RealtimeWeb.TenantControllerTest do
       attrs = put_extension_setting(attrs, "postgres_changes_pool", 10)
 
       conn = put(conn, ~p"/api/tenants/#{external_id}", tenant: attrs)
-      assert [%{"settings" => %{"subcriber_pool_size" => 10}}] = json_response(conn, 200)["data"]["extensions"]
+      assert [%{"settings" => settings}] = json_response(conn, 200)["data"]["extensions"]
+      assert settings["subcriber_pool_size"] == 10
+      refute Map.has_key?(settings, "postgres_changes_pool")
     end
 
     test "renders errors when data is invalid", %{conn: conn} do

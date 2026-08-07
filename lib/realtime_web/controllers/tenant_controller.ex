@@ -298,14 +298,16 @@ defmodule RealtimeWeb.TenantController do
     end
   end
 
-  # `postgres_changes_pool` it's the naming used in middleware
+  # `postgres_changes_pool` is the public facing name for this setting to make it more explicit on intent
   defp translate_postgres_changes_pool(%{"extensions" => extensions} = params) when is_list(extensions),
     do: %{params | "extensions" => Enum.map(extensions, &translate_extension_pool/1)}
 
   defp translate_postgres_changes_pool(params), do: params
 
-  defp translate_extension_pool(%{"settings" => %{"postgres_changes_pool" => pool} = settings} = extension),
-    do: %{extension | "settings" => Map.put(settings, "subcriber_pool_size", pool)}
+  defp translate_extension_pool(%{"settings" => %{"postgres_changes_pool" => pool} = settings} = extension) do
+    settings = settings |> Map.delete("postgres_changes_pool") |> Map.put("subcriber_pool_size", pool)
+    %{extension | "settings" => settings}
+  end
 
   defp translate_extension_pool(extension), do: extension
 
