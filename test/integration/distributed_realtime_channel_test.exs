@@ -10,7 +10,7 @@ defmodule Realtime.Integration.DistributedRealtimeChannelTest do
   alias Realtime.Integration.WebsocketClient
 
   setup do
-    tenant = Containers.checkout_tenant_unboxed(run_migrations: true)
+    tenant = TestTenantDb.checkout_tenant_unboxed(run_migrations: true)
 
     {:ok, node} = Clustered.start()
     region = Realtime.Tenants.region(tenant)

@@ -9,7 +9,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
   alias Realtime.Database
 
   setup do
-    tenant = Containers.checkout_tenant(run_migrations: true)
+    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
 
     {:ok, db_settings} = Database.from_tenant(tenant, "realtime_rls")
 
@@ -823,7 +823,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
     end
 
     test "create works for a table whose name contains a backslash", %{conn: conn} do
-      Postgrex.query!(conn, ~s|CREATE TABLE "my\\table" (id int)|, [])
+      Postgrex.query!(conn, ~s|CREATE TABLE IF NOT EXISTS "my\\table" (id int)|, [])
       Postgrex.query!(conn, ~s|GRANT ALL ON "my\\table" TO anon|, [])
 
       {:ok, subscription_params} =

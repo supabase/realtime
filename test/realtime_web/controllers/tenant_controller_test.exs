@@ -33,7 +33,7 @@ defmodule RealtimeWeb.TenantControllerTest do
   end
 
   defp with_tenant(_context) do
-    tenant = Containers.checkout_tenant(run_migrations: true)
+    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
     %{tenant: tenant}
   end
 
@@ -75,7 +75,7 @@ defmodule RealtimeWeb.TenantControllerTest do
   describe "create tenant with post" do
     test "run migrations on creation and encrypts credentials", %{conn: conn} do
       external_id = random_string()
-      {:ok, port} = Containers.checkout()
+      {:ok, port} = TestTenantDb.checkout()
 
       assert nil == Tenants.get_tenant_by_external_id(external_id)
 
@@ -106,7 +106,7 @@ defmodule RealtimeWeb.TenantControllerTest do
   describe "create tenant with put" do
     test "run migrations on creation and encrypts credentials", %{conn: conn} do
       external_id = random_string()
-      {:ok, port} = Containers.checkout()
+      {:ok, port} = TestTenantDb.checkout()
 
       assert nil == Tenants.get_tenant_by_external_id(external_id)
 
@@ -590,7 +590,7 @@ defmodule RealtimeWeb.TenantControllerTest do
     end
 
     test "triggers migrations without blocking and self heals eventually", %{conn: conn} do
-      tenant = Containers.checkout_tenant(run_migrations: false)
+      tenant = TestTenantDb.checkout_tenant(run_migrations: false)
 
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
       assert {:error, _} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])

@@ -4,12 +4,11 @@ defmodule Realtime.Integration.RegionAwareMigrationsTest do
 
   setup :set_mimic_from_context
 
-  alias Containers
   alias Realtime.Tenants
   alias Realtime.Tenants.Migrations
 
   setup do
-    {:ok, port} = Containers.checkout()
+    {:ok, port} = TestTenantDb.checkout()
 
     settings = [
       %{

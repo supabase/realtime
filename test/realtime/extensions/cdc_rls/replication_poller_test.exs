@@ -45,7 +45,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
       on_exit(fn -> :telemetry.detach(__MODULE__) end)
 
-      tenant = Containers.checkout_tenant(run_migrations: true)
+      tenant = TestTenantDb.checkout_tenant(run_migrations: true)
 
       {:ok, tenant} = Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{"max_events_per_second" => 123})
 
@@ -942,7 +942,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
   describe "get_pg_stat_activity_diff/2" do
     setup do
-      tenant = Containers.checkout_tenant(run_migrations: true)
+      tenant = TestTenantDb.checkout_tenant(run_migrations: true)
       {:ok, conn} = Database.connect(tenant, "realtime_rls", :stop)
       %{conn: conn}
     end
@@ -954,7 +954,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
   describe "error handling" do
     setup do
-      tenant = Containers.checkout_tenant(run_migrations: true)
+      tenant = TestTenantDb.checkout_tenant(run_migrations: true)
 
       args =
         hd(tenant.extensions).settings

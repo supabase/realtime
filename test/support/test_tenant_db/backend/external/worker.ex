@@ -1,11 +1,12 @@
-defmodule Containers.ExternalTarget do
+defmodule TestTenantDb.Backend.External.Worker do
   @moduledoc false
-  # Poolboy worker for one pre-configured external-tenant-DB port
-  # (USE_EXTERNAL_TENANT_DB=true). Unlike Containers.Container, there's no
-  # docker container to start or wait on — the port is already a live,
-  # already-running Postgres-wire-compatible server; this worker just claims
-  # one of the configured ports for the rest of its lifetime in the pool.
+  # Poolboy worker for the External backend: claims one pre-configured
+  # external-tenant-DB port from TestTenantDb.Backend.External for the rest
+  # of its lifetime in the pool. Unlike the Docker worker, there's no
+  # container to start or wait on — the port is already a live server.
   use GenServer
+
+  alias TestTenantDb.Backend.External
 
   def start_link(args \\ [], opts \\ []) do
     GenServer.start_link(__MODULE__, args, opts)
@@ -22,17 +23,17 @@ defmodule Containers.ExternalTarget do
   end
 
   # A replacement worker (started by poolboy after a crash) can momentarily
-  # find no port available if it asks before Containers has processed the
+  # find no port available if it asks before the registry has processed the
   # dead worker's :DOWN and reclaimed its port. Retry briefly instead of
   # crashing this worker outright.
   defp assign_port(attempts) do
-    case Containers.start_external_target() do
+    case External.claim() do
       {:error, :no_external_ports_available} when attempts > 1 ->
         Process.sleep(100)
         assign_port(attempts - 1)
 
       {:error, :no_external_ports_available} ->
-        raise "Containers.ExternalTarget: no external port became available after retrying"
+        raise "TestTenantDb.Backend.External.Worker: no external port became available after retrying"
 
       port ->
         port

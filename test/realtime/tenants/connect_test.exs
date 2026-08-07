@@ -15,7 +15,7 @@ defmodule Realtime.Tenants.ConnectTest do
   alias Realtime.UsersCounter
 
   setup do
-    tenant = Containers.checkout_tenant(run_migrations: true)
+    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
 
     %{tenant: tenant}
   end
@@ -131,7 +131,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
   describe "list_tenants/0" do
     test "lists all tenants with active connections", %{tenant: tenant1} do
-      tenant2 = Containers.checkout_tenant(run_migrations: true)
+      tenant2 = TestTenantDb.checkout_tenant(run_migrations: true)
       assert {:ok, _} = Connect.lookup_or_start_connection(tenant1.external_id)
       assert {:ok, _} = Connect.lookup_or_start_connection(tenant2.external_id)
 
@@ -305,7 +305,7 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "tracks multiple users that connect and disconnect", %{tenant: tenant1} do
-      tenant2 = Containers.checkout_tenant(run_migrations: true)
+      tenant2 = TestTenantDb.checkout_tenant(run_migrations: true)
       tenants = [tenant1, tenant2]
 
       for tenant <- tenants do
@@ -488,7 +488,7 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "on migrations failure, stop the process" do
-      tenant = Containers.checkout_tenant(run_migrations: false)
+      tenant = TestTenantDb.checkout_tenant(run_migrations: false)
       expect(Realtime.Tenants.Migrations, :run_migrations, fn ^tenant -> raise "error" end)
 
       assert {:ok, pid} = Connect.lookup_or_start_connection(tenant.external_id)

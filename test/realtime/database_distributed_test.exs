@@ -12,7 +12,7 @@ defmodule Realtime.DatabaseDistributedTest do
   def handle_telemetry(event, metadata, content, pid: pid), do: send(pid, {event, metadata, content})
 
   setup do
-    tenant = Containers.checkout_tenant()
+    tenant = TestTenantDb.checkout_tenant()
     :telemetry.attach(__MODULE__, [:realtime, :database, :transaction], &__MODULE__.handle_telemetry/4, pid: self())
 
     on_exit(fn -> :telemetry.detach(__MODULE__) end)
@@ -40,7 +40,7 @@ defmodule Realtime.DatabaseDistributedTest do
 
   describe "transaction/1 in clustered mode" do
     setup do
-      tenant = Containers.checkout_tenant_unboxed(run_migrations: true)
+      tenant = TestTenantDb.checkout_tenant_unboxed(run_migrations: true)
       %{distributed_tenant: tenant}
     end
 

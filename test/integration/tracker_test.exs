@@ -8,7 +8,7 @@ defmodule Integration.TrackerTest do
   alias Realtime.Integration.WebsocketClient
 
   setup do
-    tenant = Containers.checkout_tenant(run_migrations: true)
+    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
     :ets.delete_all_objects(Tracker.table_name())
 
     {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)

@@ -40,7 +40,7 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
     end
 
     test "broadcast to another tenant does not get mixed up", %{tenant: tenant, serializer: serializer} do
-      other_tenant = Containers.checkout_tenant(run_migrations: true)
+      other_tenant = TestTenantDb.checkout_tenant(run_migrations: true)
 
       Realtime.Tenants.Cache.update_cache(other_tenant)
 

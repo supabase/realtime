@@ -7,7 +7,7 @@ defmodule Realtime.Tenants.ReconnectorTest do
   alias RealtimeWeb.Endpoint
 
   setup do
-    tenant = Containers.checkout_tenant(run_migrations: true)
+    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
 
     %{tenant: tenant}
   end

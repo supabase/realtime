@@ -6,7 +6,7 @@ defmodule Extensions.PostgresCdcRls.WorkerSupervisorTest do
   alias Extensions.PostgresCdcRls.SubscriptionManager
 
   setup do
-    tenant = Containers.checkout_tenant(run_migrations: true)
+    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
     extension = hd(tenant.extensions).settings
 
     args =
