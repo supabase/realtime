@@ -823,7 +823,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
     end
 
     test "create works for a table whose name contains a backslash", %{conn: conn} do
-      Postgrex.query!(conn, ~s|CREATE TABLE "my\\table" (id int)|, [])
+      Postgrex.query!(conn, ~s|CREATE TABLE IF NOT EXISTS "my\\table" (id int)|, [])
       Postgrex.query!(conn, ~s|GRANT ALL ON "my\\table" TO anon|, [])
 
       {:ok, subscription_params} =
