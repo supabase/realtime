@@ -822,7 +822,16 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
         Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
     end
 
-    test "create works for a table whose name contains a backslash", %{conn: conn} do
+    test "create works for a table whose name contains a backslash", %{conn: conn, tenant: tenant} do
+      on_exit(fn ->
+        {:ok, db_settings} = Database.from_tenant(tenant, "realtime_rls")
+
+        {:ok, cleanup_conn} =
+          db_settings |> Map.from_struct() |> Keyword.new() |> Postgrex.start_link()
+
+        Postgrex.query!(cleanup_conn, ~s|DROP TABLE IF EXISTS "my\\table"|, [])
+      end)
+
       Postgrex.query!(conn, ~s|CREATE TABLE IF NOT EXISTS "my\\table" (id int)|, [])
       Postgrex.query!(conn, ~s|GRANT ALL ON "my\\table" TO anon|, [])
 
