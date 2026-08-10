@@ -1,5 +1,5 @@
 defmodule RealtimeWeb.InspectorLive.ConnComponentTest do
-  use RealtimeWeb.ConnCase
+  use RealtimeWeb.ConnCase, async: true
   import Phoenix.LiveViewTest
 
   describe "connection form persistence" do

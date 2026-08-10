@@ -5,7 +5,7 @@ defmodule Realtime.Tenants.SchemaTest do
   # - tag `@describetag :requires_no_supautils_policy_grants` represents older images where schema restrictions can't be applied
   # - untagged tests assert behaviour on every version
 
-  use Realtime.DataCase, async: false
+  use Realtime.DataCase, async: true
   alias Realtime.Database
 
   setup do

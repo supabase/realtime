@@ -1,5 +1,5 @@
 defmodule RealtimeWeb.InspectorLive.IndexTest do
-  use RealtimeWeb.ConnCase
+  use RealtimeWeb.ConnCase, async: true
   import Phoenix.LiveViewTest
 
   describe "Inspector LiveView" do

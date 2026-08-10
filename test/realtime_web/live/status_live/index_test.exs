@@ -1,5 +1,5 @@
 defmodule RealtimeWeb.StatusLive.IndexTest do
-  use RealtimeWeb.ConnCase
+  use RealtimeWeb.ConnCase, async: true
   import Phoenix.LiveViewTest
 
   alias Realtime.Latency.Payload
