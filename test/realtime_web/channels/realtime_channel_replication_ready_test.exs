@@ -8,8 +8,8 @@ defmodule RealtimeWeb.RealtimeChannelReplicationReadyTest do
 
   setup :set_mimic_from_context
 
-  setup do
-    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
+  setup_all do
+    tenant = TestTenantDb.checkout_tenant_unboxed(run_migrations: true)
     Realtime.Tenants.Cache.update_cache(tenant)
     {:ok, tenant: tenant}
   end

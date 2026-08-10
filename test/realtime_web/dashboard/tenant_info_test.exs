@@ -10,7 +10,7 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
 
   setup :set_mimic_from_context
 
-  setup do
+  setup_all do
     Application.put_env(:realtime, :dashboard_auth, :basic_auth)
     Application.put_env(:realtime, :dashboard_credentials, {"user", "pass"})
 
@@ -19,10 +19,14 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
       Application.delete_env(:realtime, :dashboard_credentials)
     end)
 
-    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
-    conn = using_basic_auth(build_conn(), "user", "pass")
+    tenant = TestTenantDb.checkout_tenant_unboxed(run_migrations: true)
 
-    %{tenant: tenant, conn: conn}
+    %{tenant: tenant}
+  end
+
+  setup do
+    conn = using_basic_auth(build_conn(), "user", "pass")
+    %{conn: conn}
   end
 
   test "renders lookup form", %{conn: conn} do
