@@ -317,7 +317,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
     @tag role: "anon", policies: []
     test "ssl recv: closed ConnectionError from Repo on read is classified as tenant_database_unavailable", context do
       conn_error = %DBConnection.ConnectionError{message: "ssl recv: closed", severity: :error, reason: :closed}
-      stub(Repo, :insert_all_entries, fn _, _, _ -> {:error, conn_error} end)
+      stub(Repo, :insert_all_entries, fn _, _, _, _ -> {:error, conn_error} end)
 
       assert {:error, :tenant_database_unavailable} =
                Authorization.get_read_authorizations(%Policies{}, context.db_conn, context.authorization_context)
