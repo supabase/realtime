@@ -249,16 +249,25 @@ defmodule Realtime.Tenants.Authorization do
     Database.transaction(
       conn,
       fn transaction_conn ->
+        # Generate the probe ids client-side so we can skip RETURNING on the insert and build the
+        # extension -> id map deterministically (multi-row RETURNING order is not guaranteed).
+        messages_by_extension = Map.new(extensions, &{&1, Ecto.UUID.generate()})
+
         changesets =
-          Enum.map(extensions, fn ext ->
-            Message.changeset(%Message{}, %{topic: authorization_context.topic, extension: ext})
+          Enum.map(messages_by_extension, fn {ext, id} ->
+            # The raw insert sends params straight to Postgrex (no Ecto casting), so the uuid column
+            # needs the 16-byte binary form. The map keeps the string form for the Ecto SELECT below.
+            {:ok, dumped_id} = Ecto.UUID.dump(id)
+
+            %Message{}
+            |> Message.changeset(%{topic: authorization_context.topic, extension: ext})
+            |> Ecto.Changeset.put_change(:id, dumped_id)
           end)
 
-        with {:ok, messages} <- Repo.insert_all_entries(transaction_conn, changesets, Message),
-             messages_by_extension = Map.new(messages, &{&1.extension, &1.id}),
+        with {:ok, _} <- Repo.insert_all_entries(transaction_conn, changesets, Message, returning: false),
              _ = set_conn_config(transaction_conn, authorization_context),
              {:ok, policies} <-
-               check_read_policies(transaction_conn, authorization_context, messages_by_extension, policies) do
+               check_read_policies(transaction_conn, messages_by_extension, policies) do
           Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
           policies
         else
@@ -301,10 +310,10 @@ defmodule Realtime.Tenants.Authorization do
       else: [:broadcast]
   end
 
-  defp check_read_policies(conn, authorization_context, messages_by_extension, policies) do
+  defp check_read_policies(conn, messages_by_extension, policies) do
     ids = Map.values(messages_by_extension)
 
-    query = from(m in Message, where: m.topic == ^authorization_context.topic and m.id in ^ids)
+    query = from(m in Message, where: m.id in ^ids, select: m.id)
 
     with {:ok, res} <- Repo.all(conn, query, Message) do
       returned_ids = MapSet.new(res, & &1.id)

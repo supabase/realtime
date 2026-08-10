@@ -145,6 +145,22 @@ defmodule Realtime.Tenants.RepoTest do
       assert Enum.all?(results, fn result -> is_map(result) end)
     end
 
+    test "with returning: false skips RETURNING and returns the applied changesets", %{db_conn: db_conn} do
+      id = Ecto.UUID.generate()
+      {:ok, dumped_id} = Ecto.UUID.dump(id)
+
+      changeset = [
+        Message.changeset(%Message{}, %{topic: random_string(), extension: :broadcast})
+        |> Ecto.Changeset.put_change(:id, dumped_id)
+      ]
+
+      assert {:ok, [%Message{} = message]} =
+               Repo.insert_all_entries(db_conn, changeset, Message, returning: false)
+
+      # No DB round-trip for the id: it is the value we supplied, not one loaded from RETURNING.
+      assert message.id == dumped_id
+    end
+
     test "returns changeset if changeset is invalid", %{db_conn: db_conn} do
       changeset = [Message.changeset(%Message{}, %{})]
       res = Repo.insert_all_entries(db_conn, changeset, Message)
