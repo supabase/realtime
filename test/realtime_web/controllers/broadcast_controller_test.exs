@@ -15,7 +15,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
   alias RealtimeWeb.TenantBroadcaster
 
   setup %{conn: conn} do
-    tenant = Containers.checkout_tenant(run_migrations: true)
+    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
     # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
     Realtime.Tenants.Cache.update_cache(tenant)
 

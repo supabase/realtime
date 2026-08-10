@@ -16,7 +16,7 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
   import UUID, only: [uuid1: 0, string_to_binary!: 1]
 
   setup do
-    tenant = Containers.checkout_tenant(run_migrations: true)
+    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
     {:ok, db_conn} = Realtime.Database.connect(tenant, "realtime_test", :stop)
     Integrations.setup_postgres_changes(db_conn)
     GenServer.stop(db_conn)

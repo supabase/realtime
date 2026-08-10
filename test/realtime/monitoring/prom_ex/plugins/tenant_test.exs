@@ -90,7 +90,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
 
   describe "execute_tenant_metrics/0" do
     setup do
-      tenant = Containers.checkout_tenant()
+      tenant = TestTenantDb.checkout_tenant()
       :telemetry.attach(__MODULE__, [:realtime, :connections], &__MODULE__.handle_telemetry/4, pid: self())
 
       on_exit(fn -> :telemetry.detach(__MODULE__) end)
@@ -125,7 +125,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
 
   describe "event_metrics/0" do
     setup do
-      tenant = Containers.checkout_tenant(run_migrations: true)
+      tenant = TestTenantDb.checkout_tenant(run_migrations: true)
       {:ok, db_conn} = Realtime.Database.connect(tenant, "realtime_test", :stop)
 
       authorization_context =
@@ -375,7 +375,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
 
   describe "subscription pooler metrics" do
     setup do
-      tenant = Containers.checkout_tenant()
+      tenant = TestTenantDb.checkout_tenant()
       on_exit(fn -> Peep.prune_tags(MetricsTest.__metrics_collector_name__(), [%{tenant: tenant.external_id}]) end)
       %{tenant: tenant}
     end

@@ -19,7 +19,7 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
       Application.delete_env(:realtime, :dashboard_credentials)
     end)
 
-    tenant = Containers.checkout_tenant(run_migrations: true)
+    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
     conn = using_basic_auth(build_conn(), "user", "pass")
 
     %{tenant: tenant, conn: conn}

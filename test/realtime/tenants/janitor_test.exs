@@ -17,8 +17,8 @@ defmodule Realtime.Tenants.JanitorTest do
     Application.put_env(:realtime, :janitor_schedule_timer, 200)
     Application.put_env(:realtime, :janitor_schedule_randomize, false)
     Application.put_env(:realtime, :janitor_chunk_size, 2)
-    tenant1 = Containers.checkout_tenant(run_migrations: true)
-    tenant2 = Containers.checkout_tenant(run_migrations: true)
+    tenant1 = TestTenantDb.checkout_tenant(run_migrations: true)
+    tenant2 = TestTenantDb.checkout_tenant(run_migrations: true)
 
     tenants =
       Enum.map(

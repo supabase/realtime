@@ -366,10 +366,13 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
       WebsocketClient.send_event(main, topic, "presence", track.(test))
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
 
-      # Main sees the diff
+      # Main sees the diff. Main also holds presence.read for this topic, so its diff can legitimately
+      # include other's join alongside its own: both tracks land in the same Phoenix.Tracker broadcast
+      # window and coalesce into a single presence_diff. The order of entries in the joins map is not
+      # deterministic, so match on the tracked payload rather than assuming which entry comes first.
       assert_receive %Message{event: "presence_diff", payload: %{"joins" => joins}, topic: ^topic}, 1000
-      meta = joins |> Map.values() |> hd() |> get_in(["metas"]) |> hd()
-      assert get_in(meta, ["test"]) == "should not go to other"
+      metas = joins |> Map.values() |> Enum.flat_map(&get_in(&1, ["metas"]))
+      assert Enum.any?(metas, &(get_in(&1, ["test"]) == "should not go to other"))
 
       # Other can't receive the diff
       refute_receive {:other, %Message{event: "presence_diff", topic: ^topic}}, 1000

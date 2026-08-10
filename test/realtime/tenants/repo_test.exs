@@ -8,7 +8,7 @@ defmodule Realtime.Tenants.RepoTest do
   alias Realtime.Database
 
   setup do
-    tenant = Containers.checkout_tenant(run_migrations: true)
+    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
     %{tenant: tenant, db_conn: db_conn}
   end

@@ -17,7 +17,7 @@ defmodule Realtime.PromEx.Plugins.PhoenixTest do
   end
 
   setup do
-    %{tenant: Containers.checkout_tenant(run_migrations: true)}
+    %{tenant: TestTenantDb.checkout_tenant(run_migrations: true)}
   end
 
   describe "pooling metrics" do

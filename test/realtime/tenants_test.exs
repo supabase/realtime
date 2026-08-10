@@ -81,7 +81,7 @@ defmodule Realtime.TenantsTest do
 
   describe "create_messages_partitions/1" do
     test "running twice keeps the same partitions" do
-      tenant = Containers.checkout_tenant(run_migrations: true)
+      tenant = TestTenantDb.checkout_tenant(run_migrations: true)
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
 
       assert :ok = Tenants.create_messages_partitions(conn)
