@@ -32,7 +32,6 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias RealtimeWeb.RealtimeChannel.MessageDispatcher
   alias RealtimeWeb.RealtimeChannel.PresenceHandler
   alias RealtimeWeb.RealtimeChannel.Tracker
-  alias RealtimeWeb.Socket.UserBroadcast
 
   @confirm_token_ms_interval :timer.minutes(5)
   @replication_ready_check_interval 500
@@ -1102,17 +1101,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp replay(%Message{binary_payload: binary_payload, event: event}, meta, socket) when is_binary(binary_payload) do
-    %{serializer: serializer, transport_pid: transport_pid, topic: topic} = socket
-
-    user_broadcast = %UserBroadcast{
-      topic: topic,
-      user_event: event,
-      user_payload: binary_payload,
-      user_payload_encoding: :binary,
-      metadata: meta
-    }
-
-    send(transport_pid, serializer.fastlane!(user_broadcast))
+    push(socket, "broadcast", {event, :binary, binary_payload, meta})
   end
 
   defp replay(%Message{} = message, meta, socket) do

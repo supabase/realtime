@@ -282,11 +282,20 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
 
       WebsocketClient.join(socket, topic, %{config: %{private: true, broadcast: %{replay: %{limit: 10, since: 0}}}})
 
-      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+      assert_receive %Message{
+                       event: "phx_reply",
+                       payload: %{"status" => "ok"},
+                       topic: ^topic,
+                       join_ref: join_ref
+                     },
+                     500
+
+      assert is_binary(join_ref)
 
       assert_receive %Message{
                        event: "broadcast",
                        topic: ^topic,
+                       join_ref: nil,
                        payload: %{
                          "event" => ^event,
                          "payload" => {:binary, ^binary},
