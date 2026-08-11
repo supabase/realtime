@@ -802,11 +802,11 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp confirm_token(%{assigns: assigns}) do
-    %{access_token: access_token} = assigns
+    %{jwt_secret: jwt_secret, access_token: access_token} = assigns
 
     jwt_jwks = Map.get(assigns, :jwt_jwks)
 
-    with jwt_secret_dec <- Crypto.decrypt_jwt_secret!(assigns),
+    with jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
          {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
            ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec, jwt_jwks),
          exp_diff when exp_diff > 0 <- exp - Joken.current_time() do

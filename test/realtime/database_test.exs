@@ -6,6 +6,7 @@ defmodule Realtime.DatabaseTest do
 
   import ExUnit.CaptureLog
 
+  alias Realtime.Crypto
   alias Realtime.Database
 
   doctest Realtime.Database
@@ -320,26 +321,21 @@ defmodule Realtime.DatabaseTest do
   end
 
   describe "from_settings/3 encryption" do
-    test "reads the GCM settings column by default", %{tenant: tenant} do
+    test "decrypts GCM and legacy ECB values side by side", %{tenant: tenant} do
       [extension] = tenant.extensions
-      # A value only reachable through settings_gcm proves the GCM column is the one being read.
-      settings_gcm = Map.put(extension.settings_gcm, "db_name", Realtime.Crypto.encrypt_gcm!("gcm_only_db"))
-      {:ok, _} = extension |> Ecto.Changeset.change(%{settings_gcm: settings_gcm}) |> Repo.update()
+
+      settings =
+        extension.settings
+        |> Map.put("db_name", Crypto.encrypt!("gcm_db", cipher: :gcm))
+        |> Map.put("db_user", Crypto.encrypt!("ecb_user", cipher: :ecb))
+
+      {:ok, _} = extension |> Ecto.Changeset.change(%{settings: settings}) |> Repo.update()
 
       tenant = Realtime.Api.get_tenant_by_external_id(tenant.external_id)
       settings = Realtime.PostgresCdc.filter_settings("postgres_cdc_rls", tenant.extensions)
 
-      assert {:ok, %Realtime.Database{database: "gcm_only_db"}} = Database.from_settings(settings, "realtime_connect")
-    end
-
-    test "falls back to the legacy ECB column for a tenant the backfill has not reached", %{tenant: tenant} do
-      [extension] = tenant.extensions
-      {:ok, _} = extension |> Ecto.Changeset.change(%{settings_gcm: nil}) |> Repo.update()
-
-      tenant = Realtime.Api.get_tenant_by_external_id(tenant.external_id)
-      settings = Realtime.PostgresCdc.filter_settings("postgres_cdc_rls", tenant.extensions)
-
-      assert {:ok, %Realtime.Database{hostname: "127.0.0.1"}} = Database.from_settings(settings, "realtime_connect")
+      assert {:ok, %Database{database: "gcm_db", username: "ecb_user"}} =
+               Database.from_settings(settings, "realtime_connect")
     end
   end
 

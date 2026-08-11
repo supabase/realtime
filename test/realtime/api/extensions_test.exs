@@ -89,19 +89,6 @@ defmodule Realtime.Api.ExtensionsTest do
       assert Realtime.Crypto.decrypt!(settings["db_password"]) == "secret"
     end
 
-    test "dual-writes settings_gcm alongside the legacy settings column" do
-      changeset =
-        %Extensions{}
-        |> Ecto.Changeset.cast(%{type: "test", settings: %{"db_password" => "secret"}}, [:type, :settings])
-        |> Extensions.encrypt_settings([{"db_password", &is_binary/1, true}])
-
-      settings = Ecto.Changeset.get_change(changeset, :settings)
-      settings_gcm = Ecto.Changeset.get_change(changeset, :settings_gcm)
-
-      refute settings_gcm["db_password"] == settings["db_password"]
-      assert Realtime.Crypto.decrypt_gcm!(settings_gcm["db_password"]) == "secret"
-    end
-
     test "leaves fields not flagged for encryption untouched" do
       changeset =
         %Extensions{}
@@ -109,9 +96,7 @@ defmodule Realtime.Api.ExtensionsTest do
         |> Extensions.encrypt_settings([{"region", &is_binary/1, false}])
 
       settings = Ecto.Changeset.get_change(changeset, :settings)
-      settings_gcm = Ecto.Changeset.get_change(changeset, :settings_gcm)
       assert settings["region"] == "us-east-1"
-      assert settings_gcm["region"] == "us-east-1"
     end
 
     test "skips flagged fields that are absent" do
@@ -121,34 +106,7 @@ defmodule Realtime.Api.ExtensionsTest do
         |> Extensions.encrypt_settings([{"db_password", &is_binary/1, true}])
 
       settings = Ecto.Changeset.get_change(changeset, :settings)
-      settings_gcm = Ecto.Changeset.get_change(changeset, :settings_gcm)
       refute Map.has_key?(settings, "db_password")
-      refute Map.has_key?(settings_gcm, "db_password")
-    end
-
-    test "leaves settings_gcm unset when there is no settings change" do
-      changeset =
-        %Extensions{}
-        |> Ecto.Changeset.cast(%{type: "test"}, [:type, :settings])
-        |> Extensions.encrypt_settings([{"db_password", &is_binary/1, true}])
-
-      refute Ecto.Changeset.get_change(changeset, :settings_gcm)
-    end
-  end
-
-  describe "reconcile_encryption_changeset/2" do
-    test "only accepts and requires settings_gcm" do
-      changeset =
-        Extensions.reconcile_encryption_changeset(%Extensions{}, %{
-          settings_gcm: %{"db_password" => "ciphertext"},
-          type: "should be ignored"
-        })
-
-      assert changeset.valid?
-      assert Ecto.Changeset.get_change(changeset, :settings_gcm) == %{"db_password" => "ciphertext"}
-      refute Ecto.Changeset.get_change(changeset, :type)
-
-      refute Extensions.reconcile_encryption_changeset(%Extensions{}, %{}).valid?
     end
   end
 end

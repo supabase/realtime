@@ -60,10 +60,7 @@ defmodule Realtime.PostgresCdc do
   def filter_settings(key, extensions) do
     [cdc] = Enum.filter(extensions, fn e -> e.type == key end)
 
-    # Prefer the GCM copy. Both columns hold the same plaintext under different ciphers, so this is a
-    # drop-in swap; consumers reading non-sensitive keys are unaffected and `Realtime.Crypto.decrypt_any!/1`
-    # sorts out the cipher at the point of decryption.
-    cdc.settings_gcm || cdc.settings
+    cdc.settings
   end
 
   @doc """

@@ -5,51 +5,47 @@ defmodule Realtime.Api.TenantTest do
   alias Realtime.Crypto
 
   describe "encrypt_jwt_secret/1 via changeset/2" do
-    test "dual-writes jwt_secret (ECB) and jwt_secret_gcm (GCM) from the same plaintext" do
+    test "encrypts jwt_secret with the configured cipher" do
       changeset = Tenant.changeset(%Tenant{}, %{external_id: "tenant", jwt_secret: "my-secret"})
-
       jwt_secret = Ecto.Changeset.get_change(changeset, :jwt_secret)
-      jwt_secret_gcm = Ecto.Changeset.get_change(changeset, :jwt_secret_gcm)
 
       assert jwt_secret != "my-secret"
-      assert jwt_secret_gcm != "my-secret"
+      assert Crypto.gcm?(jwt_secret)
       assert Crypto.decrypt!(jwt_secret) == "my-secret"
-      assert Crypto.decrypt_gcm!(jwt_secret_gcm) == "my-secret"
     end
 
     test "does nothing when jwt_secret is not part of the changes" do
       changeset = Tenant.changeset(%Tenant{}, %{external_id: "tenant", jwt_jwks: %{"keys" => []}})
 
       refute Ecto.Changeset.get_change(changeset, :jwt_secret)
-      refute Ecto.Changeset.get_change(changeset, :jwt_secret_gcm)
     end
 
-    test "clears jwt_secret_gcm when jwt_secret is cleared" do
-      tenant = %Tenant{external_id: "tenant", jwt_secret: "ecb-ciphertext", jwt_secret_gcm: "gcm-ciphertext"}
+    test "leaves a cleared jwt_secret cleared" do
+      tenant = %Tenant{external_id: "tenant", jwt_secret: "ciphertext"}
       changeset = Tenant.changeset(tenant, %{jwt_secret: nil, jwt_jwks: %{"keys" => []}})
 
       assert Ecto.Changeset.get_change(changeset, :jwt_secret) == nil
-      assert Ecto.Changeset.get_field(changeset, :jwt_secret_gcm) == nil
     end
 
-    test "does nothing on an invalid changeset" do
+    test "leaves jwt_secret unencrypted on an invalid changeset" do
       changeset = Tenant.changeset(%Tenant{}, %{jwt_secret: "my-secret"})
 
       refute changeset.valid?
-      refute Ecto.Changeset.get_change(changeset, :jwt_secret_gcm)
+      assert Ecto.Changeset.get_change(changeset, :jwt_secret) == "my-secret"
     end
   end
 
-  describe "reconcile_encryption_changeset/2" do
-    test "only accepts and requires jwt_secret_gcm" do
-      changeset =
-        Tenant.reconcile_encryption_changeset(%Tenant{}, %{jwt_secret_gcm: "ciphertext", name: "should be ignored"})
+  describe "gcm_migrated_at_changeset/2" do
+    test "casts gcm_migrated_at and ignores every other field" do
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+      changeset = Tenant.gcm_migrated_at_changeset(%Tenant{}, %{gcm_migrated_at: now, name: "should be ignored"})
 
-      assert changeset.valid?
-      assert Ecto.Changeset.get_change(changeset, :jwt_secret_gcm) == "ciphertext"
-      refute Ecto.Changeset.get_change(changeset, :name)
+      assert %Ecto.Changeset{valid?: true, changes: %{gcm_migrated_at: ^now} = changes} = changeset
+      refute Map.has_key?(changes, :name)
+    end
 
-      refute Tenant.reconcile_encryption_changeset(%Tenant{}, %{}).valid?
+    test "requires gcm_migrated_at" do
+      refute Tenant.gcm_migrated_at_changeset(%Tenant{}, %{}).valid?
     end
   end
 

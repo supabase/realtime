@@ -4,6 +4,7 @@ defmodule RealtimeWeb.AuthTenantTest do
   import Plug.Conn
   import ExUnit.CaptureLog
 
+  alias Realtime.Crypto
   alias RealtimeWeb.AuthTenant
 
   describe "without tenant" do
@@ -42,20 +43,10 @@ defmodule RealtimeWeb.AuthTenantTest do
     end
 
     @tag header: "authorization"
-    test "authorizes against the GCM secret in preference to the legacy one", %{conn: conn} do
-      # Point the legacy column at a different secret. Authorization only succeeds if the plug read
-      # the GCM column, since the token was signed with the tenant's real secret.
-      tenant = %{conn.assigns.tenant | jwt_secret: Realtime.Crypto.encrypt!("a-different-secret")}
-      conn = assign(conn, :tenant, tenant) |> AuthTenant.call(%{})
-
-      refute conn.status
-      refute conn.halted
-    end
-
-    @tag header: "authorization"
-    test "authorizes against the legacy secret when the tenant has no GCM secret yet", %{conn: conn} do
-      tenant = %{conn.assigns.tenant | jwt_secret_gcm: nil}
-      conn = assign(conn, :tenant, tenant) |> AuthTenant.call(%{})
+    test "authorizes a tenant still on the legacy cipher", %{conn: conn} do
+      tenant = conn.assigns.tenant
+      legacy = tenant.jwt_secret |> Crypto.decrypt!() |> Crypto.encrypt!(cipher: :ecb)
+      conn = conn |> assign(:tenant, %{tenant | jwt_secret: legacy}) |> AuthTenant.call(%{})
 
       refute conn.status
       refute conn.halted

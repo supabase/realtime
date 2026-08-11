@@ -5,17 +5,13 @@ defmodule Realtime.Tenants do
 
   use Realtime.Logs
 
-  alias Realtime.Api
   alias Realtime.Api.Tenant
-  alias Realtime.Crypto
   alias Realtime.Database
-  alias Realtime.Extensions
-  alias Realtime.FeatureFlags
   alias Realtime.RateCounter
   alias Realtime.Repo.Replica
-  alias Realtime.Telemetry
   alias Realtime.Tenants.Cache
   alias Realtime.Tenants.Connect
+  alias Realtime.Tenants.EncryptionReconciler
   alias Realtime.Tenants.Migrations
   alias Realtime.UsersCounter
 
@@ -490,99 +486,9 @@ defmodule Realtime.Tenants do
       |> repo_replica.get_by(external_id: external_id)
       |> repo_replica.preload(:extensions)
 
-    if tenant, do: reconcile_encryption(tenant)
+    if tenant, do: EncryptionReconciler.reconcile(tenant)
 
     tenant
-  end
-
-  @encryption_reconcile_event [:realtime, :tenants, :encryption, :reconcile]
-
-  @gcm_encryption_backfill_flag "gcm_encryption_backfill"
-
-  @doc """
-  Backfills jwt_secret_gcm/settings_gcm for a tenant still on legacy AES-128-ECB ciphertext, firing
-  the re-encryption + write off in a detached task so a slow or failing write never blocks the caller.
-
-  Gated by the #{@gcm_encryption_backfill_flag} feature flag so the rollout can be controlled per tenant.
-  """
-  @spec reconcile_encryption(Tenant.t()) :: :ok
-  def reconcile_encryption(tenant) do
-    if needs_encryption_reconciliation?(tenant) do
-      # The flag check has to happen inside the task, not here. `FeatureFlags.enabled?/2` reads the
-      # tenant cache, and `get_tenant_by_external_id/1` above is itself the fallback Cachex runs for
-      # that key. Checking it in this process re-enters the Cachex courier for a key whose fetch is
-      # still in flight, which blocks on `:infinity` and never returns. Deferring it to a separate
-      # process also guarantees the cache write below lands after Cachex commits this fetch.
-      Task.Supervisor.start_child(Realtime.TaskSupervisor, fn ->
-        if FeatureFlags.enabled?(@gcm_encryption_backfill_flag, tenant.external_id),
-          do: do_reconcile_encryption(tenant)
-      end)
-    end
-
-    :ok
-  end
-
-  defp needs_encryption_reconciliation?(tenant) do
-    (is_nil(tenant.jwt_secret_gcm) and not is_nil(tenant.jwt_secret)) or
-      Enum.any?(tenant.extensions, &(is_nil(&1.settings_gcm) and encrypted_settings_keys(&1.type) != []))
-  end
-
-  defp do_reconcile_encryption(tenant) do
-    jwt_result = reconcile_jwt_secret(tenant)
-    extensions_result = Enum.map(tenant.extensions, &reconcile_extension_settings(tenant.external_id, &1))
-
-    if jwt_result == :ok and Enum.all?(extensions_result, &(&1 == :ok)) do
-      Api.update_tenant_gcm_migrated_at(tenant.external_id)
-    end
-
-    :ok
-  end
-
-  defp reconcile_jwt_secret(%Tenant{jwt_secret_gcm: nil, jwt_secret: jwt_secret, external_id: external_id})
-       when not is_nil(jwt_secret) do
-    metadata = %{external_id: external_id, field: "jwt_secret"}
-    start_time = Telemetry.start(@encryption_reconcile_event, metadata)
-    jwt_secret_gcm = Crypto.migrate_to_gcm!(jwt_secret)
-
-    case Api.update_tenant_jwt_secret_gcm(external_id, jwt_secret_gcm) do
-      {:ok, _updated_tenant} ->
-        Telemetry.stop(@encryption_reconcile_event, start_time, metadata)
-        :ok
-
-      {:error, error} ->
-        Telemetry.exception(@encryption_reconcile_event, start_time, :error, error, [], metadata)
-        :error
-    end
-  end
-
-  defp reconcile_jwt_secret(_tenant), do: :ok
-
-  defp reconcile_extension_settings(external_id, %{settings_gcm: nil} = extension) do
-    case encrypted_settings_keys(extension.type) do
-      [] ->
-        :ok
-
-      keys ->
-        metadata = %{external_id: external_id, field: "settings:#{extension.type}"}
-        start_time = Telemetry.start(@encryption_reconcile_event, metadata)
-        settings_gcm = Crypto.migrate_settings_to_gcm!(extension.settings, keys)
-
-        case Api.update_extension_settings_gcm(external_id, extension.id, settings_gcm) do
-          {:ok, _updated_extension} ->
-            Telemetry.stop(@encryption_reconcile_event, start_time, metadata)
-            :ok
-
-          {:error, error} ->
-            Telemetry.exception(@encryption_reconcile_event, start_time, :error, error, [], metadata)
-            :error
-        end
-    end
-  end
-
-  defp reconcile_extension_settings(_external_id, _extension), do: :ok
-
-  defp encrypted_settings_keys(extension_type) do
-    for {field, _checker, true} <- Extensions.db_settings(extension_type).required, do: field
   end
 
   @doc """

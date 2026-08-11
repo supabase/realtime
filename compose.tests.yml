@@ -35,6 +35,7 @@ services:
       DB_NAME: postgres
       DB_ENC_KEY: 1234567890123456
       DB_ENC_KEY_GCM: "12345678901234567890123456789012"
+      DB_ENC_WRITE_GCM: "true"
       DB_AFTER_CONNECT_QUERY: 'SET search_path TO _realtime'
       API_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
       METRICS_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long

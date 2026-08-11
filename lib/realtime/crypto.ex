@@ -2,147 +2,121 @@ defmodule Realtime.Crypto do
   @moduledoc """
   Encrypt and decrypt operations required by Realtime.
 
-  Supports AES-128-ECB (legacy) and AES-256-GCM. This is the only module that should know about
-  the dual ECB/GCM column scheme (`jwt_secret`/`jwt_secret_gcm`, `settings`/`settings_gcm`) - other
-  layers call `encrypt_jwt_secret!/1`, `decrypt_jwt_secret!/1`, `encrypt_settings!/2`, and
-  `decrypt_settings!/2` and stay agnostic to which scheme is in play.
+  AES-256-GCM ciphertext carries a `"g1:"` prefix, legacy AES-128-ECB ciphertext is bare base64.
+  `:` is not in the base64 alphabet, so `decrypt!/1` picks the cipher from the value itself.
 
-  Rollout status: writes dual-write both columns, `Realtime.Tenants.reconcile_encryption/1` backfills
-  the GCM columns for existing tenants, and reads default to GCM with an ECB fallback for tenants the
-  backfill has not reached yet. Once every tenant is migrated the legacy columns get wiped, at which
-  point `encrypt!/1`, `decrypt!/1`, `decrypt_any!/1`, `migrate_to_gcm!/1` and the dual-write/dual-read
-  helpers all go away.
+  New writes use GCM when `:db_enc_write_gcm` is set; `Realtime.Tenants.EncryptionReconciler`
+  re-encrypts legacy values in place. Once nothing is on ECB, the ECB branch and `:db_enc_key` go.
   """
+
+  require Logger
+
+  @gcm_prefix "g1:"
+
+  @type cipher :: :gcm | :ecb
 
   @doc """
-  Encrypts the given text using AES-128-ECB. Deprecated, use `encrypt_gcm!/1`.
+  Encrypts the given text. Uses `:db_enc_write_gcm` to pick the cipher unless `:cipher` is given.
   """
-  @spec encrypt!(binary()) :: binary()
-  def encrypt!(text) do
-    secret_key = Application.get_env(:realtime, :db_enc_key)
-
-    :aes_128_ecb
-    |> :crypto.crypto_one_time(secret_key, pad(text), true)
-    |> Base.encode64()
-  end
-
-  @doc """
-  Decrypts ciphertext produced by `encrypt!/1`.
-  """
-  @spec decrypt!(binary()) :: binary()
-  def decrypt!(base64_text) do
-    secret_key = Application.get_env(:realtime, :db_enc_key)
-    crypto_text = Base.decode64!(base64_text)
-
-    :aes_128_ecb
-    |> :crypto.crypto_one_time(secret_key, crypto_text, false)
-    |> unpad()
-  end
-
-  @doc """
-  Encrypts the given text using AES-256-GCM with a random 12-byte IV per call.
-  Result: `Base.encode64(iv <> tag <> ciphertext)`.
-  """
-  @spec encrypt_gcm!(binary()) :: binary()
-  def encrypt_gcm!(text) do
-    secret_key = Application.get_env(:realtime, :db_enc_key_gcm)
-    iv = :crypto.strong_rand_bytes(12)
-    {ciphertext, tag} = :crypto.crypto_one_time_aead(:aes_256_gcm, secret_key, iv, text, "", true)
-    Base.encode64(iv <> tag <> ciphertext)
-  end
-
-  @doc """
-  Decrypts ciphertext produced by `encrypt_gcm!/1`.
-  """
-  @spec decrypt_gcm!(binary()) :: binary()
-  def decrypt_gcm!(base64_text) do
-    secret_key = Application.get_env(:realtime, :db_enc_key_gcm)
-    <<iv::binary-12, tag::binary-16, ciphertext::binary>> = Base.decode64!(base64_text)
-
-    case :crypto.crypto_one_time_aead(:aes_256_gcm, secret_key, iv, ciphertext, "", tag, false) do
-      :error -> raise "GCM decryption failed: ciphertext or authentication tag is invalid"
-      plaintext -> plaintext
+  @spec encrypt!(binary(), [{:cipher, cipher()}]) :: binary()
+  def encrypt!(text, opts \\ []) do
+    case Keyword.get(opts, :cipher, default_cipher()) do
+      :gcm -> encrypt_gcm!(text)
+      :ecb -> encrypt_ecb!(text)
     end
   end
 
   @doc """
-  Decrypts ciphertext produced by either `encrypt_gcm!/1` or `encrypt!/1`, preferring GCM.
-
-  For call sites that receive a ciphertext without knowing which column it came from. GCM's
-  authentication tag makes the fallback deterministic: an ECB ciphertext has a ~2^-128 chance of
-  passing GCM's tag check, so a successful GCM decrypt means the input really was GCM.
-
-  Delete this along with `decrypt!/1` once the legacy columns are wiped.
+  Decrypts ciphertext produced by `encrypt!/2`, dispatching on the `"g1:"` prefix.
   """
-  @spec decrypt_any!(binary()) :: binary()
-  def decrypt_any!(base64_text) do
-    decrypt_gcm!(base64_text)
-  rescue
-    _ -> decrypt!(base64_text)
+  @spec decrypt!(binary()) :: binary()
+  def decrypt!(@gcm_prefix <> base64_text), do: decrypt_gcm!(base64_text)
+  def decrypt!(base64_text), do: decrypt_ecb!(base64_text)
+
+  @doc """
+  Whether the given ciphertext is AES-256-GCM.
+  """
+  @spec gcm?(binary()) :: boolean()
+  def gcm?(@gcm_prefix <> _), do: true
+  def gcm?(ciphertext) when is_binary(ciphertext), do: false
+
+  @doc """
+  Whether new writes should use AES-256-GCM. False when no GCM key is configured, so a self-hosted
+  deployment without `DB_ENC_KEY_GCM` keeps working on the legacy cipher instead of failing.
+  """
+  @spec write_gcm?() :: boolean()
+  def write_gcm?, do: gcm_requested?() and not is_nil(gcm_key())
+
+  @doc """
+  Logs a warning when GCM writes are asked for but no GCM key is configured, since the result is a
+  silent fallback to the legacy cipher. Called once at boot.
+  """
+  @spec check_config() :: :ok
+  def check_config do
+    if gcm_requested?() and is_nil(gcm_key()),
+      do: Logger.warning("DB_ENC_WRITE_GCM is set but DB_ENC_KEY_GCM is missing, continuing with AES-128-ECB")
+
+    :ok
   end
 
   @doc """
-  Decrypts a tenant's jwt_secret, preferring jwt_secret_gcm when present.
+  Re-encrypts a ciphertext as AES-256-GCM, whichever cipher it currently uses.
   """
-  @spec decrypt_jwt_secret!(%{
-          :jwt_secret_gcm => binary() | nil,
-          :jwt_secret => binary() | nil,
-          optional(any()) => any()
-        }) :: binary()
-  def decrypt_jwt_secret!(%{jwt_secret_gcm: jwt_secret_gcm}) when is_binary(jwt_secret_gcm),
-    do: decrypt_gcm!(jwt_secret_gcm)
-
-  def decrypt_jwt_secret!(%{jwt_secret: jwt_secret}), do: decrypt!(jwt_secret)
+  @spec re_encrypt!(binary()) :: binary()
+  def re_encrypt!(ciphertext), do: ciphertext |> decrypt!() |> encrypt!(cipher: :gcm)
 
   @doc """
-  Encrypts a plaintext jwt_secret with both schemes, for dual-writing jwt_secret and jwt_secret_gcm.
+  Re-encrypts the given keys of a settings map as AES-256-GCM. Missing keys are left alone.
   """
-  @spec encrypt_jwt_secret!(binary()) :: %{jwt_secret: binary(), jwt_secret_gcm: binary()}
-  def encrypt_jwt_secret!(plaintext) do
-    %{jwt_secret: encrypt!(plaintext), jwt_secret_gcm: encrypt_gcm!(plaintext)}
+  @spec re_encrypt_settings!(map(), [String.t()]) :: map()
+  def re_encrypt_settings!(settings, keys) do
+    for key <- keys, is_binary(settings[key]), reduce: settings do
+      acc -> Map.put(acc, key, re_encrypt!(settings[key]))
+    end
   end
 
   @doc """
-  Decrypts the given keys of an extension's settings, preferring settings_gcm when present.
+  Whether any of the given keys of a settings map still holds a legacy AES-128-ECB ciphertext.
   """
-  @spec decrypt_settings!(%{:settings_gcm => map() | nil, :settings => map(), optional(any()) => any()}, [
-          String.t()
-        ]) :: map()
-  def decrypt_settings!(%{settings_gcm: settings_gcm}, keys) when is_map(settings_gcm),
-    do: crypt_settings_fields(settings_gcm, keys, &decrypt_gcm!/1)
-
-  def decrypt_settings!(%{settings: settings}, keys), do: crypt_settings_fields(settings, keys, &decrypt!/1)
-
-  @doc """
-  Encrypts the given keys of a settings map with both schemes, for dual-writing settings and settings_gcm.
-  """
-  @spec encrypt_settings!(map(), [String.t()]) :: %{settings: map(), settings_gcm: map()}
-  def encrypt_settings!(settings, keys) do
-    %{
-      settings: crypt_settings_fields(settings, keys, &encrypt!/1),
-      settings_gcm: crypt_settings_fields(settings, keys, &encrypt_gcm!/1)
-    }
+  @spec legacy_settings?(map(), [String.t()]) :: boolean()
+  def legacy_settings?(settings, keys) do
+    Enum.any?(keys, &(is_binary(settings[&1]) and not gcm?(settings[&1])))
   end
 
-  @doc """
-  Re-encrypts a legacy AES-128-ECB ciphertext as AES-256-GCM, for backfilling jwt_secret_gcm.
-  """
-  @spec migrate_to_gcm!(binary()) :: binary()
-  def migrate_to_gcm!(legacy_ciphertext), do: legacy_ciphertext |> decrypt!() |> encrypt_gcm!()
+  defp default_cipher do
+    if write_gcm?(), do: :gcm, else: :ecb
+  end
 
-  @doc """
-  Re-encrypts the given keys of a legacy AES-128-ECB settings map as AES-256-GCM, for backfilling settings_gcm.
-  """
-  @spec migrate_settings_to_gcm!(map(), [String.t()]) :: map()
-  def migrate_settings_to_gcm!(settings, keys), do: crypt_settings_fields(settings, keys, &migrate_to_gcm!/1)
+  defp gcm_requested?, do: Application.get_env(:realtime, :db_enc_write_gcm, false)
+  defp gcm_key, do: Application.get_env(:realtime, :db_enc_key_gcm)
+  defp ecb_key, do: Application.get_env(:realtime, :db_enc_key)
 
-  defp crypt_settings_fields(settings, keys, crypt_fun) do
-    Enum.reduce(keys, settings, fn key, acc ->
-      case acc[key] do
-        nil -> acc
-        value -> Map.put(acc, key, crypt_fun.(value))
-      end
-    end)
+  defp encrypt_gcm!(text) do
+    secret_key = gcm_key()
+    iv = :crypto.strong_rand_bytes(12)
+    {ciphertext, tag} = :crypto.crypto_one_time_aead(:aes_256_gcm, secret_key, iv, text, "", true)
+    @gcm_prefix <> Base.encode64(iv <> tag <> ciphertext)
+  end
+
+  defp decrypt_gcm!(base64_text) do
+    <<iv::binary-12, tag::binary-16, ciphertext::binary>> = Base.decode64!(base64_text)
+
+    case :crypto.crypto_one_time_aead(:aes_256_gcm, gcm_key(), iv, ciphertext, "", tag, false) do
+      :error -> raise "GCM decryption failed: ciphertext or authentication tag is invalid"
+      plaintext when is_binary(plaintext) -> plaintext
+    end
+  end
+
+  defp encrypt_ecb!(text) do
+    :aes_128_ecb
+    |> :crypto.crypto_one_time(ecb_key(), pad(text), true)
+    |> Base.encode64()
+  end
+
+  defp decrypt_ecb!(base64_text) do
+    :aes_128_ecb
+    |> :crypto.crypto_one_time(ecb_key(), Base.decode64!(base64_text), false)
+    |> unpad()
   end
 
   defp pad(data) do

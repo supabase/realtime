@@ -12,12 +12,9 @@ defmodule Realtime.Api.Extensions do
   @foreign_key_type :binary_id
   @derive {Jason.Encoder, only: [:type, :inserted_at, :updated_at, :settings]}
 
-  @type t :: %__MODULE__{}
-
   schema "extensions" do
     field(:type, :string)
     field(:settings, :map)
-    field(:settings_gcm, :map)
     belongs_to(:tenant, Realtime.Api.Tenant, foreign_key: :tenant_external_id, type: :string)
     timestamps()
   end
@@ -46,21 +43,15 @@ defmodule Realtime.Api.Extensions do
   end
 
   def encrypt_settings(changeset, fields) do
-    case get_change(changeset, :settings) do
-      nil ->
-        changeset
+    update_change(changeset, :settings, fn settings ->
+      Enum.reduce(fields, settings, fn
+        {field, _, true}, acc ->
+          if is_nil(acc[field]), do: acc, else: Map.put(acc, field, Crypto.encrypt!(acc[field]))
 
-      settings ->
-        keys = for {field, _checker, true} <- fields, do: field
-        change(changeset, Crypto.encrypt_settings!(settings, keys))
-    end
-  end
-
-  @doc false
-  def reconcile_encryption_changeset(extension, attrs) do
-    extension
-    |> cast(attrs, [:settings_gcm])
-    |> validate_required([:settings_gcm])
+        _, acc ->
+          acc
+      end)
+    end)
   end
 
   def validate_required_settings(changeset, required) do

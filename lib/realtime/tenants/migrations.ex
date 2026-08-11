@@ -146,8 +146,7 @@ defmodule Realtime.Tenants.Migrations do
   end
 
   defp migration_target(%Tenant{} = tenant) do
-    %{extensions: [extension | _]} = tenant
-    settings = extension.settings_gcm || extension.settings
+    %{extensions: [%{settings: settings} | _]} = tenant
 
     attrs = %__MODULE__{
       tenant_external_id: tenant.external_id,

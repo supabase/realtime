@@ -97,7 +97,7 @@ defmodule Realtime.ApiTest do
       assert {:ok, %Tenant{} = tenant} = Api.create_tenant(valid_attrs)
 
       assert tenant.external_id == external_id
-      assert tenant.jwt_secret == "YIriPuuJO1uerq5hSZ1W5Q=="
+      assert Crypto.decrypt!(tenant.jwt_secret) == "new secret"
       assert tenant.name == external_id
       assert tenant.broadcast_adapter == :gen_rpc
     end
@@ -116,8 +116,7 @@ defmodule Realtime.ApiTest do
         Api.get_tenant_by_external_id(tenant.external_id)
 
       assert Map.has_key?(extension.settings, "db_password")
-      password = extension.settings["db_password"]
-      assert ^password = "v1QVng3N+pZd/0AEObABwg=="
+      assert Crypto.decrypt!(extension.settings["db_password"]) == "postgres"
     end
 
     test "fetch by external id using replica", %{tenants: [tenant | _]} do
@@ -125,8 +124,7 @@ defmodule Realtime.ApiTest do
         Api.get_tenant_by_external_id(tenant.external_id, use_replica?: true)
 
       assert Map.has_key?(extension.settings, "db_password")
-      password = extension.settings["db_password"]
-      assert ^password = "v1QVng3N+pZd/0AEObABwg=="
+      assert Crypto.decrypt!(extension.settings["db_password"]) == "postgres"
     end
 
     test "fetch by external id using no replica", %{tenants: [tenant | _]} do
@@ -134,8 +132,7 @@ defmodule Realtime.ApiTest do
         Api.get_tenant_by_external_id(tenant.external_id, use_replica?: false)
 
       assert Map.has_key?(extension.settings, "db_password")
-      password = extension.settings["db_password"]
-      assert ^password = "v1QVng3N+pZd/0AEObABwg=="
+      assert Crypto.decrypt!(extension.settings["db_password"]) == "postgres"
     end
   end
 
@@ -152,7 +149,7 @@ defmodule Realtime.ApiTest do
       assert {:ok, %Tenant{} = tenant} = Api.update_tenant_by_external_id(tenant.external_id, update_attrs)
       assert tenant.external_id == tenant.external_id
 
-      assert tenant.jwt_secret == Crypto.encrypt!("some updated jwt_secret")
+      assert Crypto.decrypt!(tenant.jwt_secret) == "some updated jwt_secret"
       assert tenant.name == "some updated name"
     end
 
@@ -420,7 +417,7 @@ defmodule Realtime.ApiTest do
   end
 
   describe "rename_settings_field/2" do
-    test "renames the field in the legacy settings column, leaving settings_gcm alone" do
+    test "renames setting fields" do
       tenant = tenant_fixture()
 
       Api.rename_settings_field("poll_interval_ms", "poll_interval")
@@ -428,7 +425,6 @@ defmodule Realtime.ApiTest do
       assert %{extensions: [extension]} = Api.get_tenant_by_external_id(tenant.external_id)
       assert Map.has_key?(extension.settings, "poll_interval")
       refute Map.has_key?(extension.settings, "poll_interval_ms")
-      assert Map.has_key?(extension.settings_gcm, "poll_interval_ms")
     end
   end
 
