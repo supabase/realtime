@@ -63,7 +63,7 @@ defmodule Realtime.MixProject do
       {:postgrex, "~> 0.22"},
       {:db_connection, "~> 2.10"},
       {:phoenix_html, "~> 3.2"},
-      {:phoenix_live_view, "~> 0.18"},
+      {:phoenix_live_view, "~> 1.0"},
       {:phoenix_live_reload, "~> 1.2", only: :dev},
       {:phoenix_live_dashboard, "~> 0.7"},
       {:lumis, "~> 0.7"},
@@ -108,6 +108,7 @@ defmodule Realtime.MixProject do
       {:req, "~> 0.6.2"},
       {:mimic, "~> 2.0", only: :test},
       {:floki, ">= 0.30.0", only: :test},
+      {:lazy_html, ">= 0.1.0", only: :test},
       {:mint_web_socket, "~> 1.0", only: :test},
       {:postgres_replication, git: "https://github.com/filipecabaco/postgres_replication.git", only: :test},
       {:benchee, "~> 1.1.0", only: [:dev, :test]},
@@ -125,7 +126,7 @@ defmodule Realtime.MixProject do
     if path = System.get_env("PHOENIX_PATH") do
       {:phoenix, path: path, override: true}
     else
-      {:phoenix, override: true, github: "supabase/phoenix", branch: "feat/presence-custom-dispatcher-1.7.19"}
+      {:phoenix, "~> 1.8"}
     end
   end
 
