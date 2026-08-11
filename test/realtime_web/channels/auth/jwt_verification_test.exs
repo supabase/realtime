@@ -487,7 +487,6 @@ defmodule RealtimeWeb.JwtVerificationTest do
             "kty" => "OKP",
             "crv" => "Ed25519",
             "x" => "hR5rgn8NeZtkO6c5zBqQWFskBWnkBGa8c1Noa1L7FRw",
-            "d" => "B760w5vOLrntFkIfGZRy7di_WPIYymxTjxufHiuHY0g",
             "kid" => "key-id-1"
           }
         ]
@@ -507,14 +506,15 @@ defmodule RealtimeWeb.JwtVerificationTest do
             "kty" => "OKP",
             "crv" => "Ed25519",
             "x" => "hR5rgn8NeZtkO6c5zBqQWFskBWnkBGa8c1Noa1L7FRw",
-            "d" => "B760w5vOLrntFkIfGZRy7di_WPIYymxTjxufHiuHY0g",
             "kid" => "key-id-1"
           }
         ]
       }
 
+      # Same header and claims as the valid token, but signed by a different key,
+      # so the whole signature (not just a mutated byte) fails to verify.
       token =
-        "eyJhbGciOiJFZERTQSIsImtpZCI6ImtleS1pZC0xIiwidHlwIjoiSldUIn0.eyJleHAiOjE3MTIwNTMyNTcsImlhdCI6MTcxMjA0OTY1Nywicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJzdWIiOiJ1c2VyLWlkIn0.aPgmoz7qHith4CA-T-hazSA375EHTkGQ2o1cjrKd8AkdB22OXy35fsHwjjnNzdQGpkVIaIq0ydLjCtVC7BOCDQ"
+        "eyJhbGciOiJFZERTQSIsImtpZCI6ImtleS1pZC0xIiwidHlwIjoiSldUIn0.eyJleHAiOjE3MTIwNTMyNTcsImlhdCI6MTcxMjA0OTY1Nywicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJzdWIiOiJ1c2VyLWlkIn0.mSjlnZjAKOnrI2bin7_q7ku11SlVuYeHOo3Ne8gd-OFTqzH9JvzPFAazSKHIX5OaJvAvip-v2GfqBf2WVF2RBw"
 
       assert JwtVerification.verify(token, @jwt_secret, jwks) == {:error, :signature_error}
     end

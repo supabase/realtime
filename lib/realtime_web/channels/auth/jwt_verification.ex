@@ -118,28 +118,16 @@ defmodule RealtimeWeb.JwtVerification do
 
   defp generate_signer(%{"alg" => alg, "kid" => kid}, _jwt_secret, %{"keys" => keys})
        when is_binary(kid) and (alg in @ed_algorithms or alg == @eddsa_algorithm) do
-    jwk = Enum.find(keys, fn jwk -> jwk["kty"] == "OKP" and jwk["kid"] == kid end)
-
-    case {jwk, alg} do
-      {nil, _} ->
-        {:error, {:error_generating_signer, kid}}
-
-      # RFC 8037 keeps the curve in the JWK, so JOSE resolves it from the key.
-      # Joken.Signer.create/2 only knows the curve-named spellings, and a signer
-      # built with one would reject this token's alg, so it is built directly.
-      {%{"crv" => crv}, @eddsa_algorithm} when crv in @ed_algorithms ->
-        {:ok,
-         %Joken.Signer{
-           alg: @eddsa_algorithm,
-           jwk: JOSE.JWK.from_map(jwk),
-           jws: JOSE.JWS.from_map(%{"alg" => @eddsa_algorithm})
-         }}
-
-      {_, @eddsa_algorithm} ->
-        {:error, {:error_generating_signer, kid}}
+    keys
+    |> Enum.find(fn jwk -> jwk["kty"] == "OKP" and jwk["kid"] == kid end)
+    |> case do
+      # For "EdDSA" the curve comes from the JWK (RFC 8037); for the curve-named
+      # algs it must match the JWK's curve. Either way JOSE resolves the key.
+      %{"crv" => crv} = jwk when crv in @ed_curves and (alg == @eddsa_algorithm or alg == crv) ->
+        {:ok, Joken.Signer.create(alg, jwk)}
 
       _ ->
-        {:ok, Joken.Signer.create(alg, jwk)}
+        {:error, {:error_generating_signer, kid}}
     end
   end
 
