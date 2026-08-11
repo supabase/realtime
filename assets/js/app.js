@@ -136,8 +136,21 @@ function logEvent(hook, category, event, payload, latencyMs = null) {
 
 Hooks.payload = {
   initRealtime(connection) {
-    const { channel: channelName, host, log_level, token, schema, table, event, filter, select, bearer, enable_presence, enable_db_changes, private_channel } =
-      connection;
+    const {
+      channel: channelName,
+      host,
+      log_level,
+      token,
+      schema,
+      table,
+      event,
+      filter,
+      select,
+      bearer,
+      enable_presence,
+      enable_db_changes,
+      private_channel,
+    } = connection;
 
     if (this.channel) this.channel.unsubscribe();
     if (this.realtimeSocket) this.realtimeSocket.realtime.disconnect();
@@ -163,7 +176,8 @@ Hooks.payload = {
     this.channel.on("system", {}, (payload) => {
       if (payload.extension === "postgres_changes") {
         if (payload.status === "ok") this.pushEvent("postgres_subscribed", { schema, table, filter });
-        else if (payload.status === "error") this.pushEvent("postgres_error", { reason: payload.message ?? "unknown error" });
+        else if (payload.status === "error")
+          this.pushEvent("postgres_error", { reason: payload.message ?? "unknown error" });
       }
       logEvent(this, "system", payload.extension ?? "system", payload);
     });
@@ -374,7 +388,7 @@ Hooks.logFilter = {
         hit.className = "search-hit";
         hit.textContent = part.text;
         return hit;
-      })
+      }),
     );
     cell.dataset.signature = signature;
   },
@@ -460,7 +474,7 @@ Hooks.exportLog = {
           received_at: row.dataset.receivedAt,
           latency_ms: row.dataset.latencyMs ? Number(row.dataset.latencyMs) : null,
           payload: JSON.parse(row.dataset.payload),
-        })
+        }),
       );
 
       const blob = new Blob([lines.join("\n")], { type: "application/x-ndjson" });

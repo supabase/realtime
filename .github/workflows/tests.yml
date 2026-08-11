@@ -109,6 +109,22 @@ jobs:
             cover/lcov.info
             cover/partition-${{ matrix.partition }}.coverdata
 
+  assets_tests:
+    name: Asset Tests
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Setup Node.js
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: assets/package-lock.json
+      - name: Install dependencies
+        run: npm --prefix assets ci
+      - name: Run asset tests
+        run: npm --prefix assets test
+
   coverage:
     name: Merge Coverage
     needs: tests

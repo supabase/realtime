@@ -82,9 +82,10 @@ COPY priv priv
 COPY lib lib
 
 # install js dependencies before the rest of assets, so editing a stylesheet or a hook does not
-# invalidate the install layer. `npm ci` installs exactly what the lockfile pins.
+# invalidate the install layer. `npm ci` installs exactly what the lockfile pins; `--omit=dev` keeps
+# the lint/format tooling (oxlint, oxfmt) out of the image build.
 COPY assets/package.json assets/package-lock.json assets/
-RUN cd assets && npm ci
+RUN cd assets && npm ci --omit=dev
 
 COPY assets assets
 

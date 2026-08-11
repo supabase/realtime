@@ -26,6 +26,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: Lint
@@ -76,6 +79,24 @@ jobs:
           mix dialyzer.build
       - name: Run dialyzer
         run: mix dialyzer
+
+  assets:
+    name: Assets Lint
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Setup Node.js
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: assets/package-lock.json
+      - name: Install dependencies
+        run: npm --prefix assets ci
+      - name: Run oxlint
+        run: npm --prefix assets run lint
+      - name: Run oxfmt check
+        run: npm --prefix assets run format:check
 
   actionlint:
     name: Actionlint

@@ -44,4 +44,3 @@ export function segments(text, query) {
 
   return out;
 }
-

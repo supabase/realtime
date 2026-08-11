@@ -40,7 +40,7 @@ test("segments split the text without losing or duplicating any of it", () => {
       .filter((p) => p.matched)
       .map((p) => p.text)
       .join(""),
-    "Jrm"
+    "Jrm",
   );
 });
 
