@@ -268,7 +268,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
           assert_receive :abcast_called
         end)
 
-      assert log =~ "Muster router changed during broadcast for tenant #{tenant_id}"
+      assert log =~ "Muster router changed during broadcast (:route) for tenant #{tenant_id}"
       refute_receive "le message"
       refute_receive {@fanout_event, _, _, %{tenant: ^tenant_id}}
     end
@@ -422,7 +422,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
           assert_receive :abcast_called
         end)
 
-      assert log =~ "Muster router changed"
+      assert log =~ "Muster router changed during broadcast (:route_region)"
       refute_receive "le message"
       refute_receive {@fanout_event, _, _, %{tenant: ^tenant_id}}
     end

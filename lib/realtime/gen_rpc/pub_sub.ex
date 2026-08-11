@@ -108,9 +108,9 @@ defmodule Realtime.GenRpcPubSub do
         route = Worker.route(tenant_id, topic, message, dispatcher, node(), Muster.view_hash(scope))
         GenRpc.abcast([router_node], worker, route, key: self())
 
-      {:rebalancing, _members} ->
-        # Routing is unreliable while the ring is in flux: over-deliver to the
-        # whole region (minus the origin, which already delivered locally).
+      _ ->
+        # Routing is unreliable while the ring is in flux (or not available):
+        # over-deliver to the whole region (minus the origin).
         intra_region_flood(worker, my_region, topic, message, dispatcher)
     end
 
@@ -262,7 +262,10 @@ defmodule Realtime.GenRpcPubSub.Worker do
 
         # Router changed somehow, we have a bug or it's rebalancing at the moment
         _ ->
-          Logger.warning("Muster router changed during broadcast for tenant #{tenant_id}, falling back to region flood")
+          Logger.warning(
+            "Muster router changed during broadcast (:route) for tenant #{tenant_id}, falling back to region flood"
+          )
+
           Realtime.Nodes.region_nodes(my_region)
       end
 
@@ -289,7 +292,10 @@ defmodule Realtime.GenRpcPubSub.Worker do
         # The sender's expected-router guess was stale or we are
         # rebalancing: flood our whole region rather than risk a miss.
         _ ->
-          Logger.warning("Muster router changed during broadcast for tenant #{tenant_id}, falling back to region flood")
+          Logger.warning(
+            "Muster router changed during broadcast (:route_region) for tenant #{tenant_id}, falling back to region flood"
+          )
+
           Realtime.Nodes.region_nodes(my_region)
       end
 
