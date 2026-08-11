@@ -1,5 +1,5 @@
 defmodule RealtimeWeb.InspectorLive.EventLogComponentTest do
-  use RealtimeWeb.ConnCase
+  use RealtimeWeb.ConnCase, async: true
   import Phoenix.LiveViewTest
 
   alias RealtimeWeb.InspectorLive.EventLogComponent

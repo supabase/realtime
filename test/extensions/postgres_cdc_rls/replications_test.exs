@@ -1,5 +1,5 @@
 defmodule Extensions.PostgresCdcRls.ReplicationsTest do
-  use Realtime.DataCase, async: false
+  use Realtime.DataCase, async: true
 
   alias Extensions.PostgresCdcRls.Replications
   alias Extensions.PostgresCdcRls.Subscriptions

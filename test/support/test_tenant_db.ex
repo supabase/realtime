@@ -167,6 +167,13 @@ defmodule TestTenantDb do
       )
 
     try do
+      %{rows: slots} = Postgrex.query!(admin_conn, "SELECT slot_name, active_pid FROM pg_replication_slots", [])
+
+      Enum.each(slots, fn [slot_name, active_pid] ->
+        if active_pid, do: Postgrex.query!(admin_conn, "SELECT pg_terminate_backend($1)", [active_pid])
+        Postgrex.query!(admin_conn, "SELECT pg_drop_replication_slot($1)", [slot_name])
+      end)
+
       Postgrex.query!(admin_conn, "DROP PUBLICATION IF EXISTS supabase_realtime_test", [])
       Postgrex.query!(admin_conn, "DROP SCHEMA IF EXISTS realtime CASCADE", [])
       Postgrex.query!(admin_conn, "CREATE SCHEMA realtime", [])

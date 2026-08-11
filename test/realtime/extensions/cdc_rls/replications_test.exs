@@ -5,8 +5,12 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationsTest do
   alias Extensions.PostgresCdcRls.Subscriptions
   alias Realtime.Database
 
-  setup do
-    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
+  setup_all do
+    tenant = TestTenantDb.checkout_tenant_unboxed(run_migrations: true)
+    %{tenant: tenant}
+  end
+
+  setup %{tenant: tenant} do
     {:ok, conn} = Database.connect(tenant, "realtime_rls", :stop)
     %{conn: conn}
   end

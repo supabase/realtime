@@ -1,6 +1,5 @@
 defmodule Realtime.TenantsTest do
-  # async: false due to cache usage
-  use Realtime.DataCase, async: false
+  use Realtime.DataCase, async: true
 
   alias Realtime.Database
   alias Realtime.GenCounter
