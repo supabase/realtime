@@ -254,6 +254,34 @@ defmodule Realtime.SynHandlerTest do
     end
   end
 
+  describe "on_process_joined/5" do
+    test "emits telemetry event with name and meta for a group join" do
+      pid = self()
+      meta = %{region: "us-east-1"}
+      reason = :normal
+
+      ref = :telemetry_test.attach_event_handlers(self(), [[:syn, @mod, :joined]])
+
+      assert SynHandler.on_process_joined(@mod, @name, pid, meta, reason) == :ok
+
+      assert_receive {[:syn, @mod, :joined], ^ref, %{}, %{name: @name, meta: ^meta}}
+    end
+  end
+
+  describe "on_process_left/5" do
+    test "emits telemetry event with name and meta for a group leave" do
+      pid = self()
+      meta = %{region: "us-east-1"}
+      reason = :normal
+
+      ref = :telemetry_test.attach_event_handlers(self(), [[:syn, @mod, :left]])
+
+      assert SynHandler.on_process_left(@mod, @name, pid, meta, reason) == :ok
+
+      assert_receive {[:syn, @mod, :left], ^ref, %{}, %{name: @name, meta: ^meta}}
+    end
+  end
+
   describe "on_process_unregistered/5" do
     setup do
       RealtimeWeb.Endpoint.subscribe("#{@topic}:#{@name}")
