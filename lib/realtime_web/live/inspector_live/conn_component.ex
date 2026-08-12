@@ -1,7 +1,7 @@
 defmodule RealtimeWeb.InspectorLive.ConnComponent do
   use RealtimeWeb, :live_component
 
-  @url_params ~w(host project channel schema table event filter select enable_presence enable_db_changes private_channel log_level)
+  @url_params ~w(host project channel token schema table event filter select enable_presence enable_db_changes private_channel log_level)
 
   defmodule Connection do
     use Ecto.Schema
@@ -173,17 +173,13 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
 
   @impl true
   def update(%{url_params: params} = assigns, socket) do
-    # Preserve any already-entered secrets (they never travel in the URL) while applying the
-    # non-secret shape coming from the URL.
-    current = socket.assigns.changeset
-    token = Ecto.Changeset.get_field(current, :token)
-    bearer = Ecto.Changeset.get_field(current, :bearer)
+    bearer = %{"bearer" => Ecto.Changeset.get_field(socket.assigns.changeset, :bearer)}
 
     merged =
       params
       |> adopt_legacy_project()
-      |> Map.put("token", token)
-      |> Map.put("bearer", bearer)
+      |> Map.take(@url_params)
+      |> then(&Map.merge(bearer, &1))
       |> Map.reject(fn {_k, v} -> v in [nil, ""] end)
 
     socket =
@@ -261,10 +257,16 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
   end
 
   def handle_event("local_storage", params, socket) do
-    params = Map.reject(params, fn {_, v} -> v in [nil, ""] end)
-    changeset = Connection.changeset(socket.assigns.changeset, params)
+    changeset = socket.assigns.changeset
 
-    {:noreply, assign(socket, :changeset, changeset)}
+    saved =
+      params
+      |> Map.take(~w(token bearer))
+      |> Map.reject(fn {key, value} ->
+        value in [nil, ""] or Ecto.Changeset.get_field(changeset, String.to_existing_atom(key)) not in [nil, ""]
+      end)
+
+    {:noreply, assign(socket, :changeset, Connection.changeset(changeset, saved))}
   end
 
   def handle_event("cancel", params, socket) do
