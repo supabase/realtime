@@ -6,6 +6,14 @@ ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
 # @supabase/pg-delta@1.0.0-alpha.33
 ARG PG_DELTA_COMMIT=c0e5e002eb712faf46dd1660d5578357f21af950
 
+FROM ghcr.io/fujiwara/awslim:builder AS awslim-builder
+ARG AWSLIM_VERSION=v0.6.13
+ARG TARGETOS
+ARG TARGETARCH
+ENV AWSLIM_GEN=secretsmanager
+RUN GIT_REF="${AWSLIM_VERSION}" AWSLIM_OS="${TARGETOS}" AWSLIM_ARCH="${TARGETARCH}" \
+    ./build-in-docker.sh
+
 FROM debian:${DEBIAN_VERSION} AS pgdelta-builder
 ARG PG_DELTA_COMMIT
 ARG BUN_VERSION=1.3.14
@@ -103,8 +111,6 @@ RUN mix release
 FROM ${RUNNER_IMAGE}
 ARG SLOT_NAME_SUFFIX
 
-# C.UTF-8 is built into glibc, so we get a UTF-8 locale without the `locales`
-# package and its generated locale data.
 ENV SLOT_NAME_SUFFIX="${SLOT_NAME_SUFFIX}" \
     LANG="C.UTF-8" \
     LC_ALL="C.UTF-8" \
@@ -112,13 +118,12 @@ ENV SLOT_NAME_SUFFIX="${SLOT_NAME_SUFFIX}" \
     ECTO_IPV6="true" \
     ERL_AFLAGS="-proto_dist inet6_tcp"
 
-# ca-certificates is required: run.sh talks to Secrets Manager over HTTPS and
-# the base image ships no trust store. libtinfo6 is the only curses library
-# beam.smp links against, so we do not need all of libncurses6.
 RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
-      libstdc++6 openssl libtinfo6 ca-certificates tini curl xz-utils && \
+      libstdc++6 openssl libtinfo6 ca-certificates tini curl jq xz-utils && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
+
+COPY --from=awslim-builder /app/awslim /usr/local/bin/awslim
 
 COPY --from=pgdelta-builder /tmp/pgdelta.xz /usr/local/share/pgdelta/pgdelta.xz
 COPY --from=pgdelta-builder /tmp/pgdelta-wrapper /usr/local/bin/pgdelta
