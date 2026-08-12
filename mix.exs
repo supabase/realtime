@@ -83,7 +83,7 @@ defmodule Realtime.MixProject do
       # prom_ex depends on peep ~> 3.0 but there is no issue using peep ~> 4.0
       # https://github.com/akoutmos/prom_ex/pull/270
       {:peep, "~> 4.3", override: true},
-      {:joken, "~> 2.5.0"},
+      {:joken, "~> 2.6"},
       {:nimble_zta, "~> 0.1"},
       {:ex_json_schema, "~> 0.11"},
       {:recon, "~> 2.5"},
