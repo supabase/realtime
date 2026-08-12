@@ -366,12 +366,14 @@ async function setup(): Promise<{ userId: string; testUser: { email: string; pas
             id text PRIMARY KEY,
             topic text NOT NULL,
             event text NOT NULL,
-            payload jsonb NOT NULL DEFAULT '{}'
+            payload jsonb NOT NULL DEFAULT '{}',
+            binary_payload bytea
           )`),
     ]);
     await runSql("pg_changes details column", sql`ALTER TABLE public.pg_changes ADD COLUMN IF NOT EXISTS details text`);
     await runSql("pg_changes nullable_value column", sql`ALTER TABLE public.pg_changes ADD COLUMN IF NOT EXISTS nullable_value text`);
     await runSql("pg_changes replica identity", sql`ALTER TABLE public.pg_changes REPLICA IDENTITY FULL`);
+    await runSql("replay_check binary_payload column", sql`ALTER TABLE public.replay_check ADD COLUMN IF NOT EXISTS binary_payload bytea`);
     log(kleur.dim(`setup: tables done (${(performance.now() - stepStart).toFixed(0)}ms)`));
 
     stepStart = performance.now();
@@ -456,7 +458,11 @@ async function setup(): Promise<{ userId: string; testUser: { email: string; pas
     await runSql("function replay_check_trigger", sql`
       CREATE OR REPLACE FUNCTION replay_check_trigger() RETURNS TRIGGER AS $$
       BEGIN
-        PERFORM realtime.send(NEW.payload, NEW.event, NEW.topic, true);
+        IF NEW.binary_payload IS NULL THEN
+          PERFORM realtime.send(NEW.payload, NEW.event, NEW.topic, true);
+        ELSE
+          PERFORM realtime.send_binary(NEW.binary_payload, NEW.event, NEW.topic, true);
+        END IF;
         RETURN NULL;
       END;
       $$ LANGUAGE plpgsql
@@ -1827,6 +1833,42 @@ async function runBroadcastReplayTests(_testUser: { email: string; password: str
       assert.strictEqual(result.message, payload.message);
       return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "replay", value: replayMs, unit: "ms" }];
     } finally {
+      await supabase.removeAllChannels();
+    }
+  });
+
+  await test("replayed binary messages are delivered on join", async () => {
+    const sql = new SQL(DB_URL, { tls: DB_SSL || undefined });
+    try {
+      const event = crypto.randomUUID();
+      const topic = randomTopic();
+      const binary = new Uint8Array([0xde, 0xad, 0xbe, 0xef, 0x00, 0xff]);
+      let result: any = null;
+      let receivedMeta: any = null;
+
+      const since = Date.now() - 1000;
+      await sql`INSERT INTO public.replay_check (id, topic, event, binary_payload)
+                VALUES (${crypto.randomUUID()}, ${topic}, ${event}, ${binary}::bytea)`;
+
+      await sleep(500);
+
+      const receiver = supabase.channel(topic, {
+        config: { private: true, broadcast: { replay: { since, limit: 1 } } },
+      }).on("broadcast", { event }, (msg) => {
+        result = msg.payload;
+        receivedMeta = msg.meta;
+      });
+      const subscribeMs = await openChannel(receiver);
+
+      const { latencyMs: replayMs } = await waitFor(() => result, "replayed binary broadcast event");
+
+      const received = result instanceof Uint8Array ? result : new Uint8Array(result);
+      assert.strictEqual(received.length, binary.length, "binary payload length mismatch");
+      assert.ok(binary.every((b, i) => received[i] === b), "binary payload bytes mismatch");
+      assert.strictEqual(receivedMeta?.replayed, true, "expected meta.replayed on replayed binary message");
+      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "replay", value: replayMs, unit: "ms" }];
+    } finally {
+      await sql.close().catch(() => {});
       await supabase.removeAllChannels();
     }
   });
