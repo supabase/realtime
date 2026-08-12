@@ -26,7 +26,7 @@ defmodule Forum.Muster.Scope do
   # back into this process, so the synchronous gather cannot deadlock.
   use GenServer
   require Logger
-  use Snabbkaffe
+  use Snabbkaffex, only: :trace
 
   alias ExHashRing.Ring
 

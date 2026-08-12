@@ -11,14 +11,14 @@ defmodule Forum.MusterDistributedTest do
   # surface and real cluster events -- start/stop nodes, join/leave, real process
   # crashes -- and observe outcomes through public reads (persistent_term, the
   # occupancy table) and the snabbkaffe trace. The ONLY sanctioned ways to steer
-  # execution are snabbkaffe `force_ordering/2,3` and `inject_crash/2,3` (both
+  # execution are snabbkaffe `force_ordering/1` and `inject_crash/1,2` (both
   # anchored on real `tp` events). NO mocks, and NO reaching inside a process to
   # mutate it: `:sys.replace_state`, hand-set `:persistent_term`s standing in for
   # real convergence, or any other state surgery are forbidden -- they assert on a
   # fiction the running system never actually produces. If a scenario cannot be
   # reached black-box, observe the mechanism via a `tp` rather than fake the state.
   use ExUnit.Case, async: false
-  use Snabbkaffe
+  use Snabbkaffex
 
   alias ExHashRing.Ring
   alias Forum.Muster
@@ -293,7 +293,7 @@ defmodule Forum.MusterDistributedTest do
           # The trace independently confirms all three nodes reached :ready at
           # the final view, and that a rebalance into that view actually happened.
           ready_nodes =
-            of_kind(:muster_status_change, trace)
+            of_kind(trace, :muster_status_change)
             |> Enum.filter(&(&1.to == :ready and &1.view_hash == result.view_hash))
             |> Enum.map(& &1.node)
             |> Enum.uniq()
@@ -302,7 +302,7 @@ defmodule Forum.MusterDistributedTest do
           assert ready_nodes == result.members
 
           rebalanced_into_final =
-            of_kind(:muster_rebalance_start, trace)
+            of_kind(trace, :muster_rebalance_start)
             |> Enum.any?(&(&1.view_hash == result.view_hash))
 
           assert rebalanced_into_final
@@ -368,7 +368,7 @@ defmodule Forum.MusterDistributedTest do
         fn result, trace ->
           # The group always routes to C, so no partial-view sweep C ran while
           # discovering peers may ever have dropped T's row.
-          assert of_kind(:muster_drop_stale_entry, trace)
+          assert of_kind(trace, :muster_drop_stale_entry)
                  |> Enum.count(
                    &(&1.node == result.c_node and &1.group == result.group and
                        &1.source == result.t_node)
@@ -442,11 +442,11 @@ defmodule Forum.MusterDistributedTest do
           # FULL snapshot (C was a brand-new router); the heal, to a now-settled C
           # regaining the group on a leave, is a DELTA.
           fulls =
-            of_kind(:muster_node_state_received, trace)
+            of_kind(trace, :muster_node_state_received)
             |> Enum.filter(&(&1.node == result.c_node and &1.source == result.t_node))
 
           deltas =
-            of_kind(:muster_delta_received, trace)
+            of_kind(trace, :muster_delta_received)
             |> Enum.filter(&(&1.node == result.c_node and &1.source == result.t_node))
 
           # The initial join took the full-snapshot path.
@@ -546,12 +546,12 @@ defmodule Forum.MusterDistributedTest do
           # The heal was a delta, never a full snapshot: S was settled throughout
           # (it only ever GAINED groups, which on a leave travels incrementally),
           # so T never sent it a receive_node_state.
-          assert of_kind(:muster_node_state_received, trace)
+          assert of_kind(trace, :muster_node_state_received)
                  |> Enum.filter(&(&1.node == result.s_node and &1.source == result.t_node)) == []
 
           # Exactly the moved group rode the delta(s) to S; the kept group never did.
           delta_groups =
-            of_kind(:muster_delta_received, trace)
+            of_kind(trace, :muster_delta_received)
             |> Enum.filter(&(&1.node == result.s_node and &1.source == result.t_node))
             |> Enum.flat_map(& &1.groups)
 
@@ -614,8 +614,8 @@ defmodule Forum.MusterDistributedTest do
           # blocks in {:apply_snapshot}, so its RPC worker on T never returns and
           # T's owed_snapshots[S] never clears.
           force_ordering(
-            %{:"$kind" => :test_release_s},
-            %{:"$kind" => :muster_node_state_received, node: ^s_node, source: ^t_node}
+            until: %{:"$kind" => :test_release_s},
+            delay: %{:"$kind" => :muster_node_state_received, node: ^s_node, source: ^t_node}
           )
 
           # S joins {T,O,S}: T's rebalance snapshots g_park onto the new router S
@@ -658,13 +658,13 @@ defmodule Forum.MusterDistributedTest do
           # which for a settled, non-owed router would have been a delta, arrived
           # in one.
           fulls =
-            of_kind(:muster_node_state_received, trace)
+            of_kind(trace, :muster_node_state_received)
             |> Enum.filter(&(&1.node == result.s_node and &1.source == result.t_node))
 
           assert Enum.any?(fulls, &(result.g_move in &1.groups)),
                  "g_move must reach S via a full snapshot under the owed fallback"
 
-          assert of_kind(:muster_delta_received, trace)
+          assert of_kind(trace, :muster_delta_received)
                  |> Enum.count(&(&1.node == result.s_node and &1.source == result.t_node)) == 0,
                  "no delta should be sent to an owed router"
         end
@@ -725,8 +725,8 @@ defmodule Forum.MusterDistributedTest do
           # sent: T's owed_snapshots[C] is set (that happens synchronously in
           # do_rebalance), but C receives nothing until we release.
           force_ordering(
-            %{:"$kind" => :test_release_snapshot},
-            %{
+            until: %{:"$kind" => :test_release_snapshot},
+            delay: %{
               :"$kind" => :muster_rpc_worker_start,
               router: ^c_node,
               function: :receive_node_state
@@ -913,7 +913,7 @@ defmodule Forum.MusterDistributedTest do
         end,
         fn result, trace ->
           to_s = fn kind ->
-            of_kind(kind, trace)
+            of_kind(trace, kind)
             |> Enum.filter(&(&1.node == result.s_node and &1.source == result.t_node))
           end
 
@@ -1012,7 +1012,7 @@ defmodule Forum.MusterDistributedTest do
         end,
         fn result, trace ->
           to_s = fn kind ->
-            of_kind(kind, trace)
+            of_kind(trace, kind)
             |> Enum.filter(&(&1.node == result.s_node and &1.source == result.t_node))
           end
 
@@ -1028,7 +1028,7 @@ defmodule Forum.MusterDistributedTest do
           # S itself performed the retract (receiver owns removes): the only node to
           # drop g_move (sourced from T) as stale was S.
           drops =
-            of_kind(:muster_drop_stale_entry, trace)
+            of_kind(trace, :muster_drop_stale_entry)
             |> Enum.filter(&(&1.group == result.g_move and &1.source == result.t_node))
 
           assert drops |> Enum.map(& &1.node) |> Enum.uniq() == [result.s_node]
@@ -1074,15 +1074,15 @@ defmodule Forum.MusterDistributedTest do
           # join above, the second is the re-claim below. (Already-collected
           # events count towards n_events, hence 2.)
           force_ordering(
-            %{:"$kind" => :muster_occupied, node: ^r_node, group: ^group, source: ^t_node},
-            2,
-            %{
+            until: %{:"$kind" => :muster_occupied, node: ^r_node, group: ^group, source: ^t_node},
+            count: 2,
+            delay: %{
               :"$kind" => :muster_vacant_batch,
               :"$span" => :start,
               node: ^r_node,
               source: ^t_node
             },
-            true
+            when: true
           )
 
           # Vacate: cooldown (50ms) expires -> :vacant_queued -> the periodic
@@ -1129,7 +1129,7 @@ defmodule Forum.MusterDistributedTest do
           # Exactly two INSERTs reached the router: the join and the re-claim,
           # in dispatch order (seqs are per-source monotonic).
           assert [%{seq: first_seq}, %{seq: reclaim_seq}] =
-                   of_kind(:muster_occupied, trace)
+                   of_kind(trace, :muster_occupied)
                    |> Enum.filter(&(&1.node == result.r_node and &1.group == result.group))
 
           assert first_seq < reclaim_seq
@@ -1138,7 +1138,7 @@ defmodule Forum.MusterDistributedTest do
           # dispatch BEFORE the re-claim (lower seq), applied AFTER its INSERT
           # (later in the trace -- the forced ordering).
           batches =
-            of_kind(:muster_vacant_batch, trace)
+            of_kind(trace, :muster_vacant_batch)
             |> Enum.filter(&(&1[:"$span"] == :start and result.group in &1.groups))
 
           assert [%{seq: batch_seq}] = batches
@@ -1148,9 +1148,9 @@ defmodule Forum.MusterDistributedTest do
           # forced pair: the stale batch was applied AFTER the re-claim that
           # superseded it.
           assert causality(
+                   trace,
                    %{:"$kind" => :muster_occupied, seq: ^reclaim_seq},
-                   %{:"$kind" => :muster_vacant_batch, :"$span" => :start, seq: ^batch_seq},
-                   trace
+                   %{:"$kind" => :muster_vacant_batch, :"$span" => :start, seq: ^batch_seq}
                  )
         end
       )
@@ -1215,13 +1215,13 @@ defmodule Forum.MusterDistributedTest do
           # :start anchor fires BEFORE the ETS write, so the row is genuinely not
           # written while parked.
           force_ordering(
-            %{
+            until: %{
               :"$kind" => :muster_vacant_batch,
               :"$span" => {:complete, _},
               node: ^r_node,
               source: ^t_node
             },
-            %{
+            delay: %{
               :"$kind" => :muster_occupied_apply,
               :"$span" => :start,
               node: ^r_node,
@@ -1303,14 +1303,14 @@ defmodule Forum.MusterDistributedTest do
           # The forced order really was DELETE-then-INSERT, and the INSERT carried
           # the lower (stale) seq -- otherwise this would not be the reverse race.
           assert [%{seq: ins_seq}] =
-                   of_kind(:muster_occupied_apply, trace)
+                   of_kind(trace, :muster_occupied_apply)
                    |> Enum.filter(
                      &(&1[:"$span"] == :start and &1.node == result.r_node and
                          &1.group == result.group)
                    )
 
           assert [%{seq: del_seq}] =
-                   of_kind(:muster_vacant_batch, trace)
+                   of_kind(trace, :muster_vacant_batch)
                    |> Enum.filter(
                      &(&1[:"$span"] == :start and &1.node == result.r_node and
                          result.group in &1.groups)
@@ -1413,8 +1413,8 @@ defmodule Forum.MusterDistributedTest do
           # write (same anchor the reverse-race test above uses), so the row is
           # genuinely absent while parked.
           force_ordering(
-            %{:"$kind" => :test_release_occupied},
-            %{
+            until: %{:"$kind" => :test_release_occupied},
+            delay: %{
               :"$kind" => :muster_occupied_apply,
               :"$span" => :start,
               node: ^r_node,
@@ -1513,6 +1513,7 @@ defmodule Forum.MusterDistributedTest do
           # happened BEFORE the delayed INSERT applied on it, so that sweep is
           # not what caught the phantom row (it ran before the row existed).
           assert causality(
+                   trace,
                    %{
                      :"$kind" => :muster_status_change,
                      node: ^r_node,
@@ -1524,8 +1525,7 @@ defmodule Forum.MusterDistributedTest do
                      :"$span" => {:complete, _},
                      node: ^r_node,
                      group: ^group
-                   },
-                   trace
+                   }
                  )
 
           # And the delayed INSERT really did land before the drop that caught
@@ -1533,19 +1533,19 @@ defmodule Forum.MusterDistributedTest do
           # exist at either of the earlier sweep points (do_rebalance's own,
           # and the :ready transition's), not a coincidence of test timing.
           assert causality(
+                   trace,
                    %{
                      :"$kind" => :muster_occupied_apply,
                      :"$span" => {:complete, _},
                      node: ^r_node,
                      group: ^group
                    },
-                   %{:"$kind" => :muster_drop_stale_entry, node: ^r_node, group: ^group},
-                   trace
+                   %{:"$kind" => :muster_drop_stale_entry, node: ^r_node, group: ^group}
                  )
 
           # Exactly one drop for this key: the backstop caught it once and it
           # never came back (T never re-asserts to R; it now only talks to X).
-          assert of_kind(:muster_drop_stale_entry, trace)
+          assert of_kind(trace, :muster_drop_stale_entry)
                  |> Enum.count(&(&1.node == r_node and &1.group == group)) == 1
 
           refute result.t_node in occupancy_on(r_node, scope, group),
@@ -1626,8 +1626,8 @@ defmodule Forum.MusterDistributedTest do
           # delayed-RPC arm; the orphaned worker survives independently of
           # the shard that dispatched it.
           force_ordering(
-            %{:"$kind" => :test_release_occupied},
-            %{
+            until: %{:"$kind" => :test_release_occupied},
+            delay: %{
               :"$kind" => :muster_occupied_apply,
               :"$span" => :start,
               node: ^r_node,
@@ -1748,6 +1748,7 @@ defmodule Forum.MusterDistributedTest do
           # sweep had every opportunity to touch this row and, per the fix,
           # correctly declined to.
           assert causality(
+                   trace,
                    %{
                      :"$kind" => :muster_status_change,
                      node: ^r_node,
@@ -1760,19 +1761,18 @@ defmodule Forum.MusterDistributedTest do
                      node: ^r_node,
                      group: ^group,
                      source: ^t_node
-                   },
-                   trace
+                   }
                  )
 
           # THE FIX: the tombstone from step 3 is never re-judged by any
           # :ready-transition sweep -- not once, across the entire round
           # trip -- because it no longer reads as :present. Nothing ever
           # judges or drops this key.
-          assert of_kind(:muster_drop_stale_judged, trace)
+          assert of_kind(trace, :muster_drop_stale_judged)
                  |> Enum.count(&(&1.node == r_node and &1.group == group and &1.source == t_node)) ==
                    0
 
-          assert of_kind(:muster_drop_stale_entry, trace)
+          assert of_kind(trace, :muster_drop_stale_entry)
                  |> Enum.count(&(&1.node == r_node and &1.group == group and &1.source == t_node)) ==
                    0
 
@@ -1865,8 +1865,8 @@ defmodule Forum.MusterDistributedTest do
 
           # Park R's sweep between judging {group, T} stale and deleting it.
           force_ordering(
-            %{:"$kind" => :test_release_drop},
-            %{
+            until: %{:"$kind" => :test_release_drop},
+            delay: %{
               :"$kind" => :muster_drop_stale_apply,
               :"$span" => :start,
               node: ^r_node,
@@ -1982,7 +1982,7 @@ defmodule Forum.MusterDistributedTest do
           # original claim (what the sweep judged) and the fresh re-claim
           # (what the delete must spare).
           occupied_seqs =
-            of_kind(:muster_occupied_apply, trace)
+            of_kind(trace, :muster_occupied_apply)
             |> Enum.filter(
               &(&1.node == r_node and &1.group == group and &1.source == t_node and
                   match?({:complete, _}, Map.get(&1, :"$span")))
@@ -1998,6 +1998,7 @@ defmodule Forum.MusterDistributedTest do
           # first, the FRESH row landed while it was parked, and only then did
           # its delete fire -- the exact select-then-delete TOCTOU window.
           assert causality(
+                   trace,
                    %{
                      :"$kind" => :muster_drop_stale_judged,
                      node: ^r_node,
@@ -2010,11 +2011,11 @@ defmodule Forum.MusterDistributedTest do
                      node: ^r_node,
                      group: ^group,
                      seq: ^fresh_seq
-                   },
-                   trace
+                   }
                  )
 
           assert causality(
+                   trace,
                    %{
                      :"$kind" => :muster_occupied_apply,
                      :"$span" => {:complete, _},
@@ -2028,13 +2029,12 @@ defmodule Forum.MusterDistributedTest do
                      node: ^r_node,
                      group: ^group,
                      source: ^t_node
-                   },
-                   trace
+                   }
                  )
 
           # The seq-guarded delete was a no-op on the raised key, so the
           # "row is gone" event never fired for it.
-          assert of_kind(:muster_drop_stale_entry, trace)
+          assert of_kind(trace, :muster_drop_stale_entry)
                  |> Enum.filter(&(&1.node == r_node and &1.group == group)) == []
         end
       )
@@ -2088,8 +2088,8 @@ defmodule Forum.MusterDistributedTest do
           # README scenario. (Its discovery ack -- carrying its OLD view -- is
           # sent before the parked rebalance, so C does learn about B.)
           force_ordering(
-            %{:"$kind" => :test_release_b},
-            %{:"$kind" => :muster_rebalance_start, node: ^b_node, to: ^view3}
+            until: %{:"$kind" => :test_release_b},
+            delay: %{:"$kind" => :muster_rebalance_start, node: ^b_node, to: ^view3}
           )
 
           {:ok, p_c, ^c_node} = Peer.start(name: c_name, aux_mod: @aux_mod)
@@ -2310,18 +2310,18 @@ defmodule Forum.MusterDistributedTest do
         fn result, trace ->
           # The rebalance never announced the queued group to anyone.
           assert [] =
-                   of_kind(:muster_node_state_received, trace)
+                   of_kind(trace, :muster_node_state_received)
                    |> Enum.filter(&(result.group in &1.groups))
 
           # Exactly one rightful drop: the old router clearing its stale row.
           drops =
-            of_kind(:muster_drop_stale_entry, trace)
+            of_kind(trace, :muster_drop_stale_entry)
             |> Enum.filter(&(&1.group == result.group and &1.source == result.t_node))
 
           assert Enum.map(drops, & &1.node) == [result.o_node]
 
           # And no vacant batch for the group ever targeted the OLD router.
-          refute of_kind(:muster_vacant_batch, trace)
+          refute of_kind(trace, :muster_vacant_batch)
                  |> Enum.any?(
                    &(&1[:"$span"] == :start and &1.node == result.o_node and
                        result.group in &1.groups)
@@ -2417,8 +2417,8 @@ defmodule Forum.MusterDistributedTest do
           # Installed now -- after the {T,R} join rebalance already gathered the
           # shards -- so it can only catch the R-leave rebalance below.
           force_ordering(
-            %{:"$kind" => :test_release_gather},
-            %{:"$kind" => :muster_rebalance_gather, node: ^t_node, index: 1}
+            until: %{:"$kind" => :test_release_gather},
+            delay: %{:"$kind" => :muster_rebalance_gather, node: ^t_node, index: 1}
           )
 
           # R leaves -> T rebalances to [T]. `group` now routes to T (a changed
@@ -2476,7 +2476,7 @@ defmodule Forum.MusterDistributedTest do
                    "member-less phantom occupancy row {#{inspect(group)}, #{inspect(t_node)}}"
 
           # Sanity: the scenario really happened -- T rebalanced into [T].
-          assert of_kind(:muster_rebalance_start, trace)
+          assert of_kind(trace, :muster_rebalance_start)
                  |> Enum.any?(&(&1.node == t_node and &1.to == [t_node]))
         end
       )
@@ -2512,8 +2512,8 @@ defmodule Forum.MusterDistributedTest do
           # before we kill the peer, turning this into a real occupied RPC
           # failure instead of a race with a fast success.
           force_ordering(
-            %{:"$kind" => :test_release_occupied_never},
-            %{
+            until: %{:"$kind" => :test_release_occupied_never},
+            delay: %{
               :"$kind" => :muster_occupied_apply,
               :"$span" => :start,
               node: ^r_node,
@@ -2554,7 +2554,7 @@ defmodule Forum.MusterDistributedTest do
           %{group: group, t_node: t_node}
         end,
         fn result, trace ->
-          refute of_kind(:muster_occupied, trace)
+          refute of_kind(trace, :muster_occupied)
                  |> Enum.any?(&(&1.group == result.group and &1.source == result.t_node))
         end
       )
@@ -2596,8 +2596,8 @@ defmodule Forum.MusterDistributedTest do
           # Hold the router-side DELETE so the natural flush stays in flight until
           # we kill the peer, forcing the source shard down the real re-queue path.
           force_ordering(
-            %{:"$kind" => :test_release_vacant_never},
-            %{
+            until: %{:"$kind" => :test_release_vacant_never},
+            delay: %{
               :"$kind" => :muster_vacant_batch,
               :"$span" => :start,
               node: ^r_node,
@@ -2649,7 +2649,7 @@ defmodule Forum.MusterDistributedTest do
         end,
         fn result, trace ->
           states =
-            of_kind(:muster_group_state, trace)
+            of_kind(trace, :muster_group_state)
             |> Enum.filter(&(&1.group == result.group and &1.node == node()))
             |> Enum.map(& &1.state)
 
@@ -2703,8 +2703,8 @@ defmodule Forum.MusterDistributedTest do
           # cannot complete before T's short rpc_timeout_ms elapses -- a real
           # client-side timeout, not a race with a fast success.
           force_ordering(
-            %{:"$kind" => :test_release_occupied_timeout},
-            %{
+            until: %{:"$kind" => :test_release_occupied_timeout},
+            delay: %{
               :"$kind" => :muster_occupied_apply,
               :"$span" => :start,
               node: ^r_node,
@@ -2766,7 +2766,7 @@ defmodule Forum.MusterDistributedTest do
         end,
         fn result, trace ->
           batches =
-            of_kind(:muster_vacant_batch, trace)
+            of_kind(trace, :muster_vacant_batch)
             |> Enum.filter(&(&1[:"$span"] == :start and &1.node == result.r_node))
 
           assert Enum.any?(batches, &(result.group in &1.groups))
@@ -2821,7 +2821,7 @@ defmodule Forum.MusterDistributedTest do
 
           inject_crash(
             %{:"$kind" => :muster_node_state_received, node: ^c_node, source: ^t_node},
-            :snabbkaffe_nemesis.recover_after(1)
+            recover_after: 1
           )
 
           {:ok, p_c, ^c_node} = Peer.start(name: c_name, aux_mod: @aux_mod)
@@ -2892,7 +2892,7 @@ defmodule Forum.MusterDistributedTest do
         end,
         fn result, trace ->
           # The crash fired exactly once: at the first snapshot to C.
-          assert of_kind(:snabbkaffe_crash, trace)
+          assert of_kind(trace, :snabbkaffe_crash)
                  |> Enum.count(&(&1[:node] == result.c_node and &1[:source] == result.t_node)) ==
                    1
 
@@ -2901,7 +2901,7 @@ defmodule Forum.MusterDistributedTest do
           # and is never collected; later recovery rounds may legitimately
           # re-snapshot the same group to the same router.
           snaps_to_c =
-            of_kind(:muster_node_state_received, trace)
+            of_kind(trace, :muster_node_state_received)
             |> Enum.filter(&(&1.node == result.c_node and &1.source == result.t_node))
 
           assert snaps_to_c != []
@@ -2910,7 +2910,7 @@ defmodule Forum.MusterDistributedTest do
           # T entered a rebalance into the 3-node view at least twice: the
           # crashed attempt and the successful post-restart one.
           t_rebalances =
-            of_kind(:muster_rebalance_start, trace)
+            of_kind(trace, :muster_rebalance_start)
             |> Enum.count(&(&1.node == result.t_node and &1.view_hash == result.hash3))
 
           assert t_rebalances >= 2
@@ -2993,7 +2993,7 @@ defmodule Forum.MusterDistributedTest do
           # Exactly one snapshot from T landed on the router -- the post-crash
           # heal -- and it carried the group.
           assert [%{groups: groups}] =
-                   of_kind(:muster_node_state_received, trace)
+                   of_kind(trace, :muster_node_state_received)
                    |> Enum.filter(&(&1.node == result.r_node and &1.source == result.t_node))
 
           assert result.group in groups
@@ -3027,8 +3027,8 @@ defmodule Forum.MusterDistributedTest do
           # Hold shard 0 inside the synchronous rebalance gather with a real trace
           # ordering, so the coordinator times out naturally on its GenServer.call.
           force_ordering(
-            %{:"$kind" => :test_release_gather},
-            %{:"$kind" => :muster_rebalance_gather, node: ^t_node, index: 0}
+            until: %{:"$kind" => :test_release_gather},
+            delay: %{:"$kind" => :muster_rebalance_gather, node: ^t_node, index: 0}
           )
 
           coord = Process.whereis(Forum.Supervisor.name(scope))
@@ -3079,7 +3079,7 @@ defmodule Forum.MusterDistributedTest do
           %{t_node: t_node, view3: view3}
         end,
         fn result, trace ->
-          assert of_kind(:muster_rebalance_start, trace)
+          assert of_kind(trace, :muster_rebalance_start)
                  |> Enum.count(&(&1.node == result.t_node and &1.to == result.view3)) >= 2
         end
       )
@@ -3167,7 +3167,7 @@ defmodule Forum.MusterDistributedTest do
           # re-adopts from the Partition -- neither path is a snapshot. (Contrast
           # the router Scope crash, where the heal IS a snapshot.)
           snaps =
-            of_kind(:muster_node_state_received, trace)
+            of_kind(trace, :muster_node_state_received)
             |> Enum.filter(&(result.group in &1.groups))
 
           assert snaps == [],
@@ -3178,7 +3178,7 @@ defmodule Forum.MusterDistributedTest do
           # a membership event).
           view2_hash = :erlang.phash2(Enum.sort([result.t_node, result.r_node]))
 
-          assert of_kind(:muster_rebalance_start, trace)
+          assert of_kind(trace, :muster_rebalance_start)
                  |> Enum.all?(&(&1.view_hash == view2_hash or &1.to == [&1.node])),
                  "a shard crash must not trigger a rebalance into any new view"
         end
@@ -3218,7 +3218,7 @@ defmodule Forum.MusterDistributedTest do
           # leaves the restarted shard healthy.
           inject_crash(
             %{:"$kind" => :muster_occupied_dispatched, node: ^t_node, group: ^group},
-            :snabbkaffe_nemesis.recover_after(1)
+            recover_after: 1
           )
 
           # Claim off to the side: the join call dies with the shard and we NEVER
@@ -3382,7 +3382,7 @@ defmodule Forum.MusterDistributedTest do
           # of the pre-crash one: two separate :cooldown entries for this
           # group on R (the pre-crash one and the post-restart re-arm).
           cooldown_entries =
-            of_kind(:muster_group_state, trace)
+            of_kind(trace, :muster_group_state)
             |> Enum.filter(
               &(&1.node == result.r_node and &1.group == result.group and &1.state == :cooldown)
             )
@@ -3396,11 +3396,11 @@ defmodule Forum.MusterDistributedTest do
           # churn.
           view2_hash = :erlang.phash2(Enum.sort([result.t_node, result.r_node]))
 
-          assert of_kind(:muster_rebalance_start, trace)
+          assert of_kind(trace, :muster_rebalance_start)
                  |> Enum.all?(&(&1.view_hash == view2_hash or &1.to == [&1.node])),
                  "a shard crash must not trigger a rebalance into any new view"
 
-          assert of_kind(:muster_node_state_received, trace)
+          assert of_kind(trace, :muster_node_state_received)
                  |> Enum.filter(&(result.group in &1.groups)) == [],
                  "a cooldown retraction across a shard crash must not need a cross-node snapshot"
         end
@@ -3472,13 +3472,13 @@ defmodule Forum.MusterDistributedTest do
           # both together make it deterministic regardless of R's mailbox order.
           # Released together by :test_release_r.
           force_ordering(
-            %{:"$kind" => :test_release_r},
-            %{:"$kind" => :muster_peer_registered, node: ^r_node, peer: ^c_node}
+            until: %{:"$kind" => :test_release_r},
+            delay: %{:"$kind" => :muster_peer_registered, node: ^r_node, peer: ^c_node}
           )
 
           force_ordering(
-            %{:"$kind" => :test_release_r},
-            %{:"$kind" => :muster_transition_applied, node: ^r_node, source: ^t_node}
+            until: %{:"$kind" => :test_release_r},
+            delay: %{:"$kind" => :muster_transition_applied, node: ^r_node, source: ^t_node}
           )
 
           # C joins. T tries to grow to {T,R,C}, preparing its old peer R -- which
@@ -3552,7 +3552,7 @@ defmodule Forum.MusterDistributedTest do
           }
         end,
         fn result, trace ->
-          status_changes = of_kind(:muster_status_change, trace)
+          status_changes = of_kind(trace, :muster_status_change)
 
           # T never trusted (went :ready for) the intermediate 3-node view --
           # with the gate it never committed it, so it could not.
@@ -3578,7 +3578,7 @@ defmodule Forum.MusterDistributedTest do
           # The intermediate router C never received it (T never committed the
           # view that routed the group there).
           group_snaps =
-            of_kind(:muster_node_state_received, trace)
+            of_kind(trace, :muster_node_state_received)
             |> Enum.filter(&(&1.source == result.t_node and result.group in &1.groups))
 
           assert [%{node: d}] = group_snaps
@@ -3586,7 +3586,7 @@ defmodule Forum.MusterDistributedTest do
 
           # Only R ever held (and thus swept) the group's row; C and D never did.
           drops =
-            of_kind(:muster_drop_stale_entry, trace)
+            of_kind(trace, :muster_drop_stale_entry)
             |> Enum.filter(&(&1.group == result.group and &1.source == result.t_node))
 
           assert Enum.map(drops, & &1.node) |> Enum.uniq() == [result.r_node]
@@ -3698,7 +3698,7 @@ defmodule Forum.MusterDistributedTest do
           # Each survivor rebalanced view3 -> view2 exactly once (the `from`
           # match excludes the original 1 -> 2 node formation rebalances).
           for n <- [result.t_node, result.s_node] do
-            assert of_kind(:muster_rebalance_start, trace)
+            assert of_kind(trace, :muster_rebalance_start)
                    |> Enum.count(
                      &(&1.node == n and &1.from == result.view3 and &1.to == result.view2)
                    ) == 1
@@ -3709,7 +3709,7 @@ defmodule Forum.MusterDistributedTest do
           # group on a leave is a settled router, so the re-announce travels as a
           # DELTA (`:muster_delta_received`), not a full snapshot.
           deliveries =
-            of_kind(:muster_delta_received, trace) ++ of_kind(:muster_node_state_received, trace)
+            of_kind(trace, :muster_delta_received) ++ of_kind(trace, :muster_node_state_received)
 
           assert Enum.any?(
                    deliveries,
@@ -3822,7 +3822,7 @@ defmodule Forum.MusterDistributedTest do
           # The sweeps run during the split never judged T's rows under a view
           # T hadn't agreed to: neither group was dropped anywhere.
           drops =
-            of_kind(:muster_drop_stale_entry, trace)
+            of_kind(trace, :muster_drop_stale_entry)
             |> Enum.filter(&(&1.source == result.t_node and &1.group in [result.g_a, result.g_b]))
 
           assert drops == []
@@ -3852,21 +3852,14 @@ defmodule Forum.MusterDistributedTest do
     # a LIVE peer (whose seq counters never reset, unlike a same-named restart
     # on a fresh VM) re-pairs and heals cleanly.
     #
-    # :snabbkaffe.forward_trace/1 cannot stay attached to R across the split:
-    # once forwarded, EVERY tp() on R (Muster ticks fire constantly) performs
-    # a synchronous `rpc:call` back to T, and any such call auto-reconnects a
-    # merely Node.disconnect/1'd node (confirmed by direct repro -- Node.list()
-    # was back within 50ms with forwarding left on). Snabbkaffe exposes no
-    # public "unforward" call, but do_forward_trace/1 is nothing more than a
-    # `persistent_term:put(snabbkaffe_tp_fun, fun snabbkaffe:remote_tp/5)` on
-    # R; poking that same key back to `local_tp/5` before disconnecting (and
-    # calling forward_trace/1 again once reconnected) undoes it cleanly and
-    # was confirmed by repro to hold the split for 2s+ with zero reconnects.
-    defp unforward_trace(node) do
-      :ok =
-        :erpc.call(node, :persistent_term, :put, [:snabbkaffe_tp_fun, &:snabbkaffe.local_tp/5])
-    end
-
+    # forward_trace/1 cannot stay attached to R across the split: once forwarded,
+    # EVERY tp() on R (Muster ticks fire constantly) performs a synchronous
+    # `rpc:call` back to T, and any such call auto-reconnects a merely
+    # Node.disconnect/1'd node (confirmed by direct repro -- Node.list() was back
+    # within 50ms with forwarding left on). Snabbkaffex.unforward_trace/1 reverts
+    # R to recording locally (poking `snabbkaffe_tp_fun` back to `local_tp/5`)
+    # before disconnecting; call forward_trace/1 again once reconnected. Confirmed
+    # by repro to hold the split for 2s+ with zero reconnects.
     test "T disconnects from the peer holding its group, then reconnects and heals",
          %{scope: scope} do
       t_node = node()
@@ -3927,7 +3920,7 @@ defmodule Forum.MusterDistributedTest do
           # Exactly one post-heal snapshot from T landed on R and carried the
           # group.
           assert [%{groups: groups}] =
-                   of_kind(:muster_node_state_received, trace)
+                   of_kind(trace, :muster_node_state_received)
                    |> Enum.filter(&(&1.node == result.r_node and &1.source == result.t_node))
 
           assert result.group in groups
@@ -4078,7 +4071,7 @@ defmodule Forum.MusterDistributedTest do
           rejoin_at = Enum.find_index(trace, &(&1[:"$kind"] == :test_s_rejoined))
           assert rejoin_at
 
-          status_changes = of_kind(:muster_status_change, trace)
+          status_changes = of_kind(trace, :muster_status_change)
 
           # The restarted S DID announce + converge to :ready for the final
           # {T,S} view (so the cluster genuinely converged -- except T).
@@ -4250,6 +4243,7 @@ defmodule Forum.MusterDistributedTest do
           # The row really did arrive (via the simulated fresh incarnation's
           # snapshot) strictly before the DOWN handler ran.
           assert causality(
+                   trace,
                    %{
                      :"$kind" => :muster_node_state_received,
                      node: ^t_node,
@@ -4260,8 +4254,7 @@ defmodule Forum.MusterDistributedTest do
                      :"$span" => :start,
                      node: ^t_node,
                      peer_node: ^r_node
-                   },
-                   trace
+                   }
                  )
         end
       )
@@ -4361,6 +4354,7 @@ defmodule Forum.MusterDistributedTest do
           %{t_node: t_node, r_node: r_node} = result
 
           assert causality(
+                   trace,
                    %{
                      :"$kind" => :muster_node_state_received,
                      node: ^t_node,
@@ -4371,8 +4365,7 @@ defmodule Forum.MusterDistributedTest do
                      :"$span" => :start,
                      node: ^t_node,
                      peer_node: ^r_node
-                   },
-                   trace
+                   }
                  )
         end
       )
@@ -4473,8 +4466,8 @@ defmodule Forum.MusterDistributedTest do
           # released by this test -- C is about to be killed outright instead,
           # which is what finally frees this call (with a crash, not a reply).
           force_ordering(
-            %{:"$kind" => :test_never_release_c},
-            %{
+            until: %{:"$kind" => :test_never_release_c},
+            delay: %{
               :"$kind" => :muster_node_state_received,
               scope: ^scope,
               node: ^c_node,
@@ -4486,8 +4479,13 @@ defmodule Forum.MusterDistributedTest do
           # departure rebalance (triggered below by killing C) has already
           # dropped C from `members` -- this is what removes the real race.
           force_ordering(
-            %{:"$kind" => :muster_rebalance_start, scope: ^scope, node: ^t_node, to: [^t_node]},
-            %{
+            until: %{
+              :"$kind" => :muster_rebalance_start,
+              scope: ^scope,
+              node: ^t_node,
+              to: [^t_node]
+            },
+            delay: %{
               :"$kind" => :muster_rpc_worker_result,
               scope: ^scope,
               node: ^t_node,
@@ -4572,7 +4570,7 @@ defmodule Forum.MusterDistributedTest do
           # The coordinator really did receive the stale failure report (not
           # just avoid crashing on something it never saw)...
           worker_results =
-            of_kind(:muster_rpc_worker_result, trace)
+            of_kind(trace, :muster_rpc_worker_result)
             |> Enum.filter(&(&1.scope == scope and &1.node == t_node and &1.router == c_node))
 
           assert Enum.any?(worker_results, &(&1.ok? == false))
@@ -4581,6 +4579,7 @@ defmodule Forum.MusterDistributedTest do
           # before -- proving this test exercised the ordering it claims to,
           # rather than happening to avoid the race by luck.
           assert causality(
+                   trace,
                    %{
                      :"$kind" => :muster_rebalance_start,
                      scope: ^scope,
@@ -4593,8 +4592,7 @@ defmodule Forum.MusterDistributedTest do
                      node: ^t_node,
                      router: ^c_node,
                      ok?: false
-                   },
-                   trace
+                   }
                  )
         end
       )
@@ -4848,13 +4846,13 @@ defmodule Forum.MusterDistributedTest do
           #    coordinator loop drives both, so whichever it hits first freezes it;
           #    released together by :test_release.
           force_ordering(
-            %{:"$kind" => :test_release},
-            %{:"$kind" => :muster_peer_registered, node: ^r_node, peer: ^t_node}
+            until: %{:"$kind" => :test_release},
+            delay: %{:"$kind" => :muster_peer_registered, node: ^r_node, peer: ^t_node}
           )
 
           force_ordering(
-            %{:"$kind" => :test_release},
-            %{:"$kind" => :muster_transition_applied, node: ^r_node, source: ^s_node}
+            until: %{:"$kind" => :test_release},
+            delay: %{:"$kind" => :muster_transition_applied, node: ^r_node, source: ^s_node}
           )
 
           # 3. T joins. S discovers it and starts a PREPARE round toward {R,S,T},
@@ -4946,13 +4944,13 @@ defmodule Forum.MusterDistributedTest do
           # Freeze R fully: it can neither register C nor apply T's transition, so
           # T is the only node that runs (and gets stuck in) a prepare round.
           force_ordering(
-            %{:"$kind" => :test_release},
-            %{:"$kind" => :muster_peer_registered, node: ^r_node, peer: ^c_node}
+            until: %{:"$kind" => :test_release},
+            delay: %{:"$kind" => :muster_peer_registered, node: ^r_node, peer: ^c_node}
           )
 
           force_ordering(
-            %{:"$kind" => :test_release},
-            %{:"$kind" => :muster_transition_applied, node: ^r_node, source: ^t_node}
+            until: %{:"$kind" => :test_release},
+            delay: %{:"$kind" => :muster_transition_applied, node: ^r_node, source: ^t_node}
           )
 
           # C joins. T grows toward {T,R,C} and PREPAREs R -- frozen, so T's round
@@ -5046,13 +5044,13 @@ defmodule Forum.MusterDistributedTest do
           # transition, so it never acks (keeping T and R pending) and never
           # starts a round of its own that would invalidate T or R.
           force_ordering(
-            %{:"$kind" => :test_release},
-            %{:"$kind" => :muster_peer_registered, node: ^s_node, peer: ^c_node}
+            until: %{:"$kind" => :test_release},
+            delay: %{:"$kind" => :muster_peer_registered, node: ^s_node, peer: ^c_node}
           )
 
           force_ordering(
-            %{:"$kind" => :test_release},
-            %{:"$kind" => :muster_transition_applied, node: ^s_node}
+            until: %{:"$kind" => :test_release},
+            delay: %{:"$kind" => :muster_transition_applied, node: ^s_node}
           )
 
           # C joins. T and R each grow toward {T,R,S,C}, prepare {other, S}, ack
@@ -5154,7 +5152,7 @@ defmodule Forum.MusterDistributedTest do
           # Crash T's FIRST prepare worker (R is in the target, so it re-raises).
           inject_crash(
             %{:"$kind" => :muster_rpc_worker_start, node: ^t_node, function: :note_transition},
-            :snabbkaffe_nemesis.recover_after(1)
+            recover_after: 1
           )
 
           {:ok, p_c, ^c_node} = Peer.start(name: c_name, aux_mod: @aux_mod)
@@ -5184,7 +5182,7 @@ defmodule Forum.MusterDistributedTest do
         end,
         fn trace ->
           # The injected crash fired at least once on T's prepare worker.
-          assert of_kind(:snabbkaffe_crash, trace)
+          assert of_kind(trace, :snabbkaffe_crash)
                  |> Enum.any?(&(&1[:node] == t_node and &1[:function] == :note_transition))
         end
       )
@@ -5305,7 +5303,7 @@ defmodule Forum.MusterDistributedTest do
           # 3-node view at least twice: once at formation, once after the total
           # crash. Anything less means a node stayed wedged in :converging.
           ready_by_node =
-            of_kind(:muster_status_change, trace)
+            of_kind(trace, :muster_status_change)
             |> Enum.filter(&(&1.to == :ready and &1.view_hash == result.view_hash))
             |> Enum.group_by(& &1.node)
 
