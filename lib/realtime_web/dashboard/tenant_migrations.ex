@@ -4,8 +4,11 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
 
   Requires `pgdelta` on `$PATH`.
 
-  Tenants are diffed against the catalog snapshot matching their own Postgres
-  major version (falling back to the nearest older one).
+  Tenants are diffed against the declarative schema artifact in
+  `priv/repo/tenant_schema`, which is the same for every supported Postgres major
+  version. Planning creates a short-lived shadow database on the tenant's own
+  cluster, so the tenant's `db_user` needs `CREATEDB`. OrioleDB tenants are not
+  supported.
   """
   use Phoenix.LiveDashboard.PageBuilder
   use Realtime.Logs
@@ -17,16 +20,6 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   alias Realtime.Rpc
   alias Realtime.Tenants.Migrations
 
-  @pgdelta_filter ~s"""
-  {
-    "and": [
-      {"*/schema": "realtime"},
-      {"not": {"table/is_partition": true}},
-      {"not": {"and": [{"objectType": "rls_policy"}, {"operation": "drop"}]}},
-      {"not": {"and": [{"table/schema": "realtime"}, {"table/name": "schema_migrations"}]}}
-    ]
-  }
-  """
   @application_name "realtime_migrations"
   @query_timeout 60_000
   @pgdelta_timeout @query_timeout * 2
@@ -46,11 +39,11 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
 
     with %Tenant{} = tenant <- Api.get_tenant_by_external_id(ref),
          {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop),
-         {:ok, schema_migrations, catalog_major_version} <- with_tenant_conn(settings, &fetch_tenant_state/1) do
+         {:ok, schema_migrations} <- with_tenant_conn(settings, &fetch_tenant_state/1) do
       socket
       |> reset_assigns()
       |> assign(external_id: ref, tenant: tenant, schema_migrations: {:ok, schema_migrations})
-      |> start_pgdelta(tenant, catalog_major_version)
+      |> start_pgdelta(tenant)
       |> then(&{:noreply, &1})
     else
       nil ->
@@ -150,7 +143,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     %{tenant: %Tenant{} = tenant, pgdelta_result: pgdelta_result} = socket.assigns
 
     case pgdelta_result do
-      {:ok, %{status: :changes, sql: sql}} -> {:noreply, start_apply(socket, tenant, sql)}
+      {:ok, %{status: :changes, plan: plan}} -> {:noreply, start_apply(socket, tenant, plan)}
       {:ok, %{status: :no_changes}} -> {:noreply, start_apply(socket, tenant, nil)}
       _ -> {:noreply, socket}
     end
@@ -162,7 +155,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     <div class="phx-dashboard-section">
       <h5 class="card-title">Tenant Migrations</h5>
       <p class="text-muted">
-        Inspect a tenant's applied migrations and drift against the catalog schema snapshot.
+        Inspect a tenant's applied migrations and drift against the committed schema.
       </p>
 
       <form phx-submit="lookup" class="mb-4 d-flex gap-2">
@@ -186,7 +179,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
         <h6 class="mt-4">realtime.schema_migrations</h6>
         <%= schema_migrations(@schema_migrations) %>
 
-        <h6 class="mt-4">pg-delta plan vs catalog<%= if @catalog_major_version, do: " (PG#{@catalog_major_version})", else: "" %></h6>
+        <h6 class="mt-4">pg-delta plan vs committed schema</h6>
         <div :if={@pgdelta_running} class="alert alert-info d-flex align-items-center" style="gap: 8px;">
           <div class="spinner-border spinner-border-sm" role="status"></div>
           <span>Processing... (<%= div(@pgdelta_elapsed_ms, 1000) %>s)</span>
@@ -213,7 +206,6 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
       pgdelta_task: nil,
       applying: false,
       apply_task: nil,
-      catalog_major_version: nil,
       error: nil
     )
   end
@@ -230,36 +222,49 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   end
 
   defp fetch_tenant_state(conn) do
-    major_version = fetch_major_version(conn)
-
     with {:ok, _} <- ensure_realtime_admin_role(conn),
-         {:ok, _} <- ensure_schema_migrations(conn),
-         {:ok, schema_migrations} <- fetch_schema_migrations(conn) do
-      {:ok, schema_migrations, major_version}
+         {:ok, _} <- ensure_schema_migrations(conn) do
+      fetch_schema_migrations(conn)
     end
   end
 
-  defp start_pgdelta(socket, %Tenant{} = tenant, catalog_major_version) do
-    task = Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn -> run_pgdelta(tenant, catalog_major_version) end)
-    running_pgdelta(socket, task, catalog_major_version)
+  defp start_pgdelta(socket, %Tenant{} = tenant) do
+    task =
+      Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn ->
+        tenant |> run_pgdelta() |> highlight_plan()
+      end)
+
+    running_pgdelta(socket, task)
   end
+
+  defp highlight_plan({:ok, %{status: :changes, sql: sql} = result}) do
+    formatter =
+      {:html_multi_themes,
+       language: "sql", themes: [light: "github_light", dark: "github_dark"], default_theme: "light-dark()"}
+
+    case Lumis.highlight(sql, formatter: formatter) do
+      {:ok, html} -> {:ok, Map.put(result, :highlighted, html)}
+      {:error, _reason} -> {:ok, result}
+    end
+  end
+
+  defp highlight_plan(result), do: result
 
   defp start_recheck(socket, %Tenant{} = tenant, %Database{} = settings) do
     task =
       Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn ->
         {:rechecked, with_tenant_conn(settings, &fetch_schema_migrations/1),
-         run_pgdelta(tenant, socket.assigns.catalog_major_version)}
+         tenant |> run_pgdelta() |> highlight_plan()}
       end)
 
     socket
     |> assign(schema_migrations: nil)
-    |> running_pgdelta(task, socket.assigns.catalog_major_version)
+    |> running_pgdelta(task)
   end
 
-  defp running_pgdelta(socket, task, catalog_major_version) do
+  defp running_pgdelta(socket, task) do
     socket
     |> assign(
-      catalog_major_version: catalog_major_version,
       pgdelta_running: true,
       pgdelta_elapsed_ms: 0,
       pgdelta_started_at: System.monotonic_time(:millisecond),
@@ -268,8 +273,8 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     |> schedule_tick()
   end
 
-  defp start_apply(socket, %Tenant{} = tenant, sql) do
-    task = Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn -> apply_pgdelta(tenant, sql) end)
+  defp start_apply(socket, %Tenant{} = tenant, plan) do
+    task = Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn -> apply_pgdelta(tenant, plan) end)
     assign(socket, applying: true, apply_task: task, error: nil)
   end
 
@@ -365,20 +370,65 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
       </div>
     </div>
     <div :if={not @behind} class="alert alert-success mb-0">
-      No drift detected. Tenant schema matches the catalog.
+      No drift detected. Tenant matches the committed schema.
     </div>
     """
   end
 
-  defp pgdelta_plan({:ok, %{status: :changes, sql: sql}}, _schema_migrations, apply_disabled) do
-    assigns = %{sql: sql, apply_disabled: apply_disabled}
+  defp pgdelta_plan({:ok, %{status: :changes} = result}, _schema_migrations, apply_disabled) do
+    assigns = %{
+      sql: result.sql,
+      highlighted: Map.get(result, :highlighted),
+      destructive: result.destructive,
+      apply_disabled: apply_disabled
+    }
 
     ~H"""
     <div class="alert alert-warning">
-      <strong>Drift detected between tenant and catalog.</strong>
+      <strong>Drift detected between tenant and the committed schema.</strong>
       The SQL below is reconciliation plan generated by pg-delta and it may contain errors and/or destructive statements.
       Review every statement before running it.
+      <div :if={@destructive > 0} class="mt-2">
+        pg-delta flagged <strong><%= @destructive %></strong> action(s) as destructive.
+      </div>
     </div>
+    <style>
+      .pgdelta-sql pre.lumis {
+        margin: 0;
+        padding: 16px 64px 16px 16px;
+        border-radius: 6px;
+        max-width: 100%;
+        max-height: 60vh;
+        overflow-y: auto;
+        overflow-x: hidden;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        color-scheme: light dark;
+        font-family: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Mono", "Cascadia Code", Menlo, Consolas,
+          "DejaVu Sans Mono", "Liberation Mono", monospace;
+        font-size: 0.85rem;
+        line-height: 1.55;
+        font-variant-ligatures: none;
+      }
+      .pgdelta-sql .l-line {
+        padding-left: 2em;
+        text-indent: -2em;
+      }
+      pre.pgdelta-sql-plain {
+        font-family: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Mono", "Cascadia Code", Menlo, Consolas,
+          "DejaVu Sans Mono", "Liberation Mono", monospace;
+        font-size: 0.85rem;
+        line-height: 1.55;
+        font-variant-ligatures: none;
+      }
+      @media (max-width: 768px) {
+        .pgdelta-sql pre.lumis,
+        pre.pgdelta-sql-plain {
+          padding: 12px 48px 12px 12px;
+          font-size: 0.78rem;
+        }
+      }
+    </style>
     <div style="position: relative;">
       <button
         type="button"
@@ -396,7 +446,12 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
         "}
         style="position: absolute; top: 8px; right: 8px; z-index: 2;"
       >Copy</button>
-      <pre style="background: #0d1117; color: #e6edf3; padding: 16px; padding-right: 64px; border-radius: 6px; overflow: auto; max-height: 500px; margin: 0;"><code class="language-sql"><%= @sql %></code></pre>
+      <div :if={@highlighted} class="pgdelta-sql"><%= Phoenix.HTML.raw(@highlighted) %></div>
+      <pre
+        :if={!@highlighted}
+        class="pgdelta-sql-plain"
+        style="color-scheme: light dark; background: light-dark(#ffffff, #0d1117); color: light-dark(#1f2328, #e6edf3); margin: 0; padding: 16px 64px 16px 16px; border-radius: 6px; max-width: 100%; max-height: 60vh; overflow-y: auto; overflow-x: hidden; white-space: pre-wrap; overflow-wrap: anywhere;"
+      ><code class="language-sql"><%= @sql %></code></pre>
     </div>
     <div class="d-flex justify-content-end mt-3">
       <button
@@ -441,12 +496,6 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
         log_error("TenantMigrationsSchemaMigrationsQueryFailed", reason)
         {:error, inspect(reason)}
     end
-  end
-
-  defp fetch_major_version(conn) do
-    server_major_version_query = "SELECT current_setting('server_version_num')::int / 10000"
-    {:ok, %{rows: [[version]]}} = Postgrex.query(conn, server_major_version_query, [])
-    if version >= 17, do: 17, else: 15
   end
 
   defp ensure_schema_migrations(conn) do
@@ -495,18 +544,20 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   end
 
   @doc false
-  # Used for debugging
-  def pgdelta_filter, do: @pgdelta_filter
-
-  defp catalog_path(major) do
-    Application.app_dir(:realtime, "priv/repo/tenant_db_catalog_#{major}.json")
+  def schema_path do
+    Application.app_dir(:realtime, "priv/repo/tenant_schema")
   end
 
   @doc false
-  def run_pgdelta(%Tenant{external_id: external_id} = tenant, catalog_major_version) do
+  def profile_path do
+    Application.app_dir(:realtime, "priv/repo/pgdelta_profile.json")
+  end
+
+  @doc false
+  def run_pgdelta(%Tenant{external_id: external_id} = tenant) do
     with {:ok, node, _region} <- Nodes.get_node_for_tenant(tenant),
          {:ok, _} = result <-
-           Rpc.enhanced_call(node, __MODULE__, :run_pgdelta_tenant, [tenant, catalog_major_version],
+           Rpc.enhanced_call(node, __MODULE__, :run_pgdelta_tenant, [tenant],
              timeout: @rpc_timeout,
              tenant_id: external_id
            ) do
@@ -517,53 +568,103 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     end
   end
 
-  def run_pgdelta(%Database{} = settings, catalog_major_version) do
+  def run_pgdelta(%Database{} = settings) do
+    with_pgdelta(fn path, dir ->
+      plan_path = Path.join(dir, "plan.json")
+
+      args = [
+        "schema",
+        "apply",
+        "--dir",
+        schema_path(),
+        "--target",
+        postgres_url(settings),
+        "--profile",
+        profile_path(),
+        "--dry-run",
+        "--out-plan",
+        plan_path
+      ]
+
+      case run_pgdelta_cmd(path, args) do
+        {_output, 0} -> read_plan(path, plan_path, dir)
+        other -> pgdelta_error(other)
+      end
+    end)
+  end
+
+  defp read_plan(path, plan_path, dir) do
+    with {:ok, plan} <- File.read(plan_path),
+         {:ok, %{"actions" => actions} = decoded} <- Jason.decode(plan) do
+      case actions do
+        [] ->
+          {:ok, %{status: :no_changes, plan: nil, sql: "", destructive: 0}}
+
+        _ ->
+          destructive = get_in(decoded, ["safetyReport", "destructiveActions"]) || 0
+
+          with {:ok, sql} <- render_plan(path, plan_path, dir) do
+            {:ok, %{status: :changes, plan: plan, sql: sql, destructive: destructive}}
+          end
+      end
+    else
+      error ->
+        log_error("TenantMigrationsPgDeltaPlanUnreadable", error)
+        {:error, "pg-delta wrote an unreadable plan: #{inspect(error)}"}
+    end
+  end
+
+  defp render_plan(path, plan_path, dir) do
+    args = ["render", "--plan", plan_path, "--out", Path.join(dir, "plan.sql"), "--allow-drops"]
+
+    case run_pgdelta_cmd(path, args) do
+      {_output, 0} -> {:ok, dir |> segment_files() |> Enum.map_join("\n", &File.read!/1)}
+      other -> pgdelta_error(other)
+    end
+  end
+
+  defp segment_files(dir) do
+    dir
+    |> Path.join("plan*.sql")
+    |> Path.wildcard()
+    |> Enum.sort_by(fn file ->
+      case Regex.run(~r/_(\d+)\.sql$/, file) do
+        [_, segment] -> String.to_integer(segment)
+        nil -> 0
+      end
+    end)
+  end
+
+  defp with_pgdelta(fun) do
     case System.find_executable("pgdelta") do
       nil ->
         log_error("TenantMigrationsPgDeltaMissing", "pgdelta not found on PATH")
         {:error, "pgdelta not found on PATH"}
 
       path ->
-        catalog = catalog_path(catalog_major_version)
+        dir = Path.join(System.tmp_dir!(), "pgdelta-#{System.unique_integer([:positive])}")
+        File.mkdir_p!(dir)
 
-        args = [
-          "plan",
-          "--source",
-          postgres_url(settings),
-          "--target",
-          catalog,
-          "--filter",
-          pgdelta_filter(),
-          "--format",
-          "sql"
-        ]
-
-        env = [
-          {~c"PGDELTA_CONNECTION_TIMEOUT_MS", ~c"#{@query_timeout}"},
-          {~c"PGDELTA_CONNECT_TIMEOUT_MS", ~c"#{@query_timeout}"}
-        ]
-
-        case run_pgdelta_cmd(path, args, env) do
-          {output, 0} ->
-            {:ok, %{status: :no_changes, sql: output}}
-
-          {output, 2} ->
-            {:ok, %{status: :changes, sql: output}}
-
-          :timeout ->
-            log_error("TenantMigrationsPgDeltaTimeout", "killed after #{@pgdelta_timeout}ms")
-            {:error, "pg-delta timed out after #{div(@pgdelta_timeout, 1000)}s"}
-
-          {output, code} ->
-            log_error("TenantMigrationsPgDeltaNonZeroExit", "exit #{code}: #{output}")
-            {:error, "pg-delta exited #{code}:\n#{output}"}
+        try do
+          fun.(path, dir)
+        after
+          File.rm_rf(dir)
         end
     end
   end
 
-  defp run_pgdelta_cmd(path, args, env) do
-    port =
-      Port.open({:spawn_executable, path}, [:binary, :exit_status, :stderr_to_stdout, args: args, env: env])
+  defp pgdelta_error(:timeout) do
+    log_error("TenantMigrationsPgDeltaTimeout", "killed after #{@pgdelta_timeout}ms")
+    {:error, "pg-delta timed out after #{div(@pgdelta_timeout, 1000)}s"}
+  end
+
+  defp pgdelta_error({output, code}) do
+    log_error("TenantMigrationsPgDeltaNonZeroExit", "exit #{code}: #{output}")
+    {:error, "pg-delta exited #{code}:\n#{output}"}
+  end
+
+  defp run_pgdelta_cmd(path, args) do
+    port = Port.open({:spawn_executable, path}, [:binary, :exit_status, :stderr_to_stdout, args: args])
 
     collect_pgdelta(port, [])
   end
@@ -583,19 +684,20 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   end
 
   @doc false
-  def run_pgdelta_tenant(%Tenant{} = tenant, catalog_major_version) do
+  def run_pgdelta_tenant(%Tenant{} = tenant) do
     with {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop) do
-      run_pgdelta(settings, catalog_major_version)
+      run_pgdelta(settings)
     end
   end
 
   @doc false
-  def apply_pgdelta(%Tenant{external_id: external_id} = tenant, sql) do
+  def apply_pgdelta(%Tenant{external_id: external_id} = tenant, plan) do
     versions = Enum.map(Migrations.migrations(), fn {v, _mod} -> v end)
     total = length(versions)
 
-    with {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop),
-         :ok <- with_tenant_conn(settings, &apply_plan(&1, sql, versions)),
+    with :ok <- apply_plan(tenant, plan),
+         {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop),
+         :ok <- with_tenant_conn(settings, &insert_versions(&1, versions)),
          {:ok, _} <- Api.update_migrations_ran(external_id, total) do
       :ok
     else
@@ -609,12 +711,50 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     end
   end
 
-  defp apply_plan(conn, nil, versions), do: insert_versions(conn, versions)
+  defp apply_plan(_tenant, nil), do: :ok
 
-  defp apply_plan(conn, sql, versions) do
-    with {:ok, _} <- Postgrex.query(conn, sql, [], query_type: :text, timeout: @query_timeout) do
-      insert_versions(conn, versions)
+  defp apply_plan(%Tenant{external_id: external_id} = tenant, plan) do
+    with {:ok, node, _region} <- Nodes.get_node_for_tenant(tenant),
+         {:ok, _} <-
+           Rpc.enhanced_call(node, __MODULE__, :apply_plan_tenant, [tenant, plan],
+             timeout: @rpc_timeout,
+             tenant_id: external_id
+           ) do
+      :ok
+    else
+      {:error, :rpc_error, reason} -> {:error, "pg-delta RPC failed: #{inspect(reason)}"}
+      {:error, _} = err -> err
     end
+  end
+
+  @doc false
+  def apply_plan_tenant(%Tenant{} = tenant, plan) do
+    with {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop) do
+      run_pgdelta_apply(settings, plan)
+    end
+  end
+
+  defp run_pgdelta_apply(%Database{} = settings, plan) do
+    with_pgdelta(fn path, dir ->
+      plan_path = Path.join(dir, "plan.json")
+      File.write!(plan_path, plan)
+
+      args = [
+        "apply",
+        "--plan",
+        plan_path,
+        "--target",
+        postgres_url(settings),
+        "--profile",
+        profile_path(),
+        "--allow-data-loss"
+      ]
+
+      case run_pgdelta_cmd(path, args) do
+        {_output, 0} -> {:ok, :applied}
+        other -> pgdelta_error(other)
+      end
+    end)
   end
 
   defp with_tenant_conn(%Database{} = settings, fun) do

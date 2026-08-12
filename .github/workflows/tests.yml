@@ -6,7 +6,7 @@ on:
       - "test/**"
       - "config/**"
       - "priv/**"
-      - "!priv/repo/tenant_db_catalog_*.json"
+      - "!priv/repo/tenant_schema/**"
       - "assets/**"
       - "rel/**"
       - "native/**"
