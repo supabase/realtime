@@ -157,9 +157,11 @@ defmodule RealtimeWeb.RealtimeChannel do
       if presence_enabled?, do: send(self(), :sync_presence)
 
       UsersCounter.add(transport_pid, tenant_id)
-      await_muster_join(muster_join_task, socket)
 
-      {:ok, state, assign(socket, assigns)}
+      case await_muster_join(muster_join_task, socket) do
+        :ok -> {:ok, state, assign(socket, assigns)}
+        {:error, _} = error -> error
+      end
     else
       {:error, :expired_token, msg} ->
         maybe_log_warning(socket, "InvalidJWTToken", msg)
@@ -724,8 +726,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:exit, reason} -> log_error(socket, "MusterJoinError", inspect(reason))
       nil -> log_error(socket, "MusterJoinError", "timed out after #{@muster_join_await_ms}ms")
     end
-
-    :ok
   end
 
   defp limit_max_users(tenant, transport_pid) do

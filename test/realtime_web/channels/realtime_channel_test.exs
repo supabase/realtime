@@ -917,7 +917,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
     end
 
-    test "join still succeeds when Muster.join raises", %{tenant: tenant} do
+    test "join fails when Muster.join raises", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "error"}, conn_opts(tenant, jwt))
 
@@ -927,13 +927,14 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       log =
         capture_log(fn ->
-          assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
+          assert {:error, %{reason: reason}} = subscribe_and_join(socket, "realtime:test", %{})
+          assert reason =~ "MusterJoinError"
         end)
 
       assert log =~ "MusterJoinError"
     end
 
-    test "join still succeeds when Muster.join exits", %{tenant: tenant} do
+    test "join fails when Muster.join exits", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "error"}, conn_opts(tenant, jwt))
 
@@ -943,13 +944,14 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       log =
         capture_log(fn ->
-          assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
+          assert {:error, %{reason: reason}} = subscribe_and_join(socket, "realtime:test", %{})
+          assert reason =~ "MusterJoinError"
         end)
 
       assert log =~ "MusterJoinError"
     end
 
-    test "join still succeeds when Muster.join times out", %{tenant: tenant} do
+    test "join fails when Muster.join times out", %{tenant: tenant} do
       # @muster_join_await_ms (4s) is a private constant, not overridable from
       # tests, so this pays the real timeout in wall-clock time rather than
       # shrinking it.
@@ -962,7 +964,9 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       log =
         capture_log(fn ->
-          assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
+          assert {:error, %{reason: reason}} = subscribe_and_join(socket, "realtime:test", %{})
+          assert reason =~ "MusterJoinError"
+          assert reason =~ "timed out"
         end)
 
       assert log =~ "MusterJoinError"
