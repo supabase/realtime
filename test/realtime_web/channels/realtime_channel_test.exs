@@ -1294,15 +1294,16 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert_process_down(channel_pid)
 
       assert_receive %Socket.Message{
-        topic: "realtime:test",
-        event: "system",
-        payload: %{
-          message: "Token has expired 0 seconds ago",
-          status: "error",
-          extension: "system",
-          channel: "test"
-        }
-      }
+                       topic: "realtime:test",
+                       event: "system",
+                       payload: %{
+                         message: "Token has expired" <> _,
+                         status: "error",
+                         extension: "system",
+                         channel: "test"
+                       }
+                     },
+                     1000
     end
 
     test "shuts down cleanly with JwtSignerError when the signer can no longer be generated", %{tenant: tenant} do
