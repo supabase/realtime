@@ -126,6 +126,19 @@ defmodule RealtimeWeb.Dashboard.FeatureFlags do
     end
   end
 
+  @impl true
+  def handle_event("clear_tenant_flag", %{"flag_name" => flag_name}, socket) do
+    tenant = socket.assigns.found_tenant
+
+    case FeatureFlags.clear_tenant_flag(flag_name, tenant.external_id) do
+      {:ok, updated_tenant} ->
+        {:noreply, assign(socket, found_tenant: updated_tenant)}
+
+      {:error, _} ->
+        {:noreply, assign(socket, tenant_error: "Failed to clear tenant flag")}
+    end
+  end
+
   defp reset_tenant_state(socket, extra \\ []) do
     assign(socket, [managing_id: nil, tenant_search: "", found_tenant: nil, tenant_error: nil] ++ extra)
   end
@@ -261,25 +274,52 @@ defmodule RealtimeWeb.Dashboard.FeatureFlags do
                   <% end %>
 
                   <%= if @found_tenant do %>
-                    <% flag_enabled = Map.get(@found_tenant.feature_flags, flag.name, FeatureFlags.enabled?(flag.name, @found_tenant.external_id)) %>
+                    <% override = Map.get(@found_tenant.feature_flags, flag.name) %>
+                    <% inherited = FeatureFlags.enabled?(flag.name, @found_tenant.external_id) %>
                     <div style="display: flex; align-items: center; gap: 1rem; padding: 0.5rem 0.75rem; background: white; border-radius: 4px; border: 1px solid #dee2e6;">
                       <code><%= @found_tenant.external_id %></code>
                       <span class="text-muted">—</span>
-                      <div style="display: flex; align-items: center; gap: 0.5rem;">
+                      <%= case override do %>
+                        <% true -> %>
+                          <span class="badge" style="background: #22c55e; color: white;">Override: Enabled</span>
+                        <% false -> %>
+                          <span class="badge" style="background: #6b7280; color: white;">Override: Disabled</span>
+                        <% nil -> %>
+                          <span class="badge" style="background: #e5e7eb; color: #374151;">
+                            No override · inheriting <%= if inherited, do: "Enabled", else: "Disabled" %>
+                          </span>
+                      <% end %>
+                      <div style="display: flex; gap: 0.5rem; margin-left: auto;">
                         <button
                           type="button"
                           phx-click="set_tenant_flag"
                           phx-value-flag_name={flag.name}
-                          phx-value-enabled={to_string(!flag_enabled)}
-                          role="switch"
-                          aria-checked={to_string(flag_enabled)}
-                          style={"position: relative; display: inline-flex; align-items: center; width: 44px; height: 24px; border-radius: 9999px; border: none; outline: none; cursor: pointer; padding: 0; transition: background-color 0.2s ease; background-color: #{if flag_enabled, do: "#22c55e", else: "#9ca3af"};"}
+                          phx-value-enabled="true"
+                          disabled={override == true}
+                          class={"btn btn-sm #{if override == true, do: "btn-success", else: "btn-outline-success"}"}
                         >
-                          <span style={"display: block; width: 18px; height: 18px; border-radius: 50%; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.2); transition: transform 0.2s ease; transform: translateX(#{if flag_enabled, do: "23px", else: "3px"});"} />
+                          Enable
                         </button>
-                        <span style={"font-size: 0.8125rem; font-weight: 500; color: #{if flag_enabled, do: "#16a34a", else: "#6b7280"};"}>
-                          <%= if flag_enabled, do: "Enabled", else: "Disabled" %>
-                        </span>
+                        <button
+                          type="button"
+                          phx-click="set_tenant_flag"
+                          phx-value-flag_name={flag.name}
+                          phx-value-enabled="false"
+                          disabled={override == false}
+                          class={"btn btn-sm #{if override == false, do: "btn-secondary", else: "btn-outline-secondary"}"}
+                        >
+                          Disable
+                        </button>
+                        <%= if override != nil do %>
+                          <button
+                            type="button"
+                            phx-click="clear_tenant_flag"
+                            phx-value-flag_name={flag.name}
+                            class="btn btn-sm btn-outline-danger"
+                          >
+                            Clear override
+                          </button>
+                        <% end %>
                       </div>
                     </div>
                   <% end %>
