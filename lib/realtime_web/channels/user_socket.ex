@@ -1,5 +1,9 @@
 defmodule RealtimeWeb.UserSocket do
-  use RealtimeWeb.Socket
+  # Raise Phoenix's built-in per-transport channel limit above its default of 100. Realtime
+  # enforces its own per-tenant `max_channels_per_client` limit (default 100) in RealtimeChannel
+  # with a dedicated error message, so we keep a bit of headroom above it and let that be the
+  # source of truth for the error the client sees.
+  use RealtimeWeb.Socket, max_channels_per_transport: 110
   use Realtime.Logs
 
   alias Realtime.Api.Tenant
