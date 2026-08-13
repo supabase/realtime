@@ -86,6 +86,24 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
     assert html =~ "db_host_resolved"
   end
 
+  test "shows feature flags section with 'no feature flags' when empty", %{conn: conn, tenant: tenant} do
+    {:ok, _view, html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
+
+    assert html =~ "Feature Flags"
+    assert html =~ "No feature flags set"
+  end
+
+  test "shows feature flags when set", %{conn: conn, tenant: tenant} do
+    {:ok, tenant} =
+      Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{feature_flags: %{"new_thing" => true}})
+
+    {:ok, _view, html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
+
+    assert html =~ "Feature Flags"
+    assert html =~ "new_thing"
+    assert html =~ "true"
+  end
+
   test "shows runtime status for connect and replication", %{conn: conn, tenant: tenant} do
     {:ok, _view, html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
 

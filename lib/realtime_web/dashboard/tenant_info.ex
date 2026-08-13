@@ -119,116 +119,153 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
       <% end %>
 
       <%= if @tenant do %>
-        <h6 class="mt-4">Tenant</h6>
-        <table class="table table-hover">
-          <tbody>
-            <tr><td>external_id</td><td><%= @tenant.external_id %></td></tr>
-            <tr><td>name</td><td><%= @tenant.name %></td></tr>
-            <tr><td>suspend</td><td><%= @tenant.suspend %></td></tr>
-            <tr><td>private_only</td><td><%= @tenant.private_only %></td></tr>
-            <tr><td>presence_enabled</td><td><%= @tenant.presence_enabled %></td></tr>
-            <tr><td>postgres_cdc_default</td><td><%= @tenant.postgres_cdc_default %></td></tr>
-            <tr><td>broadcast_adapter</td><td><%= @tenant.broadcast_adapter %></td></tr>
-            <tr><td>max_concurrent_users</td><td><%= @tenant.max_concurrent_users %></td></tr>
-            <tr><td>max_events_per_second</td><td><%= @tenant.max_events_per_second %></td></tr>
-            <tr><td>max_bytes_per_second</td><td><%= @tenant.max_bytes_per_second %></td></tr>
-            <tr><td>max_channels_per_client</td><td><%= @tenant.max_channels_per_client %></td></tr>
-            <tr><td>max_joins_per_second</td><td><%= @tenant.max_joins_per_second %></td></tr>
-            <tr><td>max_presence_events_per_second</td><td><%= @tenant.max_presence_events_per_second %></td></tr>
-            <tr><td>max_payload_size_in_kb</td><td><%= @tenant.max_payload_size_in_kb %></td></tr>
-            <tr><td>max_client_presence_events_per_window</td><td><%= @tenant.max_client_presence_events_per_window %></td></tr>
-            <tr><td>client_presence_window_ms</td><td><%= @tenant.client_presence_window_ms %></td></tr>
-            <tr><td>migrations_ran</td><td><%= @tenant.migrations_ran %></td></tr>
-            <tr><td>inserted_at</td><td><%= @tenant.inserted_at %></td></tr>
-            <tr><td>updated_at</td><td><%= @tenant.updated_at %></td></tr>
-          </tbody>
-        </table>
+        <div class="card mb-4">
+          <div class="card-header"><strong>Tenant</strong></div>
+          <div class="card-body p-0">
+            <table class="table table-hover mb-0">
+              <tbody>
+                <tr><td>external_id</td><td><%= @tenant.external_id %></td></tr>
+                <tr><td>name</td><td><%= @tenant.name %></td></tr>
+                <tr><td>suspend</td><td><%= @tenant.suspend %></td></tr>
+                <tr><td>private_only</td><td><%= @tenant.private_only %></td></tr>
+                <tr><td>presence_enabled</td><td><%= @tenant.presence_enabled %></td></tr>
+                <tr><td>postgres_cdc_default</td><td><%= @tenant.postgres_cdc_default %></td></tr>
+                <tr><td>broadcast_adapter</td><td><%= @tenant.broadcast_adapter %></td></tr>
+                <tr><td>max_concurrent_users</td><td><%= @tenant.max_concurrent_users %></td></tr>
+                <tr><td>max_events_per_second</td><td><%= @tenant.max_events_per_second %></td></tr>
+                <tr><td>max_bytes_per_second</td><td><%= @tenant.max_bytes_per_second %></td></tr>
+                <tr><td>max_channels_per_client</td><td><%= @tenant.max_channels_per_client %></td></tr>
+                <tr><td>max_joins_per_second</td><td><%= @tenant.max_joins_per_second %></td></tr>
+                <tr><td>max_presence_events_per_second</td><td><%= @tenant.max_presence_events_per_second %></td></tr>
+                <tr><td>max_payload_size_in_kb</td><td><%= @tenant.max_payload_size_in_kb %></td></tr>
+                <tr><td>max_client_presence_events_per_window</td><td><%= @tenant.max_client_presence_events_per_window %></td></tr>
+                <tr><td>client_presence_window_ms</td><td><%= @tenant.client_presence_window_ms %></td></tr>
+                <tr><td>migrations_ran</td><td><%= @tenant.migrations_ran %></td></tr>
+                <tr><td>inserted_at</td><td><%= @tenant.inserted_at %></td></tr>
+                <tr><td>updated_at</td><td><%= @tenant.updated_at %></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-        <h6 class="mt-4">Database</h6>
-        <table class="table table-hover">
-          <tbody>
-            <tr>
-              <td>postgres_version</td>
-              <td>
-                <%= case @pg_version do %>
-                  <% nil -> %>
-                  <% {:ok, version} -> %><span class="font-monospace"><%= version %></span>
-                  <% {:error, msg} -> %><span class="text-danger"><%= msg %></span>
+        <div class="card mb-4">
+          <div class="card-header"><strong>Feature Flags</strong></div>
+          <div class="card-body p-0">
+            <table class="table table-hover mb-0">
+              <tbody>
+                <%= if @tenant.feature_flags == %{} do %>
+                  <tr><td class="text-muted">No feature flags set</td></tr>
+                <% else %>
+                  <%= for {key, value} <- Enum.sort_by(@tenant.feature_flags, &elem(&1, 0)) do %>
+                    <tr><td><%= key %></td><td><%= inspect(value) %></td></tr>
+                  <% end %>
                 <% end %>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-        <h6 class="mt-4">Runtime</h6>
-        <table class="table table-hover">
-          <tbody>
-            <tr>
-              <td>connect</td>
-              <td><%= status_cell(@runtime.connect) %></td>
-              <td>
-                <button
-                  phx-click="shutdown_connect"
-                  data-confirm={"Shutdown Connect for #{@external_id}?"}
-                  class="btn btn-sm btn-danger"
-                >
-                  Shutdown
-                </button>
-              </td>
-            </tr>
-            <tr>
-              <td>replication_connection</td>
-              <td><%= status_cell(@runtime.replication) %></td>
-              <td></td>
-            </tr>
-            <tr>
-              <td>postgres_cdc_rls</td>
-              <td><%= status_cell(@runtime.cdc_rls) %></td>
-              <td>
-                <button
-                  phx-click="shutdown_cdc_rls"
-                  data-confirm={"Shutdown Postgres Replication (CDC RLS) for #{@external_id}?"}
-                  class="btn btn-sm btn-danger"
-                >
-                  Shutdown
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="card mb-4">
+          <div class="card-header"><strong>Database</strong></div>
+          <div class="card-body p-0">
+            <table class="table table-hover mb-0">
+              <tbody>
+                <tr>
+                  <td>postgres_version</td>
+                  <td>
+                    <%= case @pg_version do %>
+                      <% nil -> %>
+                      <% {:ok, version} -> %><span class="font-monospace"><%= version %></span>
+                      <% {:error, msg} -> %><span class="text-danger"><%= msg %></span>
+                    <% end %>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-        <h6 class="mt-4">Connected users per region</h6>
-        <table class="table table-hover">
-          <thead>
-            <tr><th>region</th><th>nodes</th><th>connected</th></tr>
-          </thead>
-          <tbody>
-            <%= for region <- @runtime.users.regions do %>
-              <tr>
-                <td><%= region.region %></td>
-                <td><%= region.nodes %></td>
-                <td><%= region.count %></td>
-              </tr>
-            <% end %>
-            <tr class="font-weight-bold">
-              <td>total (cluster)</td>
-              <td></td>
-              <td><%= @runtime.users.total %></td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="card mb-4">
+          <div class="card-header"><strong>Runtime</strong></div>
+          <div class="card-body p-0">
+            <table class="table table-hover mb-0">
+              <tbody>
+                <tr>
+                  <td>connect</td>
+                  <td><%= status_cell(@runtime.connect) %></td>
+                  <td>
+                    <button
+                      phx-click="shutdown_connect"
+                      data-confirm={"Shutdown Connect for #{@external_id}?"}
+                      class="btn btn-sm btn-danger"
+                    >
+                      Shutdown
+                    </button>
+                  </td>
+                </tr>
+                <tr>
+                  <td>replication_connection</td>
+                  <td><%= status_cell(@runtime.replication) %></td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>postgres_cdc_rls</td>
+                  <td><%= status_cell(@runtime.cdc_rls) %></td>
+                  <td>
+                    <button
+                      phx-click="shutdown_cdc_rls"
+                      data-confirm={"Shutdown Postgres Replication (CDC RLS) for #{@external_id}?"}
+                      class="btn btn-sm btn-danger"
+                    >
+                      Shutdown
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card mb-4">
+          <div class="card-header"><strong>Connected users per region</strong></div>
+          <div class="card-body p-0">
+            <table class="table table-hover mb-0">
+              <thead>
+                <tr><th>region</th><th>nodes</th><th>connected</th></tr>
+              </thead>
+              <tbody>
+                <%= for region <- @runtime.users.regions do %>
+                  <tr>
+                    <td><%= region.region %></td>
+                    <td><%= region.nodes %></td>
+                    <td><%= region.count %></td>
+                  </tr>
+                <% end %>
+                <tr class="font-weight-bold">
+                  <td>total (cluster)</td>
+                  <td></td>
+                  <td><%= @runtime.users.total %></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
         <%= for ext <- @tenant.extensions do %>
-          <h6 class="mt-4">Extension: <%= ext.type %></h6>
-          <table class="table table-hover">
-            <tbody>
-              <%= for {key, value} <- ext.settings do %>
-                <tr><td><%= key %></td><td><%= value %></td></tr>
-              <% end %>
-              <tr><td>inserted_at</td><td><%= ext.inserted_at %></td></tr>
-              <tr><td>updated_at</td><td><%= ext.updated_at %></td></tr>
-            </tbody>
-          </table>
+          <div class="card mb-4">
+            <div class="card-header"><strong>Extension: <%= ext.type %></strong></div>
+            <div class="card-body p-0">
+              <table class="table table-hover mb-0">
+                <tbody>
+                  <%= for {key, value} <- ext.settings do %>
+                    <tr><td><%= key %></td><td><%= value %></td></tr>
+                  <% end %>
+                  <tr><td>inserted_at</td><td><%= ext.inserted_at %></td></tr>
+                  <tr><td>updated_at</td><td><%= ext.updated_at %></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
         <% end %>
       <% end %>
     </div>
