@@ -121,6 +121,42 @@ defmodule Realtime.MessagesTest do
       assert Messages.replay(conn, tenant.external_id, "test", 0, 10) == {:ok, [privatem], MapSet.new([privatem.id])}
     end
 
+    test "replay binary payloads", %{conn: conn, tenant: tenant} do
+      message =
+        message_fixture(tenant, %{
+          "event" => "bin",
+          "extension" => "broadcast",
+          "topic" => "test",
+          "private" => true,
+          "binary_payload" => <<0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0xFF>>
+        })
+
+      assert Messages.replay(conn, tenant.external_id, "test", 0, 10) == {:ok, [message], MapSet.new([message.id])}
+    end
+
+    test "replay binary and json payloads in insertion order", %{conn: conn, tenant: tenant} do
+      binary_message =
+        message_fixture(tenant, %{
+          "event" => "bin",
+          "extension" => "broadcast",
+          "topic" => "test",
+          "private" => true,
+          "binary_payload" => <<1, 2, 3>>
+        })
+
+      json_message =
+        message_fixture(tenant, %{
+          "event" => "json",
+          "extension" => "broadcast",
+          "topic" => "test",
+          "private" => true,
+          "payload" => %{"value" => "json"}
+        })
+
+      assert Messages.replay(conn, tenant.external_id, "test", 0, 10) ==
+               {:ok, [binary_message, json_message], MapSet.new([binary_message.id, json_message.id])}
+    end
+
     test "replay respects since", %{conn: conn, tenant: tenant} do
       m1 =
         message_fixture(tenant, %{
