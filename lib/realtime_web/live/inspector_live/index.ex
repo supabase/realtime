@@ -43,8 +43,6 @@ defmodule RealtimeWeb.InspectorLive.Index do
 
   @impl true
   def handle_params(params, _url, socket) do
-    # Only the non-secret connection shape lives in the URL; the component merges these onto its
-    # existing changeset so a typed token/bearer isn't wiped on every validate round-trip.
     send_update(ConnComponent, id: :conn, url_params: params)
 
     {:noreply, socket}

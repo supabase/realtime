@@ -3,31 +3,36 @@ defmodule RealtimeWeb.InspectorLive.ConnComponentTest do
   import Phoenix.LiveViewTest
 
   describe "connection form persistence" do
-    test "validate never patches the URL with token or bearer, regardless of which field changed", %{conn: conn} do
+    test "validate patches the URL with the publishable token but never the bearer", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/")
 
       view
-      |> form("#conn_form", connection: %{channel: "room_b", token: "secret-token", bearer: "secret-bearer"})
+      |> form("#conn_form", connection: %{channel: "room_b", token: "publishable-key", bearer: "secret-bearer"})
       |> render_change()
 
       path = assert_patch(view)
 
-      refute path =~ "secret-token"
+      assert path =~ "token=publishable-key"
       refute path =~ "secret-bearer"
       assert path =~ "room_b"
+    end
+
+    test "a link carrying a token fills the token field", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/?host=https://x.supabase.co&channel=room_a&token=publishable-key")
+
+      assert view |> element("#conn_form_token") |> render() =~ "publishable-key"
     end
 
     test "a bare project ref in the host field derives the full host", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/")
 
       view
-      |> form("#conn_form", connection: %{host: "abcdefgh", token: "secret-token"})
+      |> form("#conn_form", connection: %{host: "abcdefgh", token: "publishable-key"})
       |> render_change()
 
       path = assert_patch(view)
 
       assert path =~ "abcdefgh.supabase.co"
-      refute path =~ "secret-token"
     end
 
     test "a real host is left alone rather than treated as a project ref", %{conn: conn} do
@@ -47,22 +52,6 @@ defmodule RealtimeWeb.InspectorLive.ConnComponentTest do
       {:ok, view, _html} = live(conn, ~p"/?project=abcdefgh&channel=room_a")
 
       assert render(view) =~ "abcdefgh.supabase.co"
-    end
-
-    test "share link never contains the token or bearer even after connecting", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/")
-
-      view
-      |> form("#conn_form",
-        connection: %{channel: "room_a", host: "https://x.supabase.co", token: "secret-token", bearer: "secret-bearer"}
-      )
-      |> render_change()
-
-      path = assert_patch(view)
-
-      refute path =~ "secret-token"
-      refute path =~ "secret-bearer"
-      assert path =~ "room_a"
     end
 
     test "the share button is available before a successful connection", %{conn: conn} do
