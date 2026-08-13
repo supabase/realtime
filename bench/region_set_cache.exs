@@ -1,26 +1,3 @@
-# Benchmarks the region-SET read on the GenRpcPubSub broadcast hot path — the one
-# call `Realtime.GenRpcPubSub.RegionRings.all_node_regions/0` replaces:
-#
-#   * CURRENT: `:syn.group_names(scope)` — a full `:ets.select/2` scan of the
-#     RegionNodes by-name table (one row per node) plus an `ordsets:from_list` usort
-#     down to the distinct region names. O(nodes) per broadcast.
-#   * CACHED : a single `:ets.lookup/2` of the pre-computed region list that
-#     RegionRings maintains in its table (reserved `:__all_regions__` row, refreshed
-#     on syn membership changes). O(1), independent of fleet size.
-#
-# This isolates ONLY the region-list read. It is NOT the full cross-region
-# resolution — after this read the muster path (`cross_region_route`) does pure-ETS
-# `RegionRings.expected_router/2` per region, so `group_names` is that path's
-# dominant syn cost and this is where the cache pays off. For the full flood-path
-# resolution (which also does `node_from_region/2` per region) see
-# `bench/nodes_topology.exs`.
-#
-# Self-contained: boots only :syn (no DB / full app). Run with:
-#   mix run --no-start bench/region_set_cache.exs
-#
-# Each scenario gets its own syn scope + cached row and is fed to Benchee as an
-# input, so the two reads are measured across a matrix of cluster topologies.
-
 {:ok, _} = Application.ensure_all_started(:syn)
 
 scenarios =
