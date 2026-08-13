@@ -52,6 +52,57 @@ defmodule Realtime.GenRpcPubSub.RegionRingsTest do
     end
   end
 
+  describe "all_node_regions/1" do
+    test "falls back to a live syn read before the table exists" do
+      # No RegionRings started: the table is absent, so :ets.lookup raises and the
+      # rescue must fall back to a single Nodes.all_node_regions/0 read.
+      expect(Nodes, :all_node_regions, fn -> [@region, "us-east-1"] end)
+
+      assert RegionRings.all_node_regions(:rr_absent_table) == [@region, "us-east-1"]
+    end
+
+    test "falls back to a live syn read before any reconcile has populated the cache row" do
+      %{table: table} = start_region_rings!()
+
+      # Table exists (created in init) but the cache row hasn't been written yet, so
+      # the empty-lookup branch must fall back to a single Nodes.all_node_regions/0 read.
+      expect(Nodes, :all_node_regions, fn -> [@region, "us-east-1"] end)
+
+      assert RegionRings.all_node_regions(table) == [@region, "us-east-1"]
+    end
+
+    test "reads are served from the cache after a reconcile, never re-reading syn" do
+      %{pid: pid, table: table} = start_region_rings!()
+
+      # Exactly one syn read, performed by the reconcile itself. If any later
+      # all_node_regions/1 fell through to syn, Mimic would see a second call and fail.
+      expect(Nodes, :all_node_regions, 1, fn -> [@region, "us-east-1"] end)
+      expect(Nodes, :region_nodes, 1, fn _ -> members() end)
+
+      reconcile(pid)
+
+      assert RegionRings.all_node_regions(table) == [@region, "us-east-1"]
+      # Read again: served from ETS, not from syn (guaranteed by the expect-once above).
+      assert RegionRings.all_node_regions(table) == [@region, "us-east-1"]
+    end
+
+    test "a reconcile refreshes the cached region set when membership changes" do
+      %{pid: pid, table: table} = start_region_rings!()
+
+      # One region_nodes read per reconcile (only @region is wanted; "us-east-1" is
+      # own_region and is rejected).
+      expect(Nodes, :region_nodes, 2, fn _ -> members() end)
+
+      expect(Nodes, :all_node_regions, fn -> [@region] end)
+      reconcile(pid)
+      assert RegionRings.all_node_regions(table) == [@region]
+
+      expect(Nodes, :all_node_regions, fn -> [@region, "us-east-1"] end)
+      reconcile(pid)
+      assert RegionRings.all_node_regions(table) == [@region, "us-east-1"]
+    end
+  end
+
   describe "ring process exit" do
     test "rebuilds a ring that exits and recovers expected_router" do
       members = members()

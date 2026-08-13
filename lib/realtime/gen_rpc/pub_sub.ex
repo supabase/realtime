@@ -130,7 +130,7 @@ defmodule Realtime.GenRpcPubSub do
   end
 
   defp nodes_from_other_regions(my_region, key) do
-    Enum.flat_map(Nodes.all_node_regions(), fn
+    Enum.flat_map(RegionRings.all_node_regions(), fn
       ^my_region ->
         []
 
@@ -149,7 +149,7 @@ defmodule Realtime.GenRpcPubSub do
   # representative-per-region flood (`:ftr`), so cross-region delivery is never worse
   # than before Muster routing.
   defp cross_region_route(worker, my_region, tenant_id, topic, message, dispatcher) do
-    Enum.each(Nodes.all_node_regions(), fn
+    Enum.each(RegionRings.all_node_regions(), fn
       ^my_region ->
         :ok
 

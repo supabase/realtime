@@ -43,6 +43,9 @@ defmodule Realtime.GenRpcPubSub.RegionRings do
   @table :realtime_region_router_rings
   @default_reconcile_interval_ms :timer.minutes(5)
 
+  # Reserved row in @table caching the full cluster region set
+  @all_regions_key :__all_regions__
+
   defmodule State do
     @moduledoc false
 
@@ -55,6 +58,9 @@ defmodule Realtime.GenRpcPubSub.RegionRings do
             # region => the node set last applied to its ring, so an unchanged
             # reconcile can skip the non-idempotent `set_nodes`
             members: %{optional(String.t()) => MapSet.t(node())},
+            # last full region set written to the cache row, so an unchanged
+            # reconcile can skip rewriting it (nil until the first reconcile)
+            all_regions: [String.t()] | nil,
             # ETS table holding {region, ring_name, view_hash} for lock-free reads
             table: atom(),
             # reconcile backstop interval, in ms
@@ -62,7 +68,7 @@ defmodule Realtime.GenRpcPubSub.RegionRings do
           }
 
     @enforce_keys [:table, :interval]
-    defstruct rings: %{}, members: %{}, table: nil, interval: nil
+    defstruct rings: %{}, members: %{}, all_regions: nil, table: nil, interval: nil
   end
 
   ## Client
@@ -95,6 +101,30 @@ defmodule Realtime.GenRpcPubSub.RegionRings do
   rescue
     # Table doesn't exist yet (registry not started); :ets.lookup raises here.
     ArgumentError -> :error
+  end
+
+  @doc """
+  Returns the cached full cluster region set — the same value
+  `Realtime.Nodes.all_node_regions/0` would return (sorted, de-duplicated) —
+  maintained by `reconcile/1`.
+
+  This is the broadcast hot path's read: a single lock-free ETS lookup instead of
+  the full-table `:syn.group_names/1` scan on every message. Falls back to a live
+  syn read when the cache row or table is not present yet (registry still
+  starting, or between a crash and the rebuilding reconcile), so it is never less
+  fresh than reading syn directly.
+
+  `table` selects the backing ETS table.
+  """
+  @spec all_node_regions(atom()) :: [String.t()]
+  def all_node_regions(table \\ @table) do
+    case :ets.lookup(table, @all_regions_key) do
+      [{@all_regions_key, regions}] -> regions
+      [] -> Nodes.all_node_regions()
+    end
+  rescue
+    # Table doesn't exist yet (registry not started); :ets.lookup raises here.
+    ArgumentError -> Nodes.all_node_regions()
   end
 
   defp ring_name(table, region), do: :"#{table}_ring_#{region}"
@@ -173,7 +203,13 @@ defmodule Realtime.GenRpcPubSub.RegionRings do
   @spec reconcile(State.t()) :: State.t()
   defp reconcile(%State{} = state) do
     own_region = Application.get_env(:realtime, :region)
-    wanted = Nodes.all_node_regions() |> Enum.reject(&(&1 == own_region))
+    all_regions = Nodes.all_node_regions()
+
+    if all_regions != state.all_regions do
+      :ets.insert(state.table, {@all_regions_key, all_regions})
+    end
+
+    wanted = Enum.reject(all_regions, &(&1 == own_region))
 
     # Add/update rings for every other region. Rings for regions that go away
     # (a deployment draining a region) are left in place: they're rare, harmless
@@ -198,7 +234,7 @@ defmodule Realtime.GenRpcPubSub.RegionRings do
         {Map.put(rings, region, entry), Map.put(members, region, desired)}
       end)
 
-    %State{state | rings: rings, members: members}
+    %State{state | rings: rings, members: members, all_regions: all_regions}
   end
 
   defp ensure_ring(table, region, rings) do
