@@ -45,6 +45,23 @@ defmodule Realtime.FeatureFlags do
     end
   end
 
+  @doc """
+  Removes a tenant's explicit override for `flag_name`, so the tenant falls back
+  to the global enabled/rollout resolution. A no-op if no override is present.
+  """
+  @spec clear_tenant_flag(String.t(), String.t()) ::
+          {:ok, Realtime.Api.Tenant.t()} | {:error, :not_found | Ecto.Changeset.t()}
+  def clear_tenant_flag(flag_name, tenant_id) when is_binary(flag_name) and is_binary(tenant_id) do
+    case Api.get_tenant_by_external_id(tenant_id, use_replica?: false) do
+      nil ->
+        {:error, :not_found}
+
+      tenant ->
+        updated_flags = Map.delete(tenant.feature_flags, flag_name)
+        Api.update_tenant_by_external_id(tenant_id, %{feature_flags: updated_flags})
+    end
+  end
+
   @spec enabled?(String.t()) :: boolean()
   def enabled?(flag_name) when is_binary(flag_name) do
     case Cache.get_flag(flag_name) do
