@@ -91,7 +91,12 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     # presence_diff for this socket, then authorize presence.write.
     with {:ok, policies} <- maybe_authorize_presence_read(policies, db_conn, authorization_context),
          {:ok, policies} <-
-           Authorization.get_write_authorizations(policies, db_conn, authorization_context, presence_enabled?: true) do
+           Authorization.get_write_authorizations(
+             policies,
+             db_conn,
+             authorization_context,
+             broadcast_enabled?: false
+           ) do
       socket = assign(socket, :policies, policies)
       handle_presence_event("track", payload, db_conn, socket)
     else

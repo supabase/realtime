@@ -257,6 +257,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
     test "only checks write policies once on private channels", %{tenant: tenant, topic: topic, db_conn: db_conn} do
       expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context, opts ->
+        assert opts == [broadcast_enabled?: false]
         call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context, opts])
       end)
 
@@ -280,6 +281,28 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
           assert_receive %Broadcast{topic: ^topic, event: "presence_diff"}
           socket
       end
+    end
+
+    @tag policies: [:authenticated_read_presence, :authenticated_write_presence]
+    test "leaves broadcast write policy unevaluated when tracking presence", %{
+      tenant: tenant,
+      topic: topic,
+      db_conn: db_conn
+    } do
+      key = random_string()
+      socket = socket_fixture(tenant, topic, key)
+
+      assert {:ok, socket} =
+               PresenceHandler.handle(
+                 %{"event" => "track", "payload" => %{"metadata" => random_string()}},
+                 db_conn,
+                 socket
+               )
+
+      assert %Policies{
+               broadcast: %BroadcastPolicies{write: nil},
+               presence: %PresencePolicies{write: true}
+             } = socket.assigns.policies
     end
 
     test "increase_connection_pool from write authorization returns error and does not log UnableToSetPolicies",

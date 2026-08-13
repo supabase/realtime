@@ -73,10 +73,23 @@ defmodule Realtime.Tenants.AuthorizationTest do
           presence_enabled?: false
         )
 
-      # presence.read is left unevaluated (nil) since presence was not checked; write is false.
+      # Presence is left unevaluated since it was not checked.
       assert %Policies{
                broadcast: %BroadcastPolicies{read: true, write: true},
-               presence: %PresencePolicies{read: nil, write: false}
+               presence: %PresencePolicies{read: nil, write: nil}
+             } == policies
+    end
+
+    @tag role: "authenticated", policies: [:authenticated_write_presence]
+    test "skips broadcast RLS check when broadcast is disabled", context do
+      {:ok, policies} =
+        Authorization.get_write_authorizations(%Policies{}, context.db_conn, context.authorization_context,
+          broadcast_enabled?: false
+        )
+
+      assert %Policies{
+               broadcast: %BroadcastPolicies{read: nil, write: nil},
+               presence: %PresencePolicies{read: nil, write: true}
              } == policies
     end
 

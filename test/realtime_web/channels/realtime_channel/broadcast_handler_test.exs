@@ -16,6 +16,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
+  alias Realtime.Tenants.Authorization.Policies.PresencePolicies
   alias Realtime.Tenants.Connect
   alias RealtimeWeb.Endpoint
   alias RealtimeWeb.RealtimeChannel.BroadcastHandler
@@ -182,17 +183,24 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
          %{topic: topic, tenant: tenant, db_conn: db_conn, serializer: serializer} do
       socket = socket_fixture(tenant, topic)
 
-      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context ->
-        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context])
+      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context, opts ->
+        assert opts == [presence_enabled?: false]
+        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context, opts])
       end)
 
-      reject(&Authorization.get_write_authorizations/3)
+      reject(&Authorization.get_write_authorizations/4)
 
-      for _ <- 1..100, reduce: socket do
-        socket ->
-          {:reply, :ok, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
-          socket
-      end
+      socket =
+        for _ <- 1..100, reduce: socket do
+          socket ->
+            {:reply, :ok, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+            socket
+        end
+
+      assert %Policies{
+               broadcast: %BroadcastPolicies{write: true},
+               presence: %PresencePolicies{write: nil}
+             } = socket.assigns.policies
 
       for _ <- 1..100 do
         topic = "realtime:#{topic}"
@@ -204,8 +212,9 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     test "validation only runs once on nil and blocking policies", %{topic: topic, tenant: tenant, db_conn: db_conn} do
       socket = socket_fixture(tenant, topic)
 
-      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context ->
-        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context])
+      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context, opts ->
+        assert opts == [presence_enabled?: false]
+        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context, opts])
       end)
 
       for _ <- 1..100, reduce: socket do
@@ -361,7 +370,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
          %{topic: topic, tenant: tenant, db_conn: db_conn} do
       socket = socket_fixture(tenant, topic)
 
-      stub(Authorization, :get_write_authorizations, fn _, _, _ -> {:error, :increase_connection_pool} end)
+      stub(Authorization, :get_write_authorizations, fn _, _, _, _ -> {:error, :increase_connection_pool} end)
 
       log =
         capture_log(fn ->

@@ -305,9 +305,10 @@ defmodule Realtime.Tenants.Authorization do
   @all_extensions [:broadcast, :presence]
 
   defp extensions_to_check(opts) do
-    if Keyword.get(opts, :presence_enabled?, true),
-      do: @all_extensions,
-      else: [:broadcast]
+    Enum.filter(@all_extensions, fn
+      :broadcast -> Keyword.get(opts, :broadcast_enabled?, true)
+      :presence -> Keyword.get(opts, :presence_enabled?, true)
+    end)
   end
 
   defp check_read_policies(conn, messages_by_extension, policies) do
@@ -329,22 +330,18 @@ defmodule Realtime.Tenants.Authorization do
   end
 
   defp check_write_policies(conn, authorization_context, extensions, policies) do
-    Enum.reduce_while(@all_extensions, {:ok, policies}, fn extension, {:ok, acc} ->
-      if extension in extensions do
-        changeset = Message.changeset(%Message{}, %{topic: authorization_context.topic, extension: extension})
+    Enum.reduce_while(extensions, {:ok, policies}, fn extension, {:ok, acc} ->
+      changeset = Message.changeset(%Message{}, %{topic: authorization_context.topic, extension: extension})
 
-        case Repo.insert(conn, changeset, Message, mode: :savepoint, returning: false) do
-          {:ok, _} ->
-            {:cont, {:ok, Policies.update_policies(acc, extension, :write, true)}}
+      case Repo.insert(conn, changeset, Message, mode: :savepoint, returning: false) do
+        {:ok, _} ->
+          {:cont, {:ok, Policies.update_policies(acc, extension, :write, true)}}
 
-          {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-            {:cont, {:ok, Policies.update_policies(acc, extension, :write, false)}}
+        {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
+          {:cont, {:ok, Policies.update_policies(acc, extension, :write, false)}}
 
-          {:error, reason} ->
-            {:halt, {:error, reason}}
-        end
-      else
-        {:cont, {:ok, Policies.update_policies(acc, extension, :write, false)}}
+        {:error, reason} ->
+          {:halt, {:error, reason}}
       end
     end)
   end
