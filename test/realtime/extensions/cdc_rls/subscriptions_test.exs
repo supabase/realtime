@@ -1180,6 +1180,104 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
     end
   end
 
+  describe "rls policies that raise (apply_rls)" do
+    setup :setup_tenant
+
+    setup %{conn: conn} do
+      Postgrex.query!(conn, "alter table public.test enable row level security", [])
+
+      # Casting a claim is enough to make a policy raise: a claim carrying the
+      # string "null" instead of a JSON null fails `::uuid` with 22P02.
+      Postgrex.query!(
+        conn,
+        """
+        create policy test_app_id on public.test as permissive for select to anon
+        using (
+          coalesce(
+            ((current_setting('request.jwt.claims', true)::jsonb -> 'app_metadata' ->> 'app_id')::uuid)::text,
+            'no-app-id'
+          ) is not null
+        )
+        """,
+        []
+      )
+
+      :ok
+    end
+
+    test "one subscription raising does not stop delivery for the others", %{conn: conn} do
+      healthy_id = UUID.uuid1()
+      poisoned_id = UUID.uuid1()
+      slot_name = "test_apply_rls_policy_raise_#{:rand.uniform(999_999)}"
+
+      insert_subscription(conn, healthy_id, %{"role" => "anon"})
+      insert_subscription(conn, poisoned_id, %{"role" => "anon", "app_metadata" => %{"app_id" => "null"}})
+
+      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json')", [slot_name])
+
+      try do
+        Postgrex.query!(conn, "insert into test (details) values ('hello')", [])
+
+        %{rows: rows} = list_changes(conn, slot_name)
+
+        healthy_bin = UUID.string_to_binary!(healthy_id)
+        poisoned_bin = UUID.string_to_binary!(poisoned_id)
+
+        delivered = Enum.find(rows, fn [_wal, sub_ids, _errors] -> healthy_bin in (sub_ids || []) end)
+        assert delivered != nil, "healthy subscription lost the record. rows=#{inspect(rows)}"
+        [healthy_wal, _, healthy_errors] = delivered
+        assert healthy_wal["record"]["details"] == "hello"
+        assert healthy_errors in [nil, []]
+
+        errored = Enum.find(rows, fn [_wal, sub_ids, _errors] -> poisoned_bin in (sub_ids || []) end)
+        assert errored != nil, "poisoned subscription got no error row. rows=#{inspect(rows)}"
+        [poisoned_wal, _, poisoned_errors] = errored
+        assert poisoned_errors == ["Error 500: Internal Server Error, RLS policy evaluation failed"]
+
+        # The policy could not be evaluated, so the row it was meant to gate is withheld
+        refute Map.has_key?(poisoned_wal, "record")
+
+        # The batch was consumed rather than left behind for the next poll to fail on again
+        assert %{rows: [[nil, nil, nil]]} = list_changes(conn, slot_name)
+      after
+        Postgrex.query(conn, "SELECT pg_drop_replication_slot($1)", [slot_name])
+      end
+    end
+
+    test "a role whose every subscription raises does not affect another role", %{conn: conn} do
+      Postgrex.query!(
+        conn,
+        "create policy test_authenticated on public.test as permissive for select to authenticated using (true)",
+        []
+      )
+
+      authenticated_id = UUID.uuid1()
+      poisoned_id = UUID.uuid1()
+      slot_name = "test_apply_rls_policy_raise_roles_#{:rand.uniform(999_999)}"
+
+      insert_subscription(conn, authenticated_id, %{"role" => "authenticated"})
+      insert_subscription(conn, poisoned_id, %{"role" => "anon", "app_metadata" => %{"app_id" => "null"}})
+
+      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json')", [slot_name])
+
+      try do
+        Postgrex.query!(conn, "insert into test (details) values ('hello')", [])
+
+        %{rows: rows} = list_changes(conn, slot_name)
+
+        authenticated_bin = UUID.string_to_binary!(authenticated_id)
+        delivered = Enum.find(rows, fn [_wal, sub_ids, _errors] -> authenticated_bin in (sub_ids || []) end)
+
+        assert delivered != nil, "unrelated role lost the record. rows=#{inspect(rows)}"
+        [wal, _, errors] = delivered
+        assert wal["record"]["details"] == "hello"
+        assert errors in [nil, []]
+      after
+        Postgrex.query(conn, "SELECT pg_drop_replication_slot($1)", [slot_name])
+      end
+    end
+  end
+
   describe "subscribing with column selection (select param) - parse" do
     test "user can pass a list of column names to limit the payload" do
       assert {:ok, {"*", "public", "messages", [], ["id", "details"]}} =
@@ -1414,6 +1512,22 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
 
       Postgrex.query(conn, "SELECT pg_drop_replication_slot($1)", [slot_name])
     end
+  end
+
+  defp insert_subscription(conn, subscription_id, claims) do
+    Postgrex.query!(
+      conn,
+      "insert into realtime.subscription (subscription_id, entity, claims) values ($1::text::uuid, 'public.test'::regclass, $2)",
+      [subscription_id, claims]
+    )
+  end
+
+  defp list_changes(conn, slot_name) do
+    Postgrex.query!(
+      conn,
+      "select wal, subscription_ids, errors from realtime.list_changes($1, $2, 100, 1048576)",
+      ["supabase_realtime_test", slot_name]
+    )
   end
 
   defp create_subscriptions(conn, num, opts \\ []) do
