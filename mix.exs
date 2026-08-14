@@ -66,6 +66,7 @@ defmodule Realtime.MixProject do
       {:phoenix_live_view, "~> 0.18"},
       {:phoenix_live_reload, "~> 1.2", only: :dev},
       {:phoenix_live_dashboard, "~> 0.7"},
+      {:lumis, "~> 0.7"},
       {:phoenix_view, "~> 2.0"},
       {:esbuild, "~> 0.4", runtime: Mix.env() == :dev},
       {:tailwind, "~> 0.1", runtime: Mix.env() == :dev},

@@ -3,8 +3,8 @@ ARG OTP_VERSION=28.5.0.4
 ARG DEBIAN_VERSION=trixie-20260713-slim
 ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
 ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
-# @supabase/pg-delta@1.0.0-alpha.33
-ARG PG_DELTA_COMMIT=c0e5e002eb712faf46dd1660d5578357f21af950
+# @supabase/pg-delta@1.0.0-alpha.34
+ARG PG_DELTA_COMMIT=2247de05849455b358fae71bbe514273cae4faba
 
 FROM debian:${DEBIAN_VERSION} AS pgdelta-builder
 ARG PG_DELTA_COMMIT
@@ -20,11 +20,9 @@ RUN set -eux; \
       | tar xz --strip-components=1; \
     bun install --frozen-lockfile --ignore-scripts; \
     cd /build/packages/pg-delta; \
-    bun build --compile src/cli/bin/cli.ts --outfile /tmp/pgdelta; \
+    bun build --compile src/cli/main.ts --outfile /tmp/pgdelta; \
     /tmp/pgdelta --help > /dev/null; \
     xz -9 -e -T0 -c /tmp/pgdelta > /tmp/pgdelta.xz; \
-    cd / && find build -path '*/@libpg-query/parser/wasm/libpg-query.wasm' \
-      | tar -czf /tmp/libpg-query.tar.gz -T -; \
     printf '%s\n' \
       '#!/bin/sh' \
       'set -e' \
@@ -120,8 +118,6 @@ RUN apt-get update -y && \
 
 COPY --from=pgdelta-builder /tmp/pgdelta.xz /usr/local/share/pgdelta/pgdelta.xz
 COPY --from=pgdelta-builder /tmp/pgdelta-wrapper /usr/local/bin/pgdelta
-COPY --from=pgdelta-builder /tmp/libpg-query.tar.gz /tmp/libpg-query.tar.gz
-RUN tar -C / -xzf /tmp/libpg-query.tar.gz && rm /tmp/libpg-query.tar.gz
 
 # Set the locale
 RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
