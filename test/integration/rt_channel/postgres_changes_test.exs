@@ -85,6 +85,84 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
     end
   end
 
+  describe "wait for subscription" do
+    test "a write straight after the join reply is not missed", %{tenant: tenant, serializer: serializer} do
+      assert_cdc_stopped(tenant)
+
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+
+      config = %{
+        postgres_changes: [%{event: "INSERT", schema: "public"}],
+        postgres_changes_options: %{wait: true, timeout: 15_000}
+      }
+
+      WebsocketClient.join(socket, topic, %{config: config})
+      sub_id = :erlang.phash2(%{"event" => "INSERT", "schema" => "public"})
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       payload: %{
+                         "response" => %{
+                           "postgres_changes" => [%{"event" => "INSERT", "id" => ^sub_id, "schema" => "public"}]
+                         },
+                         "status" => "ok"
+                       },
+                       topic: ^topic
+                     },
+                     20_000
+
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{
+                         "channel" => "any",
+                         "extension" => "postgres_changes",
+                         "message" => "Subscribed to PostgreSQL",
+                         "status" => "ok"
+                       },
+                       ref: nil,
+                       topic: ^topic
+                     },
+                     500
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+      %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{
+                         "data" => %{"record" => %{"details" => "test", "id" => ^id}, "type" => "INSERT"},
+                         "ids" => [^sub_id]
+                       },
+                       ref: nil,
+                       topic: ^topic
+                     },
+                     2000
+    end
+
+    test "join is rejected when the subscription params are malformed", %{tenant: tenant, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+
+      config = %{
+        postgres_changes: [%{event: "INSERT", schema: "public", table: "test", filter: "wrong"}],
+        postgres_changes_options: %{wait: true, timeout: 15_000}
+      }
+
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       payload: %{"status" => "error", "response" => %{"reason" => reason}},
+                       topic: ^topic
+                     },
+                     20_000
+
+      assert reason =~ "RealtimeDisabledForConfiguration"
+      assert reason =~ "Error parsing `filter` params"
+    end
+  end
+
   describe "bytea column" do
     test "handle insert with bytea data without double-encoding", %{
       tenant: tenant,
@@ -810,5 +888,10 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
                      },
                      1000
     end
+  end
+
+  defp assert_cdc_stopped(tenant) do
+    PostgresCdcRls.handle_stop(tenant.external_id, 5000)
+    eventually(fn -> PostgresCdcRls.get_manager_conn(tenant.external_id) == {:error, nil} end)
   end
 end
