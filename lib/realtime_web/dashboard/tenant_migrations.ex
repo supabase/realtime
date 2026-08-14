@@ -39,11 +39,11 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
 
     with %Tenant{} = tenant <- Api.get_tenant_by_external_id(ref),
          {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop),
-         {:ok, schema_migrations} <- with_tenant_conn(settings, &fetch_tenant_state/1) do
+         {:ok, schema_migrations, orioledb?} <- with_tenant_conn(settings, &fetch_tenant_state/1) do
       socket
       |> reset_assigns()
       |> assign(external_id: ref, tenant: tenant, schema_migrations: {:ok, schema_migrations})
-      |> start_pgdelta(tenant)
+      |> start_pgdelta(tenant, orioledb?)
       |> then(&{:noreply, &1})
     else
       nil ->
@@ -223,12 +223,22 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
 
   defp fetch_tenant_state(conn) do
     with {:ok, _} <- ensure_realtime_admin_role(conn),
-         {:ok, _} <- ensure_schema_migrations(conn) do
-      fetch_schema_migrations(conn)
+         {:ok, _} <- ensure_schema_migrations(conn),
+         {:ok, schema_migrations} <- fetch_schema_migrations(conn) do
+      {:ok, schema_migrations, orioledb?(conn)}
     end
   end
 
-  defp start_pgdelta(socket, %Tenant{} = tenant) do
+  defp orioledb?(conn) do
+    case Postgrex.query(conn, "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'orioledb')", []) do
+      {:ok, %{rows: [[true]]}} -> true
+      _ -> false
+    end
+  end
+
+  defp start_pgdelta(socket, _tenant, true = _orioledb?), do: assign(socket, pgdelta_result: :unsupported)
+
+  defp start_pgdelta(socket, %Tenant{} = tenant, false = _orioledb?) do
     task =
       Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn ->
         tenant |> run_pgdelta() |> highlight_plan()
@@ -340,6 +350,14 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   defp pgdelta_plan(nil, _schema_migrations, _apply_disabled) do
     assigns = %{}
     ~H""
+  end
+
+  defp pgdelta_plan(:unsupported, _schema_migrations, _apply_disabled) do
+    assigns = %{}
+
+    ~H"""
+    <div class="alert alert-secondary mb-0">Drift detection is not supported on OrioleDB tenants.</div>
+    """
   end
 
   defp pgdelta_plan({:error, msg}, _schema_migrations, _apply_disabled) do
