@@ -58,6 +58,15 @@ defmodule Forum.MusterDistributedTest do
                   :persistent_term.get({Forum.Muster, scope, :status})
                 end
 
+                # Gracefully drain this node's router role (Forum.Muster.drain/2).
+                def drain(scope, opts \\ []) do
+                  Forum.Muster.drain(scope, opts)
+                end
+
+                def view_hash(scope) do
+                  :persistent_term.get({Forum.Muster, scope, :view_hash})
+                end
+
                 # Advance this VM's global monotonic counter by `n`. The
                 # occupancy/announce seqs are :erlang.unique_integer([:monotonic]),
                 # which starts from the SAME base on every fresh VM, so burning a
@@ -5314,6 +5323,272 @@ defmodule Forum.MusterDistributedTest do
           end
         end
       )
+    end
+  end
+
+  describe "graceful drain (drain/2)" do
+    setup do
+      scope = :"muster_drain_#{System.unique_integer([:positive])}"
+      # Fast heartbeat on the local (test) node so its re-discovery backstop fires
+      # several times inside the draining test's observation window. The drained
+      # peer must ignore every one of those discover offers.
+      start_supervised!( spec(scope, vacant_flush_interval_ms: 100, view_heartbeat_interval_ms: 300))
+
+      %{scope: scope}
+    end
+
+    # Draining evacuates a node's router role before it dies: peers rebalance it
+    # out and the groups it routed stay reachable on the newly elected router
+    # (held-elsewhere source rows are re-announced, so no broadcast is missed).
+    # The leaver was demonitored on the graceful leave, so its eventual real :DOWN
+    # is a no-op and the membership does not flap when the process finally goes away.
+    test "evacuates the router role; peers re-elect and re-announce; :DOWN is a no-op",
+         %{scope: scope} do
+      t_node = node()
+      a_name = ~c"muster_drain_a_#{System.unique_integer([:positive])}"
+      a_node = :"#{a_name}@127.0.0.1"
+      c_name = ~c"muster_drain_c_#{System.unique_integer([:positive])}"
+      c_node = :"#{c_name}@127.0.0.1"
+
+      check_trace(
+        fn ->
+          {:ok, pa, ^a_node} = Peer.start(name: a_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(a_node)
+          start_remote_muster(pa, scope)
+          await_ready([t_node, a_node])
+
+          {:ok, pc, ^c_node} = Peer.start(name: c_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(c_node)
+          start_remote_muster(pc, scope)
+          await_ready([t_node, a_node, c_node])
+
+          # A group C is the router for, held (as a member) on A -- so its source
+          # row lives on C and must be re-announced to the new router when C leaves.
+          g = group_routed_to(scope, c_node)
+          assert g, "no group routing to C found"
+          :ok = :peer.call(pa, MusterPeerAux, :join, [scope, g])
+          assert a_node in occupancy_on(c_node, scope, g)
+
+          # Drain C. Returns :ok only after both peers rebalanced it out and the
+          # settle window elapsed.
+          assert :ok = :peer.call(pc, MusterPeerAux, :drain, [scope, [settle_ms: 300]])
+
+          # Peers converged onto the 2-node view without C.
+          await_ready([t_node, a_node])
+          assert Muster.members(scope) == Enum.sort([t_node, a_node])
+
+          # The group C routed is reachable on the newly elected router, with A's
+          # source row intact -- no missed broadcast across the handoff.
+          {:ok, r} = Muster.router(scope, g)
+          assert r != c_node
+          assert a_node in occupancy_on(r, scope, g)
+
+          # The eventual real :DOWN (process actually stops) is a no-op: C was
+          # already departed + demonitored, so membership stays put.
+          :ok = stop_supervised({:peer, c_name})
+          Process.sleep(300)
+          assert Muster.members(scope) == Enum.sort([t_node, a_node])
+          assert status(scope) == :ready
+        end,
+        fn _trace -> :ok end
+      )
+    end
+
+    # drain returns :ok only once every peer acked; if a peer never acks within
+    # :timeout_ms it returns {:timeout, unacked_nodes}. Park the peer's handling of
+    # the leave so its ack never arrives, and assert the deadline path fires.
+    test "returns {:timeout, unacked} when a peer never acks", %{scope: scope} do
+      t_node = node()
+      p_name = ~c"muster_drain_to_#{System.unique_integer([:positive])}"
+      p_node = :"#{p_name}@127.0.0.1"
+
+      check_trace(
+        fn ->
+          {:ok, p1, ^p_node} = Peer.start(name: p_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(p_node)
+          start_remote_muster(p1, scope)
+          await_ready([t_node, p_node])
+
+          # Block the peer's coordinator the instant it receives our leave, so it
+          # can neither depart us nor ack until we release it.
+          force_ordering(
+            delay: %{:"$kind" => :muster_leaving_received, node: ^p_node},
+            until: %{:"$kind" => :test_release}
+          )
+
+          assert {:timeout, [^p_node]} =
+                   Muster.drain(scope, timeout_ms: 500, settle_ms: 100)
+
+          # Release the peer so check_trace teardown isn't left with a wedged
+          # process; the late ack lands after leave_from is cleared and is a no-op.
+          tp(:test_release, %{})
+        end,
+        fn _trace -> :ok end
+      )
+    end
+
+    # The unacked set on timeout must list exactly the peers that never acked -- a
+    # peer that did rebalance us out must not appear. A acks normally; B's
+    # leave-handling is parked. drain must return {:timeout, [B]}, not [A, B] or [A].
+    test "timeout lists only the peers that never acked", %{scope: scope} do
+      t_node = node()
+      a_name = ~c"muster_drain_ack_#{System.unique_integer([:positive])}"
+      a_node = :"#{a_name}@127.0.0.1"
+      b_name = ~c"muster_drain_noack_#{System.unique_integer([:positive])}"
+      b_node = :"#{b_name}@127.0.0.1"
+
+      check_trace(
+        fn ->
+          {:ok, pa, ^a_node} = Peer.start(name: a_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(a_node)
+          start_remote_muster(pa, scope)
+          await_ready([t_node, a_node])
+
+          {:ok, pb, ^b_node} = Peer.start(name: b_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(b_node)
+          start_remote_muster(pb, scope)
+          await_ready([t_node, a_node, b_node])
+
+          # Park ONLY B the instant it receives our leave, so B can neither depart
+          # us nor ack until released. A is untouched and acks normally.
+          force_ordering(
+            delay: %{:"$kind" => :muster_leaving_received, node: ^b_node},
+            until: %{:"$kind" => :test_release}
+          )
+
+          # A acks well within timeout_ms; B never does, so the unacked set (the
+          # difference leave_expected -- leave_acked) must be exactly [B].
+          assert {:timeout, [^b_node]} =
+                   Muster.drain(scope, timeout_ms: 1_000, settle_ms: 100)
+
+          # Release B so check_trace teardown isn't left with a wedged process;
+          # its late ack lands after leave_from is cleared and is a no-op.
+          tp(:test_release, %{})
+        end,
+        fn _trace -> :ok end
+      )
+    end
+
+    # Regression: with settle_ms > timeout_ms the real ack deadline fires DURING the
+    # settle window (all peers acked, but leave_from is still parked until settle
+    # elapses) -- exactly the stale-deadline race. The handler must treat a deadline
+    # with no outstanding acks as a no-op; a naive handler would reply {:timeout, []}
+    # to the already-satisfied caller. Here T acks in well under timeout_ms (300),
+    # the deadline fires at 300ms, and the settle reply only lands at ~t_ack + 700ms,
+    # so the deadline is genuinely processed mid-settle -- no message injection
+    # needed. We assert :ok (not {:timeout, []}) and that no timeout was reported.
+    test "a deadline that fires during the settle window is a no-op", %{scope: scope} do
+      t_node = node()
+      c_name = ~c"muster_drain_stray_#{System.unique_integer([:positive])}"
+      c_node = :"#{c_name}@127.0.0.1"
+
+      check_trace(
+        fn ->
+          {:ok, pc, ^c_node} = Peer.start(name: c_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(c_node)
+          start_remote_muster(pc, scope)
+          await_ready([t_node, c_node])
+
+          assert :ok =
+                   :peer.call(pc, MusterPeerAux, :drain, [
+                     scope,
+                     [timeout_ms: 300, settle_ms: 700]
+                   ])
+
+          # The leaver's coordinator is still responsive and kept its own full view
+          # (it never rebalanced itself).
+          assert :erpc.call(c_node, Muster, :members, [scope]) ==
+                   Enum.sort([t_node, c_node])
+        end,
+        fn trace ->
+          # The drain settled (all peers acked, settle elapsed)...
+          assert Enum.any?(of_kind(trace, :muster_drain_settled), &(&1.node == c_node))
+
+          # ...and the mid-settle deadline was a no-op: no timeout was ever reported.
+          refute Enum.any?(of_kind(trace, :muster_drain_timeout), &(&1.node == c_node))
+        end
+      )
+    end
+
+    # The settle window keeps Scope + the occupancy table alive after all peers
+    # rebalanced the leaver out, so a broadcast routed to the leaver as router just
+    # before the handoff still resolves to the full target set (targets/3 answers
+    # correctly). Observed via :muster_drain_acked, which fires when settle opens.
+    test "stays a live router through the settle window", %{scope: scope} do
+      t_node = node()
+      c_name = ~c"muster_drain_settle_#{System.unique_integer([:positive])}"
+      c_node = :"#{c_name}@127.0.0.1"
+
+      check_trace(
+        fn ->
+          {:ok, pc, ^c_node} = Peer.start(name: c_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(c_node)
+          start_remote_muster(pc, scope)
+          await_ready([t_node, c_node])
+
+          # C is the router for g; T holds it, so C's occupancy has {g, T}.
+          g = group_routed_to(scope, c_node)
+          assert g, "no group routing to C found"
+          :ok = Muster.join(scope, g, spawn(fn -> Process.sleep(:infinity) end))
+          assert t_node in occupancy_on(c_node, scope, g)
+
+          # Drain C with a generous settle window, in a task so we can observe C
+          # mid-settle. It replies :ok only after the window elapses.
+          task =
+            Task.async(fn ->
+              :peer.call(pc, MusterPeerAux, :drain, [scope, [settle_ms: 1_500]])
+            end)
+
+          # The settle window has opened (all peers acked) but not yet elapsed.
+          assert {:ok, _} =
+                   block_until(%{:"$kind" => :muster_drain_acked, node: ^c_node}, 10_000)
+
+          # A broadcast in flight to C as router still resolves to the full target
+          # set: C is still :ready, its occupancy table is intact, Scope is alive.
+          vh = :peer.call(pc, MusterPeerAux, :view_hash, [scope])
+          assert {:ok, srcs} = :erpc.call(c_node, Forum.Muster, :targets, [scope, g, vh])
+          assert t_node in srcs
+
+          assert :ok = Task.await(task, 10_000)
+        end,
+        fn _trace -> :ok end
+      )
+    end
+
+    # Draining is non-resurrecting: once leaving, the node suppresses outbound
+    # self-assertion and ignores inbound discovery, so no peer can re-pair it. T
+    # re-offers discovery every heartbeat (300ms); C must ignore all of them and
+    # stay out of T's membership. C keeps its own full view. Ot never rebalances
+    # itself.
+    test "a drained node is not resurrected by discovery", %{scope: scope} do
+      t_node = node()
+      c_name = ~c"muster_drain_lame_#{System.unique_integer([:positive])}"
+      c_node = :"#{c_name}@127.0.0.1"
+
+      {:ok, pc, ^c_node} = Peer.start(name: c_name, aux_mod: @aux_mod)
+      start_remote_muster(pc, scope)
+      wait_until(fn -> Muster.members(scope) == Enum.sort([t_node, c_node]) end)
+
+      assert :ok = :peer.call(pc, MusterPeerAux, :drain, [scope, [settle_ms: 200]])
+      wait_until(fn -> Muster.members(scope) == [t_node] end)
+
+      # T re-offers discovery ~3x over this window; C must ignore every one.
+      Process.sleep(1_000)
+      assert Muster.members(scope) == [t_node]
+
+      # The departing node kept its own full ring/view (it does not rebalance
+      # itself); only the peers rebalanced it out.
+      assert :erpc.call(c_node, Muster, :members, [scope]) == Enum.sort([t_node, c_node])
+    end
+
+    # A join on a draining node fails loudly with {:error, :draining} instead of
+    # creating a local member the cluster can no longer route to. A singleton drain
+    # returns :ok immediately (no peers to evacuate to).
+    test "join is rejected once draining", %{scope: scope} do
+      assert :ok = Muster.drain(scope)
+
+      assert {:error, :draining} =
+               Muster.join(scope, :drain_probe, spawn(fn -> Process.sleep(:infinity) end))
     end
   end
 
