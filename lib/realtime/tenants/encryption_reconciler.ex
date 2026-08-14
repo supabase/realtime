@@ -6,6 +6,8 @@ defmodule Realtime.Tenants.EncryptionReconciler do
   deleted wholesale, along with the legacy branch in `Realtime.Crypto`.
   """
 
+  # TODO: delete this module once no tenant is left on AES-128-ECB.
+
   use Realtime.Logs
 
   alias Realtime.Api

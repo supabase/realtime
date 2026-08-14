@@ -20,7 +20,7 @@ dashboard_user = System.get_env("DASHBOARD_USER", :crypto.strong_rand_bytes(12) 
 db_after_connect_query = System.get_env("DB_AFTER_CONNECT_QUERY")
 db_enc_key = System.get_env("DB_ENC_KEY")
 db_enc_key_gcm = System.get_env("DB_ENC_KEY_GCM")
-db_enc_write_gcm = System.get_env("DB_ENC_WRITE_GCM") == "true"
+db_enc_write_gcm = Env.get_boolean("DB_ENC_WRITE_GCM", false)
 db_host = System.get_env("DB_HOST", "127.0.0.1")
 db_ip_version = System.get_env("DB_IP_VERSION")
 db_master_region = System.get_env("DB_MASTER_REGION")
