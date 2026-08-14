@@ -78,8 +78,9 @@ The split keeps the hot path (joins/claims) sharded while the rare, node-wide wo
 ### Public API
 
 ```elixir
-Forum.Muster.join(scope, group, pid)        # :ok | {:error, :rpc_failed | :not_local | ...}
+Forum.Muster.join(scope, group, pid)        # :ok | {:error, :rpc_failed | :not_local | :draining | ...}
 Forum.Muster.leave(scope, group, pid)       # :ok | {:error, term}
+Forum.Muster.drain(scope, opts)             # graceful cluster-leave; :ok | {:timeout, [node]}
 Forum.Muster.router(scope, group)           # {:ok, node} | {:rebalancing, [node]}
 Forum.Muster.targets(scope, group, sender_view_hash)  # (on router) {:ok, [node]} | {:error, :flood}
 Forum.Muster.occupancy(scope, group)        # (on router) raw held [node], NOT barrier-gated
@@ -242,6 +243,17 @@ Because `:view_hash` is content-derived (`phash2` of the sorted node set) rather
 
 Because the ring is consistent-hashed, a 100-node rolling deploy that grows the new cluster 1 → 100 moves ~1 group out of every 100 candidates per node-add, on average. A `phash2(group, length(members))` scheme would instead remap ~all groups on every node-add. Consistent hashing keeps the per-event announce-set small and the rebalance window short, which in turn keeps the broadcast-fan-out window short.
 
+### Graceful shutdown / draining (`Forum.Muster.drain/2`)
+
+**Draining is outbound-only.** While leaving, the node suppresses every *outbound self-assertion* (heartbeat announce, re-discovery, discover-ack, nodeup-discovery) so no peer can re-pair it after it announced leaving. Every *inbound coordination RPC* (`:occupied`, `:vacant_batch`, snapshot/delta/transition applies, `:rebalance_marker`) keeps being serviced through the whole drain + settle window — the node stays a correct, responsive router right up to exit; it just stops advertising itself. `join/3` on a draining node returns `{:error, :draining}` so a stray join fails loudly instead of creating an unroutable member.
+
+* Its **source role** (holding local members) needs no Muster mechanism on shutdown. As the host app disconnects its clients, membership drops to 0 and the normal vacant-flush (see *How leave works*) retracts occupancy on the current router. That is the host app's job.
+* Its **router role** is the one only a *pre-death* handoff can protect. By consistent hashing this node is the elected router for ~1/N of *all* groups cluster-wide. If it dies abruptly, broadcast messages routed to this node will be dropped.
+
+`drain/2` closes that window while the node is **still alive**. It does *not* rebalance itself; instead it broadcasts `{:muster_leaving}` and lets each **peer** rebalance it out of that peer's ring. The instant a peer swaps its ring, its subsequent claims/routing go to the newly-elected router, and its own rebalance re-announces the groups it holds to that router. Nothing the dying router "owned" is lost: every occupancy row was sourced from some node's local members, and the live sources re-announce during the same rebalance. The only rows that vanish are the ones sourced from the dying node itself which are going away regardless.
+
+**`drain` is terminal.** It leaves the node draining with its heartbeat off, so a node that calls `drain` but does not actually die (e.g. an aborted deploy) is stranded until it restarts. Call it only when truly shutting down.
+
 ---
 
 ## Failure scenarios
@@ -280,11 +292,12 @@ Snapshot dispatch is fire-and-forget on the sender (the coordinator does not wai
 
 After a crash the supervisor restarts the **coordinator**, whose `init/1`:
 
-* Resets the member list to `[node()]`, the `:status` persistent_term to `:ready`, and `:view_hash` to `phash2([node()])` (forgetting the cluster view). A sender that still holds the pre-crash multi-node `:view_hash` will mismatch this single-node hash, so `can_decide?/2` returns false and broadcasts to the restarted router fan out to all nodes until it re-converges.
+* Resets the member list to `[node()]`, the `:status` persistent_term to `:converging` (not `:ready`, even at members `[node()]`: a restarted local sender would otherwise agree with that one-node view and trust incomplete occupancy before scope discovery re-pairs; the bounded `:singleton_promotion_timeout_ms` restores `:ready` if the scope truly downsized to one node), and `:view_hash` to `phash2([node()])` (forgetting the cluster view). A sender that still holds the pre-crash multi-node `:view_hash` will mismatch this single-node hash, so `can_decide?/2` returns false and broadcasts to the restarted router fan out to all nodes until it re-converges.
 * Walks the shards' membership entries (which survive a coordinator death because they live in `:public, :named_table` ETS owned by the Supervisor) and re-asserts (monotonic upsert) its router-role **occupancy self-rows** for every group with live local members. The occupancy table is itself owned by the Supervisor, so it is **not** recreated on a coordinator restart: it survives intact under whichever shard processes write it directly. Any foreign-source rows the dead incarnation held are harmless: the restart resets `:view_hash` (below), so `can_decide?/2` is false and callers flood until each source re-snapshots (replacing its rows) and the `:ready` sweep prunes the rest. A coordinator crash also restarts every shard (see [Coordinator crash](#coordinator-shard-or-ring-crash-for-other-reasons)), so this same walk-and-reassert always runs against freshly-restarted shards, one reset story, not two. The per-group state machine is not lost by this: it lives in the shards' Supervisor-owned durable claim-state table, which each shard's own restart rebuilds from; remote sources' rows are refilled when they re-snapshot after re-discovery.
 * Re-broadcasts the discovery message; peers respond; `recompute_members` runs again. This `init` broadcast is one-shot, but it is **not** the only chance to re-pair: because the node restarted in place (its dist connection never dropped, so no `:nodeup` re-fires and peers won't reach back out), a lost `init` discovery would otherwise strand it forever, so the view heartbeat re-offers `:muster_discover` to every connected non-member each tick (see [the re-discovery backstop](#router-readiness-barrier)), bounding worst-case stranding to one interval.
+* Reopens the join gate (`:accepting_joins` persistent_term to `true`). `drain/2` is the *only* writer that closes it (to `false`), and that term outlives the coordinator process. So a coordinator crash *during* a drain — before the node actually dies — would otherwise leave the gate stuck closed forever: the restarted incarnation re-pairs and routes normally, yet `join/3` would keep returning `{:error, :draining}` for the life of the OS process. A fresh `init` means "not leaving", so it reopens the gate; the in-memory `leaving` state is dropped by the restart anyway, so the drain is effectively aborted and the node rejoins as a normal member.
 
-The supervisor restart strategy ensures the cluster eventually re-converges. During the restart window, between the crash and `init/1` running, the `:status` persistent_term is left at `:rebalancing`, so `Muster.router/2` returns `{:rebalancing, members}` and callers correctly fan out. (See `test/forum/muster_distributed_test.exs`.)
+The supervisor restart strategy ensures the cluster eventually re-converges. The `:status` and `:view_hash` persistent_terms both **survive the crash unchanged** — nothing resets them as the coordinator dies — so during the brief window between the crash and `init/1` running they hold their pre-crash values (whatever `:status` was: usually `:ready` or `:converging`, `:rebalancing` only if the node happened to crash mid-rebalance). That window is nonetheless safe, because the occupancy table is likewise unmutated (the coordinator that would rebalance it is down), so a router answering `targets/3` from it returns the same authoritative set it would have before the crash. What actually protects correctness *across* the restart is `init/1` resetting `:view_hash` to `phash2([node()])` and `:status` to `:converging` (above): from then on `can_decide?/2` fails for any sender still holding the pre-crash multi-node view, so callers flood rather than trust the restarted router's shrunken view until it re-converges. (See `test/forum/muster_distributed_test.exs`.)
 
 ### Coordinator, shard, or ring crash for other reasons
 
