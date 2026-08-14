@@ -50,7 +50,18 @@
       "extensions": [
         "JakeBecker.elixir-ls",
         "phoenixframework.phoenix"
-      ]
+      ],
+      // The vscode user's login shell is zsh (Dockerfile), but VS Code's terminal profile
+      // picker doesn't follow /etc/passwd, so it needs its own explicit zsh profile too.
+      // The IDE may flag "zsh" here as invalid while editing on the host - that's the
+      // *local* editor validating against shells on your machine, not the container's;
+      // it resolves once VS Code actually connects into the devcontainer.
+      "settings": {
+        "terminal.integrated.profiles.linux": {
+          "zsh": { "path": "/usr/bin/zsh" }
+        },
+        "terminal.integrated.defaultProfile.linux": "zsh"
+      }
     }
   }
 }

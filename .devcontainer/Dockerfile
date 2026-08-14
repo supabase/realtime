@@ -13,7 +13,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential autoconf libncurses-dev libssl-dev \
       ca-certificates curl git inotify-tools locales openssh-client \
-      postgresql-client procps sudo \
+      postgresql-client procps sudo zsh \
     && rm -rf /var/lib/apt/lists/*
 
 # Elixir warns and can misbehave when the VM's native name encoding is not utf8, which is
@@ -26,7 +26,7 @@ ARG USERNAME=vscode
 ARG USER_UID=1000
 ARG USER_GID=1000
 RUN groupadd --gid $USER_GID $USERNAME \
-    && useradd --uid $USER_UID --gid $USER_GID -m -s /bin/bash $USERNAME \
+    && useradd --uid $USER_UID --gid $USER_GID -m -s /bin/zsh $USERNAME \
     && echo "$USERNAME ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME \
     && chmod 0440 /etc/sudoers.d/$USERNAME
 
@@ -52,7 +52,15 @@ RUN curl -fsSL https://mise.run | sh \
 # start and hides this; `devcontainer exec`, plain `docker run` and CI get no such fixup.
 RUN printf 'PATH=/mise/shims:$PATH\n' > /etc/profile.d/00-mise-shims.sh
 
+# zsh does not need the profile.d fixup above: /etc/zsh/zprofile ships empty on Debian and
+# /etc/zsh/zshenv only overwrites PATH when it is unset or the bare "/bin:/usr/bin" default, so
+# the shims dir survives both login and interactive zsh unmolested (verified in an isolated
+# container). Only the git/command completion below is zsh-specific.
 USER $USERNAME
+
+# The zsh package ships completion functions (e.g. _git) but nothing wires them up by default,
+# so a bare new shell has no tab-completion until compinit runs once.
+RUN printf 'autoload -Uz compinit\ncompinit\n' > /home/$USERNAME/.zshrc
 
 # Production containers carry no wx/ODBC/Java either, so skip them and save build time.
 ENV KERL_CONFIGURE_OPTIONS="--without-javac --without-wx --without-odbc --without-observer --without-debugger --without-et"
