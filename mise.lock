@@ -36,7 +36,19 @@ url = "https://builds.hex.pm/builds/elixir/v1.19.5-otp-28.zip"
 version = "28.5.0.4"
 backend = "core:erlang"
 
+[tools.erlang."platforms.linux-arm64"]
+checksum = "sha256:efb045f96ee56d274f6c1fe3a9612b45caa01d2f82e35fe4e0ac9b0c501f6e53"
+url = "https://github.com/erlang/otp/releases/download/OTP-28.5.0.4/otp_src_28.5.0.4.tar.gz"
+url_api = "https://api.github.com/repos/erlang/otp/releases/assets/491552679"
+install = "source"
+
 [tools.erlang."platforms.linux-arm64-musl"]
+checksum = "sha256:efb045f96ee56d274f6c1fe3a9612b45caa01d2f82e35fe4e0ac9b0c501f6e53"
+url = "https://github.com/erlang/otp/releases/download/OTP-28.5.0.4/otp_src_28.5.0.4.tar.gz"
+url_api = "https://api.github.com/repos/erlang/otp/releases/assets/491552679"
+install = "source"
+
+[tools.erlang."platforms.linux-x64"]
 checksum = "sha256:efb045f96ee56d274f6c1fe3a9612b45caa01d2f82e35fe4e0ac9b0c501f6e53"
 url = "https://github.com/erlang/otp/releases/download/OTP-28.5.0.4/otp_src_28.5.0.4.tar.gz"
 url_api = "https://api.github.com/repos/erlang/otp/releases/assets/491552679"

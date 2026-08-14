@@ -6,6 +6,7 @@
   - [Client libraries](#client-libraries)
 - [Server](#server)
   - [Server Setup](#server-setup)
+  - [Devcontainer](#devcontainer)
   - [Tenants](#tenants)
   - [WebSocket](#websocket)
     - [WebSocket URL](#websocket-url)
@@ -76,6 +77,18 @@ To see all available tasks:
 ```bash
 mise task ls
 ```
+
+### Devcontainer
+
+If you use VS Code (or another [Dev Containers](https://containers.dev)-compatible editor), `.devcontainer/` gives you a ready-to-use environment without installing mise, Elixir, or Erlang on your host.
+
+The image installs the exact toolchain as discussed above and all commands should work similarly.
+
+To use it, open the repo in VS Code and run **Dev Containers: Reopen in Container**.
+Once the container has built and `postCreateCommand` finishes, follow the same steps as above: `mise run db-start`, `mix setup`, `mise run dev`.
+
+> **Note**
+> It uses `--network=host`, which requires a container runtime that supports it. This works natively on Linux and on OrbStack; on Docker Desktop for Mac you need to enable the host networking beta feature first.
 
 ### Tenants
 
