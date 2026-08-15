@@ -18,8 +18,8 @@ alter table "realtime"."subscription"
 
 create index ix_realtime_subscription_entity on realtime.subscription using btree (entity);
 
-create unique index subscription_subscription_id_entity_filters_action_filter_selec on realtime.subscription
-  using btree (subscription_id, entity, filters, action_filter, COALESCE(selected_columns, '{}'::text[]));
+create unique index subscription_subscription_id_entity_filters_hash_key on realtime.subscription
+  using btree (subscription_id, entity, realtime.filters_hash(filters), action_filter, COALESCE(selected_columns, '{}'::text[]));
 
 create trigger tr_check_filters
   before insert or update on realtime.subscription

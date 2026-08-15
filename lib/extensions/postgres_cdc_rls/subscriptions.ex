@@ -103,7 +103,8 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
         sub_tables
         on conflict
         -- coalesce needed: NULL != NULL in unique constraints; NULL selected_columns means all columns
-        (subscription_id, entity, filters, action_filter, coalesce(selected_columns, '{}'))
+        -- filters is matched through realtime.filters_hash so a long `in` list stays under the btree tuple limit
+        (subscription_id, entity, realtime.filters_hash(filters), action_filter, coalesce(selected_columns, '{}'))
         do update set
         claims = excluded.claims,
         created_at = now()
