@@ -487,6 +487,107 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
     end
   end
 
+  describe "filters: the operator has to be usable on the column type" do
+    setup :setup_tenant
+
+    setup %{conn: conn} do
+      Postgrex.query!(conn, "alter table public.test add column payload json, add column label varchar(32)", [])
+      :ok
+    end
+
+    test "an operator the column type has no implementation for is rejected", %{conn: conn} do
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "test",
+          "filter" => "payload=eq.1"
+        })
+
+      params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
+
+      assert {:error, {:subscription_insert_failed, msg}} =
+               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+
+      assert msg =~ "operator eq is not supported on column payload of type json"
+
+      assert %Postgrex.Result{rows: [[0]]} =
+               Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+    end
+
+    test "ilike is rejected on bytea, which has ~~ but no ~~*", %{conn: conn} do
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "test",
+          "filter" => "binary_data=ilike.x"
+        })
+
+      params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
+
+      assert {:error, {:subscription_insert_failed, msg}} =
+               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+
+      assert msg =~ "operator ilike is not supported on column binary_data of type bytea"
+    end
+
+    test "like is accepted on varchar, which resolves ~~ through text", %{conn: conn} do
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "test",
+          "filter" => "label=like.rele%"
+        })
+
+      params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
+
+      assert {:ok, [%Postgrex.Result{}]} =
+               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+
+      assert %Postgrex.Result{rows: [[1]]} =
+               Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+    end
+
+    test "a filter the column type does support still gates rows end to end", %{conn: conn} do
+      visible = UUID.uuid1()
+      hidden = UUID.uuid1()
+      slot_name = "test_varchar_like_#{:rand.uniform(999_999)}"
+
+      for {id, filter} <- [{visible, "label=like.rele%"}, {hidden, "label=like.draft%"}] do
+        {:ok, subscription_params} =
+          Subscriptions.parse_subscription_params(%{
+            "schema" => "public",
+            "table" => "test",
+            "filter" => filter
+          })
+
+        params_list = [%{claims: %{"role" => "anon"}, id: id, subscription_params: subscription_params}]
+
+        assert {:ok, [%Postgrex.Result{}]} =
+                 Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+      end
+
+      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json')", [slot_name])
+
+      try do
+        Postgrex.query!(conn, "insert into test (details, label) values ('hi', 'released')", [])
+
+        %{rows: rows} =
+          Postgrex.query!(
+            conn,
+            "select wal, subscription_ids from realtime.list_changes($1, $2, 100, 1048576)",
+            ["supabase_realtime_test", slot_name]
+          )
+
+        all_sub_ids = Enum.flat_map(rows, fn [_wal, sub_ids] -> sub_ids || [] end)
+
+        assert UUID.string_to_binary!(visible) in all_sub_ids
+        refute UUID.string_to_binary!(hidden) in all_sub_ids
+      after
+        Postgrex.query(conn, "SELECT pg_drop_replication_slot($1)", [slot_name])
+      end
+    end
+  end
+
   describe "filters: gating rows end to end (apply_rls)" do
     setup :setup_tenant
 
