@@ -811,5 +811,4 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
                      1000
     end
   end
-
 end

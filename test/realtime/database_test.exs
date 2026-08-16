@@ -22,7 +22,7 @@ defmodule Realtime.DatabaseTest do
   # Pure tests (DNS resolution, settings structs, pool-size math) never touch a tenant database,
   # so they skip the container checkout.
   defp maybe_checkout_tenant(%{without_db: true}), do: :ok
-  defp maybe_checkout_tenant(_context), do: %{tenant:  TestTenantDb.checkout_tenant()}
+  defp maybe_checkout_tenant(_context), do: %{tenant: TestTenantDb.checkout_tenant()}
 
   describe "check_tenant_connection/1" do
     setup context do
