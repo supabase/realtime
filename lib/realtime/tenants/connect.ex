@@ -181,12 +181,15 @@ defmodule Realtime.Tenants.Connect do
             log_error("UnableToConnectToTenantDatabase", "Unable to connect to tenant database", metadata)
             {:error, :tenant_database_unavailable}
         after
-          15_000 -> {:error, :initializing}
+          connection_ready_timeout() -> {:error, :initializing}
         end
     end
   after
     RealtimeWeb.Endpoint.unsubscribe(syn_topic(tenant_id))
   end
+
+  # How long a caller waits for a tenant connection to become ready before giving up.
+  defp connection_ready_timeout, do: Application.get_env(:realtime, :connect_connection_ready_timeout, 15_000)
 
   @doc """
   Connects to a tenant's database and stores the DBConnection in the process :syn metadata

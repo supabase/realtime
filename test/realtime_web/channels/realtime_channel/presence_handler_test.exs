@@ -21,6 +21,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
   setup [:initiate_tenant]
 
   describe "is_private?/1" do
+    @describetag without_db: true
     defmodule TestIsPrivate do
       import RealtimeWeb.RealtimeChannel.PresenceHandler
 
@@ -40,6 +41,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
   end
 
   describe "can_read_presence?/1" do
+    @describetag without_db: true
     defmodule TestCanReadPresence do
       import RealtimeWeb.RealtimeChannel.PresenceHandler
 
@@ -71,6 +73,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
   end
 
   describe "can_write_presence?/1" do
+    @describetag without_db: true
     defmodule TestCanWritePresence do
       import RealtimeWeb.RealtimeChannel.PresenceHandler
 
@@ -598,6 +601,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
   end
 
   describe "per-client rate limiting" do
+    @describetag without_db: true
     test "allows calls under the limit", %{tenant: tenant, topic: topic} do
       client_rate_limit = %{max_calls: 10, window_ms: 60_000, counter: 0, reset_at: nil}
       socket = socket_fixture(tenant, topic, random_string(), private?: false, client_rate_limit: client_rate_limit)
@@ -771,6 +775,16 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       assert {:ok, _socket} =
                PresenceHandler.handle(%{"event" => "track", "payload" => %{"call" => random_string()}}, nil, socket)
     end
+  end
+
+  # Guard-clause and per-client rate-limiting tests only inspect the socket struct, so they
+  # need a tenant struct but neither a migrated database nor a live Connect. Skip that setup.
+  defp initiate_tenant(%{without_db: true}) do
+    tenant = tenant_fixture()
+    # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
+    Realtime.Tenants.Cache.update_cache(tenant)
+
+    {:ok, tenant: tenant, topic: random_string()}
   end
 
   defp initiate_tenant(context) do

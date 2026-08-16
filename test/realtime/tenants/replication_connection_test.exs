@@ -15,11 +15,19 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
   @replication_slot_name "supabase_realtime_messages_replication_slot_test"
 
-  setup do
+  setup context do
     slot = Application.get_env(:realtime, :slot_name_suffix)
     on_exit(fn -> Application.put_env(:realtime, :slot_name_suffix, slot) end)
     Application.put_env(:realtime, :slot_name_suffix, "test")
 
+    maybe_checkout_tenant(context)
+  end
+
+  # Pure struct/binary tests (and those building their own tenant) never touch the context
+  # tenant/db_conn, so they skip the expensive tenant checkout + postgres_changes setup.
+  defp maybe_checkout_tenant(%{without_db: true}), do: :ok
+
+  defp maybe_checkout_tenant(_context) do
     tenant = TestTenantDb.checkout_tenant(run_migrations: true)
 
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
@@ -77,6 +85,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
   end
 
   describe "replication" do
+    @tag without_db: true
     test "fails if tenant connection is invalid" do
       tenant =
         tenant_fixture(%{
@@ -869,6 +878,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
   end
 
   describe "handle_result/2 for step :start_replication_slot" do
+    @describetag without_db: true
     test "returns disconnect when error has postgres map with message" do
       error = %Postgrex.Error{
         postgres: %{
@@ -907,6 +917,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       Process.exit(pid, :shutdown)
     end
 
+    @tag without_db: true
     test "returns nil if not exists" do
       assert ReplicationConnection.whereis(random_string()) == nil
     end
@@ -915,6 +926,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
   def handle_telemetry(event, measures, metadata, pid: pid), do: send(pid, {event, measures, metadata})
 
   describe "handle_data/2 for KeepAlive" do
+    @describetag without_db: true
     test "always sends standby_status when reply is :later" do
       wal_end = 1_000_000
       # KeepAlive binary: ?k + wal_end(64) + clock(64) + reply(8), reply=0 means :later
