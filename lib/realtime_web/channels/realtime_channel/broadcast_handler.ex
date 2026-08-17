@@ -6,6 +6,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
 
   import Phoenix.Socket, only: [assign: 3]
 
+  alias Realtime.FeatureFlags
   alias Realtime.Messages
   alias Realtime.Tenants
   alias RealtimeWeb.RealtimeChannel
@@ -177,31 +178,28 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   end
 
   @spec maybe_persist(Policies.t(), pid(), String.t(), String.t(), payload, ack_broadcast :: boolean()) ::
-          :ok | {:ok, map()}
+          :ok | :skip | {:ok, map()}
   defp maybe_persist(
          %Policies{persistence: %PersistencePolicies{write: true}},
          db_conn,
          tenant_id,
          topic,
          payload,
-         true = _ack_broadcast
+         ack_broadcast
        ) do
-    persist(db_conn, tenant_id, topic, payload)
-  end
+    if FeatureFlags.broadcast_persistence_enabled?(tenant_id) do
+      if ack_broadcast do
+        persist(db_conn, tenant_id, topic, payload)
+      else
+        Task.Supervisor.start_child(Realtime.TaskSupervisor, fn ->
+          persist(db_conn, tenant_id, topic, payload)
+        end)
 
-  defp maybe_persist(
-         %Policies{persistence: %PersistencePolicies{write: true}},
-         db_conn,
-         tenant_id,
-         topic,
-         payload,
-         false = _ack_broadcast
-       ) do
-    Task.Supervisor.start_child(Realtime.TaskSupervisor, fn ->
-      persist(db_conn, tenant_id, topic, payload)
-    end)
-
-    :ok
+        :ok
+      end
+    else
+      :skip
+    end
   end
 
   defp maybe_persist(_policies, _db_conn, _tenant_id, _topic, _payload, _ack_broadcast), do: :ok

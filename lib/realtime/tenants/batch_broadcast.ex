@@ -7,6 +7,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
   import Ecto.Changeset
 
   alias Realtime.Api.Tenant
+  alias Realtime.FeatureFlags
   alias Realtime.GenCounter
   alias Realtime.Messages
   alias Realtime.RateCounter
@@ -165,14 +166,16 @@ defmodule Realtime.Tenants.BatchBroadcast do
   end
 
   defp maybe_persist(%PersistencePolicies{write: true}, db_conn, tenant, events) do
-    Task.Supervisor.start_child(Realtime.TaskSupervisor, fn ->
-      Enum.each(events, fn message ->
-        case Messages.persist(db_conn, tenant.external_id, message.topic, message.event, message.payload) do
-          {:ok, _id} -> :ok
-          error -> log_error("UnableToPersistMessage", error)
-        end
+    if FeatureFlags.broadcast_persistence_enabled?(tenant.external_id) do
+      Task.Supervisor.start_child(Realtime.TaskSupervisor, fn ->
+        Enum.each(events, fn message ->
+          case Messages.persist(db_conn, tenant.external_id, message.topic, message.event, message.payload) do
+            {:ok, _id} -> :ok
+            error -> log_error("UnableToPersistMessage", error)
+          end
+        end)
       end)
-    end)
+    end
 
     :ok
   end

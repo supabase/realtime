@@ -6,6 +6,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
 
   import Ecto.Query, only: [from: 2]
 
+  alias Realtime.FeatureFlags
   alias Realtime.Api.Message
   alias Realtime.Database
   alias Realtime.GenCounter
@@ -399,6 +400,8 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
 
   describe "message persistence" do
     setup %{tenant: tenant} do
+      stub(FeatureFlags, :broadcast_persistence_enabled?, fn _tenant_id -> true end)
+
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
       Tenants.create_messages_partitions(db_conn)
 

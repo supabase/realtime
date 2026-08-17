@@ -7,6 +7,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
   setup :set_mimic_from_context
 
+  import Ecto.Query, only: [from: 2]
   import Generators
   import ExUnit.CaptureLog
 
@@ -91,10 +92,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     @tag policies: [:authenticated_read_matching_user_sub, :authenticated_write_matching_user_sub], sub: UUID.generate()
     test "with valid sub, is able to send message",
          %{topic: topic, tenant: tenant, db_conn: db_conn, sub: sub, serializer: serializer} do
-      stub(FeatureFlags, :enabled?, fn
-        "broadcast_persistence", _tenant_id -> true
-        _flag, _tenant_id -> false
-      end)
+      stub(FeatureFlags, :broadcast_persistence_enabled?, fn _tenant_id -> true end)
 
       socket =
         socket_fixture(tenant, topic,
@@ -135,10 +133,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     @tag policies: [:read_matching_user_role, :write_matching_user_role], role: "anon"
     test "with valid role, is able to send message",
          %{topic: topic, tenant: tenant, db_conn: db_conn, serializer: serializer} do
-      stub(FeatureFlags, :enabled?, fn
-        "broadcast_persistence", _tenant_id -> true
-        _flag, _tenant_id -> false
-      end)
+      stub(FeatureFlags, :broadcast_persistence_enabled?, fn _tenant_id -> true end)
 
       socket =
         socket_fixture(tenant, topic,
@@ -472,6 +467,12 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
   end
 
   describe "broadcast persistence" do
+    setup do
+      stub(FeatureFlags, :broadcast_persistence_enabled?, fn _tenant_id -> true end)
+
+      :ok
+    end
+
     test "broadcast authorized to persist is stored and acks with its id", %{
       topic: topic,
       tenant: tenant,
@@ -499,7 +500,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
                   payload: ^expected_payload,
                   skip_broadcast: true
                 }
-              ]} = Repo.all(db_conn, Message, Message)
+              ]} = Repo.all(db_conn, messages_for(topic), Message)
     end
 
     test "broadcast without ack does not wait for the message to be persisted", %{
@@ -521,7 +522,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       assert eventually(fn ->
                match?(
                  {:ok, [%Message{topic: ^topic, event: "test", skip_broadcast: true}]},
-                 Repo.all(db_conn, Message, Message)
+                 Repo.all(db_conn, messages_for(topic), Message)
                )
              end)
     end
@@ -554,7 +555,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
                   payload: %{"a" => "b"},
                   skip_broadcast: true
                 }
-              ]} = Repo.all(db_conn, Message, Message)
+              ]} = Repo.all(db_conn, messages_for(topic), Message)
     end
 
     test "V2 json user broadcast with an invalid user payload is delivered but not persisted", %{
@@ -579,7 +580,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       assert_receive {:socket_push, _encoding, _data}
       assert log =~ "UnableToPersistMessage"
-      assert {:ok, []} = Repo.all(db_conn, Message, Message)
+      assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
 
     test "V2 binary user broadcast authorized to persist is stored as binary_payload", %{
@@ -611,7 +612,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
                   private: true,
                   skip_broadcast: true
                 }
-              ]} = Repo.all(db_conn, Message, Message)
+              ]} = Repo.all(db_conn, messages_for(topic), Message)
     end
 
     test "unsupported payload shape is delivered, not persisted, and logged", %{
@@ -633,7 +634,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         end)
 
       assert log =~ "UnableToPersistMessage"
-      assert {:ok, []} = Repo.all(db_conn, Message, Message)
+      assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
 
     test "persistence failure still delivers the broadcast and acks ok", %{
@@ -658,7 +659,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       assert_receive {:socket_push, :text, _data}
       assert log =~ "UnableToPersistMessage"
-      assert {:ok, []} = Repo.all(db_conn, Message, Message)
+      assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
 
     test "broadcast without a persistence policy is sent but not stored", %{
@@ -676,7 +677,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       assert {:reply, :ok, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
 
-      assert {:ok, []} = Repo.all(db_conn, Message, Message)
+      assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
 
     test "unauthorized private broadcast is not stored", %{
@@ -688,7 +689,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       assert {:noreply, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
 
-      assert {:ok, []} = Repo.all(db_conn, Message, Message)
+      assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
 
     test "public channel broadcasts and acks but is not stored", %{
@@ -700,7 +701,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       assert {:reply, :ok, _socket} = BroadcastHandler.handle(@payload, nil, socket)
 
-      assert {:ok, []} = Repo.all(db_conn, Message, Message)
+      assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
 
     test "public channel without a database connection still broadcasts and acks", %{
@@ -794,4 +795,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
   defp message(Phoenix.Socket.V1.JSONSerializer, topic, payload) do
     %{"event" => "broadcast", "payload" => payload, "ref" => nil, "topic" => topic}
   end
+
+  defp messages_for(topic), do: from(m in Message, where: m.topic == ^topic)
 end
