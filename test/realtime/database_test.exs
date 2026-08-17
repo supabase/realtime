@@ -84,14 +84,25 @@ defmodule Realtime.DatabaseTest do
 
     @tag db_pool: 3
     test "durable pool opens the configured number of realtime_connect connections", %{tenant: tenant} do
-      assert {:ok, conn, _migrations_ran} = Database.check_tenant_connection(tenant)
+      # pg_stat_activity is server-wide, so draining 'realtime_connect' backends left
+      # behind by earlier tests can inflate the count. Terminate any lingering ones
+      # (using a separate connection that is not counted) to start from a clean slate.
+      {:ok, admin} = Database.connect(tenant, "realtime_test", :stop)
+
+      Postgrex.query!(
+        admin,
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
+        []
+      )
+
+      assert {:ok, _conn, _migrations_ran} = Database.check_tenant_connection(tenant)
 
       # Postgrex opens the pool connections asynchronously, so give it a moment
       # to bring all of them up.
       assert eventually(fn ->
                %{rows: [[count]]} =
                  Postgrex.query!(
-                   conn,
+                   admin,
                    "SELECT count(*)::int FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
                    []
                  )
