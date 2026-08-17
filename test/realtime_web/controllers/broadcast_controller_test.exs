@@ -525,6 +525,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
       tenant: tenant
     } do
       enable_broadcast_persistence_flag!()
+      stub(GenCounter, :add, fn _ -> :ok end)
 
       start_link_supervised!(
         {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},

@@ -547,7 +547,9 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       assert :ok = BatchBroadcast.broadcast(auth_params, tenant, messages, false)
 
-      assert {:ok, stored} = Repo.all(db_conn, messages_for(topic), Message)
+      assert eventually(fn -> match?({:ok, [_, _]}, Repo.all(db_conn, messages_for(topic), Message)) end)
+
+      {:ok, stored} = Repo.all(db_conn, messages_for(topic), Message)
       assert Enum.map(stored, & &1.event) |> Enum.sort() == ["event1", "event2"]
       assert Enum.all?(stored, &match?(%Message{extension: :broadcast, private: true, skip_broadcast: true}, &1))
     end
