@@ -27,8 +27,10 @@ defmodule Realtime.Application do
   end
 
   def start(_type, _args) do
-    check_for_local_ipv6_host()
-    opentelemetry_setup()
+    if Application.get_env(:logflare_logger_backend, :url) do
+      Logger.add_backend(LogflareLogger.HttpBackend)
+    end
+
     Realtime.LogFilter.setup()
     primary_config = :logger.get_primary_config()
 
@@ -38,6 +40,9 @@ defmodule Realtime.Application do
         :metadata,
         Enum.into([region: System.get_env("REGION"), cluster: System.get_env("CLUSTER")], primary_config.metadata)
       )
+
+    opentelemetry_setup()
+    check_for_local_ipv6_host()
 
     topologies = Application.get_env(:libcluster, :topologies) || []
 
@@ -110,6 +115,7 @@ defmodule Realtime.Application do
         Realtime.TenantPromEx,
         {Realtime.Telemetry.Logger, handler_id: "telemetry-logger"},
         RealtimeWeb.Telemetry,
+        Realtime.GenRpcPubSub.RegionRings,
         {Cluster.Supervisor, [topologies, [name: Realtime.ClusterSupervisor]]},
         {Phoenix.PubSub,
          name: Realtime.PubSub, pool_size: 10, adapter: pubsub_adapter(), broadcast_pool_size: broadcast_pool_size},

@@ -7,6 +7,13 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
 
   import ExUnit.CaptureLog
 
+  # Booting a peer node is expensive (~seconds) and generic across these tests, so start one
+  # shared node for the whole module and reuse it. async: false already serializes the module.
+  setup_all do
+    {:ok, node} = Clustered.start()
+    %{node: node}
+  end
+
   alias Realtime.Database
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
@@ -230,8 +237,8 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
     end
   end
 
-  defp remote_rls_context(context) do
-    tenant = Containers.checkout_tenant_unboxed(run_migrations: true)
+  defp remote_rls_context(%{node: node} = context) do
+    tenant = TestTenantDb.checkout_tenant_unboxed(run_migrations: true)
 
     {:ok, local_db_conn} = Database.connect(tenant, "realtime_test", :stop)
     topic = random_string()
@@ -252,7 +259,6 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
     Realtime.Tenants.create_messages_partitions(local_db_conn)
     create_rls_policies(local_db_conn, context.policies, %{topic: topic})
 
-    {:ok, node} = Clustered.start()
     region = Tenants.region(tenant)
     {:ok, db_conn} = :erpc.call(node, Connect, :connect, [tenant.external_id, region])
 

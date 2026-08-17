@@ -15,6 +15,8 @@ defmodule RealtimeWeb.InspectorLive.Index do
     def changeset(form, params \\ %{}) do
       form
       |> cast(params, [:event, :payload])
+      # Broadcast under the name as typed, so a trailing space would miss every listener.
+      |> update_change(:event, &String.trim/1)
       |> validate_required([:event, :payload])
       |> validate_change(:payload, fn :payload, payload ->
         case Jason.decode(payload) do
@@ -35,15 +37,12 @@ defmodule RealtimeWeb.InspectorLive.Index do
       |> assign(changeset: changeset)
       |> assign(page_title: "Inspector - Supabase Realtime")
       |> assign(health: health_idle())
-      |> assign(share_url: nil)
 
     {:ok, socket}
   end
 
   @impl true
   def handle_params(params, _url, socket) do
-    # Only the non-secret connection shape lives in the URL; the component merges these onto its
-    # existing changeset so a typed token/bearer isn't wiped on every validate round-trip.
     send_update(ConnComponent, id: :conn, url_params: params)
 
     {:noreply, socket}
@@ -99,11 +98,20 @@ defmodule RealtimeWeb.InspectorLive.Index do
           end)
           |> update_health(:broadcast, fn _ -> %{status: :active} end)
 
+        "retrying" ->
+          socket
+          |> update_health(:channel, &%{&1 | status: :retrying, reason: params["reason"]})
+          |> drop_subscriptions()
+
         "errored" ->
-          update_health(socket, :channel, &%{&1 | status: :errored, reason: params["reason"]})
+          socket
+          |> update_health(:channel, &%{&1 | status: :errored, reason: params["reason"]})
+          |> drop_subscriptions()
 
         "timed_out" ->
-          update_health(socket, :channel, &%{&1 | status: :timed_out, reason: nil})
+          socket
+          |> update_health(:channel, &%{&1 | status: :timed_out, reason: params["reason"]})
+          |> drop_subscriptions()
 
         "closed" ->
           assign(socket, :health, health_idle())
@@ -131,9 +139,12 @@ defmodule RealtimeWeb.InspectorLive.Index do
     {:noreply, update_health(socket, :postgres, &%{&1 | status: :error, reason: reason})}
   end
 
-  @impl true
-  def handle_info({:share_url, url}, socket) do
-    {:noreply, assign(socket, share_url: url)}
+  defp drop_subscriptions(socket) do
+    socket
+    |> update_health(:transport, &%{&1 | rtt_ms: nil})
+    |> update_health(:broadcast, fn _ -> %{status: :idle} end)
+    |> update_health(:presence, fn _ -> %{status: :idle, count: 0} end)
+    |> update_health(:postgres, &%{&1 | status: :idle, reason: nil})
   end
 
   defp update_health(socket, key, fun) do
@@ -156,22 +167,48 @@ defmodule RealtimeWeb.InspectorLive.Index do
 
   @doc false
   def status_variant(status) when status in [:open, :joined, :active, :synced, :subscribed], do: :success
-  def status_variant(status) when status in [:connecting, :joining], do: :info
+  def status_variant(status) when status in [:connecting, :joining, :retrying], do: :info
   def status_variant(status) when status in [:error, :errored, :timed_out], do: :error
   def status_variant(_), do: :neutral
 
   @doc false
-  def status_pulse?(status), do: status in [:connecting, :joining]
+  def status_pulse?(status), do: status in [:connecting, :joining, :retrying]
 
   @doc false
-  def channel_label(%{status: :joined, host: host}), do: "Connected to #{host}"
-  def channel_label(%{status: :joining}), do: "Connecting..."
-  def channel_label(%{status: :errored, reason: reason}), do: "Error: #{reason}"
+  def channel_label(%{status: :joined, host: host}), do: "Connected to #{host_label(host)}"
+  def channel_label(%{status: :joining}), do: "Connecting"
+
+  def channel_label(%{status: :retrying}), do: "Reconnecting"
   def channel_label(%{status: :timed_out}), do: "Timed out"
+  def channel_label(%{status: :errored, reason: nil}), do: "Connection failed"
+  def channel_label(%{status: :errored, reason: reason}), do: reason
   def channel_label(_), do: "Not connected"
 
   @doc false
-  def postgres_label(%{status: :subscribed, schema: schema, table: table}), do: "Subscribed: #{schema}.#{table}"
-  def postgres_label(%{status: :error, reason: reason}), do: "Error: #{reason}"
-  def postgres_label(_), do: "Not subscribed"
+  def channel_detail(%{status: :retrying, reason: reason}) when is_binary(reason), do: reason
+  def channel_detail(_), do: nil
+
+  defp host_label(nil), do: "host"
+
+  defp host_label(host) do
+    host |> String.replace(~r{^\w+://}, "") |> String.trim_trailing("/")
+  end
+
+  @doc false
+  def postgres_label(%{status: :subscribed, schema: schema, table: table}), do: "#{schema}.#{table}"
+  def postgres_label(%{status: :error}), do: "error"
+  def postgres_label(_), do: "off"
+
+  @doc false
+  def presence_label(%{status: :synced, count: count}), do: "#{count} online"
+  def presence_label(_), do: "off"
+
+  @doc false
+  def subscription_class(status) do
+    case status_variant(status) do
+      :success -> "font-medium text-brand-700 dark:text-brand-300"
+      :error -> "font-medium text-red-700 dark:text-red-400"
+      _ -> "font-medium text-gray-400 dark:text-neutral-500"
+    end
+  end
 end

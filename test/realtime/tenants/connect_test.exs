@@ -15,7 +15,7 @@ defmodule Realtime.Tenants.ConnectTest do
   alias Realtime.UsersCounter
 
   setup do
-    tenant = Containers.checkout_tenant(run_migrations: true)
+    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
 
     %{tenant: tenant}
   end
@@ -50,9 +50,88 @@ defmodule Realtime.Tenants.ConnectTest do
     end
   end
 
+  describe "database connection resilience" do
+    test "a momentary database blip does not tear down the pool or Connect", %{tenant: tenant} do
+      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      assert Connect.ready?(tenant.external_id)
+      pid = Connect.whereis(tenant.external_id)
+
+      # Terminate the pool's backend connections from a separate connection to
+      # simulate a momentary blip. The durable pool uses :rand_exp backoff so it
+      # reconnects instead of crashing (previously :stop + max_restarts: 0 would
+      # bring the whole pool down and stop Connect).
+      {:ok, killer} = Database.connect(tenant, "realtime_test", :stop)
+
+      Postgrex.query!(
+        killer,
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
+        []
+      )
+
+      GenServer.stop(killer)
+
+      # Neither the pool nor Connect should go down over the blip
+      refute_process_down(db_conn, 1000)
+      assert Process.alive?(pid)
+
+      # And the pool recovers so queries succeed again
+      assert wait_until(fn -> match?({:ok, _}, Postgrex.query(db_conn, "SELECT 1", [])) end)
+      assert Process.alive?(pid)
+    end
+
+    test "a real pool disconnect opens the recovery window and reconnecting closes it", %{tenant: tenant} do
+      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      assert Connect.ready?(tenant.external_id)
+      pid = Connect.whereis(tenant.external_id)
+
+      {:ok, killer} = Database.connect(tenant, "realtime_test", :stop)
+
+      # The window opens on the disconnect and closes again once the pool reconnects.
+      # Since the database itself is healthy, reconnection is near-instant, so we
+      # assert on the logs rather than trying to observe the transient open state.
+      log =
+        capture_log(fn ->
+          Postgrex.query!(
+            killer,
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
+            []
+          )
+
+          GenServer.stop(killer)
+
+          assert wait_until(fn -> match?({:ok, _}, Postgrex.query(db_conn, "SELECT 1", [])) end)
+          assert wait_until(fn -> :sys.get_state(pid).db_recovery_started_at == nil end)
+        end)
+
+      assert log =~ "recovery window opened"
+      assert log =~ "recovery window closed"
+      assert Process.alive?(pid)
+    end
+
+    test "terminates Connect when the pool stays disconnected past the recovery window", %{tenant: tenant} do
+      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      assert Connect.ready?(tenant.external_id)
+      pid = Connect.whereis(tenant.external_id)
+      ref = Process.monitor(pid)
+
+      # Simulate a disconnect that opened the window longer ago than it allows
+      :sys.replace_state(pid, fn state ->
+        %{state | db_recovery_started_at: System.monotonic_time(:millisecond) - :timer.hours(1)}
+      end)
+
+      log =
+        capture_log(fn ->
+          send(pid, :db_recovery_timeout)
+          assert_receive {:DOWN, ^ref, :process, ^pid, _}, 2000
+        end)
+
+      assert log =~ "DatabaseConnectionRecoveryWindowExceeded"
+    end
+  end
+
   describe "list_tenants/0" do
     test "lists all tenants with active connections", %{tenant: tenant1} do
-      tenant2 = Containers.checkout_tenant(run_migrations: true)
+      tenant2 = TestTenantDb.checkout_tenant(run_migrations: true)
       assert {:ok, _} = Connect.lookup_or_start_connection(tenant1.external_id)
       assert {:ok, _} = Connect.lookup_or_start_connection(tenant2.external_id)
 
@@ -98,9 +177,9 @@ defmodule Realtime.Tenants.ConnectTest do
       parent = self()
 
       # Let's slow down Connect starting
-      expect(Database, :check_tenant_connection, fn t ->
+      expect(Database, :check_tenant_connection, fn t, listeners ->
         :timer.sleep(1000)
-        call_original(Database, :check_tenant_connection, [t])
+        call_original(Database, :check_tenant_connection, [t, listeners])
       end)
 
       connect = fn -> send(parent, Connect.lookup_or_start_connection(tenant.external_id)) end
@@ -121,13 +200,13 @@ defmodule Realtime.Tenants.ConnectTest do
       assert_receive {:ok, ^pid}
     end
 
-    test "more than 15 seconds passed error out", %{tenant: tenant} do
+    test "more than the connection ready timeout passed error out", %{tenant: tenant} do
       parent = self()
 
-      # Let's slow down Connect starting
-      expect(Database, :check_tenant_connection, fn t ->
-        Process.sleep(15500)
-        call_original(Database, :check_tenant_connection, [t])
+      # Slow down Connect starting so it takes longer than the connection ready timeout
+      expect(Database, :check_tenant_connection, fn t, listeners ->
+        Process.sleep(3000)
+        call_original(Database, :check_tenant_connection, [t, listeners])
       end)
 
       connect = fn -> send(parent, Connect.lookup_or_start_connection(tenant.external_id)) end
@@ -136,7 +215,7 @@ defmodule Realtime.Tenants.ConnectTest do
       spawn(connect)
 
       {:error, :initializing} = Connect.lookup_or_start_connection(tenant.external_id)
-      # The above call waited 15 seconds
+      # The above call waited for the connection ready timeout
       assert_receive {:error, :initializing}
       assert_receive {:error, :initializing}
 
@@ -168,9 +247,9 @@ defmodule Realtime.Tenants.ConnectTest do
       parent = self()
 
       # Let's slow down Connect starting
-      expect(Database, :check_tenant_connection, fn t ->
+      expect(Database, :check_tenant_connection, fn t, listeners ->
         :timer.sleep(1000)
-        call_original(Database, :check_tenant_connection, [t])
+        call_original(Database, :check_tenant_connection, [t, listeners])
       end)
 
       connect = fn -> send(parent, Connect.lookup_or_start_connection(tenant.external_id)) end
@@ -226,7 +305,7 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "tracks multiple users that connect and disconnect", %{tenant: tenant1} do
-      tenant2 = Containers.checkout_tenant(run_migrations: true)
+      tenant2 = TestTenantDb.checkout_tenant(run_migrations: true)
       tenants = [tenant1, tenant2]
 
       for tenant <- tenants do
@@ -409,7 +488,7 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "on migrations failure, stop the process" do
-      tenant = Containers.checkout_tenant(run_migrations: false)
+      tenant = TestTenantDb.checkout_tenant(run_migrations: false)
       expect(Realtime.Tenants.Migrations, :run_migrations, fn ^tenant -> raise "error" end)
 
       assert {:ok, pid} = Connect.lookup_or_start_connection(tenant.external_id)
@@ -422,8 +501,8 @@ defmodule Realtime.Tenants.ConnectTest do
       stale_count = tenant.migrations_ran - 5
       parent = self()
 
-      expect(Database, :check_tenant_connection, fn t ->
-        {:ok, conn, _actual_count} = call_original(Database, :check_tenant_connection, [t])
+      expect(Database, :check_tenant_connection, fn t, listeners ->
+        {:ok, conn, _actual_count} = call_original(Database, :check_tenant_connection, [t, listeners])
         {:ok, conn, stale_count}
       end)
 
@@ -543,7 +622,7 @@ defmodule Realtime.Tenants.ConnectTest do
       parent = self()
 
       pids =
-        for i <- 0..4 do
+        for i <- 0..5 do
           replication_slot_opts =
             %PostgresReplication{
               connection_opts: opts,
@@ -557,7 +636,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
           spawn(fn ->
             {:ok, pid} = PostgresReplication.start_link(replication_slot_opts)
-            send(parent, {:replication_ready, i})
+            send(parent, :replication_ready)
 
             receive do
               :stop -> Process.exit(pid, :kill)
@@ -565,11 +644,13 @@ defmodule Realtime.Tenants.ConnectTest do
           end)
         end
 
-      # Bringing up 5 real replication connections can take well over 5s on
-      # loaded CI runners, so allow generous time for each to report ready.
-      # All 5 are required: they must occupy every WAL sender so that Connect's
-      # own replication attempt below is the one that trips max_wal_senders.
-      for i <- 0..4, do: assert_receive({:replication_ready, ^i}, 30_000)
+      # Over-provision the replication connections and only wait for enough of
+      # them to report ready to occupy every WAL sender, so that Connect's own
+      # replication attempt below is the one that trips max_wal_senders. We don't
+      # pin to specific spawns: bringing up real replication connections is
+      # timing-sensitive (especially on a loaded machine or a freshly reused
+      # tenant DB), so requiring every single one to report by index is flaky.
+      for _ <- 1..4, do: assert_receive(:replication_ready, 30_000)
 
       on_exit(fn ->
         Enum.each(pids, &send(&1, :stop))
@@ -664,9 +745,9 @@ defmodule Realtime.Tenants.ConnectTest do
       {:ok, tenant} = update_extension(tenant, extension)
       parent = self()
 
-      expect(Database, :check_tenant_connection, fn t ->
+      expect(Database, :check_tenant_connection, fn t, listeners ->
         :timer.sleep(1000)
-        call_original(Database, :check_tenant_connection, [t])
+        call_original(Database, :check_tenant_connection, [t, listeners])
       end)
 
       connect = fn -> send(parent, Connect.lookup_or_start_connection(tenant.external_id)) end

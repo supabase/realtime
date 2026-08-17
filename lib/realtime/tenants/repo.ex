@@ -75,10 +75,17 @@ defmodule Realtime.Tenants.Repo do
         ) ::
           {:ok, [struct()]} | {:error, any()} | Ecto.Changeset.t()
   def insert_all_entries(conn, changesets, result_struct, opts \\ []) do
-    with {:ok, {query, args}} <- insert_all_query_from_changeset(changesets) do
-      conn
-      |> run_query_with_trap(query, args, opts)
-      |> result_to_structs(result_struct)
+    {returning?, opts} = Keyword.pop(opts, :returning, true)
+
+    with {:ok, {query, args}} <- insert_all_query_from_changeset(changesets, returning: returning?) do
+      result = run_query_with_trap(conn, query, args, opts)
+
+      if returning? do
+        result_to_structs(result, result_struct)
+      else
+        with {:ok, %Postgrex.Result{}} <- result,
+             do: {:ok, Enum.map(changesets, &Ecto.Changeset.apply_changes/1)}
+      end
     end
   end
 
@@ -164,7 +171,7 @@ defmodule Realtime.Tenants.Repo do
     {:ok, {"INSERT INTO #{table} #{header} VALUES (#{arg_index})#{returning}", rows}}
   end
 
-  defp insert_all_query_from_changeset(changesets) do
+  defp insert_all_query_from_changeset(changesets, opts) do
     invalid = Enum.filter(changesets, &(!&1.valid?))
 
     if invalid != [] do
@@ -211,7 +218,8 @@ defmodule Realtime.Tenants.Repo do
 
       table = "\"#{prefix}\".\"#{source}\""
       header = "(#{Enum.map_join(header, ",", &"\"#{&1}\"")})"
-      {:ok, {"INSERT INTO #{table} #{header} VALUES #{args_index} RETURNING *", rows}}
+      returning = if Keyword.get(opts, :returning, true), do: " RETURNING *", else: ""
+      {:ok, {"INSERT INTO #{table} #{header} VALUES #{args_index}#{returning}", rows}}
     end
   end
 

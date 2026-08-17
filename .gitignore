@@ -25,6 +25,11 @@ realtime-*.tar
 # Ignore assets that are produced by build tools.
 /priv/static/assets/
 
+# Ignore `mix phx.digest` output (digested copies, gzipped copies and the manifest).
+/priv/static/cache_manifest.json
+/priv/static/*.gz
+/priv/static/*-????????????????????????????????.*
+
 # Ignore Dialyzer .plt
 /priv/plts/*
 node_modules

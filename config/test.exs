@@ -47,6 +47,7 @@ config :realtime,
   node_balance_uptime_threshold_in_ms: 999_999_999_999,
   connect_error_backoff_ms: 100,
   channel_error_backoff_ms: 100,
+  connect_connection_ready_timeout: 2_000,
   max_gen_rpc_clients: 5,
   max_gen_rpc_call_clients: 1,
   metrics_pusher_req_options: [
@@ -55,13 +56,22 @@ config :realtime,
 
 # Print nothing during tests unless captured or a test failure happens
 config :logger,
-  backends: [],
+  default_handler: false,
   level: :info
 
 # Configures Elixir's Logger
-config :logger, :console,
+config :logger, :default_formatter,
   format: "$time $metadata[$level] $message\n",
-  metadata: [:error_code, :request_id, :project, :external_id, :application_name, :sub, :iss, :exp]
+  metadata: [
+    :error_code,
+    :request_id,
+    :project,
+    :external_id,
+    :application_name,
+    :sub,
+    :iss,
+    :exp
+  ]
 
 config :opentelemetry,
   span_processor: :simple,

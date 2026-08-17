@@ -35,8 +35,6 @@ defmodule Forum.Muster.Scope do
   @default_rebalance_gather_timeout_ms 15_000
   @default_shards_ready_timeout_ms 5_000
   @singleton_promotion_timeout_multiplier 3
-  @ring_replicas 128
-  @ring_depth 2
 
   # A vacancy tombstone is kept this many multiples of rpc_timeout_ms before the
   # GC sweep reaps it: long enough that an orphaned, un-cancelled :occupied/
@@ -482,9 +480,7 @@ defmodule Forum.Muster.Scope do
   def ring_child_spec(scope) do
     %{
       id: :muster_ring,
-      start:
-        {Ring, :start_link,
-         [[name: ring_name(scope), depth: @ring_depth, replicas: @ring_replicas]]}
+      start: {Ring, :start_link, [[{:name, ring_name(scope)} | Forum.Muster.ring_config()]]}
     }
   end
 
@@ -549,7 +545,10 @@ defmodule Forum.Muster.Scope do
     # really has downsized to one node.
     :persistent_term.put({Forum.Muster, scope, :status}, :converging)
     # Cluster-view hash senders tag broadcasts with; router compares against its own.
-    :persistent_term.put({Forum.Muster, scope, :view_hash}, :erlang.phash2([node()]))
+    :persistent_term.put(
+      {Forum.Muster, scope, :view_hash},
+      Forum.Muster.view_hash_for_members([node()])
+    )
 
     Logger.info("Muster[#{node()}|#{scope}] Starting")
 
@@ -1135,11 +1134,37 @@ defmodule Forum.Muster.Scope do
 
   ## Rebalance
 
+  # Render a membership change as a compact delta for logging. A single
+  # transition can add and/or remove any number of nodes at once (recompute_members
+  # rederives the whole set), so both `added` and `removed` may be non-empty. The
+  # full before/after sets stay in the telemetry events; humans get signed counts
+  # plus the (usually tiny) diff instead of two walls of node names.
+  defp member_delta(from, to) do
+    added = to -- from
+    removed = from -- to
+
+    summary =
+      [added != [] && "+#{length(added)}", removed != [] && "-#{length(removed)}"]
+      |> Enum.filter(& &1)
+      |> case do
+        [] -> "no change"
+        parts -> Enum.join(parts, "/")
+      end
+
+    detail =
+      [added != [] && "added #{inspect(added)}", removed != [] && "removed #{inspect(removed)}"]
+      |> Enum.filter(& &1)
+      |> Enum.join(", ")
+
+    base = "#{length(to)} members (was #{length(from)}), #{summary}"
+    if detail == "", do: base, else: "#{base}: #{detail}"
+  end
+
   defp do_rebalance(state, new_members) do
     ring = ring_name(state.scope)
 
     Logger.info(
-      "Muster[#{node()}|#{state.scope}] rebalance start: members #{inspect(state.members)} -> #{inspect(new_members)} (view_hash #{:erlang.phash2(new_members)})"
+      "Muster[#{node()}|#{state.scope}] rebalance start: #{member_delta(state.members, new_members)} (view_hash #{Forum.Muster.view_hash_for_members(new_members)})"
     )
 
     tp(:muster_rebalance_start, %{
@@ -1147,7 +1172,7 @@ defmodule Forum.Muster.Scope do
       node: node(),
       from: state.members,
       to: new_members,
-      view_hash: :erlang.phash2(new_members)
+      view_hash: Forum.Muster.view_hash_for_members(new_members)
     })
 
     # 1) Flip status to :rebalancing BEFORE updating the ring. Callers reading
@@ -1155,7 +1180,11 @@ defmodule Forum.Muster.Scope do
     #    reset: peers' already-announced views stay and are re-evaluated against
     #    the new hash by update_status at the end.
     :persistent_term.put({Forum.Muster, state.scope, :status}, :rebalancing)
-    :persistent_term.put({Forum.Muster, state.scope, :view_hash}, :erlang.phash2(new_members))
+
+    :persistent_term.put(
+      {Forum.Muster, state.scope, :view_hash},
+      Forum.Muster.view_hash_for_members(new_members)
+    )
 
     # 2) Atomically replace the node set; this bumps the ring's generation. After
     #    this call: find_node = NEW routers; find_historical_node(_, _, 1) = OLD.
@@ -1268,7 +1297,7 @@ defmodule Forum.Muster.Scope do
       end)
     end)
 
-    view_hash = :erlang.phash2(new_members)
+    view_hash = Forum.Muster.view_hash_for_members(new_members)
 
     Enum.each(remote_targets, fn {router_node, groups, function} ->
       spawn_rpc_worker(
@@ -1393,7 +1422,7 @@ defmodule Forum.Muster.Scope do
     end)
   end
 
-  defp own_view_hash(state), do: :erlang.phash2(state.members)
+  defp own_view_hash(state), do: Forum.Muster.view_hash_for_members(state.members)
 
   # Newest-seq-wins: seqs are per-source monotonic dispatch stamps, so the entry
   # with the highest seq is the source's causally-latest announcement even when
@@ -1595,7 +1624,11 @@ defmodule Forum.Muster.Scope do
   defp begin_view_change(state, target) do
     round_seq = next_seq()
     :persistent_term.put({Forum.Muster, state.scope, :status}, :rebalancing)
-    :persistent_term.put({Forum.Muster, state.scope, :view_hash}, :erlang.phash2(target))
+
+    :persistent_term.put(
+      {Forum.Muster, state.scope, :view_hash},
+      Forum.Muster.view_hash_for_members(target)
+    )
 
     # Old-view members still connected. A member that has already dropped off
     # distribution (a departing node) is excluded: it can no longer be a stale
@@ -1604,7 +1637,7 @@ defmodule Forum.Muster.Scope do
     audience = Enum.filter(state.members -- [node()], &(&1 in Node.list()))
 
     Logger.info(
-      "Muster[#{node()}|#{state.scope}] view-change prepare: #{inspect(state.members)} -> #{inspect(target)}, preparing #{inspect(audience)}"
+      "Muster[#{node()}|#{state.scope}] view-change prepare: #{member_delta(state.members, target)}, preparing #{inspect(audience)}"
     )
 
     tp(:muster_view_prepare, %{

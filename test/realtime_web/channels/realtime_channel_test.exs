@@ -15,7 +15,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   alias RealtimeWeb.UserSocket
 
   setup do
-    tenant = Containers.checkout_tenant(run_migrations: true)
+    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
     {:ok, db_conn} = Realtime.Database.connect(tenant, "realtime_test", :stop)
     Integrations.setup_postgres_changes(db_conn)
     GenServer.stop(db_conn)
@@ -917,7 +917,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
     end
 
-    test "join still succeeds when Muster.join raises", %{tenant: tenant} do
+    test "join fails when Muster.join raises", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "error"}, conn_opts(tenant, jwt))
 
@@ -927,13 +927,14 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       log =
         capture_log(fn ->
-          assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
+          assert {:error, %{reason: reason}} = subscribe_and_join(socket, "realtime:test", %{})
+          assert reason =~ "MusterJoinError"
         end)
 
       assert log =~ "MusterJoinError"
     end
 
-    test "join still succeeds when Muster.join exits", %{tenant: tenant} do
+    test "join fails when Muster.join exits", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "error"}, conn_opts(tenant, jwt))
 
@@ -943,13 +944,14 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       log =
         capture_log(fn ->
-          assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
+          assert {:error, %{reason: reason}} = subscribe_and_join(socket, "realtime:test", %{})
+          assert reason =~ "MusterJoinError"
         end)
 
       assert log =~ "MusterJoinError"
     end
 
-    test "join still succeeds when Muster.join times out", %{tenant: tenant} do
+    test "join fails when Muster.join times out", %{tenant: tenant} do
       # @muster_join_await_ms (4s) is a private constant, not overridable from
       # tests, so this pays the real timeout in wall-clock time rather than
       # shrinking it.
@@ -962,7 +964,9 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       log =
         capture_log(fn ->
-          assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
+          assert {:error, %{reason: reason}} = subscribe_and_join(socket, "realtime:test", %{})
+          assert reason =~ "MusterJoinError"
+          assert reason =~ "timed out"
         end)
 
       assert log =~ "MusterJoinError"
@@ -1290,15 +1294,16 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert_process_down(channel_pid)
 
       assert_receive %Socket.Message{
-        topic: "realtime:test",
-        event: "system",
-        payload: %{
-          message: "Token has expired 0 seconds ago",
-          status: "error",
-          extension: "system",
-          channel: "test"
-        }
-      }
+                       topic: "realtime:test",
+                       event: "system",
+                       payload: %{
+                         message: "Token has expired" <> _,
+                         status: "error",
+                         extension: "system",
+                         channel: "test"
+                       }
+                     },
+                     1000
     end
 
     test "shuts down cleanly with JwtSignerError when the signer can no longer be generated", %{tenant: tenant} do

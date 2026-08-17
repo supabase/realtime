@@ -5,6 +5,8 @@ defmodule Forum.MusterTest do
   use ExUnit.Case, async: false
   use Mimic
 
+  import ExUnit.CaptureLog
+
   alias Forum.Muster
   alias Forum.Muster.Scope
   alias Forum.Adapter.ErlDist
@@ -460,6 +462,13 @@ defmodule Forum.MusterTest do
     test "occupied/4 inserts a {group, source_node} row", %{scope: scope} do
       assert :ok = Scope.occupied(scope, :rg1, :src@nowhere, 1, fake_pid())
       assert :src@nowhere in Scope.occupancy(scope, :rg1)
+    end
+
+    test "Muster.occupancy/2 exposes the raw router-held rows", %{scope: scope} do
+      assert :ok = Scope.occupied(scope, :rg_pub, :src@nowhere, 1, fake_pid())
+      # Public, non-barrier-gated read; delegates to Scope.occupancy/2.
+      assert Muster.occupancy(scope, :rg_pub) == Scope.occupancy(scope, :rg_pub)
+      assert :src@nowhere in Muster.occupancy(scope, :rg_pub)
     end
 
     test "vacant_batch/4 deletes multiple {group, source_node} rows", %{scope: scope} do
@@ -1364,6 +1373,33 @@ defmodule Forum.MusterTest do
 
       # The in-flight batch was normalized back to :vacant_queued for a later flush.
       assert :vacant_queued = wait_for_group_state(scope, g, :vacant_queued)
+    end
+
+    test "rebalance start log reports the membership delta, not the full sets",
+         %{scope: scope} do
+      # Growth: [node()] -> [node(), fake]. The log leads with signed counts and
+      # names only the added node -- never dumps the whole member set.
+      growth =
+        capture_log(fn ->
+          trigger_rebalance(scope, [node(), @fake_node])
+          Process.sleep(50)
+        end)
+
+      assert growth =~ "rebalance start: 2 members (was 1), +1: added [:#{@fake_node}]"
+      # The old format dumped both full member sets inline; the delta must not.
+      refute growth =~ "rebalance start: members ["
+
+      # Mixed: [node(), fake] -> [node(), fake2]. One in, one out in a single
+      # transition -- both sides show up in the delta.
+      mixed =
+        capture_log(fn ->
+          trigger_rebalance(scope, [node(), :fake2@nowhere])
+          Process.sleep(50)
+        end)
+
+      assert mixed =~ "rebalance start: 2 members (was 2), +1/-1:"
+      assert mixed =~ "added [:fake2@nowhere]"
+      assert mixed =~ "removed [:#{@fake_node}]"
     end
 
     # A re-join arriving while a vacant batch is in flight must NOT park behind

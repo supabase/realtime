@@ -1,5 +1,5 @@
 defmodule RealtimeWeb.InspectorLive.EventLogComponentTest do
-  use RealtimeWeb.ConnCase
+  use RealtimeWeb.ConnCase, async: true
   import Phoenix.LiveViewTest
 
   alias RealtimeWeb.InspectorLive.EventLogComponent
@@ -43,7 +43,7 @@ defmodule RealtimeWeb.InspectorLive.EventLogComponentTest do
       html = render_hook(log, "clear", %{})
 
       refute html =~ "will-be-cleared"
-      assert html =~ "No events yet"
+      assert html =~ "Nothing yet"
     end
 
     test "toggle_category flips the button's active styling", %{log: log} do
@@ -56,29 +56,96 @@ defmodule RealtimeWeb.InspectorLive.EventLogComponentTest do
     end
   end
 
-  describe "hidden?/3" do
-    test "hides entries from deactivated categories" do
-      entry = %{category: :presence, event: "join", payload: %{}}
-      active = MapSet.new([:broadcast, :postgres])
+  describe "default categories" do
+    test "channel traffic is on and client logging is off", %{log: log} do
+      [active] =
+        render(log)
+        |> Floki.parse_document!()
+        |> Floki.find("#event_log")
+        |> Floki.attribute("data-categories")
 
-      assert EventLogComponent.hidden?(entry, active, "")
-      refute EventLogComponent.hidden?(entry, MapSet.new([:presence]), "")
+      assert active |> String.split(",") |> Enum.sort() == ~w(broadcast postgres presence system)
     end
 
-    test "hides entries that don't match the search term" do
-      entry = %{category: :broadcast, event: "cursor-move", payload: %{"x" => 1}}
-      active = MapSet.new([:broadcast])
+    test "toggling a category updates what the browser filter is told to show", %{log: log} do
+      html = render_hook(log, "toggle_category", %{"category" => "transport"})
 
-      refute EventLogComponent.hidden?(entry, active, "cursor")
-      refute EventLogComponent.hidden?(entry, active, "")
-      assert EventLogComponent.hidden?(entry, active, "nomatch")
+      [active] = html |> Floki.parse_document!() |> Floki.find("#event_log") |> Floki.attribute("data-categories")
+
+      assert "transport" in String.split(active, ",")
     end
 
-    test "search matches against payload contents too" do
-      entry = %{category: :postgres, event: "INSERT", payload: %{"table" => "messages"}}
-      active = MapSet.new([:postgres])
+    test "each row carries the fields the browser filter matches against", %{log: log} do
+      render_hook(log, "log_event", %{
+        "category" => "system",
+        "event" => "realtime:room_a phx_join (6, 6)",
+        "payload" => %{"table" => "messages"}
+      })
 
-      refute EventLogComponent.hidden?(entry, active, "messages")
+      [row] = render(log) |> Floki.parse_document!() |> Floki.find("#event_log_rows > tr")
+
+      assert Floki.attribute(row, "data-label") == ["Joining room_a"]
+      assert Floki.attribute(row, "data-category") == ["system"]
+      assert Floki.attribute(row, "data-payload") == [~s({"table":"messages"})]
+    end
+  end
+
+  describe "payload_summary/1" do
+    test "renders JSON rather than Elixir map syntax" do
+      summary = EventLogComponent.payload_summary(%{"event" => "test", "payload" => %{"some" => "data"}})
+
+      assert summary == ~s({"event":"test","payload":{"some":"data"}})
+      refute summary =~ "=>"
+    end
+
+    test "truncates long payloads instead of stretching the row" do
+      summary = EventLogComponent.payload_summary(%{"blob" => String.duplicate("x", 500)})
+
+      assert String.ends_with?(summary, "…")
+      assert String.length(summary) <= 161
+    end
+
+    test "renders an em dash for an empty payload" do
+      assert EventLogComponent.payload_summary(%{}) == "—"
+      assert EventLogComponent.payload_summary(nil) == "—"
+    end
+  end
+
+  describe "event_label/1" do
+    test "names the protocol verb and drops the message refs" do
+      assert EventLogComponent.event_label("realtime:room_a phx_join (6, 6)") == "Joining room_a"
+      assert EventLogComponent.event_label("ok realtime:room_a phx_reply (6)") == "Joined room_a"
+      assert EventLogComponent.event_label("error realtime:room_a phx_reply (6)") == "Join rejected"
+      assert EventLogComponent.event_label("realtime:room_a phx_leave (null, 22)") == "Leaving room_a"
+      assert EventLogComponent.event_label("close realtime:room_a") == "Channel closed"
+      assert EventLogComponent.event_label("error realtime:room_a") == "Channel error"
+    end
+
+    test "leaves a broadcast's own event name alone" do
+      assert EventLogComponent.event_label("cursor-move") == "cursor-move"
+    end
+
+    test "names the transport lifecycle instead of parsing the socket URL" do
+      raw = "connected to ws://127.0.0.1:54321/realtime/v1/websocket?apikey=[redacted]&vsn=2.0.0"
+
+      assert EventLogComponent.event_label(raw) == "Transport connected"
+    end
+
+    test "names the subscription confirmation" do
+      assert EventLogComponent.event_label("ok realtime:room_a system") == "Subscription confirmed"
+    end
+
+    test "never leaks the raw refs into the label" do
+      refute EventLogComponent.event_label("realtime:room_a phx_join (6, 6)") =~ "("
+      refute EventLogComponent.event_label("realtime:room_a phx_join (6, 6)") =~ "phx_"
+    end
+  end
+
+  describe "time_label/1" do
+    test "shows time of day only" do
+      {:ok, dt, _} = DateTime.from_iso8601("2026-08-07T13:37:25.596Z")
+
+      assert EventLogComponent.time_label(dt) == "13:37:25.596"
     end
   end
 end

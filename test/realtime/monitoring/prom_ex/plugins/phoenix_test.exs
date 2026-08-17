@@ -1,5 +1,5 @@
 defmodule Realtime.PromEx.Plugins.PhoenixTest do
-  use Realtime.DataCase, async: false
+  use Realtime.DataCase, async: true
   alias Realtime.PromEx.Plugins
   alias Realtime.Integration.WebsocketClient
 
@@ -17,7 +17,7 @@ defmodule Realtime.PromEx.Plugins.PhoenixTest do
   end
 
   setup do
-    %{tenant: Containers.checkout_tenant(run_migrations: true)}
+    %{tenant: TestTenantDb.checkout_tenant_unboxed(run_migrations: true)}
   end
 
   describe "pooling metrics" do

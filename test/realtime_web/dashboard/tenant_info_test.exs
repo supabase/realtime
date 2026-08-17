@@ -10,7 +10,7 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
 
   setup :set_mimic_from_context
 
-  setup do
+  setup_all do
     Application.put_env(:realtime, :dashboard_auth, :basic_auth)
     Application.put_env(:realtime, :dashboard_credentials, {"user", "pass"})
 
@@ -19,10 +19,14 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
       Application.delete_env(:realtime, :dashboard_credentials)
     end)
 
-    tenant = Containers.checkout_tenant(run_migrations: true)
-    conn = using_basic_auth(build_conn(), "user", "pass")
+    tenant = TestTenantDb.checkout_tenant_unboxed(run_migrations: true)
 
-    %{tenant: tenant, conn: conn}
+    %{tenant: tenant}
+  end
+
+  setup do
+    conn = using_basic_auth(build_conn(), "user", "pass")
+    %{conn: conn}
   end
 
   test "renders lookup form", %{conn: conn} do
@@ -80,6 +84,24 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
     {:ok, _view, html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
 
     assert html =~ "db_host_resolved"
+  end
+
+  test "shows feature flags section with 'no feature flags' when empty", %{conn: conn, tenant: tenant} do
+    {:ok, _view, html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
+
+    assert html =~ "Feature Flags"
+    assert html =~ "No feature flags set"
+  end
+
+  test "shows feature flags when set", %{conn: conn, tenant: tenant} do
+    {:ok, tenant} =
+      Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{feature_flags: %{"new_thing" => true}})
+
+    {:ok, _view, html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
+
+    assert html =~ "Feature Flags"
+    assert html =~ "new_thing"
+    assert html =~ "true"
   end
 
   test "shows runtime status for connect and replication", %{conn: conn, tenant: tenant} do

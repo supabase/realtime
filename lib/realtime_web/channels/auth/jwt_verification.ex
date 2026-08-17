@@ -37,7 +37,11 @@ defmodule RealtimeWeb.JwtVerification do
   @hs_algorithms ["HS256", "HS384", "HS512"]
   @rs_algorithms ["RS256", "RS384", "RS512"]
   @es_algorithms ["ES256", "ES384", "ES512"]
-  @ed_algorithms ["Ed25519", "Ed448"]
+  # RFC 8037 always sets alg to EdDSA and carries the curve in the JWK, while
+  # JOSE (and Joken) also name the signer after the curve itself. Tokens minted
+  # by RFC-conformant libraries arrive with the former spelling.
+  @ed_algorithms ["Ed25519", "Ed448", "EdDSA"]
+  @ed_curves ["Ed25519", "Ed448"]
 
   @doc """
   Verify JWT token and validate claims
@@ -117,8 +121,9 @@ defmodule RealtimeWeb.JwtVerification do
     jwk = Enum.find(keys, fn jwk -> jwk["kty"] == "OKP" and jwk["kid"] == kid end)
 
     case jwk do
-      nil -> {:error, {:error_generating_signer, kid}}
-      _ -> {:ok, Joken.Signer.create(alg, jwk)}
+      # Joken raises for OKP curves it cannot sign with, such as X25519.
+      %{"crv" => crv} when crv in @ed_curves -> {:ok, Joken.Signer.create(alg, jwk)}
+      _ -> {:error, {:error_generating_signer, kid}}
     end
   end
 

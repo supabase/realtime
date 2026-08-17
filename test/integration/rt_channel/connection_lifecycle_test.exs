@@ -21,7 +21,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
   @moduletag :capture_log
 
   @service_restart_close_code 1012
-  @normal_close_code 1000
+  @going_away_close_code 1001
 
   setup [:checkout_tenant_and_connect]
 
@@ -74,7 +74,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
 
   describe "replication connection establishment" do
     test "Connect signals replication readiness on its syn topic with the replication_conn pid" do
-      tenant = Containers.checkout_tenant(run_migrations: true)
+      tenant = TestTenantDb.checkout_tenant(run_migrations: true)
 
       Phoenix.PubSub.subscribe(Realtime.PubSub, Connect.syn_topic(tenant.external_id))
       {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
@@ -88,7 +88,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
 
     test "clients that opt in receive the replication established system message, even after streaming has started",
          %{serializer: serializer} do
-      tenant = Containers.checkout_tenant(run_migrations: true)
+      tenant = TestTenantDb.checkout_tenant(run_migrations: true)
 
       Phoenix.PubSub.subscribe(Realtime.PubSub, Connect.syn_topic(tenant.external_id))
       {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
@@ -317,7 +317,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
       realtime_topic_2 = "realtime:#{random_string()}"
       WebsocketClient.join(socket, realtime_topic_2, %{config: config})
 
-      assert_receive {:close_code, @normal_close_code}, 1000
+      assert_receive {:close_code, @going_away_close_code}, 1000
 
       assert_process_down(socket, 1000)
     end

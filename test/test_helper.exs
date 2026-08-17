@@ -1,7 +1,13 @@
 start_time = :os.system_time(:millisecond)
 
 alias Realtime.Api
-max_cases = String.to_integer(System.get_env("MAX_CASES", "4"))
+
+# Where tenant DBs come from — docker containers (default) or external
+# servers (USE_EXTERNAL_TENANT_DB=true). The backend is resolved exactly
+# once per run, here; everything else dispatches through
+# TestTenantDb.Backend.current().
+backend = TestTenantDb.Backend.resolve!()
+max_cases = backend.max_cases()
 
 repo_config = Application.fetch_env!(:realtime, Realtime.Repo)
 
@@ -49,17 +55,17 @@ exclude =
     &is_nil/1
   )
 
-ExUnit.start(exclude: exclude, max_cases: max_cases, capture_log: true)
+ExUnit.start(
+  exclude: exclude,
+  max_cases: max_cases,
+  capture_log: Realtime.Env.get_boolean("CAPTURE_LOG", true)
+)
 
 max_cases = ExUnit.configuration()[:max_cases]
 
-Containers.pull()
+backend.prepare!()
 
-if System.get_env("REUSE_CONTAINERS") != "true" do
-  Containers.stop_containers()
-end
-
-{:ok, _pid} = Containers.start_link(max_cases)
+{:ok, _pid} = TestTenantDb.start_link(max_cases)
 
 for tenant <- Api.list_tenants(), do: Api.delete_tenant_by_external_id(tenant.external_id)
 

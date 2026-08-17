@@ -6,7 +6,7 @@ on:
       - "test/**"
       - "config/**"
       - "priv/**"
-      - "!priv/repo/tenant_db_catalog_*.json"
+      - "!priv/repo/tenant_schema/**"
       - "assets/**"
       - "rel/**"
       - "mix.exs"
@@ -26,6 +26,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: Lint
@@ -37,17 +40,17 @@ jobs:
         id: beam
         uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1.24.0
         with:
-          otp-version: 27.x # Define the OTP version [required]
-          elixir-version: 1.18.x # Define the elixir version [required]
+          otp-version: 28.5.0.4 # Define the OTP version [required]
+          elixir-version: 1.19.5 # Define the elixir version [required]
       - name: Cache Mix
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: |
             deps
             _build
-          key: ${{ github.workflow }}-${{ runner.os }}-mix-${{ env.elixir }}-${{ env.otp }}-${{ hashFiles('**/mix.lock') }}
+          key: ${{ github.workflow }}-${{ runner.os }}-mix-${{ steps.beam.outputs.elixir-version }}-${{ steps.beam.outputs.otp-version }}-${{ hashFiles('**/mix.lock') }}
           restore-keys: |
-            ${{ github.workflow }}-${{ runner.os }}-mix-${{ env.elixir }}-${{ env.otp }}-
+            ${{ github.workflow }}-${{ runner.os }}-mix-${{ steps.beam.outputs.elixir-version }}-${{ steps.beam.outputs.otp-version }}-
 
       - name: Install dependencies
         run: mix deps.get
@@ -76,6 +79,24 @@ jobs:
           mix dialyzer.build
       - name: Run dialyzer
         run: mix dialyzer
+
+  assets:
+    name: Assets Lint
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Setup Node.js
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: assets/package-lock.json
+      - name: Install dependencies
+        run: npm --prefix assets ci
+      - name: Run oxlint
+        run: npm --prefix assets run lint
+      - name: Run oxfmt check
+        run: npm --prefix assets run format:check
 
   actionlint:
     name: Actionlint

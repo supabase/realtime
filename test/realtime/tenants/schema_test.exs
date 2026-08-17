@@ -5,11 +5,12 @@ defmodule Realtime.Tenants.SchemaTest do
   # - tag `@describetag :requires_no_supautils_policy_grants` represents older images where schema restrictions can't be applied
   # - untagged tests assert behaviour on every version
 
-  use Realtime.DataCase, async: false
+  use Realtime.DataCase, async: true
   alias Realtime.Database
+  alias RealtimeWeb.Dashboard.TenantMigrations
 
   setup do
-    tenant = Containers.checkout_tenant(run_migrations: true)
+    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
     {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
     opts = settings |> Map.from_struct() |> Keyword.new()
 
@@ -18,7 +19,7 @@ defmodule Realtime.Tenants.SchemaTest do
     {:ok, conn_superuser} =
       opts |> Keyword.put(:username, "supabase_admin") |> Postgrex.start_link()
 
-    %{conn_postgres: conn_postgres, conn_superuser: conn_superuser, settings: settings}
+    %{tenant: tenant, conn_postgres: conn_postgres, conn_superuser: conn_superuser, settings: settings}
   end
 
   describe "postgres role restrictions on realtime schema" do
@@ -1024,6 +1025,67 @@ defmodule Realtime.Tenants.SchemaTest do
         Postgrex.rollback(conn, :rollback)
       end)
     end
+  end
+
+  describe "pg-delta reconciliation" do
+    @describetag :requires_supautils_policy_grants
+    @describetag :skip_orioledb
+
+    test "recreating realtime.messages leaves the postgres role able to work", %{
+      tenant: tenant,
+      conn_postgres: conn_postgres,
+      conn_superuser: conn_superuser,
+      settings: settings
+    } do
+      before_acl = relacl(conn_superuser, "messages")
+
+      Postgrex.query!(conn_superuser, "DROP TABLE realtime.messages CASCADE", [])
+
+      assert {:ok, %{status: :changes, plan: plan}} =
+               TenantMigrations.run_pgdelta(%{settings | pool_size: 1})
+
+      assert :ok = TenantMigrations.apply_pgdelta(tenant, plan)
+
+      assert relacl(conn_superuser, "messages") == before_acl
+
+      assert %Postgrex.Result{rows: [["supabase_realtime_admin"]]} =
+               Postgrex.query!(
+                 conn_superuser,
+                 "SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid = 'realtime.messages'::regclass",
+                 []
+               )
+
+      :ok = Realtime.Tenants.create_messages_partitions(conn_superuser)
+
+      assert {:ok, %Postgrex.Result{num_rows: 1}} =
+               Postgrex.query(
+                 conn_postgres,
+                 "INSERT INTO realtime.messages (payload, event, topic, private, extension) VALUES ($1, $2, $3, $4, $5)",
+                 [%{"hello" => "world"}, "test_event", "test_topic", false, "broadcast"]
+               )
+
+      assert_allowed(
+        conn_postgres,
+        "CREATE POLICY reconciled_policy ON realtime.messages FOR SELECT TO authenticated USING (true)"
+      )
+
+      assert_allowed(conn_postgres, "DROP POLICY reconciled_policy ON realtime.messages")
+      assert_allowed(conn_postgres, "TRUNCATE realtime.messages")
+      assert_denied(conn_postgres, "CREATE TABLE realtime.new_table (id int)")
+    end
+  end
+
+  defp relacl(conn, table) do
+    %Postgrex.Result{rows: [[acl]]} =
+      Postgrex.query!(
+        conn,
+        "SELECT coalesce(array(SELECT unnest(relacl)::text ORDER BY 1), '{}') FROM pg_class c
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = 'realtime' AND c.relname = $1",
+        [table]
+      )
+
+    acl
   end
 
   defp in_rollback(conn, fun) do

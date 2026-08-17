@@ -16,10 +16,10 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
     end
   end
 
-  describe "fastlane_metadata/7" do
+  describe "fastlane_metadata/8" do
     test "info level" do
       assert MessageDispatcher.fastlane_metadata(self(), Serializer, "realtime:topic", :info, "tenant_id") ==
-               {:rc_fastlane, self(), Serializer, "realtime:topic", :info, "tenant_id", MapSet.new(), true}
+               {:rc_fastlane, self(), Serializer, "realtime:topic", :info, "tenant_id", MapSet.new(), true, true}
     end
 
     test "presence_read? defaults to true and can be set to false" do
@@ -32,12 +32,12 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
                MapSet.new(),
                false
              ) ==
-               {:rc_fastlane, self(), Serializer, "realtime:topic", :info, "tenant_id", MapSet.new(), false}
+               {:rc_fastlane, self(), Serializer, "realtime:topic", :info, "tenant_id", MapSet.new(), false, true}
     end
 
     test "non-info level" do
       assert MessageDispatcher.fastlane_metadata(self(), Serializer, "realtime:topic", :warning, "tenant_id") ==
-               {:rc_fastlane, self(), Serializer, "realtime:topic", :warning, "tenant_id", MapSet.new(), true}
+               {:rc_fastlane, self(), Serializer, "realtime:topic", :warning, "tenant_id", MapSet.new(), true, true}
     end
 
     test "replayed message ids" do
@@ -49,7 +49,21 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
                "tenant_id",
                MapSet.new([1])
              ) ==
-               {:rc_fastlane, self(), Serializer, "realtime:topic", :warning, "tenant_id", MapSet.new([1]), true}
+               {:rc_fastlane, self(), Serializer, "realtime:topic", :warning, "tenant_id", MapSet.new([1]), true, true}
+    end
+
+    test "broadcast_read? defaults to true and can be set to false" do
+      assert MessageDispatcher.fastlane_metadata(
+               self(),
+               Serializer,
+               "realtime:topic",
+               :info,
+               "tenant_id",
+               MapSet.new(),
+               true,
+               false
+             ) ==
+               {:rc_fastlane, self(), Serializer, "realtime:topic", :info, "tenant_id", MapSet.new(), true, false}
     end
   end
 
@@ -84,9 +98,9 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
 
       subscribers = [
         {subscriber_pid,
-         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :info, "tenant123", MapSet.new(), true}},
+         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :info, "tenant123", MapSet.new(), true, true}},
         {subscriber_pid,
-         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :warning, "tenant123", MapSet.new(), true}}
+         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :warning, "tenant123", MapSet.new(), true, true}}
       ]
 
       msg = %Broadcast{topic: "some:other:topic", event: "event", payload: %{data: "test"}}
@@ -109,6 +123,47 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
       refute_receive _any
     end
 
+    test "does not dispatch broadcast messages to subscribers denied broadcast.read" do
+      parent = self()
+
+      subscriber_pid =
+        spawn(fn ->
+          loop = fn loop ->
+            receive do
+              msg ->
+                send(parent, {:subscriber, msg})
+                loop.(loop)
+            end
+          end
+
+          loop.(loop)
+        end)
+
+      from_pid = :erlang.list_to_pid(~c'<0.2.1>')
+
+      subscribers = [
+        {subscriber_pid,
+         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :info, "tenant123", MapSet.new(), true, false}}
+      ]
+
+      for msg <- [
+            %Broadcast{topic: "some:other:topic", event: "broadcast", payload: %{data: "test"}},
+            %UserBroadcast{topic: "some:other:topic", user_event: "event", user_payload: %{data: "test"}}
+          ] do
+        assert MessageDispatcher.dispatch(subscribers, from_pid, msg) == :ok
+      end
+
+      assert Agent.get(TestSerializer, & &1) == 0
+      refute_receive _any
+
+      # system/operations events are not gated on broadcast.read
+      system = %Broadcast{topic: "some:other:topic", event: "system", payload: %{status: "ok"}}
+      assert MessageDispatcher.dispatch(subscribers, from_pid, system) == :ok
+
+      assert_receive {:encoded, %Broadcast{event: "system", topic: "realtime:topic"}}
+      assert_receive {:subscriber, :update_rate_counter}
+    end
+
     test "strips the {:tb, tenant_id, msg} tenant tag before dispatching to fastlane subscribers" do
       parent = self()
 
@@ -129,7 +184,7 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
 
       subscribers = [
         {subscriber_pid,
-         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :info, "tenant123", MapSet.new(), true}}
+         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :info, "tenant123", MapSet.new(), true, true}}
       ]
 
       msg = %Broadcast{topic: "some:other:topic", event: "event", payload: %{data: "test"}}
@@ -187,9 +242,9 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
 
       subscribers = [
         {subscriber_pid,
-         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :info, "tenant456", MapSet.new(), true}},
+         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :info, "tenant456", MapSet.new(), true, true}},
         {subscriber_pid,
-         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :warning, "tenant456", MapSet.new(), true}}
+         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :warning, "tenant456", MapSet.new(), true, true}}
       ]
 
       msg = %Broadcast{topic: "some:other:topic", event: "presence_diff", payload: %{data: "test"}}
@@ -232,13 +287,13 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
       subscribers = [
         # allowed: presence_read? == true -> fastlaned
         {subscriber_pid,
-         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :info, "tenant789", MapSet.new(), true}},
+         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :info, "tenant789", MapSet.new(), true, true}},
         # denied: presence_read? == false -> withheld
         {subscriber_pid,
-         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :warning, "tenant789", MapSet.new(), false}},
+         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :warning, "tenant789", MapSet.new(), false, true}},
         # unknown: presence_read? == nil -> routed to the channel process (raw, unencoded)
         {subscriber_pid,
-         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :info, "tenant789", MapSet.new(), nil}}
+         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :info, "tenant789", MapSet.new(), nil, true}}
       ]
 
       msg = %Broadcast{topic: "some:other:topic", event: "presence_diff", payload: %{data: "test"}}
@@ -281,9 +336,10 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
 
       subscribers = [
         {subscriber_pid,
-         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :info, "tenant123", replaeyd_message_ids, true}},
+         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :info, "tenant123", replaeyd_message_ids, true, true}},
         {subscriber_pid,
-         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :warning, "tenant123", replaeyd_message_ids, true}}
+         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :warning, "tenant123", replaeyd_message_ids, true,
+          true}}
       ]
 
       msg = %Broadcast{
@@ -320,9 +376,10 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
 
       subscribers = [
         {subscriber_pid,
-         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :info, "tenant123", replayed_message_ids, true}},
+         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :info, "tenant123", replayed_message_ids, true, true}},
         {subscriber_pid,
-         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :warning, "tenant123", replayed_message_ids, true}}
+         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :warning, "tenant123", replayed_message_ids, true,
+          true}}
       ]
 
       msg = %UserBroadcast{
@@ -360,9 +417,9 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
 
       subscribers = [
         {subscriber_pid,
-         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :info, "tenant123", MapSet.new(), true}},
+         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :info, "tenant123", MapSet.new(), true, true}},
         {subscriber_pid,
-         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :warning, "tenant123", MapSet.new(), true}}
+         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :warning, "tenant123", MapSet.new(), true, true}}
       ]
 
       msg = %Broadcast{topic: "some:other:topic", event: "event", payload: "not a map"}
@@ -406,13 +463,13 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
       # Four subscribers: same serializer, two different join_topics (two each)
       subscribers = [
         {subscriber_pid,
-         {:rc_fastlane, self(), TestSerializer, "realtime:topic-a", :info, "tenant123", MapSet.new(), true}},
+         {:rc_fastlane, self(), TestSerializer, "realtime:topic-a", :info, "tenant123", MapSet.new(), true, true}},
         {subscriber_pid,
-         {:rc_fastlane, self(), TestSerializer, "realtime:topic-a", :info, "tenant123", MapSet.new(), true}},
+         {:rc_fastlane, self(), TestSerializer, "realtime:topic-a", :info, "tenant123", MapSet.new(), true, true}},
         {subscriber_pid,
-         {:rc_fastlane, self(), TestSerializer, "realtime:topic-b", :info, "tenant123", MapSet.new(), true}},
+         {:rc_fastlane, self(), TestSerializer, "realtime:topic-b", :info, "tenant123", MapSet.new(), true, true}},
         {subscriber_pid,
-         {:rc_fastlane, self(), TestSerializer, "realtime:topic-b", :info, "tenant123", MapSet.new(), true}}
+         {:rc_fastlane, self(), TestSerializer, "realtime:topic-b", :info, "tenant123", MapSet.new(), true, true}}
       ]
 
       msg = %Broadcast{topic: "some:other:topic", event: "event", payload: %{data: "test"}}
@@ -481,12 +538,13 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
 
       subscribers = [
         {subscriber_pid,
-         {:rc_fastlane, self(), V1.JSONSerializer, "realtime:topic", :info, "tenant123", MapSet.new(), true}},
+         {:rc_fastlane, self(), V1.JSONSerializer, "realtime:topic", :info, "tenant123", MapSet.new(), true, true}},
         {subscriber_pid,
-         {:rc_fastlane, self(), V1.JSONSerializer, "realtime:topic", :info, "tenant123", MapSet.new(), true}},
+         {:rc_fastlane, self(), V1.JSONSerializer, "realtime:topic", :info, "tenant123", MapSet.new(), true, true}},
         {subscriber_pid,
-         {:rc_fastlane, self(), V2Serializer, "realtime:topic", :info, "tenant123", MapSet.new(), true}},
-        {subscriber_pid, {:rc_fastlane, self(), V2Serializer, "realtime:topic", :info, "tenant123", MapSet.new(), true}}
+         {:rc_fastlane, self(), V2Serializer, "realtime:topic", :info, "tenant123", MapSet.new(), true, true}},
+        {subscriber_pid,
+         {:rc_fastlane, self(), V2Serializer, "realtime:topic", :info, "tenant123", MapSet.new(), true, true}}
       ]
 
       msg = %Broadcast{topic: "some:other:topic", event: "event", payload: %{data: "test"}}
@@ -544,12 +602,13 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
 
       subscribers = [
         {subscriber_pid,
-         {:rc_fastlane, self(), V1.JSONSerializer, "realtime:topic", :info, "tenant123", MapSet.new(), true}},
+         {:rc_fastlane, self(), V1.JSONSerializer, "realtime:topic", :info, "tenant123", MapSet.new(), true, true}},
         {subscriber_pid,
-         {:rc_fastlane, self(), V1.JSONSerializer, "realtime:topic", :info, "tenant123", MapSet.new(), true}},
+         {:rc_fastlane, self(), V1.JSONSerializer, "realtime:topic", :info, "tenant123", MapSet.new(), true, true}},
         {subscriber_pid,
-         {:rc_fastlane, self(), V2Serializer, "realtime:topic", :info, "tenant123", MapSet.new(), true}},
-        {subscriber_pid, {:rc_fastlane, self(), V2Serializer, "realtime:topic", :info, "tenant123", MapSet.new(), true}}
+         {:rc_fastlane, self(), V2Serializer, "realtime:topic", :info, "tenant123", MapSet.new(), true, true}},
+        {subscriber_pid,
+         {:rc_fastlane, self(), V2Serializer, "realtime:topic", :info, "tenant123", MapSet.new(), true, true}}
       ]
 
       user_payload = Jason.encode!(%{data: "test"})
@@ -637,12 +696,13 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
 
       subscribers = [
         {subscriber_pid,
-         {:rc_fastlane, self(), V1.JSONSerializer, "realtime:topic", :info, "tenant123", MapSet.new(), true}},
+         {:rc_fastlane, self(), V1.JSONSerializer, "realtime:topic", :info, "tenant123", MapSet.new(), true, true}},
         {subscriber_pid,
-         {:rc_fastlane, self(), V1.JSONSerializer, "realtime:topic", :info, "tenant123", MapSet.new(), true}},
+         {:rc_fastlane, self(), V1.JSONSerializer, "realtime:topic", :info, "tenant123", MapSet.new(), true, true}},
         {subscriber_pid,
-         {:rc_fastlane, self(), V2Serializer, "realtime:topic", :info, "tenant123", MapSet.new(), true}},
-        {subscriber_pid, {:rc_fastlane, self(), V2Serializer, "realtime:topic", :info, "tenant123", MapSet.new(), true}}
+         {:rc_fastlane, self(), V2Serializer, "realtime:topic", :info, "tenant123", MapSet.new(), true, true}},
+        {subscriber_pid,
+         {:rc_fastlane, self(), V2Serializer, "realtime:topic", :info, "tenant123", MapSet.new(), true, true}}
       ]
 
       user_payload = <<123, 456, 789>>

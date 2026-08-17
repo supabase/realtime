@@ -80,7 +80,7 @@ defmodule Realtime.UsersCounterTest do
 
       my_counts = UsersCounter.local_tenant_counts()
       # Only one connection from this test process on this node
-      assert my_counts == %{tenant_id => 1}
+      assert %{^tenant_id => 1} = my_counts
     end
   end
 

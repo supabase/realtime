@@ -33,7 +33,7 @@ defmodule RealtimeWeb.TenantControllerTest do
   end
 
   defp with_tenant(_context) do
-    tenant = Containers.checkout_tenant(run_migrations: true)
+    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
     %{tenant: tenant}
   end
 
@@ -75,7 +75,7 @@ defmodule RealtimeWeb.TenantControllerTest do
   describe "create tenant with post" do
     test "run migrations on creation and encrypts credentials", %{conn: conn} do
       external_id = random_string()
-      {:ok, port} = Containers.checkout()
+      {:ok, port} = TestTenantDb.checkout()
 
       assert nil == Tenants.get_tenant_by_external_id(external_id)
 
@@ -106,7 +106,7 @@ defmodule RealtimeWeb.TenantControllerTest do
   describe "create tenant with put" do
     test "run migrations on creation and encrypts credentials", %{conn: conn} do
       external_id = random_string()
-      {:ok, port} = Containers.checkout()
+      {:ok, port} = TestTenantDb.checkout()
 
       assert nil == Tenants.get_tenant_by_external_id(external_id)
 
@@ -249,6 +249,22 @@ defmodule RealtimeWeb.TenantControllerTest do
 
       updated_tenant = Realtime.Api.get_tenant_by_external_id(external_id, use_replica?: false)
       assert updated_tenant.presence_enabled == true
+    end
+
+    test "postgres_changes_pool is stored as subcriber_pool_size and overrides it", %{tenant: tenant, conn: conn} do
+      external_id = tenant.external_id
+      port = tenant_db_port(tenant)
+      attrs = default_tenant_attrs(port) |> put_extension_setting("subcriber_pool_size", 3)
+
+      conn = put(conn, ~p"/api/tenants/#{external_id}", tenant: attrs)
+      assert [%{"settings" => %{"subcriber_pool_size" => 3}}] = json_response(conn, 200)["data"]["extensions"]
+
+      attrs = put_extension_setting(attrs, "postgres_changes_pool", 10)
+
+      conn = put(conn, ~p"/api/tenants/#{external_id}", tenant: attrs)
+      assert [%{"settings" => settings}] = json_response(conn, 200)["data"]["extensions"]
+      assert settings["subcriber_pool_size"] == 10
+      refute Map.has_key?(settings, "postgres_changes_pool")
     end
 
     test "renders errors when data is invalid", %{conn: conn} do
@@ -574,7 +590,7 @@ defmodule RealtimeWeb.TenantControllerTest do
     end
 
     test "triggers migrations without blocking and self heals eventually", %{conn: conn} do
-      tenant = Containers.checkout_tenant(run_migrations: false)
+      tenant = TestTenantDb.checkout_tenant(run_migrations: false)
 
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
       assert {:error, _} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
@@ -682,6 +698,10 @@ defmodule RealtimeWeb.TenantControllerTest do
       "postgres_cdc_default" => "postgres_cdc_rls",
       "jwt_secret" => "new secret"
     }
+  end
+
+  defp put_extension_setting(%{"extensions" => [extension]} = attrs, key, value) do
+    %{attrs | "extensions" => [update_in(extension, ["settings"], &Map.put(&1, key, value))]}
   end
 
   defp wait_on_postgres_cdc_rls(external_id, attempt \\ 10)

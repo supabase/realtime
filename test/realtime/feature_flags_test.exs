@@ -232,6 +232,57 @@ defmodule Realtime.FeatureFlagsTest do
     end
   end
 
+  describe "set_tenant_flag/3" do
+    test "writes an explicit override into the tenant's feature_flags map" do
+      tenant = tenant_fixture(%{feature_flags: %{}})
+
+      assert {:ok, updated} = FeatureFlags.set_tenant_flag("some_flag", tenant.external_id, true)
+      assert updated.feature_flags == %{"some_flag" => true}
+    end
+
+    test "returns {:error, :not_found} for an unknown tenant" do
+      assert {:error, :not_found} = FeatureFlags.set_tenant_flag("some_flag", "nonexistent_tenant", true)
+    end
+  end
+
+  describe "clear_tenant_flag/2" do
+    test "removes the override so the tenant falls back to global resolution" do
+      {:ok, _} = Api.upsert_feature_flag(%{name: "clearable_flag", enabled: true, rollout_percentage: 100})
+      tenant = tenant_fixture(%{feature_flags: %{"clearable_flag" => false}})
+
+      # Override forces it off despite the global 100% rollout.
+      refute FeatureFlags.enabled?("clearable_flag", tenant.external_id)
+
+      assert {:ok, updated} = FeatureFlags.clear_tenant_flag("clearable_flag", tenant.external_id)
+      refute Map.has_key?(updated.feature_flags, "clearable_flag")
+
+      # The tenant cache is refreshed via an async multicast; clear it so enabled?/2
+      # reads the updated row instead of the pre-clear override.
+      Cachex.clear(TenantsCache)
+
+      # With the override gone, the tenant inherits the global rollout again.
+      assert FeatureFlags.enabled?("clearable_flag", tenant.external_id)
+    end
+
+    test "leaves other overrides untouched" do
+      tenant = tenant_fixture(%{feature_flags: %{"a" => true, "b" => false}})
+
+      assert {:ok, updated} = FeatureFlags.clear_tenant_flag("a", tenant.external_id)
+      assert updated.feature_flags == %{"b" => false}
+    end
+
+    test "is a no-op when there is no override" do
+      tenant = tenant_fixture(%{feature_flags: %{}})
+
+      assert {:ok, updated} = FeatureFlags.clear_tenant_flag("missing", tenant.external_id)
+      assert updated.feature_flags == %{}
+    end
+
+    test "returns {:error, :not_found} for an unknown tenant" do
+      assert {:error, :not_found} = FeatureFlags.clear_tenant_flag("some_flag", "nonexistent_tenant")
+    end
+  end
+
   describe "enabled?/1 ignores rollout percentage" do
     test "returns true for an enabled flag even with a 0% rollout percentage" do
       {:ok, _} = Api.upsert_feature_flag(%{name: "global_ignores_rollout", enabled: true, rollout_percentage: 0})

@@ -95,28 +95,41 @@ defmodule Realtime.Database do
 
   @doc """
   Checks if the Tenant CDC extension information is properly configured and that we're able to query against the tenant database.
-  """
-  @spec check_tenant_connection(Tenant.t() | nil) :: {:error, atom()} | {:ok, pid(), non_neg_integer()}
-  def check_tenant_connection(nil), do: {:error, :tenant_not_found}
 
-  def check_tenant_connection(tenant) do
+  Connectivity and readiness are validated with a short-lived probe pool of a
+  single connection using `backoff_type: :stop` and `max_restarts: 0`, so we get
+  instant feedback when the database is unreachable. Once validated, the probe is
+  torn down and the durable pool that Connect keeps around is started with
+  `backoff_type: :rand_exp`, so a momentary blip reconnects instead of crashing the pool.
+
+  `connection_listeners` is forwarded to the durable pool (see DBConnection's
+  `:connection_listeners`) so the caller receives `{:connected, pid, tag}` /
+  `{:disconnected, pid, tag}` messages as the pool's connections come and go. The
+  probe never carries listeners.
+  """
+  @spec check_tenant_connection(Tenant.t() | nil, [pid()] | {[pid()], term()}) ::
+          {:error, atom()} | {:ok, pid(), non_neg_integer()}
+  def check_tenant_connection(tenant, connection_listeners \\ [])
+  def check_tenant_connection(nil, _connection_listeners), do: {:error, :tenant_not_found}
+
+  def check_tenant_connection(tenant, connection_listeners) do
     tenant
     |> then(&PostgresCdc.filter_settings(@cdc, &1.extensions))
     |> then(fn settings ->
       required_pool = tenant_pool_requirements(settings)
 
-      with {:ok, base_settings} <- from_settings(settings, "realtime_connect", :stop),
-           check_settings = %{base_settings | max_restarts: 0},
-           {:ok, conn} <- connect_db(check_settings),
-           {:ok, [available_connections, migrations_ran]} <- query_connection_info(conn) do
+      with {:ok, probe_settings} <- from_settings(settings, "realtime_connect_probe", :stop),
+           {:ok, probe_conn} <- connect_db(%{probe_settings | max_restarts: 0}),
+           {:ok, [available_connections, migrations_ran]} <- query_connection_info(probe_conn),
+           GenServer.stop(probe_conn),
+           {:ok, settings} <- from_settings(settings, "realtime_connect", :rand_exp) do
         requirement = ceil(required_pool * @available_connection_factor)
 
         if requirement < available_connections do
-          {:ok, conn, migrations_ran}
+          connect_durable_pool(settings, migrations_ran, connection_listeners)
         else
           msg = "Only #{available_connections} available connections. At least #{requirement} connections are required."
           log_error("DatabaseLackOfConnections", msg)
-          GenServer.stop(conn)
           {:error, :tenant_db_too_many_connections}
         end
       else
@@ -125,6 +138,19 @@ defmodule Realtime.Database do
           {:error, e}
       end
     end)
+  end
+
+  # Starts the durable pool Connect holds onto. `:rand_exp` backoff lets each
+  # connection ride out momentary blips by reconnecting on its own.
+  defp connect_durable_pool(settings, migrations_ran, connection_listeners) do
+    case connect_db(settings, connection_listeners: connection_listeners) do
+      {:ok, conn} ->
+        {:ok, conn, migrations_ran}
+
+      {:error, e} ->
+        log_error("UnableToConnectToTenantDatabase", e)
+        {:error, e}
+    end
   end
 
   @migrations_table_exists_query """
@@ -138,7 +164,7 @@ defmodule Realtime.Database do
   @connections_query """
   SELECT (current_setting('max_connections')::int - count(*))::int
   FROM pg_stat_activity
-  WHERE application_name != 'realtime_connect'
+  WHERE application_name NOT IN ('realtime_connect', 'realtime_connect_probe')
   """
 
   defp query_connection_info(conn) do
@@ -245,8 +271,8 @@ defmodule Realtime.Database do
       {:error, {:exit, reason}}
   end
 
-  @spec connect_db(__MODULE__.t()) :: {:ok, pid()} | {:error, any()}
-  def connect_db(%__MODULE__{} = settings) do
+  @spec connect_db(__MODULE__.t(), keyword()) :: {:ok, pid()} | {:error, any()}
+  def connect_db(%__MODULE__{} = settings, extra_opts \\ []) do
     %__MODULE__{
       hostname: hostname,
       port: port,
@@ -287,6 +313,7 @@ defmodule Realtime.Database do
     |> then(fn opts ->
       if max_restarts, do: Keyword.put(opts, :max_restarts, max_restarts), else: opts
     end)
+    |> Keyword.merge(extra_opts)
     |> Postgrex.start_link()
   end
 
@@ -302,6 +329,7 @@ defmodule Realtime.Database do
       "realtime_subscription_manager" -> 1
       "realtime_subscription_manager_pub" -> settings["subs_pool_size"] || 1
       "realtime_connect" -> settings["db_pool"] || 1
+      "realtime_connect_probe" -> 1
       "realtime_health_check" -> 1
       "realtime_janitor" -> 1
       "realtime_migrations" -> 2

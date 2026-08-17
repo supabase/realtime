@@ -42,7 +42,7 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
     end
 
     test "broadcast to another tenant does not get mixed up", %{tenant: tenant, serializer: serializer} do
-      other_tenant = Containers.checkout_tenant(run_migrations: true)
+      other_tenant = TestTenantDb.checkout_tenant(run_migrations: true)
 
       Realtime.Tenants.Cache.update_cache(other_tenant)
 
@@ -250,8 +250,8 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
           :syn.update_registry(Connect, tenant.external_id, fn _pid, meta -> %{meta | conn: nil} end)
           payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
           WebsocketClient.send_event(service_role_socket, topic, "broadcast", payload)
-          # Waiting more than 15 seconds as this is the amount of time we will wait for the Connection to be ready
-          refute_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 16000
+          # Wait past the (test-configured) connection-ready timeout to confirm nothing is delivered
+          refute_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 3000
         end)
 
       assert log =~ "UnableToHandleBroadcast"
@@ -375,6 +375,162 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
 
       assert {:ok, %Postgrex.Result{rows: [[1]]}} =
                Postgrex.query(db_conn, "SELECT count(*)::int FROM realtime.messages WHERE topic = $1", [topic])
+    end
+  end
+
+  describe "broadcast replay" do
+    setup [:rls_context]
+
+    @tag policies: [:authenticated_read_broadcast_and_presence], serializer: RealtimeWeb.Socket.V2Serializer
+    test "replays binary messages as binary frames", %{
+      tenant: tenant,
+      topic: topic,
+      serializer: RealtimeWeb.Socket.V2Serializer = serializer
+    } do
+      binary = <<0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0xFF>>
+      event = "bin"
+
+      %{id: id} =
+        message_fixture(tenant, %{
+          "event" => event,
+          "extension" => "broadcast",
+          "topic" => topic,
+          "private" => true,
+          "binary_payload" => binary
+        })
+
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, topic, %{config: %{private: true, broadcast: %{replay: %{limit: 10, since: 0}}}})
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       payload: %{"status" => "ok"},
+                       topic: ^topic,
+                       join_ref: join_ref
+                     },
+                     500
+
+      assert is_binary(join_ref)
+
+      assert_receive %Message{
+                       event: "broadcast",
+                       topic: ^topic,
+                       join_ref: nil,
+                       payload: %{
+                         "event" => ^event,
+                         "payload" => {:binary, ^binary},
+                         "type" => "broadcast",
+                         "meta" => %{"id" => ^id, "replayed" => true}
+                       }
+                     },
+                     1_000
+    end
+
+    @tag policies: [:authenticated_read_broadcast_and_presence], serializer: RealtimeWeb.Socket.V2Serializer
+    test "replays binary and json messages in insertion order", %{
+      tenant: tenant,
+      topic: topic,
+      serializer: RealtimeWeb.Socket.V2Serializer = serializer
+    } do
+      binary = <<1, 2, 3>>
+      value = random_string()
+
+      %{id: binary_id} =
+        message_fixture(tenant, %{
+          "event" => "bin",
+          "extension" => "broadcast",
+          "topic" => topic,
+          "private" => true,
+          "binary_payload" => binary
+        })
+
+      %{id: json_id} =
+        message_fixture(tenant, %{
+          "event" => "json",
+          "extension" => "broadcast",
+          "topic" => topic,
+          "private" => true,
+          "payload" => %{"value" => value}
+        })
+
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, topic, %{config: %{private: true, broadcast: %{replay: %{limit: 10, since: 0}}}})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+
+      assert_receive %Message{
+                       event: "broadcast",
+                       topic: ^topic,
+                       payload: %{
+                         "event" => "bin",
+                         "payload" => {:binary, ^binary},
+                         "type" => "broadcast",
+                         "meta" => %{"id" => ^binary_id, "replayed" => true}
+                       }
+                     },
+                     1000
+
+      assert_receive %Message{
+                       event: "broadcast",
+                       topic: ^topic,
+                       payload: %{
+                         "event" => "json",
+                         "payload" => %{"value" => ^value},
+                         "type" => "broadcast",
+                         "meta" => %{"id" => ^json_id, "replayed" => true}
+                       }
+                     },
+                     1000
+    end
+
+    @tag policies: [:authenticated_read_broadcast_and_presence], serializer: Phoenix.Socket.V1.JSONSerializer
+    test "binary messages are skipped on V1 sockets", %{
+      tenant: tenant,
+      topic: topic,
+      serializer: Phoenix.Socket.V1.JSONSerializer = serializer
+    } do
+      value = random_string()
+
+      message_fixture(tenant, %{
+        "event" => "bin",
+        "extension" => "broadcast",
+        "topic" => topic,
+        "private" => true,
+        "binary_payload" => <<1, 2, 3>>
+      })
+
+      %{id: json_id} =
+        message_fixture(tenant, %{
+          "event" => "json",
+          "extension" => "broadcast",
+          "topic" => topic,
+          "private" => true,
+          "payload" => %{"value" => value}
+        })
+
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, topic, %{config: %{private: true, broadcast: %{replay: %{limit: 10, since: 0}}}})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+
+      assert_receive %Message{
+                       event: "broadcast",
+                       topic: ^topic,
+                       payload: %{
+                         "event" => "json",
+                         "payload" => %{"value" => ^value},
+                         "meta" => %{"id" => ^json_id, "replayed" => true}
+                       }
+                     },
+                     1000
+
+      refute_receive %Message{event: "broadcast", payload: %{"event" => "bin"}}, 500
     end
   end
 

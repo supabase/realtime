@@ -82,7 +82,7 @@ defmodule Realtime.NodesTest do
 
   describe "get_node_for_tenant/1" do
     setup do
-      tenant = Containers.checkout_tenant()
+      tenant = TestTenantDb.checkout_tenant()
       region = tenant.extensions |> hd() |> get_in([Access.key!(:settings), "region"])
       %{tenant: tenant, region: region}
     end

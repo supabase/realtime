@@ -4,9 +4,10 @@ defmodule Realtime.MixProject do
   def project do
     [
       app: :realtime,
-      version: "2.121.3",
-      elixir: "~> 1.18",
+      version: "2.128.3",
+      elixir: "~> 1.19",
       elixirc_paths: elixirc_paths(Mix.env()),
+      compilers: [:phoenix_live_view] ++ Mix.compilers(),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
@@ -61,11 +62,12 @@ defmodule Realtime.MixProject do
       {:ecto_sql, "~> 3.11"},
       {:ecto_psql_extras, "~> 0.8"},
       {:postgrex, "~> 0.22"},
-      {:db_connection, github: "elixir-ecto/db_connection", branch: "master", override: true},
+      {:db_connection, "~> 2.10"},
       {:phoenix_html, "~> 3.2"},
-      {:phoenix_live_view, "~> 0.18"},
+      {:phoenix_live_view, "~> 1.0"},
       {:phoenix_live_reload, "~> 1.2", only: :dev},
       {:phoenix_live_dashboard, "~> 0.7"},
+      {:lumis, "~> 0.7"},
       {:phoenix_view, "~> 2.0"},
       {:esbuild, "~> 0.4", runtime: Mix.env() == :dev},
       {:tailwind, "~> 0.1", runtime: Mix.env() == :dev},
@@ -83,7 +85,7 @@ defmodule Realtime.MixProject do
       # prom_ex depends on peep ~> 3.0 but there is no issue using peep ~> 4.0
       # https://github.com/akoutmos/prom_ex/pull/270
       {:peep, "~> 4.3", override: true},
-      {:joken, "~> 2.5.0"},
+      {:joken, "~> 2.6"},
       {:nimble_zta, "~> 0.1"},
       {:ex_json_schema, "~> 0.11"},
       {:recon, "~> 2.5"},
@@ -95,9 +97,9 @@ defmodule Realtime.MixProject do
       {:open_api_spex, "~> 3.16"},
       {:corsica, "~> 2.0"},
       {:observer_cli, "~> 1.7"},
-      {:opentelemetry_exporter, "~> 1.6"},
-      {:opentelemetry, "~> 1.3"},
-      {:opentelemetry_api, "~> 1.2"},
+      {:opentelemetry_exporter, "~> 1.10"},
+      {:opentelemetry, "~> 1.7"},
+      {:opentelemetry_api, "~> 1.5"},
       {:opentelemetry_phoenix, "~> 2.0"},
       {:opentelemetry_cowboy, "~> 1.0"},
       {:opentelemetry_ecto, "~> 1.2"},
@@ -107,6 +109,7 @@ defmodule Realtime.MixProject do
       {:req, "~> 0.6.2"},
       {:mimic, "~> 2.0", only: :test},
       {:floki, ">= 0.30.0", only: :test},
+      {:lazy_html, ">= 0.1.0", only: :test},
       {:mint_web_socket, "~> 1.0", only: :test},
       {:postgres_replication, git: "https://github.com/filipecabaco/postgres_replication.git", only: :test},
       {:benchee, "~> 1.1.0", only: [:dev, :test]},
@@ -124,7 +127,7 @@ defmodule Realtime.MixProject do
     if path = System.get_env("PHOENIX_PATH") do
       {:phoenix, path: path, override: true}
     else
-      {:phoenix, override: true, github: "supabase/phoenix", branch: "feat/presence-custom-dispatcher-1.7.19"}
+      {:phoenix, "~> 1.8"}
     end
   end
 

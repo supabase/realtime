@@ -24,10 +24,15 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
   setup :set_mimic_from_context
 
+  setup_all do
+    tenant = TestTenantDb.checkout_tenant_unboxed(run_migrations: true)
+    %{tenant: tenant}
+  end
+
   @change_json ~s({"table":"test","type":"INSERT","record":{"id": 34, "details": "test"},"columns":[{"name": "id", "type": "int4"}, {"name": "details", "type": "text"}],"errors":null,"schema":"public","commit_timestamp":"2025-10-13T07:50:28.066Z"})
 
   describe "poll" do
-    setup do
+    setup %{tenant: tenant} do
       :telemetry.attach_many(
         __MODULE__,
         [
@@ -45,7 +50,9 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
       on_exit(fn -> :telemetry.detach(__MODULE__) end)
 
-      tenant = Containers.checkout_tenant(run_migrations: true)
+      # The tenant is shared across the module via setup_all, so reset its rate
+      # counters per-test (checkout_tenant used to do this on every checkout).
+      RateCounterHelper.stop(tenant.external_id)
 
       {:ok, tenant} = Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{"max_events_per_second" => 123})
 
@@ -941,8 +948,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
   end
 
   describe "get_pg_stat_activity_diff/2" do
-    setup do
-      tenant = Containers.checkout_tenant(run_migrations: true)
+    setup %{tenant: tenant} do
       {:ok, conn} = Database.connect(tenant, "realtime_rls", :stop)
       %{conn: conn}
     end
@@ -953,9 +959,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
   end
 
   describe "error handling" do
-    setup do
-      tenant = Containers.checkout_tenant(run_migrations: true)
-
+    setup %{tenant: tenant} do
       args =
         hd(tenant.extensions).settings
         |> Map.put("id", tenant.external_id)

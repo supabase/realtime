@@ -14,14 +14,19 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
   alias RealtimeWeb.RealtimeChannel
   alias RealtimeWeb.Endpoint
 
-  setup %{conn: conn} do
-    tenant = Containers.checkout_tenant(run_migrations: true)
-    # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
+  setup_all do
+    tenant = TestTenantDb.checkout_tenant_unboxed(run_migrations: true)
+    %{tenant: tenant}
+  end
+
+  setup %{conn: conn, tenant: tenant} do
+    # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues.
+    # Kept per-test so the "suspended tenant" case can't leak suspend: true into later tests.
     Realtime.Tenants.Cache.update_cache(tenant)
 
     conn = generate_conn(conn, tenant)
 
-    {:ok, conn: conn, tenant: tenant}
+    {:ok, conn: conn}
   end
 
   defp subscribe(tenant_topic, topic, serializer \\ Phoenix.Socket.V1.JSONSerializer) do

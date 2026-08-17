@@ -17,7 +17,7 @@ END $$;
 
 
 -- Dumped from database version 15.14
--- Dumped by pg_dump version 15.18 (Ubuntu 15.18-1.pgdg24.04+1)
+-- Dumped by pg_dump version 15.19 (Ubuntu 15.19-1.pgdg24.04+2)
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;

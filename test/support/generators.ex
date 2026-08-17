@@ -7,7 +7,7 @@ defmodule Generators do
   alias Realtime.Crypto
   alias Realtime.Database
   alias Realtime.Integration.WebsocketClient
-  def port(), do: Containers.port()
+  def port(), do: TestTenantDb.port()
 
   @spec tenant_fixture(map()) :: Realtime.Api.Tenant.t()
   def tenant_fixture(override \\ %{}) do
@@ -277,6 +277,19 @@ defmodule Generators do
       realtime.topic() = '#{name}'
       AND realtime.messages.extension = 'presence'
       AND coalesce(((current_setting('request.jwt.claims', true))::jsonb ->> 'presence_read')::boolean, false)
+    );
+    """
+  end
+
+  def policy_query(:authenticated_read_broadcast_based_on_claim, %{topic: name}) do
+    """
+    CREATE POLICY "authenticated_read_broadcast_claim_#{name}"
+    ON realtime.messages FOR SELECT
+    TO authenticated
+    USING (
+      realtime.topic() = '#{name}'
+      AND realtime.messages.extension = 'broadcast'
+      AND coalesce(((current_setting('request.jwt.claims', true))::jsonb ->> 'broadcast_read')::boolean, false)
     );
     """
   end

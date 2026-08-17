@@ -422,6 +422,16 @@ defmodule RealtimeWeb.Socket.V2SerializerTest do
              }) == @broadcast
     end
 
+    test "binary user broadcast pushed message" do
+      assert encode!(@serializer, %Phoenix.Socket.Message{
+               join_ref: "12",
+               ref: nil,
+               topic: "topic",
+               event: "broadcast",
+               payload: {"user_event", :binary, <<101, 102, 103>>, %{"replayed" => true}}
+             }) == @binary_user_broadcast
+    end
+
     test "fastlane binary UserBroadcast" do
       assert fastlane!(@serializer, %UserBroadcast{
                topic: "topic",
