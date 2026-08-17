@@ -11,14 +11,18 @@ defmodule Realtime.DatabaseTest do
   doctest Realtime.Database
   def handle_telemetry(event, metadata, content, pid: pid), do: send(pid, {event, metadata, content})
 
-  setup do
-    tenant = TestTenantDb.checkout_tenant()
+  setup context do
     :telemetry.attach(__MODULE__, [:realtime, :database, :transaction], &__MODULE__.handle_telemetry/4, pid: self())
 
     on_exit(fn -> :telemetry.detach(__MODULE__) end)
 
-    %{tenant: tenant}
+    maybe_checkout_tenant(context)
   end
+
+  # Pure tests (DNS resolution, settings structs, pool-size math) never touch a tenant database,
+  # so they skip the container checkout.
+  defp maybe_checkout_tenant(%{without_db: true}), do: :ok
+  defp maybe_checkout_tenant(_context), do: %{tenant: TestTenantDb.checkout_tenant()}
 
   describe "check_tenant_connection/1" do
     setup context do
@@ -80,14 +84,25 @@ defmodule Realtime.DatabaseTest do
 
     @tag db_pool: 3
     test "durable pool opens the configured number of realtime_connect connections", %{tenant: tenant} do
-      assert {:ok, conn, _migrations_ran} = Database.check_tenant_connection(tenant)
+      # pg_stat_activity is server-wide, so draining 'realtime_connect' backends left
+      # behind by earlier tests can inflate the count. Terminate any lingering ones
+      # (using a separate connection that is not counted) to start from a clean slate.
+      {:ok, admin} = Database.connect(tenant, "realtime_test", :stop)
+
+      Postgrex.query!(
+        admin,
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
+        []
+      )
+
+      assert {:ok, _conn, _migrations_ran} = Database.check_tenant_connection(tenant)
 
       # Postgrex opens the pool connections asynchronously, so give it a moment
       # to bring all of them up.
       assert eventually(fn ->
                %{rows: [[count]]} =
                  Postgrex.query!(
-                   conn,
+                   admin,
                    "SELECT count(*)::int FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
                    []
                  )
@@ -243,6 +258,7 @@ defmodule Realtime.DatabaseTest do
   end
 
   describe "pool_size_by_application_name/2" do
+    @describetag without_db: true
     test "returns the number of connections per application name" do
       assert Database.pool_size_by_application_name("realtime_connect", %{}) == 1
       assert Database.pool_size_by_application_name("realtime_connect", %{"db_pool" => 10}) == 10
@@ -260,6 +276,7 @@ defmodule Realtime.DatabaseTest do
   end
 
   describe "get_external_id/1" do
+    @describetag without_db: true
     test "returns the external id for a given hostname" do
       assert Realtime.Database.get_external_id("tenant.realtime.supabase.co") == {:ok, "tenant"}
       assert Realtime.Database.get_external_id("tenant.supabase.co") == {:ok, "tenant"}
@@ -268,6 +285,7 @@ defmodule Realtime.DatabaseTest do
   end
 
   describe "detect_ip_version/1" do
+    @describetag without_db: true
     test "detects appropriate IP version" do
       # Using ipv4.google.com
       assert Realtime.Database.detect_ip_version("ipv4.google.com") == {:ok, :inet}
@@ -336,6 +354,7 @@ defmodule Realtime.DatabaseTest do
              } = settings
     end
 
+    @tag without_db: true
     test "defaults ssl to true when ssl_enforced is not set" do
       assert Database.default_ssl_param(%{})
       assert Database.default_ssl_param(%{"other" => "value"})
