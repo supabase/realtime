@@ -37,6 +37,74 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesFiltersTest do
       assert_filter_delivers(tenant, "details=eq.hello", "hello")
     end
 
+    test "jsonb text extraction filter matches only the selected value", %{tenant: tenant} do
+      {socket, _} = get_connection(tenant, @serializer)
+      topic = "realtime:jsonb"
+
+      config = %{
+        postgres_changes: [
+          %{
+            event: "INSERT",
+            schema: "public",
+            table: "test",
+            filter: "data->>organization_id=eq.org_123"
+          }
+        ]
+      }
+
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 200
+
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{
+                         "channel" => "jsonb",
+                         "extension" => "postgres_changes",
+                         "message" => "Subscribed to PostgreSQL",
+                         "status" => "ok"
+                       },
+                       ref: nil,
+                       topic: ^topic
+                     },
+                     8000
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+
+      %{rows: [[matching_id]]} =
+        Postgrex.query!(
+          conn,
+          "insert into test (details, data) values ($1, $2::jsonb) returning id",
+          ["jsonb-match", ~s|{"organization_id":"org_123"}|]
+        )
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{
+                         "data" => %{
+                           "record" => %{"id" => ^matching_id, "details" => "jsonb-match"},
+                           "type" => "INSERT"
+                         }
+                       },
+                       ref: nil,
+                       topic: ^topic
+                     },
+                     500
+
+      Postgrex.query!(
+        conn,
+        "insert into test (details, data) values ($1, $2::jsonb)",
+        ["jsonb-no-match", ~s|{"organization_id":"other"}|]
+      )
+
+      refute_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{"data" => %{"record" => %{"details" => "jsonb-no-match"}}},
+                       topic: ^topic
+                     },
+                     500
+    end
+
     test "neq filter matches on insert, update and delete", %{tenant: tenant} do
       assert_filter_delivers(tenant, "details=neq.other", "hello")
     end
