@@ -947,38 +947,32 @@ begin
             if filter.value <> 'null' and col_type <> 'boolean'::regtype then
                 raise exception 'is % filter requires a boolean column, got %', filter.value, col_type::text;
             end if;
-        elsif filter.op in ('like'::realtime.equality_op, 'ilike'::realtime.equality_op) then
-            -- like/ilike apply the text pattern operator (~~); reject column types that
-            -- have no such operator instead of failing at WAL time
-            if not exists (
-                select 1 from pg_catalog.pg_operator
-                where oprname = '~~' and oprleft = col_type
-            ) then
-                raise exception 'operator % requires a text-compatible column type, got %', filter.op::text, col_type::text;
-            end if;
-        elsif filter.op in ('match'::realtime.equality_op, 'imatch'::realtime.equality_op) then
-            -- match/imatch apply the regex operators ~ / ~*; reject column types that have
-            -- no such operator (e.g. integer) instead of failing at WAL time, mirroring the
-            -- like/ilike guard above.
-            if not exists (
-                select 1 from pg_catalog.pg_operator
-                where oprname = case when filter.op = 'imatch'::realtime.equality_op then '~*' else '~' end
-                  and oprleft = col_type
-                  and oprright = col_type
-                  and oprresult = 'boolean'::regtype
-            ) then
-                raise exception 'operator % requires a text-compatible column type, got %', filter.op::text, col_type::text;
-            end if;
-            -- validate the regex eagerly so a bad pattern is rejected here, not inside
-            -- apply_rls where it would abort the WAL stream for the entity
-            begin
-                perform '' ~ filter.value;
-            exception when others then
-                raise exception 'invalid regular expression for % filter: %', filter.op::text, sqlerrm;
-            end;
         else
-            -- eq/neq/lt/lte/gt/gte: value must be coercable to the type
-            perform realtime.cast(filter.value, col_type);
+            if filter.op in ('match'::realtime.equality_op, 'imatch'::realtime.equality_op) then
+                -- validate the regex eagerly so a bad pattern gets its own error rather than
+                -- surfacing as an unsupported operator below
+                begin
+                    perform '' ~ filter.value;
+                exception when others then
+                    raise exception 'invalid regular expression for % filter: %', filter.op::text, sqlerrm;
+                end;
+            elsif filter.op not in ('like'::realtime.equality_op, 'ilike'::realtime.equality_op) then
+                -- eq/neq/lt/lte/gt/gte/isdistinct: value must be coercable to the type
+                perform realtime.cast(filter.value, col_type);
+            end if;
+
+            -- The operator also has to be applicable to the column type. pg_operator answers
+            -- that wrongly in both directions - varchar carries no ~~ of its own but resolves
+            -- one through text, bytea carries ~~ but no ~~* - so evaluate the operator instead
+            -- of looking it up. This is the exact call apply_rls makes, which is what keeps
+            -- the two from disagreeing; anything that raises here would otherwise raise at WAL
+            -- time, where it aborts the batch for every subscription on the tenant.
+            begin
+                perform realtime.check_equality_op(filter.op, col_type, filter.value, filter.value, filter.negate);
+            exception when others then
+                raise exception 'operator % is not supported on column % of type %: %',
+                    filter.op::text, filter.column_name, col_type::text, sqlerrm;
+            end;
         end if;
     end loop;
 
@@ -1485,3 +1479,4 @@ INSERT INTO realtime."schema_migrations" (version) VALUES (20260626120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260706120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260707120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260709120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20260815140000);
