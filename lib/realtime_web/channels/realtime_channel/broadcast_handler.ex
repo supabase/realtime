@@ -56,7 +56,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
             # Broadcast first to prioritize throughput.
             :ok ->
               send_message(tenant_id, self_broadcast, tenant_topic, payload)
-              maybe_persist(policies, db_conn, tenant_id, authorization_context.topic, payload)
+              # TODO: hard limits and buffering based on ack
+              maybe_persist(policies, db_conn, tenant_id, authorization_context.topic, payload, ack_broadcast)
 
             {:error, error} ->
               {:error, error}
@@ -175,8 +176,37 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
     %Phoenix.Socket.Broadcast{topic: topic, event: @event_type, payload: payload}
   end
 
-  @spec maybe_persist(Policies.t(), pid(), String.t(), String.t(), payload) :: :ok | {:ok, map()}
-  defp maybe_persist(%Policies{persistence: %PersistencePolicies{write: true}}, db_conn, tenant_id, topic, payload) do
+  @spec maybe_persist(Policies.t(), pid(), String.t(), String.t(), payload, ack_broadcast :: boolean()) ::
+          :ok | {:ok, map()}
+  defp maybe_persist(
+         %Policies{persistence: %PersistencePolicies{write: true}},
+         db_conn,
+         tenant_id,
+         topic,
+         payload,
+         true = _ack_broadcast
+       ) do
+    persist(db_conn, tenant_id, topic, payload)
+  end
+
+  defp maybe_persist(
+         %Policies{persistence: %PersistencePolicies{write: true}},
+         db_conn,
+         tenant_id,
+         topic,
+         payload,
+         false = _ack_broadcast
+       ) do
+    Task.Supervisor.start_child(Realtime.TaskSupervisor, fn ->
+      persist(db_conn, tenant_id, topic, payload)
+    end)
+
+    :ok
+  end
+
+  defp maybe_persist(_policies, _db_conn, _tenant_id, _topic, _payload, _ack_broadcast), do: :ok
+
+  defp persist(db_conn, tenant_id, topic, payload) do
     with {:ok, event, event_payload} <- convert_to_persistable_fields(payload),
          {:ok, id} <- Messages.persist(db_conn, tenant_id, topic, event, event_payload) do
       {:ok, %{id: id}}
@@ -186,8 +216,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
         :ok
     end
   end
-
-  defp maybe_persist(_policies, _db_conn, _tenant_id, _topic, _payload), do: :ok
 
   @spec convert_to_persistable_fields(payload) ::
           {:ok, String.t(), map() | binary()} | {:error, :unsupported_payload}

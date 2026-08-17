@@ -496,6 +496,30 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
               ]} = Repo.all(db_conn, Message, Message)
     end
 
+    test "broadcast without ack does not wait for the message to be persisted", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket =
+        socket_fixture(tenant, topic,
+          ack_broadcast: false,
+          policies: %Policies{
+            broadcast: %BroadcastPolicies{write: true},
+            persistence: %PersistencePolicies{write: true}
+          }
+        )
+
+      assert {:noreply, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+
+      assert eventually(fn ->
+               match?(
+                 {:ok, [%Message{topic: ^topic, event: "test", skip_broadcast: true}]},
+                 Repo.all(db_conn, Message, Message)
+               )
+             end)
+    end
+
     test "V2 json user broadcast authorized to persist stores the user payload", %{
       topic: topic,
       tenant: tenant,
