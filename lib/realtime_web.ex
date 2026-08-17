@@ -21,7 +21,12 @@ defmodule RealtimeWeb do
 
   def controller do
     quote do
-      use Phoenix.Controller, namespace: RealtimeWeb
+      # Phoenix 1.8 deprecated the :namespace option. `formats: [html: "View", json: "View"]`
+      # keeps the existing Phoenix.View module naming (e.g. PageController -> PageView), and
+      # `layouts:` replaces what :namespace previously derived ({RealtimeWeb.LayoutView, :app}).
+      use Phoenix.Controller,
+        formats: [html: "View", json: "View"],
+        layouts: [html: RealtimeWeb.LayoutView]
 
       import Plug.Conn
       import RealtimeWeb.Gettext
