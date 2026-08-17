@@ -539,26 +539,35 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   def postgres_url(%Database{} = db) do
     sslmode = if db.ssl, do: "require", else: "disable"
 
-    hostname =
-      case :inet.parse_ipv6strict_address(String.to_charlist(db.hostname)) do
-        {:ok, _} -> "[#{db.hostname}]"
-        _ -> db.hostname
-      end
-
     IO.iodata_to_binary([
       "postgresql://",
       URI.encode_www_form(db.username),
       ":",
       URI.encode_www_form(db.password),
       "@",
-      hostname,
+      url_host(db),
       ":",
       Integer.to_string(db.port),
       "/",
       URI.encode_www_form(db.database),
       "?sslmode=",
-      sslmode
+      sslmode,
+      host_param(db)
     ])
+  end
+
+  defp url_host(%Database{hostname: hostname} = db) do
+    if ipv6_literal?(db), do: "[#{hostname}]", else: hostname
+  end
+
+  # node-postgres passes the URL host to getaddrinfo verbatim, so brackets fail with
+  # `ENOTFOUND [::1]`. A `host` query param overrides the URL host, unbracketed.
+  defp host_param(%Database{hostname: hostname} = db) do
+    if ipv6_literal?(db), do: ["&host=", hostname], else: []
+  end
+
+  defp ipv6_literal?(%Database{hostname: hostname}) do
+    match?({:ok, _}, :inet.parse_ipv6strict_address(String.to_charlist(hostname)))
   end
 
   @doc false

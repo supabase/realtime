@@ -290,7 +290,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
                socket_options: [:inet6],
                ssl: true
              }) ==
-               "postgresql://supabase_admin:s3cr3t@[2600:1f14:359d:9302:205d:38ca:a017:c7e3]:5432/postgres?sslmode=require"
+               "postgresql://supabase_admin:s3cr3t@[2600:1f14:359d:9302:205d:38ca:a017:c7e3]:5432/postgres?sslmode=require&host=2600:1f14:359d:9302:205d:38ca:a017:c7e3"
     end
 
     test "builds a valid URL for DNS hostnames resolved over IPv6" do
