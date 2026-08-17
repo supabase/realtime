@@ -5,6 +5,8 @@ defmodule RealtimeWeb.BroadcastControllerTest do
   setup :set_mimic_from_context
 
   alias Realtime.Api
+  import Ecto.Query, only: [from: 2]
+
   alias Realtime.Api.Message
   alias Realtime.Crypto
   alias Realtime.FeatureFlags
@@ -547,8 +549,12 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
       assert_receive {:socket_push, :text, _data}, 500
 
-      assert {:ok, [%Message{topic: ^topic, event: ^event, skip_broadcast: true}]} =
-               Repo.all(db_conn, Message, Message)
+      assert eventually(fn ->
+               match?(
+                 {:ok, [%Message{topic: ^topic, event: ^event, skip_broadcast: true}]},
+                 Repo.all(db_conn, messages_for(topic), Message)
+               )
+             end)
 
       # The stored row reaches the replication stream but must not be delivered a second time
       refute_receive {:socket_push, :text, _}, 500
@@ -609,4 +615,6 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     |> put_req_header("authorization", "Bearer #{generate_jwt_token(tenant, claims)}")
     |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
   end
+
+  defp messages_for(topic), do: from(m in Message, where: m.topic == ^topic)
 end

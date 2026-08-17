@@ -4,6 +4,8 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
   setup :set_mimic_from_context
 
+  import Ecto.Query, only: [from: 2]
+
   alias Realtime.Api.Message
   alias Realtime.Database
   alias Realtime.GenCounter
@@ -542,7 +544,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       assert :ok = BatchBroadcast.broadcast(auth_params, tenant, messages, false)
 
-      assert {:ok, stored} = Repo.all(db_conn, Message, Message)
+      assert {:ok, stored} = Repo.all(db_conn, messages_for(topic), Message)
       assert Enum.map(stored, & &1.event) |> Enum.sort() == ["event1", "event2"]
       assert Enum.all?(stored, &match?(%Message{extension: :broadcast, private: true, skip_broadcast: true}, &1))
     end
@@ -567,7 +569,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       assert :ok = BatchBroadcast.broadcast(auth_params, tenant, messages, false)
 
-      assert {:ok, []} = Repo.all(db_conn, Message, Message)
+      assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
 
     test "does not store super user messages", %{tenant: tenant, db_conn: db_conn} do
@@ -579,7 +581,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       assert :ok = BatchBroadcast.broadcast(nil, tenant, messages, true)
 
-      assert {:ok, []} = Repo.all(db_conn, Message, Message)
+      assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
 
     test "does not store public messages", %{tenant: tenant, db_conn: db_conn, auth_params: auth_params} do
@@ -591,7 +593,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       assert :ok = BatchBroadcast.broadcast(auth_params, tenant, messages, false)
 
-      assert {:ok, []} = Repo.all(db_conn, Message, Message)
+      assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
   end
 
@@ -643,4 +645,6 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       assert calls(&TenantBroadcaster.pubsub_broadcast/5) == []
     end
   end
+
+  defp messages_for(topic), do: from(m in Message, where: m.topic == ^topic)
 end

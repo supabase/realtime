@@ -91,7 +91,10 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     @tag policies: [:authenticated_read_matching_user_sub, :authenticated_write_matching_user_sub], sub: UUID.generate()
     test "with valid sub, is able to send message",
          %{topic: topic, tenant: tenant, db_conn: db_conn, sub: sub, serializer: serializer} do
-      stub(FeatureFlags, :enabled?, fn "broadcast_persistence", _tenant_id -> true end)
+      stub(FeatureFlags, :enabled?, fn
+        "broadcast_persistence", _tenant_id -> true
+        _flag, _tenant_id -> false
+      end)
 
       socket =
         socket_fixture(tenant, topic,
@@ -132,7 +135,10 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     @tag policies: [:read_matching_user_role, :write_matching_user_role], role: "anon"
     test "with valid role, is able to send message",
          %{topic: topic, tenant: tenant, db_conn: db_conn, serializer: serializer} do
-      stub(FeatureFlags, :enabled?, fn "broadcast_persistence", _tenant_id -> true end)
+      stub(FeatureFlags, :enabled?, fn
+        "broadcast_persistence", _tenant_id -> true
+        _flag, _tenant_id -> false
+      end)
 
       socket =
         socket_fixture(tenant, topic,

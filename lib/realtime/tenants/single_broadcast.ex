@@ -205,10 +205,14 @@ defmodule Realtime.Tenants.SingleBroadcast do
   end
 
   defp maybe_persist(%PersistencePolicies{write: true}, db_conn, tenant, topic, event, payload) do
-    case Messages.persist(db_conn, tenant.external_id, topic, event, payload) do
-      {:ok, _id} -> :ok
-      error -> log_error("UnableToPersistMessage", error)
-    end
+    Task.Supervisor.start_child(Realtime.TaskSupervisor, fn ->
+      case Messages.persist(db_conn, tenant.external_id, topic, event, payload) do
+        {:ok, _id} -> :ok
+        error -> log_error("UnableToPersistMessage", error)
+      end
+    end)
+
+    :ok
   end
 
   defp maybe_persist(_persistence, _db_conn, _tenant, _topic, _event, _payload), do: :ok

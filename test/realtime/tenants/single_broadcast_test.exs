@@ -4,6 +4,8 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
 
   setup :set_mimic_from_context
 
+  import Ecto.Query, only: [from: 2]
+
   alias Realtime.Api.Message
   alias Realtime.Database
   alias Realtime.GenCounter
@@ -437,17 +439,22 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
 
       assert :ok = SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, payload, :json)
 
-      assert {:ok,
-              [
-                %Message{
-                  topic: ^topic,
-                  event: "event",
-                  payload: ^payload,
-                  extension: :broadcast,
-                  private: true,
-                  skip_broadcast: true
-                }
-              ]} = Repo.all(db_conn, Message, Message)
+      assert eventually(fn ->
+               match?(
+                 {:ok,
+                  [
+                    %Message{
+                      topic: ^topic,
+                      event: "event",
+                      payload: ^payload,
+                      extension: :broadcast,
+                      private: true,
+                      skip_broadcast: true
+                    }
+                  ]},
+                 Repo.all(db_conn, messages_for(topic), Message)
+               )
+             end)
     end
 
     test "does not store the message without a persistence policy", %{
@@ -467,7 +474,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
 
       assert :ok = SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, %{"a" => "b"}, :json)
 
-      assert {:ok, []} = Repo.all(db_conn, Message, Message)
+      assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
 
     test "stores binary messages as binary_payload", %{tenant: tenant, db_conn: db_conn, auth_params: auth_params} do
@@ -488,18 +495,23 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
 
       assert :ok = SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, binary, :binary)
 
-      assert {:ok,
-              [
-                %Message{
-                  topic: ^topic,
-                  event: "event",
-                  payload: nil,
-                  binary_payload: ^binary,
-                  extension: :broadcast,
-                  private: true,
-                  skip_broadcast: true
-                }
-              ]} = Repo.all(db_conn, Message, Message)
+      assert eventually(fn ->
+               match?(
+                 {:ok,
+                  [
+                    %Message{
+                      topic: ^topic,
+                      event: "event",
+                      payload: nil,
+                      binary_payload: ^binary,
+                      extension: :broadcast,
+                      private: true,
+                      skip_broadcast: true
+                    }
+                  ]},
+                 Repo.all(db_conn, messages_for(topic), Message)
+               )
+             end)
     end
   end
 
@@ -548,4 +560,6 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
                SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, %{"secret" => "data"}, :json)
     end
   end
+
+  defp messages_for(topic), do: from(m in Message, where: m.topic == ^topic)
 end

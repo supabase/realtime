@@ -91,8 +91,9 @@ defmodule Realtime.Tenants.BatchBroadcast do
             {db_conn, %Policies{broadcast: %BroadcastPolicies{write: true}} = policies} ->
               Enum.each(events, fn message ->
                 send_message_and_count(tenant, events_per_second_rate, message, false)
-                maybe_persist(policies.persistence, db_conn, tenant, message)
               end)
+
+              maybe_persist(policies.persistence, db_conn, tenant, events)
 
             _ ->
               nil
@@ -163,14 +164,20 @@ defmodule Realtime.Tenants.BatchBroadcast do
     )
   end
 
-  defp maybe_persist(%PersistencePolicies{write: true}, db_conn, tenant, message) do
-    case Messages.persist(db_conn, tenant.external_id, message.topic, message.event, message.payload) do
-      {:ok, _id} -> :ok
-      error -> log_error("UnableToPersistMessage", error)
-    end
+  defp maybe_persist(%PersistencePolicies{write: true}, db_conn, tenant, events) do
+    Task.Supervisor.start_child(Realtime.TaskSupervisor, fn ->
+      Enum.each(events, fn message ->
+        case Messages.persist(db_conn, tenant.external_id, message.topic, message.event, message.payload) do
+          {:ok, _id} -> :ok
+          error -> log_error("UnableToPersistMessage", error)
+        end
+      end)
+    end)
+
+    :ok
   end
 
-  defp maybe_persist(_persistence, _db_conn, _tenant, _message), do: :ok
+  defp maybe_persist(_persistence, _db_conn, _tenant, _events), do: :ok
 
   defp permissions_for_message(_, nil, _), do: nil
 
