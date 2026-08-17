@@ -4,8 +4,10 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
   setup :set_mimic_from_context
 
+  alias Realtime.Api
   alias Realtime.Api.Message
   alias Realtime.Crypto
+  alias Realtime.FeatureFlags
   alias Realtime.GenCounter
   alias Realtime.RateCounter
   alias Realtime.Tenants
@@ -515,6 +517,8 @@ defmodule RealtimeWeb.BroadcastControllerTest do
       db_conn: db_conn,
       tenant: tenant
     } do
+      enable_broadcast_persistence_flag!()
+
       start_link_supervised!(
         {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
         restart: :transient
@@ -574,6 +578,15 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
       assert conn.status == 202
     end
+  end
+
+  # Enables the `broadcast_persistence` flag for real: the flag is created and pushed into the local
+  # FeatureFlags cache so the replication connection process reads it synchronously, and torn down
+  # afterwards so it does not leak into other tests via the shared in-memory cache.
+  defp enable_broadcast_persistence_flag! do
+    {:ok, flag} = Api.upsert_feature_flag(%{name: "broadcast_persistence", enabled: true})
+    FeatureFlags.Cache.update_cache(flag)
+    on_exit(fn -> FeatureFlags.Cache.invalidate_cache("broadcast_persistence") end)
   end
 
   defp generate_message_with_policies(db_conn, tenant) do

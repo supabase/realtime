@@ -12,6 +12,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
   alias Ecto.UUID
   alias Realtime.Api.Message
+  alias Realtime.FeatureFlags
   alias Realtime.RateCounter
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
@@ -90,6 +91,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     @tag policies: [:authenticated_read_matching_user_sub, :authenticated_write_matching_user_sub], sub: UUID.generate()
     test "with valid sub, is able to send message",
          %{topic: topic, tenant: tenant, db_conn: db_conn, sub: sub, serializer: serializer} do
+      stub(FeatureFlags, :enabled?, fn "broadcast_persistence", _tenant_id -> true end)
+
       socket =
         socket_fixture(tenant, topic,
           policies: %Policies{broadcast: %BroadcastPolicies{write: nil, read: true}},
@@ -129,6 +132,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     @tag policies: [:read_matching_user_role, :write_matching_user_role], role: "anon"
     test "with valid role, is able to send message",
          %{topic: topic, tenant: tenant, db_conn: db_conn, serializer: serializer} do
+      stub(FeatureFlags, :enabled?, fn "broadcast_persistence", _tenant_id -> true end)
+
       socket =
         socket_fixture(tenant, topic,
           policies: %Policies{broadcast: %BroadcastPolicies{write: nil, read: true}},

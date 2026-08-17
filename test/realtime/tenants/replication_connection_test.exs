@@ -4,8 +4,10 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
   import ExUnit.CaptureLog
 
+  alias Realtime.Api
   alias Realtime.Api.Message
   alias Realtime.Database
+  alias Realtime.FeatureFlags
   alias Realtime.GenCounter
   alias Realtime.RateCounter
   alias Realtime.Tenants
@@ -780,8 +782,9 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     test "if proper tables are included, starts replication", %{tenant: tenant, db_conn: db_conn} do
       publication_name = "supabase_realtime_messages_publication"
 
+      enable_broadcast_persistence_flag!()
       Postgrex.query!(db_conn, "DROP PUBLICATION IF EXISTS #{publication_name}", [])
-      Postgrex.query!(db_conn, "CREATE PUBLICATION #{publication_name} FOR TABLE realtime.messages", [])
+      create_messages_publication(db_conn, publication_name)
 
       logs =
         capture_log(fn ->
@@ -795,6 +798,92 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
         end)
 
       refute logs =~ "Recreating"
+    end
+
+    test "keeps publication untouched when broadcast persistence is disabled", %{tenant: tenant, db_conn: db_conn} do
+      publication_name = "supabase_realtime_messages_publication"
+
+      Postgrex.query!(db_conn, "DROP PUBLICATION IF EXISTS #{publication_name}", [])
+      Postgrex.query!(db_conn, "CREATE PUBLICATION #{publication_name} FOR TABLE realtime.messages", [])
+
+      logs =
+        capture_log(fn ->
+          {:ok, pid} = ReplicationConnection.start(tenant, self())
+
+          assert_replication_started(db_conn, @replication_slot_name)
+
+          assert %{rows: [[true, true, true, true, false]]} =
+                   Postgrex.query!(
+                     db_conn,
+                     "SELECT pubinsert, pubupdate, pubdelete, pubtruncate, pubviaroot FROM pg_publication WHERE pubname = $1",
+                     [publication_name]
+                   )
+
+          Process.exit(pid, :shutdown)
+        end)
+
+      refute logs =~ "Recreating"
+    end
+
+    @tag :requires_pg_150000
+    test "creates publication that filters out messages sent over WebSocket and still allows writes", %{
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      publication_name = "supabase_realtime_messages_publication"
+
+      enable_broadcast_persistence_flag!()
+      Postgrex.query!(db_conn, "DROP PUBLICATION IF EXISTS #{publication_name}", [])
+
+      capture_log(fn ->
+        {:ok, pid} = ReplicationConnection.start(tenant, self())
+
+        assert_replication_started(db_conn, @replication_slot_name)
+
+        assert %{rows: [["realtime", "messages", "(NOT skip_broadcast)", true, false, false, false, true]]} =
+                 publication_options(db_conn, publication_name)
+
+        message =
+          message_fixture(tenant, %{
+            "topic" => random_string(),
+            "private" => true,
+            "event" => "INSERT",
+            "payload" => %{"value" => random_string()}
+          })
+
+        assert {:ok, %{num_rows: 1}} =
+                 Postgrex.query(db_conn, "UPDATE realtime.messages SET event = 'UPDATE' WHERE id::text = $1", [
+                   message.id
+                 ])
+
+        assert {:ok, %{num_rows: 1}} =
+                 Postgrex.query(db_conn, "DELETE FROM realtime.messages WHERE id::text = $1", [message.id])
+
+        Process.exit(pid, :shutdown)
+      end)
+    end
+
+    @tag :requires_pg_150000
+    test "recreates publication without a row filter", %{tenant: tenant, db_conn: db_conn} do
+      publication_name = "supabase_realtime_messages_publication"
+
+      enable_broadcast_persistence_flag!()
+      Postgrex.query!(db_conn, "DROP PUBLICATION IF EXISTS #{publication_name}", [])
+      Postgrex.query!(db_conn, "CREATE PUBLICATION #{publication_name} FOR TABLE realtime.messages", [])
+
+      logs =
+        capture_log(fn ->
+          {:ok, pid} = ReplicationConnection.start(tenant, self())
+
+          assert_replication_started(db_conn, @replication_slot_name)
+
+          assert %{rows: [["realtime", "messages", "(NOT skip_broadcast)", true, false, false, false, true]]} =
+                   publication_options(db_conn, publication_name)
+
+          Process.exit(pid, :shutdown)
+        end)
+
+      assert logs =~ "Recreating"
     end
 
     test "disconnects when the publication cannot be created", %{tenant: tenant, db_conn: db_conn} do
@@ -1055,6 +1144,40 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       |> TenantConnection.create_message(conn)
 
     message
+  end
+
+  # Enables the `broadcast_persistence` flag for real: the flag is created and pushed into the local
+  # FeatureFlags cache so the replication connection process reads it synchronously, and torn down
+  # afterwards so it does not leak into other tests via the shared in-memory cache.
+  defp enable_broadcast_persistence_flag! do
+    {:ok, flag} = Api.upsert_feature_flag(%{name: "broadcast_persistence", enabled: true})
+    FeatureFlags.Cache.update_cache(flag)
+    on_exit(fn -> FeatureFlags.Cache.invalidate_cache("broadcast_persistence") end)
+  end
+
+  defp create_messages_publication(db_conn, publication_name) do
+    %{rows: [[server_version_num]]} = Postgrex.query!(db_conn, "SELECT current_setting('server_version_num')::int", [])
+
+    row_filter = if server_version_num >= 150_000, do: " WHERE (NOT skip_broadcast)", else: ""
+
+    Postgrex.query!(
+      db_conn,
+      "CREATE PUBLICATION #{publication_name} FOR TABLE realtime.messages#{row_filter} WITH (publish = 'insert', publish_via_partition_root = true)",
+      []
+    )
+  end
+
+  defp publication_options(db_conn, publication_name) do
+    Postgrex.query!(
+      db_conn,
+      """
+      SELECT t.schemaname, t.tablename, t.rowfilter, p.pubinsert, p.pubupdate, p.pubdelete, p.pubtruncate, p.pubviaroot
+      FROM pg_publication_tables t
+      JOIN pg_publication p ON p.pubname = t.pubname
+      WHERE t.pubname = $1
+      """,
+      [publication_name]
+    )
   end
 
   defp assert_publication_contains_only_messages(db_conn, publication_name) do

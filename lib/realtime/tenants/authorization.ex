@@ -15,6 +15,7 @@ defmodule Realtime.Tenants.Authorization do
   alias Realtime.Api.Message
   alias Realtime.Api.Tenant
   alias Realtime.Database
+  alias Realtime.FeatureFlags
   alias Realtime.GenCounter
   alias Realtime.GenRpc
   alias Realtime.Tenants.Repo
@@ -320,7 +321,7 @@ defmodule Realtime.Tenants.Authorization do
   end
 
   defp check_write_policies(conn, authorization_context, extensions, policies) do
-    extensions = extensions ++ [:persistence]
+    extensions = if persistence_enabled?(authorization_context), do: extensions ++ [:persistence], else: extensions
 
     Enum.reduce_while(@all_extensions ++ [:persistence], {:ok, policies}, fn extension, {:ok, acc} ->
       if extension in extensions do
@@ -341,6 +342,11 @@ defmodule Realtime.Tenants.Authorization do
       end
     end)
   end
+
+  defp persistence_enabled?(%__MODULE__{tenant_id: tenant_id}) when is_binary(tenant_id),
+    do: FeatureFlags.enabled?("broadcast_persistence", tenant_id)
+
+  defp persistence_enabled?(_authorization_context), do: false
 
   defp rate_counter(tenant_id) do
     %Tenant{} = tenant = Realtime.Tenants.Cache.get_tenant_by_external_id(tenant_id)

@@ -11,7 +11,9 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
 
   alias Phoenix.Socket.Message
   alias Postgrex
+  alias Realtime.Api
   alias Realtime.Database
+  alias Realtime.FeatureFlags
   alias Realtime.Integration.WebsocketClient
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.ReplicationConnection
@@ -258,6 +260,11 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
 
   describe "broadcast storage" do
     setup [:rls_context]
+
+    setup do
+      enable_broadcast_persistence_flag!()
+      :ok
+    end
 
     test "public broadcast is delivered but not stored", %{
       tenant: tenant,
@@ -748,5 +755,14 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
 
   defp create_message_policy(db_conn, name, definition) do
     Postgrex.query!(db_conn, "CREATE POLICY #{name} ON realtime.messages #{definition}", [])
+  end
+
+  # Enables the `broadcast_persistence` flag for real: the flag is created and pushed into the local
+  # FeatureFlags cache so the channel and replication connection processes read it synchronously, and
+  # torn down afterwards so it does not leak into other tests via the shared in-memory cache.
+  defp enable_broadcast_persistence_flag! do
+    {:ok, flag} = Api.upsert_feature_flag(%{name: "broadcast_persistence", enabled: true})
+    FeatureFlags.Cache.update_cache(flag)
+    on_exit(fn -> FeatureFlags.Cache.invalidate_cache("broadcast_persistence") end)
   end
 end
