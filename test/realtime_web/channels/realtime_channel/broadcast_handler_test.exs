@@ -465,7 +465,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     end
   end
 
-  describe "broadcast storage" do
+  describe "broadcast persistence" do
     test "broadcast authorized to persist is stored and acks with its id", %{
       topic: topic,
       tenant: tenant,

@@ -258,7 +258,7 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
     end
   end
 
-  describe "broadcast storage" do
+  describe "broadcast persistence" do
     setup [:rls_context]
 
     setup do
