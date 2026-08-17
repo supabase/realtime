@@ -1,10 +1,7 @@
 defmodule Realtime.Integration.RtChannel.WalBloatTest do
-  use RealtimeWeb.ConnCase,
-    async: false,
-    parameterize: [
-      %{serializer: Phoenix.Socket.V1.JSONSerializer},
-      %{serializer: RealtimeWeb.Socket.V2Serializer}
-    ]
+  # WAL-bloat detection and replication recovery are serializer-independent, so this
+  # only runs under a single serializer (the websocket encode/decode path is covered elsewhere).
+  use RealtimeWeb.ConnCase, async: false
 
   import Generators
 
@@ -75,8 +72,8 @@ defmodule Realtime.Integration.RtChannel.WalBloatTest do
     # TODO: fix potential incompatibility on realtime.send in OrioleDB. See https://github.com/orioledb/orioledb/issues/936
     @tag :skip_orioledb
     @tag timeout: :timer.minutes(3)
-    test "track PID changes during WAL bloat creation", %{tenant: tenant, topic: topic, serializer: serializer} do
-      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+    test "track PID changes during WAL bloat creation", %{tenant: tenant, topic: topic} do
+      {socket, _} = get_connection(tenant, RealtimeWeb.Socket.V2Serializer, role: "authenticated")
       full_topic = "realtime:#{topic}"
 
       WebsocketClient.join(socket, full_topic, %{config: %{broadcast: %{self: true}, private: false}})
