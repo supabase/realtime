@@ -38,6 +38,7 @@ config/prod.secret.exs
 demo/.env
 .lexical
 .vscode
+.elixir_ls
 
 # Local
 mise.local.toml
