@@ -6,6 +6,7 @@ defmodule Realtime.DatabaseTest do
 
   import ExUnit.CaptureLog
 
+  alias Realtime.Crypto
   alias Realtime.Database
 
   doctest Realtime.Database
@@ -316,6 +317,25 @@ defmodule Realtime.DatabaseTest do
     test "uses default backoff when not provided", %{tenant: tenant} do
       {:ok, settings} = Database.from_tenant(tenant, "realtime_test")
       assert settings.backoff_type == :rand_exp
+    end
+  end
+
+  describe "from_settings/3 encryption" do
+    test "decrypts GCM and legacy ECB values side by side", %{tenant: tenant} do
+      [extension] = tenant.extensions
+
+      settings =
+        extension.settings
+        |> Map.put("db_name", Crypto.encrypt!("gcm_db", cipher: :gcm))
+        |> Map.put("db_user", Crypto.encrypt!("ecb_user", cipher: :ecb))
+
+      {:ok, _} = extension |> Ecto.Changeset.change(%{settings: settings}) |> Repo.update()
+
+      tenant = Realtime.Api.get_tenant_by_external_id(tenant.external_id)
+      settings = Realtime.PostgresCdc.filter_settings("postgres_cdc_rls", tenant.extensions)
+
+      assert {:ok, %Database{database: "gcm_db", username: "ecb_user"}} =
+               Database.from_settings(settings, "realtime_connect")
     end
   end
 

@@ -43,6 +43,7 @@ defmodule Realtime.Application do
 
     opentelemetry_setup()
     check_for_local_ipv6_host()
+    Realtime.Crypto.check_config()
 
     topologies = Application.get_env(:libcluster, :topologies) || []
 

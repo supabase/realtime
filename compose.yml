@@ -15,6 +15,8 @@ services:
       DASHBOARD_USER: realtime
       DB_AFTER_CONNECT_QUERY: SET search_path TO _realtime
       DB_ENC_KEY: "1234567890123456"
+      DB_ENC_KEY_GCM: "12345678901234567890123456789012"
+      DB_ENC_WRITE_GCM: "true"
       DB_HOST: db
       DB_USER: supabase_admin
       DNS_NODES: "''"
