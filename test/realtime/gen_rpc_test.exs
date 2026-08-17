@@ -6,8 +6,12 @@ defmodule Realtime.GenRpcTest do
 
   alias Realtime.GenRpc
 
-  setup context do
-    {:ok, node} = Clustered.start(nil, extra_config: context[:extra_config] || [])
+  # Booting a peer node is expensive (~seconds) and generic across these tests, so start one
+  # shared node for the whole module and reuse it. async: false already serializes the module.
+  # Bad-TCP / port-error variants live in Realtime.GenRpcBadTcpTest since they need an isolated
+  # node that must not appear in Node.list()/multicast results here.
+  setup_all do
+    {:ok, node} = Clustered.start()
 
     %{node: node}
   end
@@ -143,27 +147,6 @@ defmodule Realtime.GenRpcTest do
                       }}
     end
 
-    @tag extra_config: [{:gen_rpc, :tcp_server_port, 9999}]
-    test "bad tcp error", %{node: node} do
-      current_node = node()
-
-      log =
-        capture_log(fn ->
-          assert GenRpc.call(node, Map, :fetch, [%{a: 1}, :a], tenant_id: 123) == {:error, :rpc_error, :econnrefused}
-        end)
-
-      assert log =~
-               ~r/project=123 external_id=123 \[error\] ErrorOnRpcCall: %{\s+error: :econnrefused,\s+mod: Map,\s+func: :fetch,\s+target:\s+:"#{node}"/
-
-      assert_receive {[:realtime, :rpc], %{latency: _},
-                      %{
-                        origin_node: ^current_node,
-                        target_node: ^node,
-                        success: false,
-                        mechanism: :gen_rpc
-                      }}
-    end
-
     test "bad node" do
       node = :"unknown@1.1.1.1"
 
@@ -206,22 +189,6 @@ defmodule Realtime.GenRpcTest do
       assert_receive "a message"
       refute_receive _any
     end
-
-    @tag extra_config: [{:gen_rpc, :tcp_server_port, 9999}]
-    test "tcp error" do
-      Logger.put_process_level(self(), :debug)
-
-      log =
-        capture_log(fn ->
-          assert GenRpc.abcast(Node.list(), :some_process_name, "a message", []) == :ok
-          # We have to wait for gen_rpc logs to show up
-          Process.sleep(100)
-        end)
-
-      assert log =~ "failed_to_connect_server"
-
-      refute_receive _any
-    end
   end
 
   describe "cast/5" do
@@ -252,23 +219,6 @@ defmodule Realtime.GenRpcTest do
 
       refute_receive _any
     end
-
-    @tag extra_config: [{:gen_rpc, :tcp_server_port, 9999}]
-    test "tcp error", %{node: node} do
-      parent = self()
-      Logger.put_process_level(self(), :debug)
-
-      log =
-        capture_log(fn ->
-          assert GenRpc.cast(node, Kernel, :send, [parent, :sent]) == :ok
-          # We have to wait for gen_rpc logs to show up
-          Process.sleep(100)
-        end)
-
-      assert log =~ "failed_to_connect_server"
-
-      refute_receive _any
-    end
   end
 
   describe "multicast/4" do
@@ -278,24 +228,6 @@ defmodule Realtime.GenRpcTest do
       assert GenRpc.multicast(Kernel, :send, [parent, :sent]) == :ok
 
       assert_receive :sent
-      assert_receive :sent
-      refute_receive _any
-    end
-
-    @tag extra_config: [{:gen_rpc, :tcp_server_port, 9999}]
-    test "tcp error" do
-      parent = self()
-      Logger.put_process_level(self(), :debug)
-
-      log =
-        capture_log(fn ->
-          assert GenRpc.multicast(Kernel, :send, [parent, :sent]) == :ok
-          # We have to wait for gen_rpc logs to show up
-          Process.sleep(100)
-        end)
-
-      assert log =~ "failed_to_connect_server"
-
       assert_receive :sent
       refute_receive _any
     end
@@ -362,38 +294,6 @@ defmodule Realtime.GenRpcTest do
                         origin_node: ^current_node,
                         target_node: ^current_node,
                         success: false,
-                        mechanism: :gen_rpc
-                      }}
-    end
-
-    @tag extra_config: [{:gen_rpc, :tcp_server_port, 9999}]
-    test "partial results with bad tcp error", %{node: node} do
-      current_node = node()
-
-      log =
-        capture_log(fn ->
-          assert GenRpc.multicall(Map, :fetch, [%{a: 1}, :a], tenant_id: 123) == [
-                   {node(), {:ok, 1}},
-                   {node, {:error, :rpc_error, :econnrefused}}
-                 ]
-        end)
-
-      assert log =~
-               ~r/project=123 external_id=123 \[error\] ErrorOnRpcCall: %{\s+error: :econnrefused,\s+mod: Map,\s+func: :fetch,\s+target:\s+:"#{node}"/
-
-      assert_receive {[:realtime, :rpc], %{latency: _},
-                      %{
-                        origin_node: ^current_node,
-                        target_node: ^node,
-                        success: false,
-                        mechanism: :gen_rpc
-                      }}
-
-      assert_receive {[:realtime, :rpc], %{latency: _},
-                      %{
-                        origin_node: ^current_node,
-                        target_node: ^current_node,
-                        success: true,
                         mechanism: :gen_rpc
                       }}
     end

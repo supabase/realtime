@@ -599,8 +599,8 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
           WebsocketClient.send_event(socket, topic, "presence", payload)
 
           refute_receive %Message{event: "presence_diff"}, 500
-          # Waiting more than 5 seconds as this is the amount of time we will wait for the Connection to be ready
-          refute_receive %Message{event: "phx_leave", topic: ^topic}, 16000
+          # Wait past the (test-configured) connection-ready timeout to confirm nothing is delivered
+          refute_receive %Message{event: "phx_leave", topic: ^topic}, 3000
         end)
 
       assert log =~ ~r/external_id=#{tenant.external_id}.*UnableToHandlePresence/

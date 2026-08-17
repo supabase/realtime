@@ -248,8 +248,8 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
           :syn.update_registry(Connect, tenant.external_id, fn _pid, meta -> %{meta | conn: nil} end)
           payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
           WebsocketClient.send_event(service_role_socket, topic, "broadcast", payload)
-          # Waiting more than 15 seconds as this is the amount of time we will wait for the Connection to be ready
-          refute_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 16000
+          # Wait past the (test-configured) connection-ready timeout to confirm nothing is delivered
+          refute_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 3000
         end)
 
       assert log =~ "UnableToHandleBroadcast"

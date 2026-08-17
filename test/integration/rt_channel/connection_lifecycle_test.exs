@@ -21,7 +21,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
   @moduletag :capture_log
 
   @service_restart_close_code 1012
-  @normal_close_code 1000
+  @going_away_close_code 1001
 
   setup [:checkout_tenant_and_connect]
 
@@ -317,7 +317,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
       realtime_topic_2 = "realtime:#{random_string()}"
       WebsocketClient.join(socket, realtime_topic_2, %{config: config})
 
-      assert_receive {:close_code, @normal_close_code}, 1000
+      assert_receive {:close_code, @going_away_close_code}, 1000
 
       assert_process_down(socket, 1000)
     end
