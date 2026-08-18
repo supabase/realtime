@@ -48,7 +48,7 @@ defmodule RealtimeLoadTest.StatusLive do
       views: %{}
     }
 
-    state = loop(node_count, broadcasts_per_tick, ticks_until_report, total_ticks, state)
+    state = loadtest(node_count, broadcasts_per_tick, ticks_until_report, total_ticks, state)
 
     print_summary(state, node_count, rate, duration_ms)
   end
@@ -60,7 +60,7 @@ defmodule RealtimeLoadTest.StatusLive do
     Application.put_env(:realtime, RealtimeWeb.StatusLive.Index, extra_node_ids: extra_node_ids)
   end
 
-  defp loop(node_count, messages_per_tick, ticks_until_report, total_ticks, state) do
+  defp loadtest(node_count, messages_per_tick, ticks_until_report, total_ticks, state) do
     send_batch(node_count, state.sent, messages_per_tick)
     state = %{state | sent: state.sent + messages_per_tick, tick: state.tick + 1}
 
@@ -76,7 +76,7 @@ defmodule RealtimeLoadTest.StatusLive do
     else
       # this isn't quite exact (work + sleep for tick_ms) but good enough for what we do
       Process.sleep(@tick_ms)
-      loop(node_count, messages_per_tick, ticks_until_report, total_ticks, state)
+      loadtest(node_count, messages_per_tick, ticks_until_report, total_ticks, state)
     end
   end
 
