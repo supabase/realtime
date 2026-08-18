@@ -34,6 +34,7 @@ defmodule Realtime.Api.Tenant do
     field(:client_presence_window_ms, :integer)
     field(:presence_enabled, :boolean, default: false)
     field(:feature_flags, :map, default: %{})
+    field(:gcm_migrated_at, :utc_datetime)
 
     has_many(:extensions, Realtime.Api.Extensions,
       foreign_key: :tenant_external_id,
@@ -111,8 +112,16 @@ defmodule Realtime.Api.Tenant do
     end
   end
 
-  def encrypt_jwt_secret(%Ecto.Changeset{valid?: true} = changeset),
-    do: update_change(changeset, :jwt_secret, &Crypto.encrypt!/1)
+  def encrypt_jwt_secret(%Ecto.Changeset{valid?: true, changes: %{jwt_secret: plaintext}} = changeset)
+      when is_binary(plaintext),
+      do: put_change(changeset, :jwt_secret, Crypto.encrypt!(plaintext))
 
   def encrypt_jwt_secret(changeset), do: changeset
+
+  @doc false
+  def gcm_migrated_at_changeset(tenant, attrs) do
+    tenant
+    |> cast(attrs, [:gcm_migrated_at])
+    |> validate_required([:gcm_migrated_at])
+  end
 end

@@ -4,6 +4,7 @@ defmodule RealtimeWeb.AuthTenantTest do
   import Plug.Conn
   import ExUnit.CaptureLog
 
+  alias Realtime.Crypto
   alias RealtimeWeb.AuthTenant
 
   describe "without tenant" do
@@ -39,6 +40,16 @@ defmodule RealtimeWeb.AuthTenantTest do
       conn = AuthTenant.call(conn, %{})
       assert conn.status == 401
       assert conn.halted
+    end
+
+    @tag header: "authorization"
+    test "authorizes a tenant still on the legacy cipher", %{conn: conn} do
+      tenant = conn.assigns.tenant
+      legacy = tenant.jwt_secret |> Crypto.decrypt!() |> Crypto.encrypt!(cipher: :ecb)
+      conn = conn |> assign(:tenant, %{tenant | jwt_secret: legacy}) |> AuthTenant.call(%{})
+
+      refute conn.status
+      refute conn.halted
     end
 
     @tag api_key: "Bearer invalid", header: "authorization"
