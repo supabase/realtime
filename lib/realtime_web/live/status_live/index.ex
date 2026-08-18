@@ -128,7 +128,10 @@ defmodule RealtimeWeb.StatusLive.Index do
   defp schedule_staleness_check, do: Process.send_after(self(), :check_staleness, @stale_after)
 
   defp all_nodes do
-    [Node.self() | Node.list()] |> Enum.map(&Nodes.short_node_id_from_name/1)
+    # Load-test-only escape hatch to have realistic rendering.
+    # Practically `[]` on prod and so shouldn't have a meaningful impact.
+    extra_ids = Application.get_env(:realtime, __MODULE__, []) |> Keyword.get(:extra_node_ids, [])
+    extra_ids ++ ([Node.self() | Node.list()] |> Enum.map(&Nodes.short_node_id_from_name/1))
   end
 
   defp default_pair_status(node_ids) do

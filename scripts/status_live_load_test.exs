@@ -31,10 +31,12 @@ defmodule RealtimeLoadTest.StatusLive do
   @ping_frequency_seconds 15
 
   def run(node_count, duration_ms, poll_ms) do
+    fake_node_existence(node_count)
+
     rate = node_count * node_count / @ping_frequency_seconds
     ticks_per_second = to_timeout(second: 1) / @tick_ms
-    broadcasts_broadcasts_per_tick = round(rate / ticks_per_second)
-    ticks_until_report = div(poll_ms, @tick_ms)
+    broadcasts_per_tick = max(round(rate / ticks_per_second), 1)
+    ticks_until_report = max(div(poll_ms, @tick_ms), 1)
     total_ticks = div(duration_ms, @tick_ms)
 
     print_banner(node_count, rate, duration_ms, poll_ms)
@@ -46,9 +48,16 @@ defmodule RealtimeLoadTest.StatusLive do
       views: %{}
     }
 
-    state = loop(node_count, broadcasts_broadcasts_per_tick, ticks_until_report, total_ticks, state)
+    state = loop(node_count, broadcasts_per_tick, ticks_until_report, total_ticks, state)
 
     print_summary(state, node_count, rate, duration_ms)
+  end
+
+  # Make the status page see our synthetic node ids too, so we have meaningful rendering
+  # Works via a purpose built escape hatch.
+  defp fake_node_existence(node_count) do
+    extra_node_ids = Enum.map(0..(node_count - 1), &"loadnode-#{&1}")
+    Application.put_env(:realtime, RealtimeWeb.StatusLive.Index, extra_node_ids: extra_node_ids)
   end
 
   defp loop(node_count, messages_per_tick, ticks_until_report, total_ticks, state) do
@@ -130,7 +139,7 @@ defmodule RealtimeLoadTest.StatusLive do
 
         IO.puts(
           "[load] t=#{format_time(elapsed_ms)}  #{inspect(pid)}  sent=#{state.sent}  " <>
-            "actual=#{format_rate(state.sent, elapsed_ms)}/s mem=#{format_bytes(mem)} queue_len=#{pad(qlen)}}"
+            "actual=#{format_rate(state.sent, elapsed_ms)}/s mem=#{format_bytes(mem)} queue_len=#{pad(qlen)}"
         )
 
         view = Map.get(state.views, pid, %{samples: []})
