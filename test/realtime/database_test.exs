@@ -6,6 +6,7 @@ defmodule Realtime.DatabaseTest do
 
   import ExUnit.CaptureLog
 
+  alias Realtime.Crypto
   alias Realtime.Database
 
   doctest Realtime.Database
@@ -84,14 +85,25 @@ defmodule Realtime.DatabaseTest do
 
     @tag db_pool: 3
     test "durable pool opens the configured number of realtime_connect connections", %{tenant: tenant} do
-      assert {:ok, conn, _migrations_ran} = Database.check_tenant_connection(tenant)
+      # pg_stat_activity is server-wide, so draining 'realtime_connect' backends left
+      # behind by earlier tests can inflate the count. Terminate any lingering ones
+      # (using a separate connection that is not counted) to start from a clean slate.
+      {:ok, admin} = Database.connect(tenant, "realtime_test", :stop)
+
+      Postgrex.query!(
+        admin,
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
+        []
+      )
+
+      assert {:ok, _conn, _migrations_ran} = Database.check_tenant_connection(tenant)
 
       # Postgrex opens the pool connections asynchronously, so give it a moment
       # to bring all of them up.
       assert eventually(fn ->
                %{rows: [[count]]} =
                  Postgrex.query!(
-                   conn,
+                   admin,
                    "SELECT count(*)::int FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
                    []
                  )
@@ -305,6 +317,25 @@ defmodule Realtime.DatabaseTest do
     test "uses default backoff when not provided", %{tenant: tenant} do
       {:ok, settings} = Database.from_tenant(tenant, "realtime_test")
       assert settings.backoff_type == :rand_exp
+    end
+  end
+
+  describe "from_settings/3 encryption" do
+    test "decrypts GCM and legacy ECB values side by side", %{tenant: tenant} do
+      [extension] = tenant.extensions
+
+      settings =
+        extension.settings
+        |> Map.put("db_name", Crypto.encrypt!("gcm_db", cipher: :gcm))
+        |> Map.put("db_user", Crypto.encrypt!("ecb_user", cipher: :ecb))
+
+      {:ok, _} = extension |> Ecto.Changeset.change(%{settings: settings}) |> Repo.update()
+
+      tenant = Realtime.Api.get_tenant_by_external_id(tenant.external_id)
+      settings = Realtime.PostgresCdc.filter_settings("postgres_cdc_rls", tenant.extensions)
+
+      assert {:ok, %Database{database: "gcm_db", username: "ecb_user"}} =
+               Database.from_settings(settings, "realtime_connect")
     end
   end
 

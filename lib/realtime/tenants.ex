@@ -11,6 +11,7 @@ defmodule Realtime.Tenants do
   alias Realtime.Repo.Replica
   alias Realtime.Tenants.Cache
   alias Realtime.Tenants.Connect
+  alias Realtime.Tenants.EncryptionReconciler
   alias Realtime.Tenants.Migrations
   alias Realtime.UsersCounter
 
@@ -480,9 +481,14 @@ defmodule Realtime.Tenants do
   def get_tenant_by_external_id(external_id) do
     repo_replica = Replica.replica()
 
-    Tenant
-    |> repo_replica.get_by(external_id: external_id)
-    |> repo_replica.preload(:extensions)
+    tenant =
+      Tenant
+      |> repo_replica.get_by(external_id: external_id)
+      |> repo_replica.preload(:extensions)
+
+    if tenant, do: EncryptionReconciler.reconcile(tenant)
+
+    tenant
   end
 
   @doc """

@@ -73,7 +73,7 @@ defmodule Forum.Muster.Shard do
   #     crash strand a member-less row that nothing retracts.
   use GenServer
   require Logger
-  use Snabbkaffe
+  use Snabbkaffex, only: :trace
 
   alias ExHashRing.Ring
   alias Forum.Muster.Scope
