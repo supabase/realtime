@@ -6,6 +6,14 @@ ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
 # @supabase/pg-delta@1.0.0-alpha.42
 ARG PG_DELTA_COMMIT=47bf101558f0c1e42cf59b272ac943537b5af483
 
+FROM ghcr.io/fujiwara/awslim:builder AS awslim-builder
+ARG AWSLIM_VERSION=v0.6.13
+ARG TARGETOS
+ARG TARGETARCH
+ENV AWSLIM_GEN=secretsmanager
+RUN GIT_REF="${AWSLIM_VERSION}" AWSLIM_OS="${TARGETOS}" AWSLIM_ARCH="${TARGETARCH}" \
+    ./build-in-docker.sh
+
 FROM debian:${DEBIAN_VERSION} AS pgdelta-builder
 ARG PG_DELTA_COMMIT
 ARG BUN_VERSION=1.3.14
@@ -44,14 +52,10 @@ FROM ${BUILDER_IMAGE} AS builder
 
 ENV MIX_ENV="prod"
 
-RUN apt-get update -y \
-    && apt-get install curl -y \
-    && apt-get install -y build-essential git \
-    && apt-get clean
-
 RUN set -uex; \
-    apt-get update; \
-    apt-get install -y ca-certificates curl gnupg; \
+    apt-get update -y; \
+    apt-get install -y --no-install-recommends \
+      build-essential git ca-certificates curl gnupg; \
     mkdir -p /etc/apt/keyrings; \
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
     | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg; \
@@ -59,7 +63,9 @@ RUN set -uex; \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" \
     > /etc/apt/sources.list.d/nodesource.list; \
     apt-get -qy update; \
-    apt-get -qy install nodejs;
+    apt-get -qy install --no-install-recommends nodejs; \
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/*
 
 # prepare build dir
 WORKDIR /app
@@ -107,25 +113,23 @@ FROM ${RUNNER_IMAGE}
 ARG SLOT_NAME_SUFFIX
 
 ENV SLOT_NAME_SUFFIX="${SLOT_NAME_SUFFIX}" \
-    LANG="en_US.UTF-8" \
-    LANGUAGE="en_US:en" \
-    LC_ALL="en_US.UTF-8" \
+    LANG="C.UTF-8" \
+    LC_ALL="C.UTF-8" \
     MIX_ENV="prod" \
     ECTO_IPV6="true" \
     ERL_AFLAGS="-proto_dist inet6_tcp"
 
 RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
-      libstdc++6 openssl libncurses6 locales iptables sudo tini curl awscli jq xz-utils && \
+      libstdc++6 openssl libtinfo6 ca-certificates tini curl jq xz-utils && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
+
+COPY --from=awslim-builder /app/awslim /usr/local/bin/awslim
 
 COPY --from=pgdelta-builder /tmp/pgdelta.xz /usr/local/share/pgdelta/pgdelta.xz
 COPY --from=pgdelta-builder /tmp/pgdelta-wrapper /usr/local/bin/pgdelta
 COPY --from=pgdelta-builder /tmp/libpg-query.tar.gz /tmp/libpg-query.tar.gz
 RUN tar -C / -xzf /tmp/libpg-query.tar.gz && rm /tmp/libpg-query.tar.gz
-
-# Set the locale
-RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
 
 WORKDIR "/app"
 
@@ -133,6 +137,5 @@ RUN chown nobody /app && mkdir -p /app/.pgdelta-cache && chown nobody /app/.pgde
 
 COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/realtime ./
 COPY run.sh run.sh
-RUN ls -la /app
 ENTRYPOINT ["/usr/bin/tini", "-s", "-g", "--", "/app/run.sh"]
 CMD ["/app/bin/server"]
