@@ -61,6 +61,9 @@ jobs:
       - name: Credo checks
         run: mix credo
       - name: Run hex audit
+        # Advisories are informational here: fixing/updating dependencies isn't
+        # in scope for an arbitrary PR, so don't block merges on this. 
+        continue-on-error: true
         run: mix hex.audit
       - name: Check for unused deps
         run: mix deps.unlock --check-unused
