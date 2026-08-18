@@ -7,9 +7,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
   import Ecto.Changeset
 
   alias Realtime.Api.Tenant
-  alias Realtime.FeatureFlags
   alias Realtime.GenCounter
-  alias Realtime.Messages
   alias Realtime.RateCounter
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
@@ -88,12 +86,10 @@ defmodule Realtime.Tenants.BatchBroadcast do
           Enum.each(events, fn message -> send_message_and_count(tenant, events_per_second_rate, message, false) end)
         else
           case permissions_for_message(tenant, auth_params, topic) do
-            {db_conn, %Policies{broadcast: %BroadcastPolicies{write: true}} = policies} ->
+            {_db_conn, %Policies{broadcast: %BroadcastPolicies{write: true}}} ->
               Enum.each(events, fn message ->
                 send_message_and_count(tenant, events_per_second_rate, message, false)
               end)
-
-              maybe_persist(policies.broadcast, db_conn, tenant, events)
 
             _ ->
               nil
@@ -163,23 +159,6 @@ defmodule Realtime.Tenants.BatchBroadcast do
       :broadcast
     )
   end
-
-  defp maybe_persist(%BroadcastPolicies{persist: true}, db_conn, tenant, events) do
-    if FeatureFlags.broadcast_persistence_enabled?(tenant.external_id) do
-      Task.Supervisor.start_child(Realtime.TaskSupervisor, fn ->
-        Enum.each(events, fn message ->
-          case Messages.persist(db_conn, tenant.external_id, message.topic, message.event, message.payload) do
-            {:ok, _id} -> :ok
-            error -> log_error("UnableToPersistMessage", error)
-          end
-        end)
-      end)
-    end
-
-    :ok
-  end
-
-  defp maybe_persist(_broadcast_policies, _db_conn, _tenant, _events), do: :ok
 
   defp permissions_for_message(_, nil, _), do: nil
 

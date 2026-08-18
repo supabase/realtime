@@ -4,17 +4,10 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
   setup :set_mimic_from_context
 
-  alias Realtime.Api
-  import Ecto.Query, only: [from: 2]
-
-  alias Realtime.Api.Message
   alias Realtime.Crypto
-  alias Realtime.FeatureFlags
   alias Realtime.GenCounter
   alias Realtime.RateCounter
   alias Realtime.Tenants
-  alias Realtime.Tenants.ReplicationConnection
-  alias Realtime.Tenants.Repo
   alias Realtime.Database
 
   alias RealtimeWeb.RealtimeChannel
@@ -518,49 +511,6 @@ defmodule RealtimeWeb.BroadcastControllerTest do
       assert conn.status == 202
     end
 
-    @tag role: "authenticated"
-    test "message authorized to persist is stored and not broadcast again from the database", %{
-      conn: conn,
-      db_conn: db_conn,
-      tenant: tenant
-    } do
-      enable_broadcast_persistence_flag!()
-      stub(GenCounter, :add, fn _ -> :ok end)
-
-      start_link_supervised!(
-        {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
-        restart: :transient
-      )
-
-      topic = random_string()
-      event = random_string()
-
-      create_rls_policies(
-        db_conn,
-        [:authenticated_read_broadcast, :authenticated_write_broadcast, :authenticated_write_persistence],
-        %{topic: topic}
-      )
-
-      subscribe(Tenants.tenant_topic(tenant.external_id, topic, false), topic)
-
-      messages = [%{"topic" => topic, "payload" => %{"content" => "hello"}, "event" => event, "private" => true}]
-
-      conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
-      assert conn.status == 202
-
-      assert_receive {:socket_push, :text, _data}, 500
-
-      assert eventually(fn ->
-               match?(
-                 {:ok, [%Message{topic: ^topic, event: ^event, skip_broadcast: true}]},
-                 Repo.all(db_conn, messages_for(topic), Message)
-               )
-             end)
-
-      # The stored row reaches the replication stream but must not be delivered a second time
-      refute_receive {:socket_push, :text, _}, 500
-    end
-
     @tag role: "anon"
     test "user without permission won't broadcast", %{conn: conn, db_conn: db_conn, tenant: tenant} do
       request_events_key = Tenants.requests_per_second_key(tenant)
@@ -592,15 +542,6 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     end
   end
 
-  # Enables the `broadcast_persistence` flag for real: the flag is created and pushed into the local
-  # FeatureFlags cache so the replication connection process reads it synchronously, and torn down
-  # afterwards so it does not leak into other tests via the shared in-memory cache.
-  defp enable_broadcast_persistence_flag! do
-    {:ok, flag} = Api.upsert_feature_flag(%{name: "broadcast_persistence", enabled: true})
-    FeatureFlags.Cache.update_cache(flag)
-    on_exit(fn -> FeatureFlags.Cache.invalidate_cache("broadcast_persistence") end)
-  end
-
   defp generate_message_with_policies(db_conn, tenant) do
     message = message_fixture(tenant)
     create_rls_policies(db_conn, [:authenticated_read_broadcast, :authenticated_write_broadcast], message)
@@ -616,6 +557,4 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     |> put_req_header("authorization", "Bearer #{generate_jwt_token(tenant, claims)}")
     |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
   end
-
-  defp messages_for(topic), do: from(m in Message, where: m.topic == ^topic)
 end

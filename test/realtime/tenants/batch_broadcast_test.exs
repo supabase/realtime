@@ -516,43 +516,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       %{db_conn: db_conn, auth_params: auth_params}
     end
 
-    test "stores every message of an authorized topic", %{
-      tenant: tenant,
-      db_conn: db_conn,
-      auth_params: auth_params
-    } do
-      topic = random_string()
-
-      messages = %{
-        messages: [
-          %{topic: topic, payload: %{"data" => "test1"}, event: "event1", private: true},
-          %{topic: topic, payload: %{"data" => "test2"}, event: "event2", private: true}
-        ]
-      }
-
-      expect(GenCounter, :add, 2, fn _ -> :ok end)
-      expect(TenantBroadcaster, :pubsub_broadcast, 2, fn _, _, _, _, _ -> :ok end)
-      expect(Connect, :lookup_or_start_connection, fn _ -> {:ok, db_conn} end)
-
-      Authorization
-      |> expect(:build_authorization_params, fn params -> params end)
-      |> expect(:get_write_authorizations, fn _, _ ->
-        {:ok,
-         %Policies{
-           broadcast: %BroadcastPolicies{write: true, persist: true}
-         }}
-      end)
-
-      assert :ok = BatchBroadcast.broadcast(auth_params, tenant, messages, false)
-
-      assert eventually(fn -> match?({:ok, [_, _]}, Repo.all(db_conn, messages_for(topic), Message)) end)
-
-      {:ok, stored} = Repo.all(db_conn, messages_for(topic), Message)
-      assert Enum.map(stored, & &1.event) |> Enum.sort() == ["event1", "event2"]
-      assert Enum.all?(stored, &match?(%Message{extension: :broadcast, private: true, skip_broadcast: true}, &1))
-    end
-
-    test "does not store without a persistence policy", %{
+    test "the batch API never stores messages, even when authorized to persist", %{
       tenant: tenant,
       db_conn: db_conn,
       auth_params: auth_params
@@ -567,36 +531,15 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       Authorization
       |> expect(:build_authorization_params, fn params -> params end)
       |> expect(:get_write_authorizations, fn _, _ ->
-        {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
+        {:ok, %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}}}
       end)
 
       assert :ok = BatchBroadcast.broadcast(auth_params, tenant, messages, false)
 
-      assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
-    end
-
-    test "does not store super user messages", %{tenant: tenant, db_conn: db_conn} do
-      topic = random_string()
-      messages = %{messages: [%{topic: topic, payload: %{"data" => "x"}, event: "event1", private: true}]}
-
-      expect(GenCounter, :add, fn _ -> :ok end)
-      expect(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _, _ -> :ok end)
-
-      assert :ok = BatchBroadcast.broadcast(nil, tenant, messages, true)
-
-      assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
-    end
-
-    test "does not store public messages", %{tenant: tenant, db_conn: db_conn, auth_params: auth_params} do
-      topic = random_string()
-      messages = %{messages: [%{topic: topic, payload: %{"data" => "x"}, event: "event1", private: false}]}
-
-      expect(GenCounter, :add, fn _ -> :ok end)
-      expect(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _, _ -> :ok end)
-
-      assert :ok = BatchBroadcast.broadcast(auth_params, tenant, messages, false)
-
-      assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
+      refute eventually(fn -> match?({:ok, [_ | _]}, Repo.all(db_conn, messages_for(topic), Message)) end,
+               retries: 5,
+               sleep: 20
+             )
     end
   end
 

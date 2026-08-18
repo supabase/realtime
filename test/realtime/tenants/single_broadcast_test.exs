@@ -438,7 +438,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
          }}
       end)
 
-      assert :ok = SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, payload, :json)
+      assert :ok = SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, payload, :json, true)
 
       assert eventually(fn ->
                match?(
@@ -473,9 +473,41 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
       end)
 
-      assert :ok = SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, %{"a" => "b"}, :json)
+      assert :ok = SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, %{"a" => "b"}, :json, true)
 
       assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
+    end
+
+    test "does not store when the request does not ask to persist", %{
+      tenant: tenant,
+      db_conn: db_conn,
+      auth_params: auth_params
+    } do
+      topic = random_string()
+
+      expect(GenCounter, :add, fn _ -> :ok end)
+      expect(Connect, :lookup_or_start_connection, fn _ -> {:ok, db_conn} end)
+      expect(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _, _ -> :ok end)
+
+      expect(Authorization, :get_write_authorizations, fn _, _ ->
+        {:ok, %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}}}
+      end)
+
+      assert :ok = SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, %{"a" => "b"}, :json)
+
+      refute eventually(fn -> match?({:ok, [_ | _]}, Repo.all(db_conn, messages_for(topic), Message)) end,
+               retries: 5,
+               sleep: 20
+             )
+    end
+
+    test "rejects persisting a public broadcast", %{tenant: tenant, auth_params: auth_params} do
+      topic = random_string()
+
+      assert {:error, %Ecto.Changeset{errors: errors}} =
+               SingleBroadcast.broadcast(auth_params, tenant, topic, "event", false, %{"a" => "b"}, :json, true)
+
+      assert {:persist, {"can only be used on private broadcasts", []}} in errors
     end
 
     test "stores binary messages as binary_payload", %{tenant: tenant, db_conn: db_conn, auth_params: auth_params} do
@@ -493,7 +525,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
          }}
       end)
 
-      assert :ok = SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, binary, :binary)
+      assert :ok = SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, binary, :binary, true)
 
       assert eventually(fn ->
                match?(

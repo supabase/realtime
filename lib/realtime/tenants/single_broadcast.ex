@@ -38,6 +38,7 @@ defmodule Realtime.Tenants.SingleBroadcast do
     field :private, :boolean, default: false
     # "json" or "binary"
     field :content_type, :string
+    field :persist, :boolean, default: false
   end
 
   @type content_type :: :json | :binary
@@ -53,6 +54,7 @@ defmodule Realtime.Tenants.SingleBroadcast do
   - `private` - Whether this is a private broadcast (requires authorization)
   - `payload` - Message payload (map for JSON, binary for binary)
   - `content_type` - :json or :binary
+  - `persist` - whether the message is stored in `realtime.messages`, requires `private`
   """
   @spec broadcast(
           Authorization.t(),
@@ -61,18 +63,31 @@ defmodule Realtime.Tenants.SingleBroadcast do
           String.t(),
           boolean(),
           map() | binary(),
-          content_type()
+          content_type(),
+          boolean()
         ) :: :ok | {:error, term()} | {:error, atom(), String.t()}
-  def broadcast(_auth_params, %Tenant{suspend: true}, _topic, _event, _private, _payload, _content_type) do
+  def broadcast(auth_params, tenant, topic, event, private, payload, content_type, persist \\ false)
+
+  def broadcast(_auth_params, %Tenant{suspend: true}, _topic, _event, _private, _payload, _content_type, _persist) do
     {:error, :forbidden, "Tenant is suspended"}
   end
 
-  def broadcast(auth_params, %Tenant{} = tenant, topic, event, private, payload, content_type) do
-    with %Ecto.Changeset{valid?: true} <- validate_message(topic, event, private, payload, content_type, tenant),
+  def broadcast(auth_params, %Tenant{} = tenant, topic, event, private, payload, content_type, persist) do
+    with %Ecto.Changeset{valid?: true} <-
+           validate_message(topic, event, private, payload, content_type, persist, tenant),
          events_per_second_rate = Tenants.events_per_second_rate(tenant),
          :ok <- check_rate_limit(events_per_second_rate, tenant) do
       if private do
-        handle_private_message(tenant, auth_params, topic, event, payload, content_type, events_per_second_rate)
+        handle_private_message(
+          tenant,
+          auth_params,
+          topic,
+          event,
+          payload,
+          content_type,
+          events_per_second_rate,
+          persist
+        )
       else
         send_message_and_count(tenant, events_per_second_rate, topic, event, payload, content_type, _public? = true)
         :ok
@@ -83,19 +98,27 @@ defmodule Realtime.Tenants.SingleBroadcast do
     end
   end
 
-  defp validate_message(topic, event, private, payload, content_type, tenant) do
+  defp validate_message(topic, event, private, payload, content_type, persist, tenant) do
     %__MODULE__{}
-    |> cast(%{topic: topic, event: event, private: private, content_type: to_string(content_type)}, [
+    |> cast(%{topic: topic, event: event, private: private, content_type: to_string(content_type), persist: persist}, [
       :topic,
       :event,
       :private,
-      :content_type
+      :content_type,
+      :persist
     ])
     |> put_change(:payload, payload)
     |> validate_required([:topic, :event, :content_type])
     |> validate_payload_present(content_type, payload)
     |> validate_inclusion(:content_type, ["json", "binary"])
     |> validate_payload_size(tenant, content_type)
+    |> validate_persist_is_private()
+  end
+
+  defp validate_persist_is_private(changeset) do
+    if get_field(changeset, :persist) and !get_field(changeset, :private),
+      do: add_error(changeset, :persist, "can only be used on private broadcasts"),
+      else: changeset
   end
 
   defp validate_payload_present(changeset, content_type, payload) do
@@ -152,11 +175,11 @@ defmodule Realtime.Tenants.SingleBroadcast do
     end
   end
 
-  defp handle_private_message(tenant, auth_params, topic, event, payload, content_type, rate_counter) do
+  defp handle_private_message(tenant, auth_params, topic, event, payload, content_type, rate_counter, persist) do
     case permissions_for_message(tenant, auth_params, topic) do
       {:ok, db_conn, %Policies{broadcast: %BroadcastPolicies{write: true}} = policies} ->
         send_message_and_count(tenant, rate_counter, topic, event, payload, content_type, false)
-        maybe_persist(policies.broadcast, db_conn, tenant, topic, event, payload)
+        if persist, do: maybe_persist(policies.broadcast, db_conn, tenant, topic, event, payload)
         :ok
 
       {:ok, _db_conn, %Policies{broadcast: %BroadcastPolicies{write: _}}} ->
