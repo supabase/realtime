@@ -12,28 +12,33 @@ defmodule RealtimeWeb.StatusLive.Index do
   @stale_after @ping_interval * 2
   @warn_above_ms 1_000
   @problem_limit 200
+  @flush_interval 1_000
+  @state_key :node_info
 
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
       Endpoint.subscribe("admin:cluster")
       schedule_staleness_check()
+      schedule_flush()
     end
 
     node_ids = all_nodes()
+    pair_status = default_pair_status(node_ids)
 
     socket =
       socket
       |> assign(:active_nav, :status)
       |> assign(:node_ids, node_ids)
       |> assign(:node_regions, %{})
-      |> assign(:pair_status, default_pair_status(node_ids))
+      |> assign(:pair_status, pair_status)
       |> assign(:selected_node, nil)
       |> assign(:region_filter, "")
       |> assign(:node_sort, "node")
       |> assign(:pair_sort, "severity")
       |> assign(:drill_sort, "node")
       |> assign(:mounted_at, DateTime.utc_now())
+      |> put_state(%{pair_status: pair_status, node_regions: %{}})
 
     {:ok, socket}
   end
@@ -68,11 +73,26 @@ defmodule RealtimeWeb.StatusLive.Index do
   @impl true
   def handle_info(%Phoenix.Socket.Broadcast{payload: %Payload{} = payload}, socket) do
     {pair, entry} = pair_entry(payload)
+    state = state(socket)
+
+    state = %{
+      state
+      | pair_status: Map.put(state.pair_status, pair, entry),
+        node_regions: Map.put(state.node_regions, payload.from_node, payload.from_region)
+    }
+
+    {:noreply, put_state(socket, state)}
+  end
+
+  # scheduled flushes/draws to avoid triggering rerenders too frequently
+  def handle_info(:flush, socket) do
+    schedule_flush()
+    state = state(socket)
 
     socket =
       socket
-      |> update(:pair_status, &Map.put(&1, pair, entry))
-      |> update(:node_regions, &Map.put(&1, payload.from_node, payload.from_region))
+      |> assign(:pair_status, state.pair_status)
+      |> assign(:node_regions, state.node_regions)
 
     {:noreply, socket}
   end
@@ -80,7 +100,14 @@ defmodule RealtimeWeb.StatusLive.Index do
   def handle_info(:check_staleness, socket) do
     schedule_staleness_check()
     pair_status = apply_staleness(socket.assigns.pair_status, DateTime.utc_now(), socket.assigns.mounted_at)
-    {:noreply, assign(socket, :pair_status, pair_status)}
+    state = %{state(socket) | pair_status: pair_status}
+
+    socket =
+      socket
+      |> put_state(state)
+      |> assign(:pair_status, pair_status)
+
+    {:noreply, socket}
   end
 
   @doc false
@@ -126,6 +153,12 @@ defmodule RealtimeWeb.StatusLive.Index do
   defp payload_status(_), do: :unknown
 
   defp schedule_staleness_check, do: Process.send_after(self(), :check_staleness, @stale_after)
+  defp schedule_flush, do: Process.send_after(self(), :flush, @flush_interval)
+
+  # Private (not change-tracked) accumulator for payloads arriving between flushes,
+  # to delay rerendering until the next `flush`
+  defp state(socket), do: socket.private[@state_key]
+  defp put_state(socket, state), do: put_private(socket, @state_key, state)
 
   defp all_nodes do
     # Load-test-only escape hatch to have realistic rendering.
