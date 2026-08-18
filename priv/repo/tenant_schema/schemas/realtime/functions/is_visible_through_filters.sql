@@ -14,8 +14,14 @@ create or replace function realtime.is_visible_through_filters (
             and sum(
                 realtime.check_equality_op(
                     op:=f.op,
-                    type_:=coalesce(col.type_oid::regtype, col.type_name::regtype),
-                    val_1:=col.value #>> '{}',
+                    type_:=case
+                        when position('->>' in f.column_name) > 0 then 'text'::regtype
+                        else coalesce(col.type_oid::regtype, col.type_name::regtype)
+                    end,
+                    val_1:=case
+                        when position('->>' in f.column_name) > 0 then col.value ->> btrim(split_part(f.column_name, '->>', 2), ' "')
+                        else col.value #>> '{}'
+                    end,
                     val_2:=f.value,
                     negate:=coalesce(f.negate, false)
                 )::int
@@ -25,7 +31,11 @@ create or replace function realtime.is_visible_through_filters (
     from
         unnest(filters) f
         left join unnest(columns) col
-            on f.column_name = col.name;
+            on split_part(f.column_name, '->>', 1) = col.name
+           and (
+             position('->>' in f.column_name) = 0
+             or coalesce(col.type_oid::regtype, col.type_name::regtype) = 'jsonb'::regtype
+           );
 $function$;
 
 alter function "realtime"."is_visible_through_filters"(realtime.wal_column[], realtime.user_defined_filter[]) owner to "supabase_realtime_admin";

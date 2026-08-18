@@ -21,11 +21,27 @@ declare
             );
     filter realtime.user_defined_filter;
     col_type regtype;
+    comparison_type regtype;
+    filter_column text;
+    json_key text;
+    is_jsonb_filter boolean;
     in_val jsonb;
     selected_col text;
 begin
     for filter in select * from unnest(new.filters) loop
-        if not filter.column_name = any(col_names) then
+        is_jsonb_filter = position('->>' in filter.column_name) > 0;
+        filter_column = split_part(filter.column_name, '->>', 1);
+        json_key = btrim(split_part(filter.column_name, '->>', 2), ' "');
+
+        if is_jsonb_filter and (
+            filter_column = ''
+            or json_key = ''
+            or position('->>' in split_part(filter.column_name, '->>', 2)) > 0
+        ) then
+            raise exception 'invalid jsonb filter expression %', filter.column_name;
+        end if;
+
+        if not filter_column = any(col_names) then
             raise exception 'invalid column for filter %', filter.column_name;
         end if;
 
@@ -33,14 +49,18 @@ begin
             select atttypid::regtype
             from pg_catalog.pg_attribute
             where attrelid = new.entity
-                  and attname = filter.column_name
+                  and attname = filter_column
         );
+        if is_jsonb_filter and col_type <> 'jsonb'::regtype then
+            raise exception 'jsonb filter requires a jsonb column, got %', col_type::text;
+        end if;
+        comparison_type = case when is_jsonb_filter then 'text'::regtype else col_type end;
         if col_type is null then
             raise exception 'failed to lookup type for column %', filter.column_name;
         end if;
 
         if filter.op = 'in'::realtime.equality_op then
-            in_val = realtime.cast(filter.value, (col_type::text || '[]')::regtype);
+            in_val = realtime.cast(filter.value, (comparison_type::text || '[]')::regtype);
             if coalesce(jsonb_array_length(in_val), 0) > 100 then
                 raise exception 'too many values for `in` filter. Maximum 100';
             end if;
@@ -52,17 +72,17 @@ begin
             -- IS NULL works for any type, but IS TRUE/FALSE/UNKNOWN require a boolean
             -- operand. Reject the non-null keywords on non-boolean columns here so they
             -- don't abort apply_rls at WAL time.
-            if filter.value <> 'null' and col_type <> 'boolean'::regtype then
-                raise exception 'is % filter requires a boolean column, got %', filter.value, col_type::text;
+            if filter.value <> 'null' and comparison_type <> 'boolean'::regtype then
+                raise exception 'is % filter requires a boolean column, got %', filter.value, comparison_type::text;
             end if;
         elsif filter.op in ('like'::realtime.equality_op, 'ilike'::realtime.equality_op) then
             -- like/ilike apply the text pattern operator (~~); reject column types that
             -- have no such operator instead of failing at WAL time
             if not exists (
                 select 1 from pg_catalog.pg_operator
-                where oprname = '~~' and oprleft = col_type
+                where oprname = '~~' and oprleft = comparison_type
             ) then
-                raise exception 'operator % requires a text-compatible column type, got %', filter.op::text, col_type::text;
+                raise exception 'operator % requires a text-compatible column type, got %', filter.op::text, comparison_type::text;
             end if;
         elsif filter.op in ('match'::realtime.equality_op, 'imatch'::realtime.equality_op) then
             -- match/imatch apply the regex operators ~ / ~*; reject column types that have
@@ -71,11 +91,11 @@ begin
             if not exists (
                 select 1 from pg_catalog.pg_operator
                 where oprname = case when filter.op = 'imatch'::realtime.equality_op then '~*' else '~' end
-                  and oprleft = col_type
-                  and oprright = col_type
+                  and oprleft = comparison_type
+                  and oprright = comparison_type
                   and oprresult = 'boolean'::regtype
             ) then
-                raise exception 'operator % requires a text-compatible column type, got %', filter.op::text, col_type::text;
+                raise exception 'operator % requires a text-compatible column type, got %', filter.op::text, comparison_type::text;
             end if;
             -- validate the regex eagerly so a bad pattern is rejected here, not inside
             -- apply_rls where it would abort the WAL stream for the entity
@@ -86,7 +106,7 @@ begin
             end;
         else
             -- eq/neq/lt/lte/gt/gte: value must be coercable to the type
-            perform realtime.cast(filter.value, col_type);
+            perform realtime.cast(filter.value, comparison_type);
         end if;
     end loop;
 

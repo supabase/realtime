@@ -75,6 +75,7 @@ defmodule Integrations do
         create table "public"."test" (
         "id" int4 not null default nextval('test_id_seq'::regclass),
         "details" text,
+        "data" jsonb,
         "binary_data" bytea,
         primary key ("id"));
         """,
