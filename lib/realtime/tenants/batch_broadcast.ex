@@ -3,7 +3,6 @@ defmodule Realtime.Tenants.BatchBroadcast do
   Virtual schema with a representation of a batched broadcast.
   """
   use Ecto.Schema
-  use Realtime.Logs
   import Ecto.Changeset
 
   alias Realtime.Api.Tenant
@@ -86,7 +85,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
           Enum.each(events, fn message -> send_message_and_count(tenant, events_per_second_rate, message, false) end)
         else
           case permissions_for_message(tenant, auth_params, topic) do
-            {_db_conn, %Policies{broadcast: %BroadcastPolicies{write: true}}} ->
+            %Policies{broadcast: %BroadcastPolicies{write: true}} ->
               Enum.each(events, fn message ->
                 send_message_and_count(tenant, events_per_second_rate, message, false)
               end)
@@ -170,7 +169,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
         |> Authorization.build_authorization_params()
 
       case Authorization.get_write_authorizations(db_conn, auth_params) do
-        {:ok, policies} -> {db_conn, policies}
+        {:ok, policies} -> policies
         {:error, :not_found} -> nil
         error -> error
       end

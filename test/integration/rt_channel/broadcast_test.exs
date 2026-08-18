@@ -318,6 +318,56 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
                Postgrex.query(db_conn, "SELECT id::text, topic FROM realtime.messages WHERE topic = $1", [topic])
     end
 
+    test "a stored broadcast is replayed to a client joining later", %{
+      tenant: tenant,
+      db_conn: db_conn,
+      serializer: serializer
+    } do
+      allow_broadcast(db_conn)
+      allow_persistence(db_conn, "realtime.topic() LIKE 'stored:%'")
+
+      topic = "stored:#{random_string()}"
+      full_topic = "realtime:#{topic}"
+      event = "TEST"
+      user_payload = %{"msg" => 1}
+      payload = %{"event" => event, "payload" => user_payload, "type" => "broadcast"}
+
+      {sender, _} = get_connection(tenant, serializer, role: "authenticated")
+      WebsocketClient.join(sender, full_topic, %{config: %{broadcast: %{self: true, ack: true}, private: true}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^full_topic}, 300
+
+      WebsocketClient.send_event(sender, full_topic, "broadcast", payload)
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       payload: %{"status" => "ok", "response" => %{"id" => id}},
+                       topic: ^full_topic
+                     },
+                     500
+
+      assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^full_topic}, 500
+
+      {joiner, _} = get_connection(tenant, serializer, role: "authenticated")
+
+      WebsocketClient.join(joiner, full_topic, %{
+        config: %{private: true, broadcast: %{replay: %{limit: 10, since: 0}}}
+      })
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^full_topic}, 500
+
+      assert_receive %Message{
+                       event: "broadcast",
+                       topic: ^full_topic,
+                       payload: %{
+                         "event" => ^event,
+                         "payload" => ^user_payload,
+                         "type" => "broadcast",
+                         "meta" => %{"id" => ^id, "replayed" => true}
+                       }
+                     },
+                     1_000
+    end
+
     test "a broadcast on a topic not matching the persistence policy is delivered but not stored", %{
       tenant: tenant,
       db_conn: db_conn,

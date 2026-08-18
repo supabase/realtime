@@ -12,7 +12,7 @@ defmodule Realtime.Messages do
   @default_timeout 5_000
 
   @doc """
-  Persists a broadcast sent over WebSocket for `topic`.
+  Persists a broadcast for `topic`, either sent over WebSocket or through the single broadcast API.
 
   Only called after the sender's `persistence` policy authorized it, so the persisted row is always private.
   Bypasses RLS because that authorization already happened on the broadcast.
@@ -20,7 +20,7 @@ defmodule Realtime.Messages do
   Check `:persistence` authorization to define if message is persisted,
   but store with `:broadcast` extension, like any other broadcasted message.
 
-  Set `skip_broadcast` because the message was already delivered over WebSocket, so it must not be
+  Set `skip_broadcast` because the message was already delivered to the subscribers, so it must not be
   broadcast again when it appears on the replication stream.
 
   Automatically uses RPC if the database connection is not on the same node.

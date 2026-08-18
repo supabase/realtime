@@ -116,9 +116,10 @@ defmodule Realtime.Tenants.SingleBroadcast do
   end
 
   defp validate_persist_is_private(changeset) do
-    if get_field(changeset, :persist) and !get_field(changeset, :private),
-      do: add_error(changeset, :persist, "can only be used on private broadcasts"),
-      else: changeset
+    case {get_field(changeset, :persist), get_field(changeset, :private)} do
+      {true, false} -> add_error(changeset, :persist, "can only be used on private broadcasts")
+      _persist_and_private -> changeset
+    end
   end
 
   defp validate_payload_present(changeset, content_type, payload) do
@@ -176,13 +177,14 @@ defmodule Realtime.Tenants.SingleBroadcast do
   end
 
   defp handle_private_message(tenant, auth_params, topic, event, payload, content_type, rate_counter, persist) do
-    case permissions_for_message(tenant, auth_params, topic) do
-      {:ok, db_conn, %Policies{broadcast: %BroadcastPolicies{write: true}} = policies} ->
-        send_message_and_count(tenant, rate_counter, topic, event, payload, content_type, false)
-        if persist, do: maybe_persist(policies.broadcast, db_conn, tenant, topic, event, payload)
-        :ok
-
-      {:ok, _db_conn, %Policies{broadcast: %BroadcastPolicies{write: _}}} ->
+    with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id),
+         {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}} = policies} <-
+           permissions_for_message(db_conn, auth_params, topic) do
+      send_message_and_count(tenant, rate_counter, topic, event, payload, content_type, false)
+      if persist, do: maybe_persist(policies.broadcast, db_conn, tenant, topic, event, payload)
+      :ok
+    else
+      {:ok, %Policies{}} ->
         {:error, :forbidden, "Unauthorized"}
 
       {:error, :rls_policy_error, error} ->
@@ -242,12 +244,9 @@ defmodule Realtime.Tenants.SingleBroadcast do
 
   defp maybe_persist(_broadcast_policies, _db_conn, _tenant, _topic, _event, _payload), do: :ok
 
-  defp permissions_for_message(tenant, auth_params, topic) do
-    with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id),
-         auth_params = %{auth_params | topic: topic},
-         {:ok, policies} <- Authorization.get_write_authorizations(db_conn, auth_params) do
-      {:ok, db_conn, policies}
-    end
+  defp permissions_for_message(db_conn, auth_params, topic) do
+    auth_params = %{auth_params | topic: topic}
+    Authorization.get_write_authorizations(db_conn, auth_params)
   end
 
   defp check_rate_limit(events_per_second_rate, %Tenant{} = tenant) do
