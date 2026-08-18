@@ -374,34 +374,41 @@ occupancy (as router):
 
 Node up/down is also emitted as a `:telemetry` event (`[:forum, scope, :node, :up | :down]`) if you'd rather attach a handler than read logs. (Muster does not emit a group-vacancy telemetry event: the shard that owns the group's membership transitions its own claim state directly.)
 
-## Trace-based testing (`Snabbkaffe`)
+## Trace-based testing (`Snabbkaffex`)
 
 Concurrent code is awkward to test with mocks and `Process.sleep`. The
 [snabbkaffe](https://github.com/kafka4beam/snabbkaffe) library instead lets you
 assert on the *trace* of events a system emitted, and block until a specific
 event happens. Snabbkaffe is a BEAM library, but its instrumentation ships as
-Erlang `-include` macros that Elixir can't use, so `lib/snabbkaffe.ex` provides
-the Elixir macro counterparts (the `Snabbkaffe` module).
+Erlang `-include` macros that Elixir can't use, so we depend on
+[`snabbkaffex`](https://github.com/kafka4beam/snabbkaffe) — an Elixir wrapper
+that provides the macro/function counterparts (the `Snabbkaffex` module).
 
 **Trace points are discarded outside `:test`.** A `tp/2` call compiles to a real
 collector call in `MIX_ENV=test` and to `_ = data; :ok` everywhere else (the data
-expression is still evaluated, matching snabbkaffe's prod semantics). So you can
-sprinkle them through `lib/` code at near-zero production cost:
+expression is still evaluated, matching snabbkaffe's prod semantics). Instrument
+`lib/` code with `use Snabbkaffex, only: :trace`, which imports just the
+discardable trace-point macros (`tp/2,3`, `tp_span/3,4`) at near-zero production
+cost:
 
 ```elixir
 defmodule Forum.Muster do
-  use Snabbkaffe
+  use Snabbkaffex, only: :trace
 
   # ... somewhere in the rebalance path:
   tp(:muster_rebalance_done, %{scope: scope, members: members})
 end
 ```
 
-In a test, `check_trace/2` runs an action, collects the trace, and hands it to a
-check function (which passes unless it raises, so use ordinary `assert`):
+In a test, `use Snabbkaffex` (no options) brings in the full API. The collector
+is a global singleton, so a trace-running test module must be `async: false`.
+`check_trace/2` runs an action, collects the trace, and hands it to a check
+function (which passes unless it raises, so use ordinary `assert`). Trace-query
+helpers take the `trace` as their **first** argument, so they pipe naturally:
 
 ```elixir
-use Snabbkaffe
+use ExUnit.Case, async: false
+use Snabbkaffex
 
 test "rebalance converges" do
   check_trace(
@@ -410,7 +417,7 @@ test "rebalance converges" do
       block_until(%{:"$kind" => :muster_rebalance_done}, 1000)
     end,
     fn trace ->
-      assert [%{members: members}] = of_kind(:muster_rebalance_done, trace)
+      assert [%{members: members}] = of_kind(trace, :muster_rebalance_done)
       assert :node2 in members
     end
   )
@@ -470,7 +477,7 @@ emitted on *other* nodes (e.g. `:peer` nodes in `muster_distributed_test.exs`),
 tell each remote node to forward its events to the collector:
 
 ```elixir
-:snabbkaffe.forward_trace(remote_node)
+forward_trace(remote_node)
 ```
 
 Attach it **before** the remote work starts so no event is missed: a remote
@@ -478,7 +485,9 @@ Attach it **before** the remote work starts so no event is missed: a remote
 single `check_trace` sees events from the whole cluster, which is how the
 distributed test asserts that *every* node re-converges to `:ready` (matching on
 the final `view_hash`) after a node joins. The remote nodes only need snabbkaffe
-on their code path, with no collector of their own.
+on their code path, with no collector of their own. `unforward_trace/1` reverts a
+node to recording locally — call it before a deliberate `Node.disconnect/1` so a
+forwarded `tp`'s RPC doesn't auto-reconnect the node (see the netsplit tests).
 
 Available macros: trace points `tp/2,3` and `tp_span/3,4`; running/checking with
 `check_trace/2,3`; collector lifecycle `start_trace/0`, `stop/0`,
@@ -486,6 +495,8 @@ Available macros: trace points `tp/2,3` and `tp_span/3,4`; running/checking with
 `retry/3`; trace querying `of_kind/2`, `projection/2`, `find_pairs/3,4`,
 `causality/3,4`, `strict_causality/3,4`; fault injection `force_ordering/2,3`,
 `inject_crash/2,3`; plus `give_or_take/3` and the `match_event/1` predicate
-builder. Patterns are ordinary Elixir patterns (snabbkaffe's `?match_event`
-becomes `match?/2`); the event's kind lives under the `:"$kind"` key, so prefer
-`of_kind/2` for filtering. See the `Snabbkaffe` moduledoc for details.
+builder. The trace-query helpers take the `trace` as their **first** argument
+(`of_kind(trace, kind)`), so they pipe left-to-right. Patterns are ordinary
+Elixir patterns (snabbkaffe's `?match_event` becomes `match?/2`); the event's
+kind lives under the `:"$kind"` key, so prefer `of_kind/2` for filtering. See the
+`Snabbkaffex` moduledoc for details.
