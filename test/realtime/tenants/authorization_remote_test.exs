@@ -20,7 +20,6 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
-  alias Realtime.Tenants.Authorization.Policies.PersistencePolicies
   alias Realtime.Tenants.Connect
 
   setup [:remote_rls_context]
@@ -49,9 +48,8 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
         )
 
       assert %Policies{
-               broadcast: %BroadcastPolicies{read: true, write: true},
-               presence: %PresencePolicies{read: true, write: true},
-               persistence: %PersistencePolicies{write: false}
+               broadcast: %BroadcastPolicies{read: true, write: true, persist: false},
+               presence: %PresencePolicies{read: true, write: true}
              } == policies
     end
 
@@ -78,9 +76,8 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
         )
 
       assert %Policies{
-               broadcast: %BroadcastPolicies{read: false, write: false},
-               presence: %PresencePolicies{read: false, write: false},
-               persistence: %PersistencePolicies{write: false}
+               broadcast: %BroadcastPolicies{read: false, write: false, persist: false},
+               presence: %PresencePolicies{read: false, write: false}
              } == policies
     end
 

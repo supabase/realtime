@@ -15,7 +15,6 @@ defmodule Realtime.Tenants.BatchBroadcast do
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
-  alias Realtime.Tenants.Authorization.Policies.PersistencePolicies
   alias Realtime.Tenants.Connect
 
   alias RealtimeWeb.RealtimeChannel
@@ -94,7 +93,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
                 send_message_and_count(tenant, events_per_second_rate, message, false)
               end)
 
-              maybe_persist(policies.persistence, db_conn, tenant, events)
+              maybe_persist(policies.broadcast, db_conn, tenant, events)
 
             _ ->
               nil
@@ -165,7 +164,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
     )
   end
 
-  defp maybe_persist(%PersistencePolicies{write: true}, db_conn, tenant, events) do
+  defp maybe_persist(%BroadcastPolicies{persist: true}, db_conn, tenant, events) do
     if FeatureFlags.broadcast_persistence_enabled?(tenant.external_id) do
       Task.Supervisor.start_child(Realtime.TaskSupervisor, fn ->
         Enum.each(events, fn message ->
@@ -180,7 +179,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
     :ok
   end
 
-  defp maybe_persist(_persistence, _db_conn, _tenant, _events), do: :ok
+  defp maybe_persist(_broadcast_policies, _db_conn, _tenant, _events), do: :ok
 
   defp permissions_for_message(_, nil, _), do: nil
 

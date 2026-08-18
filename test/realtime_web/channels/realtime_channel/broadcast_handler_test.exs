@@ -19,7 +19,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
-  alias Realtime.Tenants.Authorization.Policies.PersistencePolicies
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Repo
   alias RealtimeWeb.Endpoint
@@ -481,8 +480,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       socket =
         socket_fixture(tenant, topic,
           policies: %Policies{
-            broadcast: %BroadcastPolicies{write: true},
-            persistence: %PersistencePolicies{write: true}
+            broadcast: %BroadcastPolicies{write: true, persist: true}
           }
         )
 
@@ -512,8 +510,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         socket_fixture(tenant, topic,
           ack_broadcast: false,
           policies: %Policies{
-            broadcast: %BroadcastPolicies{write: true},
-            persistence: %PersistencePolicies{write: true}
+            broadcast: %BroadcastPolicies{write: true, persist: true}
           }
         )
 
@@ -535,8 +532,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       socket =
         socket_fixture(tenant, topic,
           policies: %Policies{
-            broadcast: %BroadcastPolicies{write: true},
-            persistence: %PersistencePolicies{write: true}
+            broadcast: %BroadcastPolicies{write: true, persist: true}
           }
         )
 
@@ -566,8 +562,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       socket =
         socket_fixture(tenant, topic,
           policies: %Policies{
-            broadcast: %BroadcastPolicies{write: true},
-            persistence: %PersistencePolicies{write: true}
+            broadcast: %BroadcastPolicies{write: true, persist: true}
           }
         )
 
@@ -591,8 +586,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       socket =
         socket_fixture(tenant, topic,
           policies: %Policies{
-            broadcast: %BroadcastPolicies{write: true},
-            persistence: %PersistencePolicies{write: true}
+            broadcast: %BroadcastPolicies{write: true, persist: true}
           }
         )
 
@@ -623,8 +617,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       socket =
         socket_fixture(tenant, topic,
           policies: %Policies{
-            broadcast: %BroadcastPolicies{write: true},
-            persistence: %PersistencePolicies{write: true}
+            broadcast: %BroadcastPolicies{write: true, persist: true}
           }
         )
 
@@ -647,8 +640,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       socket =
         socket_fixture(tenant, topic,
           policies: %Policies{
-            broadcast: %BroadcastPolicies{write: true},
-            persistence: %PersistencePolicies{write: true}
+            broadcast: %BroadcastPolicies{write: true, persist: true}
           }
         )
 
@@ -670,8 +662,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       socket =
         socket_fixture(tenant, topic,
           policies: %Policies{
-            broadcast: %BroadcastPolicies{write: true},
-            persistence: %PersistencePolicies{write: false}
+            broadcast: %BroadcastPolicies{write: true, persist: false}
           }
         )
 

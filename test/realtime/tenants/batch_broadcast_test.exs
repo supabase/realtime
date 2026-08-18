@@ -16,7 +16,6 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
-  alias Realtime.Tenants.Authorization.Policies.PersistencePolicies
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Repo
 
@@ -540,8 +539,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       |> expect(:get_write_authorizations, fn _, _ ->
         {:ok,
          %Policies{
-           broadcast: %BroadcastPolicies{write: true},
-           persistence: %PersistencePolicies{write: true}
+           broadcast: %BroadcastPolicies{write: true, persist: true}
          }}
       end)
 

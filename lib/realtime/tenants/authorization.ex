@@ -341,19 +341,25 @@ defmodule Realtime.Tenants.Authorization do
 
         case Repo.insert(conn, changeset, Message, mode: :savepoint, returning: false) do
           {:ok, _} ->
-            {:cont, {:ok, Policies.update_policies(acc, extension, :write, true)}}
+            {:cont, {:ok, update_write_policy(acc, extension, true)}}
 
           {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-            {:cont, {:ok, Policies.update_policies(acc, extension, :write, false)}}
+            {:cont, {:ok, update_write_policy(acc, extension, false)}}
 
           {:error, reason} ->
             {:halt, {:error, reason}}
         end
       else
-        {:cont, {:ok, Policies.update_policies(acc, extension, :write, false)}}
+        {:cont, {:ok, update_write_policy(acc, extension, false)}}
       end
     end)
   end
+
+  defp update_write_policy(policies, :persistence, value),
+    do: Policies.update_policies(policies, :broadcast, :persist, value)
+
+  defp update_write_policy(policies, extension, value),
+    do: Policies.update_policies(policies, extension, :write, value)
 
   defp rate_counter(tenant_id) do
     %Tenant{} = tenant = Realtime.Tenants.Cache.get_tenant_by_external_id(tenant_id)

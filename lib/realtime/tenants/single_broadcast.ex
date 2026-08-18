@@ -23,7 +23,6 @@ defmodule Realtime.Tenants.SingleBroadcast do
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
-  alias Realtime.Tenants.Authorization.Policies.PersistencePolicies
   alias Realtime.Tenants.Connect
 
   alias RealtimeWeb.RealtimeChannel
@@ -157,7 +156,7 @@ defmodule Realtime.Tenants.SingleBroadcast do
     case permissions_for_message(tenant, auth_params, topic) do
       {:ok, db_conn, %Policies{broadcast: %BroadcastPolicies{write: true}} = policies} ->
         send_message_and_count(tenant, rate_counter, topic, event, payload, content_type, false)
-        maybe_persist(policies.persistence, db_conn, tenant, topic, event, payload)
+        maybe_persist(policies.broadcast, db_conn, tenant, topic, event, payload)
         :ok
 
       {:ok, _db_conn, %Policies{broadcast: %BroadcastPolicies{write: _}}} ->
@@ -205,7 +204,7 @@ defmodule Realtime.Tenants.SingleBroadcast do
     end
   end
 
-  defp maybe_persist(%PersistencePolicies{write: true}, db_conn, tenant, topic, event, payload) do
+  defp maybe_persist(%BroadcastPolicies{persist: true}, db_conn, tenant, topic, event, payload) do
     if FeatureFlags.broadcast_persistence_enabled?(tenant.external_id) do
       Task.Supervisor.start_child(Realtime.TaskSupervisor, fn ->
         case Messages.persist(db_conn, tenant.external_id, topic, event, payload) do
@@ -218,7 +217,7 @@ defmodule Realtime.Tenants.SingleBroadcast do
     :ok
   end
 
-  defp maybe_persist(_persistence, _db_conn, _tenant, _topic, _event, _payload), do: :ok
+  defp maybe_persist(_broadcast_policies, _db_conn, _tenant, _topic, _event, _payload), do: :ok
 
   defp permissions_for_message(tenant, auth_params, topic) do
     with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id),

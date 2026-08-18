@@ -16,7 +16,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
-  alias Realtime.Tenants.Authorization.Policies.PersistencePolicies
 
   @type payload :: map | {String.t(), :json | :binary, binary, map()}
 
@@ -180,7 +179,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   @spec maybe_persist(Policies.t(), pid(), String.t(), String.t(), payload, ack_broadcast :: boolean()) ::
           :ok | :skip | {:ok, map()}
   defp maybe_persist(
-         %Policies{persistence: %PersistencePolicies{write: true}},
+         %Policies{broadcast: %BroadcastPolicies{persist: true}},
          db_conn,
          tenant_id,
          topic,
