@@ -27,20 +27,13 @@ defmodule Realtime.Tenants.BatchBroadcast do
   end
 
   @spec broadcast(
-          auth_params :: Plug.Conn.t() | map() | nil,
-          tenant :: Tenant.t() | nil,
+          auth_params :: map() | nil,
+          tenant :: Tenant.t(),
           messages :: %{
-            messages:
-              list(%{
-                optional(:id) => String.t(),
-                optional(:private) => boolean(),
-                required(:topic) => String.t(),
-                required(:payload) => map(),
-                required(:event) => String.t()
-              })
+            messages: list(%{id: String.t(), topic: String.t(), payload: map(), event: String.t(), private: boolean()})
           },
           super_user :: boolean()
-        ) :: :ok | {:error, atom() | Ecto.Changeset.t()} | {:error, atom(), String.t()}
+        ) :: :ok | {:error, atom() | Ecto.Changeset.t()}
   def broadcast(auth_params, tenant, messages, super_user \\ false)
 
   def broadcast(%Plug.Conn{} = conn, %Tenant{} = tenant, messages, super_user) do
@@ -86,9 +79,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
         else
           case permissions_for_message(tenant, auth_params, topic) do
             %Policies{broadcast: %BroadcastPolicies{write: true}} ->
-              Enum.each(events, fn message ->
-                send_message_and_count(tenant, events_per_second_rate, message, false)
-              end)
+              Enum.each(events, fn message -> send_message_and_count(tenant, events_per_second_rate, message, false) end)
 
             _ ->
               nil
