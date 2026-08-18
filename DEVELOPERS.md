@@ -7,6 +7,7 @@
 - [Server](#server)
   - [Server Setup](#server-setup)
   - [Devcontainer](#devcontainer)
+  - [Worktrees](#worktrees)
   - [Tenants](#tenants)
   - [WebSocket](#websocket)
     - [WebSocket URL](#websocket-url)
@@ -89,6 +90,39 @@ Once the container has built and `postCreateCommand` finishes, follow the same s
 
 > **Note**
 > It uses `--network=host`, which requires a container runtime that supports it. This works natively on Linux and on OrbStack; on Docker Desktop for Mac you need to enable the host networking beta feature first.
+
+### Worktrees
+
+Ports, node names and container names are all read from the environment, so each worktree can run its own server and test
+suite. Defaults are the values used above; override what you need in a gitignored
+[mise.local.toml](https://mise.jdx.dev/configuration.html):
+
+```toml
+[env]
+PORT = "4107"                              # dev server
+NAME = "realtime-7"
+CLUSTER_STRATEGIES = ""
+GEN_RPC_TCP_SERVER_PORT = "5607"
+GEN_RPC_TCP_CLIENT_PORT = "5707"
+DB_PORT = "5732"                           # published by compose.dbs.yml
+TENANT_DB_PORT = "5733"
+COMPOSE_PROJECT_NAME = "realtime-7"
+TEST_PORT = "4702"                         # test suite
+TEST_GEN_RPC_TCP_SERVER_PORT = "5769"
+TEST_GEN_RPC_TCP_CLIENT_PORT = "5770"
+TEST_DB_NAME = "realtime_test_7"
+TEST_NODE_SUFFIX = "7"                     # appended to the run's node name and every peer it starts
+TEST_PEER_PORT_BASE = "4712"               # peer HTTP, one port per peer in TestEnv's slots
+TEST_PEER_GEN_RPC_PORT_BASE = "17070"      # peer gen_rpc, same slots
+TEST_TENANT_DB_PORT_RANGE = "9100-9300"    # host ports for pooled tenant databases
+TEST_CONTAINER_PREFIX = "realtime-test-7-" # names those containers, and scopes which ones a run removes
+TEST_DB_PORT = "5832"                      # published by compose.tests.yml
+TEST_REALTIME_PORT = "4807"
+```
+
+The test variables are separate from the dev ones on purpose: both live in the same shell, and a test run must not bind the
+ports of the server it runs next to. `TEST_CONTAINER_PREFIX` has to differ per worktree, otherwise one run tears down
+another's tenant databases. `MIX_TEST_PARTITION` still shifts the test defaults, so CI needs none of this.
 
 ### Tenants
 

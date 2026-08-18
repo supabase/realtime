@@ -176,12 +176,7 @@ metrics_tags = %{
   id: Realtime.Nodes.short_node_id_from_name(node())
 }
 
-config :realtime, Realtime.Repo,
-  hostname: db_host,
-  username: db_user,
-  password: db_password,
-  database: db_name,
-  port: db_port,
+repo_opts = [
   pool_size: db_pool_size,
   queue_target: db_queue_target,
   queue_interval: db_queue_interval,
@@ -189,6 +184,14 @@ config :realtime, Realtime.Repo,
   after_connect: after_connect_query_args,
   socket_options: socket_options,
   ssl: ssl_opts
+]
+
+repo_opts =
+  if config_env() == :test,
+    do: repo_opts,
+    else: [hostname: db_host, username: db_user, password: db_password, database: db_name, port: db_port] ++ repo_opts
+
+config :realtime, Realtime.Repo, repo_opts
 
 config :realtime,
   websocket_max_heap_size: websocket_max_heap_size,

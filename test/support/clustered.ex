@@ -3,6 +3,9 @@ defmodule Clustered do
   Uses the gist https://gist.github.com/ityonemo/177cbc96f8c8722bfc4d127ff9baec62 to start a node for testing
   """
 
+  @port_wait_attempts 50
+  @port_wait_delay_ms 100
+
   @doc """
   Starts a node for testing.
 
@@ -51,11 +54,10 @@ defmodule Clustered do
   @spec start_disconnected(any(), keyword()) :: {:ok, :peer.server_ref(), node}
   def start_disconnected(aux_mod \\ nil, opts \\ []) do
     extra_config = Keyword.get(opts, :extra_config, [])
-    phoenix_port = Keyword.get(opts, :phoenix_port, 4012)
-    name = Keyword.get(opts, :name, :peer.random_name())
+    phoenix_port = Keyword.get(opts, :phoenix_port, TestEnv.peer_http_port())
+    name = opts |> Keyword.get(:name, :peer.random_name()) |> TestEnv.peer_name()
 
-    partition = System.get_env("MIX_TEST_PARTITION")
-    node_name = if partition, do: :"main#{partition}@127.0.0.1", else: :"main@127.0.0.1"
+    node_name = TestEnv.node_name()
 
     :ok =
       case :net_kernel.start([node_name]) do
@@ -110,6 +112,7 @@ defmodule Clustered do
     # Configure gen_rpc swapping port definitons
     gen_rpc_tcp_server_port = Application.fetch_env!(:gen_rpc, :tcp_server_port)
     gen_rpc_tcp_client_port = Application.fetch_env!(:gen_rpc, :tcp_client_port)
+    peer_gen_rpc_port = peer_gen_rpc_port(extra_config, gen_rpc_tcp_client_port)
 
     :ok = :peer.call(pid, Application, :put_env, [:gen_rpc, :tcp_server_port, gen_rpc_tcp_client_port])
     :ok = :peer.call(pid, Application, :put_env, [:gen_rpc, :tcp_client_port, gen_rpc_tcp_server_port])
@@ -122,7 +125,9 @@ defmodule Clustered do
       :ok = :peer.call(pid, Application, :put_env, [app_name, key, value])
     end
 
-    wait_for_port_free(gen_rpc_tcp_client_port)
+    await_port_available!(peer_gen_rpc_port, "gen_rpc", "TEST_PEER_GEN_RPC_PORT_BASE")
+    await_port_available!(phoenix_port, "Phoenix", "TEST_PEER_PORT_BASE")
+
     {:ok, _} = :peer.call(pid, Application, :ensure_all_started, [:gen_rpc])
     {:ok, _} = :peer.call(pid, Application, :ensure_all_started, [:mix])
     :ok = :peer.call(pid, Mix, :env, [Mix.env()])
@@ -148,18 +153,33 @@ defmodule Clustered do
     end
   end
 
-  defp wait_for_port_free(port, attempts \\ 50, delay_ms \\ 100)
-  defp wait_for_port_free(_port, 0, _delay_ms), do: :ok
+  # The peer's own gen_rpc server port: extra_config wins, otherwise it inherits the
+  # local node's client port (they are swapped above so the two can talk).
+  defp peer_gen_rpc_port(extra_config, default) do
+    Enum.find_value(extra_config, default, fn
+      {:gen_rpc, :tcp_server_port, port} -> port
+      _ -> nil
+    end)
+  end
 
-  defp wait_for_port_free(port, attempts, delay_ms) do
-    case :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false], 100) do
-      {:ok, socket} ->
-        :gen_tcp.close(socket)
-        Process.sleep(delay_ms)
-        wait_for_port_free(port, attempts - 1, delay_ms)
+  # A peer that stopped moments ago may still be releasing its port, hence the retries.
+  # Anything still holding it after that is another test run or a dev server, and starting
+  # the peer anyway only fails later and less clearly.
+  defp await_port_available!(port, label, env_var, attempts \\ @port_wait_attempts)
 
-      {:error, _} ->
-        :ok
+  defp await_port_available!(port, label, env_var, 0) do
+    raise """
+    #{label} port #{port} is still in use after #{div(@port_wait_attempts * @port_wait_delay_ms, 1000)}s.
+    Another test run or a dev server is bound to it. Set #{env_var} to move this run to a free block.
+    """
+  end
+
+  defp await_port_available!(port, label, env_var, attempts) do
+    if TestEnv.port_available?(port) do
+      :ok
+    else
+      Process.sleep(@port_wait_delay_ms)
+      await_port_available!(port, label, env_var, attempts - 1)
     end
   end
 

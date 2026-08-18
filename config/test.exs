@@ -1,6 +1,15 @@
 import Config
 
+get_integer = fn env, default ->
+  case System.get_env(env) do
+    nil -> default
+    value -> String.to_integer(value)
+  end
+end
+
 partition = System.get_env("MIX_TEST_PARTITION")
+db_port = get_integer.("DB_PORT", 5432)
+db_name = System.get_env("TEST_DB_NAME", "realtime_test#{partition}")
 
 for repo <- [
       Realtime.Repo,
@@ -17,12 +26,14 @@ for repo <- [
   config :realtime, repo,
     username: "supabase_admin",
     password: "postgres",
-    database: "realtime_test#{partition}",
+    database: db_name,
     hostname: "127.0.0.1",
+    port: db_port,
     pool: Ecto.Adapters.SQL.Sandbox
 end
 
-http_port = if partition, do: 4002 + String.to_integer(partition), else: 4002
+default_http_port = if partition, do: 4002 + String.to_integer(partition), else: 4002
+http_port = get_integer.("TEST_PORT", default_http_port)
 
 # Single-node test scopes have no peers to agree with, so they only reach
 # :ready via the singleton-promotion timer. Keep it short so Muster.targets/3
@@ -84,9 +95,12 @@ config :opentelemetry,
 # See Clustered module
 gen_rpc_offset = if partition, do: String.to_integer(partition) * 10, else: 0
 
+gen_rpc_tcp_server_port = get_integer.("TEST_GEN_RPC_TCP_SERVER_PORT", 5969 + gen_rpc_offset)
+gen_rpc_tcp_client_port = get_integer.("TEST_GEN_RPC_TCP_CLIENT_PORT", 5970 + gen_rpc_offset)
+
 config :gen_rpc,
-  tcp_server_port: 5969 + gen_rpc_offset,
-  tcp_client_port: 5970 + gen_rpc_offset,
+  tcp_server_port: gen_rpc_tcp_server_port,
+  tcp_client_port: gen_rpc_tcp_client_port,
   connect_timeout: 500
 
 config :realtime, :dashboard_auth, :basic_auth

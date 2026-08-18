@@ -12,19 +12,20 @@ defmodule TestTenantDb.Backend.Docker do
   use GenServer
 
   alias Realtime.Database
+  alias Realtime.Env
 
   # -- TestTenantDb.Backend implementation
 
   @impl TestTenantDb.Backend
-  def max_cases, do: String.to_integer(System.get_env("MAX_CASES", "4"))
+  def max_cases, do: Env.get_integer("MAX_CASES", 4)
 
   @impl TestTenantDb.Backend
   def prepare! do
     pull()
 
     existing =
-      if System.get_env("REUSE_CONTAINERS") == "true" do
-        existing_containers("realtime-test-*")
+      if Env.get_boolean("REUSE_CONTAINERS", false) do
+        existing_containers()
       else
         stop_containers()
         []
@@ -88,7 +89,7 @@ defmodule TestTenantDb.Backend.Docker do
 
   # -- Docker plumbing
 
-  defp image, do: System.get_env("POSTGRES_IMAGE", "supabase/postgres:17.6.1.127")
+  defp image, do: Env.get_binary("POSTGRES_IMAGE", "supabase/postgres:17.6.1.127")
 
   def pull do
     case System.cmd("docker", ["image", "inspect", image()]) do
@@ -108,7 +109,7 @@ defmodule TestTenantDb.Backend.Docker do
 
   defp start_available_container(attempts) do
     port = TestTenantDb.port()
-    name = "realtime-test-#{random_string(12)}"
+    name = container_name()
 
     case docker_run(name, port) do
       {_, 0} -> {name, port}
@@ -122,21 +123,37 @@ defmodule TestTenantDb.Backend.Docker do
     |> binary_part(0, length)
   end
 
-  def stop_containers() do
-    {list, 0} = System.cmd("docker", ["ps", "-a", "--format", "{{.Names}}", "--filter", "name=realtime-test-*"])
+  def container_name, do: "#{TestEnv.container_prefix()}#{random_string(TestEnv.container_suffix_length())}"
 
-    for name <- String.split(list, "\n", trim: true) do
+  # Only containers this instance would have created: the docker name filter is a
+  # substring match, so a custom TEST_CONTAINER_PREFIX that extends the default
+  # (realtime-test-7-) is still matched by a default-prefixed run. Checking the
+  # random suffix length keeps each instance from tearing down another's DBs.
+  def own_container?(name) do
+    prefix = TestEnv.container_prefix()
+
+    String.starts_with?(name, prefix) and
+      byte_size(name) == byte_size(prefix) + TestEnv.container_suffix_length()
+  end
+
+  def stop_containers() do
+    {list, 0} =
+      System.cmd("docker", ["ps", "-a", "--format", "{{.Names}}", "--filter", "name=#{TestEnv.container_prefix()}"])
+
+    for name <- String.split(list, "\n", trim: true), own_container?(name) do
       System.cmd("docker", ["rm", "-f", name])
     end
   end
 
-  def existing_containers(pattern) do
-    {containers, 0} = System.cmd("docker", ["ps", "--format", "{{json .}}", "--filter", "name=#{pattern}"])
+  def existing_containers do
+    {containers, 0} =
+      System.cmd("docker", ["ps", "--format", "{{json .}}", "--filter", "name=#{TestEnv.container_prefix()}"])
 
     containers
     |> String.split("\n", trim: true)
+    |> Enum.map(&Jason.decode!/1)
+    |> Enum.filter(&own_container?(&1["Names"]))
     |> Enum.map(fn container ->
-      container = Jason.decode!(container)
       # Ports" => "0.0.0.0:6445->5432/tcp, [::]:6445->5432/tcp"
       regex = ~r/(?<=:)\d+(?=->)/
 

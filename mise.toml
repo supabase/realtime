@@ -6,6 +6,11 @@ supabase = "2.105.0"
 "npm:@supabase/pg-delta" = "1.0.0-alpha.34"
 
 [env]
+NAME = "pink"
+PORT = "4000"
+REGION = "us-east-1"
+GEN_RPC_TCP_SERVER_PORT = "5369"
+GEN_RPC_TCP_CLIENT_PORT = "5469"
 API_JWT_SECRET = "dev"
 DB_ENC_KEY = "1234567890123456"
 METRICS_JWT_SECRET = "dev"
@@ -15,7 +20,6 @@ DASHBOARD_PASSWORD = "admin"
 [tasks.dev]
 description = "Start the dev server"
 run = "iex --name ${NAME}@127.0.0.1 --cookie cookie -S mix phx.server"
-env = { NAME = "pink", PORT = "4000", REGION = "us-east-1", GEN_RPC_TCP_SERVER_PORT = "5369", GEN_RPC_TCP_CLIENT_PORT = "5469" }
 
 [tasks.dev-orange]
 description = "Start another dev server (orange)"

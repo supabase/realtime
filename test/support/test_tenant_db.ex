@@ -6,6 +6,7 @@ defmodule TestTenantDb do
   alias Realtime.Tenants.Connect
   alias TestTenantDb.Backend
   alias Realtime.Database
+  alias Realtime.Env
 
   use GenServer
 
@@ -18,9 +19,9 @@ defmodule TestTenantDb do
   def port(), do: GenServer.call(__MODULE__, :port, 10_000)
 
   def init(max_cases) do
-    partition = System.get_env("MIX_TEST_PARTITION", "1") |> String.to_integer()
-    total_partitions = System.get_env("MIX_TEST_TOTAL_PARTITIONS", "4") |> String.to_integer()
-    all_ports = 6500..9000
+    partition = Env.get_integer("MIX_TEST_PARTITION", 1)
+    total_partitions = Env.get_integer("MIX_TEST_TOTAL_PARTITIONS", 4)
+    all_ports = TestEnv.tenant_db_port_range()
     range_size = div(Enum.count(all_ports), total_partitions)
 
     # Exclude ports the backend has already reserved so we never hand out a port that's in use.
