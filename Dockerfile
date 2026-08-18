@@ -23,6 +23,9 @@ RUN set -eux; \
     bun build --compile src/cli/main.ts --outfile /tmp/pgdelta; \
     /tmp/pgdelta --help > /dev/null; \
     xz -9 -e -T0 -c /tmp/pgdelta > /tmp/pgdelta.xz; \
+    cd / && find build -path '*/@libpg-query/parser/wasm/libpg-query.wasm' > /tmp/libpg-query.txt; \
+    test -s /tmp/libpg-query.txt; \
+    tar -czf /tmp/libpg-query.tar.gz -T /tmp/libpg-query.txt; \
     printf '%s\n' \
       '#!/bin/sh' \
       'set -e' \
@@ -35,7 +38,7 @@ RUN set -eux; \
       'exec "$BIN" "$@"' \
       > /tmp/pgdelta-wrapper; \
     chmod +x /tmp/pgdelta-wrapper; \
-    rm -rf /tmp/pgdelta /build /root/.bun /var/lib/apt/lists/*
+    rm -rf /tmp/pgdelta /tmp/libpg-query.txt /build /root/.bun /var/lib/apt/lists/*
 
 FROM ${BUILDER_IMAGE} AS builder
 
@@ -118,6 +121,8 @@ RUN apt-get update -y && \
 
 COPY --from=pgdelta-builder /tmp/pgdelta.xz /usr/local/share/pgdelta/pgdelta.xz
 COPY --from=pgdelta-builder /tmp/pgdelta-wrapper /usr/local/bin/pgdelta
+COPY --from=pgdelta-builder /tmp/libpg-query.tar.gz /tmp/libpg-query.tar.gz
+RUN tar -C / -xzf /tmp/libpg-query.tar.gz && rm /tmp/libpg-query.tar.gz
 
 # Set the locale
 RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
