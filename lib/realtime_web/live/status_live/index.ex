@@ -8,11 +8,11 @@ defmodule RealtimeWeb.StatusLive.Index do
   alias Realtime.Nodes
   alias RealtimeWeb.Endpoint
 
-  @ping_interval 15_000
+  @ping_interval to_timeout(second: 15)
   @stale_after @ping_interval * 2
-  @warn_above_ms 1_000
+  @warn_above_ms to_timeout(second: 1)
   @problem_limit 200
-  @flush_interval 1_000
+  @flush_interval to_timeout(second: 1)
   @state_key :node_info
 
   @impl true
