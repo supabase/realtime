@@ -146,7 +146,9 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       Authorization
       |> expect(:build_authorization_params, fn params -> params end)
-      |> expect(:get_write_authorizations, fn _, _ -> {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}} end)
+      |> expect(:get_write_authorizations, fn _, _, :broadcast ->
+        {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
+      end)
 
       expect(TenantBroadcaster, :pubsub_broadcast, 1, fn _, _, _, _, _ -> :ok end)
 
@@ -169,7 +171,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       Authorization
       |> expect(:build_authorization_params, 1, fn params -> params end)
-      |> expect(:get_write_authorizations, 1, fn _, _ ->
+      |> expect(:get_write_authorizations, 1, fn _, _, :broadcast ->
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: false}}}
       end)
 
@@ -211,8 +213,8 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       Authorization
       |> expect(:build_authorization_params, 2, fn params -> params end)
       |> expect(:get_write_authorizations, 2, fn
-        _, %{topic: ^topic} -> %Policies{broadcast: %BroadcastPolicies{write: true}}
-        _, _ -> %Policies{broadcast: %BroadcastPolicies{write: false}}
+        _, %{topic: ^topic}, :broadcast -> %Policies{broadcast: %BroadcastPolicies{write: true}}
+        _, _, :broadcast -> %Policies{broadcast: %BroadcastPolicies{write: false}}
       end)
 
       # Only one topic will actually be broadcasted
@@ -251,7 +253,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       Authorization
       |> expect(:build_authorization_params, 2, fn params -> params end)
-      |> expect(:get_write_authorizations, 2, fn _, _ ->
+      |> expect(:get_write_authorizations, 2, fn _, _, :broadcast ->
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
       end)
 
@@ -324,7 +326,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       Authorization
       |> expect(:build_authorization_params, fn params -> params end)
-      |> expect(:get_write_authorizations, fn _, _ ->
+      |> expect(:get_write_authorizations, fn _, _, :broadcast ->
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
       end)
 

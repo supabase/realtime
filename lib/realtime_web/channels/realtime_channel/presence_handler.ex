@@ -95,7 +95,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
              policies,
              db_conn,
              authorization_context,
-             broadcast_enabled?: false
+             :presence
            ) do
       socket = assign(socket, :policies, policies)
       handle_presence_event("track", payload, db_conn, socket)

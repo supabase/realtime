@@ -172,7 +172,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
          db_conn,
          authorization_context
        ) do
-    Authorization.get_write_authorizations(policies, db_conn, authorization_context, presence_enabled?: false)
+    Authorization.get_write_authorizations(policies, db_conn, authorization_context, :broadcast)
   end
 
   defp run_authorization_check(socket, _db_conn, _authorization_context) do

@@ -256,12 +256,10 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
     test "only checks write policies once on private channels", %{tenant: tenant, topic: topic, db_conn: db_conn} do
-      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context, opts ->
-        assert opts == [broadcast_enabled?: false]
-        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context, opts])
+      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context, extension ->
+        assert extension == :presence
+        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context, extension])
       end)
-
-      reject(&Authorization.get_write_authorizations/3)
 
       key = random_string()
       # Use high client rate limit to test tenant-level rate limiting
@@ -327,8 +325,9 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :broken_write_presence]
     test "handle failing rls policy", %{tenant: tenant, topic: topic, db_conn: db_conn} do
-      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context, opts ->
-        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context, opts])
+      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context, extension ->
+        assert extension == :presence
+        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context, extension])
       end)
 
       key = random_string()
@@ -351,7 +350,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     end
 
     test "does not check write policies once on public channels", %{tenant: tenant, topic: topic} do
-      reject(&Authorization.get_write_authorizations/3)
+      reject(&Authorization.get_write_authorizations/4)
 
       key = random_string()
       policies = %Policies{broadcast: %BroadcastPolicies{read: false}}

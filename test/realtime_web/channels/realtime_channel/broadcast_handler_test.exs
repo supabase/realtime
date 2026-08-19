@@ -183,9 +183,9 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
          %{topic: topic, tenant: tenant, db_conn: db_conn, serializer: serializer} do
       socket = socket_fixture(tenant, topic)
 
-      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context, opts ->
-        assert opts == [presence_enabled?: false]
-        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context, opts])
+      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context, extension ->
+        assert extension == :broadcast
+        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context, extension])
       end)
 
       reject(&Authorization.get_write_authorizations/4)
@@ -212,9 +212,9 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     test "validation only runs once on nil and blocking policies", %{topic: topic, tenant: tenant, db_conn: db_conn} do
       socket = socket_fixture(tenant, topic)
 
-      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context, opts ->
-        assert opts == [presence_enabled?: false]
-        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context, opts])
+      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context, extension ->
+        assert extension == :broadcast
+        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context, extension])
       end)
 
       for _ <- 1..100, reduce: socket do
