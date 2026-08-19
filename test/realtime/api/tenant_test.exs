@@ -3,6 +3,16 @@ defmodule Realtime.Api.TenantTest do
 
   alias Realtime.Api.Tenant
   alias Realtime.Crypto
+  alias Realtime.Extensions
+
+  @settings %{
+    "region" => "us-east-1",
+    "db_host" => "127.0.0.1",
+    "db_port" => "5432",
+    "db_name" => "postgres",
+    "db_user" => "postgres",
+    "db_password" => "postgres"
+  }
 
   describe "encrypt_jwt_secret/1 via changeset/2" do
     test "encrypts jwt_secret with the configured cipher" do
@@ -32,6 +42,64 @@ defmodule Realtime.Api.TenantTest do
 
       refute changeset.valid?
       assert Ecto.Changeset.get_change(changeset, :jwt_secret) == "my-secret"
+    end
+  end
+
+  describe "mark_gcm_migrated/1" do
+    test "stamps gcm_migrated_at when every encrypted value is on GCM" do
+      changeset = tenant(jwt_secret: cipher_text(:gcm), extensions: [extension(:gcm)]) |> change() |> mark()
+
+      assert %DateTime{} = Ecto.Changeset.get_change(changeset, :gcm_migrated_at)
+    end
+
+    test "stamps a tenant that has nothing encrypted to migrate" do
+      changeset = tenant(jwt_secret: nil, extensions: []) |> change() |> mark()
+
+      assert %DateTime{} = Ecto.Changeset.get_change(changeset, :gcm_migrated_at)
+    end
+
+    test "picks up the encrypted values the changeset is about to write" do
+      attrs = %{
+        external_id: "tenant",
+        jwt_secret: "my-secret",
+        extensions: [%{"type" => "postgres_cdc_rls", "settings" => @settings}]
+      }
+
+      changeset = %Tenant{extensions: []} |> Tenant.changeset(attrs) |> mark()
+
+      assert %DateTime{} = Ecto.Changeset.get_change(changeset, :gcm_migrated_at)
+    end
+
+    test "does not stamp while jwt_secret is on the legacy cipher" do
+      changeset = tenant(jwt_secret: cipher_text(:ecb), extensions: [extension(:gcm)]) |> change() |> mark()
+
+      refute Ecto.Changeset.get_change(changeset, :gcm_migrated_at)
+    end
+
+    test "does not stamp while an extension holds legacy settings" do
+      changeset = tenant(jwt_secret: cipher_text(:gcm), extensions: [extension(:ecb)]) |> change() |> mark()
+
+      refute Ecto.Changeset.get_change(changeset, :gcm_migrated_at)
+    end
+
+    test "does not stamp when the extensions are not loaded, since they could still be legacy" do
+      changeset = %Tenant{external_id: "tenant", jwt_secret: cipher_text(:gcm)} |> change() |> mark()
+
+      refute Ecto.Changeset.get_change(changeset, :gcm_migrated_at)
+    end
+
+    test "leaves an already stamped tenant alone" do
+      stamped = DateTime.utc_now(:second) |> DateTime.add(-1, :day)
+      tenant = %{tenant(jwt_secret: cipher_text(:gcm), extensions: [extension(:gcm)]) | gcm_migrated_at: stamped}
+
+      refute tenant |> change() |> mark() |> Ecto.Changeset.get_change(:gcm_migrated_at)
+    end
+
+    test "is a no-op on an invalid changeset" do
+      changeset = %Tenant{} |> Tenant.changeset(%{jwt_secret: "my-secret"}) |> mark()
+
+      refute changeset.valid?
+      refute Ecto.Changeset.get_change(changeset, :gcm_migrated_at)
     end
   end
 
@@ -72,4 +140,22 @@ defmodule Realtime.Api.TenantTest do
       refute Ecto.Changeset.get_change(result, :max_bytes_per_second)
     end
   end
+
+  defp tenant(opts),
+    do: %Tenant{external_id: "tenant", jwt_secret: opts[:jwt_secret], extensions: opts[:extensions]}
+
+  defp extension(cipher),
+    do: %Realtime.Api.Extensions{type: "postgres_cdc_rls", settings: encrypted_settings(cipher)}
+
+  defp encrypted_settings(cipher) do
+    for key <- Extensions.encrypted_settings_keys("postgres_cdc_rls"), reduce: @settings do
+      acc -> Map.put(acc, key, Crypto.encrypt!(@settings[key], cipher: cipher))
+    end
+  end
+
+  defp cipher_text(cipher), do: Crypto.encrypt!("a-secret", cipher: cipher)
+
+  defp change(tenant), do: Ecto.Changeset.change(tenant)
+
+  defp mark(changeset), do: Tenant.mark_gcm_migrated(changeset)
 end

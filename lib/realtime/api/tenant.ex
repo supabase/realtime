@@ -46,8 +46,8 @@ defmodule Realtime.Api.Tenant do
     timestamps()
   end
 
-  @doc false
-  def changeset(tenant, attrs) do
+  @doc "`opts` are forwarded to `Realtime.Crypto.encrypt!/2`."
+  def changeset(tenant, attrs, opts \\ []) do
     # TODO: remove after infra update
     extension_key = if attrs[:extensions], do: :extensions, else: "extensions"
 
@@ -93,13 +93,13 @@ defmodule Realtime.Api.Tenant do
       message: "either jwt_secret or jwt_jwks must be provided"
     )
     |> unique_constraint([:external_id])
-    |> encrypt_jwt_secret()
+    |> encrypt_jwt_secret(opts)
     |> maybe_set_default(:max_bytes_per_second, :tenant_max_bytes_per_second)
     |> maybe_set_default(:max_channels_per_client, :tenant_max_channels_per_client)
     |> maybe_set_default(:max_concurrent_users, :tenant_max_concurrent_users)
     |> maybe_set_default(:max_events_per_second, :tenant_max_events_per_second)
     |> maybe_set_default(:max_joins_per_second, :tenant_max_joins_per_second)
-    |> cast_assoc(:extensions, with: &Extensions.changeset/2)
+    |> cast_assoc(:extensions, with: &Extensions.changeset(&1, &2, opts))
   end
 
   def maybe_set_default(changeset, property, config_key) do
@@ -112,11 +112,41 @@ defmodule Realtime.Api.Tenant do
     end
   end
 
-  def encrypt_jwt_secret(%Ecto.Changeset{valid?: true, changes: %{jwt_secret: plaintext}} = changeset)
-      when is_binary(plaintext),
-      do: put_change(changeset, :jwt_secret, Crypto.encrypt!(plaintext))
+  def encrypt_jwt_secret(changeset, opts \\ [])
 
-  def encrypt_jwt_secret(changeset), do: changeset
+  def encrypt_jwt_secret(%Ecto.Changeset{valid?: true, changes: %{jwt_secret: plaintext}} = changeset, opts)
+      when is_binary(plaintext),
+      do: put_change(changeset, :jwt_secret, Crypto.encrypt!(plaintext, opts))
+
+  def encrypt_jwt_secret(changeset, _opts), do: changeset
+
+  @doc """
+  Stamps `gcm_migrated_at` when the pending write leaves every encrypted value on AES-256-GCM, so an
+  upsert that already migrated the tenant keeps it out of `Realtime.Tenants.EncryptionReconciler`.
+  """
+  @spec mark_gcm_migrated(Ecto.Changeset.t()) :: Ecto.Changeset.t()
+  def mark_gcm_migrated(%Ecto.Changeset{valid?: true} = changeset) do
+    if is_nil(get_field(changeset, :gcm_migrated_at)) and gcm_only?(changeset),
+      do: put_change(changeset, :gcm_migrated_at, DateTime.utc_now(:second)),
+      else: changeset
+  end
+
+  def mark_gcm_migrated(changeset), do: changeset
+
+  defp gcm_only?(changeset) do
+    jwt_secret = get_field(changeset, :jwt_secret)
+    extensions = extensions(changeset)
+
+    is_list(extensions) and (is_nil(jwt_secret) or Crypto.gcm?(jwt_secret)) and
+      Enum.all?(extensions, &gcm_settings?/1)
+  end
+
+  # `get_field/2` reads an unloaded assoc as `[]`, which would pass for migrated.
+  defp extensions(%Ecto.Changeset{changes: %{extensions: _}} = changeset), do: get_field(changeset, :extensions)
+  defp extensions(%Ecto.Changeset{data: %{extensions: extensions}}), do: extensions
+
+  defp gcm_settings?(%Extensions{type: type, settings: settings}),
+    do: not Crypto.legacy_settings?(settings, Realtime.Extensions.encrypted_settings_keys(type))
 
   @doc false
   def gcm_migrated_at_changeset(tenant, attrs) do

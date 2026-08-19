@@ -5,13 +5,17 @@ defmodule Realtime.Crypto do
   AES-256-GCM ciphertext carries a `"g1:"` prefix, legacy AES-128-ECB ciphertext is bare base64.
   `:` is not in the base64 alphabet, so `decrypt!/1` picks the cipher from the value itself.
 
-  New writes use GCM when `:db_enc_write_gcm` is set; `Realtime.Tenants.EncryptionReconciler`
-  re-encrypts legacy values in place. Once nothing is on ECB, the ECB branch and `:db_enc_key` go.
+  A tenant moves to GCM once `cipher_for/1` says so: its next upsert rewrites whatever secrets it
+  carries and `Realtime.Tenants.EncryptionReconciler` re-encrypts the rest in place. Once nothing is
+  on ECB, the ECB branch and `:db_enc_key` go.
   """
 
   require Logger
 
+  alias Realtime.FeatureFlags
+
   @gcm_prefix "g1:"
+  @backfill_flag "gcm_encryption_backfill"
 
   @type cipher :: :gcm | :ecb
 
@@ -58,6 +62,19 @@ defmodule Realtime.Crypto do
 
     :ok
   end
+
+  @doc """
+  Cipher a given tenant's values should be written with, gated by the #{@backfill_flag} flag.
+
+  Reads the tenant cache, so it must not be called from inside that cache's fallback - see
+  `Realtime.Tenants.EncryptionReconciler.reconcile/1`.
+  """
+  @spec cipher_for(binary() | nil) :: cipher()
+  def cipher_for(external_id) when is_binary(external_id) do
+    if write_gcm?() and FeatureFlags.enabled?(@backfill_flag, external_id), do: :gcm, else: :ecb
+  end
+
+  def cipher_for(_external_id), do: default_cipher()
 
   @doc """
   Re-encrypts a ciphertext as AES-256-GCM, whichever cipher it currently uses.

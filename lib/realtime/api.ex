@@ -11,6 +11,7 @@ defmodule Realtime.Api do
   alias Realtime.Api.Extensions
   alias Realtime.Api.FeatureFlag
   alias Realtime.Api.Tenant
+  alias Realtime.Crypto
   alias Realtime.FeatureFlags
   alias Realtime.GenCounter
   alias Realtime.GenRpc
@@ -120,7 +121,8 @@ defmodule Realtime.Api do
 
     if master_region?() do
       %Tenant{}
-      |> Tenant.changeset(attrs)
+      |> Tenant.changeset(attrs, cipher: Crypto.cipher_for(tenant_id))
+      |> Tenant.mark_gcm_migrated()
       |> Repo.insert()
       |> case do
         {:ok, tenant} ->
@@ -149,8 +151,12 @@ defmodule Realtime.Api do
     end
   end
 
-  defp update_tenant(%Tenant{} = tenant, attrs) do
-    changeset = Tenant.changeset(tenant, attrs)
+  defp update_tenant(%Tenant{external_id: external_id} = tenant, attrs) do
+    changeset =
+      tenant
+      |> Tenant.changeset(attrs, cipher: Crypto.cipher_for(external_id))
+      |> Tenant.mark_gcm_migrated()
+
     updated = Repo.update(changeset)
 
     case updated do
