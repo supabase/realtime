@@ -127,7 +127,13 @@ defmodule Realtime.MixProject do
     if path = System.get_env("PHOENIX_PATH") do
       {:phoenix, path: path, override: true}
     else
-      {:phoenix, "~> 1.8"}
+      # Phoenix 1.8.3 introduces a bugfix/regression as previous versions allowed missing `join_ref`
+      # This would break some SDK clients.
+      # Wait until they are fixed + some grace period to upgrade.
+      # We're running phoenix 1.8.11 from a fork here with the bugfix removed as to give us some
+      # more lenience to update while resolving the CVEs.
+      # REAL-981
+      {:phoenix, "~> 1.8", github: "supabase/phoenix", branch: "v1.8-no-drop-missing-join-refs", override: true}
     end
   end
 
