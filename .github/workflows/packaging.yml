@@ -1,0 +1,104 @@
+name: Packaging
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packaging-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docker_x86_build:
+    if: github.event_name == 'pull_request'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 120
+    env:
+      arch: amd64
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@ef12d5b165b596e3aa44ea8198d8fde563eab402 # v1.4.0
+
+      - uses: useblacksmith/build-push-action@30c71162f16ea2c27c3e21523255d209b8b538c1 # v2
+        with:
+          context: .
+          push: false
+          platforms: linux/${{ env.arch }}
+
+  docker_arm_build:
+    if: github.event_name == 'pull_request'
+    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
+    timeout-minutes: 120
+    env:
+      arch: arm64
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@ef12d5b165b596e3aa44ea8198d8fde563eab402 # v1.4.0
+
+      - uses: useblacksmith/build-push-action@30c71162f16ea2c27c3e21523255d209b8b538c1 # v2
+        with:
+          context: .
+          push: false
+          platforms: linux/${{ env.arch }}
+
+  nix_build:
+    name: Nix portable build
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          path: realtime
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: supabase/slim-services
+          path: slim-services
+          sparse-checkout: |
+            services/realtime/nix
+            scripts
+
+      - uses: nixbuild/nix-quick-install-action@9f63be77f412a248c9d9a65a4c82cf066cdf8f0c # v35
+
+      - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+        with:
+          primary-key: nix-realtime-${{ runner.os }}-${{ hashFiles('slim-services/services/realtime/nix/**', 'realtime/mix.lock', 'realtime/Dockerfile') }}
+          restore-prefixes-first-match: nix-realtime-${{ runner.os }}-
+          gc-max-store-size-linux: 8G
+
+      - name: Build portable artifact
+        run: |
+          set -euo pipefail
+          cp -R slim-services/services/realtime/nix realtime/nix
+          version="$(sed -nE 's/^[[:space:]]*version: "([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' realtime/mix.exs | head -n1)"
+          [ -n "$version" ] || { echo "::error::could not read version from mix.exs" >&2; exit 1; }
+          cd realtime
+          ../slim-services/scripts/nix-build-with-derived-hashes.sh \
+            nix-build ./nix realtime "$version" ./result ./nix-hashes.json \
+            mix-deps:mix_deps_hash
+
+      - name: Smoke the release
+        env:
+          APP_NAME: realtime-smoke
+          DB_HOST: 127.0.0.1
+          METRICS_JWT_SECRET: realtime-metrics-secret-with-at-least-32
+          SECRET_KEY_BASE: realtimerealtimerealtimerealtimerealtimerealtimerealtimereal
+        run: |
+          set -euo pipefail
+          ./realtime/result/bin/realtime eval 'IO.puts(:crypto.hash(:sha256, "ok") |> Base.encode16())'
+
+      - name: Explain failure
+        if: failure()
+        run: |
+          echo "::error::Nix packaging build failed. Usually a dependency downloading during \`mix compile\`, or an Elixir/OTP bump the pinned nixpkgs does not provide. Expression lives in supabase/slim-services under services/realtime/nix."
