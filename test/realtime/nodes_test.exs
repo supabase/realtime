@@ -8,11 +8,11 @@ defmodule Realtime.NodesTest do
   alias Realtime.Nodes
   alias Realtime.Tenants
 
-  defp spawn_fake_node(region, node) do
+  defp spawn_fake_node(region, node, meta \\ []) do
     parent = self()
 
     fun = fn ->
-      :syn.join(RegionNodes, region, self(), node: node)
+      :syn.join(RegionNodes, region, self(), [node: node] ++ meta)
       send(parent, :joined)
 
       receive do
@@ -56,6 +56,28 @@ defmodule Realtime.NodesTest do
 
     test "on non-existing region, returns empty list" do
       assert Nodes.region_nodes("non-existing-region") == []
+    end
+
+    test "includes draining nodes" do
+      region = "ap-southeast-4"
+      spawn_fake_node(region, :node_1)
+      spawn_fake_node(region, :node_2, draining: true)
+
+      assert Nodes.region_nodes(region) == [:node_1, :node_2]
+    end
+  end
+
+  describe "eligible_region_nodes/1" do
+    test "nil region returns empty list" do
+      assert Nodes.eligible_region_nodes(nil) == []
+    end
+
+    test "excludes draining nodes" do
+      region = "ap-southeast-5"
+      spawn_fake_node(region, :node_1)
+      spawn_fake_node(region, :node_2, draining: true)
+
+      assert Nodes.eligible_region_nodes(region) == [:node_1]
     end
   end
 

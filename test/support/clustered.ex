@@ -3,6 +3,9 @@ defmodule Clustered do
   Uses the gist https://gist.github.com/ityonemo/177cbc96f8c8722bfc4d127ff9baec62 to start a node for testing
   """
 
+  # Booting :realtime on a cold peer exceeds `:peer.call/4`'s implicit 5s timeout.
+  @boot_timeout :timer.seconds(60)
+
   @doc """
   Starts a node for testing.
 
@@ -133,17 +136,17 @@ defmodule Clustered do
     end
 
     wait_for_port_free(gen_rpc_tcp_client_port)
-    {:ok, _} = :peer.call(pid, Application, :ensure_all_started, [:gen_rpc])
-    {:ok, _} = :peer.call(pid, Application, :ensure_all_started, [:mix])
-    :ok = :peer.call(pid, Mix, :env, [Mix.env()])
+    {:ok, _} = :peer.call(pid, Application, :ensure_all_started, [:gen_rpc], @boot_timeout)
+    {:ok, _} = :peer.call(pid, Application, :ensure_all_started, [:mix], @boot_timeout)
+    :ok = :peer.call(pid, Mix, :env, [Mix.env()], @boot_timeout)
 
     Enum.each(
       [:logger, :runtime_tools, :prom_ex, :mix, :os_mon, :realtime],
-      fn app -> {:ok, _} = :peer.call(pid, Application, :ensure_all_started, [app]) end
+      fn app -> {:ok, _} = :peer.call(pid, Application, :ensure_all_started, [app], @boot_timeout) end
     )
 
     if aux_mod do
-      {{:module, _, _, _}, []} = :peer.call(pid, Code, :eval_quoted, [aux_mod])
+      {{:module, _, _, _}, []} = :peer.call(pid, Code, :eval_quoted, [aux_mod], @boot_timeout)
     end
 
     {:ok, pid, node}
