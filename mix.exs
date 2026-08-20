@@ -15,6 +15,7 @@ defmodule Realtime.MixProject do
       dialyzer: dialyzer(),
       test_coverage: [tool: ExCoveralls],
       hex: [
+        cooldown: "7d",
         ignore_advisories: ["CVE-2026-43969", "CVE-2026-43966"]
       ],
       releases: [
