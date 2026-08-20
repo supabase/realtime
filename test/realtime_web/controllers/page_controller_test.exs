@@ -23,6 +23,14 @@ defmodule RealtimeWeb.PageControllerTest do
     assert text_response(conn, 200) == "ok"
   end
 
+  test "GET /healthcheck returns 503 once shutdown is in progress", %{conn: conn} do
+    Application.put_env(:realtime, :shutdown_in_progress, true)
+    on_exit(fn -> Application.put_env(:realtime, :shutdown_in_progress, false) end)
+
+    conn = get(conn, "/healthcheck")
+    assert text_response(conn, 503) == "shutting down"
+  end
+
   describe "GET /healthcheck logging behavior" do
     setup do
       original_value = Application.get_env(:realtime, :disable_healthcheck_logging, false)

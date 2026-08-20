@@ -102,13 +102,14 @@ defmodule Realtime.Application do
     muster_scope = :"realtime_channels_#{region}"
     Application.put_env(:realtime, :muster_scope, muster_scope)
 
-    :syn.join(RegionNodes, region, self(), node: node())
-
     zta_children =
       case Application.get_env(:realtime, :dashboard_auth) do
         :zta -> [{NimbleZTA.Cloudflare, name: Realtime.ZTA, identity_key: System.fetch_env!("CF_TEAM_DOMAIN")}]
         _ -> []
       end
+
+    # Must stay last: see `Realtime.RegionMembership`.
+    region_membership = [{Realtime.RegionMembership, region}]
 
     children =
       [
@@ -205,7 +206,7 @@ defmodule Realtime.Application do
         Realtime.Presence.Rollcall
       ] ++
         extensions_supervisors() ++
-        janitor_tasks() ++ latency_pinger() ++ Realtime.MetricsPusher.child_specs() ++ zta_children
+        janitor_tasks() ++ latency_pinger() ++ Realtime.MetricsPusher.child_specs() ++ zta_children ++ region_membership
 
     database_connections = if master_region == region, do: [Realtime.Repo], else: [Replica.replica()]
 
