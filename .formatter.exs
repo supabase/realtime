@@ -2,6 +2,6 @@
   import_deps: [:ecto, :ecto_sql, :phoenix, :open_api_spex],
   subdirectories: ["priv/*/migrations"],
   plugins: [],
-  inputs: ["*.{heex,ex,exs}", "{config,lib,test,scripts}/**/*.{heex,ex,exs}", "priv/*/*seeds*.exs"],
+  inputs: ["*.{heex,ex,exs}", "{config,dev,lib,test}/**/*.{heex,ex,exs}", "priv/*/*seeds*.exs"],
   line_length: 120
 ]
