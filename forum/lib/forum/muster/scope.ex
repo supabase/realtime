@@ -999,18 +999,12 @@ defmodule Forum.Muster.Scope do
     end
   end
 
-  # A peer is leaving the cluster gracefully (Forum.Muster.drain/2). We are still
-  # in its ring at this instant, but we evict it NOW -- before it dies -- so our
+  # A peer is leaving the cluster gracefully. We are still
+  # in its ring at this instant, but we evict it before it dies so our
   # subsequent claims/routing go to the newly-elected router and our own
   # rebalance re-announces the groups we hold to that router. depart_peer/3 does
-  # the ring swap + re-announce; we ack only AFTER it returns, so the ack
-  # provably means "I've rebalanced you out AND re-announced everything I hold to
-  # the correct new routers", which is exactly what makes drain/2's completion
-  # mean "the new-RPC rate to me is ~0". We demonitor-and-flush first so the
+  # the ring swap + re-announce; we ack only after it returns. We demonitor-and-flush first so the
   # peer's eventual real :DOWN is a no-op (the guard above rejects it).
-  #
-  # Guard on the pid being a current peer (mirroring :DOWN): a duplicate leaving
-  # broadcast, or one from a fresher incarnation we never paired with, is ignored.
   def handle_info({:muster_leaving, peer_pid, _seq}, %State{} = state) do
     case Map.get(state.peers, peer_pid) do
       nil ->
@@ -1036,10 +1030,9 @@ defmodule Forum.Muster.Scope do
 
   # An ack from a peer that has finished rebalancing us out of its ring. Only
   # meaningful while we are the leaver (leaving: true with a parked caller). Once
-  # every expected peer has acked, the new-RPC rate to us is provably ~0; we then
-  # start the settle window (still servicing inbound RPCs) to drain in-flight RPCs
-  # peers dispatched BEFORE they rebalanced -- see forum/README.md / drain/2 for
-  # why the settle is required and not optional.
+  # every expected peer has acked, we then start the settle window
+  # (still servicing inbound RPCs) to drain in-flight RPCs
+  # peers dispatched before they rebalanced
   def handle_info({:muster_leaving_ack, peer_node}, %State{leaving: true} = state) do
     acked = MapSet.put(state.leave_acked, peer_node)
     state = %{state | leave_acked: acked}
@@ -1060,8 +1053,8 @@ defmodule Forum.Muster.Scope do
   def handle_info({:muster_leaving_ack, _peer_node}, state), do: {:noreply, state}
 
   # Settle window elapsed: in-flight RPCs peers dispatched before rebalancing us
-  # out have had `settle_ms` (>= rpc_timeout_ms) to land. Reply :ok to the parked
-  # drain/2 caller; the host app may now tear down its transport and halt.
+  # out have had `settle_ms` to land. Reply :ok to the parked
+  # drain/2 caller. The host app may now tear down its transport and halt.
   def handle_info(:leave_settle, %State{leave_from: from} = state) when from != nil do
     Logger.info(
       "Muster[#{node()}|#{state.scope}] Draining: settle window elapsed, router role fully evacuated; safe to halt"
@@ -1075,13 +1068,8 @@ defmodule Forum.Muster.Scope do
   def handle_info(:leave_settle, state), do: {:noreply, state}
 
   # Ack deadline fired while the drain caller is still parked. If every expected
-  # peer has already acked, we are provably in the settle window (the ack handler
-  # armed it) and this deadline is stale -- ignore it. We deliberately do NOT
-  # cancel the deadline timer when acks complete: cancel_timer cannot reclaim an
-  # already-fired message from a backlogged coordinator's mailbox, so the stale
-  # deadline must be tolerated here rather than raced against. Otherwise this is a
-  # real timeout (a partitioned/unreachable peer): reply {:timeout, unacked_nodes}
-  # so the caller can decide whether to proceed; we stay draining regardless.
+  # peer has already acked, we are in the settle window and this deadline is stale.
+  # If there are still peers to ack we consider that it timed out
   def handle_info(:leave_deadline, %State{leave_from: from} = state) when from != nil do
     unacked = MapSet.difference(state.leave_expected, state.leave_acked) |> MapSet.to_list()
 
@@ -1216,10 +1204,7 @@ defmodule Forum.Muster.Scope do
   # the worst-case "restarted in place but never re-paired" window to one
   # interval. Idempotent with member_views (latest-wins) and with discovery
   # (register_peer no-ops a known peer), so a redundant heartbeat is harmless.
-  # Draining: skip the whole heartbeat while leaving. This silences BOTH outbound
-  # self-assertions it drives -- announce_view (bare view markers) and rediscover
-  # (re-offering discovery to unpaired nodes) -- and stops rescheduling, so no
-  # peer re-pairs us after we announced leaving. Inbound RPCs are unaffected.
+  # Draining: skip the whole heartbeat while leaving.
   def handle_info(:view_heartbeat, %State{leaving: true} = state) do
     {:noreply, state}
   end
@@ -1749,7 +1734,7 @@ defmodule Forum.Muster.Scope do
   # permanently: membership does not change (nothing new got registered), so
   # recompute_members is a no-op and nothing ever re-announces to repair it.
   #
-  # So: wipe only the entries actually attributable to THIS pid. Each of
+  # Wipe only the entries actually attributable to THIS pid. Each of
   # occupancy / member_views / applied_snapshot_seq carries the writer pid
   # that produced it, independent of whatever `peers` currently holds. A row
   # written by any OTHER pid was necessarily written by a different
