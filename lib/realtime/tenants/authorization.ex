@@ -306,10 +306,9 @@ defmodule Realtime.Tenants.Authorization do
   @all_extensions [:broadcast, :presence]
 
   defp extensions_to_check(opts) do
-    Enum.filter(@all_extensions, fn
-      :broadcast -> Keyword.get(opts, :broadcast_enabled?, true)
-      :presence -> Keyword.get(opts, :presence_enabled?, true)
-    end)
+    if Keyword.get(opts, :presence_enabled?, true),
+      do: @all_extensions,
+      else: [:broadcast]
   end
 
   defp check_read_policies(conn, messages_by_extension, policies) do
