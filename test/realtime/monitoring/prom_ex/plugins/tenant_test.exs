@@ -217,7 +217,8 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
         Authorization.get_write_authorizations(
           %Policies{},
           context.db_conn,
-          context.authorization_context
+          context.authorization_context,
+          :broadcast
         )
 
       # Wait enough time for the poll rate to be triggered at least once
