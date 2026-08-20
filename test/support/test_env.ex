@@ -1,21 +1,10 @@
 defmodule TestEnv do
   @moduledoc false
-  # Host-global resources a test run binds or registers: TCP ports, EPMD node
-  # names and docker container names. Everything is derived from env so two
-  # runs (different worktrees, or a run alongside a dev server) never collide.
-  # Defaults reproduce the values that were hardcoded before.
+  # The ports and node names this run owns. config/test.exs claims the ports; names carry its
+  # run tag, so concurrent runs never collide.
 
-  alias Realtime.Env
-
-  @peer_http_base 4012
-  @peer_gen_rpc_base 16_970
-  @tenant_db_port_range "6500-9000"
-  @container_prefix "realtime-test-"
-  @container_suffix_length 12
-
-  # Every peer a test starts owns one slot in both peer port blocks, so a node's HTTP and
-  # gen_rpc ports stay consistent and no test has to know the arithmetic. The two region
-  # clusters hold separate slots so neither reuses a port the other is still releasing.
+  # One slot per peer, offset from both peer port ranges, so no test has to know the
+  # arithmetic. The region clusters hold separate slots so neither reuses the other's port.
   @peer_slots %{
     default: 0,
     us_node: 1,
@@ -31,14 +20,29 @@ defmodule TestEnv do
     bad_tcp: 11
   }
 
+  # Labels this run's databases and containers. Empty for the first run on a machine, which
+  # therefore looks exactly like it did before any of this.
+  @spec run_tag() :: binary()
+  def run_tag, do: Application.fetch_env!(:realtime, :test_run_tag)
+
+  # Node names get the port rather than the tag: they show up inside inspected maps in logs that
+  # tests assert on, so they have to stay short.
+  @spec node_suffix() :: binary()
+  def node_suffix, do: Application.fetch_env!(:realtime, :test_node_suffix)
+
+  # The endpoint port this run claimed, which is also what a later run probes to decide
+  # whether this run is still alive.
+  @spec http_port() :: pos_integer()
+  def http_port, do: Application.fetch_env!(:realtime, :test_http_port)
+
   @spec node_name() :: node()
-  def node_name, do: :"main#{Env.get_binary("MIX_TEST_PARTITION", "")}#{node_suffix()}@127.0.0.1"
+  def node_name, do: :"main#{node_suffix()}@127.0.0.1"
 
   @spec peer_name(atom() | charlist() | binary()) :: atom() | charlist() | binary()
   def peer_name(name) do
     case node_suffix() do
       "" -> name
-      suffix -> :"#{name}#{suffix}"
+      tag -> :"#{name}#{tag}"
     end
   end
 
@@ -46,11 +50,12 @@ defmodule TestEnv do
   def peer_node(name), do: :"#{peer_name(name)}@127.0.0.1"
 
   @spec peer_http_port(atom()) :: pos_integer()
-  def peer_http_port(peer \\ :default), do: Env.get_integer("TEST_PEER_PORT_BASE", @peer_http_base) + slot!(peer)
+  def peer_http_port(peer \\ :default),
+    do: Application.fetch_env!(:realtime, :test_peer_http_base) + slot!(peer)
 
   @spec peer_gen_rpc_port(atom()) :: pos_integer()
   def peer_gen_rpc_port(peer \\ :default),
-    do: Env.get_integer("TEST_PEER_GEN_RPC_PORT_BASE", @peer_gen_rpc_base) + slot!(peer)
+    do: Application.fetch_env!(:realtime, :test_peer_gen_rpc_base) + slot!(peer)
 
   @spec peers() :: [atom()]
   def peers, do: Map.keys(@peer_slots)
@@ -66,20 +71,13 @@ defmodule TestEnv do
     end
   end
 
-  @spec tenant_db_port_range() :: Range.t()
-  def tenant_db_port_range do
-    value = Env.get_binary("TEST_TENANT_DB_PORT_RANGE", @tenant_db_port_range)
-
-    with [first, last] <- String.split(value, "-", parts: 2),
-         {first, ""} <- Integer.parse(String.trim(first)),
-         {last, ""} <- Integer.parse(String.trim(last)),
-         true <- first <= last do
-      first..last
-    else
-      _ ->
-        raise ArgumentError,
-              ~s(env TEST_TENANT_DB_PORT_RANGE expected "<first>-<last>" with first <= last, got #{inspect(value)})
-    end
+  # A port with nothing behind it, for tenant fixtures that never open a connection.
+  @spec unused_port() :: :inet.port_number()
+  def unused_port do
+    {:ok, socket} = :gen_tcp.listen(0, [:inet, ip: {0, 0, 0, 0}, active: false])
+    {:ok, port} = :inet.port(socket)
+    :ok = :gen_tcp.close(socket)
+    port
   end
 
   # Can a listener still bind this port? Probes the wildcard address with the same
@@ -91,19 +89,6 @@ defmodule TestEnv do
     case :gen_tcp.listen(port, [:inet, ip: {0, 0, 0, 0}, reuseaddr: true, active: false]) do
       {:ok, socket} -> :gen_tcp.close(socket) == :ok
       {:error, _reason} -> false
-    end
-  end
-
-  @spec container_prefix() :: binary()
-  def container_prefix, do: Env.get_binary("TEST_CONTAINER_PREFIX", @container_prefix)
-
-  @spec container_suffix_length() :: pos_integer()
-  def container_suffix_length, do: @container_suffix_length
-
-  defp node_suffix do
-    case Env.get_binary("TEST_NODE_SUFFIX", "") do
-      "" -> ""
-      suffix -> "_" <> suffix
     end
   end
 end

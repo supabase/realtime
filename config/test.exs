@@ -7,9 +7,44 @@ get_integer = fn env, default ->
   end
 end
 
+port_free? = fn port ->
+  case :gen_tcp.listen(port, [:inet, ip: {0, 0, 0, 0}, reuseaddr: true, active: false]) do
+    {:ok, socket} -> :gen_tcp.close(socket) == :ok
+    {:error, _reason} -> false
+  end
+end
+
+first_http_port = 4002
+
+http_port =
+  get_integer.("TEST_PORT", nil) || Enum.find(first_http_port..4999, port_free?) ||
+    raise "no free port in #{first_http_port}..4999"
+
+# The endpoint port is the only one bound for a whole run, so taking it is what makes a run
+# unique. Every other port sits the same distance from its own default: peer ports are bound
+# only while a clustered test runs, so scanning for those would let two runs claim the same ones.
+offset = http_port - first_http_port
+
+# Node names, kept short: they end up inside inspected maps in logs that tests assert on.
+node_suffix =
+  case offset do
+    0 -> ""
+    _ -> "_#{http_port}"
+  end
+
+# Names this run's database and containers. RUN_TAG labels a session — "pr_1234",
+# "fix_something" — and otherwise the endpoint port does, which also lets a later run tell
+# whether the run that left something behind is gone.
+run_tag =
+  case {offset, System.get_env("RUN_TAG")} do
+    {0, nil} -> ""
+    {_, nil} -> "_#{http_port}"
+    {_, name} -> "_#{name}"
+  end
+
 partition = System.get_env("MIX_TEST_PARTITION")
 db_port = get_integer.("DB_PORT", 5432)
-db_name = System.get_env("TEST_DB_NAME", "realtime_test#{partition}")
+db_name = System.get_env("TEST_DB_NAME", "realtime_test#{partition}#{run_tag}")
 
 for repo <- [
       Realtime.Repo,
@@ -32,8 +67,17 @@ for repo <- [
     pool: Ecto.Adapters.SQL.Sandbox
 end
 
-default_http_port = if partition, do: 4002 + String.to_integer(partition), else: 4002
-http_port = get_integer.("TEST_PORT", default_http_port)
+# 16 ports each, one per peer in TestEnv's slots, in bands of their own so no run's peers can
+# land on another run's endpoint or gen_rpc port.
+peer_http_base = get_integer.("TEST_PEER_PORT_BASE", nil) || 10_000 + offset * 16
+peer_gen_rpc_base = get_integer.("TEST_PEER_GEN_RPC_PORT_BASE", nil) || 26_000 + offset * 16
+
+config :realtime,
+  test_run_tag: run_tag,
+  test_node_suffix: node_suffix,
+  test_http_port: http_port,
+  test_peer_http_base: peer_http_base,
+  test_peer_gen_rpc_base: peer_gen_rpc_base
 
 # Single-node test scopes have no peers to agree with, so they only reach
 # :ready via the singleton-promotion timer. Keep it short so Muster.targets/3
@@ -91,16 +135,12 @@ config :opentelemetry,
   traces_exporter: :none,
   processors: [{:otel_simple_processor, %{}}]
 
-# Using different ports so that a remote node during test can connect using the same local network
-# See Clustered module
-gen_rpc_offset = if partition, do: String.to_integer(partition) * 10, else: 0
-
-gen_rpc_tcp_server_port = get_integer.("TEST_GEN_RPC_TCP_SERVER_PORT", 5969 + gen_rpc_offset)
-gen_rpc_tcp_client_port = get_integer.("TEST_GEN_RPC_TCP_CLIENT_PORT", 5970 + gen_rpc_offset)
+# Adjacent server and client ports: Clustered swaps them so a peer can connect back.
+gen_rpc_base = get_integer.("TEST_GEN_RPC_TCP_SERVER_PORT", nil) || 5969 + offset * 2
 
 config :gen_rpc,
-  tcp_server_port: gen_rpc_tcp_server_port,
-  tcp_client_port: gen_rpc_tcp_client_port,
+  tcp_server_port: gen_rpc_base,
+  tcp_client_port: get_integer.("TEST_GEN_RPC_TCP_CLIENT_PORT", gen_rpc_base + 1),
   connect_timeout: 500
 
 config :realtime, :dashboard_auth, :basic_auth

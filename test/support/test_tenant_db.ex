@@ -6,31 +6,17 @@ defmodule TestTenantDb do
   alias Realtime.Tenants.Connect
   alias TestTenantDb.Backend
   alias Realtime.Database
-  alias Realtime.Env
 
   use GenServer
 
   def start_link(max_cases), do: GenServer.start_link(__MODULE__, max_cases, name: __MODULE__)
 
-  # Dispense the next free TCP port. Used both as Generators.tenant_fixture/1's
-  # default db_port (via Generators.port/0, when a test doesn't check out a
-  # DB) and by the Docker backend when it needs a host port for a new
-  # container. Ports are never handed out twice.
-  def port(), do: GenServer.call(__MODULE__, :port, 10_000)
+  # Generators.tenant_fixture/1's default db_port, for tests that never open a connection.
+  # A pooled database hands out the port docker assigned it instead.
+  def port(), do: TestEnv.unused_port()
 
   def init(max_cases) do
-    partition = Env.get_integer("MIX_TEST_PARTITION", 1)
-    total_partitions = Env.get_integer("MIX_TEST_TOTAL_PARTITIONS", 4)
-    all_ports = TestEnv.tenant_db_port_range()
-    range_size = div(Enum.count(all_ports), total_partitions)
-
-    # Exclude ports the backend has already reserved so we never hand out a port that's in use.
-    reserved = Backend.current().reserved_ports()
-
-    available_ports =
-      all_ports |> Enum.slice((partition - 1) * range_size, range_size) |> Enum.shuffle() |> Kernel.--(reserved)
-
-    {:ok, %{ports: available_ports}, {:continue, {:pool, max_cases}}}
+    {:ok, %{}, {:continue, {:pool, max_cases}}}
   end
 
   def handle_continue({:pool, max_cases}, state) do
@@ -49,11 +35,6 @@ defmodule TestTenantDb do
       )
 
     {:noreply, state}
-  end
-
-  def handle_call(:port, _from, state) do
-    [port | ports] = state.ports
-    {:reply, port, %{state | ports: ports}}
   end
 
   @doc "Return a port for a pooled tenant DB that can be used"

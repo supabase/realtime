@@ -49,8 +49,55 @@ gen_rpc_socket_recbuf = Env.get_integer("GEN_RPC_SOCKET_RECEIVE_BUFFER")
 gen_rpc_socket_sndbuf = Env.get_integer("GEN_RPC_SOCKET_SEND_BUFFER")
 gen_rpc_ssl_client_port = Env.get_integer("GEN_RPC_SSL_CLIENT_PORT", 6369)
 gen_rpc_ssl_server_port = Env.get_integer("GEN_RPC_SSL_SERVER_PORT")
+
 gen_rpc_tcp_client_port = Env.get_integer("GEN_RPC_TCP_CLIENT_PORT", 5369)
-gen_rpc_tcp_server_port = Env.get_integer("GEN_RPC_TCP_SERVER_PORT", 5369)
+
+port_free? = fn port ->
+  case :gen_tcp.listen(port, [:inet, ip: {0, 0, 0, 0}, reuseaddr: true, active: false]) do
+    {:ok, socket} -> :gen_tcp.close(socket) == :ok
+    {:error, _reason} -> false
+  end
+end
+
+# Every node a dev cluster can have, and the port each listens on. gen_rpc dials a node on that
+# node's own port — production nodes all share one, nodes on one machine cannot — so each name
+# gets its own, and a node reads its port out of this map rather than hunting for a free one.
+# `mise run dev` hands out these names in order, so servers two and three just join the cluster.
+dev_cluster_ports =
+  Map.new(1..10, fn
+    1 -> {:"pink@127.0.0.1", 5369}
+    n -> {:"pink#{n}@127.0.0.1", 5368 + n}
+  end)
+  |> Map.put(:"orange@127.0.0.1", 5469)
+
+dev_cluster_members = Map.keys(dev_cluster_ports)
+
+pinned_gen_rpc_tcp_server_port = Env.get_integer("GEN_RPC_TCP_SERVER_PORT")
+
+if config_env() == :dev and pinned_gen_rpc_tcp_server_port do
+  if !port_free?.(pinned_gen_rpc_tcp_server_port) do
+    raise "GEN_RPC_TCP_SERVER_PORT=#{pinned_gen_rpc_tcp_server_port} is set but it's already in use."
+  end
+end
+
+# Only the server port is bound. A dev node under one of the cluster's names takes that name's
+# port; one named anything else takes the next free port and clusters with nobody, since the
+# others have no way to reach it. config/test.exs sets the test ports itself.
+gen_rpc_tcp_server_port =
+  case config_env() do
+    :test ->
+      nil
+
+    :dev ->
+      pinned_gen_rpc_tcp_server_port || dev_cluster_ports[node()] || Enum.find(5470..5568, port_free?) ||
+        raise "no free gen_rpc port on range 5470..5568"
+
+    _ ->
+      pinned_gen_rpc_tcp_server_port || 5369
+  end
+
+dev_cluster_member? = config_env() == :dev and node() in dev_cluster_members
+
 http_dynamic_buffer_min = Env.get_integer("HTTP_DYNAMIC_BUFFER_MIN")
 http_dynamic_buffer_max = Env.get_integer("HTTP_DYNAMIC_BUFFER_MAX")
 janitor_children_timeout = Env.get_integer("JANITOR_CHILDREN_TIMEOUT", :timer.seconds(5))
@@ -284,7 +331,7 @@ cluster_topologies =
         [
           dev: [
             strategy: Cluster.Strategy.Epmd,
-            config: [hosts: [:"orange@127.0.0.1", :"pink@127.0.0.1"]],
+            config: [hosts: dev_cluster_members],
             connect: {:net_kernel, :connect_node, []},
             disconnect: {:net_kernel, :disconnect_node, []}
           ]
@@ -509,5 +556,12 @@ if config_env() != :test do
 end
 
 if config_env() == :dev do
-  config :libcluster, debug: false, topologies: cluster_topologies
+  topologies =
+    case dev_cluster_member? or not is_nil(System.get_env("CLUSTER_STRATEGIES")) do
+      true -> cluster_topologies
+      false -> []
+    end
+
+  config :libcluster, debug: false, topologies: topologies
+  config :gen_rpc, client_config_per_node: {:internal, dev_cluster_ports}
 end
