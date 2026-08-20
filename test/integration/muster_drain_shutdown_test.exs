@@ -1,25 +1,4 @@
 defmodule Realtime.Integration.MusterDrainShutdownTest do
-  # End-to-end smoke test of the Realtime-level graceful-shutdown wiring: bring up
-  # a second full Realtime node and prove that tearing down its
-  # `Realtime.MusterDrainer` child -- exactly what the Realtime supervision tree
-  # does to that child on shutdown (SIGTERM -> init:stop -> reverse-order child
-  # termination) -- runs `Forum.Muster.drain/2`, gracefully evacuating the peer's
-  # Muster router role.
-  #
-  # We drive the drainer child directly with `Supervisor.terminate_child/2` rather
-  # than stopping the whole peer app: it exercises the identical `terminate/2`
-  # code path, but leaves the peer node (and its Muster coordinator) alive, which
-  # is what makes the graceful leave observable. `drain/2`'s own cross-node
-  # correctness (re-election, re-announce, ack/settle) is covered exhaustively in
-  # forum/test/forum/muster_distributed_test.exs; here we only guard that Realtime
-  # invokes it on shutdown.
-  #
-  # The distinguishing, snabbkaffe-free signal: after the drain the survivor drops
-  # the peer from its Muster ring **while the peer node is still alive and
-  # connected**. An abrupt node death is handled via `:DOWN` and could only evict
-  # a *disconnected* node, so a still-connected eviction can only be the graceful
-  # `:muster_leaving` broadcast drain/2 sends. (forum's tracepoints compile to
-  # no-ops outside its own `:test` build, so they can't be asserted on from here.)
   use ExUnit.Case, async: false
 
   alias Forum.Muster
