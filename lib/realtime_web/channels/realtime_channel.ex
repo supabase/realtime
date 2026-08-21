@@ -35,8 +35,8 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @confirm_token_ms_interval :timer.minutes(5)
   @replication_ready_check_interval 500
-  @postgres_subscribe_first_retry 100
-  @postgres_subscribe_max_retry 1_000
+  @postgres_subscribe_backoff_min 100
+  @postgres_subscribe_backoff_max 1_000
   @postgres_subscribe_fatal_reasons [:malformed_subscription_params, :subscription_insert_failed]
   @postgres_subscribe_error_code "RealtimeDisabledForConfiguration"
   @fullsweep_after Application.compile_env!(:realtime, :websocket_fullsweep_after)
@@ -953,12 +953,22 @@ defmodule RealtimeWeb.RealtimeChannel do
         :ok
 
       timeout ->
-        deadline = System.monotonic_time(:millisecond) + timeout
-        await_postgres_subscribe(socket, tenant, pg_change_params, deadline, @postgres_subscribe_first_retry)
+        await_postgres_subscribe(socket, %{
+          tenant: tenant,
+          pg_change_params: pg_change_params,
+          timeout: timeout,
+          deadline: System.monotonic_time(:millisecond) + timeout,
+          backoff:
+            Backoff.new(
+              backoff_min: @postgres_subscribe_backoff_min,
+              backoff_max: @postgres_subscribe_backoff_max,
+              backoff_type: :rand_exp
+            )
+        })
     end
   end
 
-  defp await_postgres_subscribe(socket, tenant, pg_change_params, deadline, interval) do
+  defp await_postgres_subscribe(socket, %{tenant: tenant, pg_change_params: pg_change_params} = wait) do
     case postgres_subscribe_attempt(tenant, pg_change_params) do
       {:ok, _response} ->
         send(self(), :postgres_changes_subscribed)
@@ -968,23 +978,27 @@ defmodule RealtimeWeb.RealtimeChannel do
         maybe_log_warning(socket, @postgres_subscribe_error_code, error)
 
       {:error, :not_connected} ->
-        sleep_and_retry_postgres_subscribe(socket, tenant, pg_change_params, deadline, interval)
+        sleep_and_retry_postgres_subscribe(socket, wait)
 
       {:error, :retry, error} ->
         maybe_log_warning(socket, @postgres_subscribe_error_code, error)
-        sleep_and_retry_postgres_subscribe(socket, tenant, pg_change_params, deadline, interval)
+        sleep_and_retry_postgres_subscribe(socket, wait)
     end
   end
 
-  defp sleep_and_retry_postgres_subscribe(socket, tenant, pg_change_params, deadline, interval) do
+  defp sleep_and_retry_postgres_subscribe(socket, %{deadline: deadline, backoff: backoff, timeout: timeout} = wait) do
     case deadline - System.monotonic_time(:millisecond) do
       remaining when remaining > 0 ->
+        {interval, backoff} = Backoff.backoff(backoff)
         Process.sleep(min(interval, remaining))
-        next_interval = min(interval * 2, @postgres_subscribe_max_retry)
-        await_postgres_subscribe(socket, tenant, pg_change_params, deadline, next_interval)
+        await_postgres_subscribe(socket, %{wait | backoff: backoff})
 
       _ ->
-        log_error(socket, "PostgresChangesSubscribeTimeout", "Timed out waiting for postgres_changes subscription")
+        log_error(
+          socket,
+          "PostgresChangesSubscribeTimeout",
+          "Timed out after #{timeout}ms waiting for the postgres_changes subscription"
+        )
     end
   end
 
