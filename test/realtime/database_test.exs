@@ -396,12 +396,12 @@ defmodule Realtime.DatabaseTest do
     end
   end
 
-  describe "check_replication_slot_lag/2" do
+  describe "check_replication_slot/2" do
     setup %{tenant: tenant} do
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
       suffix = System.unique_integer([:positive])
-      slot_name = "test_lag_#{suffix}"
-      table_name = "lag_test_#{suffix}"
+      slot_name = "test_slot_#{suffix}"
+      table_name = "slot_test_#{suffix}"
 
       Postgrex.query!(db_conn, "SELECT pg_create_logical_replication_slot($1, 'pgoutput')", [slot_name])
       Postgrex.query!(db_conn, "CREATE TABLE IF NOT EXISTS #{table_name} (id INT, data TEXT)", [])
@@ -421,25 +421,33 @@ defmodule Realtime.DatabaseTest do
       %{db_conn: db_conn, slot_name: slot_name, table_name: table_name}
     end
 
-    test "returns :ok when slot lag is below threshold", %{db_conn: db_conn, slot_name: slot_name} do
-      assert :ok == Database.check_replication_slot_lag(db_conn, slot_name)
+    test "returns {:error, :slot_not_found} for unknown slot", %{db_conn: db_conn} do
+      assert {:error, :slot_not_found} == Database.check_replication_slot(db_conn, "nonexistent_slot_xyz")
     end
 
-    test "returns :ok when slot lag is non-zero but below threshold", %{
+    test "returns {:error, :slot_inactive} when slot exists but is not being consumed", %{
+      db_conn: db_conn,
+      slot_name: slot_name
+    } do
+      assert {:error, :slot_inactive} == Database.check_replication_slot(db_conn, slot_name)
+    end
+
+    test "returns {:error, :slot_inactive} when lag is non-zero but below threshold", %{
       db_conn: db_conn,
       slot_name: slot_name,
       table_name: table_name
     } do
       # Generate ~40% of the 32MB max_slot_wal_keep_size (test container value) by inserting
       # ~50k rows of 200 bytes each — produces roughly 12-13MB of WAL, safely under the 16MB
-      # (50%) shutdown threshold. The slot is inactive so restart_lsn stays pinned.
+      # (50%) lag threshold. The slot is inactive so restart_lsn stays pinned; with lag below
+      # the threshold, inactivity is the reported problem.
       Postgrex.query!(
         db_conn,
         "INSERT INTO #{table_name} SELECT generate_series(1, 50000), repeat('x', 200)",
         []
       )
 
-      assert :ok == Database.check_replication_slot_lag(db_conn, slot_name)
+      assert {:error, :slot_inactive} == Database.check_replication_slot(db_conn, slot_name)
     end
 
     test "returns {:error, :lag_too_high} when slot is far behind", %{
@@ -448,18 +456,15 @@ defmodule Realtime.DatabaseTest do
       table_name: table_name
     } do
       # Generate >16MB of WAL (50% of the 32MB max_slot_wal_keep_size in test containers).
-      # The slot is inactive so restart_lsn stays pinned at creation LSN.
+      # The slot is inactive so restart_lsn stays pinned at creation LSN. An excessive lag
+      # takes precedence over the slot being inactive.
       Postgrex.query!(
         db_conn,
         "INSERT INTO #{table_name} SELECT generate_series(1, 100000), repeat('x', 200)",
         []
       )
 
-      assert {:error, :lag_too_high} == Database.check_replication_slot_lag(db_conn, slot_name)
-    end
-
-    test "returns :ok for unknown slot", %{db_conn: db_conn} do
-      assert :ok == Database.check_replication_slot_lag(db_conn, "nonexistent_slot_xyz")
+      assert {:error, :lag_too_high} == Database.check_replication_slot(db_conn, slot_name)
     end
   end
 
