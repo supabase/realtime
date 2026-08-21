@@ -1,6 +1,12 @@
 defmodule RealtimeWeb.Channels.Payloads.PostgresChangesOptions do
   @moduledoc """
   Validate postgres_changes_options field of the join payload.
+
+  * `wait` - hold the join reply until the postgres_changes subscription is established.
+  * `timeout` - how long to hold it for. The server clamps this to
+    `:postgres_changes_wait_max_timeout`, so a client asking for more waits less; when the wait
+    runs out the join is rejected with `PostgresChangesSubscribeTimeout` naming the timeout that
+    was actually applied.
   """
   use Ecto.Schema
   import Ecto.Changeset
