@@ -52,7 +52,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
         :ok
       end)
 
-      assert :ok = SingleBroadcast.broadcast(%Authorization{}, tenant, topic, event, false, payload, :json)
+      assert :ok = SingleBroadcast.broadcast(%Authorization{}, tenant, topic, event, payload, :json)
     end
 
     test "public messages do not have private prefix in topic", %{tenant: tenant} do
@@ -67,7 +67,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
       end)
 
       assert :ok =
-               SingleBroadcast.broadcast(%Authorization{}, tenant, topic, "event", false, %{"data" => "test"}, :json)
+               SingleBroadcast.broadcast(%Authorization{}, tenant, topic, "event", %{"data" => "test"}, :json)
     end
 
     test "JSON payload can be empty map", %{tenant: tenant} do
@@ -77,7 +77,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
       expect(GenCounter, :add, fn ^broadcast_events_key -> :ok end)
       expect(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _, _ -> :ok end)
 
-      assert :ok = SingleBroadcast.broadcast(%Authorization{}, tenant, topic, "event", false, %{}, :json)
+      assert :ok = SingleBroadcast.broadcast(%Authorization{}, tenant, topic, "event", %{}, :json)
     end
   end
 
@@ -103,7 +103,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
         :ok
       end)
 
-      assert :ok = SingleBroadcast.broadcast(%Authorization{}, tenant, topic, event, false, binary, :binary)
+      assert :ok = SingleBroadcast.broadcast(%Authorization{}, tenant, topic, event, binary, :binary)
     end
 
     test "binary payload can be empty", %{tenant: tenant} do
@@ -113,7 +113,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
       expect(GenCounter, :add, fn ^broadcast_events_key -> :ok end)
       expect(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _, _ -> :ok end)
 
-      assert :ok = SingleBroadcast.broadcast(%Authorization{}, tenant, topic, "event", false, <<>>, :binary)
+      assert :ok = SingleBroadcast.broadcast(%Authorization{}, tenant, topic, "event", <<>>, :binary)
     end
 
     test "handles large binary payloads within limit", %{tenant: tenant} do
@@ -126,7 +126,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
       expect(GenCounter, :add, fn ^broadcast_events_key -> :ok end)
       expect(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _, _ -> :ok end)
 
-      assert :ok = SingleBroadcast.broadcast(%Authorization{}, tenant, topic, "event", false, binary, :binary)
+      assert :ok = SingleBroadcast.broadcast(%Authorization{}, tenant, topic, "event", binary, :binary)
     end
   end
 
@@ -159,7 +159,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
         :ok
       end)
 
-      assert :ok = SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, payload, :json)
+      assert :ok = SingleBroadcast.broadcast(auth_params, tenant, topic, "event", payload, :json, private: true)
     end
 
     test "skips private JSON message without authorization", %{tenant: tenant} do
@@ -183,7 +183,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
       reject(&TenantBroadcaster.pubsub_broadcast/5)
 
       assert {:error, :forbidden, "Unauthorized"} =
-               SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, %{"data" => "test"}, :json)
+               SingleBroadcast.broadcast(auth_params, tenant, topic, "event", %{"data" => "test"}, :json, private: true)
 
       assert calls(&TenantBroadcaster.pubsub_broadcast/5) == []
     end
@@ -224,7 +224,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
         :ok
       end)
 
-      assert :ok = SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, binary, :binary)
+      assert :ok = SingleBroadcast.broadcast(auth_params, tenant, topic, "event", binary, :binary, private: true)
     end
 
     test "skips private binary message without authorization", %{tenant: tenant} do
@@ -248,7 +248,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
       reject(&TenantBroadcaster.pubsub_broadcast/5)
 
       assert {:error, :forbidden, "Unauthorized"} =
-               SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, <<1, 2, 3>>, :binary)
+               SingleBroadcast.broadcast(auth_params, tenant, topic, "event", <<1, 2, 3>>, :binary, private: true)
 
       assert calls(&TenantBroadcaster.pubsub_broadcast/5) == []
     end
@@ -258,7 +258,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
     test "returns changeset error when topic is empty", %{tenant: tenant} do
       reject(&TenantBroadcaster.pubsub_broadcast/5)
 
-      result = SingleBroadcast.broadcast(%Authorization{}, tenant, "", "event", false, %{"data" => "test"}, :json)
+      result = SingleBroadcast.broadcast(%Authorization{}, tenant, "", "event", %{"data" => "test"}, :json)
       assert {:error, %Ecto.Changeset{valid?: false}} = result
     end
 
@@ -266,7 +266,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
       topic = random_string()
       reject(&TenantBroadcaster.pubsub_broadcast/5)
 
-      result = SingleBroadcast.broadcast(%Authorization{}, tenant, topic, "", false, %{"data" => "test"}, :json)
+      result = SingleBroadcast.broadcast(%Authorization{}, tenant, topic, "", %{"data" => "test"}, :json)
       assert {:error, %Ecto.Changeset{valid?: false}} = result
     end
 
@@ -274,7 +274,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
       topic = random_string()
       reject(&TenantBroadcaster.pubsub_broadcast/5)
 
-      result = SingleBroadcast.broadcast(%Authorization{}, tenant, topic, "event", false, nil, :json)
+      result = SingleBroadcast.broadcast(%Authorization{}, tenant, topic, "event", nil, :json)
       assert {:error, %Ecto.Changeset{valid?: false}} = result
     end
 
@@ -282,7 +282,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
       topic = random_string()
       reject(&TenantBroadcaster.pubsub_broadcast/5)
 
-      result = SingleBroadcast.broadcast(%Authorization{}, tenant, topic, "event", false, nil, :binary)
+      result = SingleBroadcast.broadcast(%Authorization{}, tenant, topic, "event", nil, :binary)
       assert {:error, %Ecto.Changeset{valid?: false}} = result
     end
   end
@@ -293,7 +293,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
       topic = random_string()
       reject(&TenantBroadcaster.pubsub_broadcast/5)
 
-      result = SingleBroadcast.broadcast(%Authorization{}, tenant, topic, "event", false, %{"data" => "test"}, :json)
+      result = SingleBroadcast.broadcast(%Authorization{}, tenant, topic, "event", %{"data" => "test"}, :json)
       assert {:error, :forbidden, "Tenant is suspended"} = result
       assert calls(&TenantBroadcaster.pubsub_broadcast/5) == []
     end
@@ -310,7 +310,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
 
       reject(&TenantBroadcaster.pubsub_broadcast/5)
 
-      result = SingleBroadcast.broadcast(%Authorization{}, tenant, topic, "event", false, %{"data" => "test"}, :json)
+      result = SingleBroadcast.broadcast(%Authorization{}, tenant, topic, "event", %{"data" => "test"}, :json)
       assert {:error, :too_many_requests, "You have exceeded your rate limit"} = result
     end
 
@@ -334,7 +334,6 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
                  tenant,
                  random_string(),
                  "event",
-                 false,
                  %{"data" => "test"},
                  :json
                )
@@ -346,7 +345,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
 
       reject(&TenantBroadcaster.pubsub_broadcast/5)
 
-      result = SingleBroadcast.broadcast(%Authorization{}, tenant, topic, "event", false, large_payload, :json)
+      result = SingleBroadcast.broadcast(%Authorization{}, tenant, topic, "event", large_payload, :json)
 
       assert {:error, %Ecto.Changeset{valid?: false, errors: errors}} = result
       assert {:payload, {"Payload size exceeds tenant limit", []}} in errors
@@ -358,7 +357,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
 
       reject(&TenantBroadcaster.pubsub_broadcast/5)
 
-      result = SingleBroadcast.broadcast(%Authorization{}, tenant, topic, "event", false, large_binary, :binary)
+      result = SingleBroadcast.broadcast(%Authorization{}, tenant, topic, "event", large_binary, :binary)
 
       assert {:error, %Ecto.Changeset{valid?: false, errors: errors}} = result
       assert {:payload, {"Payload size exceeds tenant limit", []}} in errors
@@ -391,7 +390,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
       reject(&TenantBroadcaster.pubsub_broadcast/5)
 
       assert {:error, :unprocessable_entity, "Tenant database unavailable"} =
-               SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, %{"data" => "test"}, :json)
+               SingleBroadcast.broadcast(auth_params, tenant, topic, "event", %{"data" => "test"}, :json, private: true)
 
       assert calls(&TenantBroadcaster.pubsub_broadcast/5) == []
     end
@@ -438,7 +437,11 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
          }}
       end)
 
-      assert :ok = SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, payload, :json, true)
+      assert :ok =
+               SingleBroadcast.broadcast(auth_params, tenant, topic, "event", payload, :json,
+                 private: true,
+                 persist: true
+               )
 
       assert eventually(fn ->
                match?(
@@ -473,8 +476,13 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
       end)
 
-      assert :ok = SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, %{"a" => "b"}, :json, true)
+      assert :ok =
+               SingleBroadcast.broadcast(auth_params, tenant, topic, "event", %{"a" => "b"}, :json,
+                 private: true,
+                 persist: true
+               )
 
+      # The policy denies persistence, so no task is spawned and there is nothing to wait for here
       assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
 
@@ -493,21 +501,18 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}}}
       end)
 
-      assert :ok = SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, %{"a" => "b"}, :json)
+      assert :ok = SingleBroadcast.broadcast(auth_params, tenant, topic, "event", %{"a" => "b"}, :json, private: true)
 
-      refute eventually(fn -> match?({:ok, [_ | _]}, Repo.all(db_conn, messages_for(topic), Message)) end,
-               retries: 5,
-               sleep: 20
-             )
+      assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
 
     test "rejects persisting a public broadcast", %{tenant: tenant, auth_params: auth_params} do
       topic = random_string()
 
       assert {:error, %Ecto.Changeset{errors: errors}} =
-               SingleBroadcast.broadcast(auth_params, tenant, topic, "event", false, %{"a" => "b"}, :json, true)
+               SingleBroadcast.broadcast(auth_params, tenant, topic, "event", %{"a" => "b"}, :json, persist: true)
 
-      assert {:persist, {"can only be used on private broadcasts", []}} in errors
+      assert {:persist, {"can only be used on private channels", []}} in errors
     end
 
     test "stores binary messages as binary_payload", %{tenant: tenant, db_conn: db_conn, auth_params: auth_params} do
@@ -525,7 +530,11 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
          }}
       end)
 
-      assert :ok = SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, binary, :binary, true)
+      assert :ok =
+               SingleBroadcast.broadcast(auth_params, tenant, topic, "event", binary, :binary,
+                 private: true,
+                 persist: true
+               )
 
       assert eventually(fn ->
                match?(
@@ -589,7 +598,9 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
       expect(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _, _ -> :ok end)
 
       assert :ok =
-               SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, %{"secret" => "data"}, :json)
+               SingleBroadcast.broadcast(auth_params, tenant, topic, "event", %{"secret" => "data"}, :json,
+                 private: true
+               )
     end
   end
 

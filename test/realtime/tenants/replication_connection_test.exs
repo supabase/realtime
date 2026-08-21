@@ -791,7 +791,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     test "if proper tables are included, starts replication", %{tenant: tenant, db_conn: db_conn} do
       publication_name = "supabase_realtime_messages_publication"
 
-      enable_broadcast_persistence_flag!()
+      enable_broadcast_persistence_flag!(tenant)
       Postgrex.query!(db_conn, "DROP PUBLICATION IF EXISTS #{publication_name}", [])
       create_messages_publication(db_conn, publication_name)
 
@@ -841,7 +841,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     } do
       publication_name = "supabase_realtime_messages_publication"
 
-      enable_broadcast_persistence_flag!()
+      enable_broadcast_persistence_flag!(tenant)
       Postgrex.query!(db_conn, "DROP PUBLICATION IF EXISTS #{publication_name}", [])
 
       capture_log(fn ->
@@ -876,7 +876,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     test "recreates publication without a row filter", %{tenant: tenant, db_conn: db_conn} do
       publication_name = "supabase_realtime_messages_publication"
 
-      enable_broadcast_persistence_flag!()
+      enable_broadcast_persistence_flag!(tenant)
       Postgrex.query!(db_conn, "DROP PUBLICATION IF EXISTS #{publication_name}", [])
       Postgrex.query!(db_conn, "CREATE PUBLICATION #{publication_name} FOR TABLE realtime.messages", [])
 
@@ -1161,9 +1161,11 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
   # Enables the `broadcast_persistence` flag for real: the flag is created and pushed into the local
   # FeatureFlags cache so the replication connection process reads it synchronously, and torn down
   # afterwards so it does not leak into other tests via the shared in-memory cache.
-  defp enable_broadcast_persistence_flag! do
-    {:ok, flag} = Api.upsert_feature_flag(%{name: "broadcast_persistence", enabled: true})
+  defp enable_broadcast_persistence_flag!(tenant) do
+    {:ok, flag} = Api.upsert_feature_flag(%{name: "broadcast_persistence", enabled: false})
     FeatureFlags.Cache.update_cache(flag)
+    {:ok, tenant} = FeatureFlags.set_tenant_flag("broadcast_persistence", tenant.external_id, true)
+    Realtime.Tenants.Cache.update_cache(tenant)
     on_exit(fn -> FeatureFlags.Cache.invalidate_cache("broadcast_persistence") end)
   end
 

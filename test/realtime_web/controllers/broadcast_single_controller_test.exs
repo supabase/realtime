@@ -670,7 +670,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
 
   describe "broadcast persistence" do
     setup %{conn: conn, tenant: tenant} do
-      enable_broadcast_persistence_flag!()
+      enable_broadcast_persistence_flag!(tenant)
       jwt_secret = Crypto.decrypt!(tenant.jwt_secret)
 
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
@@ -694,6 +694,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       db_conn: db_conn,
       tenant: tenant
     } do
+      # Other tests in this module assert this tenant's events counter is 0.0
       stub(GenCounter, :add, fn _ -> :ok end)
 
       start_link_supervised!(
@@ -756,10 +757,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
 
       assert conn.status == 202
 
-      refute eventually(fn -> match?({:ok, [_ | _]}, Repo.all(db_conn, messages_for(sub_topic), Message)) end,
-               retries: 5,
-               sleep: 20
-             )
+      refute eventually(fn -> match?({:ok, [_ | _]}, Repo.all(db_conn, messages_for(sub_topic), Message)) end)
     end
 
     test "rejects persist=true on a public broadcast", %{conn: conn} do
@@ -774,16 +772,18 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
         )
 
       assert conn.status == 422
-      assert Jason.decode!(conn.resp_body)["errors"]["persist"] == ["can only be used on private broadcasts"]
+      assert Jason.decode!(conn.resp_body)["errors"]["persist"] == ["can only be used on private channels"]
     end
   end
 
   # Enables the `broadcast_persistence` flag for real: the flag is created and pushed into the local
   # FeatureFlags cache so the replication connection process reads it synchronously, and torn down
   # afterwards so it does not leak into other tests via the shared in-memory cache.
-  defp enable_broadcast_persistence_flag! do
-    {:ok, flag} = Api.upsert_feature_flag(%{name: "broadcast_persistence", enabled: true})
+  defp enable_broadcast_persistence_flag!(tenant) do
+    {:ok, flag} = Api.upsert_feature_flag(%{name: "broadcast_persistence", enabled: false})
     FeatureFlags.Cache.update_cache(flag)
+    {:ok, tenant} = FeatureFlags.set_tenant_flag("broadcast_persistence", tenant.external_id, true)
+    Realtime.Tenants.Cache.update_cache(tenant)
     on_exit(fn -> FeatureFlags.Cache.invalidate_cache("broadcast_persistence") end)
   end
 

@@ -51,28 +51,31 @@ defmodule Realtime.Tenants.SingleBroadcast do
   - `tenant` - Tenant struct
   - `topic` - Channel topic from URL (e.g., "room:123")
   - `event` - Event name from URL (e.g., "message")
-  - `private` - Whether this is a private broadcast (requires authorization)
   - `payload` - Message payload (map for JSON, binary for binary)
   - `content_type` - :json or :binary
-  - `persist` - whether the message is stored in `realtime.messages`, requires `private`
+  - `opts`
+    - `:private` - Whether this is a private broadcast (requires authorization). Defaults to `false`
+    - `:persist` - Whether the message is stored in `realtime.messages`, requires `:private`. Defaults to `false`
   """
   @spec broadcast(
           Authorization.t(),
           Tenant.t(),
           String.t(),
           String.t(),
-          boolean(),
           map() | binary(),
           content_type(),
-          boolean()
+          keyword()
         ) :: :ok | {:error, term()} | {:error, atom(), String.t()}
-  def broadcast(auth_params, tenant, topic, event, private, payload, content_type, persist \\ false)
+  def broadcast(auth_params, tenant, topic, event, payload, content_type, opts \\ [])
 
-  def broadcast(_auth_params, %Tenant{suspend: true}, _topic, _event, _private, _payload, _content_type, _persist) do
+  def broadcast(_auth_params, %Tenant{suspend: true}, _topic, _event, _payload, _content_type, _opts) do
     {:error, :forbidden, "Tenant is suspended"}
   end
 
-  def broadcast(auth_params, %Tenant{} = tenant, topic, event, private, payload, content_type, persist) do
+  def broadcast(auth_params, %Tenant{} = tenant, topic, event, payload, content_type, opts) do
+    private = Keyword.get(opts, :private, false)
+    persist = Keyword.get(opts, :persist, false)
+
     with %Ecto.Changeset{valid?: true} <-
            validate_message(topic, event, private, payload, content_type, persist, tenant),
          events_per_second_rate = Tenants.events_per_second_rate(tenant),
@@ -117,7 +120,7 @@ defmodule Realtime.Tenants.SingleBroadcast do
 
   defp validate_persist_is_private(changeset) do
     case {get_field(changeset, :persist), get_field(changeset, :private)} do
-      {true, false} -> add_error(changeset, :persist, "can only be used on private broadcasts")
+      {true, false} -> add_error(changeset, :persist, "can only be used on private channels")
       _persist_and_private -> changeset
     end
   end
@@ -229,6 +232,7 @@ defmodule Realtime.Tenants.SingleBroadcast do
     end
   end
 
+  # Currently the API has no ACK so just persist the message asyncly and log in case of errors.
   defp maybe_persist(%BroadcastPolicies{persist: true}, db_conn, tenant, topic, event, payload) do
     if FeatureFlags.broadcast_persistence_enabled?(tenant.external_id) do
       Task.Supervisor.start_child(Realtime.TaskSupervisor, fn ->

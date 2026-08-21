@@ -91,8 +91,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     @tag policies: [:authenticated_read_matching_user_sub, :authenticated_write_matching_user_sub], sub: UUID.generate()
     test "with valid sub, is able to send message",
          %{topic: topic, tenant: tenant, db_conn: db_conn, sub: sub, serializer: serializer} do
-      stub(FeatureFlags, :broadcast_persistence_enabled?, fn _tenant_id -> true end)
-
       socket =
         socket_fixture(tenant, topic,
           policies: %Policies{broadcast: %BroadcastPolicies{write: nil, read: true}},
@@ -101,7 +99,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:reply, {:ok, %{id: _id}}, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+          {:reply, :ok, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
           socket
       end
 
@@ -132,8 +130,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     @tag policies: [:read_matching_user_role, :write_matching_user_role], role: "anon"
     test "with valid role, is able to send message",
          %{topic: topic, tenant: tenant, db_conn: db_conn, serializer: serializer} do
-      stub(FeatureFlags, :broadcast_persistence_enabled?, fn _tenant_id -> true end)
-
       socket =
         socket_fixture(tenant, topic,
           policies: %Policies{broadcast: %BroadcastPolicies{write: nil, read: true}},
@@ -142,7 +138,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:reply, {:ok, %{id: _id}}, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+          {:reply, :ok, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
           socket
       end
 
@@ -479,6 +475,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     } do
       socket =
         socket_fixture(tenant, topic,
+          ack_broadcast: true,
           policies: %Policies{
             broadcast: %BroadcastPolicies{write: true, persist: true}
           }
@@ -531,6 +528,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     } do
       socket =
         socket_fixture(tenant, topic,
+          ack_broadcast: true,
           policies: %Policies{
             broadcast: %BroadcastPolicies{write: true, persist: true}
           }
@@ -561,6 +559,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     } do
       socket =
         socket_fixture(tenant, topic,
+          ack_broadcast: true,
           policies: %Policies{
             broadcast: %BroadcastPolicies{write: true, persist: true}
           }
@@ -575,6 +574,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       assert_receive {:socket_push, _encoding, _data}
       assert log =~ "UnableToPersistMessage"
+
       assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
 
@@ -585,6 +585,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     } do
       socket =
         socket_fixture(tenant, topic,
+          ack_broadcast: true,
           policies: %Policies{
             broadcast: %BroadcastPolicies{write: true, persist: true}
           }
@@ -616,6 +617,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     } do
       socket =
         socket_fixture(tenant, topic,
+          ack_broadcast: true,
           policies: %Policies{
             broadcast: %BroadcastPolicies{write: true, persist: true}
           }
@@ -639,6 +641,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       socket =
         socket_fixture(tenant, topic,
+          ack_broadcast: true,
           policies: %Policies{
             broadcast: %BroadcastPolicies{write: true, persist: true}
           }

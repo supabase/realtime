@@ -93,7 +93,11 @@ defmodule RealtimeWeb.BroadcastSingleController do
     persist = parse_boolean(params["persist"])
     auth_params = build_auth_params(conn, tenant)
 
-    with :ok <- SingleBroadcast.broadcast(auth_params, tenant, topic, event, private, binary, :binary, persist) do
+    with :ok <-
+           SingleBroadcast.broadcast(auth_params, tenant, topic, event, binary, :binary,
+             private: private,
+             persist: persist
+           ) do
       send_resp(conn, :accepted, "")
     end
   end
@@ -104,7 +108,11 @@ defmodule RealtimeWeb.BroadcastSingleController do
     payload = conn.body_params
     auth_params = build_auth_params(conn, tenant)
 
-    with :ok <- SingleBroadcast.broadcast(auth_params, tenant, topic, event, private, payload, :json, persist) do
+    with :ok <-
+           SingleBroadcast.broadcast(auth_params, tenant, topic, event, payload, :json,
+             private: private,
+             persist: persist
+           ) do
       send_resp(conn, :accepted, "")
     end
   end

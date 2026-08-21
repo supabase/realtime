@@ -536,10 +536,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       assert :ok = BatchBroadcast.broadcast(auth_params, tenant, messages, false)
 
-      refute eventually(fn -> match?({:ok, [_ | _]}, Repo.all(db_conn, messages_for(topic), Message)) end,
-               retries: 5,
-               sleep: 20
-             )
+      refute eventually(fn -> match?({:ok, [_ | _]}, Repo.all(db_conn, messages_for(topic), Message)) end)
     end
   end
 

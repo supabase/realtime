@@ -261,8 +261,8 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
   describe "broadcast persistence" do
     setup [:rls_context]
 
-    setup do
-      enable_broadcast_persistence_flag!()
+    setup %{tenant: tenant} do
+      enable_broadcast_persistence_flag!(tenant)
       :ok
     end
 
@@ -316,6 +316,59 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
 
       assert {:ok, %Postgrex.Result{rows: [[^id, ^topic]]}} =
                Postgrex.query(db_conn, "SELECT id::text, topic FROM realtime.messages WHERE topic = $1", [topic])
+    end
+
+    @tag serializer: RealtimeWeb.Socket.V2Serializer
+    test "a binary broadcast is stored as binary_payload and replayed as a binary frame", %{
+      tenant: tenant,
+      db_conn: db_conn,
+      serializer: RealtimeWeb.Socket.V2Serializer = serializer
+    } do
+      allow_broadcast(db_conn)
+      allow_persistence(db_conn, "realtime.topic() LIKE 'stored:%'")
+
+      topic = "stored:#{random_string()}"
+      full_topic = "realtime:#{topic}"
+      binary = <<0xCA, 0xFE, 0xBA, 0xBE, 0x00, 0x11>>
+      event = "my-binary-event"
+
+      {sender, _} = get_connection(tenant, serializer, role: "authenticated")
+      WebsocketClient.join(sender, full_topic, %{config: %{broadcast: %{self: true, ack: true}, private: true}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^full_topic}, 300
+
+      WebsocketClient.send_user_broadcast(sender, full_topic, event, binary, encoding: :binary)
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       payload: %{"status" => "ok", "response" => %{"id" => id}},
+                       topic: ^full_topic
+                     },
+                     500
+
+      assert {:ok, %Postgrex.Result{rows: [[^binary, nil]]}} =
+               Postgrex.query(db_conn, "SELECT binary_payload, payload FROM realtime.messages WHERE topic = $1", [
+                 topic
+               ])
+
+      {joiner, _} = get_connection(tenant, serializer, role: "authenticated")
+
+      WebsocketClient.join(joiner, full_topic, %{
+        config: %{private: true, broadcast: %{replay: %{limit: 10, since: 0}}}
+      })
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^full_topic}, 500
+
+      assert_receive %Message{
+                       event: "broadcast",
+                       topic: ^full_topic,
+                       payload: %{
+                         "event" => ^event,
+                         "payload" => {:binary, ^binary},
+                         "type" => "broadcast",
+                         "meta" => %{"id" => ^id, "replayed" => true}
+                       }
+                     },
+                     1_000
     end
 
     test "a stored broadcast is replayed to a client joining later", %{
@@ -966,9 +1019,11 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
   # Enables the `broadcast_persistence` flag for real: the flag is created and pushed into the local
   # FeatureFlags cache so the channel and replication connection processes read it synchronously, and
   # torn down afterwards so it does not leak into other tests via the shared in-memory cache.
-  defp enable_broadcast_persistence_flag! do
-    {:ok, flag} = Api.upsert_feature_flag(%{name: "broadcast_persistence", enabled: true})
+  defp enable_broadcast_persistence_flag!(tenant) do
+    {:ok, flag} = Api.upsert_feature_flag(%{name: "broadcast_persistence", enabled: false})
     FeatureFlags.Cache.update_cache(flag)
+    {:ok, tenant} = FeatureFlags.set_tenant_flag("broadcast_persistence", tenant.external_id, true)
+    Realtime.Tenants.Cache.update_cache(tenant)
     on_exit(fn -> FeatureFlags.Cache.invalidate_cache("broadcast_persistence") end)
   end
 end
