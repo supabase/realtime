@@ -5332,7 +5332,9 @@ defmodule Forum.MusterDistributedTest do
       # Fast heartbeat on the local (test) node so its re-discovery backstop fires
       # several times inside the draining test's observation window. The drained
       # peer must ignore every one of those discover offers.
-      start_supervised!( spec(scope, vacant_flush_interval_ms: 100, view_heartbeat_interval_ms: 300))
+      start_supervised!(
+        spec(scope, vacant_flush_interval_ms: 100, view_heartbeat_interval_ms: 300)
+      )
 
       %{scope: scope}
     end
