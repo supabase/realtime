@@ -241,30 +241,16 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   defp start_pgdelta(socket, %Tenant{} = tenant, false = _orioledb?) do
     task =
       Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn ->
-        tenant |> run_pgdelta() |> highlight_plan()
+        run_pgdelta(tenant)
       end)
 
     running_pgdelta(socket, task)
   end
 
-  defp highlight_plan({:ok, %{status: :changes, sql: sql} = result}) do
-    formatter =
-      {:html_multi_themes,
-       language: "sql", themes: [light: "github_light", dark: "github_dark"], default_theme: "light-dark()"}
-
-    case Lumis.highlight(sql, formatter: formatter) do
-      {:ok, html} -> {:ok, Map.put(result, :highlighted, html)}
-      {:error, _reason} -> {:ok, result}
-    end
-  end
-
-  defp highlight_plan(result), do: result
-
   defp start_recheck(socket, %Tenant{} = tenant, %Database{} = settings) do
     task =
       Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn ->
-        {:rechecked, with_tenant_conn(settings, &fetch_schema_migrations/1),
-         tenant |> run_pgdelta() |> highlight_plan()}
+        {:rechecked, with_tenant_conn(settings, &fetch_schema_migrations/1), run_pgdelta(tenant)}
       end)
 
     socket
@@ -396,7 +382,6 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   defp pgdelta_plan({:ok, %{status: :changes} = result}, _schema_migrations, apply_disabled) do
     assigns = %{
       sql: result.sql,
-      highlighted: Map.get(result, :highlighted),
       destructive: result.destructive,
       apply_disabled: apply_disabled
     }
@@ -411,27 +396,6 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
       </div>
     </div>
     <style>
-      .pgdelta-sql pre.lumis {
-        margin: 0;
-        padding: 16px 64px 16px 16px;
-        border-radius: 6px;
-        max-width: 100%;
-        max-height: 60vh;
-        overflow-y: auto;
-        overflow-x: hidden;
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-        color-scheme: light dark;
-        font-family: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Mono", "Cascadia Code", Menlo, Consolas,
-          "DejaVu Sans Mono", "Liberation Mono", monospace;
-        font-size: 0.85rem;
-        line-height: 1.55;
-        font-variant-ligatures: none;
-      }
-      .pgdelta-sql .l-line {
-        padding-left: 2em;
-        text-indent: -2em;
-      }
       pre.pgdelta-sql-plain {
         font-family: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Mono", "Cascadia Code", Menlo, Consolas,
           "DejaVu Sans Mono", "Liberation Mono", monospace;
@@ -440,7 +404,6 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
         font-variant-ligatures: none;
       }
       @media (max-width: 768px) {
-        .pgdelta-sql pre.lumis,
         pre.pgdelta-sql-plain {
           padding: 12px 48px 12px 12px;
           font-size: 0.78rem;
@@ -464,9 +427,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
         "}
         style="position: absolute; top: 8px; right: 8px; z-index: 2;"
       >Copy</button>
-      <div :if={@highlighted} class="pgdelta-sql"><%= Phoenix.HTML.raw(@highlighted) %></div>
       <pre
-        :if={!@highlighted}
         class="pgdelta-sql-plain"
         style="color-scheme: light dark; background: light-dark(#ffffff, #0d1117); color: light-dark(#1f2328, #e6edf3); margin: 0; padding: 16px 64px 16px 16px; border-radius: 6px; max-width: 100%; max-height: 60vh; overflow-y: auto; overflow-x: hidden; white-space: pre-wrap; overflow-wrap: anywhere;"
       ><code class="language-sql"><%= @sql %></code></pre>
@@ -539,26 +500,35 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   def postgres_url(%Database{} = db) do
     sslmode = if db.ssl, do: "require", else: "disable"
 
-    hostname =
-      case :inet.parse_ipv6strict_address(String.to_charlist(db.hostname)) do
-        {:ok, _} -> "[#{db.hostname}]"
-        _ -> db.hostname
-      end
-
     IO.iodata_to_binary([
       "postgresql://",
       URI.encode_www_form(db.username),
       ":",
       URI.encode_www_form(db.password),
       "@",
-      hostname,
+      url_host(db),
       ":",
       Integer.to_string(db.port),
       "/",
       URI.encode_www_form(db.database),
       "?sslmode=",
-      sslmode
+      sslmode,
+      host_param(db)
     ])
+  end
+
+  defp url_host(%Database{hostname: hostname} = db) do
+    if ipv6_literal?(db), do: "[#{hostname}]", else: hostname
+  end
+
+  # node-postgres passes the URL host to getaddrinfo verbatim, so brackets fail with
+  # `ENOTFOUND [::1]`. A `host` query param overrides the URL host, unbracketed.
+  defp host_param(%Database{hostname: hostname} = db) do
+    if ipv6_literal?(db), do: ["&host=", hostname], else: []
+  end
+
+  defp ipv6_literal?(%Database{hostname: hostname}) do
+    match?({:ok, _}, :inet.parse_ipv6strict_address(String.to_charlist(hostname)))
   end
 
   @doc false

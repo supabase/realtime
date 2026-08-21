@@ -25,6 +25,14 @@ defmodule Clustered do
     assert ok = :rpc.call(node, Aux, :checker, [:ok])
   end
   ```
+
+  ## Options
+
+  - `:warm_clients` - Whether to eagerly establish the gen_rpc client pool against the node
+    before returning, defaulting to `true`. Set to `false` when the node is intentionally
+    unreachable (e.g. a broken gen_rpc port), so warming doesn't leave dead client processes
+    that can race with the test's own calls.
+
   """
   @spec start(any(), keyword()) :: {:ok, node}
   def start(aux_mod \\ nil, opts \\ []) do
@@ -34,15 +42,17 @@ defmodule Clustered do
 
     true = Node.connect(node)
 
-    max_cast_clients = Application.get_env(:realtime, :max_gen_rpc_clients, 5)
-    max_call_clients = Application.get_env(:realtime, :max_gen_rpc_call_clients, 1)
+    if Access.get(opts, :warm_clients, true) do
+      max_cast_clients = Application.get_env(:realtime, :max_gen_rpc_clients, 5)
+      max_call_clients = Application.get_env(:realtime, :max_gen_rpc_call_clients, 1)
 
-    for key <- 1..max_cast_clients do
-      _ = :gen_rpc.call({node, {:cast, key}}, :erlang, :node, [], 5_000)
-    end
+      for key <- 1..max_cast_clients do
+        _ = :gen_rpc.call({node, {:cast, key}}, :erlang, :node, [], 5_000)
+      end
 
-    for key <- 1..max_call_clients do
-      _ = :gen_rpc.call({node, {:call, key}}, :erlang, :node, [], 5_000)
+      for key <- 1..max_call_clients do
+        _ = :gen_rpc.call({node, {:call, key}}, :erlang, :node, [], 5_000)
+      end
     end
 
     {:ok, node}

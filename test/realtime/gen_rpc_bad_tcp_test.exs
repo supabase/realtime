@@ -13,7 +13,7 @@ defmodule Realtime.GenRpcBadTcpTest do
 
   setup context do
     extra_config = context[:extra_config] || [{:gen_rpc, :tcp_server_port, TestEnv.peer_gen_rpc_port(:bad_tcp)}]
-    {:ok, node} = Clustered.start(nil, extra_config: extra_config)
+    {:ok, node} = Clustered.start(nil, extra_config: extra_config, warm_clients: false)
     %{node: node}
   end
 
