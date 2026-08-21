@@ -144,6 +144,12 @@ defmodule Realtime.Application do
                else: []
              )
          ]},
+        # Placed right after Forum.Muster (and before RealtimeWeb.Endpoint): on
+        # shutdown children terminate in reverse start order, so this drains the
+        # Muster router role AFTER the Endpoint closed its websockets and BEFORE
+        # the Muster coordinator terminates. See Realtime.MusterDrainer.
+        {Realtime.MusterDrainer,
+         scope: muster_scope, drain_opts: Application.get_env(:realtime, :muster_drain_opts, [])},
         Supervisor.child_spec({Cachex, name: Realtime.RateCounter}, id: Realtime.RateCounter),
         Supervisor.child_spec({Cachex, name: Realtime.Nodes.Cache}, id: Realtime.Nodes.Cache),
         Supervisor.child_spec(

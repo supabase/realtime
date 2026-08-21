@@ -129,5 +129,18 @@ sequenceDiagram
 - **Safety during change.** The `:rebalancing` fan-out trades a brief burst of
   extra traffic for never missing a node whose router assignment is mid-flight.
 
+### Graceful shutdown
+
+A router that is about to leave the cluster must not simply vanish: a peer that
+still hashes a group to it would fire an `:occupied` claim (or route a broadcast)
+to a corpse and silently lose it. `Forum.Muster.drain/2` evacuates the router
+role *before* death — peers rebalance the leaver out of their rings and
+re-announce the groups they hold to the newly-elected routers while the leaver is
+still alive to service in-flight RPCs. During the drain the leaver stays a
+correct router (it answers `targets/3` throughout, including a mandatory settle
+window for broadcasts already in flight to it), but stops advertising itself, and
+`join/3` on it returns `{:error, :draining}`. See the *Graceful shutdown /
+draining* section in the top-level [`README.md`](../README.md).
+
 See the top-level [`README.md`](../README.md) for the join, leave/cooldown,
 rebalance, and failure-handling details that keep the occupancy table accurate.

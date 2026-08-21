@@ -236,19 +236,97 @@ defmodule Forum.Muster do
   the table against the live member counts, and never forgets an outstanding router
   assertion, so a shard crash cannot orphan a `{group, node}` entry on a (local or
   remote) router.
+
+  Returns `{:error, :draining}` if this node has begun a graceful cluster-leave
+  (`drain/2`): once leaving, the node is being rebalanced out of every peer's
+  ring, so a new first-member join could produce a local member with no occupancy
+  row on any router (silently missing from every broadcast). The join fails loudly
+  instead. The host app should stop accepting new joins at SIGTERM anyway (see
+  `drain/2`); this is defense-in-depth for a stray join that races the drain.
   """
-  @spec join(atom, group, pid) :: :ok | {:error, :not_local | :rpc_failed | term}
+  @spec join(atom, group, pid) :: :ok | {:error, :not_local | :draining | :rpc_failed | term}
   def join(_scope, _group, pid) when is_pid(pid) and node(pid) != node(),
     do: {:error, :not_local}
 
   def join(scope, group, pid) when is_atom(scope) and is_pid(pid) do
-    call_shard(scope, group, {:join, group, pid})
+    if :persistent_term.get({Forum.Muster, scope, :accepting_joins}, true) do
+      call_shard(scope, group, {:join, group, pid})
+    else
+      {:error, :draining}
+    end
   end
 
   @doc "Remove `pid` from `group` in `scope`."
   @spec leave(atom, group, pid) :: :ok | {:error, term}
   def leave(scope, group, pid) when is_atom(scope) and is_pid(pid) do
     call_shard(scope, group, {:leave, group, pid})
+  end
+
+  @doc """
+  Gracefully evacuates this node's **router role** before it leaves the cluster,
+  and blocks until the evacuation is acknowledged.
+
+  A Muster node plays two independent roles. Its **source role** (holding local
+  members) needs no Muster mechanism on shutdown: as the host app disconnects its
+  clients, membership drops to 0 and the normal vacant-flush retracts occupancy.
+  Its **router role** is the one only a *pre-death* handoff can protect: by
+  consistent hashing this node is the elected router for ~1/N of all groups, and
+  if it dies abruptly a peer's first-member join still hashes to it, fires a
+  synchronous `:occupied` claim to a corpse, and ends up with a local member that
+  has no occupancy row on any router silently missing from every broadcast.
+
+  `drain/2` closes that window while the node is *still alive*: it broadcasts a
+  leave, and each peer rebalances this node out of its ring (routing its share to
+  the newly-elected routers and re-announcing the groups it holds) and acks.
+  `drain` returns only once **every peer has acked** and then waits a
+  `settle_ms` window (still servicing inbound RPCs) so in-flight broadcasts routed
+  here just before the handoff can fan out.
+
+  This node keeps its own full ring/view and does not rebalance itself. Other peers
+  rebalance it out. It stays draining for the whole call: all outbound
+  self-assertion (heartbeat, re-discovery) is suppressed so no peer re-pairs it,
+  while inbound coordination RPCs keep being serviced.
+
+  ## Shutdown sequencing (host-app contract)
+
+  `drain` handles ONLY the router role. Call it **late** in shutdown, in order:
+
+    1. On SIGTERM, close the listener to new connections (the
+       load balancer has usually already pulled the node).
+    2. Close/migrate existing websockets; each leaving socket retracts its
+       occupancy on the current router via the normal vacant-flush.
+    3. Give step 2 a few seconds to drain (well inside the grace period).
+    4. Call `drain/2`.
+    5. **Only then** halt.
+
+  **`drain` is terminal**: it leaves the node draining with its heartbeat off,
+  so a node that calls `drain` but does not actually die (e.g. an aborted deploy)
+  is stranded until it restarts. Call it only when truly shutting down.
+
+  ## Options
+
+    * `:timeout_ms` (default `5_000`): how long to wait for every peer to ack
+      before giving up and returning `{:timeout, unacked_nodes}`.
+    * `:settle_ms` (default `5_000`, must be `>= :rpc_timeout_ms`): the post-ack
+      in-flight-drain window.
+
+  Returns `:ok` once all peers acked and the settle elapsed, or
+  `{:timeout, unacked_nodes}` if some peer did not ack within `:timeout_ms`. A
+  singleton (no peers) returns `:ok` immediately.
+  """
+  @spec drain(atom, keyword) :: :ok | {:timeout, [node]}
+  def drain(scope, opts \\ []) when is_atom(scope) do
+    timeout = Keyword.get(opts, :timeout_ms, 5_000)
+    settle = Keyword.get(opts, :settle_ms, 5_000)
+
+    # The call blocks the CALLER; the coordinator replies asynchronously after
+    # acks + settle (so its own loop never blocks). Allow for the whole window
+    # plus slack before the call's own timeout.
+    GenServer.call(
+      Forum.Supervisor.name(scope),
+      {:drain, timeout, settle},
+      timeout + settle + 1_000
+    )
   end
 
   @doc """
