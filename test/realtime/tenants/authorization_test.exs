@@ -30,7 +30,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
         Authorization.get_write_authorizations(policies, context.db_conn, context.authorization_context)
 
       assert %Policies{
-               broadcast: %BroadcastPolicies{read: true, write: true},
+               broadcast: %BroadcastPolicies{read: true, write: true, persist: false},
                presence: %PresencePolicies{read: true, write: true}
              } == policies
     end
@@ -75,7 +75,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
       # presence.read is left unevaluated (nil) since presence was not checked; write is false.
       assert %Policies{
-               broadcast: %BroadcastPolicies{read: true, write: true},
+               broadcast: %BroadcastPolicies{read: true, write: true, persist: false},
                presence: %PresencePolicies{read: nil, write: false}
              } == policies
     end
@@ -93,7 +93,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
         Authorization.get_write_authorizations(policies, context.db_conn, context.authorization_context)
 
       assert %Policies{
-               broadcast: %BroadcastPolicies{read: false, write: false},
+               broadcast: %BroadcastPolicies{read: false, write: false, persist: false},
                presence: %PresencePolicies{read: false, write: false}
              } == policies
     end

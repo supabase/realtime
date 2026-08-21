@@ -15,6 +15,7 @@ defmodule Realtime.Tenants.Authorization do
   alias Realtime.Api.Message
   alias Realtime.Api.Tenant
   alias Realtime.Database
+  alias Realtime.FeatureFlags
   alias Realtime.GenCounter
   alias Realtime.GenRpc
   alias Realtime.Tenants.Repo
@@ -329,25 +330,36 @@ defmodule Realtime.Tenants.Authorization do
   end
 
   defp check_write_policies(conn, authorization_context, extensions, policies) do
-    Enum.reduce_while(@all_extensions, {:ok, policies}, fn extension, {:ok, acc} ->
+    extensions =
+      if FeatureFlags.broadcast_persistence_enabled?(authorization_context.tenant_id),
+        do: extensions ++ [:persistence],
+        else: extensions
+
+    Enum.reduce_while(@all_extensions ++ [:persistence], {:ok, policies}, fn extension, {:ok, acc} ->
       if extension in extensions do
         changeset = Message.changeset(%Message{}, %{topic: authorization_context.topic, extension: extension})
 
         case Repo.insert(conn, changeset, Message, mode: :savepoint, returning: false) do
           {:ok, _} ->
-            {:cont, {:ok, Policies.update_policies(acc, extension, :write, true)}}
+            {:cont, {:ok, update_write_policy(acc, extension, true)}}
 
           {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-            {:cont, {:ok, Policies.update_policies(acc, extension, :write, false)}}
+            {:cont, {:ok, update_write_policy(acc, extension, false)}}
 
           {:error, reason} ->
             {:halt, {:error, reason}}
         end
       else
-        {:cont, {:ok, Policies.update_policies(acc, extension, :write, false)}}
+        {:cont, {:ok, update_write_policy(acc, extension, false)}}
       end
     end)
   end
+
+  defp update_write_policy(policies, :persistence, value),
+    do: Policies.update_policies(policies, :broadcast, :persist, value)
+
+  defp update_write_policy(policies, extension, value),
+    do: Policies.update_policies(policies, extension, :write, value)
 
   defp rate_counter(tenant_id) do
     %Tenant{} = tenant = Realtime.Tenants.Cache.get_tenant_by_external_id(tenant_id)

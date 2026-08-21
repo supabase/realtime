@@ -7,7 +7,8 @@ create table "realtime"."messages" (
   "updated_at"     timestamp without time zone not null,
   "inserted_at"    timestamp without time zone not null,
   "id"             uuid                        not null,
-  "binary_payload" bytea
+  "binary_payload" bytea,
+  "skip_broadcast" boolean                     not null
 ) partition by range (inserted_at);
 
 alter table "realtime"."messages"
@@ -24,6 +25,9 @@ alter table "realtime"."messages"
 
 alter table "realtime"."messages"
   alter column "private" set default false;
+
+alter table "realtime"."messages"
+  alter column "skip_broadcast" set default false;
 
 alter table "realtime"."messages"
   alter column "updated_at" set default now();

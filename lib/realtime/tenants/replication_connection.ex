@@ -1,20 +1,6 @@
 defmodule Realtime.Tenants.ReplicationConnection do
   @moduledoc """
   ReplicationConnection it's the module that provides a way to stream data from a PostgreSQL database using logical replication.
-
-  ## Struct parameters
-  * `connection_opts` - The connection options to connect to the database.
-  * `table` - The table to replicate. If `:all` is passed, it will replicate all tables.
-  * `schema` - The schema of the table to replicate. If not provided, it will use the `public` schema. If `:all` is passed, this option is ignored.
-  * `opts` - The options to pass to this module
-  * `step` - The current step of the replication process
-  * `publication_name` - The name of the publication to create. If not provided, it will use the schema and table name.
-  * `replication_slot_name` - The name of the replication slot to create. If not provided, it will use the schema and table name.
-  * `output_plugin` - The output plugin to use. Default is `pgoutput`.
-  * `proto_version` - The protocol version to use. Default is `2`.
-  * `handler_module` - The module that will handle the data received from the replication stream.
-  * `metadata` - The metadata to pass to the handler module.
-
   """
   use Postgrex.ReplicationConnection
   use Realtime.Logs
@@ -27,6 +13,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
   alias Realtime.Adapters.Postgres.Protocol.Write
   alias Realtime.Api.Tenant
   alias Realtime.Database
+  alias Realtime.FeatureFlags
   alias Realtime.GenCounter
   alias Realtime.RateCounter
   alias Realtime.Telemetry
@@ -39,11 +26,27 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
   @default_query_timeout :timer.minutes(4)
 
+  @typedoc """
+  * `tenant_id` - The tenant this connection replicates for.
+  * `opts` - Reserved, defaults to `[]`.
+  * `step` - The current step of the replication process.
+  * `publication_name` - The name of the publication to create. Defaults to `"supabase_\#{schema}_\#{table}_publication"` if not provided.
+  * `replication_slot_name` - The name of the replication slot to create. Defaults to `"supabase_\#{schema}_\#{table}_replication_slot_\#{slot_suffix()}"` if not provided.
+  * `output_plugin` - The output plugin to use. Default is `pgoutput`.
+  * `proto_version` - The protocol version to use. Default is `2`.
+  * `relations` - Cache of decoded relation (table) metadata, keyed by relation id, populated as `Relation` messages stream in.
+  * `buffer` - Reserved, defaults to `[]`.
+  * `monitored_pid` - The process this connection is linked to; the connection stops when it dies.
+  * `latency_committed_at` - Timestamp of the last commit, used to compute broadcast latency.
+  * `query_timeout` - Timeout for queries run during the replication setup steps.
+  * `pg_version` - Major Postgres version of the tenant database, read on connect.
+  """
   @type t :: %__MODULE__{
           tenant_id: String.t(),
           opts: Keyword.t(),
           step:
             :disconnected
+            | :check_pg_version
             | :check_replication_slot
             | :create_publication
             | :validate_publication
@@ -58,7 +61,8 @@ defmodule Realtime.Tenants.ReplicationConnection do
           buffer: list(),
           monitored_pid: pid(),
           latency_committed_at: integer(),
-          query_timeout: timeout()
+          query_timeout: timeout(),
+          pg_version: pos_integer() | nil
         }
   defstruct tenant_id: nil,
             opts: [],
@@ -71,10 +75,13 @@ defmodule Realtime.Tenants.ReplicationConnection do
             buffer: [],
             monitored_pid: nil,
             latency_committed_at: nil,
-            query_timeout: @default_query_timeout
+            query_timeout: @default_query_timeout,
+            pg_version: nil
 
-  @table "messages"
   @schema "realtime"
+  @table "messages"
+  @row_filter "(NOT skip_broadcast)"
+
   @doc """
   Starts the replication connection for a tenant and monitors a given pid to stop the ReplicationConnection.
   """
@@ -224,20 +231,25 @@ defmodule Realtime.Tenants.ReplicationConnection do
   end
 
   def handle_result([%Postgrex.Result{num_rows: 0}], %__MODULE__{step: :check_replication_slot} = state) do
-    %__MODULE__{publication_name: publication_name} = state
+    if FeatureFlags.broadcast_persistence_enabled?(state.tenant_id) do
+      query = "SELECT current_setting('server_version_num')::int / 10000"
+      {:query, query, [timeout: state.query_timeout], %{state | step: :check_pg_version}}
+    else
+      check_publication_exists(state)
+    end
+  end
 
-    Logger.info("Check publication #{publication_name} for table #{@schema}.#{@table} exists")
-    query = "SELECT * FROM pg_publication WHERE pubname = '#{publication_name}'"
-
-    {:query, query, [timeout: state.query_timeout], %{state | step: :create_publication}}
+  def handle_result([%Postgrex.Result{rows: [[pg_version]]}], %__MODULE__{step: :check_pg_version} = state) do
+    state = %{state | pg_version: String.to_integer(pg_version)}
+    check_publication_exists(state)
   end
 
   def handle_result([%Postgrex.Result{num_rows: 0}], %__MODULE__{step: :create_publication} = state) do
     %__MODULE__{publication_name: publication_name} = state
 
     Logger.info("Create publication #{publication_name} for table #{@schema}.#{@table}")
-    query = "CREATE PUBLICATION #{publication_name} FOR TABLE #{@schema}.#{@table}"
 
+    query = create_publication_query(state)
     {:query, query, [timeout: state.query_timeout], %{state | step: :create_replication_slot}}
   end
 
@@ -246,30 +258,25 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
     Logger.info("Publication #{publication_name} exists, validating contents")
 
-    query = """
-      SELECT schemaname, tablename
-      FROM pg_publication_tables
-      WHERE pubname = '#{publication_name}'
-    """
-
+    query = validate_publication_query(state)
     {:query, query, [timeout: state.query_timeout], %{state | step: :validate_publication}}
   end
 
   def handle_result([%Postgrex.Result{rows: rows}], %__MODULE__{step: :validate_publication} = state) do
     %__MODULE__{publication_name: publication_name} = state
 
-    valid_tables =
-      Enum.all?(rows, fn [schema, table] ->
-        schema == @schema and (table == @table or String.starts_with?(table, "#{@table}_"))
+    valid_publication =
+      Enum.all?(rows, fn
+        [schema, table] -> valid_messages_table?(schema, table)
+        [schema, table, expected_options] -> expected_options == "t" and valid_messages_table?(schema, table)
       end)
 
-    if valid_tables and rows != [] do
+    if valid_publication and rows != [] do
       {:query, "SELECT 1", [timeout: state.query_timeout], %{state | step: :create_replication_slot}}
     else
-      query =
-        "DROP PUBLICATION IF EXISTS #{publication_name}; CREATE PUBLICATION #{publication_name} FOR TABLE #{@schema}.#{@table}"
+      query = "DROP PUBLICATION IF EXISTS #{publication_name}; #{create_publication_query(state)}"
 
-      Logger.warning("Publication #{publication_name} contains unexpected tables. Recreating...")
+      Logger.warning("Publication #{publication_name} does not match the expected configuration. Recreating...")
       {:query, query, [timeout: state.query_timeout], %{state | step: :create_replication_slot}}
     end
   end
@@ -409,6 +416,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
     with %{columns: columns} <- Map.get(relations, relation_id),
          to_broadcast = tuple_to_map(tuple_data, columns),
+         :ok <- check_should_broadcast(to_broadcast),
          {:ok, inserted_at} <- get_or_error(to_broadcast, "inserted_at", :inserted_at_missing),
          {:ok, event} <- get_or_error(to_broadcast, "event", :event_missing),
          {:ok, id} <- get_or_error(to_broadcast, "id", :id_missing),
@@ -449,6 +457,9 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
       {:noreply, state}
     else
+      {:error, :skip_broadcast} ->
+        {:noreply, state}
+
       {:error, error} ->
         log_error("UnableToBroadcastChanges", error)
         {:noreply, state}
@@ -467,6 +478,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
   end
 
   defp handle_message(_, state), do: {:noreply, state}
+
   @impl true
   def handle_disconnect(state) do
     Logger.warning("Disconnecting broadcast changes handler in the step : #{inspect(state.step)}")
@@ -479,6 +491,50 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
   def publication_name(schema, table) do
     "supabase_#{schema}_#{table}_publication"
+  end
+
+  defp row_filter?(%__MODULE__{pg_version: pg_version}),
+    do: is_integer(pg_version) and pg_version >= 15
+
+  defp valid_messages_table?(schema, table),
+    do: schema == @schema and (table == @table or String.starts_with?(table, "#{@table}_"))
+
+  defp check_publication_exists(%__MODULE__{publication_name: publication_name} = state) do
+    Logger.info("Check publication #{publication_name} for table #{@schema}.#{@table} exists")
+    query = "SELECT * FROM pg_publication WHERE pubname = '#{publication_name}'"
+
+    {:query, query, [timeout: state.query_timeout], %{state | step: :create_publication}}
+  end
+
+  defp create_publication_query(%__MODULE__{publication_name: publication_name} = state) do
+    if FeatureFlags.broadcast_persistence_enabled?(state.tenant_id) do
+      row_filter = if row_filter?(state), do: " WHERE #{@row_filter}", else: ""
+
+      "CREATE PUBLICATION #{publication_name} FOR TABLE #{@schema}.#{@table}#{row_filter} WITH (publish = 'insert', publish_via_partition_root = true)"
+    else
+      "CREATE PUBLICATION #{publication_name} FOR TABLE #{@schema}.#{@table}"
+    end
+  end
+
+  defp validate_publication_query(%__MODULE__{publication_name: publication_name} = state) do
+    if FeatureFlags.broadcast_persistence_enabled?(state.tenant_id) do
+      row_filter = if row_filter?(state), do: " AND t.rowfilter = '#{@row_filter}'", else: ""
+
+      """
+        SELECT t.schemaname,
+               t.tablename,
+               p.pubinsert AND NOT p.pubupdate AND NOT p.pubdelete AND NOT p.pubtruncate AND p.pubviaroot#{row_filter}
+        FROM pg_publication_tables t
+        JOIN pg_publication p ON p.pubname = t.pubname
+        WHERE t.pubname = '#{publication_name}'
+      """
+    else
+      """
+        SELECT schemaname, tablename
+        FROM pg_publication_tables
+        WHERE pubname = '#{publication_name}'
+      """
+    end
   end
 
   def replication_slot_name(schema, table) do
@@ -504,6 +560,9 @@ defmodule Realtime.Tenants.ReplicationConnection do
       _ -> :ok
     end
   end
+
+  defp check_should_broadcast(%{"skip_broadcast" => true}), do: {:error, :skip_broadcast}
+  defp check_should_broadcast(_), do: :ok
 
   defp get_or_error(map, key, error_type) do
     case Map.get(map, key) do

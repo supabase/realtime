@@ -4,11 +4,64 @@ defmodule Realtime.Messages do
   """
 
   alias Realtime.Api.Message
+  alias Realtime.Tenants.Repo
 
   import Ecto.Query, only: [from: 2]
 
   @hard_limit 25
   @default_timeout 5_000
+
+  @doc """
+  Persists a broadcast for `topic`, either sent over WebSocket or through the single broadcast API.
+
+  Only called after the sender's `persistence` policy authorized it, so the persisted row is always private.
+  Bypasses RLS because that authorization already happened on the broadcast.
+
+  Check `:persistence` authorization to define if message is persisted,
+  but store with `:broadcast` extension, like any other broadcasted message.
+
+  Set `skip_broadcast` because the message was already delivered to the subscribers, so it must not be
+  broadcast again when it appears on the replication stream.
+
+  Automatically uses RPC if the database connection is not on the same node.
+  """
+  @spec persist(
+          conn :: DBConnection.conn(),
+          tenant_id :: String.t(),
+          topic :: String.t(),
+          event :: String.t(),
+          payload :: map() | binary()
+        ) :: {:ok, binary()} | {:error, any()} | {:error, :rpc_error, term}
+  def persist(conn, _tenant_id, topic, event, payload) when node(conn) == node() do
+    insert(conn, topic, event, payload)
+  end
+
+  def persist(conn, tenant_id, topic, event, payload) do
+    Realtime.GenRpc.call(node(conn), __MODULE__, :persist, [conn, tenant_id, topic, event, payload],
+      key: topic,
+      tenant_id: tenant_id
+    )
+  end
+
+  defp insert(conn, topic, event, payload) do
+    attrs = %{
+      topic: topic,
+      extension: :broadcast,
+      event: event,
+      private: true,
+      skip_broadcast: true
+    }
+
+    changeset = Message.changeset(%Message{}, Map.merge(attrs, payload_attr(payload)))
+
+    case Repo.insert(conn, changeset, Message) do
+      {:ok, %Message{id: id}} -> {:ok, id}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp payload_attr(payload) when is_binary(payload), do: %{binary_payload: payload}
+  defp payload_attr(payload), do: %{payload: payload}
 
   @doc """
   Fetch last `limit ` messages for a given `topic` inserted after `since`

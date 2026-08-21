@@ -7,22 +7,26 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
   setup :set_mimic_from_context
 
+  import Ecto.Query, only: [from: 2]
   import Generators
   import ExUnit.CaptureLog
 
   alias Ecto.UUID
+  alias Realtime.Api.Message
+  alias Realtime.FeatureFlags
   alias Realtime.RateCounter
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Connect
+  alias Realtime.Tenants.Repo
   alias RealtimeWeb.Endpoint
   alias RealtimeWeb.RealtimeChannel.BroadcastHandler
 
   setup [:initiate_tenant]
 
-  @payload %{"a" => "b"}
+  @payload %{"event" => "test", "payload" => %{"a" => "b"}}
 
   describe "handle/3" do
     test "with write true policy, user is able to send message",
@@ -457,6 +461,253 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     end
   end
 
+  describe "broadcast persistence" do
+    setup do
+      stub(FeatureFlags, :broadcast_persistence_enabled?, fn _tenant_id -> true end)
+
+      :ok
+    end
+
+    test "broadcast authorized to persist is stored and acks with its id", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket =
+        socket_fixture(tenant, topic,
+          ack_broadcast: true,
+          policies: %Policies{
+            broadcast: %BroadcastPolicies{write: true, persist: true}
+          }
+        )
+
+      assert {:reply, {:ok, %{id: id}}, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+      expected_payload = @payload["payload"]
+
+      assert {:ok,
+              [
+                %Message{
+                  id: ^id,
+                  topic: ^topic,
+                  event: "test",
+                  extension: :broadcast,
+                  private: true,
+                  payload: ^expected_payload,
+                  skip_broadcast: true
+                }
+              ]} = Repo.all(db_conn, messages_for(topic), Message)
+    end
+
+    test "broadcast without ack does not wait for the message to be persisted", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket =
+        socket_fixture(tenant, topic,
+          ack_broadcast: false,
+          policies: %Policies{
+            broadcast: %BroadcastPolicies{write: true, persist: true}
+          }
+        )
+
+      assert {:noreply, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+
+      assert eventually(fn ->
+               match?(
+                 {:ok, [%Message{topic: ^topic, event: "test", skip_broadcast: true}]},
+                 Repo.all(db_conn, messages_for(topic), Message)
+               )
+             end)
+    end
+
+    test "V2 json user broadcast authorized to persist stores the user payload", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket =
+        socket_fixture(tenant, topic,
+          ack_broadcast: true,
+          policies: %Policies{
+            broadcast: %BroadcastPolicies{write: true, persist: true}
+          }
+        )
+
+      v2_payload = {"event123", :json, Jason.encode!(%{"a" => "b"}), %{}}
+
+      assert {:reply, {:ok, %{id: id}}, _socket} = BroadcastHandler.handle(v2_payload, db_conn, socket)
+
+      assert {:ok,
+              [
+                %Message{
+                  id: ^id,
+                  topic: ^topic,
+                  event: "event123",
+                  extension: :broadcast,
+                  private: true,
+                  payload: %{"a" => "b"},
+                  skip_broadcast: true
+                }
+              ]} = Repo.all(db_conn, messages_for(topic), Message)
+    end
+
+    test "V2 json user broadcast with an invalid user payload is delivered but not persisted", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket =
+        socket_fixture(tenant, topic,
+          ack_broadcast: true,
+          policies: %Policies{
+            broadcast: %BroadcastPolicies{write: true, persist: true}
+          }
+        )
+
+      v2_payload = {"event123", :json, "not json at all", %{}}
+
+      log =
+        capture_log(fn ->
+          assert {:reply, :ok, _socket} = BroadcastHandler.handle(v2_payload, db_conn, socket)
+        end)
+
+      assert_receive {:socket_push, _encoding, _data}
+      assert log =~ "UnableToPersistMessage"
+
+      assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
+    end
+
+    test "V2 binary user broadcast authorized to persist is stored as binary_payload", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket =
+        socket_fixture(tenant, topic,
+          ack_broadcast: true,
+          policies: %Policies{
+            broadcast: %BroadcastPolicies{write: true, persist: true}
+          }
+        )
+
+      binary = <<0, 1, 2, 3>>
+
+      assert {:reply, {:ok, %{id: id}}, _socket} =
+               BroadcastHandler.handle({"event123", :binary, binary, %{}}, db_conn, socket)
+
+      assert {:ok,
+              [
+                %Message{
+                  id: ^id,
+                  event: "event123",
+                  payload: nil,
+                  binary_payload: ^binary,
+                  extension: :broadcast,
+                  private: true,
+                  skip_broadcast: true
+                }
+              ]} = Repo.all(db_conn, messages_for(topic), Message)
+    end
+
+    test "unsupported payload shape is delivered, not persisted, and logged", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket =
+        socket_fixture(tenant, topic,
+          ack_broadcast: true,
+          policies: %Policies{
+            broadcast: %BroadcastPolicies{write: true, persist: true}
+          }
+        )
+
+      log =
+        capture_log(fn ->
+          assert {:reply, :ok, _socket} = BroadcastHandler.handle(%{"no" => "event or payload"}, db_conn, socket)
+        end)
+
+      assert log =~ "UnableToPersistMessage"
+      assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
+    end
+
+    test "persistence failure still delivers the broadcast and acks ok", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      expect(Repo, :insert, fn _conn, _changeset, _module -> {:error, :boom} end)
+
+      socket =
+        socket_fixture(tenant, topic,
+          ack_broadcast: true,
+          policies: %Policies{
+            broadcast: %BroadcastPolicies{write: true, persist: true}
+          }
+        )
+
+      log =
+        capture_log(fn ->
+          assert {:reply, :ok, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+        end)
+
+      assert_receive {:socket_push, :text, _data}
+      assert log =~ "UnableToPersistMessage"
+      assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
+    end
+
+    test "broadcast without a persistence policy is sent but not stored", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket =
+        socket_fixture(tenant, topic,
+          policies: %Policies{
+            broadcast: %BroadcastPolicies{write: true, persist: false}
+          }
+        )
+
+      assert {:reply, :ok, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+
+      assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
+    end
+
+    test "unauthorized private broadcast is not stored", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket = socket_fixture(tenant, topic, policies: %Policies{broadcast: %BroadcastPolicies{write: false}})
+
+      assert {:noreply, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+
+      assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
+    end
+
+    test "public channel broadcasts and acks but is not stored", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket = socket_fixture(tenant, topic, private?: false, policies: nil)
+
+      assert {:reply, :ok, _socket} = BroadcastHandler.handle(@payload, nil, socket)
+
+      assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
+    end
+
+    test "public channel without a database connection still broadcasts and acks", %{
+      topic: topic,
+      tenant: tenant
+    } do
+      socket = socket_fixture(tenant, topic, private?: false, policies: nil)
+
+      assert {:reply, :ok, _socket} = BroadcastHandler.handle(@payload, nil, socket)
+    end
+  end
+
   defp initiate_tenant(context) do
     tenant = TestTenantDb.checkout_tenant(run_migrations: true)
 
@@ -538,4 +789,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
   defp message(Phoenix.Socket.V1.JSONSerializer, topic, payload) do
     %{"event" => "broadcast", "payload" => payload, "ref" => nil, "topic" => topic}
   end
+
+  defp messages_for(topic), do: from(m in Message, where: m.topic == ^topic)
 end
