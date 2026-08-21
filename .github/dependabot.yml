@@ -14,9 +14,9 @@ updates:
     # Let's not flood ourselves with PRs
     open-pull-requests-limit: 3
 
-    # May widen `~>` constraints, but only when the latest resolvable version
-    # does not already satisfy them: in-range bumps touch mix.lock only.
-    versioning-strategy: "increase-if-necessary"
+    # while the docs say versioning-strategy is supported by hex, seemingly only the default
+    # option is
+    versioning-strategy: "lockfile-only"
 
     cooldown:
       # same as in our hex config
