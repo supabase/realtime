@@ -308,9 +308,9 @@ defmodule RealtimeWeb.TenantControllerTest do
 
       assert Connect.ready?(tenant.external_id)
 
-      # Replication Connections are launched async and can take a while,
-      # especially in CI environments.
-      assert eventually(fn -> Realtime.Tenants.ReplicationConnection.ready?(tenant.external_id) end)
+      # ready?/1 already waits, we just increase the time here
+      # there's a comment saying it might take up to 30 seconds
+      assert Realtime.Tenants.ReplicationConnection.ready?(tenant.external_id, to_timeout(second: 30))
 
       assert Cache.get_tenant_by_external_id(tenant.external_id)
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)

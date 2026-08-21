@@ -126,7 +126,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
     end
   end
 
-  def ready?(tenant_id) do
+  def ready?(tenant_id, wait_time \\ 5_000) do
     RealtimeWeb.Endpoint.subscribe(Connect.syn_topic(tenant_id))
     # We do a lookup after subscribing because we could've missed a message while subscribing
     case Connect.replication_status(tenant_id) do
@@ -139,7 +139,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
           %{event: "ready", payload: %{replication_conn: conn}} when is_pid(conn) ->
             true
         after
-          5_000 -> false
+          wait_time -> false
         end
     end
   after
