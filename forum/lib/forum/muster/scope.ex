@@ -568,6 +568,7 @@ defmodule Forum.Muster.Scope do
       {Forum.Muster, scope, :view_hash},
       Forum.Muster.view_hash_for_members([node()])
     )
+
     # Always re-open the join gate in case of a restart during a drain
     :persistent_term.put({Forum.Muster, scope, :accepting_joins}, true)
 
