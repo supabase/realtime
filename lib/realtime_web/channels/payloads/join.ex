@@ -6,6 +6,7 @@ defmodule RealtimeWeb.Channels.Payloads.Join do
   import Ecto.Changeset
   alias RealtimeWeb.Channels.Payloads.Config
   alias RealtimeWeb.Channels.Payloads.Broadcast
+  alias RealtimeWeb.Channels.Payloads.PostgresChangesOptions
   alias RealtimeWeb.Channels.Payloads.Presence
 
   embedded_schema do
@@ -47,6 +48,17 @@ defmodule RealtimeWeb.Channels.Payloads.Join do
 
   def private?(%__MODULE__{config: %Config{private: private}}), do: private
   def private?(_), do: false
+
+  @doc """
+  How long the join blocks waiting for the postgres_changes subscription, never above the server
+  maximum. `nil` when the join is not waiting.
+  """
+  def postgres_changes_wait_timeout(%__MODULE__{
+        config: %Config{postgres_changes_options: %PostgresChangesOptions{wait: true, timeout: timeout}}
+      }),
+      do: min(timeout, Application.fetch_env!(:realtime, :postgres_changes_wait_max_timeout))
+
+  def postgres_changes_wait_timeout(_), do: nil
 
   def error_message(_field, meta) do
     type = Keyword.get(meta, :type)
