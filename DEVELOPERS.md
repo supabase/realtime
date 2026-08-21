@@ -50,13 +50,22 @@ mix setup
 mise run dev
 ```
 
-To start another node in the local cluster (optional):
+To start another node in the local cluster (optional), in a second region:
 
 ```bash
 mise run dev-orange
 ```
 
 Once the server is up, open [http://localhost:4000/status](http://localhost:4000/status) to check the services are running.
+
+`mise run dev` can be run as many times as you like, here or in another worktree. The first server is `pink` on port 4000, the
+next are `pink2`, `pink3` and so on, each taking the next free HTTP port, and they all join the same cluster — the port each
+node listens on for `gen_rpc` follows from its name. Every server logs the port it took. Set `PORT` or `NAME` to pin either;
+`RUN_TAG` names a server when `NAME` is unset, and also labels a test run's database and containers.
+
+`mix test` needs no setup to run alongside a server, or alongside another `mix test`: the first run takes port 4002, database
+`realtime_test` and node `main`, and later runs take the next free port and label what they own with it. Tenant database
+containers left behind by a run that is gone are removed by whichever run starts next.
 
 > **Note**
 > To run the whole stack in containers instead of installing Elixir locally:

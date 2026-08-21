@@ -243,19 +243,26 @@ defmodule Realtime.GenRpcPubSub.RegionRingsTest do
     gen_rpc_port = Application.fetch_env!(:gen_rpc, :tcp_server_port)
     remote_scope = :"realtime_channels_#{@remote_region}"
 
-    node_ports = [{:rr_int_a, 16995}, {:rr_int_b, 16996}, {:rr_int_c, 16997}]
+    peers = [:rr_int_a, :rr_int_b, :rr_int_c]
 
     client_config_per_node =
-      Map.new([{node(), gen_rpc_port} | Enum.map(node_ports, fn {n, p} -> {:"#{n}@127.0.0.1", p} end)])
+      Map.new([
+        {node(), gen_rpc_port}
+        | Enum.map(peers, fn peer -> {TestEnv.peer_node(peer), TestEnv.peer_gen_rpc_port(peer)} end)
+      ])
 
     on_exit(fn -> Application.put_env(:gen_rpc, :client_config_per_node, {:internal, %{}}) end)
     Application.put_env(:gen_rpc, :client_config_per_node, {:internal, client_config_per_node})
     extra_config = [{:gen_rpc, :client_config_per_node, {:internal, client_config_per_node}}]
 
     nodes =
-      Enum.map(Enum.with_index(node_ports), fn {{name, port}, idx} ->
-        config = [{:realtime, :region, @remote_region}, {:gen_rpc, :tcp_server_port, port}] ++ extra_config
-        {:ok, n} = Clustered.start(nil, name: name, extra_config: config, phoenix_port: 4030 + idx)
+      Enum.map(peers, fn peer ->
+        config =
+          [{:realtime, :region, @remote_region}, {:gen_rpc, :tcp_server_port, TestEnv.peer_gen_rpc_port(peer)}] ++
+            extra_config
+
+        {:ok, n} = Clustered.start(nil, name: peer, extra_config: config, phoenix_port: TestEnv.peer_http_port(peer))
+
         n
       end)
 

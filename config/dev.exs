@@ -15,8 +15,32 @@ config :realtime,
   presence: presence,
   node_balance_uptime_threshold_in_ms: 100
 
+port_free? = fn port ->
+  case :gen_tcp.listen(port, [:inet, ip: {0, 0, 0, 0}, reuseaddr: true, active: false]) do
+    {:ok, socket} -> :gen_tcp.close(socket) == :ok
+    {:error, _reason} -> false
+  end
+end
+
+port =
+  case System.get_env("PORT") do
+    nil ->
+      Enum.find(4000..4999, port_free?) || raise "no free port found on range 4000..4999"
+
+    pinned ->
+      pinned = String.to_integer(pinned)
+
+      if !port_free?.(pinned) do
+        raise """
+        PORT=#{pinned} is set but it's already in use.
+        """
+      end
+
+      pinned
+  end
+
 config :realtime, RealtimeWeb.Endpoint,
-  http: [port: System.get_env("PORT", "4000"), compress: true],
+  http: [port: port, compress: true],
   debug_errors: true,
   code_reloader: true,
   check_origin: false,

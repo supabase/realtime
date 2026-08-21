@@ -100,9 +100,7 @@ Mimic.copy(RealtimeWeb.JwtVerification)
 Mimic.copy(RealtimeWeb.TenantBroadcaster)
 Mimic.copy(NimbleZTA.Cloudflare)
 
-partition = System.get_env("MIX_TEST_PARTITION")
-node_name = if partition, do: :"main#{partition}@127.0.0.1", else: :"main@127.0.0.1"
-:net_kernel.start([node_name])
+:net_kernel.start([TestEnv.node_name()])
 region = Application.get_env(:realtime, :region)
 [{pid, _}] = :syn.members(RegionNodes, region)
 :syn.update_member(RegionNodes, region, pid, fn _ -> [node: node()] end)

@@ -28,7 +28,9 @@ defmodule Realtime.Integration.DistributedRealtimeChannelTest do
         generate_token(tenant, %{exp: System.system_time(:second) + 1000, role: "authenticated", sub: random_string()})
 
       {:ok, remote_socket} =
-        WebsocketClient.connect(self(), uri(tenant, serializer, 4012), serializer, [{"x-api-key", token}])
+        WebsocketClient.connect(self(), uri(tenant, serializer, TestEnv.peer_http_port()), serializer, [
+          {"x-api-key", token}
+        ])
 
       {:ok, socket} = WebsocketClient.connect(self(), uri(tenant, serializer), serializer, [{"x-api-key", token}])
 

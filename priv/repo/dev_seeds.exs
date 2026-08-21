@@ -1,5 +1,6 @@
 alias Realtime.Api.Tenant
 alias Realtime.Database
+alias Realtime.Env
 alias Realtime.Repo
 alias Realtime.Tenants
 
@@ -19,17 +20,17 @@ publication = "supabase_realtime"
       |> Tenant.changeset(%{
         "name" => tenant_name,
         "external_id" => tenant_name,
-        "jwt_secret" => System.get_env("API_JWT_SECRET", "super-secret-jwt-token-with-at-least-32-characters-long"),
+        "jwt_secret" => Env.get_binary("API_JWT_SECRET", "super-secret-jwt-token-with-at-least-32-characters-long"),
         "jwt_jwks" => System.get_env("API_JWT_JWKS") |> then(fn v -> if v, do: Jason.decode!(v) end),
         "extensions" => [
           %{
             "type" => "postgres_cdc_rls",
             "settings" => %{
-              "db_name" => System.get_env("DB_NAME", "postgres"),
-              "db_host" => System.get_env("DB_HOST", default_db_host),
-              "db_user" => System.get_env("DB_USER", "supabase_admin"),
-              "db_password" => System.get_env("DB_PASSWORD", "postgres"),
-              "db_port" => System.get_env("DB_PORT", "5433"),
+              "db_name" => Env.get_binary("DB_NAME", "postgres"),
+              "db_host" => Env.get_binary("DB_HOST", default_db_host),
+              "db_user" => Env.get_binary("DB_USER", "supabase_admin"),
+              "db_password" => Env.get_binary("DB_PASSWORD", "postgres"),
+              "db_port" => Env.get_binary("TENANT_DB_PORT", fn -> Env.get_binary("DB_PORT", "5433") end),
               "region" => "us-east-1",
               "poll_interval_ms" => 100,
               "poll_max_record_bytes" => 1_048_576,

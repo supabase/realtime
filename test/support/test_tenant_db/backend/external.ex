@@ -44,11 +44,6 @@ defmodule TestTenantDb.Backend.External do
     :ok
   end
 
-  # External ports are the target DBs themselves, not host ports drawn from
-  # TestTenantDb's dispenser, so nothing to reserve.
-  @impl TestTenantDb.Backend
-  def reserved_ports, do: []
-
   @impl TestTenantDb.Backend
   def pool_spec(_max_cases), do: {__MODULE__.Worker, length(ports!())}
 

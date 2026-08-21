@@ -96,42 +96,31 @@ defmodule Realtime.UsersCounterTest do
 
     gen_rpc_port = Application.fetch_env!(:gen_rpc, :tcp_server_port)
 
-    nodes = %{
-      node() => gen_rpc_port,
-      :"us_node@127.0.0.1" => 16980,
-      :"ap2_nodeX@127.0.0.1" => 16981,
-      :"ap2_nodeY@127.0.0.1" => 16982
-    }
+    peers = [{:us_node, "us-east-1"}, {:ap2_nodeX, "ap-southeast-2"}, {:ap2_nodeY, "ap-southeast-2"}]
 
-    regions = %{
-      :"us_node@127.0.0.1" => "us-east-1",
-      :"ap2_nodeX@127.0.0.1" => "ap-southeast-2",
-      :"ap2_nodeY@127.0.0.1" => "ap-southeast-2"
-    }
+    nodes =
+      Map.new([
+        {node(), gen_rpc_port}
+        | Enum.map(peers, fn {peer, _} -> {TestEnv.peer_node(peer), TestEnv.peer_gen_rpc_port(peer)} end)
+      ])
 
     on_exit(fn -> Application.put_env(:gen_rpc, :client_config_per_node, {:internal, %{}}) end)
     Application.put_env(:gen_rpc, :client_config_per_node, {:internal, nodes})
 
-    nodes
-    |> Enum.filter(fn {node, _port} -> node != Node.self() end)
-    |> Enum.with_index(1)
-    |> Enum.each(fn {{node, gen_rpc_port}, i} ->
-      # Avoid port collision
+    Enum.each(peers, fn {peer, region} ->
       extra_config = [
-        {:gen_rpc, :tcp_server_port, gen_rpc_port},
+        {:gen_rpc, :tcp_server_port, TestEnv.peer_gen_rpc_port(peer)},
         {:gen_rpc, :client_config_per_node, {:internal, nodes}},
         {:realtime, :users_scope_broadcast_interval_in_ms, 100},
-        {:realtime, :region, regions[node]}
+        {:realtime, :region, region}
       ]
 
-      node_name =
-        node
-        |> to_string()
-        |> String.split("@")
-        |> hd()
-        |> String.to_atom()
-
-      {:ok, node} = Clustered.start(@aux_mod, name: node_name, extra_config: extra_config, phoenix_port: 4012 + i)
+      {:ok, node} =
+        Clustered.start(@aux_mod,
+          name: peer,
+          extra_config: extra_config,
+          phoenix_port: TestEnv.peer_http_port(peer)
+        )
 
       for _ <- 1..processes do
         pid = Rpc.call(node, Aux, :ping, [])

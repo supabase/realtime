@@ -119,9 +119,9 @@ defmodule Realtime.GenRpcPubSubTest do
 
       client_config_per_node = %{
         node() => gen_rpc_port,
-        :"#{us_node}@127.0.0.1" => 16970,
-        :"#{ap2_nodeX}@127.0.0.1" => 16971,
-        :"#{ap2_nodeY}@127.0.0.1" => 16972
+        TestEnv.peer_node(us_node) => TestEnv.peer_gen_rpc_port(us_node),
+        TestEnv.peer_node(ap2_nodeX) => TestEnv.peer_gen_rpc_port(ap2_nodeX),
+        TestEnv.peer_node(ap2_nodeY) => TestEnv.peer_gen_rpc_port(ap2_nodeY)
       }
 
       extra_config = [{:gen_rpc, :client_config_per_node, {:internal, client_config_per_node}}]
@@ -130,19 +130,37 @@ defmodule Realtime.GenRpcPubSubTest do
       Application.put_env(:gen_rpc, :client_config_per_node, {:internal, client_config_per_node})
 
       us_extra_config =
-        [{:realtime, :region, "us-east-1"}, {:gen_rpc, :tcp_server_port, 16970}] ++ extra_config
+        [{:realtime, :region, "us-east-1"}, {:gen_rpc, :tcp_server_port, TestEnv.peer_gen_rpc_port(us_node)}] ++
+          extra_config
 
-      {:ok, _} = Clustered.start(@aux_mod, name: us_node, extra_config: us_extra_config, phoenix_port: 4014)
+      {:ok, us} =
+        Clustered.start(@aux_mod,
+          name: us_node,
+          extra_config: us_extra_config,
+          phoenix_port: TestEnv.peer_http_port(us_node)
+        )
 
       ap2_nodeX_extra_config =
-        [{:realtime, :region, "ap-southeast-2"}, {:gen_rpc, :tcp_server_port, 16971}] ++ extra_config
+        [{:realtime, :region, "ap-southeast-2"}, {:gen_rpc, :tcp_server_port, TestEnv.peer_gen_rpc_port(ap2_nodeX)}] ++
+          extra_config
 
-      {:ok, _} = Clustered.start(@aux_mod, name: ap2_nodeX, extra_config: ap2_nodeX_extra_config, phoenix_port: 4015)
+      {:ok, ap_x} =
+        Clustered.start(@aux_mod,
+          name: ap2_nodeX,
+          extra_config: ap2_nodeX_extra_config,
+          phoenix_port: TestEnv.peer_http_port(ap2_nodeX)
+        )
 
       ap2_nodeY_extra_config =
-        [{:realtime, :region, "ap-southeast-2"}, {:gen_rpc, :tcp_server_port, 16972}] ++ extra_config
+        [{:realtime, :region, "ap-southeast-2"}, {:gen_rpc, :tcp_server_port, TestEnv.peer_gen_rpc_port(ap2_nodeY)}] ++
+          extra_config
 
-      {:ok, _} = Clustered.start(@aux_mod, name: ap2_nodeY, extra_config: ap2_nodeY_extra_config, phoenix_port: 4016)
+      {:ok, ap_y} =
+        Clustered.start(@aux_mod,
+          name: ap2_nodeY,
+          extra_config: ap2_nodeY_extra_config,
+          phoenix_port: TestEnv.peer_http_port(ap2_nodeY)
+        )
 
       # Ensuring that syn had enough time to propagate to all nodes the group information
       Process.sleep(3000)
@@ -167,9 +185,9 @@ defmodule Realtime.GenRpcPubSubTest do
       assert_receive ^message
 
       # Remote nodes received the broadcast
-      assert_receive {:relay, :"us_node@127.0.0.1", ^message}, 5000
-      assert_receive {:relay, :"ap2_nodeX@127.0.0.1", ^message}, 1000
-      assert_receive {:relay, :"ap2_nodeY@127.0.0.1", ^message}, 1000
+      assert_receive {:relay, ^us, ^message}, 5000
+      assert_receive {:relay, ^ap_x, ^message}, 1000
+      assert_receive {:relay, ^ap_y, ^message}, 1000
 
       # Untagged messages do not emit fan-out telemetry
       refute_receive {:fanout, _, _, _}
@@ -179,7 +197,7 @@ defmodule Realtime.GenRpcPubSubTest do
       # and each receiving node emits the fan-out telemetry. Register a connection on us_node so it
       # reports hit=true while the ap nodes report hit=false.
       tenant_id = "fanout-#{System.unique_integer([:positive])}"
-      :ok = :erpc.call(:"us_node@127.0.0.1", Subscriber, :add_user, [tenant_id])
+      :ok = :erpc.call(us, Subscriber, :add_user, [tenant_id])
 
       tagged_message = %Phoenix.Socket.Broadcast{topic: @topic, event: "an event", payload: %{"a" => "b"}}
 
@@ -192,22 +210,19 @@ defmodule Realtime.GenRpcPubSubTest do
 
       # The tag is stripped before delivery: subscribers only ever see the underlying struct
       assert_receive ^tagged_message
-      assert_receive {:relay, :"us_node@127.0.0.1", ^tagged_message}, 5000
-      assert_receive {:relay, :"ap2_nodeX@127.0.0.1", ^tagged_message}, 1000
-      assert_receive {:relay, :"ap2_nodeY@127.0.0.1", ^tagged_message}, 1000
+      assert_receive {:relay, ^us, ^tagged_message}, 5000
+      assert_receive {:relay, ^ap_x, ^tagged_message}, 1000
+      assert_receive {:relay, ^ap_y, ^tagged_message}, 1000
 
       # us_node holds a connection for the tenant (:ftl path) -> hit=true
-      assert_receive {:fanout, :"us_node@127.0.0.1", %{local_tenant_users: us_count}, %{tenant: ^tenant_id, hit: true}},
-                     5000
+      assert_receive {:fanout, ^us, %{local_tenant_users: us_count}, %{tenant: ^tenant_id, hit: true}}, 5000
 
       assert us_count >= 1
 
       # ap nodes hold no connection for the tenant (:ftr path + its re-forwarded :ftl) -> hit=false
-      assert_receive {:fanout, :"ap2_nodeX@127.0.0.1", %{local_tenant_users: 0}, %{tenant: ^tenant_id, hit: false}},
-                     1000
+      assert_receive {:fanout, ^ap_x, %{local_tenant_users: 0}, %{tenant: ^tenant_id, hit: false}}, 1000
 
-      assert_receive {:fanout, :"ap2_nodeY@127.0.0.1", %{local_tenant_users: 0}, %{tenant: ^tenant_id, hit: false}},
-                     1000
+      assert_receive {:fanout, ^ap_y, %{local_tenant_users: 0}, %{tenant: ^tenant_id, hit: false}}, 1000
 
       refute_receive _any
     end
@@ -370,46 +385,51 @@ defmodule Realtime.GenRpcPubSubTest do
   # Start two extra us-east-1 nodes (holder + bystander) so the origin makes three,
   # and wait until the region's Muster ring is :ready and agrees on a single view.
   defp start_us_east_region_cluster do
-    start_region_cluster("us-east-1", gen_rpc_ports: {16980, 16981}, phoenix_ports: {4024, 4025})
+    start_region_cluster("us-east-1", holder: :holder_us, bystander: :bystander_us)
   end
 
   # Start two nodes in a *different* region (ap-southeast-2) than the origin, and
   # wait until their Muster scope is :ready and agrees on a single view.
   defp start_ap_region_cluster do
-    start_region_cluster("ap-southeast-2", gen_rpc_ports: {16990, 16991}, phoenix_ports: {4026, 4027})
+    start_region_cluster("ap-southeast-2", holder: :holder_ap, bystander: :bystander_ap)
   end
 
   # Start a holder + bystander pair in `region` and wait until their Muster scope is
   # :ready and agrees on a single view. When `region` is the origin's own region the
   # origin joins the ring too, so it is included in the convergence wait; otherwise
-  # only the two remote nodes are. Ports are passed in so callers can keep clusters on
-  # disjoint ranges, avoiding collisions with a port that has not yet been torn down.
+  # only the two remote nodes are. Each region's pair takes its own peer slots, so the
+  # two clusters never reuse a port that has not yet been torn down.
   defp start_region_cluster(region, opts) do
-    {holder_gen, bystander_gen} = Keyword.fetch!(opts, :gen_rpc_ports)
-    {holder_phx, bystander_phx} = Keyword.fetch!(opts, :phoenix_ports)
+    holder = Keyword.fetch!(opts, :holder)
+    bystander = Keyword.fetch!(opts, :bystander)
 
     gen_rpc_port = Application.fetch_env!(:gen_rpc, :tcp_server_port)
 
-    holder = :holder_node
-    bystander = :bystander_node
-
     client_config_per_node = %{
       node() => gen_rpc_port,
-      :"#{holder}@127.0.0.1" => holder_gen,
-      :"#{bystander}@127.0.0.1" => bystander_gen
+      TestEnv.peer_node(holder) => TestEnv.peer_gen_rpc_port(holder),
+      TestEnv.peer_node(bystander) => TestEnv.peer_gen_rpc_port(bystander)
     }
 
     on_exit(fn -> Application.put_env(:gen_rpc, :client_config_per_node, {:internal, %{}}) end)
     Application.put_env(:gen_rpc, :client_config_per_node, {:internal, client_config_per_node})
     extra_config = [{:gen_rpc, :client_config_per_node, {:internal, client_config_per_node}}]
 
-    holder_config = [{:realtime, :region, region}, {:gen_rpc, :tcp_server_port, holder_gen}] ++ extra_config
-    {:ok, holder_node} = Clustered.start(@aux_mod, name: holder, extra_config: holder_config, phoenix_port: holder_phx)
+    holder_config =
+      [{:realtime, :region, region}, {:gen_rpc, :tcp_server_port, TestEnv.peer_gen_rpc_port(holder)}] ++ extra_config
 
-    bystander_config = [{:realtime, :region, region}, {:gen_rpc, :tcp_server_port, bystander_gen}] ++ extra_config
+    {:ok, holder_node} =
+      Clustered.start(@aux_mod, name: holder, extra_config: holder_config, phoenix_port: TestEnv.peer_http_port(holder))
+
+    bystander_config =
+      [{:realtime, :region, region}, {:gen_rpc, :tcp_server_port, TestEnv.peer_gen_rpc_port(bystander)}] ++ extra_config
 
     {:ok, bystander_node} =
-      Clustered.start(@aux_mod, name: bystander, extra_config: bystander_config, phoenix_port: bystander_phx)
+      Clustered.start(@aux_mod,
+        name: bystander,
+        extra_config: bystander_config,
+        phoenix_port: TestEnv.peer_http_port(bystander)
+      )
 
     scope = :"realtime_channels_#{region}"
 
