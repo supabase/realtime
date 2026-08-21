@@ -1,0 +1,45 @@
+# https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference
+
+version: 2
+updates:
+  - package-ecosystem: "mix"
+    directories:
+      - "/"        # root app
+      - "/forum"   # in-repo path dep
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+
+    # Let's not flood ourselves with PRs
+    open-pull-requests-limit: 3
+
+    # May widen `~>` constraints, but only when the latest resolvable version
+    # does not already satisfy them: in-range bumps touch mix.lock only.
+    versioning-strategy: "increase-if-necessary"
+
+    cooldown:
+      # same as in our hex config
+      default-days: 7
+      # major versions are more risky --> more cooldown
+      semver-major-days: 21
+
+    commit-message:
+      # By default, it changes behavior and so is a fix
+      prefix: "fix"
+      # dev only dependencies don't affect prod
+      prefix-development: "chore"
+      include: "scope"
+
+    groups:
+      # Batch dev and test together
+      dev-and-test:
+        dependency-type: "development"
+
+    ignore:
+      # override: true - a major bump invalidates the documented override rationale
+      # it might not be safe to bump any more
+      - dependency-name: "peep"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "snabbkaffe"
+        update-types: ["version-update:semver-major"]
