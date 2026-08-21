@@ -62,24 +62,46 @@ defmodule Realtime.Nodes do
   end
 
   @doc """
-  Lists the nodes in a region. Sorts by node name in case the list order
-  is unstable.
+  Lists every node in a region, draining ones included. Sorts by node name in case
+  the list order is unstable.
+
+  This is the *reachability* set: a node that is shutting down still serves the
+  clients already connected to it, so peers must keep delivering to it. Use
+  `eligible_region_nodes/1` to pick a node for new work.
   """
   @spec region_nodes(String.t() | nil) :: [atom()]
   def region_nodes(region) when is_binary(region) do
-    :syn.members(RegionNodes, region)
-    |> Enum.map(fn {_pid, [node: node]} -> node end)
+    RegionNodes
+    |> :syn.members(region)
+    |> Enum.map(&node_from_meta/1)
     |> Enum.sort()
   end
 
   def region_nodes(nil), do: []
 
   @doc """
+  Lists the nodes in a region that can be handed new work, excluding any that
+  `Realtime.RegionMembership.drain/0` has marked as shutting down.
+  """
+  @spec eligible_region_nodes(String.t() | nil) :: [atom()]
+  def eligible_region_nodes(region) when is_binary(region) do
+    RegionNodes
+    |> :syn.members(region)
+    |> Enum.reject(fn {_pid, meta} -> Keyword.get(meta, :draining, false) end)
+    |> Enum.map(&node_from_meta/1)
+    |> Enum.sort()
+  end
+
+  def eligible_region_nodes(nil), do: []
+
+  defp node_from_meta({_pid, meta}), do: Keyword.fetch!(meta, :node)
+
+  @doc """
   Picks a node from a region based on the provided key
   """
   @spec node_from_region(String.t(), term()) :: {:ok, node} | {:error, :not_available}
   def node_from_region(region, key) when is_binary(region) do
-    nodes = region_nodes(region)
+    nodes = eligible_region_nodes(region)
 
     case nodes do
       [] ->
@@ -115,7 +137,7 @@ defmodule Realtime.Nodes do
   """
   @spec launch_node(String.t() | nil, atom(), String.t()) :: atom()
   def launch_node(region, default, tenant_id) when is_binary(tenant_id) do
-    case region_nodes(region) do
+    case eligible_region_nodes(region) do
       [] ->
         Logger.warning("Zero region nodes for #{region} using #{inspect(default)}")
         default

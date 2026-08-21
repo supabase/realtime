@@ -10,6 +10,9 @@ defmodule Realtime.SignalHandlerTest do
   setup do
     on_exit(fn ->
       Application.put_env(:realtime, :shutdown_in_progress, false)
+      # A fresh RegionMembership re-joins without the draining mark
+      Supervisor.terminate_child(Realtime.Supervisor, Realtime.RegionMembership)
+      Supervisor.restart_child(Realtime.Supervisor, Realtime.RegionMembership)
     end)
   end
 
@@ -29,6 +32,18 @@ defmodule Realtime.SignalHandlerTest do
       capture_log(fn -> SignalHandler.handle_event(:sigterm, state) end)
 
       assert Application.get_env(:realtime, :shutdown_in_progress) == true
+    end
+
+    test "withdraws the node from region elections on sigterm" do
+      region = Application.get_env(:realtime, :region)
+      {:ok, state} = SignalHandler.init({%{handler_mod: FakeHandler}, :ok})
+
+      assert node() in Realtime.Nodes.eligible_region_nodes(region)
+
+      capture_log(fn -> SignalHandler.handle_event(:sigterm, state) end)
+
+      refute node() in Realtime.Nodes.eligible_region_nodes(region)
+      assert node() in Realtime.Nodes.region_nodes(region)
     end
 
     test "does not set shutdown_in_progress on non-sigterm signals" do
