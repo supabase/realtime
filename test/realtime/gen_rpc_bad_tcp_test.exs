@@ -14,7 +14,7 @@ defmodule Realtime.GenRpcBadTcpTest do
   @moduletag extra_config: [{:gen_rpc, :tcp_server_port, 9999}]
 
   setup context do
-    {:ok, node} = Clustered.start(nil, extra_config: context[:extra_config])
+    {:ok, node} = Clustered.start(nil, extra_config: context[:extra_config], warm_clients: false)
     %{node: node}
   end
 
