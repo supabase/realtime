@@ -372,9 +372,7 @@ defmodule Generators do
   `db_settings/0` so tests stay in step when a key is added or dropped.
   """
   @spec encrypted_settings_keys(binary()) :: [binary()]
-  def encrypted_settings_keys(type \\ "postgres_cdc_rls") do
-    for {field, _checker, true} <- Extensions.db_settings(type).required, do: field
-  end
+  defdelegate encrypted_settings_keys(type \\ "postgres_cdc_rls"), to: Extensions
 
   @doc """
   Rewrites a tenant's jwt_secret and every encrypted setting with the legacy AES-128-ECB cipher and
