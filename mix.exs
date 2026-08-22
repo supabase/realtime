@@ -15,7 +15,6 @@ defmodule Realtime.MixProject do
       dialyzer: dialyzer(),
       test_coverage: [tool: ExCoveralls],
       hex: [
-        cooldown: "7d",
         ignore_advisories: ["CVE-2026-43969", "CVE-2026-43966"]
       ],
       releases: [
@@ -108,7 +107,7 @@ defmodule Realtime.MixProject do
       # gen_rpc uses a git dependency
       {:snabbkaffe, "~> 1.0", override: true},
       {:req, "~> 0.6.2"},
-      {:mimic, "~> 2.0", only: :test},
+      {:mimic, "~> 2.4", only: :test},
       {:floki, ">= 0.30.0", only: :test},
       {:lazy_html, ">= 0.1.0", only: :test},
       {:mint_web_socket, "~> 1.0", only: :test},
