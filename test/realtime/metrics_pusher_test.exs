@@ -216,11 +216,13 @@ defmodule Realtime.MetricsPusherTest do
       log =
         capture_log(fn ->
           send(pid, :unexpected_message)
-          Process.sleep(50)
-          assert Process.alive?(pid)
+          # calling :sys.get_state/1 ensures that the above message has been processed
+          # as this is a sync call answered in mailbox order
+          :sys.get_state(pid)
         end)
 
       assert log =~ "MetricsPusher received unexpected message: :unexpected_message"
+      assert Process.alive?(pid)
     end
   end
 end
