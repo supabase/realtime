@@ -141,15 +141,17 @@ defmodule Realtime.Integration.RtChannel.WalBloatTest do
     pid
   end
 
+  # Waits for the slot to be not just active, but caught up (lag back under the
+  # watchdog's threshold). A slot can briefly show an active_pid while still
+  # replaying leftover WAL from the bloat, only for the watchdog to kill it again
+  # moments later - checking the same condition the watchdog checks avoids that race.
   defp await_replication_slot_active(db_conn, retries, interval_ms) do
+    slot_name = "supabase_realtime_messages_replication_slot_"
+
     Enum.reduce_while(1..retries, nil, fn _, _ ->
-      case Postgrex.query!(
-             db_conn,
-             "SELECT active_pid FROM pg_replication_slots WHERE active_pid IS NOT NULL AND slot_name = 'supabase_realtime_messages_replication_slot_'",
-             []
-           ) do
-        %{rows: [[pid]]} ->
-          {:halt, pid}
+      case Database.check_replication_slot(db_conn, slot_name) do
+        :ok ->
+          {:halt, active_replication_slot_pid!(db_conn)}
 
         _ ->
           Process.sleep(interval_ms)
