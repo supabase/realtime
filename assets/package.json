@@ -6,7 +6,7 @@
     "format:check": "oxfmt --check js tailwind.config.js"
   },
   "dependencies": {
-    "@supabase/supabase-js": "2.111.0"
+    "@supabase/supabase-js": "2.112.4"
   },
   "devDependencies": {
     "oxfmt": "0.63.0",
