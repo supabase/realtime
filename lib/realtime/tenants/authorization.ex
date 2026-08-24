@@ -31,6 +31,8 @@ defmodule Realtime.Tenants.Authorization do
           :sub => binary | nil
         }
 
+  @type extension :: :broadcast | :presence
+
   @doc """
   Builds a new authorization struct which will be used to retain the information required to check Policies.
 
@@ -114,7 +116,7 @@ defmodule Realtime.Tenants.Authorization do
 
   Automatically uses RPC if the database connection is not in the same node
   """
-  @spec get_write_authorizations(Policies.t(), pid(), t(), keyword()) ::
+  @spec get_write_authorizations(Policies.t(), pid(), t(), extension()) ::
           {:ok, Policies.t()}
           | {:error, :rls_policy_error, Postgrex.Error.t()}
           | {:error, :query_canceled, Postgrex.Error.t()}
@@ -122,14 +124,13 @@ defmodule Realtime.Tenants.Authorization do
           | {:error, :increase_connection_pool}
           | {:error, :tenant_database_unavailable}
           | {:error, any()}
-  def get_write_authorizations(policies, db_conn, authorization_context, opts \\ [])
-
-  def get_write_authorizations(policies, db_conn, authorization_context, opts) when node() == node(db_conn) do
+  def get_write_authorizations(policies, db_conn, authorization_context, extension)
+      when extension in [:broadcast, :presence] and node() == node(db_conn) do
     rate_counter = rate_counter(authorization_context.tenant_id)
 
     if rate_counter.limit.triggered == false do
       db_conn
-      |> get_write_policies_for_connection(authorization_context, policies, opts)
+      |> get_write_policies_for_connection(authorization_context, policies, extension)
       |> handle_policies_result(rate_counter)
     else
       {:error, :increase_connection_pool}
@@ -137,7 +138,8 @@ defmodule Realtime.Tenants.Authorization do
   end
 
   # Remote call
-  def get_write_authorizations(policies, db_conn, authorization_context, opts) do
+  def get_write_authorizations(policies, db_conn, authorization_context, extension)
+      when extension in [:broadcast, :presence] do
     rate_counter = rate_counter(authorization_context.tenant_id)
 
     if rate_counter.limit.triggered == false do
@@ -145,7 +147,7 @@ defmodule Realtime.Tenants.Authorization do
              node(db_conn),
              __MODULE__,
              :get_write_authorizations,
-             [policies, db_conn, authorization_context, opts],
+             [policies, db_conn, authorization_context, extension],
              tenant_id: authorization_context.tenant_id,
              key: authorization_context.tenant_id
            ) do
@@ -164,8 +166,8 @@ defmodule Realtime.Tenants.Authorization do
     end
   end
 
-  def get_write_authorizations(db_conn, authorization_context),
-    do: get_write_authorizations(%Policies{}, db_conn, authorization_context)
+  def get_write_authorizations(db_conn, authorization_context, extension),
+    do: get_write_authorizations(%Policies{}, db_conn, authorization_context, extension)
 
   defp handle_policies_result(result, rate_counter) do
     case result do
@@ -279,18 +281,17 @@ defmodule Realtime.Tenants.Authorization do
     )
   end
 
-  defp get_write_policies_for_connection(conn, authorization_context, policies, caller_opts) do
+  defp get_write_policies_for_connection(conn, authorization_context, policies, extension) do
     tenant_id = authorization_context.tenant_id
     opts = [telemetry: [:realtime, :tenants, :write_authorization_check], tenant_id: tenant_id]
     metadata = [project: tenant_id, external_id: tenant_id]
-    extensions = extensions_to_check(caller_opts)
 
     Database.transaction(
       conn,
       fn transaction_conn ->
         set_conn_config(transaction_conn, authorization_context)
 
-        with {:ok, policies} <- check_write_policies(transaction_conn, authorization_context, extensions, policies) do
+        with {:ok, policies} <- check_write_policy(transaction_conn, authorization_context, extension, policies) do
           Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
           policies
         else
@@ -328,25 +329,19 @@ defmodule Realtime.Tenants.Authorization do
     end
   end
 
-  defp check_write_policies(conn, authorization_context, extensions, policies) do
-    Enum.reduce_while(@all_extensions, {:ok, policies}, fn extension, {:ok, acc} ->
-      if extension in extensions do
-        changeset = Message.changeset(%Message{}, %{topic: authorization_context.topic, extension: extension})
+  defp check_write_policy(conn, authorization_context, extension, policies) do
+    changeset = Message.changeset(%Message{}, %{topic: authorization_context.topic, extension: extension})
 
-        case Repo.insert(conn, changeset, Message, mode: :savepoint, returning: false) do
-          {:ok, _} ->
-            {:cont, {:ok, Policies.update_policies(acc, extension, :write, true)}}
+    case Repo.insert(conn, changeset, Message, mode: :savepoint, returning: false) do
+      {:ok, _} ->
+        {:ok, Policies.update_policies(policies, extension, :write, true)}
 
-          {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-            {:cont, {:ok, Policies.update_policies(acc, extension, :write, false)}}
+      {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
+        {:ok, Policies.update_policies(policies, extension, :write, false)}
 
-          {:error, reason} ->
-            {:halt, {:error, reason}}
-        end
-      else
-        {:cont, {:ok, Policies.update_policies(acc, extension, :write, false)}}
-      end
-    end)
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 
   defp rate_counter(tenant_id) do

@@ -204,7 +204,7 @@ defmodule Realtime.Tenants.SingleBroadcast do
   defp permissions_for_message(tenant, auth_params, topic) do
     with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id) do
       auth_params = %{auth_params | topic: topic}
-      Authorization.get_write_authorizations(db_conn, auth_params)
+      Authorization.get_write_authorizations(db_conn, auth_params, :broadcast)
     end
   end
 
