@@ -25,7 +25,8 @@ jobs:
   export-snapshots:
     name: Export schema & dump (pg${{ matrix.pg_major }})
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Do not run for dependabot (as usually dependabot upgrades shouldn't touch schema and we don't want to duplicate secrets)
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]'
     strategy:
       fail-fast: false
       matrix:
@@ -115,7 +116,8 @@ jobs:
     name: Commit schema and dump snapshots
     needs: export-snapshots
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Do not run for dependabot (as usually dependabot upgrades shouldn't touch schema and we don't want to duplicate secrets)
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]'
 
     steps:
       - name: Generate GitHub App token
