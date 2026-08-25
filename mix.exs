@@ -16,7 +16,8 @@ defmodule Realtime.MixProject do
       test_coverage: [tool: ExCoveralls],
       hex: [
         cooldown: "7d",
-        ignore_advisories: ["CVE-2026-43969", "CVE-2026-43966"]
+        # These are all cowlib, have no released fixes as of now but also shouldn't impact us.
+        ignore_advisories: ["CVE-2026-43969", "CVE-2026-43966", "CVE-2026-43971"]
       ],
       releases: [
         realtime: [
