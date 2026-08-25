@@ -15,6 +15,7 @@ defmodule Realtime.MixProject do
       dialyzer: dialyzer(),
       test_coverage: [tool: ExCoveralls],
       hex: [
+        # Can be overridden via `HEX_COOLDOWN=0d` should you want to, see DEVELOPERS.md#dependency-cooldown
         cooldown: "7d",
         # These are all cowlib, have no released fixes as of now but also shouldn't impact us.
         ignore_advisories: ["CVE-2026-43969", "CVE-2026-43966", "CVE-2026-43971"]
