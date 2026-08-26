@@ -751,19 +751,18 @@ defmodule Forum.Muster.Scope do
   end
 
   # Graceful cluster-leave: evacuate the ROUTER role before this node dies (see
-  # Forum.Muster.drain/2). We do NOT rebalance ourselves; instead we broadcast
+  # `Forum.Muster.drain/2`). We do not rebalance ourselves; instead we broadcast
   # {:muster_leaving} and let each PEER rebalance us out of its ring and ack. The
-  # drain/2 caller is parked in `from` and replied to asynchronously (via
-  # GenServer.reply from the :leave_settle / :leave_deadline handlers), so this
-  # loop never blocks on the remote acks -- preserving the "Scope's loop never
-  # blocks on a remote RPC" invariant.
-  #
-  # Start draining immediately (leaving: true suppresses every outbound
+  # `drain/2` caller is parked in `from` and replied to asynchronously (via
+  # `GenServer.reply` from the `:leave_settle` / `:leave_deadline handlers`), so this
+  # loop never blocks on the remote acks.
+  # Start draining immediately (`leaving: true` suppresses every outbound
   # self-assertion) and stop accepting joins. A singleton (no peers) has nobody
-  # to evacuate to and nothing routed to it, so it replies :ok at once. Otherwise
-  # we arm the ack deadline and wait; inbound coordination RPCs keep being
+  # to evacuate to and nothing routed to it, so it replies `:ok` at once. Otherwise
+  # we arm the ack deadline and wait. Inbound coordination RPCs keep being
   # serviced throughout.
   def handle_call({:drain, timeout, settle_ms}, from, %State{} = state) do
+    # When atoms or other terms that fit in one machine word are deleted, no global GC is needed.
     :persistent_term.put({Forum.Muster, state.scope, :accepting_joins}, false)
     expected = state.peers |> Map.keys() |> Enum.map(&node/1) |> MapSet.new()
 
@@ -774,7 +773,9 @@ defmodule Forum.Muster.Scope do
       settle_ms: settle_ms
     })
 
-    if MapSet.size(expected) == 0 do
+    expected_size = MapSet.size(expected)
+
+    if expected_size == 0 do
       Logger.info(
         "Muster[#{node()}|#{state.scope}] Draining: singleton (no peers), nothing to hand off; draining immediately"
       )
@@ -783,7 +784,7 @@ defmodule Forum.Muster.Scope do
     else
       Logger.info(
         "Muster[#{node()}|#{state.scope}] Draining: broadcasting leave, awaiting acks from " <>
-          "#{MapSet.size(expected)} peer(s) #{inspect(MapSet.to_list(expected))} " <>
+          "#{expected_size} peer(s) #{inspect(MapSet.to_list(expected))} " <>
           "(ack timeout #{timeout}ms, settle #{settle_ms}ms)"
       )
 
@@ -953,9 +954,7 @@ defmodule Forum.Muster.Scope do
   end
 
   def handle_info({:nodeup, node}, state) do
-    Logger.info(
-      "Muster[#{node()}|#{state.scope}] node up: #{inspect(node)}, reaching out to pair"
-    )
+    Logger.info("Muster[#{node()}|#{state.scope}] node up: #{node}, reaching out to pair")
 
     :telemetry.execute([:forum, state.scope, :node, :up], %{}, %{node: node})
 
@@ -1013,7 +1012,7 @@ defmodule Forum.Muster.Scope do
 
       ref ->
         Logger.info(
-          "Muster[#{node()}|#{state.scope}] peer draining: #{inspect(node(peer_pid))}, rebalancing it out of the ring and acking"
+          "Muster[#{node()}|#{state.scope}] peer draining: #{node(peer_pid)}, rebalancing it out of the ring and acking"
         )
 
         tp(:muster_leaving_received, %{
@@ -1127,10 +1126,10 @@ defmodule Forum.Muster.Scope do
 
       other ->
         if router_node in state.members do
-          raise "Muster rebalance snapshot to #{inspect(router_node)} failed: #{inspect(other)}"
+          raise "Muster rebalance snapshot to #{router_node} failed: #{inspect(other)}"
         else
           Logger.info(
-            "Muster[#{node()}|#{state.scope}] rebalance snapshot to #{inspect(router_node)} failed: #{inspect(other)}, but it already left membership; dropping"
+            "Muster[#{node()}|#{state.scope}] rebalance snapshot to #{router_node} failed: #{inspect(other)}, but it already left membership; dropping"
           )
 
           {:noreply, state}
@@ -1170,13 +1169,13 @@ defmodule Forum.Muster.Scope do
 
           other ->
             if member in target do
-              raise "Muster view-change prepare to #{inspect(member)} failed: #{inspect(other)}"
+              raise "Muster view-change prepare to #{member} failed: #{inspect(other)}"
             else
               # Not in the target (being dropped / already leaving): don't crash,
               # and stop awaiting it so a departing old member cannot wedge the
               # round. Commit if it was the last outstanding ack.
               Logger.info(
-                "Muster[#{node()}|#{state.scope}] view-change prepare to #{inspect(member)} failed: #{inspect(other)}, but it is not in the target view; dropping"
+                "Muster[#{node()}|#{state.scope}] view-change prepare to #{member} failed: #{inspect(other)}, but it is not in the target view; dropping"
               )
 
               awaiting = MapSet.delete(awaiting, member)
@@ -1747,7 +1746,7 @@ defmodule Forum.Muster.Scope do
     new_peers = Map.delete(state.peers, pid)
 
     Logger.info(
-      "Muster[#{node()}|#{state.scope}] peer #{why}: #{inspect(peer_node)}, dropping occupancy/view data attributable to this incarnation and rebalancing"
+      "Muster[#{node()}|#{state.scope}] peer #{why}: #{peer_node}, dropping occupancy/view data attributable to this incarnation and rebalancing"
     )
 
     tp_span(:muster_peer_down_apply, %{
