@@ -115,7 +115,7 @@ defmodule Realtime.MixProject do
       {:lazy_html, ">= 0.1.0", only: :test},
       {:mint_web_socket, "~> 1.0", only: :test},
       {:postgres_replication, git: "https://github.com/filipecabaco/postgres_replication.git", only: :test},
-      {:benchee, "~> 1.1.0", only: [:dev, :test]},
+      {:benchee, "~> 1.5.1", only: [:dev, :test]},
       {:excoveralls, "~> 0.18", only: [:dev, :test], runtime: false},
       {:ex_crap, "~> 0.1", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
