@@ -253,7 +253,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     ts_new =
       case {subscribers, ts != nil && ts + @stop_after < now()} do
         {0, true} ->
-          Logger.info("Stop tenant #{state.id} because of no connected users")
+          Logger.info("Stopping Postgres Changes streaming for tenant due to no active subscriptions")
           Rls.handle_stop(state.id, 15_000)
           ts
 
