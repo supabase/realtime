@@ -14,6 +14,7 @@ config :realtime,
   replication_watchdog_interval: :timer.minutes(5),
   replication_watchdog_timeout: :timer.minutes(1),
   replication_ready_timeout: :timer.minutes(1),
+  # Blocks the transport process, so keep it under the client heartbeat interval (30s)
   postgres_changes_wait_max_timeout: :timer.seconds(20)
 
 # Configures the endpoint
