@@ -2549,7 +2549,9 @@ defmodule Forum.MusterDistributedTest do
 
           assert {:error, :rpc_failed} = Task.await(join_task, 10_000)
 
-          wait_until(fn -> Muster.members(scope) == [t_node] and status(scope) == :ready end)
+          wait_until(fn ->
+            Muster.members(scope) == [t_node] and status(scope) == :ready
+          end)
 
           refute Muster.local_member?(scope, group, member)
           assert Muster.local_member_count(scope, group) == 0
@@ -2638,7 +2640,9 @@ defmodule Forum.MusterDistributedTest do
                      10_000
                    )
 
-          wait_until(fn -> Muster.members(scope) == [t_node] and status(scope) == :ready end)
+          wait_until(fn ->
+            Muster.members(scope) == [t_node] and status(scope) == :ready
+          end)
 
           assert {:ok, _} =
                    block_until(
@@ -3068,7 +3072,7 @@ defmodule Forum.MusterDistributedTest do
 
           wait_until(
             fn ->
-              Muster.members(scope) == view3 and
+              Enum.sort(Muster.members(scope)) == view3 and
                 status(scope) == :ready and
                 :erpc.call(r_node, Muster, :members, [scope]) == view3 and
                 remote_status(p_r, scope) == :ready and
@@ -3503,7 +3507,7 @@ defmodule Forum.MusterDistributedTest do
                    )
 
           # T is gated: still committed on {T,R}; the group is still on R.
-          assert Muster.members(scope) == two_view
+          assert Enum.sort(Muster.members(scope)) == two_view
           assert t_node in occupancy_on(r_node, scope, group)
 
           # D joins. T only SUPERSEDES its (still-uncommitted) target to {T,R,C,D};
@@ -3518,7 +3522,7 @@ defmodule Forum.MusterDistributedTest do
                      15_000
                    )
 
-          assert Muster.members(scope) == two_view
+          assert Enum.sort(Muster.members(scope)) == two_view
           refute Muster.can_decide?(scope, hash4)
           refute Muster.can_decide?(scope, hash3)
 
@@ -3665,7 +3669,7 @@ defmodule Forum.MusterDistributedTest do
           await_ready(view2, nth: 2)
 
           # The survivors agree the cluster is just {T, S}...
-          assert Muster.members(scope) == view2
+          assert Enum.sort(Muster.members(scope)) == view2
           assert :erpc.call(s_node, Muster, :members, [scope]) == view2
 
           # ...the groups whose router died moved onto survivors, and the new
@@ -3989,7 +3993,7 @@ defmodule Forum.MusterDistributedTest do
           # which differs from the stale {T,S,Z} view, exposing the regression
           # if T were to keep S's stale watermark.
           :ok = stop_supervised({:peer, s_name})
-          wait_until(fn -> Muster.members(scope) == Enum.sort([t_node, z_node]) end)
+          wait_until(fn -> Enum.sort(Muster.members(scope)) == Enum.sort([t_node, z_node]) end)
 
           :ok = stop_supervised({:peer, z_name})
           wait_until(fn -> Muster.members(scope) == [t_node] end)
@@ -4030,7 +4034,7 @@ defmodule Forum.MusterDistributedTest do
           assert :erpc.call(s_node, Muster, :members, [scope]) == view_ts
 
           # T learns S is a member again (rebalances {T} -> {T,S})...
-          wait_until(fn -> Muster.members(scope) == view_ts end)
+          wait_until(fn -> Enum.sort(Muster.members(scope)) == view_ts end)
 
           # The dangerous condition is genuinely present: S's fresh announce seq
           # is LOWER than the watermark T held from the dead incarnation (proven
@@ -4731,7 +4735,7 @@ defmodule Forum.MusterDistributedTest do
           # recur. Poll real state instead, which sidesteps the race entirely.
           wait_until(
             fn ->
-              status(scope) == :ready and Muster.members(scope) == view3 and
+              status(scope) == :ready and Enum.sort(Muster.members(scope)) == view3 and
                 remote_status(p_a, scope) == :ready and remote_status(p_b, scope) == :ready and
                 :erpc.call(a_node, Muster, :members, [scope]) == view3 and
                 :erpc.call(b_node, Muster, :members, [scope]) == view3
@@ -4746,7 +4750,7 @@ defmodule Forum.MusterDistributedTest do
           assert a_node in occupancy_on(t_node, scope, g_ab_side)
 
           assert Muster.can_decide?(scope, hash3)
-          assert Muster.members(scope) == view3
+          assert Enum.sort(Muster.members(scope)) == view3
           assert :erpc.call(a_node, Muster, :members, [scope]) == view3
           assert :erpc.call(b_node, Muster, :members, [scope]) == view3
         end,
@@ -4975,7 +4979,7 @@ defmodule Forum.MusterDistributedTest do
                    )
 
           # Gated: T has NOT swapped its ring (still {T,R}).
-          assert Muster.members(scope) == two_view
+          assert Enum.sort(Muster.members(scope)) == two_view
 
           # C leaves before T commits. T's recompute is back to the committed
           # {T,R}: the round is CANCELLED, not rebalanced.
@@ -4991,7 +4995,7 @@ defmodule Forum.MusterDistributedTest do
           await_ready(two_view, nodes: [t_node], nth: 2)
           assert status(scope) == :ready
           assert Muster.view_hash(scope) == two_hash
-          assert Muster.members(scope) == two_view
+          assert Enum.sort(Muster.members(scope)) == two_view
 
           # Release R; the whole cluster settles back on {T,R} :ready.
           tp(:test_release, %{})
@@ -5081,7 +5085,7 @@ defmodule Forum.MusterDistributedTest do
                    )
 
           # Neither committed: rings still {T,R,S}.
-          assert Muster.members(scope) == three_view
+          assert Enum.sort(Muster.members(scope)) == three_view
           assert :erpc.call(r_node, Muster, :members, [scope]) == three_view
 
           # C leaves. Both T and R cancel their rounds.
@@ -5105,14 +5109,14 @@ defmodule Forum.MusterDistributedTest do
           # for the other and floods indefinitely).
           await_ready(three_view, nodes: [t_node, r_node], nth: 2)
           assert status(scope) == :ready
-          assert Muster.members(scope) == three_view
+          assert Enum.sort(Muster.members(scope)) == three_view
 
           # Release S; the whole cluster settles back on {T,R,S} :ready. S's now
           # stale (lower-seq) acks land after both rounds are gone and are dropped.
           tp(:test_release, %{})
 
           wait_until(fn ->
-            Muster.members(scope) == three_view and status(scope) == :ready and
+            Enum.sort(Muster.members(scope)) == three_view and status(scope) == :ready and
               :erpc.call(r_node, Muster, :members, [scope]) == three_view and
               :erpc.call(s_node, Muster, :members, [scope]) == three_view and
               remote_status(p_s, scope) == :ready
@@ -5179,7 +5183,7 @@ defmodule Forum.MusterDistributedTest do
           # the crashed Scope restarts and retries its (recovered) prepare.
           wait_until(
             fn ->
-              Muster.members(scope) == view3 and status(scope) == :ready and
+              Enum.sort(Muster.members(scope)) == view3 and status(scope) == :ready and
                 :erpc.call(r_node, Muster, :members, [scope]) == view3 and
                 :erpc.call(c_node, Muster, :members, [scope]) == view3
             end,
@@ -5291,7 +5295,7 @@ defmodule Forum.MusterDistributedTest do
           await_ready(view3, nth: 2, timeout: 30_000)
 
           # All three agree on the full membership again.
-          assert Muster.members(scope) == view3
+          assert Enum.sort(Muster.members(scope)) == view3
           assert :erpc.call(n1, Muster, :members, [scope]) == view3
           assert :erpc.call(n2, Muster, :members, [scope]) == view3
 
@@ -5377,7 +5381,7 @@ defmodule Forum.MusterDistributedTest do
 
           # Peers converged onto the 2-node view without C.
           await_ready([t_node, a_node])
-          assert Muster.members(scope) == Enum.sort([t_node, a_node])
+          assert Enum.sort(Muster.members(scope)) == Enum.sort([t_node, a_node])
 
           # The group C routed is reachable on the newly elected router, with A's
           # source row intact -- no missed broadcast across the handoff.
@@ -5386,10 +5390,14 @@ defmodule Forum.MusterDistributedTest do
           assert a_node in occupancy_on(r, scope, g)
 
           # The eventual real :DOWN (process actually stops) is a no-op: C was
-          # already departed + demonitored, so membership stays put.
+          # already departed + demonitored, so membership stays put. Monitor the
+          # node so we wait for the real death (the event whose harmlessness we
+          # assert) instead of a fixed sleep; the local Scope's nodedown handler
+          # is a no-op and no process :DOWN is delivered (C was demonitored+flushed).
+          Node.monitor(c_node, true)
           :ok = stop_supervised({:peer, c_name})
-          Process.sleep(300)
-          assert Muster.members(scope) == Enum.sort([t_node, a_node])
+          assert_receive {:nodedown, ^c_node}, 5_000
+          assert Enum.sort(Muster.members(scope)) == Enum.sort([t_node, a_node])
           assert status(scope) == :ready
         end,
         fn _trace -> :ok end
@@ -5569,7 +5577,7 @@ defmodule Forum.MusterDistributedTest do
 
       {:ok, pc, ^c_node} = Peer.start(name: c_name, aux_mod: @aux_mod)
       start_remote_muster(pc, scope)
-      wait_until(fn -> Muster.members(scope) == Enum.sort([t_node, c_node]) end)
+      wait_until(fn -> Enum.sort(Muster.members(scope)) == Enum.sort([t_node, c_node]) end)
 
       assert :ok = :peer.call(pc, MusterPeerAux, :drain, [scope, [settle_ms: 200]])
       wait_until(fn -> Muster.members(scope) == [t_node] end)

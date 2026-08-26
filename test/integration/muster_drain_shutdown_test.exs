@@ -1,9 +1,9 @@
 defmodule Realtime.Integration.MusterDrainShutdownTest do
+  # async: false due to usage of Clustered
   use ExUnit.Case, async: false
+  import TestHelpers
 
   alias Forum.Muster
-
-  @moduletag timeout: 60_000
 
   test "tearing down the peer's MusterDrainer gracefully evacuates its router role" do
     scope = Application.fetch_env!(:realtime, :muster_scope)
@@ -19,7 +19,10 @@ defmodule Realtime.Integration.MusterDrainShutdownTest do
 
     # Both nodes agree on the scope and converge to a 2-node :ready ring.
     assert :erpc.call(peer, Application, :fetch_env!, [:realtime, :muster_scope]) == scope
-    await(fn -> Enum.sort(Muster.members(scope)) == Enum.sort([local, peer]) and Muster.status(scope) == :ready end)
+
+    eventually(fn ->
+      Enum.sort(Muster.members(scope)) == Enum.sort([local, peer]) and Muster.status(scope) == :ready
+    end)
 
     # Terminate the drainer child on the peer: this runs Realtime.MusterDrainer's
     # terminate/2 -> Forum.Muster.drain/2 while the peer's coordinator is alive.
@@ -29,23 +32,11 @@ defmodule Realtime.Integration.MusterDrainShutdownTest do
     assert :erpc.call(peer, :persistent_term, :get, [{Forum.Muster, scope, :accepting_joins}, true]) == false
 
     # The survivor rebalanced the peer out of its ring...
-    await(fn -> Enum.sort(Muster.members(scope)) == [local] end)
+    eventually(fn -> Enum.sort(Muster.members(scope)) == [local] end)
 
     # ...and it did so while the peer node was still alive and connected -- proof
     # this was the graceful leave, not an abrupt-death :DOWN.
     assert peer in Node.list()
     assert :erpc.call(peer, Process, :whereis, [Forum.Supervisor.name(scope)]) |> is_pid()
-  end
-
-  defp await(fun, attempts \\ 100)
-  defp await(_fun, 0), do: flunk("condition never became true within timeout")
-
-  defp await(fun, attempts) do
-    if fun.() do
-      :ok
-    else
-      Process.sleep(100)
-      await(fun, attempts - 1)
-    end
   end
 end
