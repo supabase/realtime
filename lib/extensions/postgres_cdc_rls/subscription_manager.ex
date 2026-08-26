@@ -296,7 +296,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
       |> pop_not_alive_pids(state.subscribers_pids_table, state.subscribers_nodes_table, id)
 
     new_delete_queue =
-      if length(ids) > 0 do
+      if not Enum.empty?(ids) do
         q =
           Enum.reduce(ids, delete_queue.queue, fn id, acc ->
             if :queue.member(id, acc), do: acc, else: :queue.in(id, acc)
