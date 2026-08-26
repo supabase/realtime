@@ -112,6 +112,7 @@ defmodule Realtime.Application do
       [
         Realtime.ErlSysMon,
         Realtime.GenCounter,
+        Realtime.GenRpcMetrics,
         Realtime.PromEx,
         Realtime.TenantPromEx,
         {Realtime.Telemetry.Logger, handler_id: "telemetry-logger"},
