@@ -16,7 +16,23 @@ defmodule RealtimeWeb.JwtVerificationTest do
 
   setup do
     start_supervised(Mock)
-    on_exit(fn -> Application.put_env(:realtime, :jwt_claim_validators, %{}) end)
+
+    # Route Joken's current_time/0 through the Mock so Mock.freeze/0 actually
+    # controls the clock the code under test sees. Without this the mock is a
+    # no-op and exp/iat assertions flake on second boundaries.
+    previous_adapter = Application.get_env(:joken, :current_time_adapter)
+    Application.put_env(:joken, :current_time_adapter, Mock)
+
+    on_exit(fn ->
+      Application.put_env(:realtime, :jwt_claim_validators, %{})
+
+      if previous_adapter do
+        Application.put_env(:joken, :current_time_adapter, previous_adapter)
+      else
+        Application.delete_env(:joken, :current_time_adapter)
+      end
+    end)
+
     :ok
   end
 
