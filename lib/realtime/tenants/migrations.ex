@@ -99,7 +99,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_260_706_120_000, Migrations.GrantCheckEqualityOp5Arg},
     {20_260_707_120_000, Migrations.RestrictRealtimeSchema},
     {20_260_709_120_000, Migrations.FixApplyRlsFilterRoleLeak},
-    {20_260_714_120_000, Migrations.AddBroadcastPersistence}
+    {20_260_714_120_000, Migrations.AddBroadcastPersistence},
+    {20_260_827_120_000, Migrations.EmptySelectColumnsReturnPrimaryKeys}
   ]
 
   defstruct [:tenant_external_id, :settings, migrations_ran: 0]

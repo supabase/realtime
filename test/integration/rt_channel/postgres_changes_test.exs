@@ -544,6 +544,65 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
       refute "binary_data" in column_names
     end
 
+    test "subscribe with an empty select delivers primary keys only — INSERT", %{
+      tenant: tenant,
+      serializer: serializer
+    } do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+
+      config = %{
+        postgres_changes: [
+          %{event: "INSERT", schema: "public", table: "test", select: []}
+        ]
+      }
+
+      WebsocketClient.join(socket, topic, %{config: config})
+      sub_id = :erlang.phash2(%{"event" => "INSERT", "schema" => "public", "table" => "test", "select" => []})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic},
+                     200
+
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{
+                         "extension" => "postgres_changes",
+                         "message" => "Subscribed to PostgreSQL",
+                         "status" => "ok"
+                       },
+                       topic: ^topic
+                     },
+                     8000
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+
+      %{rows: [[id]]} =
+        Postgrex.query!(conn, "insert into test (details) values ('hello') returning id", [])
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{
+                         "data" => %{
+                           "columns" => columns,
+                           "record" => record,
+                           "type" => "INSERT"
+                         },
+                         "ids" => [^sub_id]
+                       },
+                       topic: ^topic
+                     },
+                     500
+
+      # An empty select means primary keys only: the PK is present and every
+      # non-pkey column is excluded (distinct from omitting select, which delivers
+      # all columns).
+      assert record["id"] == id
+      refute Map.has_key?(record, "details")
+      refute Map.has_key?(record, "binary_data")
+      # columns metadata reflects the same: only the PK column is present
+      assert Enum.map(columns, & &1["name"]) == ["id"]
+    end
+
     test "subscribe with select filters payload columns — UPDATE", %{
       tenant: tenant,
       serializer: serializer
