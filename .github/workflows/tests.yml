@@ -13,6 +13,8 @@ on:
       - "dev/**"
       - "mix.exs"
       - "compose.dbs.yml"
+      - "compose.realtime-db.yml"
+      - "compose.tenant-db.yml"
       - "mix.lock"
       - "Dockerfile"
       - "run.sh"

@@ -59,44 +59,34 @@ port_free? = fn port ->
   end
 end
 
-# Every node a dev cluster can have, and the port each listens on. gen_rpc dials a node on that
-# node's own port — production nodes all share one, nodes on one machine cannot — so each name
-# gets its own, and a node reads its port out of this map rather than hunting for a free one.
-# `mise run dev` hands out these names in order, so servers two and three just join the cluster.
-dev_cluster_ports =
-  Map.new(1..10, fn
-    1 -> {:"pink@127.0.0.1", 5369}
-    n -> {:"pink#{n}@127.0.0.1", 5368 + n}
-  end)
-  |> Map.put(:"orange@127.0.0.1", 5469)
-
-dev_cluster_members = Map.keys(dev_cluster_ports)
-
-pinned_gen_rpc_tcp_server_port = Env.get_integer("GEN_RPC_TCP_SERVER_PORT")
-
-if config_env() == :dev and pinned_gen_rpc_tcp_server_port do
-  if !port_free?.(pinned_gen_rpc_tcp_server_port) do
-    raise "GEN_RPC_TCP_SERVER_PORT=#{pinned_gen_rpc_tcp_server_port} is set but it's already in use."
-  end
-end
-
-# Only the server port is bound. A dev node under one of the cluster's names takes that name's
-# port; one named anything else takes the next free port and clusters with nobody, since the
-# others have no way to reach it. config/test.exs sets the test ports itself.
+# Only the server port is bound. Nodes on one machine cannot share it, so a dev node takes the
+# first free port of the range and Realtime.GenRpc.get_config/1 tells its peers which one it took.
+# A test run derives its ports from one scan in config/test.exs instead, and dials peers through
+# gen_rpc's own tcp_client_port, the same lookup production uses.
 gen_rpc_tcp_server_port =
-  case config_env() do
-    :test ->
+  case {config_env(), Env.get_integer("GEN_RPC_TCP_SERVER_PORT")} do
+    {:test, _port} ->
       nil
 
-    :dev ->
-      pinned_gen_rpc_tcp_server_port || dev_cluster_ports[node()] || Enum.find(5470..5568, port_free?) ||
-        raise "no free gen_rpc port on range 5470..5568"
+    # A mix task without distribution (mix seed, mix ecto.migrate) has no cluster to serve, and
+    # binding a port would make two of them collide.
+    {:dev, nil} ->
+      if Node.alive?() do
+        Enum.find(5369..5468, port_free?) || raise "no free gen_rpc port on range 5369..5468"
+      else
+        false
+      end
 
-    _ ->
-      pinned_gen_rpc_tcp_server_port || 5369
+    {:dev, port} ->
+      if port_free?.(port) do
+        port
+      else
+        raise "GEN_RPC_TCP_SERVER_PORT=#{port} is set but it's already in use."
+      end
+
+    {_env, port} ->
+      port || 5369
   end
-
-dev_cluster_member? = config_env() == :dev and node() in dev_cluster_members
 
 http_dynamic_buffer_min = Env.get_integer("HTTP_DYNAMIC_BUFFER_MIN")
 http_dynamic_buffer_max = Env.get_integer("HTTP_DYNAMIC_BUFFER_MAX")
@@ -152,13 +142,7 @@ users_scope_shards = Env.get_integer("USERS_SCOPE_SHARDS", 5)
 muster_scope_shards = Env.get_integer("MUSTER_SCOPE_SHARDS", 5)
 websocket_max_heap_size = div(Env.get_integer("WEBSOCKET_MAX_HEAP_SIZE", 50_000_000), :erlang.system_info(:wordsize))
 
-cluster_strategies =
-  Env.get_binary("CLUSTER_STRATEGIES", fn ->
-    case config_env() do
-      :prod -> "POSTGRES"
-      _ -> "EPMD"
-    end
-  end)
+cluster_strategies = Env.get_binary("CLUSTER_STRATEGIES", "POSTGRES")
 
 metrics_jwt_secret =
   if config_env() == :test do
@@ -233,6 +217,8 @@ repo_opts = [
   ssl: ssl_opts
 ]
 
+# Where to connect, except in test: config/test.exs points a run at a database named after itself,
+# on the port that run scanned, and this would overwrite both.
 repo_opts =
   if config_env() == :test,
     do: repo_opts,
@@ -309,6 +295,23 @@ cluster_topologies =
           ]
         ] ++ acc
 
+      "EPMD" ->
+        # Every node is dialed by name, so they must be known upfront. The default is what
+        # compose.yml names its nodes.
+        hosts =
+          "CLUSTER_EPMD_HOSTS"
+          |> Env.get_list(["pink@127.0.0.1", "orange@127.0.0.1"])
+          |> Enum.map(&String.to_atom/1)
+
+        [
+          epmd: [
+            strategy: Cluster.Strategy.Epmd,
+            config: [hosts: hosts],
+            connect: {:net_kernel, :connect_node, []},
+            disconnect: {:net_kernel, :disconnect_node, []}
+          ]
+        ] ++ acc
+
       "POSTGRES" ->
         [
           postgres: [
@@ -324,16 +327,6 @@ cluster_topologies =
               ssl: ssl_opts,
               heartbeat_interval: 5_000
             ]
-          ]
-        ] ++ acc
-
-      "EPMD" ->
-        [
-          dev: [
-            strategy: Cluster.Strategy.Epmd,
-            config: [hosts: dev_cluster_members],
-            connect: {:net_kernel, :connect_node, []},
-            disconnect: {:net_kernel, :disconnect_node, []}
           ]
         ] ++ acc
 
@@ -556,12 +549,10 @@ if config_env() != :test do
 end
 
 if config_env() == :dev do
-  topologies =
-    case dev_cluster_member? or not is_nil(System.get_env("CLUSTER_STRATEGIES")) do
-      true -> cluster_topologies
-      false -> []
-    end
+  # Dev servers find each other through the realtime database they share, the same way production
+  # nodes do. A mix task without distribution has no cluster to join.
+  topologies = if Node.alive?(), do: cluster_topologies, else: []
 
   config :libcluster, debug: false, topologies: topologies
-  config :gen_rpc, client_config_per_node: {:internal, dev_cluster_ports}
+  config :gen_rpc, client_config_per_node: {:external, Realtime.GenRpc}
 end

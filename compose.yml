@@ -4,7 +4,7 @@ include:
 services:
   realtime:
     depends_on:
-      - db
+      - realtime_db
       - tenant_db
     build: .
     environment:
@@ -16,7 +16,7 @@ services:
       DB_ENC_KEY: "1234567890123456"
       DB_ENC_KEY_GCM: "12345678901234567890123456789012"
       DB_ENC_WRITE_GCM: "true"
-      DB_HOST: db
+      DB_HOST: realtime_db
       DB_USER: supabase_admin
       DNS_NODES: "''"
       ELIXIR_ERL_OPTIONS: +hmax 1000000000
@@ -24,7 +24,7 @@ services:
       GEN_RPC_TCP_CLIENT_PORT: 5469
       GEN_RPC_TCP_SERVER_PORT: 5369
       METRICS_JWT_SECRET: dev
-      NAME: pink
+      NODE_NAME: pink
       PORT: ${PORT:-4000}
       REGION: us-east-1
       RLIMIT_NOFILE: 1000000

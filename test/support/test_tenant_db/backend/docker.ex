@@ -150,7 +150,7 @@ defmodule TestTenantDb.Backend.Docker do
   end
 
   # A run whose tag is its endpoint port is gone once that port is free again. A named run
-  # (RUN_TAG) says nothing about liveness, so its containers are left for its owner.
+  # (TEST_RUN) says nothing about liveness, so its containers are left for its owner.
   def abandoned_container?(name) do
     case Regex.run(~r/^#{@container_prefix}-(\d+)-(.+)$/, name) do
       [_, port, suffix] when byte_size(suffix) == @container_suffix_length ->

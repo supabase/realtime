@@ -146,7 +146,8 @@ defmodule Realtime.MixProject do
   # See the documentation for `Mix` for more info on aliases.
   defp aliases do
     [
-      setup: ["deps.get", "ecto.setup", "cmd npm install --prefix assets"],
+      # Databases, migrations and the seed tenant come from `mise run db-start`.
+      setup: ["deps.get", "cmd npm install --prefix assets"],
       "ecto.setup": ["ecto.create", "ecto.migrate", "seed"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       seed: ["run priv/repo/dev_seeds.exs"],

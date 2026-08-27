@@ -26,7 +26,7 @@ defmodule TestTenantDb.Backend.DockerTest do
       assert Docker.container_name() =~ ~r"^realtime-test-4003-.{12}$"
     end
 
-    test "a run named with RUN_TAG uses that name" do
+    test "a run named with NAME uses that name" do
       put_run_tag("_pr_1234")
 
       assert Docker.container_prefix() == "realtime-test-pr_1234"

@@ -61,7 +61,7 @@ defmodule Realtime.ApiTest do
 
   describe "create_tenant/1" do
     test "valid data creates a tenant" do
-      port = Generators.port()
+      port = TestEnv.unused_port()
 
       external_id = random_string()
 

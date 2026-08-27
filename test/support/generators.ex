@@ -10,8 +10,6 @@ defmodule Generators do
   alias Realtime.Integration.WebsocketClient
   alias Realtime.Repo
 
-  def port(), do: TestTenantDb.port()
-
   @spec tenant_fixture(map()) :: Realtime.Api.Tenant.t()
   def tenant_fixture(override \\ %{}) do
     create_attrs = %{
@@ -25,7 +23,7 @@ defmodule Generators do
             "db_name" => "postgres",
             "db_user" => System.get_env("DB_USER", "supabase_admin"),
             "db_password" => "postgres",
-            "db_port" => "#{override[:port] || port()}",
+            "db_port" => "#{override[:port] || TestEnv.unused_port()}",
             "poll_interval_ms" => 10,
             "poll_max_changes" => 100,
             "poll_max_record_bytes" => 1_048_576,

@@ -16,30 +16,31 @@ end
 
 first_http_port = 4002
 
-http_port =
-  get_integer.("TEST_PORT", nil) || Enum.find(first_http_port..4999, port_free?) ||
+port =
+  get_integer.("TEST_PORT", nil) ||
+    Enum.find(first_http_port..4999, port_free?) ||
     raise "no free port in #{first_http_port}..4999"
 
 # The endpoint port is the only one bound for a whole run, so taking it is what makes a run
 # unique. Every other port sits the same distance from its own default: peer ports are bound
 # only while a clustered test runs, so scanning for those would let two runs claim the same ones.
-offset = http_port - first_http_port
+offset = port - first_http_port
 
 # Node names, kept short: they end up inside inspected maps in logs that tests assert on.
 node_suffix =
   case offset do
     0 -> ""
-    _ -> "_#{http_port}"
+    _ -> "_#{port}"
   end
 
-# Names this run's database and containers. RUN_TAG labels a session — "pr_1234",
-# "fix_something" — and otherwise the endpoint port does, which also lets a later run tell
-# whether the run that left something behind is gone.
+# Names this run's database and containers. TEST_RUN labels a run ("pr_1234"), and otherwise the
+# endpoint port does, which also lets a later run tell whether the run that left something
+# behind is gone.
 run_tag =
-  case {offset, System.get_env("RUN_TAG")} do
-    {0, nil} -> ""
-    {_, nil} -> "_#{http_port}"
-    {_, name} -> "_#{name}"
+  case {offset, System.get_env("TEST_RUN", "")} do
+    {0, ""} -> ""
+    {_, ""} -> "_#{port}"
+    {_, run} -> "_#{run}"
   end
 
 partition = System.get_env("MIX_TEST_PARTITION")
@@ -75,7 +76,7 @@ peer_gen_rpc_base = get_integer.("TEST_PEER_GEN_RPC_PORT_BASE", nil) || 26_000 +
 config :realtime,
   test_run_tag: run_tag,
   test_node_suffix: node_suffix,
-  test_http_port: http_port,
+  test_http_port: port,
   test_peer_http_base: peer_http_base,
   test_peer_gen_rpc_base: peer_gen_rpc_base
 
@@ -85,7 +86,7 @@ config :realtime,
 config :realtime, muster_singleton_promotion_timeout_ms: 100
 
 config :realtime, RealtimeWeb.Endpoint,
-  http: [port: http_port],
+  http: [port: port],
   server: true
 
 # that's what config/runtime.exs expects to see as region

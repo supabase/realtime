@@ -340,7 +340,7 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "if tenant exists but unable to connect, returns error" do
-      port = Generators.port()
+      port = TestEnv.unused_port()
 
       extensions = [
         %{

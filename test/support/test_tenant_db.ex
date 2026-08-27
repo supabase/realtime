@@ -11,10 +11,6 @@ defmodule TestTenantDb do
 
   def start_link(max_cases), do: GenServer.start_link(__MODULE__, max_cases, name: __MODULE__)
 
-  # Generators.tenant_fixture/1's default db_port, for tests that never open a connection.
-  # A pooled database hands out the port docker assigned it instead.
-  def port(), do: TestEnv.unused_port()
-
   def init(max_cases) do
     {:ok, %{}, {:continue, {:pool, max_cases}}}
   end
