@@ -97,7 +97,7 @@ jobs:
       - name: Install pgdelta
         uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
         with:
-          install_args: "npm:@supabase/pg-delta"
+          install_args: "node@24 npm:@supabase/pg-delta"
           env: false
 
       - name: Install dependencies

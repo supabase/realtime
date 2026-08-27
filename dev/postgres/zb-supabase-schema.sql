@@ -25,3 +25,14 @@ grant execute on all functions in schema auth to supabase_realtime_admin;
 grant usage on schema realtime to postgres, anon, authenticated, service_role;
 grant all on schema realtime to supabase_realtime_admin with grant option;
 grant create, usage on schema _realtime to supabase_realtime_admin;
+
+-- A new database is copied from template1, so `mix ecto.create` only yields a usable database on
+-- the orioledb image if template1 carries the extension that provides the default access method.
+\connect template1 supabase_admin
+
+do $$
+begin
+  if exists (select from pg_available_extensions where name = 'orioledb') then
+    execute 'create extension if not exists orioledb';
+  end if;
+end$$;
