@@ -253,7 +253,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     ts_new =
       case {subscribers, ts != nil && ts + @stop_after < now()} do
         {0, true} ->
-          Logger.info("Stop tenant #{state.id} because of no connected users")
+          Logger.info("Stopping Postgres Changes streaming for tenant due to no active subscriptions")
           Rls.handle_stop(state.id, 15_000)
           ts
 
@@ -296,7 +296,9 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
       |> pop_not_alive_pids(state.subscribers_pids_table, state.subscribers_nodes_table, id)
 
     new_delete_queue =
-      if length(ids) > 0 do
+      if Enum.empty?(ids) do
+        delete_queue
+      else
         q =
           Enum.reduce(ids, delete_queue.queue, fn id, acc ->
             if :queue.member(id, acc), do: acc, else: :queue.in(id, acc)
@@ -304,8 +306,6 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
 
         Helpers.cancel_timer(delete_queue.ref)
         %{ref: check_delete_queue(1_000), queue: q}
-      else
-        delete_queue
       end
 
     {:noreply, %{state | check_active_pids_ref: check_active_pids(), delete_queue: new_delete_queue}}

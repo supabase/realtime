@@ -4,7 +4,7 @@ defmodule Realtime.MixProject do
   def project do
     [
       app: :realtime,
-      version: "2.129.8",
+      version: "2.130.0",
       elixir: "~> 1.19",
       elixirc_paths: elixirc_paths(Mix.env()),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
@@ -15,8 +15,10 @@ defmodule Realtime.MixProject do
       dialyzer: dialyzer(),
       test_coverage: [tool: ExCoveralls],
       hex: [
+        # Can be overridden via `HEX_COOLDOWN=0d` should you want to, see DEVELOPERS.md#dependency-cooldown
         cooldown: "7d",
-        ignore_advisories: ["CVE-2026-43969", "CVE-2026-43966"]
+        # These are all cowlib, have no released fixes as of now but also shouldn't impact us.
+        ignore_advisories: ["CVE-2026-43969", "CVE-2026-43966", "CVE-2026-43971"]
       ],
       releases: [
         realtime: [
@@ -113,7 +115,7 @@ defmodule Realtime.MixProject do
       {:lazy_html, ">= 0.1.0", only: :test},
       {:mint_web_socket, "~> 1.0", only: :test},
       {:postgres_replication, git: "https://github.com/filipecabaco/postgres_replication.git", only: :test},
-      {:benchee, "~> 1.1.0", only: [:dev, :test]},
+      {:benchee, "~> 1.5.1", only: [:dev, :test]},
       {:excoveralls, "~> 0.18", only: [:dev, :test], runtime: false},
       {:ex_crap, "~> 0.1", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},

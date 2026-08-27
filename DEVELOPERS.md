@@ -11,6 +11,7 @@
   - [WebSocket](#websocket)
     - [WebSocket URL](#websocket-url)
     - [WebSocket Connection Authorization](#websocket-connection-authorization)
+  - [Dependency cooldown](#dependency-cooldown)
   - [Telemetry events](#telemetry-events)
 
 ## Client
@@ -158,6 +159,26 @@ Verify JWT claims by setting JWT_CLAIM_VALIDATORS:
 > JWT expiration is checked automatically. `exp` and `role` (database role) keys are mandatory.
 
 **Authorizing Client Connection**: You can pass in the JWT by following the instructions under the Realtime client lib. For example, refer to the **Usage** section in the [@supabase/realtime-js](https://github.com/supabase/realtime-js) client library.
+
+### Dependency cooldown
+
+[mix.exs](mix.exs) sets a [cooldown for dependencies](https://hex.pm/docs/dependency-policies).
+This creates a window to guard against broken or malicious releases.
+
+If you need a freshly published release (e.g. to pick up a fix), you can bypass the cooldown:
+
+```bash
+HEX_COOLDOWN=0d mix deps.update your_dependency
+```
+
+You can also exempt specific dependencies from this cooldown (f.ex. if you trust them especially):
+
+```elixir
+hex: [
+  cooldown: "7d",
+  cooldown_exclude_repos: ["repo"]
+]
+```
 
 ### Telemetry events
 

@@ -14,9 +14,8 @@ updates:
     # Let's not flood ourselves with PRs
     open-pull-requests-limit: 3
 
-    # May widen `~>` constraints, but only when the latest resolvable version
-    # does not already satisfy them: in-range bumps touch mix.lock only.
-    versioning-strategy: "increase-if-necessary"
+    # not setting versioning strategy seemingly gives us, what we want,
+    # see: https://github.com/supabase/realtime/pull/2123#discussion_r3832772340
 
     cooldown:
       # same as in our hex config

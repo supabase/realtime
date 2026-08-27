@@ -308,6 +308,69 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       # It will try again in the future
       assert socket.assigns.pg_sub_ref != nil
     end
+
+    test "wait rejects the join when the subscription is not established in time", %{tenant: tenant} do
+      expect(Extensions.PostgresCdcRls, :handle_connect, fn _ -> nil end)
+      stub(Extensions.PostgresCdcRls, :handle_connect, fn _ -> nil end)
+
+      assert {:error,
+              %{
+                reason:
+                  "PostgresChangesSubscribeTimeout: Timed out after 100ms waiting for the postgres_changes subscription"
+              }} = join_waiting_for_postgres_changes(tenant, %{"wait" => true, "timeout" => 100})
+    end
+
+    test "wait does not start a connect attempt once the timeout has passed", %{tenant: tenant} do
+      expect(Extensions.PostgresCdcRls, :handle_connect, fn _ ->
+        Process.sleep(300)
+        nil
+      end)
+
+      assert {:error, %{reason: "PostgresChangesSubscribeTimeout: " <> _}} =
+               join_waiting_for_postgres_changes(tenant, %{"wait" => true, "timeout" => 200})
+    end
+
+    test "wait lets an in-flight subscription attempt finish before rejecting the join", %{tenant: tenant} do
+      test_pid = self()
+      stub(Extensions.PostgresCdcRls, :handle_connect, fn _ -> {:ok, {test_pid, test_pid}} end)
+
+      expect(Extensions.PostgresCdcRls, :handle_after_connect, fn _, _, _, _ ->
+        Process.sleep(300)
+        {:error, :boom}
+      end)
+
+      {elapsed, result} =
+        :timer.tc(
+          fn -> join_waiting_for_postgres_changes(tenant, %{"wait" => true, "timeout" => 200}) end,
+          :millisecond
+        )
+
+      assert {:error, %{reason: "PostgresChangesSubscribeTimeout: " <> _}} = result
+      assert elapsed >= 300
+    end
+
+    test "wait retries a transient subscribe failure until it succeeds", %{tenant: tenant} do
+      expect(Extensions.PostgresCdcRls, :handle_after_connect, fn _, _, _, _ ->
+        {:error, "Too many database timeouts"}
+      end)
+
+      expect(Extensions.PostgresCdcRls, :handle_after_connect, fn _, _, _, _ -> {:ok, []} end)
+
+      assert {:ok, _reply, _socket} = join_waiting_for_postgres_changes(tenant, %{"wait" => true, "timeout" => 5_000})
+    end
+
+    test "wait does not gate a join without postgres_changes bindings", %{tenant: tenant} do
+      reject(&Extensions.PostgresCdcRls.handle_connect/1)
+
+      assert {:ok, %{postgres_changes: []}, _socket} =
+               join_waiting_for_postgres_changes(tenant, %{"wait" => true, "timeout" => 100}, [])
+    end
+
+    test "join is not gated when wait is not requested", %{tenant: tenant} do
+      reject(&Extensions.PostgresCdcRls.handle_connect/1)
+
+      assert {:ok, _reply, _socket} = join_waiting_for_postgres_changes(tenant, %{"wait" => false})
+    end
   end
 
   describe "broadcast" do
@@ -1723,6 +1786,14 @@ defmodule RealtimeWeb.RealtimeChannelTest do
         x_headers: [{"x-api-key", token}]
       }
     ]
+  end
+
+  defp join_waiting_for_postgres_changes(tenant, options, changes \\ [%{"event" => "INSERT", "schema" => "public"}]) do
+    jwt = Generators.generate_jwt_token(tenant)
+    {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+    config = %{"postgres_changes" => changes, "postgres_changes_options" => options}
+
+    subscribe_and_join(socket, "realtime:test", %{"config" => config})
   end
 
   defp update_extension(tenant, extension) do
