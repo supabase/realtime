@@ -150,7 +150,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
 
       expect(GenCounter, :add, fn ^broadcast_events_key -> :ok end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _ ->
+      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
       end)
 
@@ -176,7 +176,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
           sub: sub
         })
 
-      expect(Authorization, :get_write_authorizations, fn _, _ ->
+      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: false}}}
       end)
 
@@ -209,7 +209,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
 
       expect(GenCounter, :add, fn ^broadcast_events_key -> :ok end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _ ->
+      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
       end)
 
@@ -241,7 +241,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
           sub: sub
         })
 
-      expect(Authorization, :get_write_authorizations, fn _, _ ->
+      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: false}}}
       end)
 
@@ -430,11 +430,12 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
       expect(Connect, :lookup_or_start_connection, fn _ -> {:ok, db_conn} end)
       expect(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _, _ -> :ok end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _ ->
-        {:ok,
-         %Policies{
-           broadcast: %BroadcastPolicies{write: true, persist: true}
-         }}
+      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
+        {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
+      end)
+
+      expect(Authorization, :get_write_authorizations, fn _, _, _, :persistence ->
+        {:ok, %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}}}
       end)
 
       assert :ok =
@@ -472,8 +473,12 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
       expect(Connect, :lookup_or_start_connection, fn _ -> {:ok, db_conn} end)
       expect(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _, _ -> :ok end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _ ->
+      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
+      end)
+
+      expect(Authorization, :get_write_authorizations, fn _, _, _, :persistence ->
+        {:ok, %Policies{broadcast: %BroadcastPolicies{write: true, persist: false}}}
       end)
 
       assert :ok =
@@ -497,7 +502,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
       expect(Connect, :lookup_or_start_connection, fn _ -> {:ok, db_conn} end)
       expect(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _, _ -> :ok end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _ ->
+      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}}}
       end)
 
@@ -523,11 +528,12 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
       expect(Connect, :lookup_or_start_connection, fn _ -> {:ok, db_conn} end)
       expect(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _, _ -> :ok end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _ ->
-        {:ok,
-         %Policies{
-           broadcast: %BroadcastPolicies{write: true, persist: true}
-         }}
+      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
+        {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
+      end)
+
+      expect(Authorization, :get_write_authorizations, fn _, _, _, :persistence ->
+        {:ok, %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}}}
       end)
 
       assert :ok =
@@ -591,7 +597,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
       expect(GenCounter, :add, fn ^broadcast_events_key -> :ok end)
       expect(Connect, :lookup_or_start_connection, fn _ -> {:ok, db_conn} end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _ ->
+      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
       end)
 

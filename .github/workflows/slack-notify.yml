@@ -1,0 +1,110 @@
+name: Reusable Slack Notification
+
+on:
+  workflow_call:
+    inputs:
+      title:
+        description: 'Short title (e.g., Hex Audit, Deploy)'
+        required: true
+        type: string
+      status:
+        description: 'Status for the notification (success|failure|info|partial)'
+        required: false
+        default: 'info'
+        type: string
+    secrets:
+      SLACK_ALERTS_WEBHOOK:
+        required: true
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Slack notification
+        env:
+          TITLE: ${{ inputs.title }}
+          STATUS: ${{ inputs.status }}
+          GITHUB_REPO: ${{ github.repository }}
+          GITHUB_WORKFLOW: ${{ github.workflow }}
+          GITHUB_REFNAME: ${{ github.ref_name }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_SHA: ${{ github.sha }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_ALERTS_WEBHOOK }}
+        run: |
+          STATUS_ICON=""
+          STATUS_PREFIX=""
+          case "$STATUS" in
+            success)
+              STATUS_ICON="✅";
+              STATUS_PREFIX="succeeded";
+              ;;
+            failure)
+              STATUS_ICON="❌";
+              STATUS_PREFIX="failed";
+              ;;
+            partial)
+              STATUS_ICON="⚠️";
+              STATUS_PREFIX="";
+              ;;
+            *)
+              STATUS_ICON="ℹ️";
+              STATUS_PREFIX="update";
+              ;;
+          esac
+          TITLE_SUFFIX=""
+          if [ -n "$STATUS_PREFIX" ]; then
+            TITLE_SUFFIX=" ${STATUS_PREFIX}"
+          fi
+
+          payload=$(cat <<EOF
+          {
+            "text": "${STATUS_ICON} ${TITLE}${TITLE_SUFFIX} in ${GITHUB_REPO}",
+            "blocks": [
+              {
+                "type": "header",
+                "text": { "type": "plain_text", "text": "${STATUS_ICON} ${TITLE}${TITLE_SUFFIX}", "emoji": true }
+              },
+              {
+                "type": "section",
+                "fields": [
+                  { "type": "mrkdwn", "text": "*Repository*\n${GITHUB_REPO}" },
+                  { "type": "mrkdwn", "text": "*Workflow*\n${GITHUB_WORKFLOW}" },
+                  { "type": "mrkdwn", "text": "*Ref*\n${GITHUB_REFNAME}" },
+                  { "type": "mrkdwn", "text": "*Actor*\n${GITHUB_ACTOR}" }
+                ]
+              },
+              {
+                "type": "actions",
+                "elements": [
+                  {
+                    "type": "button",
+                    "text": { "type": "plain_text", "text": "View Run" },
+                    "url": "https://github.com/${GITHUB_REPO}/actions/runs/${GITHUB_RUN_ID}"
+                  },
+                  {
+                    "type": "button",
+                    "text": { "type": "plain_text", "text": "View Commit" },
+                    "url": "https://github.com/${GITHUB_REPO}/commit/${GITHUB_SHA}"
+                  }
+                ]
+              },
+              {
+                "type": "context",
+                "elements": [
+                  { "type": "mrkdwn", "text": "Commit: ${GITHUB_SHA}" }
+                ]
+              }
+            ]
+          }
+          EOF
+          )
+
+          # Check delivery explicitly, there is a history of access being removed and silent failures.
+          http_status=$(curl -sS -o /tmp/slack_response.txt -w "%{http_code}" \
+            -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL")
+          cat /tmp/slack_response.txt
+          if [ "$http_status" -ne 200 ]; then
+            echo "Slack notification failed with HTTP $http_status — webhook may be dead/rotated"
+            exit 1
+          fi

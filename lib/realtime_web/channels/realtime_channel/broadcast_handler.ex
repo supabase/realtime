@@ -240,10 +240,22 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
          db_conn,
          authorization_context
        ) do
-    Authorization.get_write_authorizations(policies, db_conn, authorization_context)
+    with {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}} = policies} <-
+           Authorization.get_write_authorizations(policies, db_conn, authorization_context, :broadcast) do
+      maybe_check_persistence(policies, db_conn, authorization_context)
+    end
   end
 
   defp run_authorization_check(socket, _db_conn, _authorization_context) do
     {:ok, socket}
+  end
+
+  # The persist policy needs its own probe, so only pay for it when the flag is on.
+  defp maybe_check_persistence(policies, db_conn, authorization_context) do
+    if FeatureFlags.broadcast_persistence_enabled?(authorization_context.tenant_id) do
+      Authorization.get_write_authorizations(policies, db_conn, authorization_context, :persistence)
+    else
+      {:ok, policies}
+    end
   end
 end

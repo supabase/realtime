@@ -180,11 +180,13 @@ defmodule Realtime.Tenants.SingleBroadcast do
   end
 
   defp handle_private_message(tenant, auth_params, topic, event, payload, content_type, rate_counter, persist) do
+    persist? = persist and FeatureFlags.broadcast_persistence_enabled?(tenant.external_id)
+
     with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id),
          {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}} = policies} <-
-           permissions_for_message(db_conn, auth_params, topic) do
+           permissions_for_message(db_conn, auth_params, topic, persist?) do
       send_message_and_count(tenant, rate_counter, topic, event, payload, content_type, false)
-      if persist, do: maybe_persist(policies.broadcast, db_conn, tenant, topic, event, payload)
+      if persist?, do: maybe_persist(policies.broadcast, db_conn, tenant, topic, event, payload)
       :ok
     else
       {:ok, %Policies{}} ->
@@ -234,23 +236,28 @@ defmodule Realtime.Tenants.SingleBroadcast do
 
   # Currently the API has no ACK so just persist the message asyncly and log in case of errors.
   defp maybe_persist(%BroadcastPolicies{persist: true}, db_conn, tenant, topic, event, payload) do
-    if FeatureFlags.broadcast_persistence_enabled?(tenant.external_id) do
-      Task.Supervisor.start_child(Realtime.TaskSupervisor, fn ->
-        case Messages.persist(db_conn, tenant.external_id, topic, event, payload) do
-          {:ok, _id} -> :ok
-          error -> log_error("UnableToPersistMessage", error)
-        end
-      end)
-    end
+    Task.Supervisor.start_child(Realtime.TaskSupervisor, fn ->
+      case Messages.persist(db_conn, tenant.external_id, topic, event, payload) do
+        {:ok, _id} -> :ok
+        error -> log_error("UnableToPersistMessage", error)
+      end
+    end)
 
     :ok
   end
 
   defp maybe_persist(_broadcast_policies, _db_conn, _tenant, _topic, _event, _payload), do: :ok
 
-  defp permissions_for_message(db_conn, auth_params, topic) do
+  defp permissions_for_message(db_conn, auth_params, topic, persist?) do
     auth_params = %{auth_params | topic: topic}
-    Authorization.get_write_authorizations(db_conn, auth_params)
+
+    case Authorization.get_write_authorizations(db_conn, auth_params, :broadcast) do
+      {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}} = policies} when persist? ->
+        Authorization.get_write_authorizations(policies, db_conn, auth_params, :persistence)
+
+      result ->
+        result
+    end
   end
 
   defp check_rate_limit(events_per_second_rate, %Tenant{} = tenant) do

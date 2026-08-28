@@ -518,7 +518,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       request_events_key = Tenants.requests_per_second_key(tenant)
       expect(GenCounter, :add, fn ^request_events_key -> :ok end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _ ->
+      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
         {:error, :query_canceled,
          %Postgrex.Error{postgres: %{code: :query_canceled, message: "canceling statement due to user request"}}}
       end)
@@ -536,7 +536,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       request_events_key = Tenants.requests_per_second_key(tenant)
       expect(GenCounter, :add, fn ^request_events_key -> :ok end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _ -> {:error, :missing_partition} end)
+      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast -> {:error, :missing_partition} end)
 
       conn =
         conn
@@ -551,7 +551,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       request_events_key = Tenants.requests_per_second_key(tenant)
       expect(GenCounter, :add, fn ^request_events_key -> :ok end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _ -> {:error, :increase_connection_pool} end)
+      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast -> {:error, :increase_connection_pool} end)
 
       conn =
         conn
@@ -566,7 +566,9 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       request_events_key = Tenants.requests_per_second_key(tenant)
       expect(GenCounter, :add, fn ^request_events_key -> :ok end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _ -> {:error, :tenant_database_unavailable} end)
+      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
+        {:error, :tenant_database_unavailable}
+      end)
 
       conn =
         conn
@@ -581,7 +583,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       request_events_key = Tenants.requests_per_second_key(tenant)
       expect(GenCounter, :add, fn ^request_events_key -> :ok end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _ -> {:error, "boom"} end)
+      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast -> {:error, "boom"} end)
 
       conn =
         conn

@@ -44,11 +44,20 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
         Authorization.get_write_authorizations(
           policies,
           context.db_conn,
-          context.authorization_context
+          context.authorization_context,
+          :broadcast
+        )
+
+      {:ok, policies} =
+        Authorization.get_write_authorizations(
+          policies,
+          context.db_conn,
+          context.authorization_context,
+          :presence
         )
 
       assert %Policies{
-               broadcast: %BroadcastPolicies{read: true, write: true, persist: false},
+               broadcast: %BroadcastPolicies{read: true, write: true},
                presence: %PresencePolicies{read: true, write: true}
              } == policies
     end
@@ -72,11 +81,20 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
         Authorization.get_write_authorizations(
           policies,
           context.db_conn,
-          context.authorization_context
+          context.authorization_context,
+          :broadcast
+        )
+
+      {:ok, policies} =
+        Authorization.get_write_authorizations(
+          policies,
+          context.db_conn,
+          context.authorization_context,
+          :presence
         )
 
       assert %Policies{
-               broadcast: %BroadcastPolicies{read: false, write: false, persist: false},
+               broadcast: %BroadcastPolicies{read: false, write: false},
                presence: %PresencePolicies{read: false, write: false}
              } == policies
     end
@@ -90,7 +108,7 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
         Authorization.get_read_authorizations(%Policies{}, db_conn, context.authorization_context)
 
       {:error, :increase_connection_pool} =
-        Authorization.get_write_authorizations(%Policies{}, db_conn, context.authorization_context)
+        Authorization.get_write_authorizations(%Policies{}, db_conn, context.authorization_context, :broadcast)
     end
 
     @tag role: "anon", policies: []
@@ -125,7 +143,7 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
         capture_log(fn ->
           for _ <- 1..6 do
             {:error, :increase_connection_pool} =
-              Authorization.get_write_authorizations(%Policies{}, pid, context.authorization_context)
+              Authorization.get_write_authorizations(%Policies{}, pid, context.authorization_context, :broadcast)
           end
 
           rate_counter = Realtime.Tenants.authorization_errors_per_second_rate(context.tenant)
@@ -133,7 +151,7 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
 
           for _ <- 1..10 do
             {:error, :increase_connection_pool} =
-              Authorization.get_write_authorizations(%Policies{}, pid, context.authorization_context)
+              Authorization.get_write_authorizations(%Policies{}, pid, context.authorization_context, :broadcast)
           end
         end)
 
@@ -177,7 +195,8 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
                        Authorization.get_write_authorizations(
                          %Policies{},
                          context.db_conn,
-                         context.authorization_context
+                         context.authorization_context,
+                         :broadcast
                        )
             end)
 
@@ -208,7 +227,8 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
                Authorization.get_write_authorizations(
                  %Policies{},
                  context.db_conn,
-                 context.authorization_context
+                 context.authorization_context,
+                 :presence
                )
 
       assert {:error, :rls_policy_error, %Postgrex.Error{}} =
@@ -222,14 +242,16 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
                Authorization.get_write_authorizations(
                  %Policies{},
                  context.db_conn,
-                 context.authorization_context
+                 context.authorization_context,
+                 :presence
                )
 
       assert {:error, :rls_policy_error, %Postgrex.Error{}} =
                Authorization.get_write_authorizations(
                  %Policies{},
                  context.db_conn,
-                 context.authorization_context
+                 context.authorization_context,
+                 :presence
                )
     end
   end
