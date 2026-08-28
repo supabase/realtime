@@ -53,9 +53,9 @@ jobs:
           - postgres: pg15_latest
             postgres_image: supabase/postgres:15.14.1.129
           - postgres: pg17
-            postgres_image: supabase/postgres:17.6.1.127
+            postgres_image: supabase/postgres:17.6.1.166
           - postgres: orioledb17
-            postgres_image: supabase/postgres:17.6.0.096-orioledb
+            postgres_image: supabase/postgres:17.9.0.019-orioledb
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

@@ -34,7 +34,7 @@ jobs:
           - pg_major: 15
             postgres_image: supabase/postgres:15.14.1.129
           - pg_major: 17
-            postgres_image: supabase/postgres:17.6.1.127
+            postgres_image: supabase/postgres:17.6.1.166
     env:
       POSTGRES_IMAGE: ${{ matrix.postgres_image }}
 
