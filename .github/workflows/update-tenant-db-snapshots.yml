@@ -110,6 +110,8 @@ jobs:
           path: |
             priv/repo/tenant_db_dump_${{ matrix.pg_major }}.sql
             priv/repo/tenant_schema/
+          # pg-delta .pgdelta-export.json
+          include-hidden-files: true
           if-no-files-found: ignore
 
   commit-changes:
