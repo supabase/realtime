@@ -252,6 +252,8 @@ Because the ring is consistent-hashed, a 100-node rolling deploy that grows the 
 
 `drain/2` closes that window while the node is **still alive**. It does *not* rebalance itself; instead it broadcasts `{:muster_leaving}` and lets each **peer** rebalance it out of that peer's ring. The instant a peer swaps its ring, its subsequent claims/routing go to the newly-elected router, and its own rebalance re-announces the groups it holds to that router. Nothing the dying router "owned" is lost: every occupancy row was sourced from some node's local members, and the live sources re-announce during the same rebalance. The only rows that vanish are the ones sourced from the dying node itself which are going away regardless.
 
+`drain/2` waits for each peer to ack its handoff (it rebalanced the leaver out), then holds a short **settle window** for in-flight RPCs to land before replying `:ok`. It returns `{:timeout, unacked_nodes}` if a peer never acks within `:timeout_ms`. A peer that itself dies mid-drain (rather than acking) is treated as departed so a peer crashing during a concurrent rolling restart does not make `drain` block the full `:timeout_ms` or report the dead node as unacked.
+
 **`drain` is terminal.** It leaves the node draining with its heartbeat off, so a node that calls `drain` but does not actually die (e.g. an aborted deploy) is stranded until it restarts. Call it only when truly shutting down.
 
 ---

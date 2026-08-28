@@ -5479,14 +5479,61 @@ defmodule Forum.MusterDistributedTest do
       )
     end
 
-    # Regression: with settle_ms > timeout_ms the real ack deadline fires DURING the
-    # settle window (all peers acked, but leave_from is still parked until settle
-    # elapses) -- exactly the stale-deadline race. The handler must treat a deadline
-    # with no outstanding acks as a no-op; a naive handler would reply {:timeout, []}
-    # to the already-satisfied caller. Here T acks in well under timeout_ms (300),
-    # the deadline fires at 300ms, and the settle reply only lands at ~t_ack + 700ms,
-    # so the deadline is genuinely processed mid-settle -- no message injection
-    # needed. We assert :ok (not {:timeout, []}) and that no timeout was reported.
+    test "a peer that dies mid-drain is dropped from the handoff wait", %{scope: scope} do
+      t_node = node()
+      a_name = ~c"muster_drain_live_#{System.unique_integer([:positive])}"
+      a_node = :"#{a_name}@127.0.0.1"
+      b_name = ~c"muster_drain_die_#{System.unique_integer([:positive])}"
+      b_node = :"#{b_name}@127.0.0.1"
+
+      check_trace(
+        fn ->
+          {:ok, pa, ^a_node} = Peer.start(name: a_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(a_node)
+          start_remote_muster(pa, scope)
+          await_ready([t_node, a_node])
+
+          {:ok, pb, ^b_node} = Peer.start(name: b_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(b_node)
+          start_remote_muster(pb, scope)
+          await_ready([t_node, a_node, b_node])
+
+          # Park B the instant it receives our leave so it can neither depart us
+          # nor ack -- it will die still owing an ack. A is untouched and acks.
+          force_ordering(
+            delay: %{:"$kind" => :muster_leaving_received, node: ^b_node},
+            until: %{:"$kind" => :test_release}
+          )
+
+          # A generous timeout_ms makes the difference stark: with the bug drain
+          # would block ~30s on B; with the fix B's :DOWN drops it from the wait
+          # and the settle window replies in ~settle_ms. Run in a task since the
+          # call blocks the caller until the async reply.
+          task =
+            Task.async(fn -> Muster.drain(scope, timeout_ms: 30_000, settle_ms: 100) end)
+
+          # Once we have broadcast the leave (B is now an expected peer), kill B.
+          assert {:ok, _} =
+                   block_until(%{:"$kind" => :muster_drain_begin, node: ^t_node}, 10_000)
+
+          :ok = stop_supervised({:peer, b_name})
+
+          # drain returns :ok (A acked, B departed) well within timeout_ms.
+          assert :ok = Task.await(task, 10_000)
+
+          # Release the (now-dead) ordering hook so check_trace teardown isn't wedged.
+          tp(:test_release, %{})
+        end,
+        fn trace ->
+          # B was dropped from the wait on its death...
+          assert Enum.any?(of_kind(trace, :muster_drain_peer_lost), &(&1.peer_node == b_node))
+          # ...the drain settled instead of timing out.
+          assert Enum.any?(of_kind(trace, :muster_drain_settled), &(&1.node == t_node))
+          refute Enum.any?(of_kind(trace, :muster_drain_timeout), &(&1.node == t_node))
+        end
+      )
+    end
+
     test "a deadline that fires during the settle window is a no-op", %{scope: scope} do
       t_node = node()
       c_name = ~c"muster_drain_stray_#{System.unique_integer([:positive])}"
@@ -5507,8 +5554,7 @@ defmodule Forum.MusterDistributedTest do
 
           # The leaver's coordinator is still responsive and kept its own full view
           # (it never rebalanced itself).
-          assert :erpc.call(c_node, Muster, :members, [scope]) ==
-                   Enum.sort([t_node, c_node])
+          assert :erpc.call(c_node, Muster, :members, [scope]) == Enum.sort([t_node, c_node])
         end,
         fn trace ->
           # The drain settled (all peers acked, settle elapsed)...

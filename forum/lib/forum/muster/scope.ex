@@ -63,8 +63,7 @@ defmodule Forum.Muster.Scope do
             pending_round: nil | %{target: [node], awaiting: MapSet.t(), seq: integer},
             leaving: boolean,
             leave_from: nil | GenServer.from(),
-            leave_expected: MapSet.t(),
-            leave_acked: MapSet.t(),
+            leave_pending: MapSet.t(),
             settle_ms: non_neg_integer
           }
     defstruct [
@@ -126,13 +125,13 @@ defmodule Forum.Muster.Scope do
       # no peer re-pairs us after we announced leaving; INBOUND coordination RPCs
       # are deliberately still serviced through the whole drain + settle window.
       # `leave_from` parks the drain/2 caller (replied to asynchronously so the
-      # coordinator loop never blocks); `leave_expected` is the set of peer NODES
-      # whose ack we await; `leave_acked` those received; `settle_ms` the
-      # post-ack in-flight-drain window stashed at drain time.
+      # coordinator loop never blocks); `leave_pending` is the set of peer NODES
+      # we still await an ack from -- a peer is removed the moment it acks OR
+      # departs (crash), so the settle window opens exactly when it empties;
+      # `settle_ms` the post-ack in-flight-drain window stashed at drain time.
       leaving: false,
       leave_from: nil,
-      leave_expected: MapSet.new(),
-      leave_acked: MapSet.new(),
+      leave_pending: MapSet.new(),
       settle_ms: 0
     ]
   end
@@ -796,8 +795,7 @@ defmodule Forum.Muster.Scope do
          state
          | leaving: true,
            leave_from: from,
-           leave_expected: expected,
-           leave_acked: MapSet.new(),
+           leave_pending: expected,
            settle_ms: settle_ms
        }}
     end
@@ -994,8 +992,15 @@ defmodule Forum.Muster.Scope do
   # is depart_peer/3, shared with the graceful-leave path.
   def handle_info({:DOWN, ref, :process, pid, _reason}, %State{} = state) do
     case Map.get(state.peers, pid) do
-      ^ref -> {:noreply, depart_peer(state, pid, "down")}
-      _ -> {:noreply, state}
+      ^ref ->
+        state = depart_peer(state, pid, "down")
+        # If we are mid-drain and this peer was one we awaited an ack from, it is
+        # gone and will never ack: stop waiting on it (else drain blocks the full
+        # timeout and reports a dead node as unacked).
+        {:noreply, drop_drain_expectation(state, node(pid))}
+
+      _ ->
+        {:noreply, state}
     end
   end
 
@@ -1029,25 +1034,13 @@ defmodule Forum.Muster.Scope do
   end
 
   # An ack from a peer that has finished rebalancing us out of its ring. Only
-  # meaningful while we are the leaver (leaving: true with a parked caller). Once
-  # every expected peer has acked, we then start the settle window
+  # meaningful while we are the leaver (a parked caller in `leave_from`). Once
+  # every pending peer has acked (or departed), we start the settle window
   # (still servicing inbound RPCs) to drain in-flight RPCs
   # peers dispatched before they rebalanced
-  def handle_info({:muster_leaving_ack, peer_node}, %State{leaving: true} = state) do
-    acked = MapSet.put(state.leave_acked, peer_node)
-    state = %{state | leave_acked: acked}
-
-    if state.leave_from != nil and MapSet.subset?(state.leave_expected, acked) do
-      Logger.info(
-        "Muster[#{node()}|#{state.scope}] Draining: all #{MapSet.size(state.leave_expected)} " <>
-          "peer(s) acked the handoff; settling for #{state.settle_ms}ms before shutdown"
-      )
-
-      tp(:muster_drain_acked, %{scope: state.scope, node: node()})
-      Process.send_after(self(), :leave_settle, state.settle_ms)
-    end
-
-    {:noreply, state}
+  def handle_info({:muster_leaving_ack, peer_node}, %State{leave_from: from} = state)
+      when from != nil do
+    {:noreply, resolve_pending_peer(state, peer_node)}
   end
 
   def handle_info({:muster_leaving_ack, _peer_node}, state), do: {:noreply, state}
@@ -1068,17 +1061,20 @@ defmodule Forum.Muster.Scope do
   def handle_info(:leave_settle, state), do: {:noreply, state}
 
   # Ack deadline fired while the drain caller is still parked. If every expected
-  # peer has already acked, we are in the settle window and this deadline is stale.
-  # If there are still peers to ack we consider that it timed out
+  # peer has already acked (or departed), leave_pending is empty, we are in the
+  # settle window, and this deadline is stale. If peers are still pending we
+  # consider that it timed out.
   def handle_info(:leave_deadline, %State{leave_from: from} = state) when from != nil do
-    unacked = MapSet.difference(state.leave_expected, state.leave_acked) |> MapSet.to_list()
+    pending_size = MapSet.size(state.leave_pending)
 
-    if unacked == [] do
-      # All peers acked; the settle window owns the reply. Stale deadline, no-op.
+    if pending_size == 0 do
+      # All peers acked/departed; the settle window owns the reply. Stale deadline, no-op.
       {:noreply, state}
     else
+      unacked = MapSet.to_list(state.leave_pending)
+
       Logger.warning(
-        "Muster[#{node()}|#{state.scope}] Draining: ack deadline reached, #{length(unacked)} " <>
+        "Muster[#{node()}|#{state.scope}] Draining: ack deadline reached, #{pending_size} " <>
           "peer(s) did not ack the handoff: #{inspect(unacked)}; proceeding with shutdown anyway"
       )
 
@@ -1714,6 +1710,61 @@ defmodule Forum.Muster.Scope do
         peers = Map.put(state.peers, peer, ref)
         recompute_members(%{state | peers: peers})
     end
+  end
+
+  # A peer we were awaiting a drain handoff-ack from died before it could ack.
+  # depart_peer/3 has already evicted it and re-elected routers for whatever it
+  # held, so there is nothing left to hand off to it: resolve it out of the pending
+  # set (which opens the settle window if it was the last one) instead of blocking
+  # until the ack deadline fires and reporting a dead node as unacked. Only logs
+  # the loss for a peer still genuinely pending; a peer that already acked is no
+  # longer in the set and its DOWN is an ordinary departure here.
+  defp drop_drain_expectation(%State{leave_from: from} = state, dead_node) when from != nil do
+    if MapSet.member?(state.leave_pending, dead_node) do
+      Logger.info(
+        "Muster[#{node()}|#{state.scope}] Draining: expected peer #{inspect(dead_node)} died " <>
+          "before acking the handoff; dropping it from the wait"
+      )
+
+      tp(:muster_drain_peer_lost, %{scope: state.scope, node: node(), peer_node: dead_node})
+    end
+
+    resolve_pending_peer(state, dead_node)
+  end
+
+  defp drop_drain_expectation(state, _dead_node), do: state
+
+  # A peer we were waiting on has resolved -- it acked the handoff, or it departed
+  # the cluster. Remove it from the pending set; when that empties the set, open
+  # the settle window. The MapSet.member? guard makes this idempotent: a duplicate
+  # ack, or the DOWN of a peer that already acked, finds it already gone and is a
+  # no-op -- which is exactly why the settle window opens once, with no phase flag
+  # or before/after bookkeeping. `leave_pending` only ever shrinks, so it empties
+  # exactly once per drain.
+  defp resolve_pending_peer(%State{leave_from: from} = state, peer_node) when from != nil do
+    if MapSet.member?(state.leave_pending, peer_node) do
+      pending = MapSet.delete(state.leave_pending, peer_node)
+      state = %{state | leave_pending: pending}
+      if MapSet.size(pending) == 0, do: open_settle(state), else: state
+    else
+      state
+    end
+  end
+
+  defp resolve_pending_peer(state, _peer_node), do: state
+
+  # Every peer acked or departed: start the settle window (still servicing inbound
+  # RPCs) so in-flight RPCs peers dispatched before rebalancing us out can land,
+  # then :leave_settle replies to the parked drain/2 caller.
+  defp open_settle(%State{} = state) do
+    Logger.info(
+      "Muster[#{node()}|#{state.scope}] Draining: all peers acked or departed; " <>
+        "settling for #{state.settle_ms}ms before shutdown"
+    )
+
+    tp(:muster_drain_acked, %{scope: state.scope, node: node()})
+    Process.send_after(self(), :leave_settle, state.settle_ms)
+    state
   end
 
   # Evict a peer (crash via :DOWN, or graceful :muster_leaving): drop occupancy
