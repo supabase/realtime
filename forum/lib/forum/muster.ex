@@ -312,7 +312,10 @@ defmodule Forum.Muster do
 
   Returns `:ok` once all peers acked and the settle elapsed, or
   `{:timeout, unacked_nodes}` if some peer did not ack within `:timeout_ms`. A
-  singleton (no peers) returns `:ok` immediately.
+  singleton (no peers) returns `:ok` immediately. A peer that *dies* mid-drain
+  (rather than acking) is treated as departed: it is dropped from the wait rather
+  than counted as unacked, so a peer crashing during a rolling restart does not
+  make `drain` block the full `:timeout_ms`.
   """
   @spec drain(atom, keyword) :: :ok | {:timeout, [node]}
   def drain(scope, opts \\ []) when is_atom(scope) do
