@@ -231,7 +231,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
   end
 
   def handle_result([%Postgrex.Result{num_rows: 0}], %__MODULE__{step: :check_replication_slot} = state) do
-    if FeatureFlags.broadcast_persistence_enabled?(state.tenant_id) do
+    if FeatureFlags.enabled?("broadcast_persistence", state.tenant_id) do
       query = "SELECT current_setting('server_version_num')::int / 10000"
       {:query, query, [timeout: state.query_timeout], %{state | step: :check_pg_version}}
     else
@@ -507,7 +507,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
   end
 
   defp create_publication_query(%__MODULE__{publication_name: publication_name} = state) do
-    if FeatureFlags.broadcast_persistence_enabled?(state.tenant_id) do
+    if FeatureFlags.enabled?("broadcast_persistence", state.tenant_id) do
       row_filter = if row_filter?(state), do: " WHERE #{@row_filter}", else: ""
 
       "CREATE PUBLICATION #{publication_name} FOR TABLE #{@schema}.#{@table}#{row_filter} WITH (publish = 'insert', publish_via_partition_root = true)"
@@ -517,7 +517,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
   end
 
   defp validate_publication_query(%__MODULE__{publication_name: publication_name} = state) do
-    if FeatureFlags.broadcast_persistence_enabled?(state.tenant_id) do
+    if FeatureFlags.enabled?("broadcast_persistence", state.tenant_id) do
       row_filter = if row_filter?(state), do: " AND t.rowfilter = '#{@row_filter}'", else: ""
 
       """

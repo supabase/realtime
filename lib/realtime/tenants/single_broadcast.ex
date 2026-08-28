@@ -180,7 +180,7 @@ defmodule Realtime.Tenants.SingleBroadcast do
   end
 
   defp handle_private_message(tenant, auth_params, topic, event, payload, content_type, rate_counter, persist) do
-    persist? = persist and FeatureFlags.broadcast_persistence_enabled?(tenant.external_id)
+    persist? = persist and FeatureFlags.enabled?("broadcast_persistence", tenant.external_id)
 
     with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id),
          {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}} = policies} <-

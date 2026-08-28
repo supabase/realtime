@@ -398,7 +398,10 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
 
   describe "message persistence" do
     setup %{tenant: tenant} do
-      stub(FeatureFlags, :broadcast_persistence_enabled?, fn _tenant_id -> true end)
+      stub(FeatureFlags, :enabled?, fn
+        "broadcast_persistence", _tenant_id -> true
+        flag, tenant_id -> call_original(FeatureFlags, :enabled?, [flag, tenant_id])
+      end)
 
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
       Tenants.create_messages_partitions(db_conn)

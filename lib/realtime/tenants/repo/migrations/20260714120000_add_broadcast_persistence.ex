@@ -1,4 +1,4 @@
-defmodule Realtime.Tenants.Migrations.AddBroadcastStorage do
+defmodule Realtime.Tenants.Migrations.AddBroadcastPersistence do
   @moduledoc false
   use Ecto.Migration
 

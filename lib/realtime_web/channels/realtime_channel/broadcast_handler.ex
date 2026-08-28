@@ -186,7 +186,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
          payload,
          ack_broadcast
        ) do
-    if FeatureFlags.broadcast_persistence_enabled?(tenant_id) do
+    if FeatureFlags.enabled?("broadcast_persistence", tenant_id) do
       if ack_broadcast do
         persist(db_conn, tenant_id, topic, payload)
       else
@@ -252,7 +252,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
 
   # The persist policy needs its own probe, so only pay for it when the flag is on.
   defp maybe_check_persistence(policies, db_conn, authorization_context) do
-    if FeatureFlags.broadcast_persistence_enabled?(authorization_context.tenant_id) do
+    if FeatureFlags.enabled?("broadcast_persistence", authorization_context.tenant_id) do
       Authorization.get_write_authorizations(policies, db_conn, authorization_context, :persistence)
     else
       {:ok, policies}

@@ -86,12 +86,6 @@ defmodule Realtime.FeatureFlags do
     end
   end
 
-  @spec broadcast_persistence_enabled?(String.t()) :: boolean()
-  def broadcast_persistence_enabled?(tenant_id) when is_binary(tenant_id),
-    do: enabled?("broadcast_persistence", tenant_id)
-
-  def broadcast_persistence_enabled?(_tenant_id), do: false
-
   @spec in_rollout?(FeatureFlag.t(), String.t()) :: boolean()
   defp in_rollout?(%FeatureFlag{enabled: false}, _tenant_id), do: false
 
