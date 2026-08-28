@@ -12,8 +12,14 @@ on:
         required: false
         default: 'info'
         type: string
+      details:
+        description: 'Optional extra text (e.g. a failure snippet) appended as a code block'
+        required: false
+        default: ''
+        type: string
     secrets:
-      SLACK_ALERTS_WEBHOOK:
+      SLACK_WEBHOOK_URL:
+        description: 'Webhook to post to - caller decides which one'
         required: true
 
 jobs:
@@ -24,13 +30,14 @@ jobs:
         env:
           TITLE: ${{ inputs.title }}
           STATUS: ${{ inputs.status }}
+          DETAILS: ${{ inputs.details }}
           GITHUB_REPO: ${{ github.repository }}
           GITHUB_WORKFLOW: ${{ github.workflow }}
           GITHUB_REFNAME: ${{ github.ref_name }}
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_SHA: ${{ github.sha }}
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_ALERTS_WEBHOOK }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           STATUS_ICON=""
           STATUS_PREFIX=""
@@ -57,48 +64,45 @@ jobs:
             TITLE_SUFFIX=" ${STATUS_PREFIX}"
           fi
 
-          payload=$(cat <<EOF
-          {
-            "text": "${STATUS_ICON} ${TITLE}${TITLE_SUFFIX} in ${GITHUB_REPO}",
-            "blocks": [
-              {
-                "type": "header",
-                "text": { "type": "plain_text", "text": "${STATUS_ICON} ${TITLE}${TITLE_SUFFIX}", "emoji": true }
-              },
-              {
-                "type": "section",
-                "fields": [
-                  { "type": "mrkdwn", "text": "*Repository*\n${GITHUB_REPO}" },
-                  { "type": "mrkdwn", "text": "*Workflow*\n${GITHUB_WORKFLOW}" },
-                  { "type": "mrkdwn", "text": "*Ref*\n${GITHUB_REFNAME}" },
-                  { "type": "mrkdwn", "text": "*Actor*\n${GITHUB_ACTOR}" }
+          # DETAILS may contain stack traces with quotes/backslashes/newlines,
+          # so build the payload with jq rather than raw string interpolation.
+          TRUNCATED_DETAILS="$(printf '%s' "$DETAILS" | head -c 3000)"
+
+          payload=$(jq -n \
+            --arg text "${STATUS_ICON} ${TITLE}${TITLE_SUFFIX} in ${GITHUB_REPO}" \
+            --arg header_text "${STATUS_ICON} ${TITLE}${TITLE_SUFFIX}" \
+            --arg repo "$GITHUB_REPO" \
+            --arg workflow "$GITHUB_WORKFLOW" \
+            --arg ref "$GITHUB_REFNAME" \
+            --arg actor "$GITHUB_ACTOR" \
+            --arg run_url "https://github.com/${GITHUB_REPO}/actions/runs/${GITHUB_RUN_ID}" \
+            --arg commit_url "https://github.com/${GITHUB_REPO}/commit/${GITHUB_SHA}" \
+            --arg sha "$GITHUB_SHA" \
+            --arg details "$TRUNCATED_DETAILS" \
+            '{
+              text: $text,
+              blocks: (
+                [
+                  { type: "header", text: { type: "plain_text", text: $header_text, emoji: true } },
+                  { type: "section", fields: [
+                    { type: "mrkdwn", text: "*Repository*\n\($repo)" },
+                    { type: "mrkdwn", text: "*Workflow*\n\($workflow)" },
+                    { type: "mrkdwn", text: "*Ref*\n\($ref)" },
+                    { type: "mrkdwn", text: "*Actor*\n\($actor)" }
+                  ] }
                 ]
-              },
-              {
-                "type": "actions",
-                "elements": [
-                  {
-                    "type": "button",
-                    "text": { "type": "plain_text", "text": "View Run" },
-                    "url": "https://github.com/${GITHUB_REPO}/actions/runs/${GITHUB_RUN_ID}"
-                  },
-                  {
-                    "type": "button",
-                    "text": { "type": "plain_text", "text": "View Commit" },
-                    "url": "https://github.com/${GITHUB_REPO}/commit/${GITHUB_SHA}"
-                  }
+                + (if ($details | length) > 0 then
+                    [{ type: "section", text: { type: "mrkdwn", text: "```\($details)```" } }]
+                  else [] end)
+                + [
+                  { type: "actions", elements: [
+                    { type: "button", text: { type: "plain_text", text: "View Run" }, url: $run_url },
+                    { type: "button", text: { type: "plain_text", text: "View Commit" }, url: $commit_url }
+                  ] },
+                  { type: "context", elements: [ { type: "mrkdwn", text: "Commit: \($sha)" } ] }
                 ]
-              },
-              {
-                "type": "context",
-                "elements": [
-                  { "type": "mrkdwn", "text": "Commit: ${GITHUB_SHA}" }
-                ]
-              }
-            ]
-          }
-          EOF
-          )
+              )
+            }')
 
           # Check delivery explicitly, there is a history of access being removed and silent failures.
           http_status=$(curl -sS -o /tmp/slack_response.txt -w "%{http_code}" \

@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# Runs the test suite; if it fails with ExUnit test failures, retries
+# only the failed tests once. If the retry passes, the failure was a flake:
+# report it but exit 0 so CI stays green.
+# Any other outcome (compile/infra error, or retry also fails) exits non-zero.
+#
+# The report is uploading artifacts with a summary of the failure, a daily job 
+# picks them up, summarizes them and posts them to slack (`flaky-digest.yml`).
+set -euo pipefail
+
+EXPORT_COVERAGE_SUFFIX="$1"
+
+ATTEMPT1_LOG="$(mktemp)"
+FLAKY_REPORT="flaky-report.md"
+FLAKY_EVENTS="flaky-events.jsonl"
+MAX_SNIPPET_CHARS=4000
+
+# mix's exit code is data we need to branch on, not an error - suspend
+# errexit so a nonzero PIPESTATUS doesn't abort the script before we read it.
+set +e
+mix coveralls.lcov --partitions 4 --export-coverage "$EXPORT_COVERAGE_SUFFIX" --color 2>&1 | tee "$ATTEMPT1_LOG"
+ATTEMPT1_EXIT="${PIPESTATUS[0]}"
+set -e
+
+if [ "$ATTEMPT1_EXIT" -eq 0 ]; then
+  exit 0
+fi
+
+if [ "$ATTEMPT1_EXIT" -ne 2 ]; then
+  # ::error::/::warning:: are GitHub Actions workflow commands - the runner
+  # turns them into annotations on the job instead of plain log lines.
+  echo "::error::Test run failed with exit code $ATTEMPT1_EXIT (not a test failure) - no retry"
+  exit "$ATTEMPT1_EXIT"
+fi
+
+echo "::warning::Tests failed, retrying only the failed tests once"
+
+set +e
+mix test --failed --color
+ATTEMPT2_EXIT=$?
+set -e
+
+if [ "$ATTEMPT2_EXIT" -ne 0 ]; then
+  echo "::error::Retry also failed with exit code $ATTEMPT2_EXIT - genuine failure"
+  exit "$ATTEMPT2_EXIT"
+fi
+
+echo "Retry passed - the original failure was a flake, reporting it"
+
+SNIPPET="$(sed -n '/^ *[0-9][0-9]*)/,/^Finished in/p' "$ATTEMPT1_LOG" | \
+  sed -r 's/\x1b\[[0-9;]*m//g' | \
+  head -c "$MAX_SNIPPET_CHARS")"
+
+{
+  echo "## Flaky test detected"
+  echo '```'
+  echo "$SNIPPET"
+  echo '```'
+} > "$FLAKY_REPORT"
+
+cat "$FLAKY_REPORT" >> "$GITHUB_STEP_SUMMARY"
+
+# Code that extracts the relevant data from the detected flakies and writes them into a JSON file
+
+# Create empty flakey file
+: > "$FLAKY_EVENTS"
+
+# Structured, one-JSON-object-per-failed-test sibling of the report above -
+# lets the daily digest workflow group occurrences by file:line across runs.
+# Each ExUnit failure looks like:
+#   N) test <name> (<Module>)
+#      <file>:<line>
+#   ...rest of the block...
+# (parameterized tests insert a "Parameters: ..." line before the location;
+# module-level failures, e.g. setup_all, have no "test" keyword and no
+# location line at all - those are skipped here but still show up in
+# flaky-report.md above.)
+# `boundaries` is a "<start> <end>" line pair per block (1-indexed, inclusive).
+boundaries="$(awk '
+  /^ *[0-9]+\) test / { if (start) print start, NR - 1; start = NR; next }
+  start && /^Finished in/ { print start, NR - 1; start = 0 }
+  END { if (start) print start, NR }
+' "$ATTEMPT1_LOG")"
+
+while read -r block_start block_end; do
+  [ -z "$block_start" ] && continue
+
+  block="$(sed -n "${block_start},${block_end}p" "$ATTEMPT1_LOG" | sed -r 's/\x1b\[[0-9;]*m//g')"
+  header="$(printf '%s\n' "$block" | head -n 1)"
+  # The location is a bare "path:line" - strip its indentation before matching.
+  error_line="$(printf '%s\n' "$block" | sed -n '2,4p' | sed -E 's/^[[:space:]]*(Error:[[:space:]]*)?//' | grep -m1 -E '^.+:[0-9]+$' || true)"
+
+  test_name="$(printf '%s' "$header" | sed -E 's/^ *[0-9]+\) test (.*) \(([A-Za-z0-9_.]+)\)[[:space:]]*$/\2 \1/')"
+  file="$(printf '%s' "$error_line" | sed -E 's/^(.+):[0-9]+$/\1/')"
+  line="$(printf '%s' "$error_line" | sed -E 's/^.+:([0-9]+)$/\1/')"
+  snippet="$(printf '%s' "$block" | head -c "$MAX_SNIPPET_CHARS")"
+
+  jq -n \
+    --arg file "${file:-}" \
+    --argjson line "${line:-0}" \
+    --arg test "$test_name" \
+    --arg run_id "${GITHUB_RUN_ID:-}" \
+    --arg snippet "$snippet" \
+    '{file: $file, line: $line, test: $test, run_id: $run_id, snippet: $snippet}' \
+    >> "$FLAKY_EVENTS"
+done <<< "$boundaries"
+
+exit 0

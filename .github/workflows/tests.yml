@@ -105,7 +105,9 @@ jobs:
       - name: Start epmd
         run: epmd -daemon
       - name: Run tests
-        run: MIX_TEST_PARTITION=${{ matrix.partition }} mix coveralls.lcov --partitions 4 --export-coverage partition-${{ matrix.partition }}
+        env:
+          MIX_TEST_PARTITION: ${{ matrix.partition }}
+        run: .github/scripts/run_tests_with_retry.sh partition-${{ matrix.partition }}
       - name: Upload coverage artifact
         if: matrix.postgres == 'pg17'
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
@@ -114,6 +116,14 @@ jobs:
           path: |
             cover/lcov.info
             cover/partition-${{ matrix.partition }}.coverdata
+      - name: Upload flaky test report
+        if: hashFiles('flaky-report.md') != ''
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: flaky-${{ matrix.postgres }}-p${{ matrix.partition }}
+          path: |
+            flaky-report.md
+            flaky-events.jsonl
 
   assets_tests:
     name: Asset Tests
