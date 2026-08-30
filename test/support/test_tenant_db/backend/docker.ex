@@ -88,7 +88,7 @@ defmodule TestTenantDb.Backend.Docker do
 
   # -- Docker plumbing
 
-  defp image, do: System.get_env("POSTGRES_IMAGE", "supabase/postgres:17.6.1.127")
+  defp image, do: System.get_env("POSTGRES_IMAGE", "supabase/postgres:17.6.1.166")
 
   def pull do
     case System.cmd("docker", ["image", "inspect", image()]) do
