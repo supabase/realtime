@@ -35,10 +35,26 @@ fi
 
 echo "::warning::Tests failed, retrying only the failed tests once"
 
+ATTEMPT2_LOG="$(mktemp)"
 set +e
-mix test --failed --color
-ATTEMPT2_EXIT=$?
+mix test --failed --color 2>&1 | tee "$ATTEMPT2_LOG"
+ATTEMPT2_EXIT="${PIPESTATUS[0]}"
 set -e
+
+# ExUnit's --failed manifest does not respect :parameterize params. 
+# If a failing parameter variant's manifest entry gets
+# overwritten --failed selects nothing, prints this message, and exits
+# cleanly without rerunning.
+# Treat it as inconclusive rather than trust the exit code, so a genuinely broken
+# variant can't hide behind an always-passing sibling forever.
+#
+# Will fix in ExUnit separately but we then also need to wait for the release of that.
+# This is also a good/safe fallback for other such/similar issues, so we don't
+# accidentally leak failing tests.
+if grep -q "There are no tests to run" "$ATTEMPT2_LOG"; then
+  echo "::error::Retry selected no tests to re-run (see script comment for why) - treating as a genuine failure"
+  exit 1
+fi
 
 if [ "$ATTEMPT2_EXIT" -ne 0 ]; then
   echo "::error::Retry also failed with exit code $ATTEMPT2_EXIT - genuine failure"
