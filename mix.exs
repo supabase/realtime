@@ -62,7 +62,7 @@ defmodule Realtime.MixProject do
   defp deps do
     [
       phoenix_dep(),
-      {:phoenix_ecto, "~> 4.4.0"},
+      {:phoenix_ecto, "~> 4.7.0"},
       {:ecto_sql, "~> 3.11"},
       {:ecto_psql_extras, "~> 0.8"},
       {:postgrex, "~> 0.22"},
