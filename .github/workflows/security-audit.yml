@@ -57,4 +57,4 @@ jobs:
       title: 'Hex Audit'
       status: 'failure'
     secrets:
-      SLACK_ALERTS_WEBHOOK: ${{ secrets.SLACK_ALERTS_WEBHOOK }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_ALERTS_WEBHOOK }}

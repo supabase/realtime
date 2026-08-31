@@ -1,0 +1,124 @@
+name: Flaky Test Digest
+
+# Drains whatever flaky-*.jsonl artifacts tests.yml's "Run tests" step has
+# uploaded, groups occurrences by file:line, sends at most one Slack message
+# per workday, then deletes the artifacts it just reported on. 
+# Should catch up on a failed run.
+
+on:
+  schedule:
+    - cron: "0 8 * * 1-5" # 08:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  actions: write # write (not just read) is required to delete artifacts
+
+jobs:
+  collect:
+    name: Collect and report flaky events
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    outputs:
+      has_flaky: ${{ steps.aggregate.outputs.has_flaky }}
+      message: ${{ steps.aggregate.outputs.message }}
+    steps:
+      - name: List and download outstanding flaky artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p flaky-artifacts
+          : > matched_artifacts.jsonl
+
+          # Repo-wide `.../actions/artifacts` returns every artifact ever
+          # created, including coverage-partition-* (which this workflow
+          # never deletes) - so paginating that directly would still mean
+          # scanning up to 90 days of history every run, deletion or not.
+          # Scope to runs instead: list tests.yml runs from a generous fixed
+          # lookback then each run's own small list.
+          SINCE="$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)"
+          RUN_IDS="$(gh run list --repo "${{ github.repository }}" --workflow=tests.yml \
+            --created ">=${SINCE}" -L 1000 --json databaseId --jq '.[].databaseId')"
+
+          for RUN_ID in $RUN_IDS; do
+            gh api "repos/${{ github.repository }}/actions/runs/${RUN_ID}/artifacts?per_page=100" \
+              | jq -c '.artifacts[] | select(.expired == false) | select(.name | startswith("flaky-"))' \
+              >> matched_artifacts.jsonl
+          done
+
+          jq -r '.id' matched_artifacts.jsonl > artifact_ids.txt || true
+
+          if [ ! -s matched_artifacts.jsonl ]; then
+            echo "No outstanding flaky artifacts"
+            exit 0
+          fi
+
+          while read -r ARTIFACT_ID; do
+            curl -sSL -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/${ARTIFACT_ID}/zip" \
+              -o "flaky-artifacts/${ARTIFACT_ID}.zip"
+            unzip -o -q "flaky-artifacts/${ARTIFACT_ID}.zip" -d "flaky-artifacts/${ARTIFACT_ID}"
+          done < artifact_ids.txt
+
+      - name: Aggregate by file:line and build Slack message
+        id: aggregate
+        run: |
+          set -euo pipefail
+
+          find flaky-artifacts -name 'flaky-events.jsonl' -exec cat {} + > all_events.jsonl 2>/dev/null || true
+
+          if [ ! -s all_events.jsonl ]; then
+            echo "has_flaky=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          jq -s '
+            group_by(if (.file // "") != "" then (.file + ":" + (.line|tostring)) else .test end)
+            | map({
+                key: (if (.[0].file // "") != "" then (.[0].file + ":" + (.[0].line|tostring)) else .[0].test end),
+                count: length,
+                test: .[0].test,
+                snippet: (sort_by(.run_id | tonumber? // 0) | last | .snippet)
+              })
+            | sort_by(-.count)
+          ' all_events.jsonl > grouped.json
+
+          TOTAL_GROUPS="$(jq 'length' grouped.json)"
+
+          jq -r '
+            .[:10][] | "*\(.key)* — \(.count)x\n> \(.test)\n```\n\(.snippet[0:500])\n```\n"
+          ' grouped.json > message.txt
+
+          if [ "$TOTAL_GROUPS" -gt 10 ]; then
+            echo "…and $((TOTAL_GROUPS - 10)) more distinct flaky test location(s) today." >> message.txt
+          fi
+
+          echo "has_flaky=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "message<<FLAKY_DIGEST_EOF"
+            cat message.txt
+            echo "FLAKY_DIGEST_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Delete reported-on artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [ -s artifact_ids.txt ] || exit 0
+
+          while read -r ARTIFACT_ID; do
+            gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/${ARTIFACT_ID}" || true
+          done < artifact_ids.txt
+
+  notify:
+    name: Notify Slack
+    needs: collect
+    if: ${{ needs.collect.outputs.has_flaky == 'true' }}
+    uses: ./.github/workflows/slack-notify.yml
+    with:
+      title: "Daily flaky test digest"
+      status: "partial"
+      details: ${{ needs.collect.outputs.message }}
+    secrets:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_ALERTS_WEBHOOK }}
