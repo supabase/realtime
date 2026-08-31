@@ -41,6 +41,7 @@ defmodule Mix.Tasks.Realtime.ExportTenantDbDump do
     Mix.shell().info("[export_tenant_db_dump] target: #{host}:#{port}/#{database} (pg#{pg_major})")
 
     lines = [
+      banner(pg_major),
       realtime_admin_role_sql!(host, port, database, user, password),
       pg_dump!(host, port, database, user, password) |> postprocess(),
       schema_migrations_sql!(host, port, database, user, password)
@@ -52,6 +53,24 @@ defmodule Mix.Tasks.Realtime.ExportTenantDbDump do
   end
 
   defp dump_path(pg_major), do: Application.app_dir(:realtime, "priv/repo/tenant_db_dump_#{pg_major}.sql")
+
+  @doc false
+  def banner(pg_major) do
+    """
+    --
+    -- Auto-generated. Do not edit.
+    --
+    -- Tenant `realtime` schema for Postgres #{pg_major}
+    --
+    -- Beyond priv/repo/tenant_schema it also:
+    --   - creates the supabase_realtime_admin role
+    --   - creates realtime.schema_migrations and records every applied version
+    --   - sets ALTER DEFAULT PRIVILEGES and the dashboard_user/postgres grants
+    --
+    -- See Mix.Tasks.Realtime.ExportTenantDbDump
+    --
+    """
+  end
 
   defp pg_dump!(host, port, database, user, password) do
     pg_dump = System.find_executable("pg_dump") || Mix.raise("pg_dump not found on $PATH")
