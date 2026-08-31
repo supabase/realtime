@@ -4,12 +4,20 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
 
   setup :set_mimic_from_context
 
+  import Ecto.Query, only: [from: 2]
+
+  alias Realtime.Api
+  alias Realtime.Api.Message
   alias Realtime.Crypto
+  alias Realtime.Database
+  alias Realtime.FeatureFlags
   alias Realtime.GenCounter
   alias Realtime.RateCounter
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Connect
+  alias Realtime.Tenants.ReplicationConnection
+  alias Realtime.Tenants.Repo
 
   alias RealtimeWeb.RealtimeChannel
   alias RealtimeWeb.Endpoint
@@ -661,6 +669,127 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       assert Jason.decode!(conn.resp_body)["message"] == "RPC error"
     end
   end
+
+  describe "broadcast persistence" do
+    setup %{conn: conn, tenant: tenant} do
+      enable_broadcast_persistence_flag!(tenant)
+      jwt_secret = Crypto.decrypt!(tenant.jwt_secret)
+
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+      clean_table(db_conn, "realtime", "messages")
+
+      claims = %{sub: random_string(), role: "authenticated", exp: Joken.current_time() + 1_000}
+      signer = Joken.Signer.create("HS256", jwt_secret)
+      jwt = Joken.generate_and_sign!(%{}, claims, signer)
+
+      conn =
+        conn
+        |> put_req_header("accept", "application/json")
+        |> put_req_header("authorization", "Bearer #{jwt}")
+        |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
+
+      {:ok, conn: conn, db_conn: db_conn}
+    end
+
+    test "persist=true stores the message and does not broadcast it again from the database", %{
+      conn: conn,
+      db_conn: db_conn,
+      tenant: tenant
+    } do
+      # Other tests in this module assert this tenant's events counter is 0.0
+      stub(GenCounter, :add, fn _ -> :ok end)
+
+      start_link_supervised!(
+        {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
+        restart: :transient
+      )
+
+      sub_topic = random_string()
+      event = random_string()
+
+      create_rls_policies(
+        db_conn,
+        [:authenticated_read_broadcast, :authenticated_write_broadcast, :authenticated_write_persistence],
+        %{topic: sub_topic}
+      )
+
+      subscribe(Tenants.tenant_topic(tenant.external_id, sub_topic, false), sub_topic)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(
+          Routes.broadcast_single_path(conn, :broadcast, sub_topic, event) <> "?private=true&persist=true",
+          %{"content" => "hello"}
+        )
+
+      assert conn.status == 202
+      assert_receive {:socket_push, :text, _data}, 500
+
+      assert eventually(fn ->
+               match?(
+                 {:ok, [%Message{topic: ^sub_topic, event: ^event, skip_broadcast: true}]},
+                 Repo.all(db_conn, messages_for(sub_topic), Message)
+               )
+             end)
+
+      # The stored row reaches the replication stream but must not be delivered a second time
+      refute_receive {:socket_push, :text, _}, 500
+    end
+
+    test "does not store without persist=true", %{conn: conn, db_conn: db_conn} do
+      stub(GenCounter, :add, fn _ -> :ok end)
+
+      sub_topic = random_string()
+      event = random_string()
+
+      create_rls_policies(
+        db_conn,
+        [:authenticated_read_broadcast, :authenticated_write_broadcast, :authenticated_write_persistence],
+        %{topic: sub_topic}
+      )
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(
+          Routes.broadcast_single_path(conn, :broadcast, sub_topic, event) <> "?private=true",
+          %{"content" => "hello"}
+        )
+
+      assert conn.status == 202
+
+      refute eventually(fn -> match?({:ok, [_ | _]}, Repo.all(db_conn, messages_for(sub_topic), Message)) end)
+    end
+
+    test "rejects persist=true on a public broadcast", %{conn: conn} do
+      stub(GenCounter, :add, fn _ -> :ok end)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(
+          Routes.broadcast_single_path(conn, :broadcast, random_string(), random_string()) <> "?persist=true",
+          %{"content" => "hello"}
+        )
+
+      assert conn.status == 422
+      assert Jason.decode!(conn.resp_body)["errors"]["persist"] == ["can only be used on private channels"]
+    end
+  end
+
+  # Enables the `broadcast_persistence` flag for real: the flag is created and pushed into the local
+  # FeatureFlags cache so the replication connection process reads it synchronously, and torn down
+  # afterwards so it does not leak into other tests via the shared in-memory cache.
+  defp enable_broadcast_persistence_flag!(tenant) do
+    {:ok, flag} = Api.upsert_feature_flag(%{name: "broadcast_persistence", enabled: false})
+    FeatureFlags.Cache.update_cache(flag)
+    {:ok, tenant} = FeatureFlags.set_tenant_flag("broadcast_persistence", tenant.external_id, true)
+    Realtime.Tenants.Cache.update_cache(tenant)
+    on_exit(fn -> FeatureFlags.Cache.invalidate_cache("broadcast_persistence") end)
+  end
+
+  defp messages_for(topic), do: from(m in Message, where: m.topic == ^topic)
 
   defp generate_conn(conn, tenant) do
     now = System.system_time(:second)

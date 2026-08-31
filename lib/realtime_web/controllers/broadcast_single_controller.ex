@@ -52,6 +52,16 @@ defmodule RealtimeWeb.BroadcastSingleController do
         example: false,
         description: "Whether this is a private broadcast (requires RLS authorization). Defaults to false."
       ]
+      # TODO: uncomment when broadcast persistence is public and ready
+      # persist: [
+      #   in: :query,
+      #   name: "persist",
+      #   schema: %OpenApiSpex.Schema{type: :boolean},
+      #   required: false,
+      #   example: false,
+      #   description:
+      #     "Whether to store the broadcast in realtime.messages (requires private and RLS authorization). Defaults to false."
+      # ]
     ],
     request_body: %OpenApiSpex.RequestBody{
       description: "Broadcast message payload. Supports both JSON and binary formats.",
@@ -79,20 +89,30 @@ defmodule RealtimeWeb.BroadcastSingleController do
         %{assigns: %{tenant: tenant}, body_params: %{"_binary" => binary}} = conn,
         %{"topic" => topic, "event" => event} = params
       ) do
-    private = parse_private(params["private"])
+    private = parse_boolean(params["private"])
+    persist = parse_boolean(params["persist"])
     auth_params = build_auth_params(conn, tenant)
 
-    with :ok <- SingleBroadcast.broadcast(auth_params, tenant, topic, event, private, binary, :binary) do
+    with :ok <-
+           SingleBroadcast.broadcast(auth_params, tenant, topic, event, binary, :binary,
+             private: private,
+             persist: persist
+           ) do
       send_resp(conn, :accepted, "")
     end
   end
 
   def broadcast(%{assigns: %{tenant: tenant}} = conn, %{"topic" => topic, "event" => event} = params) do
-    private = parse_private(params["private"])
+    private = parse_boolean(params["private"])
+    persist = parse_boolean(params["persist"])
     payload = conn.body_params
     auth_params = build_auth_params(conn, tenant)
 
-    with :ok <- SingleBroadcast.broadcast(auth_params, tenant, topic, event, private, payload, :json) do
+    with :ok <-
+           SingleBroadcast.broadcast(auth_params, tenant, topic, event, payload, :json,
+             private: private,
+             persist: persist
+           ) do
       send_resp(conn, :accepted, "")
     end
   end
@@ -107,7 +127,7 @@ defmodule RealtimeWeb.BroadcastSingleController do
     })
   end
 
-  defp parse_private("true"), do: true
-  defp parse_private(true), do: true
-  defp parse_private(_), do: false
+  defp parse_boolean("true"), do: true
+  defp parse_boolean(true), do: true
+  defp parse_boolean(_), do: false
 end

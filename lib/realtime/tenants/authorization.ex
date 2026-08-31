@@ -31,7 +31,7 @@ defmodule Realtime.Tenants.Authorization do
           :sub => binary | nil
         }
 
-  @type extension :: :broadcast | :presence
+  @type extension :: :broadcast | :presence | :persistence
 
   @doc """
   Builds a new authorization struct which will be used to retain the information required to check Policies.
@@ -125,7 +125,7 @@ defmodule Realtime.Tenants.Authorization do
           | {:error, :tenant_database_unavailable}
           | {:error, any()}
   def get_write_authorizations(policies, db_conn, authorization_context, extension)
-      when extension in [:broadcast, :presence] and node() == node(db_conn) do
+      when extension in [:broadcast, :presence, :persistence] and node() == node(db_conn) do
     rate_counter = rate_counter(authorization_context.tenant_id)
 
     if rate_counter.limit.triggered == false do
@@ -139,7 +139,7 @@ defmodule Realtime.Tenants.Authorization do
 
   # Remote call
   def get_write_authorizations(policies, db_conn, authorization_context, extension)
-      when extension in [:broadcast, :presence] do
+      when extension in [:broadcast, :presence, :persistence] do
     rate_counter = rate_counter(authorization_context.tenant_id)
 
     if rate_counter.limit.triggered == false do
@@ -334,15 +334,21 @@ defmodule Realtime.Tenants.Authorization do
 
     case Repo.insert(conn, changeset, Message, mode: :savepoint, returning: false) do
       {:ok, _} ->
-        {:ok, Policies.update_policies(policies, extension, :write, true)}
+        {:ok, update_write_policy(policies, extension, true)}
 
       {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-        {:ok, Policies.update_policies(policies, extension, :write, false)}
+        {:ok, update_write_policy(policies, extension, false)}
 
       {:error, reason} ->
         {:error, reason}
     end
   end
+
+  defp update_write_policy(policies, :persistence, value),
+    do: Policies.update_policies(policies, :broadcast, :persist, value)
+
+  defp update_write_policy(policies, extension, value),
+    do: Policies.update_policies(policies, extension, :write, value)
 
   defp rate_counter(tenant_id) do
     %Tenant{} = tenant = Realtime.Tenants.Cache.get_tenant_by_external_id(tenant_id)
