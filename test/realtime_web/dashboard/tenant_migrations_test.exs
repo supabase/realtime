@@ -175,6 +175,28 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
       refute sql =~ "Planning:"
     end
 
+    test "keeps user RLS policies and their comments", %{
+      settings: settings,
+      admin_conn: admin_conn
+    } do
+      Postgrex.query!(admin_conn, "CREATE POLICY customer_policy ON realtime.messages FOR SELECT USING (true)", [])
+      Postgrex.query!(admin_conn, "COMMENT ON POLICY customer_policy ON realtime.messages IS 'customer note'", [])
+
+      Postgrex.query!(
+        admin_conn,
+        "CREATE POLICY customer_sub_policy ON realtime.subscription FOR SELECT USING (true)",
+        []
+      )
+
+      Postgrex.query!(
+        admin_conn,
+        "COMMENT ON POLICY customer_sub_policy ON realtime.subscription IS 'customer note'",
+        []
+      )
+
+      assert {:ok, %{status: :no_changes}} = TenantMigrations.run_pgdelta(settings)
+    end
+
     test "detects privilege drift on customer-facing roles", %{
       settings: settings,
       admin_conn: admin_conn
@@ -230,6 +252,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
       Postgrex.query!(admin_conn, "DROP INDEX realtime.messages_inserted_at_topic_index", [])
       Postgrex.query!(admin_conn, "ALTER TABLE realtime.messages OWNER TO postgres", [])
       Postgrex.query!(admin_conn, "CREATE POLICY customer_policy ON realtime.messages FOR SELECT USING (true)", [])
+      Postgrex.query!(admin_conn, "COMMENT ON POLICY customer_policy ON realtime.messages IS 'customer note'", [])
 
       Postgrex.query!(admin_conn, "DELETE FROM realtime.schema_migrations WHERE version > 20211116213934", [])
       {:ok, _} = Api.update_migrations_ran(tenant.external_id, 7)
@@ -256,6 +279,17 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
         )
 
       assert surviving_policies == 1
+
+      assert %{rows: [["customer note"]]} =
+               Postgrex.query!(
+                 admin_conn,
+                 """
+                 SELECT obj_description(pol.oid, 'pg_policy')
+                 FROM pg_policy pol
+                 WHERE pol.polrelid = 'realtime.messages'::regclass AND pol.polname = 'customer_policy'
+                 """,
+                 []
+               )
 
       %{rows: [[count]]} = Postgrex.query!(admin_conn, "SELECT count(*)::int FROM realtime.schema_migrations", [])
 
