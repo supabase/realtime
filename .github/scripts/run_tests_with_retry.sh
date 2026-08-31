@@ -13,7 +13,7 @@ EXPORT_COVERAGE_SUFFIX="$1"
 ATTEMPT1_LOG="$(mktemp)"
 FLAKY_REPORT="flaky-report.md"
 FLAKY_EVENTS="flaky-events.jsonl"
-MAX_SNIPPET_CHARS=4000
+MAX_SNIPPET_CHARS=8000
 
 # mix's exit code is data we need to branch on, not an error - suspend
 # errexit so a nonzero PIPESTATUS doesn't abort the script before we read it.
@@ -47,9 +47,13 @@ fi
 
 echo "Retry passed - the original failure was a flake, reporting it"
 
+# Truncate as a bash substring, not via a piped `head -c` - if the sed output
+# is longer than the limit, head closes the pipe early and SIGPIPEs sed,
+# which then exits non-zero and aborts the whole script even though the
+# retry already passed.
 SNIPPET="$(sed -n '/^ *[0-9][0-9]*)/,/^Finished in/p' "$ATTEMPT1_LOG" | \
-  sed -r 's/\x1b\[[0-9;]*m//g' | \
-  head -c "$MAX_SNIPPET_CHARS")"
+  sed -r 's/\x1b\[[0-9;]*m//g')"
+SNIPPET="${SNIPPET:0:$MAX_SNIPPET_CHARS}"
 
 {
   echo "## Flaky test detected"
@@ -93,7 +97,7 @@ while read -r block_start block_end; do
   test_name="$(printf '%s' "$header" | sed -E 's/^ *[0-9]+\) test (.*) \(([A-Za-z0-9_.]+)\)[[:space:]]*$/\2 \1/')"
   file="$(printf '%s' "$error_line" | sed -E 's/^(.+):[0-9]+$/\1/')"
   line="$(printf '%s' "$error_line" | sed -E 's/^.+:([0-9]+)$/\1/')"
-  snippet="$(printf '%s' "$block" | head -c "$MAX_SNIPPET_CHARS")"
+  snippet="${block:0:$MAX_SNIPPET_CHARS}"
 
   jq -n \
     --arg file "${file:-}" \
