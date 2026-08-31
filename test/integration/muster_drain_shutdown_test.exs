@@ -20,7 +20,7 @@ defmodule Realtime.Integration.MusterDrainShutdownTest do
     # Both nodes agree on the scope and converge to a 2-node :ready ring.
     assert :erpc.call(peer, Application, :fetch_env!, [:realtime, :muster_scope]) == scope
 
-    eventually(fn ->
+    assert eventually(fn ->
       Enum.sort(Muster.members(scope)) == Enum.sort([local, peer]) and Muster.status(scope) == :ready
     end)
 
@@ -32,7 +32,7 @@ defmodule Realtime.Integration.MusterDrainShutdownTest do
     assert :erpc.call(peer, :persistent_term, :get, [{Forum.Muster, scope, :accepting_joins}, true]) == false
 
     # The survivor rebalanced the peer out of its ring...
-    eventually(fn -> Enum.sort(Muster.members(scope)) == [local] end)
+    assert eventually(fn -> Enum.sort(Muster.members(scope)) == [local] end)
 
     # ...and it did so while the peer node was still alive and connected -- proof
     # this was the graceful leave, not an abrupt-death :DOWN.
