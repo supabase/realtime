@@ -4,7 +4,7 @@ defmodule Realtime.MixProject do
   def project do
     [
       app: :realtime,
-      version: "2.130.0",
+      version: "2.132.0",
       elixir: "~> 1.19",
       elixirc_paths: elixirc_paths(Mix.env()),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
@@ -62,7 +62,7 @@ defmodule Realtime.MixProject do
   defp deps do
     [
       phoenix_dep(),
-      {:phoenix_ecto, "~> 4.4.0"},
+      {:phoenix_ecto, "~> 4.7.0"},
       {:ecto_sql, "~> 3.11"},
       {:ecto_psql_extras, "~> 0.8"},
       {:postgrex, "~> 0.22"},
@@ -78,7 +78,7 @@ defmodule Realtime.MixProject do
        github: "tailwindlabs/heroicons", tag: "v2.1.1", sparse: "optimized", app: false, compile: false, depth: 1},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
-      {:gettext, "~> 0.19"},
+      {:gettext, "~> 1.0"},
       {:jason, "~> 1.3"},
       {:plug_cowboy, "~> 2.8"},
       {:libcluster, "~> 3.3"},

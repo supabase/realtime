@@ -31,6 +31,7 @@ concurrency:
 permissions:
   contents: read
   pull-requests: write
+  actions: read # needed to resolve this job's own numeric ID for the flaky digest's job link
 
 env:
   MIX_ENV: test
@@ -53,11 +54,11 @@ jobs:
           - postgres: pg15
             postgres_image: supabase/postgres:15.1.0.1
           - postgres: pg15_latest
-            postgres_image: supabase/postgres:15.14.1.129
+            postgres_image: supabase/postgres:15.14.1.167
           - postgres: pg17
-            postgres_image: supabase/postgres:17.6.1.127
+            postgres_image: supabase/postgres:17.6.1.166
           - postgres: orioledb17
-            postgres_image: supabase/postgres:17.6.0.096-orioledb
+            postgres_image: supabase/postgres:17.9.0.019-orioledb
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -106,8 +107,28 @@ jobs:
         run: docker compose -f compose.dbs.yml up -d --wait
       - name: Start epmd
         run: epmd -daemon
+      # flaky test reporter wants to provide full job URLs, no easier way to allow this found
+      - name: Resolve job URL
+        id: job_url
+        continue-on-error: true # best-effort metadata for the flaky digest; never fail the test job over this
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          # github.job is the YAML job key ("tests"), not the per-matrix-cell numeric job ID
+          # the /job/<id> URL needs - resolve it by matching this runner against the run's job
+          # list (each job in a run gets a distinct runner; RUNNER_NAME is set by the runner).
+          JOB_ID="$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" \
+            --paginate --jq ".jobs[] | select(.runner_name == \"$RUNNER_NAME\") | .id" | head -n1)"
+          if [ -n "$JOB_ID" ]; then
+            echo "url=https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/job/${JOB_ID}" >> "$GITHUB_OUTPUT"
+          fi
       - name: Run tests
-        run: MIX_TEST_PARTITION=${{ matrix.partition }} mix coveralls.lcov --partitions 4 --export-coverage partition-${{ matrix.partition }}
+        env:
+          MIX_TEST_PARTITION: ${{ matrix.partition }}
+          MATRIX_POSTGRES: ${{ matrix.postgres }}
+          JOB_URL: ${{ steps.job_url.outputs.url }}
+        run: .github/scripts/run_tests_with_retry.sh partition-${{ matrix.partition }}
       - name: Upload coverage artifact
         if: matrix.postgres == 'pg17'
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
@@ -116,6 +137,14 @@ jobs:
           path: |
             cover/lcov.info
             cover/partition-${{ matrix.partition }}.coverdata
+      - name: Upload flaky test report
+        if: hashFiles('flaky-report.md') != ''
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: flaky-${{ matrix.postgres }}-p${{ matrix.partition }}
+          path: |
+            flaky-report.md
+            flaky-events.jsonl
 
   assets_tests:
     name: Asset Tests

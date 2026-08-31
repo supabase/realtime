@@ -15,6 +15,11 @@
         "audit": { "reasonCode": "realtime.keep-unknown-rls-policies", "classification": "acknowledged" }
       },
       {
+        "match": { "all": [{ "kind": "comment" }, { "target": { "kind": "policy" } }, { "verb": "remove" }] },
+        "action": "exclude",
+        "audit": { "reasonCode": "realtime.keep-unknown-rls-policy-comments", "classification": "acknowledged" }
+      },
+      {
         "match": { "all": [{ "kind": "table" }, { "schema": "realtime" }, { "name": "schema_migrations" }] },
         "action": "exclude",
         "audit": { "reasonCode": "realtime.schema-migrations-table", "classification": "acknowledged" }

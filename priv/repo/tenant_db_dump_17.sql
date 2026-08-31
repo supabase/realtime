@@ -1062,7 +1062,8 @@ CREATE TABLE realtime.messages (
     updated_at timestamp without time zone DEFAULT now() NOT NULL,
     inserted_at timestamp without time zone DEFAULT now() NOT NULL,
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    binary_payload bytea
+    binary_payload bytea,
+    skip_broadcast boolean DEFAULT false NOT NULL
 )
 PARTITION BY RANGE (inserted_at);
 
@@ -1485,3 +1486,4 @@ INSERT INTO realtime."schema_migrations" (version) VALUES (20260626120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260706120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260707120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260709120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20260714120000);

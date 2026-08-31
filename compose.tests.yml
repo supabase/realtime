@@ -1,7 +1,7 @@
 services:
   # Supabase Realtime service
   test_db:
-    image: ${POSTGRES_IMAGE:-supabase/postgres:17.6.1.127}
+    image: ${POSTGRES_IMAGE:-supabase/postgres:17.6.1.166}
     ports:
       - "${TEST_DB_PORT:-5532}:5432"
     volumes:

@@ -44,3 +44,6 @@ demo/.env
 mise.local.toml
 
 .temp
+
+# Scaffolded by `pgdelta schema export` on every run
+priv/repo/tenant_schema/_custom/

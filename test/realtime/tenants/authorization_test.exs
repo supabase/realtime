@@ -92,6 +92,37 @@ defmodule Realtime.Tenants.AuthorizationTest do
              } == policies
     end
 
+    @tag role: "authenticated", policies: [:authenticated_write_broadcast, :authenticated_write_persistence]
+    test "checks only the requested persistence write policy", context do
+      {:ok, policies} =
+        Authorization.get_write_authorizations(
+          %Policies{},
+          context.db_conn,
+          context.authorization_context,
+          :persistence
+        )
+
+      # The persistence policy lands on broadcast.persist, leaving broadcast.write unevaluated.
+      assert %Policies{
+               broadcast: %BroadcastPolicies{read: nil, write: nil, persist: true},
+               presence: %PresencePolicies{read: nil, write: nil}
+             } == policies
+    end
+
+    @tag role: "authenticated", policies: [:authenticated_write_broadcast]
+    test "denies persistence when only the broadcast write policy exists", context do
+      {:ok, policies} =
+        Authorization.get_write_authorizations(%Policies{}, context.db_conn, context.authorization_context, :broadcast)
+
+      {:ok, policies} =
+        Authorization.get_write_authorizations(policies, context.db_conn, context.authorization_context, :persistence)
+
+      assert %Policies{
+               broadcast: %BroadcastPolicies{read: nil, write: true, persist: false},
+               presence: %PresencePolicies{read: nil, write: nil}
+             } == policies
+    end
+
     @tag role: "anon",
          policies: [
            :authenticated_read_broadcast_and_presence,
