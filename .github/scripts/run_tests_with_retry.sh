@@ -106,7 +106,8 @@ while read -r block_start block_end; do
   [ -z "$block_start" ] && continue
 
   block="$(sed -n "${block_start},${block_end}p" "$ATTEMPT1_LOG" | sed -r 's/\x1b\[[0-9;]*m//g')"
-  header="$(printf '%s\n' "$block" | head -n 1)"
+  # Same broken-pipe risk as the MAX_SNIPPET_CHARS truncation above, so workaround.
+  header="${block%%$'\n'*}"
   # The location is a bare "path:line" - strip its indentation before matching.
   error_line="$(printf '%s\n' "$block" | sed -n '2,4p' | sed -E 's/^[[:space:]]*(Error:[[:space:]]*)?//' | grep -m1 -E '^.+:[0-9]+$' || true)"
 
