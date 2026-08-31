@@ -5,6 +5,7 @@
 - [Client](#client)
   - [Client libraries](#client-libraries)
 - [Server](#server)
+  - [Architecture](#architecture)
   - [Server Setup](#server-setup)
   - [Devcontainer](#devcontainer)
   - [Tenants](#tenants)
@@ -26,6 +27,12 @@
 | Swift        | [supabase-swift/Realtime](https://github.com/supabase/supabase-swift/tree/main/Sources/Realtime)                    | [supabase-swift](https://swiftpackageindex.com/supabase/supabase-swift)      |
 
 ## Server
+
+### Architecture
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for an overview of the cluster layout, how a
+tenant gets placed on a node, how broadcasts are routed, and how Postgres Changes
+subscriptions work.
 
 ### Server Setup
 
