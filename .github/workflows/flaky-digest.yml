@@ -121,9 +121,9 @@ jobs:
                     . as $g
                     | (if ($g.envs | length) > 0 then "  _(seen on: \($g.envs | join(", ")))_" else "" end) as $envs_suffix
                     | (if ($g.job_url // "") != "" then "<\($g.job_url)|Job log> · " else "" end) as $link_prefix
-                    # Slack rejects the whole message if any one section's text exceeds 3000 chars,
-                    # so size the snippet budget off this block's actual fixed overhead (not a flat
-                    # guess) - a long test/key/env list must not be able to push the total over.
+                    # Slack rejects the whole message if the text in any one section exceeds
+                    # 3000 chars, so size the snippet budget off the fixed overhead of this
+                    # block (not a flat guess) - a long test/key/env list must not push the total over.
                     | ("*\($g.key)* — \($g.count)x\($envs_suffix)\n\($link_prefix)\($g.test)\n```\n\n```") as $overhead
                     | ([50, 2900 - ($overhead | length)] | max) as $budget
                     | ($g.snippet | truncate_at_line($budget)) as $snippet
