@@ -78,7 +78,7 @@ The split keeps the hot path (joins/claims) sharded while the rare, node-wide wo
 ### Public API
 
 ```elixir
-Forum.Muster.join(scope, group, pid)        # :ok | {:error, :rpc_failed | :not_local | :draining | ...}
+Forum.Muster.join(scope, group, pid)        # :ok | {:error, :not_local | :draining | :rpc_failed | term}
 Forum.Muster.leave(scope, group, pid)       # :ok | {:error, term}
 Forum.Muster.drain(scope, opts)             # graceful cluster-leave; :ok | {:timeout, [node]}
 Forum.Muster.router(scope, group)           # {:ok, node} | {:rebalancing, [node]}
