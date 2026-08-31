@@ -78,7 +78,7 @@ defmodule Realtime.MixProject do
        github: "tailwindlabs/heroicons", tag: "v2.1.1", sparse: "optimized", app: false, compile: false, depth: 1},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
-      {:gettext, "~> 0.19"},
+      {:gettext, "~> 1.0"},
       {:jason, "~> 1.3"},
       {:plug_cowboy, "~> 2.8"},
       {:libcluster, "~> 3.3"},
