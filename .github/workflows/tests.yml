@@ -29,6 +29,7 @@ concurrency:
 permissions:
   contents: read
   pull-requests: write
+  actions: read # needed to resolve this job's own numeric ID for the flaky digest's job link
 
 env:
   MIX_ENV: test
@@ -104,9 +105,27 @@ jobs:
         run: docker compose -f compose.dbs.yml up -d --wait
       - name: Start epmd
         run: epmd -daemon
+      # flaky test reporter wants to provide full job URLs, no easier way to allow this found
+      - name: Resolve job URL
+        id: job_url
+        continue-on-error: true # best-effort metadata for the flaky digest; never fail the test job over this
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          # github.job is the YAML job key ("tests"), not the per-matrix-cell numeric job ID
+          # the /job/<id> URL needs - resolve it by matching this runner against the run's job
+          # list (each job in a run gets a distinct runner; RUNNER_NAME is set by the runner).
+          JOB_ID="$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" \
+            --paginate --jq ".jobs[] | select(.runner_name == \"$RUNNER_NAME\") | .id" | head -n1)"
+          if [ -n "$JOB_ID" ]; then
+            echo "url=https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/job/${JOB_ID}" >> "$GITHUB_OUTPUT"
+          fi
       - name: Run tests
         env:
           MIX_TEST_PARTITION: ${{ matrix.partition }}
+          MATRIX_POSTGRES: ${{ matrix.postgres }}
+          JOB_URL: ${{ steps.job_url.outputs.url }}
         run: .github/scripts/run_tests_with_retry.sh partition-${{ matrix.partition }}
       - name: Upload coverage artifact
         if: matrix.postgres == 'pg17'

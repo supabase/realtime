@@ -105,7 +105,9 @@ boundaries="$(awk '
 while read -r block_start block_end; do
   [ -z "$block_start" ] && continue
 
-  block="$(sed -n "${block_start},${block_end}p" "$ATTEMPT1_LOG" | sed -r 's/\x1b\[[0-9;]*m//g')"
+  # Drop bare progress-dot lines - ExUnit's CLI formatter prints these for passing tests as
+  # they complete concurrently, and they can land inside a failure block with no diagnostic value.
+  block="$(sed -n "${block_start},${block_end}p" "$ATTEMPT1_LOG" | sed -r 's/\x1b\[[0-9;]*m//g' | grep -v -E '^\.+$' || true)"
   # Same broken-pipe risk as the MAX_SNIPPET_CHARS truncation above, so workaround.
   header="${block%%$'\n'*}"
   # The location is a bare "path:line" - strip its indentation before matching.
@@ -122,7 +124,10 @@ while read -r block_start block_end; do
     --arg test "$test_name" \
     --arg run_id "${GITHUB_RUN_ID:-}" \
     --arg snippet "$snippet" \
-    '{file: $file, line: $line, test: $test, run_id: $run_id, snippet: $snippet}' \
+    --arg postgres "${MATRIX_POSTGRES:-}" \
+    --arg partition "${MIX_TEST_PARTITION:-}" \
+    --arg job_url "${JOB_URL:-}" \
+    '{file: $file, line: $line, test: $test, run_id: $run_id, snippet: $snippet, postgres: $postgres, partition: $partition, job_url: $job_url}' \
     >> "$FLAKY_EVENTS"
 done <<< "$boundaries"
 
