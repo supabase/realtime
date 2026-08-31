@@ -15,8 +15,9 @@ defmodule Realtime.Api.TenantTest do
   }
 
   describe "encrypt_jwt_secret/2 via changeset/3" do
-    test "encrypts jwt_secret with the cipher the caller asked for" do
-      for cipher <- [:gcm, :ecb] do
+    for cipher <- [:gcm, :ecb] do
+      test "encrypts jwt_secret with the #{cipher} cipher when asked for it" do
+        cipher = unquote(cipher)
         changeset = Tenant.changeset(%Tenant{}, %{external_id: "tenant", jwt_secret: "my-secret"}, cipher: cipher)
         jwt_secret = Ecto.Changeset.get_change(changeset, :jwt_secret)
 
@@ -81,26 +82,26 @@ defmodule Realtime.Api.TenantTest do
     test "does not stamp while jwt_secret is on the legacy cipher" do
       changeset = tenant(jwt_secret: cipher_text(:ecb), extensions: [extension(:gcm)]) |> change() |> mark()
 
-      assert stamp(changeset) == :error
+      assert stamp(changeset) == :unchanged
     end
 
     test "does not stamp while an extension holds legacy settings" do
       changeset = tenant(jwt_secret: cipher_text(:gcm), extensions: [extension(:ecb)]) |> change() |> mark()
 
-      assert stamp(changeset) == :error
+      assert stamp(changeset) == :unchanged
     end
 
     test "does not stamp when the extensions are not loaded, since they could still be legacy" do
       changeset = %Tenant{external_id: "tenant", jwt_secret: cipher_text(:gcm)} |> change() |> mark()
 
-      assert stamp(changeset) == :error
+      assert stamp(changeset) == :unchanged
     end
 
     test "leaves an already stamped tenant alone" do
       changeset =
         tenant(jwt_secret: cipher_text(:gcm), extensions: [extension(:gcm)]) |> stamped() |> change() |> mark()
 
-      assert stamp(changeset) == :error
+      assert stamp(changeset) == :unchanged
     end
 
     test "clears the stamp when the write puts jwt_secret back on the legacy cipher" do
@@ -120,14 +121,14 @@ defmodule Realtime.Api.TenantTest do
     test "does not clear the stamp when the extensions are not loaded" do
       changeset = %Tenant{external_id: "tenant", jwt_secret: cipher_text(:gcm)} |> stamped() |> change() |> mark()
 
-      assert stamp(changeset) == :error
+      assert stamp(changeset) == :unchanged
     end
 
     test "is a no-op on an invalid changeset" do
       changeset = Tenant.changeset(%Tenant{}, %{jwt_secret: "my-secret"})
 
       refute changeset.valid?
-      assert stamp(changeset) == :error
+      assert stamp(changeset) == :unchanged
     end
   end
 
@@ -183,12 +184,15 @@ defmodule Realtime.Api.TenantTest do
 
   defp cipher_text(cipher), do: Crypto.encrypt!("a-secret", cipher: cipher)
 
-  defp stamped(tenant), do: %{tenant | gcm_migrated_at: DateTime.utc_now(:second) |> DateTime.add(-1, :day)}
+  defp stamped(tenant), do: %{tenant | gcm_migrated_at: DateTime.utc_now(:second) |> DateTime.shift(day: -1)}
 
   defp change(tenant), do: Ecto.Changeset.change(tenant)
 
   defp mark(changeset), do: Tenant.mark_gcm_migrated(changeset)
 
-  # `get_change/2` reads a cleared stamp and an untouched one both as nil, so go through `changes`.
-  defp stamp(changeset), do: Map.fetch(changeset.changes, :gcm_migrated_at)
+  defp stamp(changeset) do
+    if Ecto.Changeset.changed?(changeset, :gcm_migrated_at),
+      do: {:ok, Ecto.Changeset.get_change(changeset, :gcm_migrated_at)},
+      else: :unchanged
+  end
 end

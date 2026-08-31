@@ -46,7 +46,7 @@ defmodule Realtime.Api.Tenant do
     timestamps()
   end
 
-  @doc "`opts` are forwarded to `Realtime.Crypto.encrypt!/2`."
+  # `opts` are forwarded to `Realtime.Crypto.encrypt!/2`.
   def changeset(tenant, attrs, opts \\ []) do
     # TODO: remove after infra update
     extension_key = if attrs[:extensions], do: :extensions, else: "extensions"
@@ -122,12 +122,12 @@ defmodule Realtime.Api.Tenant do
   def encrypt_jwt_secret(changeset, _opts), do: changeset
 
   @doc """
-  Keeps `gcm_migrated_at` in step with the ciphers the pending write leaves behind: stamped once
-  every encrypted value is AES-256-GCM, cleared again as soon as one goes back to the legacy cipher.
+  Keeps `gcm_migrated_at` in step with the ciphers the pending write leaves behind.
 
-  Clearing is what makes the rollout reversible - a tenant written back to ECB has to land in
-  `Realtime.Tenants.EncryptionReconciler`'s reach again, and that module skips anything already
-  stamped.
+  Stamped once every encrypted value is AES-256-GCM, cleared again as soon as one goes back to the
+  legacy cipher. Clearing is what makes the rollout reversible - a tenant written back to ECB has
+  to land in `Realtime.Tenants.EncryptionReconciler`'s reach again, and that module skips anything
+  already stamped.
   """
   @spec mark_gcm_migrated(Ecto.Changeset.t()) :: Ecto.Changeset.t()
   def mark_gcm_migrated(%Ecto.Changeset{valid?: true} = changeset) do
