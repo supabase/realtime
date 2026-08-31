@@ -19,7 +19,7 @@ jobs:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
       has_flaky: ${{ steps.aggregate.outputs.has_flaky }}
-      message: ${{ steps.aggregate.outputs.message }}
+      blocks: ${{ steps.aggregate.outputs.blocks }}
     steps:
       - name: List and download outstanding flaky artifacts
         env:
@@ -60,7 +60,7 @@ jobs:
             unzip -o -q "flaky-artifacts/${ARTIFACT_ID}.zip" -d "flaky-artifacts/${ARTIFACT_ID}"
           done < artifact_ids.txt
 
-      - name: Aggregate by file:line and build Slack message
+      - name: Aggregate by file:line and build Slack blocks
         id: aggregate
         run: |
           set -euo pipefail
@@ -72,33 +72,76 @@ jobs:
             exit 0
           fi
 
-          jq -s '
-            group_by(if (.file // "") != "" then (.file + ":" + (.line|tostring)) else .test end)
-            | map({
-                key: (if (.[0].file // "") != "" then (.[0].file + ":" + (.[0].line|tostring)) else .[0].test end),
-                count: length,
-                test: .[0].test,
-                snippet: (sort_by(.run_id | tonumber? // 0) | last | .snippet)
-              })
-            | sort_by(-.count)
-          ' all_events.jsonl > grouped.json
+          # Builds one Slack section block per distinct file:line (instead of one giant string)
+          # so a snippet truncation can only ever clip that one entry, never the whole message,
+          # and so markdown (*bold*, links) isn't nested inside an outer code fence that disables
+          # it.
+          #
+          # postgres/partition/job_url may be absent from previous runs or `job_url` failures
+          # - every use below tolerates that via `// ""`/`// empty`.
+          BLOCKS_JSON="$(jq -sc --argjson max_entries 20 '
+            def truncate_at_line($budget):
+              if (. | length) <= $budget then .
+              else
+                .[0:$budget] as $cut
+                | ($cut | rindex("\n")) as $idx
+                | (if $idx then $cut[0:$idx] else $cut end) + "\n… (truncated)"
+              end;
 
-          TOTAL_GROUPS="$(jq 'length' grouped.json)"
+            def env_pairs:
+              map(select((.postgres // "") != "" and (.partition // "") != ""))
+              | map(.postgres + "/" + .partition)
+              | unique;
 
-          jq -r '
-            .[:10][] | "*\(.key)* — \(.count)x\n> \(.test)\n```\n\(.snippet[0:500])\n```\n"
-          ' grouped.json > message.txt
-
-          if [ "$TOTAL_GROUPS" -gt 10 ]; then
-            echo "…and $((TOTAL_GROUPS - 10)) more distinct flaky test location(s) today." >> message.txt
-          fi
+            (group_by(if (.file // "") != "" then (.file + ":" + (.line|tostring)) else .test end)
+             | map(
+                 . as $events
+                 | ($events[0]) as $first
+                 | ($events | sort_by(.run_id | tonumber? // 0) | last) as $latest
+                 | {
+                     key: (if ($first.file // "") != "" then ($first.file + ":" + ($first.line|tostring)) else $first.test end),
+                     count: ($events | length),
+                     test: $first.test,
+                     snippet: ($latest.snippet // ""),
+                     job_url: ($latest.job_url // ""),
+                     envs: ($events | env_pairs)
+                   }
+               )
+             | sort_by(-.count)
+            ) as $groups
+            | ($groups | length) as $total_groups
+            | ($groups | map(.count) | add) as $total_occurrences
+            | ($groups[0:$max_entries]) as $shown
+            | (
+                [
+                  { type: "section", text: { type: "mrkdwn",
+                      text: "*\($total_groups) distinct flaky test(s), \($total_occurrences) total occurrence(s) today*" } }
+                ]
+                + ($shown | map(
+                    . as $g
+                    | (if ($g.envs | length) > 0 then "  _(seen on: \($g.envs | join(", ")))_" else "" end) as $envs_suffix
+                    | (if ($g.job_url // "") != "" then "<\($g.job_url)|Job log> · " else "" end) as $link_prefix
+                    # Slack rejects the whole message if any one section's text exceeds 3000 chars,
+                    # so size the snippet budget off this block's actual fixed overhead (not a flat
+                    # guess) - a long test/key/env list must not be able to push the total over.
+                    | ("*\($g.key)* — \($g.count)x\($envs_suffix)\n\($link_prefix)\($g.test)\n```\n\n```") as $overhead
+                    | ([50, 2900 - ($overhead | length)] | max) as $budget
+                    | ($g.snippet | truncate_at_line($budget)) as $snippet
+                    | {
+                        type: "section",
+                        text: { type: "mrkdwn",
+                          text: "*\($g.key)* — \($g.count)x\($envs_suffix)\n\($link_prefix)\($g.test)\n```\n\($snippet)\n```" }
+                      }
+                  ))
+                + (if $total_groups > $max_entries then
+                    [{ type: "context", elements: [ { type: "mrkdwn",
+                        text: "…and \($total_groups - $max_entries) more distinct flaky test location(s) today." } ] }]
+                  else [] end)
+              )
+          ' all_events.jsonl)"
 
           echo "has_flaky=true" >> "$GITHUB_OUTPUT"
-          {
-            echo "message<<FLAKY_DIGEST_EOF"
-            cat message.txt
-            echo "FLAKY_DIGEST_EOF"
-          } >> "$GITHUB_OUTPUT"
+          echo "blocks=$BLOCKS_JSON" >> "$GITHUB_OUTPUT"
 
       - name: Delete reported-on artifacts
         env:
@@ -119,6 +162,6 @@ jobs:
     with:
       title: "Daily flaky test digest"
       status: "partial"
-      details: ${{ needs.collect.outputs.message }}
+      details_blocks: ${{ needs.collect.outputs.blocks }}
     secrets:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_ALERTS_WEBHOOK }}
