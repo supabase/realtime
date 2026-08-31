@@ -299,6 +299,55 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
       updated = Api.get_tenant_by_external_id(tenant.external_id, use_replica?: false)
       assert updated.migrations_ran == total
     end
+
+    test "preserve user-defined policies", %{
+      tenant: tenant,
+      settings: settings,
+      admin_conn: admin_conn
+    } do
+      create_customer_policies(admin_conn)
+
+      policies_before = messages_policies(admin_conn)
+      assert length(policies_before) == 2
+
+      drift_messages(admin_conn)
+
+      assert {:ok, %{status: :changes, sql: sql, plan: plan}} = TenantMigrations.run_pgdelta(settings)
+      assert sql =~ ~s(ALTER TABLE "realtime"."messages" DROP COLUMN "rogue_col")
+      refute sql =~ "customer_select"
+      refute sql =~ "customer_insert"
+
+      assert :ok = TenantMigrations.apply_pgdelta(tenant, plan)
+
+      assert messages_policies(admin_conn) == policies_before
+      assert {:ok, %{status: :no_changes}} = TenantMigrations.run_pgdelta(settings)
+    end
+
+    test "preserve user-defined policy comments", %{
+      tenant: tenant,
+      settings: settings,
+      admin_conn: admin_conn
+    } do
+      create_customer_policies(admin_conn)
+
+      Postgrex.query!(admin_conn, "COMMENT ON POLICY customer_select ON realtime.messages IS 'select note'", [])
+      Postgrex.query!(admin_conn, "COMMENT ON POLICY customer_insert ON realtime.messages IS 'insert note'", [])
+
+      comments_before = messages_policy_comments(admin_conn)
+      assert comments_before == [["customer_insert", "insert note"], ["customer_select", "select note"]]
+
+      drift_messages(admin_conn)
+
+      assert {:ok, %{status: :changes, sql: sql, plan: plan}} = TenantMigrations.run_pgdelta(settings)
+      assert sql =~ ~s(ALTER TABLE "realtime"."messages" DROP COLUMN "rogue_col")
+      refute sql =~ "select note"
+      refute sql =~ "insert note"
+
+      assert :ok = TenantMigrations.apply_pgdelta(tenant, plan)
+
+      assert messages_policy_comments(admin_conn) == comments_before
+      assert {:ok, %{status: :no_changes}} = TenantMigrations.run_pgdelta(settings)
+    end
   end
 
   describe "postgres_url/1" do
@@ -338,6 +387,55 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
                ssl: true
              }) == "postgresql://supabase_admin:s3cr3t@db.example.com:5432/postgres?sslmode=require"
     end
+  end
+
+  defp create_customer_policies(conn) do
+    Postgrex.query!(
+      conn,
+      "CREATE POLICY customer_select ON realtime.messages FOR SELECT TO authenticated USING (extension = 'broadcast')",
+      []
+    )
+
+    Postgrex.query!(
+      conn,
+      """
+      CREATE POLICY customer_insert ON realtime.messages AS RESTRICTIVE FOR INSERT
+      TO authenticated, service_role WITH CHECK (private IS TRUE)
+      """,
+      []
+    )
+  end
+
+  defp drift_messages(conn) do
+    Postgrex.query!(conn, "ALTER TABLE realtime.messages ADD COLUMN rogue_col text", [])
+    Postgrex.query!(conn, "DROP INDEX realtime.messages_inserted_at_topic_index", [])
+  end
+
+  defp messages_policies(conn) do
+    query = """
+    SELECT pol.polname,
+           pol.polcmd,
+           pol.polpermissive,
+           pg_get_expr(pol.polqual, pol.polrelid),
+           pg_get_expr(pol.polwithcheck, pol.polrelid),
+           (SELECT array_agg(pg_get_userbyid(oid) ORDER BY pg_get_userbyid(oid)) FROM unnest(pol.polroles) AS oid)
+    FROM pg_policy pol
+    WHERE pol.polrelid = 'realtime.messages'::regclass
+    ORDER BY pol.polname
+    """
+
+    Postgrex.query!(conn, query, []).rows
+  end
+
+  defp messages_policy_comments(conn) do
+    query = """
+    SELECT pol.polname, obj_description(pol.oid, 'pg_policy')
+    FROM pg_policy pol
+    WHERE pol.polrelid = 'realtime.messages'::regclass
+    ORDER BY pol.polname
+    """
+
+    Postgrex.query!(conn, query, []).rows
   end
 
   defp using_basic_auth(conn, username, password) do
