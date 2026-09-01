@@ -74,6 +74,25 @@ checksum = "sha256:b01b0830076539b15e63e0bcecd71b38be7bd3784c4bcd0bf46339d579549
 url = "https://github.com/erlang/otp/releases/download/OTP-28.5.0.4/otp_win64_28.5.0.4.zip"
 url_api = "https://api.github.com/repos/erlang/otp/releases/assets/491644305"
 
+[[tools.erlang]]
+version = "28.5.0.4"
+backend = "core:erlang"
+
+[tools.erlang.options]
+precompiled_os = "ubuntu-24.04"
+
+[tools.erlang."platforms.linux-arm64"]
+checksum = "sha256:efb045f96ee56d274f6c1fe3a9612b45caa01d2f82e35fe4e0ac9b0c501f6e53"
+url = "https://github.com/erlang/otp/releases/download/OTP-28.5.0.4/otp_src_28.5.0.4.tar.gz"
+url_api = "https://api.github.com/repos/erlang/otp/releases/assets/491552679"
+install = "source"
+
+[tools.erlang."platforms.linux-x64"]
+checksum = "sha256:efb045f96ee56d274f6c1fe3a9612b45caa01d2f82e35fe4e0ac9b0c501f6e53"
+url = "https://github.com/erlang/otp/releases/download/OTP-28.5.0.4/otp_src_28.5.0.4.tar.gz"
+url_api = "https://api.github.com/repos/erlang/otp/releases/assets/491552679"
+install = "source"
+
 [[tools.node]]
 version = "24.14.1"
 backend = "core:node"
