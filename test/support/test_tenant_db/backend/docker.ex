@@ -132,17 +132,13 @@ defmodule TestTenantDb.Backend.Docker do
   end
 
   # This run's containers carry its run tag, so a run only ever tears down its own.
-  def container_prefix do
-    case TestEnv.run_tag() do
-      "" -> @container_prefix
-      "_" <> tag -> "#{@container_prefix}-#{tag}"
-    end
-  end
+  def container_prefix, do: @container_prefix <> TestEnv.run_tag()
 
   def container_name, do: "#{container_prefix()}-#{random_string(@container_suffix_length)}"
 
-  # The docker name filter is a substring match, so a tagged prefix (realtime-test-4003-) is
-  # also matched by an untagged run. Checking the random suffix length rules those out.
+  # The docker name filter is a substring match: a run listing "realtime-test" also gets another
+  # run's "realtime-test_4003-...". A container is this run's only if its name is exactly this
+  # run's prefix followed by a random suffix.
   def own_container?(name) do
     prefix = container_prefix() <> "-"
 
@@ -152,7 +148,7 @@ defmodule TestTenantDb.Backend.Docker do
   # A run whose tag is its endpoint port is gone once that port is free again. A named run
   # (TEST_RUN) says nothing about liveness, so its containers are left for its owner.
   def abandoned_container?(name) do
-    case Regex.run(~r/^#{@container_prefix}-(\d+)-(.+)$/, name) do
+    case Regex.run(~r/^#{@container_prefix}_(\d+)-(.+)$/, name) do
       [_, port, suffix] when byte_size(suffix) == @container_suffix_length ->
         TestEnv.port_available?(String.to_integer(port))
 

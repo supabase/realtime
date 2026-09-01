@@ -50,7 +50,9 @@ gen_rpc_socket_sndbuf = Env.get_integer("GEN_RPC_SOCKET_SEND_BUFFER")
 gen_rpc_ssl_client_port = Env.get_integer("GEN_RPC_SSL_CLIENT_PORT", 6369)
 gen_rpc_ssl_server_port = Env.get_integer("GEN_RPC_SSL_SERVER_PORT")
 
-gen_rpc_tcp_client_port = Env.get_integer("GEN_RPC_TCP_CLIENT_PORT", 5369)
+gen_rpc_default_port = 5369
+gen_rpc_dev_port_range = gen_rpc_default_port..(gen_rpc_default_port + 99)
+gen_rpc_tcp_client_port = Env.get_integer("GEN_RPC_TCP_CLIENT_PORT", gen_rpc_default_port)
 
 port_free? = fn port ->
   case :gen_tcp.listen(port, [:inet, ip: {0, 0, 0, 0}, reuseaddr: true, active: false]) do
@@ -72,7 +74,8 @@ gen_rpc_tcp_server_port =
     # binding a port would make two of them collide.
     {:dev, nil} ->
       if Node.alive?() do
-        Enum.find(5369..5468, port_free?) || raise "no free gen_rpc port on range 5369..5468"
+        Enum.find(gen_rpc_dev_port_range, port_free?) ||
+          raise "no free gen_rpc port on range #{inspect(gen_rpc_dev_port_range)}"
       else
         false
       end
@@ -85,7 +88,7 @@ gen_rpc_tcp_server_port =
       end
 
     {_env, port} ->
-      port || 5369
+      port || gen_rpc_default_port
   end
 
 http_dynamic_buffer_min = Env.get_integer("HTTP_DYNAMIC_BUFFER_MIN")

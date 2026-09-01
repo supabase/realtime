@@ -1,4 +1,6 @@
 defmodule TestTenantDb.Backend.DockerTest do
+  # async: false — these tests swap the :test_run_tag app env that TestTenantDb reads to name
+  # and reap its containers.
   use ExUnit.Case, async: false
 
   alias TestTenantDb.Backend.Docker
@@ -22,15 +24,15 @@ defmodule TestTenantDb.Backend.DockerTest do
     test "a second run puts its endpoint port in the name" do
       put_run_tag("_4003")
 
-      assert Docker.container_prefix() == "realtime-test-4003"
-      assert Docker.container_name() =~ ~r"^realtime-test-4003-.{12}$"
+      assert Docker.container_prefix() == "realtime-test_4003"
+      assert Docker.container_name() =~ ~r"^realtime-test_4003-.{12}$"
     end
 
     test "a run named with NAME uses that name" do
       put_run_tag("_pr_1234")
 
-      assert Docker.container_prefix() == "realtime-test-pr_1234"
-      assert Docker.own_container?("realtime-test-pr_1234-" <> @suffix)
+      assert Docker.container_prefix() == "realtime-test_pr_1234"
+      assert Docker.own_container?("realtime-test_pr_1234-" <> @suffix)
     end
   end
 
@@ -39,18 +41,18 @@ defmodule TestTenantDb.Backend.DockerTest do
       put_run_tag("")
 
       assert Docker.own_container?("realtime-test-" <> @suffix)
-      refute Docker.own_container?("realtime-test-4003-" <> @suffix)
+      refute Docker.own_container?("realtime-test_4003-" <> @suffix)
       refute Docker.own_container?("some-other-container")
     end
   end
 
   describe "abandoned_container?/1" do
     test "false while the owning run still holds its port" do
-      refute Docker.abandoned_container?("realtime-test-#{TestEnv.http_port()}-#{@suffix}")
+      refute Docker.abandoned_container?("realtime-test_#{TestEnv.http_port()}-#{@suffix}")
     end
 
     test "true once that port is free" do
-      assert Docker.abandoned_container?("realtime-test-#{TestEnv.unused_port()}-#{@suffix}")
+      assert Docker.abandoned_container?("realtime-test_#{TestEnv.unused_port()}-#{@suffix}")
     end
 
     test "false for an untagged container, which belongs to whoever holds the default port" do
@@ -58,11 +60,11 @@ defmodule TestTenantDb.Backend.DockerTest do
     end
 
     test "false for a named run, whose tag says nothing about whether it is still going" do
-      refute Docker.abandoned_container?("realtime-test-pr_1234-#{@suffix}")
+      refute Docker.abandoned_container?("realtime-test_pr_1234-#{@suffix}")
     end
 
     test "false for a name that only reads like a tagged one" do
-      refute Docker.abandoned_container?("realtime-test-4003-tooshort")
+      refute Docker.abandoned_container?("realtime-test_4003-tooshort")
       refute Docker.abandoned_container?("some-other-container")
     end
   end

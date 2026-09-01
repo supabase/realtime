@@ -224,7 +224,7 @@ defmodule Realtime.GenRpc do
     driver = Application.get_env(:gen_rpc, :default_client_driver, :tcp)
     key = if driver == :ssl, do: :ssl_server_port, else: :tcp_server_port
 
-    case :erpc.call(node, :application, :get_env, [:gen_rpc, key], :timer.seconds(5)) do
+    case :erpc.call(node, :application, :get_env, [:gen_rpc, key], to_timeout(second: 5)) do
       {:ok, port} when is_integer(port) -> {driver, port}
       other -> {:error, {:no_gen_rpc_port, node, other}}
     end

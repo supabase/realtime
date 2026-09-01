@@ -68,17 +68,19 @@ for repo <- [
     pool: Ecto.Adapters.SQL.Sandbox
 end
 
-# 16 ports each, one per peer in TestEnv's slots, in bands of their own so no run's peers can
-# land on another run's endpoint or gen_rpc port.
-peer_http_base = get_integer.("TEST_PEER_PORT_BASE", nil) || 10_000 + offset * 16
-peer_gen_rpc_base = get_integer.("TEST_PEER_GEN_RPC_PORT_BASE", nil) || 26_000 + offset * 16
+# One port per peer slot in TestEnv (12 today), plus room to add a few more. TestEnv documents
+# how these two starts and the rest of a run's ports are laid out.
+peer_ports_per_run = 16
+peer_http_base = get_integer.("TEST_PEER_PORT_BASE", nil) || 10_000 + offset * peer_ports_per_run
+peer_gen_rpc_base = get_integer.("TEST_PEER_GEN_RPC_PORT_BASE", nil) || 26_000 + offset * peer_ports_per_run
 
 config :realtime,
   test_run_tag: run_tag,
   test_node_suffix: node_suffix,
   test_http_port: port,
   test_peer_http_base: peer_http_base,
-  test_peer_gen_rpc_base: peer_gen_rpc_base
+  test_peer_gen_rpc_base: peer_gen_rpc_base,
+  test_peer_ports_per_run: peer_ports_per_run
 
 # Single-node test scopes have no peers to agree with, so they only reach
 # :ready via the singleton-promotion timer. Keep it short so Muster.targets/3

@@ -175,22 +175,21 @@ defmodule Clustered do
   # A peer that stopped moments ago may still be releasing its port, hence the retries.
   # Anything still holding it after that is another test run or a dev server, and starting
   # the peer anyway only fails later and less clearly.
-  defp await_port_available!(port, label, env_var, attempts \\ @port_wait_attempts)
+  defp await_port_available!(port, label, env_var) do
+    available? =
+      TestHelpers.eventually(fn -> TestEnv.port_available?(port) end,
+        retries: @port_wait_attempts,
+        sleep: @port_wait_delay_ms
+      )
 
-  defp await_port_available!(port, label, env_var, 0) do
-    raise """
-    #{label} port #{port} is still in use after #{div(@port_wait_attempts * @port_wait_delay_ms, 1000)}s.
-    Another test run or a dev server is bound to it. Set #{env_var} to move this run to a free block.
-    """
-  end
-
-  defp await_port_available!(port, label, env_var, attempts) do
-    if TestEnv.port_available?(port) do
-      :ok
-    else
-      Process.sleep(@port_wait_delay_ms)
-      await_port_available!(port, label, env_var, attempts - 1)
+    if !available? do
+      raise """
+      #{label} port #{port} is still in use after #{div(@port_wait_attempts * @port_wait_delay_ms, 1000)}s.
+      Another test run or a dev server is bound to it. Set #{env_var} to move this run to a free block.
+      """
     end
+
+    :ok
   end
 
   defp wait_for_port(_host, _port, 0, _delay_ms), do: raise("gen_rpc tcp server did not start in time")

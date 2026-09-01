@@ -54,6 +54,10 @@ defmodule TestEnvTest do
       assert TestEnv.peer_gen_rpc_port() == Application.fetch_env!(:realtime, :test_peer_gen_rpc_base)
     end
 
+    test "every peer fits in the band a run reserves" do
+      assert length(TestEnv.peers()) <= Application.fetch_env!(:realtime, :test_peer_ports_per_run)
+    end
+
     test "raise on an unregistered peer" do
       assert_raise ArgumentError, ~r/unknown peer :nope/, fn -> TestEnv.peer_http_port(:nope) end
       assert_raise ArgumentError, ~r/unknown peer :nope/, fn -> TestEnv.peer_gen_rpc_port(:nope) end

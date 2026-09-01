@@ -2,9 +2,21 @@ defmodule TestEnv do
   @moduledoc false
   # The ports and node names this run owns. config/test.exs claims the ports; names carry its
   # run tag, so concurrent runs never collide.
+  #
+  # A run is identified by the endpoint port it took out of 4002..4999, and every other port it
+  # uses sits that same offset (0..997) from a start of its own:
+  #
+  #   endpoint  4002..4999
+  #   gen_rpc   5969..7964, the local node's server and client port
+  #   peers     10_000..25_967 for http and 26_000..41_967 for gen_rpc,
+  #             :test_peer_ports_per_run (16) of each per run
+  #
+  # The two peer starts are 16_000 apart, which at 16 ports per run is what keeps every run's
+  # peers clear of every other run's ports.
 
-  # One slot per peer, offset from both peer port ranges, so no test has to know the
-  # arithmetic. The region clusters hold separate slots so neither reuses the other's port.
+  # One slot per peer, offset from both peer port starts, so no test has to know the arithmetic.
+  # The region clusters hold separate slots so neither reuses the other's port. A run gets
+  # :test_peer_ports_per_run ports of each kind, so that is how many slots fit here.
   @peer_slots %{
     default: 0,
     us_node: 1,
