@@ -42,6 +42,9 @@ defmodule Forum.Muster.Scope do
   # timeout in a healthy cluster) can no longer land and resurrect the row.
   @tombstone_window_multiplier 5
 
+  # Message tag for the death-watch monitor a peer's graceful leave leaves behind
+  @deathwatch_tag :muster_departed
+
   defmodule State do
     @moduledoc false
     @type t :: %__MODULE__{
@@ -751,7 +754,8 @@ defmodule Forum.Muster.Scope do
 
   # Graceful cluster-leave: evacuate the ROUTER role before this node dies (see
   # `Forum.Muster.drain/2`). We do not rebalance ourselves; instead we broadcast
-  # {:muster_leaving} and let each PEER rebalance us out of its ring and ack. The
+  # {:muster_leaving, self(), view_seq} and let each PEER rebalance us out of its
+  # ring and ack with {:muster_leaving_ack, node()} once that eviction is done. The
   # `drain/2` caller is parked in `from` and replied to asynchronously (via
   # `GenServer.reply` from the `:leave_settle` / `:leave_deadline handlers`), so this
   # loop never blocks on the remote acks.
@@ -987,9 +991,8 @@ defmodule Forum.Muster.Scope do
 
   # Peer coordinator crashed/disconnected. The pid-stamp guard (matching the
   # monitor ref we hold for this pid) rejects a stale DOWN for a pid we already
-  # dropped -- e.g. one we demonitored-and-flushed when the peer left gracefully
-  # (:muster_leaving), whose real DOWN then lands as a no-op. The actual eviction
-  # is depart_peer/3, shared with the graceful-leave path.
+  # dropped. The actual eviction is depart_peer/3, shared with the graceful-leave
+  # path.
   def handle_info({:DOWN, ref, :process, pid, _reason}, %State{} = state) do
     case Map.get(state.peers, pid) do
       ^ref ->
@@ -1004,13 +1007,56 @@ defmodule Forum.Muster.Scope do
     end
   end
 
+  # The death watch on a peer we evicted when it announced its graceful leave has
+  # fired: that incarnation is finally gone.
+  #
+  # The reap is DEFERRED by tombstone_window_ms, and runs exactly once. Reaping on
+  # the spot would miss the very writes it exists to collect: occupied/5 writes
+  # the occupancy table straight from its :erpc executor process, so a request
+  # already delivered to us before the peer died still executes -- possibly after
+  # this message is handled, since nothing serializes that executor against this
+  # loop. Death stops new requests being SENT, not queued ones from running.
+  # Waiting out the window (defined as the longest an orphaned RPC can still land;
+  # see @tombstone_window_multiplier) means one sweep catches every write,
+  # whenever it landed.
+  def handle_info({@deathwatch_tag, _ref, :process, pid, _reason}, %State{} = state) do
+    Process.send_after(self(), {:reap_departed, pid}, state.tombstone_window_ms)
+    {:noreply, state}
+  end
+
+  # The deferred sweep above, now past the point where any write from `pid` can
+  # still land.
+  def handle_info({:reap_departed, pid}, %State{} = state) do
+    {:noreply, reap_departed(state, pid)}
+  end
+
   # A peer is leaving the cluster gracefully. We are still
   # in its ring at this instant, but we evict it before it dies so our
   # subsequent claims/routing go to the newly-elected router and our own
   # rebalance re-announces the groups we hold to that router. depart_peer/3 does
-  # the ring swap + re-announce; we ack only after it returns. We demonitor-and-flush first so the
-  # peer's eventual real :DOWN is a no-op (the guard above rejects it).
-  def handle_info({:muster_leaving, peer_pid, _seq}, %State{} = state) do
+  # the ring swap + re-announce; we ack only after it returns.
+  #
+  # Unlike the crash path, the leaver is still alive after we evict it and its
+  # shards / rebalance workers dispatch by :erpc, off the
+  # coordinator-to-coordinator FIFO channel this message travels on. So writes it
+  # put on the wire before draining can still land on us here, after the
+  # eviction. Two things close that:
+  #
+  #   * `seq`, its announce watermark (the snapshot_seq of its last committed
+  #     rebalance, and so the stamp on every snapshot/delta that round
+  #     dispatched), which we park as a DEPARTURE WATERMARK so those late
+  #     snapshots lose to the ordinary per-source guard. See leave_watermark/3.
+  #   * A death watch: we swap our peer-liveness monitor for one
+  #     taken purely to learn when this pid is really gone. A claim from one of
+  #     its shards carries a fresh, higher seq and writes occupancy directly, so
+  #     no watermark can stop it; only the peer's actual death bounds that
+  #     window, and its firing reaps whatever landed (reap_departed/2) rather
+  #     than re-running the eviction. It is tagged, so that arrives as its own
+  #     message with its own clause.
+  #
+  # Left unhandled, either write is a permanent phantom fan-out target for a node
+  # that no longer exists.
+  def handle_info({:muster_leaving, peer_pid, seq}, %State{} = state) do
     case Map.get(state.peers, peer_pid) do
       nil ->
         {:noreply, state}
@@ -1026,8 +1072,9 @@ defmodule Forum.Muster.Scope do
           peer_node: node(peer_pid)
         })
 
-        Process.demonitor(ref, [:flush])
-        state = depart_peer(state, peer_pid, "leaving")
+        :ok = watch_death(peer_pid, ref)
+        state = state |> depart_peer(peer_pid, "leaving") |> leave_watermark(peer_pid, seq)
+
         state.message_module.send(state.scope, node(peer_pid), {:muster_leaving_ack, node()})
         {:noreply, state}
     end
@@ -1800,14 +1847,25 @@ defmodule Forum.Muster.Scope do
       "Muster[#{node()}|#{state.scope}] peer #{why}: #{peer_node}, dropping occupancy/view data attributable to this incarnation and rebalancing"
     )
 
-    tp_span(:muster_peer_down_apply, %{
-      scope: state.scope,
-      node: node(),
-      peer_node: peer_node
-    }) do
-      :ets.match_delete(state.occupancy_table, {{:_, peer_node}, :_, :_, pid})
-      :telemetry.execute([:forum, state.scope, :node, :down], %{}, %{node: peer_node})
-    end
+    state =
+      tp_span(:muster_peer_down_apply, %{
+        scope: state.scope,
+        node: node(),
+        peer_node: peer_node
+      }) do
+        state = drop_pid_attributable(state, pid)
+        :telemetry.execute([:forum, state.scope, :node, :down], %{}, %{node: peer_node})
+        state
+      end
+
+    recompute_members(%{state | peers: new_peers})
+  end
+
+  # The pid-attributable half of an eviction, shared by depart_peer/3
+  # and reap_departed/2.
+  defp drop_pid_attributable(%State{} = state, pid) do
+    peer_node = node(pid)
+    :ets.match_delete(state.occupancy_table, {{:_, peer_node}, :_, :_, pid})
 
     member_views =
       case Map.get(state.member_views, peer_node) do
@@ -1821,14 +1879,85 @@ defmodule Forum.Muster.Scope do
         _ -> state.applied_snapshot_seq
       end
 
-    state = %{
-      state
-      | peers: new_peers,
-        member_views: member_views,
-        applied_snapshot_seq: applied_snapshot_seq
-    }
+    %{state | member_views: member_views, applied_snapshot_seq: applied_snapshot_seq}
+  end
 
-    recompute_members(state)
+  # A peer we already evicted on its graceful leave has now actually died.
+  #
+  # Its eviction is long done (ring swapped, re-announced, acked), so there is no
+  # membership or ring work here and we must NOT re-run depart_peer/3: that would
+  # log a second departure and re-emit the [:node, :down] telemetry for a node we
+  # already reported. What this DOES clean up is everything the peer wrote in the
+  # window between the eviction and its death -- a claim from one of its shards,
+  # or a snapshot/delta from a rebalance worker, dispatched by :erpc before it
+  # drained and landing afterwards. Those writes are attributable to this pid,
+  # belong to a node that is now gone, and nothing else would ever reap them:
+  # drop_stale_router_entries cannot judge a row whose source will never announce
+  # our view again, and the tombstone sweep only reaps tombstones. Left behind,
+  # each one is a permanent phantom fan-out target for the life of this process.
+  #
+  # This is the reason the leave handler takes a death-watch monitor: the peer's
+  # death is what BOUNDS the window. It does not end it on the spot -- a request
+  # already delivered to us still executes afterwards -- which is why the caller
+  # defers this by tombstone_window_ms, past the point where any write from the
+  # pid can still land. One sweep then covers writes that arrived before the death
+  # and after it alike, and the watch has served its purpose.
+  defp reap_departed(%State{} = state, pid) do
+    tp(:muster_departed_reaped, %{scope: state.scope, node: node(), peer_node: node(pid)})
+
+    drop_pid_attributable(state, pid)
+  end
+
+  # Swap our peer-liveness monitor on a gracefully leaving peer for one taken
+  # purely to learn when that pid is really gone (see reap_departed/2).
+  #
+  # `tag:` makes the new monitor's message arrive as @deathwatch_tag rather than
+  # :DOWN, which is what keeps the two roles apart: the death watch gets its own
+  # handle_info clause instead of a branch that has to tell the two monitors
+  # apart, and no state has to be carried to identify it later. Flushing the old
+  # ref first means the eviction we just ran cannot be re-triggered by its DOWN.
+  # Monitoring a pid that is already dead is safe -- it delivers the tagged
+  # message immediately (:noproc), so the reap still runs.
+  defp watch_death(pid, peer_ref) do
+    Process.demonitor(peer_ref, [:flush])
+    Process.monitor(pid, tag: @deathwatch_tag)
+    :ok
+  end
+
+  # Graceful-leave only: re-arm the per-source snapshot guard at the leaver's
+  # announce watermark, which depart_peer/3 just cleared.
+  #
+  # Clearing it is right for a CRASH (the source is gone; a same-named restart
+  # comes back with a fresh VM's monotonic seqs, which regress below anything we
+  # had recorded, so a retained watermark would silently drop all of its
+  # snapshots). But a drained peer is still ALIVE for the whole handoff + settle,
+  # and its rebalance workers dispatch snapshots/deltas by :erpc, off the
+  # coordinator-to-coordinator channel that carried the leave. One of those can
+  # land after this eviction, and with the watermark cleared it passes the
+  # `seq <= applied` guard in {:apply_snapshot, ...} / {:apply_delta, ...} and
+  # re-inserts the departed node's occupancy rows plus a member_views entry,
+  # which reap_departed/2 would then have to collect on the peer's death (and
+  # only its death: {:nodedown, _} is a no-op and drop_stale_router_entries
+  # cannot judge rows whose source announces a view -- the one that still
+  # includes itself -- that can never equal ours). Rejecting the write outright
+  # is better than reaping it later: the phantom never exists, so it cannot be
+  # read by a broadcast in the meantime, and a leaver that never actually dies
+  # (an aborted deploy) produces no death to reap on at all.
+  #
+  # `seq` is the leaver's last committed round's snapshot_seq, so any snapshot
+  # still in flight from that round carries exactly it and loses to the guard's
+  # `<=`.
+  #
+  # This entry is the one per-source watermark that outlives its writer, so it is
+  # also the one that could strand a SUCCESSOR of the same node name behind a seq
+  # it can never reach (see the same-named-restart test in
+  # muster_distributed_test.exs). It does not, because the death watch always
+  # collects it first: reap_departed/2 deletes it pid-matched, and a same-named
+  # successor cannot exist until the leaver's VM is gone, which is the very event
+  # that fires the watch. Nothing else needs to clear it.
+  defp leave_watermark(%State{} = state, peer_pid, seq) do
+    applied = Map.put(state.applied_snapshot_seq, node(peer_pid), {seq, peer_pid})
+    %{state | applied_snapshot_seq: applied}
   end
 
   defp recompute_members(state) do
