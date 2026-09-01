@@ -1,3 +1,15 @@
+--
+-- Auto-generated. Do not edit.
+--
+-- Tenant `realtime` schema for Postgres 17
+--
+-- Beyond priv/repo/tenant_schema it also:
+--   - creates the supabase_realtime_admin role
+--   - creates realtime.schema_migrations and records every applied version
+--   - sets ALTER DEFAULT PRIVILEGES and the dashboard_user/postgres grants
+--
+-- See Mix.Tasks.Realtime.ExportTenantDbDump
+--
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_realtime_admin') THEN
