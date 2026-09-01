@@ -250,9 +250,23 @@ Because the ring is consistent-hashed, a 100-node rolling deploy that grows the 
 * Its **source role** (holding local members) needs no Muster mechanism on shutdown. As the host app disconnects its clients, membership drops to 0 and the normal vacant-flush (see *How leave works*) retracts occupancy on the current router. That is the host app's job.
 * Its **router role** is the one only a *pre-death* handoff can protect. By consistent hashing this node is the elected router for ~1/N of *all* groups cluster-wide. If it dies abruptly, broadcast messages routed to this node will be dropped.
 
-`drain/2` closes that window while the node is **still alive**. It does *not* rebalance itself; instead it broadcasts `{:muster_leaving}` and lets each **peer** rebalance it out of that peer's ring. The instant a peer swaps its ring, its subsequent claims/routing go to the newly-elected router, and its own rebalance re-announces the groups it holds to that router. Nothing the dying router "owned" is lost: every occupancy row was sourced from some node's local members, and the live sources re-announce during the same rebalance. The only rows that vanish are the ones sourced from the dying node itself which are going away regardless.
+`drain/2` closes that window while the node is **still alive**. The leaver does *not* rebalance itself: it keeps its own full ring and view, and lets each **peer** rebalance *it* out of that peer's ring. Two messages carry the entire protocol:
 
-`drain/2` waits for each peer to ack its handoff (it rebalanced the leaver out), then holds a short **settle window** for in-flight RPCs to land before replying `:ok`. It returns `{:timeout, unacked_nodes}` if a peer never acks within `:timeout_ms`. A peer that itself dies mid-drain (rather than acking) is treated as departed so a peer crashing during a concurrent rolling restart does not make `drain` block the full `:timeout_ms` or report the dead node as unacked.
+1. **Leaver → peers: `{:muster_leaving, coordinator_pid, view_seq}`.** Broadcast on the scope, so it reaches every connected node running it; a node that does not hold the sender as a registered peer (never paired with it, or already evicted it) ignores the message. Before broadcasting, the leaver flips to `leaving: true` (the outbound-only silence described above), closes the join gate, and arms the `:timeout_ms` deadline.
+2. **Peer → leaver: `{:muster_leaving_ack, node()}`, sent *after* the eviction.** The peer runs `depart_peer/3` — the very same eviction the crash path uses (ring swap + re-announce) — and acks only once that returns, so **an ack means the handoff is complete on that peer**, not merely that the message was received. It also swaps its monitor on the leaver's coordinator for a *death watch*; see below.
+
+#### Why a graceful leave needs more than the eviction
+
+An eviction is enough for a crash, because a dead node writes nothing more. A **drained** node is different: it stays alive through the handoff, the settle window and however long the host app then takes to halt, and its shards and rebalance workers dispatch by `:erpc` — a channel with no ordering relation to the coordinator-to-coordinator dist send that carried the leave. So a write it put on the wire *before* draining can land on a peer *after* that peer evicted it, re-inserting occupancy rows and a `member_views` entry for a node that is on its way out. Neither `{:nodedown, _}` (a no-op) nor `drop_stale_router_entries` (which can only judge a row whose source announces *our* view, and this one announces the view that still contains itself) can ever collect them. Each is a permanent phantom fan-out target: `targets/3` keeps handing broadcasters a node that no longer exists. Two mechanisms close the two dispatch paths:
+
+* **Snapshots and deltas — the departure watermark.** The `view_seq` in step 1 is the leaver's announce watermark: the `snapshot_seq` of its last committed rebalance, and so the stamp on every snapshot/delta that round dispatched. The peer parks it as `applied_snapshot_seq[leaver]`, replacing the entry `depart_peer/3` just cleared, so a late apply loses to the ordinary `seq <= applied` guard on `{:apply_snapshot, …}`/`{:apply_delta, …}` and is dropped wholesale. Rejecting beats reaping: the phantom never exists, so no broadcast can read it in the meantime, and a leaver that never actually dies (an aborted deploy) never produces the death a reap would need. This is the one per-source watermark that outlives its writer, so it is also the only one that could strand a *successor* of the same node name behind a seq it can never reach — it doesn't, because the death watch below deletes it pid-matched, and a same-named successor cannot exist until the leaver's VM is gone, which is the very event that fires that watch.
+* **Claims — a death watch.** A first-member join fires an `:occupied` claim from a *shard*, stamped with a fresh seq at dispatch and written straight to the router's occupancy table; it never consults `applied_snapshot_seq`, so no watermark can stop it. The join gate (`:accepting_joins`) closes at the start of `drain/2`, but a claim dispatched an instant earlier is already in flight. Only the leaver's actual death bounds that window, so `watch_death/2` swaps the peer-liveness monitor for one taken purely to observe that death, `Process.monitor(pid, tag: :muster_departed)`. Its firing runs `reap_departed/2`: drop everything attributable to that pid, and *only* that — no second eviction, no repeated `[:node, :down]` telemetry, no membership or ring work, since all of that happened when the leave arrived.
+
+  The **tag** is what keeps this from being a special case. "A peer we already evicted is finally gone" is a different event from "a member died", so it arrives as its own message with its own `handle_info` clause, leaving the `:DOWN` handler untouched. Only `watch_death/2` monitors under that tag, so the message itself identifies what the pid is — no set of departed pids to carry and consult. The `[:flush]` on the old ref is what keeps the eviction from running twice, and re-monitoring a pid that has already died still delivers the tagged message (`:noproc`), so the reap is never skipped. Note this stays a **process** monitor even though `{:nodedown, _}` is the more obvious "it's really gone" signal: every write being reaped is stamped with the coordinator pid, and keeping all eviction and cleanup pid-attributable is a single story — `{:nodedown, _}` remains a deliberate no-op.
+
+The instant a peer swaps its ring, its subsequent claims/routing go to the newly-elected router, and its own rebalance re-announces the groups it holds to that router. Nothing the dying router "owned" is lost: every occupancy row was sourced from some node's local members, and the live sources re-announce during the same rebalance. The only rows that vanish are the ones sourced from the dying node itself which are going away regardless.
+
+The leaver tracks the peers it is still waiting on in `leave_pending` and replies to the parked `drain/2` caller asynchronously, so its own loop never blocks on the acks. When that set empties it opens the **settle window** (`:settle_ms`, still servicing inbound RPCs) so in-flight RPCs peers dispatched *before* they rebalanced still land, and only then replies `:ok`. Two shortcuts on the wait: a **singleton** (no peers) has nobody to hand off to and replies `:ok` at once; a peer that **dies** mid-drain instead of acking is dropped from `leave_pending` by its `:DOWN`, counted as departed rather than unacked, so a peer crashing during a concurrent rolling restart does not make `drain` block the full `:timeout_ms`. If the deadline fires with peers still pending, `drain/2` returns `{:timeout, unacked_nodes}` right away and it does not serve the settle window.
 
 **`drain` is terminal.** It leaves the node draining with its heartbeat off, so a node that calls `drain` but does not actually die (e.g. an aborted deploy) is stranded until it restarts. Call it only when truly shutting down.
 
@@ -478,6 +492,27 @@ end
 * `:muster_rediscover`: `%{scope, node, target}`, per connected non-member the
   heartbeat's re-discovery sweep re-offers `:muster_discover` to (emitted after
   the send).
+* `:muster_drain_begin`: `%{scope, node, expected, settle_ms}`, emitted on the
+  leaver when `drain/2` starts, naming the peers it will wait for acks from
+  (emitted *before* the `{:muster_leaving, …}` broadcast).
+* `:muster_leaving_received`: `%{scope, node, peer_node}`, emitted on a **peer**
+  when it accepts a `{:muster_leaving, …}`, *before* it evicts `peer_node` and
+  acks — so forcing an ordering on it parks a peer mid-handoff.
+* `:muster_drain_peer_lost`: `%{scope, node, peer_node}`, emitted on the leaver
+  when an awaited peer dies mid-drain and is dropped from the wait instead of
+  being counted as unacked.
+* `:muster_drain_acked`: `%{scope, node}`, emitted on the leaver once every peer
+  has acked or departed, as the settle window opens.
+* `:muster_drain_settled`: `%{scope, node}`, emitted on the leaver when the
+  settle window elapses, just before `drain/2` replies `:ok` (the host app may
+  halt from here).
+* `:muster_drain_timeout`: `%{scope, node, unacked}`, emitted on the leaver when
+  the `:timeout_ms` deadline fires with peers still pending.
+* `:muster_departed_reaped`: `%{scope, node, peer_node}`, emitted on a **peer**
+  when a gracefully-departed leaver's death watch fires and it drops whatever
+  that incarnation wrote after the eviction (see *Why a graceful leave needs more
+  than the eviction*). Fires on every such death, whether or not there was
+  anything left to collect.
 * `:muster_group_state`: `%{scope, node, group, state}`, emitted by the owning
   claim shard on every per-group state-machine transition (`state: nil` means the
   group was forgotten). Lets tests `block_until` a group reaches e.g.

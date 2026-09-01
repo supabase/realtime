@@ -276,8 +276,15 @@ defmodule Forum.Muster do
   has no occupancy row on any router silently missing from every broadcast.
 
   `drain/2` closes that window while the node is *still alive*: it broadcasts a
-  leave, and each peer rebalances this node out of its ring (routing its share to
-  the newly-elected routers and re-announcing the groups it holds) and acks.
+  leave (`{:muster_leaving, coordinator_pid, view_seq}`), and each peer rebalances
+  this node out of its ring (routing its share to the newly-elected routers and
+  re-announcing the groups it holds) and only *then* acks
+  (`{:muster_leaving_ack, node}`) so an ack means that peer's handoff is done.
+  Because this node stays alive after each peer evicts it, a write its shards or
+  rebalance workers had already put on the wire could otherwise land afterwards
+  and resurrect it as a fan-out target. The `view_seq` on the leave is the peer's
+  departure watermark, which rejects such a snapshot; a late claim, which no
+  watermark can stop, is collected when the peer sees this node actually die.
   `drain` returns only once **every peer has acked** and then waits a
   `settle_ms` window (still servicing inbound RPCs) so in-flight broadcasts routed
   here just before the handoff can fan out.
