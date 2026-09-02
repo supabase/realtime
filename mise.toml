@@ -6,6 +6,12 @@ supabase = "2.105.0"
 "npm:@supabase/pg-delta" = "1.0.0-alpha.48"
 
 [env]
+# TENANT names a whole environment, not just the db tasks below: the tenant's database and row,
+# and the database and containers `mix test` uses (see config/test.exs). Every checkout gets one
+# without being told — its directory name is the tenant, with the plain checkout keeping the
+# default. Setting TENANT yourself wins. A dot becomes a dash: a tenant is a compose project name
+# and a subdomain, and neither takes dots.
+TENANT = "{% if env.TENANT %}{{ env.TENANT }}{% else %}{% set dir = config_root | split(pat='/') | last | replace(from='.', to='-') %}{% if dir == 'realtime' %}realtime-dev{% else %}{{ dir }}{% endif %}{% endif %}"
 REGION = "us-east-1"
 API_JWT_SECRET = "dev"
 DB_ENC_KEY = "1234567890123456"
@@ -34,7 +40,7 @@ env = { NODE_NAME = "orange", REGION = "eu-west-1" }
 # Fixed compose projects, so every checkout shares these instead of starting a set per directory.
 # Nothing stops or removes the realtime database: another checkout may be using it.
 [tasks.db-start]
-description = "Make the databases ready: the realtime database, its migrations, and TENANT's database and row (default realtime-dev)"
+description = "Make the databases ready: the realtime database, its migrations, and TENANT's database and row"
 dir = "{{cwd}}"
 run = '''
 set -eu
@@ -57,7 +63,7 @@ TENANT="$tenant" TENANT_DB_PORT="$port" mix seed
 '''
 
 [tasks.db-stop]
-description = "Stop TENANT's database (default realtime-dev)"
+description = "Stop TENANT's database"
 dir = "{{cwd}}"
 run = """
 set -eu
@@ -65,7 +71,7 @@ COMPOSE_PROJECT_NAME="tenant-${TENANT:-realtime-dev}" docker compose -f compose.
 """
 
 [tasks.db-rm]
-description = "Remove TENANT's database (default realtime-dev), discarding its data"
+description = "Remove TENANT's database, discarding its data"
 dir = "{{cwd}}"
 run = """
 set -eu

@@ -32,8 +32,9 @@ defmodule TestEnv do
     bad_tcp: 11
   }
 
-  # Labels this run's databases and containers. Empty for the first run on a machine, which
-  # therefore looks exactly like it did before any of this.
+  # Labels this run's databases and containers. config/test.exs takes it from TENANT (or
+  # TEST_RUN), and otherwise from the endpoint port. Empty for the first run on a machine on the
+  # default tenant, which therefore looks exactly like it did before any of this.
   @spec run_tag() :: binary()
   def run_tag, do: Application.fetch_env!(:realtime, :test_run_tag)
 
