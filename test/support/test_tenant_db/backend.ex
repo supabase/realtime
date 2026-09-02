@@ -25,10 +25,6 @@ defmodule TestTenantDb.Backend do
   # One-off setup before the pool starts. Runs before TestTenantDb.start_link/1.
   @callback prepare!() :: :ok
 
-  # Ports already in use by this backend that TestTenantDb must exclude from
-  # its free-port dispenser (e.g. reused containers). [] when none.
-  @callback reserved_ports() :: [pos_integer()]
-
   # Poolboy worker module and pool size.
   @callback pool_spec(max_cases :: pos_integer()) :: {module(), pos_integer()}
 

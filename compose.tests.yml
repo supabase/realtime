@@ -2,9 +2,8 @@ services:
   # Supabase Realtime service
   test_db:
     image: ${POSTGRES_IMAGE:-supabase/postgres:17.6.1.166}
-    container_name: test-realtime-db
     ports:
-      - "5532:5432"
+      - "${TEST_DB_PORT:-5532}:5432"
     volumes:
       - ./dev/postgres/za-permit-supabase-admin.sh:/docker-entrypoint-initdb.d/za-permit-supabase-admin.sh
       - ./dev/postgres/zb-supabase-schema.sql:/docker-entrypoint-initdb.d/zb-supabase-schema.sql
@@ -21,15 +20,14 @@ services:
     depends_on:
       - test_db
     build: .
-    container_name: test-realtime-server
     ports:
-      - "4100:4100"
+      - "${TEST_REALTIME_PORT:-4100}:4100"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
       PORT: 4100
       DB_HOST: host.docker.internal
-      DB_PORT: 5532
+      DB_PORT: ${TEST_DB_PORT:-5532}
       DB_USER: ${DB_USER:-supabase_admin}
       DB_PASSWORD: postgres
       DB_NAME: postgres
@@ -64,7 +62,6 @@ services:
   # Deno test runner
   test-runner:
     image: denoland/deno:alpine-2.5.6
-    container_name: deno-test-runner
     depends_on:
       test_realtime:
         condition: service_healthy

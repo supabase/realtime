@@ -208,6 +208,28 @@ defmodule Realtime.GenRpc do
     end)
   end
 
+  @doc """
+  Tells gen_rpc which port to dial `node` on, by asking that node over Erlang distribution.
+
+  Only `config/runtime.exs` in dev wires this in, as
+  `config :gen_rpc, client_config_per_node: {:external, __MODULE__}`: several nodes on one machine
+  cannot share a port, so each takes a free one. Everywhere else every node listens on the same
+  port and gen_rpc's own default answers for them.
+
+  gen_rpc calls this once per node while opening a client connection (`gen_rpc_client.erl:252`),
+  and expects `{driver, port}` or `{:error, reason}`.
+  """
+  @spec get_config(node) :: {:tcp | :ssl, :inet.port_number()} | {:error, term()}
+  def get_config(node) do
+    driver = Application.get_env(:gen_rpc, :default_client_driver, :tcp)
+    key = if driver == :ssl, do: :ssl_server_port, else: :tcp_server_port
+
+    case :erpc.call(node, :application, :get_env, [:gen_rpc, key], to_timeout(second: 5)) do
+      {:ok, port} when is_integer(port) -> {driver, port}
+      other -> {:error, {:no_gen_rpc_port, node, other}}
+    end
+  end
+
   defp telemetry_success(node, latency) do
     Telemetry.execute(
       [:realtime, :rpc],

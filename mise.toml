@@ -6,6 +6,7 @@ supabase = "2.105.0"
 "npm:@supabase/pg-delta" = "1.0.0-alpha.48"
 
 [env]
+REGION = "us-east-1"
 API_JWT_SECRET = "dev"
 DB_ENC_KEY = "1234567890123456"
 METRICS_JWT_SECRET = "dev"
@@ -14,57 +15,97 @@ DASHBOARD_PASSWORD = "admin"
 
 [tasks.dev]
 description = "Start the dev server"
-run = "iex --name ${NAME}@127.0.0.1 --cookie cookie -S mix phx.server"
-env = { NAME = "pink", PORT = "4000", REGION = "us-east-1", GEN_RPC_TCP_SERVER_PORT = "5369", GEN_RPC_TCP_CLIENT_PORT = "5469" }
+run = """
+preferred=${NODE_NAME:-pink}
+name=$preferred
+suffix=2
+while epmd -names 2>/dev/null | grep -q "^name ${name} at port"; do
+  name="${preferred}${suffix}"
+  suffix=$((suffix + 1))
+done
+exec iex --name "${name}@127.0.0.1" --cookie cookie -S mix phx.server
+"""
 
 [tasks.dev-orange]
-description = "Start another dev server (orange)"
-run = "iex --name ${NAME}@127.0.0.1 --cookie cookie -S mix phx.server"
-env = { NAME = "orange", PORT = "4001", REGION = "eu-west-1", GEN_RPC_TCP_SERVER_PORT = "5469", GEN_RPC_TCP_CLIENT_PORT = "5369" }
+description = "Start another dev server in a second region (orange)"
+run = "iex --name ${NODE_NAME}@127.0.0.1 --cookie cookie -S mix phx.server"
+env = { NODE_NAME = "orange", REGION = "eu-west-1" }
 
+# Fixed compose projects, so every checkout shares these instead of starting a set per directory.
+# Nothing stops or removes the realtime database: another checkout may be using it.
 [tasks.db-start]
-description = "Start all dev databases"
-run = "docker compose -f compose.dbs.yml up -d --wait"
+description = "Make the databases ready: the realtime database, its migrations, and TENANT's database and row (default realtime-dev)"
+dir = "{{cwd}}"
+run = '''
+set -eu
+tenant=${TENANT:-realtime-dev}
+project="tenant-${tenant}"
+compose="docker compose -f compose.tenant-db.yml"
+
+COMPOSE_PROJECT_NAME=realtime-db docker compose -f compose.realtime-db.yml up -d --wait
+mix ecto.create --quiet
+mix ecto.migrate
+
+# The default tenant keeps 5433 so the documented URLs work; docker publishes any other tenant on
+# a port of its choosing, which no other tenant can be handed.
+[ "$tenant" = realtime-dev ] && default_port=5433 || default_port=0
+COMPOSE_PROJECT_NAME="$project" TENANT_DB_PORT="${TENANT_DB_PORT:-$default_port}" $compose up -d --wait
+published=$(COMPOSE_PROJECT_NAME="$project" $compose port tenant_db 5432)
+port=${published##*:}
+
+TENANT="$tenant" TENANT_DB_PORT="$port" mix seed
+'''
 
 [tasks.db-stop]
-description = "Stop all dev databases"
-run = "docker compose -f compose.dbs.yml stop"
+description = "Stop TENANT's database (default realtime-dev)"
+dir = "{{cwd}}"
+run = """
+set -eu
+COMPOSE_PROJECT_NAME="tenant-${TENANT:-realtime-dev}" docker compose -f compose.tenant-db.yml stop
+"""
 
 [tasks.db-rm]
-description = "Remove all dev databases"
-run = "docker compose -f compose.dbs.yml rm -sf"
+description = "Remove TENANT's database (default realtime-dev), discarding its data"
+dir = "{{cwd}}"
+run = """
+set -eu
+COMPOSE_PROJECT_NAME="tenant-${TENANT:-realtime-dev}" docker compose -f compose.tenant-db.yml rm -sf
+"""
 
 [tasks.realtime-start]
-description = "Start realtime server and dev databases"
+description = "Start Realtime and its databases in containers"
 run = "docker compose up"
 
 [tasks.realtime-stop]
-description = "Stop realtime server and dev databases"
+description = "Stop Realtime and its databases in containers"
 run = "docker compose stop"
 
 [tasks.realtime-rm]
-description = "Remove realtime server and dev databases"
+description = "Remove Realtime and its databases in containers"
 run = "docker compose rm -sf"
 
 [tasks.realtime-rebuild]
-description = "Rebuild realtime server and dev databases"
+description = "Rebuild the Realtime container image"
 run = "docker compose down --remove-orphans && docker compose build"
 
 [tasks.test-start]
-description = "Start test services"
+description = "Start the integration test stack"
 run = "docker compose -f compose.tests.yml up"
 
 [tasks.test-stop]
-description = "Stop test services"
+description = "Stop the integration test stack"
 run = "docker compose -f compose.tests.yml stop"
 
 [tasks.test-rm]
-description = "Remove test services"
+description = "Remove the integration test stack"
 run = "docker compose -f compose.tests.yml rm -sf"
 
 [tasks.e2e]
-description = "Run e2e tests locally. Starts supabase if needed. Pass --url http://127.0.0.1:4000 to test against the local dev server."
+description = "Run the e2e suite against a local Supabase stack, starting it if needed"
 dir = "test/e2e"
+usage = '''
+arg "[args]..." help="Flags for realtime-check.ts, such as --test postgres-changes-filters or --url http://127.0.0.1:4000 to use a server you already have running. See `bun run realtime-check.ts --help`."
+'''
 run = """
   supabase start
   eval "$(supabase status --output env)"
@@ -72,12 +113,16 @@ run = """
     --publishable-key "$PUBLISHABLE_KEY" \
     --secret-key "$SECRET_KEY" \
     --db-url "postgresql://postgres:postgres@127.0.0.1:54322/postgres" \
-    "$@"
+    ${usage_args:-}
 """
 
+# Use this over `e2e` when the checkout carries migrations that the released image does not.
 [tasks.e2e-local]
-description = "Run e2e tests against a locally-built realtime image (carries unreleased migrations). Builds the repo, swaps it in for supabase's stock realtime, then runs the suite. e.g. mise run e2e-local -- --test postgres-changes-filters"
+description = "Run the e2e suite against a Realtime image built from this checkout"
 dir = "test/e2e"
+usage = '''
+arg "[args]..." help="Flags for realtime-check.ts, such as --test postgres-changes-filters"
+'''
 run = """
   set -e
   REF=$(grep -E '^[[:space:]]*project_id' supabase/config.toml | sed -E 's/.*"(.*)".*/\\1/')
@@ -128,5 +173,5 @@ run = """
     --publishable-key "$PUBLISHABLE_KEY" \
     --secret-key "$SECRET_KEY" \
     --db-url "postgresql://postgres:postgres@127.0.0.1:54322/postgres" \
-    "$@"
+    ${usage_args:-}
 """
