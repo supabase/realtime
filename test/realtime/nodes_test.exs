@@ -38,6 +38,36 @@ defmodule Realtime.NodesTest do
     end
   end
 
+  describe "region/0" do
+    setup do
+      previous_region = Application.get_env(:realtime, :region)
+      on_exit(fn -> Application.put_env(:realtime, :region, previous_region) end)
+    end
+
+    test "returns the configured region" do
+      Application.put_env(:realtime, :region, "ap-southeast-1")
+
+      assert Nodes.region() == "ap-southeast-1"
+    end
+
+    test "falls back to local when region is unset" do
+      Application.put_env(:realtime, :region, nil)
+
+      assert Nodes.region() == "local"
+    end
+
+    test "nodes in a region-less cluster find each other" do
+      Application.put_env(:realtime, :region, nil)
+
+      spawn_fake_node(Nodes.region(), :node_1)
+      spawn_fake_node(Nodes.region(), :node_2)
+
+      assert Nodes.region_nodes(Nodes.region()) == [:node_1, :node_2]
+      assert {:ok, node} = Nodes.node_from_region(Nodes.region(), :key1)
+      assert node in [:node_1, :node_2]
+    end
+  end
+
   describe "region_nodes/1" do
     test "nil region returns empty list" do
       assert Nodes.region_nodes(nil) == []

@@ -62,6 +62,16 @@ defmodule Realtime.Nodes do
   end
 
   @doc """
+  The region this node registers under in the `RegionNodes` group.
+
+  Deployments that leave `:region` unset (self-hosted, CLI) still form a cluster,
+  so they share `"local"` as a canonical group name. Both the `:syn.join` and
+  every read of this node's region must go through here.
+  """
+  @spec region() :: String.t()
+  def region, do: Application.get_env(:realtime, :region) || "local"
+
+  @doc """
   Lists the nodes in a region. Sorts by node name in case the list order
   is unstable.
   """

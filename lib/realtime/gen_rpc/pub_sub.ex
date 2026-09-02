@@ -64,7 +64,7 @@ defmodule Realtime.GenRpcPubSub do
   # plus one representative per other region (:ftr, which re-floods its own region).
   defp flood_all(adapter_name, topic, message, dispatcher) do
     worker = worker_name(adapter_name, self())
-    my_region = Application.get_env(:realtime, :region)
+    my_region = Nodes.region()
 
     intra_region_flood(worker, my_region, topic, message, dispatcher)
 
@@ -87,7 +87,7 @@ defmodule Realtime.GenRpcPubSub do
   # an empty set and remote deliveries are dropped.
   defp muster_broadcast(adapter_name, topic, tenant_id, message, dispatcher) do
     worker = worker_name(adapter_name, self())
-    my_region = Application.get_env(:realtime, :region)
+    my_region = Nodes.region()
     scope = Application.get_env(:realtime, :muster_scope)
 
     # Cross-region: route to each remote region's expected router, or flood that
@@ -212,7 +212,7 @@ defmodule Realtime.GenRpcPubSub.Worker do
       pubsub: pubsub,
       worker: worker,
       scope: Application.get_env(:realtime, :muster_scope),
-      my_region: Application.get_env(:realtime, :region)
+      my_region: Realtime.Nodes.region()
     }
 
     {:ok, state}

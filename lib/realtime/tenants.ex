@@ -61,7 +61,7 @@ defmodule Realtime.Tenants do
                node: String.t()
              }}
   def health_check(external_id) when is_binary(external_id) do
-    region = Application.get_env(:realtime, :region)
+    region = Realtime.Nodes.region()
     node = Node.self() |> to_string()
 
     with %Tenant{} = tenant <- Cache.get_tenant_by_external_id(external_id),
