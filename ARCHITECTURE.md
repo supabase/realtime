@@ -6,6 +6,9 @@ A high-level tour of how Realtime is put together, plus a few highlights of the 
 
 Realtime is a multi-tenant Phoenix app where every node in the cluster runs the same code. A tenant is identified by its `external_id`.
 
+Realtime is deployed across multiple regions in a single cluster. Realtime talks to its own database as well as to individual tenant databases.
+Realtime doesn't have to be multi-node and multi-region though, it can also be run self-hosted for example in a single node environment.
+
 Clients talk to Realtime over a single WebSocket that multiplexes many channels. Almost everything else in this document exists to serve one job: get a message published on a tenant's topic.
 
 ---
