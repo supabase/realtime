@@ -82,25 +82,4 @@ defmodule TestEnv do
               "unknown peer #{inspect(peer)}: add it to TestEnv's peer slots. Known: #{inspect(Enum.sort(peers()))}"
     end
   end
-
-  # A port with nothing behind it, for tenant fixtures that never open a connection.
-  @spec unused_port() :: :inet.port_number()
-  def unused_port do
-    {:ok, socket} = :gen_tcp.listen(0, [:inet, ip: {0, 0, 0, 0}, active: false])
-    {:ok, port} = :inet.port(socket)
-    :ok = :gen_tcp.close(socket)
-    port
-  end
-
-  # Can a listener still bind this port? Probes the wildcard address with the same
-  # reuseaddr the real listeners use, so a port left in TIME_WAIT by a peer that just
-  # stopped reads as available while a live listener — ours or another run's — does not.
-  # Inherently a snapshot: use it to report a collision, never to allocate a port.
-  @spec port_available?(:inet.port_number()) :: boolean()
-  def port_available?(port) do
-    case :gen_tcp.listen(port, [:inet, ip: {0, 0, 0, 0}, reuseaddr: true, active: false]) do
-      {:ok, socket} -> :gen_tcp.close(socket) == :ok
-      {:error, _reason} -> false
-    end
-  end
 end

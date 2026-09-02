@@ -54,13 +54,6 @@ gen_rpc_default_port = 5369
 gen_rpc_dev_port_range = gen_rpc_default_port..(gen_rpc_default_port + 99)
 gen_rpc_tcp_client_port = Env.get_integer("GEN_RPC_TCP_CLIENT_PORT", gen_rpc_default_port)
 
-port_free? = fn port ->
-  case :gen_tcp.listen(port, [:inet, ip: {0, 0, 0, 0}, reuseaddr: true, active: false]) do
-    {:ok, socket} -> :gen_tcp.close(socket) == :ok
-    {:error, _reason} -> false
-  end
-end
-
 # Only the server port is bound. Nodes on one machine cannot share it, so a dev node takes the
 # first free port of the range and Realtime.GenRpc.get_config/1 tells its peers which one it took.
 # A test run derives its ports from one scan in config/test.exs instead, and dials peers through
@@ -74,14 +67,14 @@ gen_rpc_tcp_server_port =
     # binding a port would make two of them collide.
     {:dev, nil} ->
       if Node.alive?() do
-        Enum.find(gen_rpc_dev_port_range, port_free?) ||
+        Enum.find(gen_rpc_dev_port_range, &Env.port_available?/1) ||
           raise "no free gen_rpc port on range #{inspect(gen_rpc_dev_port_range)}"
       else
         false
       end
 
     {:dev, port} ->
-      if port_free?.(port) do
+      if Env.port_available?(port) do
         port
       else
         raise "GEN_RPC_TCP_SERVER_PORT=#{port} is set but it's already in use."

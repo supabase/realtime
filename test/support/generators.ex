@@ -6,6 +6,7 @@ defmodule Generators do
   alias Realtime.Api.Tenant
   alias Realtime.Crypto
   alias Realtime.Database
+  alias Realtime.Env
   alias Realtime.Extensions
   alias Realtime.Integration.WebsocketClient
   alias Realtime.Repo
@@ -23,7 +24,7 @@ defmodule Generators do
             "db_name" => "postgres",
             "db_user" => System.get_env("DB_USER", "supabase_admin"),
             "db_password" => "postgres",
-            "db_port" => "#{override[:port] || TestEnv.unused_port()}",
+            "db_port" => "#{override[:port] || Env.unused_port()}",
             "poll_interval_ms" => 10,
             "poll_max_changes" => 100,
             "poll_max_record_bytes" => 1_048_576,

@@ -77,4 +77,34 @@ defmodule Realtime.Env do
       default
     end
   end
+
+  @doc """
+  Can a listener still bind this port?
+
+  Probes the wildcard address with the same `reuseaddr` the real listeners use, so a port left
+  in `TIME_WAIT` reads as available while a live listener does not.
+
+  Inherently a snapshot: whoever binds next may lose the race.
+  """
+  @spec port_available?(:inet.port_number()) :: boolean()
+  def port_available?(port) do
+    case :gen_tcp.listen(port, [:inet, ip: {0, 0, 0, 0}, reuseaddr: true, active: false]) do
+      {:ok, socket} -> :gen_tcp.close(socket) == :ok
+      {:error, _reason} -> false
+    end
+  end
+
+  @doc """
+  A port with nothing behind it.
+
+  Lets the OS pick a free one and hands it back closed, for callers that want an address no
+  connection can succeed against.
+  """
+  @spec unused_port() :: :inet.port_number()
+  def unused_port do
+    {:ok, socket} = :gen_tcp.listen(0, [:inet, ip: {0, 0, 0, 0}, active: false])
+    {:ok, port} = :inet.port(socket)
+    :ok = :gen_tcp.close(socket)
+    port
+  end
 end

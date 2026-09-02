@@ -162,4 +162,31 @@ defmodule Realtime.EnvTest do
       end
     end
   end
+
+  describe "port_available?/1" do
+    test "true for a port nothing is listening on" do
+      assert Env.port_available?(Env.unused_port())
+    end
+
+    test "false while a listener holds the port" do
+      {:ok, socket} = :gen_tcp.listen(0, [:inet, ip: {0, 0, 0, 0}, reuseaddr: true, active: false])
+      {:ok, port} = :inet.port(socket)
+      on_exit(fn -> :gen_tcp.close(socket) end)
+
+      refute Env.port_available?(port)
+    end
+
+    test "the endpoint port this run claimed is held by this run" do
+      refute Env.port_available?(TestEnv.http_port())
+    end
+  end
+
+  describe "unused_port/0" do
+    test "returns a closed port nothing can be reached on" do
+      port = Env.unused_port()
+
+      assert port in 1..65_535
+      assert {:error, :econnrefused} = :gen_tcp.connect(~c"127.0.0.1", port, [:inet, active: false], 500)
+    end
+  end
 end

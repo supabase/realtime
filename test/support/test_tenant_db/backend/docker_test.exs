@@ -3,6 +3,7 @@ defmodule TestTenantDb.Backend.DockerTest do
   # and reap its containers.
   use ExUnit.Case, async: false
 
+  alias Realtime.Env
   alias TestTenantDb.Backend.Docker
 
   @suffix String.duplicate("a", 12)
@@ -52,7 +53,7 @@ defmodule TestTenantDb.Backend.DockerTest do
     end
 
     test "true once that port is free" do
-      assert Docker.abandoned_container?("realtime-test_#{TestEnv.unused_port()}-#{@suffix}")
+      assert Docker.abandoned_container?("realtime-test_#{Env.unused_port()}-#{@suffix}")
     end
 
     test "false for an untagged container, which belongs to whoever holds the default port" do

@@ -150,7 +150,7 @@ defmodule TestTenantDb.Backend.Docker do
   def abandoned_container?(name) do
     case Regex.run(~r/^#{@container_prefix}_(\d+)-(.+)$/, name) do
       [_, port, suffix] when byte_size(suffix) == @container_suffix_length ->
-        TestEnv.port_available?(String.to_integer(port))
+        Env.port_available?(String.to_integer(port))
 
       _ ->
         false

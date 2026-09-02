@@ -63,22 +63,4 @@ defmodule TestEnvTest do
       assert_raise ArgumentError, ~r/unknown peer :nope/, fn -> TestEnv.peer_gen_rpc_port(:nope) end
     end
   end
-
-  describe "port_available?/1" do
-    test "true for a port nothing is listening on" do
-      assert TestEnv.port_available?(TestEnv.unused_port())
-    end
-
-    test "false while a listener holds the port" do
-      {:ok, socket} = :gen_tcp.listen(0, [:inet, ip: {0, 0, 0, 0}, reuseaddr: true, active: false])
-      {:ok, port} = :inet.port(socket)
-      on_exit(fn -> :gen_tcp.close(socket) end)
-
-      refute TestEnv.port_available?(port)
-    end
-
-    test "the endpoint port this run claimed is held by this run" do
-      refute TestEnv.port_available?(TestEnv.http_port())
-    end
-  end
 end

@@ -10,6 +10,7 @@ defmodule Realtime.ApiTest do
   alias Realtime.Api.FeatureFlag
   alias Realtime.Api.Tenant
   alias Realtime.Crypto
+  alias Realtime.Env
   alias Realtime.GenCounter
   alias Realtime.GenRpc
   alias Realtime.Nodes
@@ -61,7 +62,7 @@ defmodule Realtime.ApiTest do
 
   describe "create_tenant/1" do
     test "valid data creates a tenant" do
-      port = TestEnv.unused_port()
+      port = Env.unused_port()
 
       external_id = random_string()
 

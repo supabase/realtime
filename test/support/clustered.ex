@@ -3,6 +3,8 @@ defmodule Clustered do
   Uses the gist https://gist.github.com/ityonemo/177cbc96f8c8722bfc4d127ff9baec62 to start a node for testing
   """
 
+  alias Realtime.Env
+
   @port_wait_attempts 50
   @port_wait_delay_ms 100
 
@@ -177,7 +179,7 @@ defmodule Clustered do
   # the peer anyway only fails later and less clearly.
   defp await_port_available!(port, label, env_var) do
     available? =
-      TestHelpers.eventually(fn -> TestEnv.port_available?(port) end,
+      TestHelpers.eventually(fn -> Env.port_available?(port) end,
         retries: @port_wait_attempts,
         sleep: @port_wait_delay_ms
       )

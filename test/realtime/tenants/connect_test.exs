@@ -8,6 +8,7 @@ defmodule Realtime.Tenants.ConnectTest do
   import ExUnit.CaptureLog
 
   alias Realtime.Database
+  alias Realtime.Env
   alias Realtime.Tenants
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Rebalancer
@@ -340,7 +341,7 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "if tenant exists but unable to connect, returns error" do
-      port = TestEnv.unused_port()
+      port = Env.unused_port()
 
       extensions = [
         %{
