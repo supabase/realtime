@@ -7,7 +7,6 @@ defmodule Realtime.Application do
   require Cachex.Spec
   require Logger
 
-  alias Realtime.Nodes
   alias Realtime.Repo.Replica
   alias Realtime.Tenants.ReplicationConnection
   alias Realtime.Tenants.Connect
@@ -76,7 +75,7 @@ defmodule Realtime.Application do
     :syn.set_event_handler(Realtime.SynHandler)
     :ok = :syn.add_node_to_scopes([RegionNodes, Realtime.Tenants.Connect])
 
-    region = Nodes.region()
+    region = Realtime.Nodes.region()
     broadcast_pool_size = Application.get_env(:realtime, :broadcast_pool_size, 10)
     presence_pool_size = Application.get_env(:realtime, :presence_pool_size, 10)
     presence_broadcast_period = Application.get_env(:realtime, :presence_broadcast_period, 1_500)

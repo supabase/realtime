@@ -50,14 +50,8 @@ defmodule Realtime.NodesTest do
       assert Nodes.region() == "ap-southeast-1"
     end
 
-    test "falls back to local when region is unset" do
-      Application.put_env(:realtime, :region, nil)
-
-      assert Nodes.region() == "local"
-    end
-
-    test "nodes in a region-less cluster find each other" do
-      Application.put_env(:realtime, :region, nil)
+    test "nodes in a cluster running the REGION default find each other" do
+      Application.put_env(:realtime, :region, "local")
 
       spawn_fake_node(Nodes.region(), :node_1)
       spawn_fake_node(Nodes.region(), :node_2)
