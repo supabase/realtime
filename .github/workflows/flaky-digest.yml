@@ -79,7 +79,7 @@ jobs:
           #
           # postgres/partition/job_url may be absent from previous runs or `job_url` failures
           # - every use below tolerates that via `// ""`/`// empty`.
-          BLOCKS_JSON="$(jq -sc --argjson max_entries 20 '
+          BLOCKS_JSON="$(jq -sc --argjson max_entries 20 --argjson max_job_links 5 '
             def truncate_at_line($budget):
               if (. | length) <= $budget then .
               else
@@ -88,10 +88,19 @@ jobs:
                 | (if $idx then $cut[0:$idx] else $cut end) + "\n… (truncated)"
               end;
 
-            def env_pairs:
-              map(select((.postgres // "") != "" and (.partition // "") != ""))
-              | map(.postgres + "/" + .partition)
+            # Distinct Postgres versions a group occurred on (partition does not matter)
+            def pg_versions:
+              map(.postgres // "")
+              | map(select(. != ""))
               | unique;
+
+            # Up to $n most recent distinct job URLs to find patterns
+            def recent_job_urls($n):
+              map(select((.job_url // "") != ""))
+              | sort_by(.run_id | tonumber? // 0)
+              | reverse
+              | reduce .[] as $e ([]; if any(.[]; . == $e.job_url) then . else . + [$e.job_url] end)
+              | .[0:$n];
 
             # `killed` events (test processes being force killed) carry no assertion or stacktrace,
             # so their snippet is always the same unreadable one-liner.
@@ -110,8 +119,8 @@ jobs:
                        kind: "killed",
                        count: ($events | length),
                        tests: ($events | map(.test) | unique | sort),
-                       job_url: ($latest.job_url // ""),
-                       envs: ($events | env_pairs)
+                       job_urls: ($events | recent_job_urls($max_job_links)),
+                       envs: ($events | pg_versions)
                      }
                    else
                      {
@@ -120,8 +129,8 @@ jobs:
                        count: ($events | length),
                        test: $first.test,
                        snippet: ($latest.snippet // ""),
-                       job_url: ($latest.job_url // ""),
-                       envs: ($events | env_pairs)
+                       job_urls: ($events | recent_job_urls($max_job_links)),
+                       envs: ($events | pg_versions)
                      }
                    end
                )
@@ -138,7 +147,9 @@ jobs:
                 + ($shown | map(
                     . as $g
                     | (if ($g.envs | length) > 0 then "  _(seen on: \($g.envs | join(", ")))_" else "" end) as $envs_suffix
-                    | (if ($g.job_url // "") != "" then "<\($g.job_url)|Job log> · " else "" end) as $link_prefix
+                    | (if ($g.job_urls | length) > 0 then
+                        "Logs: " + ($g.job_urls | to_entries | map("<\(.value)|\(.key + 1)>") | join(" ")) + " · "
+                      else "" end) as $link_prefix
                     | if $g.kind == "killed" then
                         # No snippet worth showing - just the test list, same char-budget
                         # safeguard as the assertion branch below.
