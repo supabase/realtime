@@ -23,13 +23,13 @@ defmodule TestTenantDb.Backend.DockerTest do
     end
 
     test "a second run puts its endpoint port in the name" do
-      put_run_tag("_4003")
+      put_run_tag("_port4003")
 
-      assert Docker.container_prefix() == "realtime-test_4003"
-      assert Docker.container_name() =~ ~r"^realtime-test_4003-.{12}$"
+      assert Docker.container_prefix() == "realtime-test_port4003"
+      assert Docker.container_name() =~ ~r"^realtime-test_port4003-.{12}$"
     end
 
-    test "a run named with NAME uses that name" do
+    test "a run named by TENANT or TEST_RUN uses that name" do
       put_run_tag("_pr_1234")
 
       assert Docker.container_prefix() == "realtime-test_pr_1234"
@@ -42,18 +42,18 @@ defmodule TestTenantDb.Backend.DockerTest do
       put_run_tag("")
 
       assert Docker.own_container?("realtime-test-" <> @suffix)
-      refute Docker.own_container?("realtime-test_4003-" <> @suffix)
+      refute Docker.own_container?("realtime-test_port4003-" <> @suffix)
       refute Docker.own_container?("some-other-container")
     end
   end
 
   describe "abandoned_container?/1" do
     test "false while the owning run still holds its port" do
-      refute Docker.abandoned_container?("realtime-test_#{TestEnv.http_port()}-#{@suffix}")
+      refute Docker.abandoned_container?("realtime-test_port#{TestEnv.http_port()}-#{@suffix}")
     end
 
     test "true once that port is free" do
-      assert Docker.abandoned_container?("realtime-test_#{Env.unused_port()}-#{@suffix}")
+      assert Docker.abandoned_container?("realtime-test_port#{Env.unused_port()}-#{@suffix}")
     end
 
     test "false for an untagged container, which belongs to whoever holds the default port" do
@@ -64,8 +64,12 @@ defmodule TestTenantDb.Backend.DockerTest do
       refute Docker.abandoned_container?("realtime-test_pr_1234-#{@suffix}")
     end
 
+    test "false for a run named after digits, which is a name and not a port" do
+      refute Docker.abandoned_container?("realtime-test_#{Env.unused_port()}-#{@suffix}")
+    end
+
     test "false for a name that only reads like a tagged one" do
-      refute Docker.abandoned_container?("realtime-test_4003-tooshort")
+      refute Docker.abandoned_container?("realtime-test_port4003-tooshort")
       refute Docker.abandoned_container?("some-other-container")
     end
   end

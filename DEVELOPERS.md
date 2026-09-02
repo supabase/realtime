@@ -73,6 +73,9 @@ TENANT=review mise run db-rm     # removes its database
 `TENANT` defaults to `realtime-dev`, so those two commands reach the default tenant as well. Re-running `db-start`
 leaves an existing tenant's data and publication alone.
 
+`TENANT` isolates the test suite too, so `TENANT=review mix test` runs on its own database and tenant containers,
+next to that tenant's dev stack and clear of every other run.
+
 > **Note**
 > Supabase runs Realtime in production with a separate database that keeps track of all tenants. For local development, the compose setup creates the `_realtime` schema for you.
 

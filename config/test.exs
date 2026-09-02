@@ -33,14 +33,29 @@ node_suffix =
     _ -> "_#{port}"
   end
 
-# Names this run's database and containers. TEST_RUN labels a run ("pr_1234"), and otherwise the
-# endpoint port does, which also lets a later run tell whether the run that left something
-# behind is gone.
+# Names this run's database and containers. One knob covers a whole environment: TENANT names a
+# test run just as it names the dev stack, so `TENANT=review mise run db-start` and
+# `TENANT=review mix test` are the same review environment. The default tenant is the unmarked
+# run, so a plain `mix test` keeps the names it always had. TEST_RUN overrides TENANT for a run
+# that wants a label without a tenant behind it ("pr_1234").
+default_tenant = "realtime-dev"
+
+run_name =
+  case {System.get_env("TEST_RUN", ""), System.get_env("TENANT", "")} do
+    {"", ^default_tenant} -> ""
+    {"", tenant} -> tenant
+    {run, _} -> run
+  end
+
+# An unnamed run is labelled by its endpoint port instead, which also lets a later run tell
+# whether the run that left something behind is gone. "port" keeps that label out of the
+# namespace of names, so a tenant called "4003" is never read as a run holding port 4003.
 run_tag =
-  case {offset, System.get_env("TEST_RUN", "")} do
+  case {offset, run_name} do
     {0, ""} -> ""
-    {_, ""} -> "_#{port}"
-    {_, run} -> "_#{run}"
+    {_, ""} -> "_port#{port}"
+    # A name reaches a database name and a container name, so keep it to what both take.
+    {_, name} -> "_" <> String.replace(name, ~r/[^A-Za-z0-9_]/, "_")
   end
 
 partition = System.get_env("MIX_TEST_PARTITION")

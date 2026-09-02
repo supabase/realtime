@@ -31,6 +31,9 @@ description = "Start another dev server in a second region (orange)"
 run = "iex --name ${NODE_NAME}@127.0.0.1 --cookie cookie -S mix phx.server"
 env = { NODE_NAME = "orange", REGION = "eu-west-1" }
 
+# TENANT (default realtime-dev) names a whole environment, not just these tasks: the tenant's
+# database and row here, and the database and containers `mix test` uses (see config/test.exs).
+#
 # Fixed compose projects, so every checkout shares these instead of starting a set per directory.
 # Nothing stops or removes the realtime database: another checkout may be using it.
 [tasks.db-start]
