@@ -174,7 +174,9 @@ defmodule Realtime.Database do
     %{rows: [[migrations_ran]]} =
       if table_exists, do: Postgrex.query!(conn, @migrations_count_query, []), else: %{rows: [[0]]}
 
-    {:ok, [available_connections, migrations_ran]}
+    # pg_stat_activity also counts non-client backends (autovacuum, walsender, ...) that
+    # don't consume a max_connections slot, so max_connections - count(*) can go negative.
+    {:ok, [max(available_connections, 0), migrations_ran]}
   rescue
     e ->
       GenServer.stop(conn)

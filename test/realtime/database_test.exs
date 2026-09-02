@@ -83,6 +83,19 @@ defmodule Realtime.DatabaseTest do
              end) =~ ~r/Only \d+ available connections\. At least 125 connections are required/
     end
 
+    test "guard against negative available connnections count", %{tenant: tenant} do
+      expect(Postgrex, :query!, 2, fn _conn, query, _params ->
+        cond do
+          query =~ "max_connections" -> %{rows: [[-5]]}
+          query =~ "to_regclass" -> %{rows: [[false]]}
+        end
+      end)
+
+      assert capture_log(fn ->
+               assert {:error, :tenant_db_too_many_connections} = Database.check_tenant_connection(tenant)
+             end) =~ ~r/Only 0 available connections/
+    end
+
     @tag db_pool: 3
     test "durable pool opens the configured number of realtime_connect connections", %{tenant: tenant} do
       # pg_stat_activity is server-wide, so draining 'realtime_connect' backends left
