@@ -138,11 +138,15 @@ jobs:
             ) as $groups
             | ($groups | length) as $total_groups
             | ($groups | map(.count) | add) as $total_occurrences
+            # The killed group is one entry in $groups but bundles many distinct tests -
+            # expand it back out so the headline count is not off by however many tests got
+            # collapsed into that one block.
+            | ($groups | map(if .kind == "killed" then (.tests | length) else 1 end) | add) as $total_distinct_tests
             | ($groups[0:$max_entries]) as $shown
             | (
                 [
                   { type: "section", text: { type: "mrkdwn",
-                      text: "*\($total_groups) distinct flaky test(s), \($total_occurrences) total occurrence(s) today*" } }
+                      text: "*\($total_distinct_tests) distinct flaky test(s), \($total_occurrences) total occurrence(s) today*" } }
                 ]
                 + ($shown | map(
                     . as $g
