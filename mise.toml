@@ -72,19 +72,19 @@ set -eu
 COMPOSE_PROJECT_NAME="tenant-${TENANT:-realtime-dev}" docker compose -f compose.tenant-db.yml rm -sf
 """
 
-[tasks.stack-start]
+[tasks.realtime-start]
 description = "Start Realtime and its databases in containers"
 run = "docker compose up"
 
-[tasks.stack-stop]
+[tasks.realtime-stop]
 description = "Stop Realtime and its databases in containers"
 run = "docker compose stop"
 
-[tasks.stack-rm]
+[tasks.realtime-rm]
 description = "Remove Realtime and its databases in containers"
 run = "docker compose rm -sf"
 
-[tasks.stack-rebuild]
+[tasks.realtime-rebuild]
 description = "Rebuild the Realtime container image"
 run = "docker compose down --remove-orphans && docker compose build"
 
