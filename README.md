@@ -63,6 +63,7 @@ Start with [DEVELOPERS.md](DEVELOPERS.md) for local setup, `mise` tasks, and exa
 
 Once your environment is up and running, check out the following docs to customize the server and troubleshooting:
 
+- [ARCHITECTURE.md](ARCHITECTURE.md) - how the cluster, broadcast fan-out and Postgres Changes fit together
 - [ENVS.md](ENVS.md) - detailed list of all environment variables
 - [ERROR_CODES.md](ERROR_CODES.md) - list of operational codes
 - [OBSERVABILITY_METRICS.md](OBSERVABILITY_METRICS.md) - monitoring information

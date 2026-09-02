@@ -5,6 +5,7 @@
 - [Client](#client)
   - [Client libraries](#client-libraries)
 - [Server](#server)
+  - [Architecture](#architecture)
   - [Server setup](#server-setup)
   - [Tenants](#tenants)
   - [Devcontainer](#devcontainer)
@@ -30,6 +31,12 @@
 See the [SDK capability matrix](https://supabase.github.io/sdk/#area-realtime).
 
 ## Server
+
+### Architecture
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for an overview of the cluster layout, how a
+tenant gets placed on a node, how broadcasts are routed, and how Postgres Changes
+subscriptions work.
 
 ### Server setup
 
