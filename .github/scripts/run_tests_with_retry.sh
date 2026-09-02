@@ -110,6 +110,13 @@ while read -r block_start block_end; do
   block="$(sed -n "${block_start},${block_end}p" "$ATTEMPT1_LOG" | sed -r 's/\x1b\[[0-9;]*m//g' | grep -v -E '^\.+$' || true)"
   # Same broken-pipe risk as the MAX_SNIPPET_CHARS truncation above, so workaround.
   header="${block%%$'\n'*}"
+  # `:kill` is untrappable, so these blocks carry no assertion/stacktrace, just this one
+  # line - the snippet is noise. Tag them so the digest can collapse them instead of
+  # listing each killed test as its own mystery entry.
+  kind="assertion"
+  if printf '%s\n' "$block" | grep -q -E '\*\* \(EXIT from #PID<[0-9.]+>\) killed'; then
+    kind="killed"
+  fi
   # The location is a bare "path:line" - strip its indentation before matching.
   error_line="$(printf '%s\n' "$block" | sed -n '2,4p' | sed -E 's/^[[:space:]]*(Error:[[:space:]]*)?//' | grep -m1 -E '^.+:[0-9]+$' || true)"
 
@@ -127,7 +134,8 @@ while read -r block_start block_end; do
     --arg postgres "${MATRIX_POSTGRES:-}" \
     --arg partition "${MIX_TEST_PARTITION:-}" \
     --arg job_url "${JOB_URL:-}" \
-    '{file: $file, line: $line, test: $test, run_id: $run_id, snippet: $snippet, postgres: $postgres, partition: $partition, job_url: $job_url}' \
+    --arg kind "$kind" \
+    '{file: $file, line: $line, test: $test, run_id: $run_id, snippet: $snippet, postgres: $postgres, partition: $partition, job_url: $job_url, kind: $kind}' \
     >> "$FLAKY_EVENTS"
 done <<< "$boundaries"
 

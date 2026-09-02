@@ -79,7 +79,7 @@ jobs:
           #
           # postgres/partition/job_url may be absent from previous runs or `job_url` failures
           # - every use below tolerates that via `// ""`/`// empty`.
-          BLOCKS_JSON="$(jq -sc --argjson max_entries 20 '
+          BLOCKS_JSON="$(jq -sc --argjson max_entries 20 --argjson max_job_links 5 '
             def truncate_at_line($budget):
               if (. | length) <= $budget then .
               else
@@ -88,50 +88,96 @@ jobs:
                 | (if $idx then $cut[0:$idx] else $cut end) + "\n… (truncated)"
               end;
 
-            def env_pairs:
-              map(select((.postgres // "") != "" and (.partition // "") != ""))
-              | map(.postgres + "/" + .partition)
+            # Distinct Postgres versions a group occurred on (partition does not matter)
+            def pg_versions:
+              map(.postgres // "")
+              | map(select(. != ""))
               | unique;
 
-            (group_by(if (.file // "") != "" then (.file + ":" + (.line|tostring)) else .test end)
+            # Up to $n most recent distinct job URLs to find patterns
+            def recent_job_urls($n):
+              map(select((.job_url // "") != ""))
+              | sort_by(.run_id | tonumber? // 0)
+              | reverse
+              | reduce .[] as $e ([]; if any(.[]; . == $e.job_url) then . else . + [$e.job_url] end)
+              | .[0:$n];
+
+            # `killed` events (test processes being force killed) carry no assertion or stacktrace,
+            # so their snippet is always the same unreadable one-liner.
+            # Collapse all of them into a single block instead of letting each
+            # distinct test form its own entry.
+            (group_by(if (.kind // "assertion") == "killed" then "__killed__"
+                       elif (.file // "") != "" then (.file + ":" + (.line|tostring))
+                       else .test end)
              | map(
                  . as $events
                  | ($events[0]) as $first
                  | ($events | sort_by(.run_id | tonumber? // 0) | last) as $latest
-                 | {
-                     key: (if ($first.file // "") != "" then ($first.file + ":" + ($first.line|tostring)) else $first.test end),
-                     count: ($events | length),
-                     test: $first.test,
-                     snippet: ($latest.snippet // ""),
-                     job_url: ($latest.job_url // ""),
-                     envs: ($events | env_pairs)
-                   }
+                 | if ($first.kind // "assertion") == "killed" then
+                     {
+                       key: "__killed__",
+                       kind: "killed",
+                       count: ($events | length),
+                       tests: ($events | map(.test) | unique | sort),
+                       job_urls: ($events | recent_job_urls($max_job_links)),
+                       envs: ($events | pg_versions)
+                     }
+                   else
+                     {
+                       key: (if ($first.file // "") != "" then ($first.file + ":" + ($first.line|tostring)) else $first.test end),
+                       kind: "assertion",
+                       count: ($events | length),
+                       test: $first.test,
+                       snippet: ($latest.snippet // ""),
+                       job_urls: ($events | recent_job_urls($max_job_links)),
+                       envs: ($events | pg_versions)
+                     }
+                   end
                )
              | sort_by(-.count)
             ) as $groups
             | ($groups | length) as $total_groups
             | ($groups | map(.count) | add) as $total_occurrences
+            # The killed group is one entry in $groups but bundles many distinct tests -
+            # expand it back out so the headline count is not off by however many tests got
+            # collapsed into that one block.
+            | ($groups | map(if .kind == "killed" then (.tests | length) else 1 end) | add) as $total_distinct_tests
             | ($groups[0:$max_entries]) as $shown
             | (
                 [
                   { type: "section", text: { type: "mrkdwn",
-                      text: "*\($total_groups) distinct flaky test(s), \($total_occurrences) total occurrence(s) today*" } }
+                      text: "*\($total_distinct_tests) distinct flaky test(s), \($total_occurrences) total occurrence(s) today*" } }
                 ]
                 + ($shown | map(
                     . as $g
                     | (if ($g.envs | length) > 0 then "  _(seen on: \($g.envs | join(", ")))_" else "" end) as $envs_suffix
-                    | (if ($g.job_url // "") != "" then "<\($g.job_url)|Job log> · " else "" end) as $link_prefix
-                    # Slack rejects the whole message if the text in any one section exceeds
-                    # 3000 chars, so size the snippet budget off the fixed overhead of this
-                    # block (not a flat guess) - a long test/key/env list must not push the total over.
-                    | ("*\($g.key)* — \($g.count)x\($envs_suffix)\n\($link_prefix)\($g.test)\n```\n\n```") as $overhead
-                    | ([50, 2900 - ($overhead | length)] | max) as $budget
-                    | ($g.snippet | truncate_at_line($budget)) as $snippet
-                    | {
-                        type: "section",
-                        text: { type: "mrkdwn",
-                          text: "*\($g.key)* — \($g.count)x\($envs_suffix)\n\($link_prefix)\($g.test)\n```\n\($snippet)\n```" }
-                      }
+                    | (if ($g.job_urls | length) > 0 then
+                        "Logs: " + ($g.job_urls | to_entries | map("<\(.value)|\(.key + 1)>") | join(" ")) + " · "
+                      else "" end) as $link_prefix
+                    | if $g.kind == "killed" then
+                        # No snippet worth showing - just the test list, same char-budget
+                        # safeguard as the assertion branch below.
+                        ("*Test process killed* — \($g.count)x across \($g.tests | length) test(s)\($envs_suffix)\n\($link_prefix)") as $overhead
+                        | ([50, 2900 - ($overhead | length)] | max) as $budget
+                        | ($g.tests | join(", ") | truncate_at_line($budget)) as $tests
+                        | {
+                            type: "section",
+                            text: { type: "mrkdwn",
+                              text: "\($overhead)\($tests)" }
+                          }
+                      else
+                        # Slack rejects the whole message if the text in any one section exceeds
+                        # 3000 chars, so size the snippet budget off the fixed overhead of this
+                        # block (not a flat guess) - a long test/key/env list must not push the total over.
+                        ("*\($g.key)* — \($g.count)x\($envs_suffix)\n\($link_prefix)\($g.test)\n```\n\n```") as $overhead
+                        | ([50, 2900 - ($overhead | length)] | max) as $budget
+                        | ($g.snippet | truncate_at_line($budget)) as $snippet
+                        | {
+                            type: "section",
+                            text: { type: "mrkdwn",
+                              text: "*\($g.key)* — \($g.count)x\($envs_suffix)\n\($link_prefix)\($g.test)\n```\n\($snippet)\n```" }
+                          }
+                      end
                   ))
                 + (if $total_groups > $max_entries then
                     [{ type: "context", elements: [ { type: "mrkdwn",
