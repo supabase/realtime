@@ -39,6 +39,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   @postgres_subscribe_backoff_max 1_000
   @postgres_subscribe_fatal_reasons [:malformed_subscription_params, :subscription_insert_failed]
   @postgres_subscribe_error_code "RealtimeDisabledForConfiguration"
+  @postgres_cdc_down Realtime.Syn.PostgresCdc.down_event()
   @fullsweep_after Application.compile_env!(:realtime, :websocket_fullsweep_after)
 
   @impl true
@@ -306,7 +307,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  def handle_info(%{event: "postgres_cdc_rls_down"}, socket) do
+  def handle_info(%{event: @postgres_cdc_down}, socket) do
     %{assigns: %{pg_sub_ref: pg_sub_ref}} = socket
     Helpers.cancel_timer(pg_sub_ref)
     pg_sub_ref = postgres_subscribe()

@@ -862,6 +862,49 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
       assert log =~ "Unable to subscribe to changes with given parameters"
     end
 
+    test "a joined channel re-subscribes after the cdc tree goes down", %{tenant: tenant, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+      config = %{postgres_changes: [%{event: "INSERT", schema: "public"}]}
+      sub_id = :erlang.phash2(%{"event" => "INSERT", "schema" => "public"})
+
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 200
+
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{"extension" => "postgres_changes", "status" => "ok"},
+                       topic: ^topic
+                     },
+                     8000
+
+      assert_cdc_stopped(tenant)
+
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{"extension" => "postgres_changes", "status" => "ok"},
+                       topic: ^topic
+                     },
+                     20_000
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+
+      %{rows: [[id]]} =
+        Postgrex.query!(conn, "insert into test (details) values ('after down') returning id", [])
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{
+                         "data" => %{"record" => %{"details" => "after down", "id" => ^id}, "type" => "INSERT"},
+                         "ids" => [^sub_id]
+                       },
+                       ref: nil,
+                       topic: ^topic
+                     },
+                     2000
+    end
+
     test "handle nil postgres changes params as empty param changes", %{
       tenant: tenant,
       serializer: serializer
