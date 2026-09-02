@@ -3760,9 +3760,9 @@ defmodule Forum.MusterDistributedTest do
       %{scope: scope}
     end
 
-    # The crash-path sibling of "a claim already queued on the router outlives the
-    # death-watch reap" (in the drain describe), and the case that has no
-    # equivalent of the death watch to fall back on.
+    # The crash-path sibling of "a claim queued past one sweep is collected by the
+    # next" (in the drain describe): the same hazard, reached through the :DOWN
+    # handler rather than a graceful leave.
     #
     # handle_info({:DOWN, ...}) evicts a crashed peer by calling depart_peer/3
     # immediately, which match_deletes every occupancy row attributable to the
@@ -3773,17 +3773,19 @@ defmodule Forum.MusterDistributedTest do
     # queue when the wipe runs, and insert its row a moment after: a dead node
     # cannot SEND a new request, but one already delivered still executes.
     #
-    # Nothing collects the row afterwards:
+    # Nothing that is keyed to the departure itself collects the row afterwards:
     #   * drop_stale_router_entries needs source_agrees?/4, and a dead source will
     #     never announce our view again
     #   * {:nodedown, _} is a no-op
-    #   * the tombstone sweep only reaps tombstones, and this row is :present
-    #   * the graceful path's deferred reap_departed/2 never runs here -- it hangs
-    #     off the death watch that only handle_info({:muster_leaving, ...}) arms
+    #   * the tombstone reaper only reaps tombstones, and this row is :present
+    #   * the eviction already ran, and it wiped a table that did not yet contain
+    #     this row
     #
-    # Muster.targets/3 returns Scope.occupancy/2 unfiltered, so the row is a live
-    # fan-out target for a node that no longer exists, for the life of this OS
-    # process.
+    # Muster.targets/3 returns Scope.occupancy/2 unfiltered, so until something
+    # collects it the row is a live fan-out target for a node that no longer
+    # exists. reap_departed_sources/1 is what collects it, on the periodic tick,
+    # from the current view and connection set rather than from anything the
+    # departure left behind.
     #
     # Nothing is simulated: :muster_occupied_apply is a span whose :start fires
     # BEFORE the upsert precisely so a test can park a real claim's router-side
@@ -3839,8 +3841,8 @@ defmodule Forum.MusterDistributedTest do
           Process.sleep(300)
 
           # C dies outright. No drain, so T learns about it from the monitor and
-          # evicts it on the :DOWN -- there is no {:muster_leaving, ...}, and so no
-          # death watch and no deferred reap.
+          # evicts it on the :DOWN -- there is no {:muster_leaving, ...} and so no
+          # departure watermark either.
           Node.monitor(c_node, true)
           :ok = stop_supervised({:peer, c_name})
           assert_receive {:nodedown, ^c_node}, 5_000
@@ -3907,32 +3909,33 @@ defmodule Forum.MusterDistributedTest do
       %{scope: scope}
     end
 
-    # The death watch armed by handle_info({:muster_leaving, ...}) is the ONLY
-    # thing that ever collects a row a drained peer wrote after we evicted it --
-    # and it is coordinator soft state. So is the {:reap_departed, _} timer it
-    # schedules, the departure watermark leave_watermark/3 parks, and state.peers.
-    # All of it dies with the Scope process.
+    # Why the collector must hold no per-departure state: a Scope crash destroys
+    # all of it, and the rows it guards survive.
     #
-    # The rows do not. The occupancy table is created in Forum.Supervisor's
-    # init/1 (see the supervision-shape comment in supervisor.ex), and a
-    # coordinator crash restarts the coordinator, the shards and the sentinel via
-    # :rest_for_one -- never the Supervisor -- so init/1 does not re-run and the
-    # table is left intact. This test asserts that survival directly rather than
-    # taking it on trust, because muster_distributed_test.exs's own
-    # "router Scope crash recovery" prose still claims the opposite.
+    # Everything a departure leaves behind lives in the coordinator -- state.peers,
+    # the departure watermark leave_watermark/3 parks -- and dies with the
+    # process. The rows do not: the occupancy table is created in Forum.Supervisor's init/1 (see
+    # the supervision-shape comment in supervisor.ex), and a coordinator crash
+    # restarts the coordinator, the shards and the sentinel via :rest_for_one --
+    # never the Supervisor -- so init/1 does not re-run and the table is left
+    # intact. This test asserts that survival directly rather than taking it on
+    # trust, because muster_distributed_test.exs's own "router Scope crash
+    # recovery" prose still claims the opposite.
     #
     # What is left afterwards is a row attributable to a node that has drained and
-    # died, on a coordinator that never monitored it, with nothing that can ever
-    # judge it: drop_stale_router_entries needs source_agrees?/4 and a dead source
-    # will never announce our view again, {:nodedown, _} is a no-op, and the
-    # tombstone sweep only reaps tombstones.
+    # died, on a coordinator that never heard of it. Nothing that reasons from the
+    # departure could collect it, and nothing that reasons from a view agreement
+    # can judge it: drop_stale_router_entries needs source_agrees?/4 and a dead
+    # source will never announce our view again, {:nodedown, _} is a no-op, and the
+    # tombstone reaper only reaps tombstones. reap_departed_sources/1 collects it
+    # anyway, because it re-derives the answer from the restarted coordinator's own
+    # view and the current connection set.
     #
     # We stand in for the delayed :erpc by calling Scope.occupied/5 with the
     # arguments C's shard worker dispatches -- that call IS what :erpc runs on the
     # router -- exactly as the two "late in-flight" tests in the drain describe do.
     # The crash itself is real: a plain Process.exit(coord, :kill).
-    test "a Scope crash loses the death watch, stranding the drained peer's row",
-         %{scope: scope} do
+    test "a Scope crash cannot strand a departed peer's row", %{scope: scope} do
       t_node = node()
       c_name = ~c"muster_reap_lost_c_#{System.unique_integer([:positive])}"
       c_node = :"#{c_name}@127.0.0.1"
@@ -3957,8 +3960,6 @@ defmodule Forum.MusterDistributedTest do
           wait_until(fn -> Muster.members(scope) == [t_node] end)
 
           # The claim C dispatched just before draining lands after the eviction.
-          # T's death watch on C is armed and is now the only thing that can ever
-          # collect this row.
           assert :ok = Scope.occupied(scope, g, c_node, c_seq, c_coord)
           assert c_node in Muster.occupancy(scope, g)
 
@@ -3984,8 +3985,9 @@ defmodule Forum.MusterDistributedTest do
           assert c_node in Muster.occupancy(scope, g),
                  "the row did not survive the coordinator crash, so there is nothing to strand"
 
-          # C actually dies. The restarted coordinator never monitored it, so no
-          # death watch can fire and no reap is ever scheduled.
+          # C actually dies. The restarted coordinator never monitored it and knows
+          # nothing about the departure -- only that C is not in its view and not
+          # connected, which is all the sweep needs.
           Node.monitor(c_node, true)
           :ok = stop_supervised({:peer, c_name})
           assert_receive {:nodedown, ^c_node}, 5_000
@@ -4004,21 +4006,21 @@ defmodule Forum.MusterDistributedTest do
           assert {:ok, srcs} = Muster.targets(scope, g, vh)
 
           refute c_node in srcs,
-                 "#{inspect(c_node)} drained and died, but #{inspect(t_node)}'s coordinator " <>
-                   "crashed before the reap, taking the death watch with it while the " <>
-                   "Supervisor-owned table kept the row: targets/3 returns #{inspect(srcs)}"
+                 "#{inspect(c_node)} drained and died, and #{inspect(t_node)}'s coordinator " <>
+                   "crashed in between, so nothing the departure left behind survived while " <>
+                   "the Supervisor-owned table kept the row: targets/3 returns #{inspect(srcs)}"
 
           %{c_node: c_node}
         end,
         fn result, trace ->
-          # The row is not merely late in being collected: no reap ever ran for C,
-          # because the only monitor that could have triggered one was destroyed.
-          refute Enum.any?(
-                   of_kind(trace, :muster_departed_reaped),
-                   &(&1.peer_node == result.c_node)
+          # The row went away because the periodic sweep collected it on the
+          # restarted coordinator, not because anything survived the crash.
+          assert Enum.any?(
+                   of_kind(trace, :muster_departed_source_reaped),
+                   &(&1.source == result.c_node)
                  ),
-                 "a reap fired for the departed peer after all -- the death watch " <>
-                   "somehow survived the coordinator crash"
+                 "no departed-source reap ran after the crash: the row must have been " <>
+                   "removed by something else"
         end
       )
     end
@@ -5621,11 +5623,11 @@ defmodule Forum.MusterDistributedTest do
       # several times inside the draining test's observation window. The drained
       # peer must ignore every one of those discover offers.
       #
-      # A short tombstone window because it is also the delay on the deferred
-      # reap of a departed peer (see handle_info({@deathwatch_tag, ...})): the
-      # production default (rpc_timeout_ms x 5 = 25s) would outlast any test's
-      # patience. The tests that care block on :muster_departed_reaped rather
-      # than on this number.
+      # A short tombstone window because it is also the interval of the sweep that
+      # collects a departed source (reap_departed_sources/1): the production
+      # default (rpc_timeout_ms x 5 = 25s) would outlast any test's patience. The
+      # tests that care block on :muster_departed_source_reaped rather than on
+      # this number.
       start_supervised!(
         spec(scope,
           vacant_flush_interval_ms: 100,
@@ -5641,8 +5643,8 @@ defmodule Forum.MusterDistributedTest do
     # out and the groups it routed stay reachable on the newly elected router
     # (held-elsewhere source rows are re-announced, so no broadcast is missed).
     # The leaver was already evicted by the graceful leave, so its eventual real
-    # :DOWN only reaps data attributable to it (reap_departed/2) and the
-    # membership does not flap when the process finally goes away.
+    # :DOWN is a no-op (it was demonitored and flushed) and the membership does
+    # not flap when the process finally goes away.
     test "evacuates the router role; peers re-elect and re-announce; :DOWN is a no-op",
          %{scope: scope} do
       t_node = node()
@@ -5684,11 +5686,11 @@ defmodule Forum.MusterDistributedTest do
           assert r != c_node
           assert a_node in occupancy_on(r, scope, g)
 
-          # The eventual real :DOWN (process actually stops) does no membership
-          # work: C was already departed on the graceful leave, so its DOWN only
-          # reaps rows attributable to it and the view stays put. Monitor the node
-          # so we wait for the real death (the event whose harmlessness we assert)
-          # instead of a fixed sleep; the local Scope's nodedown handler is a no-op.
+          # The eventual real :DOWN (process actually stops) does nothing: C was
+          # already departed on the graceful leave and demonitored, so the view
+          # stays put. Monitor the node so we wait for the real death (the event
+          # whose harmlessness we assert) instead of a fixed sleep; the local
+          # Scope's nodedown handler is a no-op.
           Node.monitor(c_node, true)
           :ok = stop_supervised({:peer, c_name})
           assert_receive {:nodedown, ^c_node}, 5_000
@@ -5974,17 +5976,21 @@ defmodule Forum.MusterDistributedTest do
           # still alive at this point, exactly as it is for the whole drain.
           assert :ok = Scope.receive_node_state(scope, c_node, [g], c_view_hash, c_seq, c_coord)
 
-          # C actually dies, and its death watch's deferred reap runs. That reap
-          # drops rows attributable to C, so the row assertion below must not be
-          # satisfied by it: the check phase confirms the snapshot never got in to
-          # begin with.
+          # C actually dies, and the periodic departed-source sweep collects
+          # whatever is attributable to it. That sweep drops C's rows, so the row
+          # assertion below must not be satisfied by it: the check phase confirms
+          # the snapshot never got in to begin with.
           Node.monitor(c_node, true)
           :ok = stop_supervised({:peer, c_name})
           assert_receive {:nodedown, ^c_node}, 5_000
 
           assert {:ok, _} =
                    block_until(
-                     %{:"$kind" => :muster_departed_reaped, node: ^t_node, peer_node: ^c_node},
+                     %{
+                       :"$kind" => :muster_departed_source_reaped,
+                       node: ^t_node,
+                       source: ^c_node
+                     },
                      10_000
                    )
 
@@ -6010,9 +6016,10 @@ defmodule Forum.MusterDistributedTest do
 
           # The departure watermark is the one per-source watermark that outlives
           # its writer, so it is also the one that could strand a same-named
-          # SUCCESSOR behind a seq it can never reach. The death watch must have
-          # collected it: nothing else clears it, and by the time a successor
-          # could exist the leaver's VM (and so the watch) has already fired.
+          # SUCCESSOR behind a seq it can never reach. The departed-source sweep
+          # must have collected it: nothing else clears it, and a successor cannot
+          # exist before C is both out of the view and disconnected, which is
+          # exactly that sweep's predicate.
           dump = GenServer.call(Forum.Supervisor.name(scope), :dump)
 
           refute Map.has_key?(dump.applied_snapshot_seq, c_node),
@@ -6045,12 +6052,12 @@ defmodule Forum.MusterDistributedTest do
     # (leave_watermark/3) cannot see it, and it carries a seq far above that
     # watermark anyway. A claim dispatched in the instant before drain/2 closed
     # the join gate can therefore land on us after we evicted the leaver, and no
-    # guard can reject it. What catches it is the monitor the leave handler KEEPS:
-    # the peer's real death reaps everything attributable to that pid
-    # (reap_departed/2), and death is what provably ends the window, since an
-    # :erpc cannot land from a dead node. Nothing else would collect the row --
-    # {:nodedown, _} is a no-op, and drop_stale_router_entries cannot judge a row
-    # whose source will never announce our view again.
+    # guard can reject it. What catches it is reap_departed_sources/1, once the
+    # leaver is both out of our view and disconnected -- disconnection is what
+    # provably ends the window, since an :erpc cannot land from a dead node.
+    # Nothing else would collect the row -- {:nodedown, _} is a no-op, and
+    # drop_stale_router_entries cannot judge a row whose source will never
+    # announce our view again.
     #
     # As in the snapshot test, we stand in for the delayed :erpc by calling the
     # receiver-side entry point (Scope.occupied/5) here with the arguments the
@@ -6089,12 +6096,16 @@ defmodule Forum.MusterDistributedTest do
           :ok = stop_supervised({:peer, c_name})
           assert_receive {:nodedown, ^c_node}, 5_000
 
-          # The death watch's deferred reap is what collects this row -- T's
+          # The periodic departed-source sweep is what collects this row -- T's
           # heartbeat and drop_stale_router_entries have both had several turns by
           # now and neither can judge it.
           assert {:ok, _} =
                    block_until(
-                     %{:"$kind" => :muster_departed_reaped, node: ^t_node, peer_node: ^c_node},
+                     %{
+                       :"$kind" => :muster_departed_source_reaped,
+                       node: ^t_node,
+                       source: ^c_node
+                     },
                      10_000
                    )
 
@@ -6122,37 +6133,38 @@ defmodule Forum.MusterDistributedTest do
                  ),
                  "the late claim never landed; the test proves nothing about reaping"
 
-          # ...and it is gone because C's real death reaped it, which only happens
-          # because the leave handler kept its monitor.
-          assert Enum.any?(of_kind(trace, :muster_departed_reaped), &(&1.peer_node == c_node)),
-                 "no reap on the departed peer's death: the row must have been " <>
-                   "removed by something else"
+          # ...and it is gone because the departed-source sweep collected it once C
+          # was out of the view and disconnected.
+          assert Enum.any?(
+                   of_kind(trace, :muster_departed_source_reaped),
+                   &(&1.source == c_node)
+                 ),
+                 "no departed-source reap for the drained peer: the row must have " <>
+                   "been removed by something else"
         end
       )
     end
 
-    # The residual window the death watch does NOT close, and so the reason a
-    # single instantaneous reap is not enough.
+    # Why the collector has to REPEAT rather than fire once per departure.
     #
     # occupied/5 writes the occupancy table DIRECTLY from the :erpc executor
     # process (upsert_if_newer, no coordinator hop), so nothing serializes that
-    # write against the coordinator's handling of the death watch. A claim request
-    # that reached T *before* C died can still be waiting in T's run queue when
-    # the reap fires, and insert its row a moment after -- a dead node cannot SEND
-    # a new request, but one already delivered still executes. After that nothing
-    # collects it: drop_stale_router_entries cannot judge a row whose source will
-    # never announce our view again, the tombstone sweep only reaps tombstones,
-    # and the watch has fired and is spent. @tombstone_window_multiplier already
-    # names this bound for the same hazard class ("an orphaned, un-cancelled
-    # :occupied/snapshot RPC ... can no longer land and resurrect the row").
+    # write against the coordinator. A claim request that reached T *before* C
+    # died can still be waiting in T's run queue while a sweep runs, and insert
+    # its row a moment after it -- a dead node cannot SEND a new request, but one
+    # already delivered still executes. A one-shot reap keyed to the departure is
+    # spent at that point and the row would be stranded: drop_stale_router_entries
+    # cannot judge a row whose source will never announce our view again, and the
+    # tombstone reaper only reaps tombstones. reap_departed_sources/1 is periodic
+    # and re-derives its answer from the current view and connection set every
+    # tick, so the row is simply collected by the NEXT sweep.
     #
     # Nothing is simulated here, unlike the two tests above: :muster_occupied_apply
     # is a span whose :start fires BEFORE the upsert precisely so a test can park
-    # a real claim's router-side write. We park C's claim, drain and kill C, wait
-    # for the reap, and only then release -- the genuine interleaving, ordered by
-    # snabbkaffe.
-    test "a claim already queued on the router outlives the death-watch reap",
-         %{scope: scope} do
+    # a real claim's router-side write. We park C's claim, drain and kill C, let a
+    # sweep run with the write still parked, and only then release -- the genuine
+    # interleaving, ordered by snabbkaffe.
+    test "a claim queued past one sweep is collected by the next", %{scope: scope} do
       t_node = node()
       c_name = ~c"muster_drain_queued_claim_#{System.unique_integer([:positive])}"
       c_node = :"#{c_name}@127.0.0.1"
@@ -6202,25 +6214,28 @@ defmodule Forum.MusterDistributedTest do
           assert :ok = :peer.call(pc, MusterPeerAux, :drain, [scope, [settle_ms: 100]])
           wait_until(fn -> Muster.members(scope) == [t_node] end)
 
-          # Hold the reap until the queued write has actually executed, so the
-          # ordering under test does not depend on how the deferred sweep's timer
-          # happens to line up with the release below. :muster_departed_reaped is
-          # emitted BEFORE the delete, so parking on it holds the coordinator
-          # right where we want it.
-          force_ordering(
-            delay: %{:"$kind" => :muster_departed_reaped, node: ^t_node, peer_node: ^c_node},
-            until: %{:"$kind" => :muster_occupied, node: ^t_node, source: ^c_node}
-          )
-
           Node.monitor(c_node, true)
           :ok = stop_supervised({:peer, c_name})
           assert_receive {:nodedown, ^c_node}, 5_000
 
-          # The row is still parked, so nothing is in the table to be reaped.
+          # Let a sweep run while the write is still parked, so the row lands
+          # strictly AFTER a collection rather than before one -- the interleaving
+          # a one-shot reap could not survive.
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_departed_source_reaped,
+                       node: ^t_node,
+                       source: ^c_node
+                     },
+                     10_000
+                   )
+
+          # The row is still parked, so that sweep found nothing to reap.
           refute c_node in Muster.occupancy(scope, g)
 
-          # Now the queued write executes -- after C's death, exactly as it would
-          # if the erpc executor had simply been scheduled late.
+          # Now the queued write executes -- after C's death and after a sweep,
+          # exactly as it would if the erpc executor had been scheduled late.
           tp(:test_release, %{})
 
           landed? =
@@ -6236,12 +6251,8 @@ defmodule Forum.MusterDistributedTest do
                  "the queued claim never executed, so this window is not reachable: OTP " <>
                    "must kill a pending :erpc executor when the caller's node goes down"
 
-          # The deferred reap is the only thing that can collect it now.
-          assert {:ok, _} =
-                   block_until(
-                     %{:"$kind" => :muster_departed_reaped, node: ^t_node, peer_node: ^c_node},
-                     10_000
-                   )
+          # Only the NEXT sweep can collect it now.
+          wait_until(fn -> c_node not in Muster.occupancy(scope, g) end, 15_000)
 
           assert Muster.members(scope) == [t_node]
           assert status(scope) == :ready
@@ -6251,8 +6262,9 @@ defmodule Forum.MusterDistributedTest do
 
           refute c_node in srcs,
                  "#{inspect(c_node)} is dead, but a claim queued on #{inspect(t_node)} before " <>
-                   "the death executed afterwards and survived the reap, leaving unreachable " <>
-                   "garbage: targets/3 returns #{inspect(srcs)}"
+                   "the death executed after a sweep had already run and was never collected " <>
+                   "by a later one, leaving unreachable garbage: targets/3 returns " <>
+                   "#{inspect(srcs)}"
         end,
         fn _trace -> :ok end
       )

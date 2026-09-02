@@ -638,6 +638,13 @@ defmodule Forum.MusterTest do
       key = {:gc_g, :src@nowhere}
       src = fake_pid()
 
+      # Make the source a cluster member. reap_departed_sources/1 rides the same
+      # :sweep_tombstones tick and deletes rows whose source is both outside the
+      # view and disconnected -- which a bare :src@nowhere is -- so without this
+      # the sweeps below would reap the row outright and the test would no longer
+      # be measuring the tombstone window at all.
+      inject_fake_remote(scope, :src@nowhere)
+
       :ok = Scope.occupied(scope, :gc_g, :src@nowhere, 1, src)
       assert :ok = Scope.vacant_batch(scope, [:gc_g], :src@nowhere, 2, src)
 
