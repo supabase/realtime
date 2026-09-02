@@ -91,3 +91,5 @@ config :gen_rpc,
 
 config :realtime, :dashboard_auth, :basic_auth
 config :realtime, :dashboard_credentials, {"test_user", "test_password"}
+
+config :realtime, :shutdown_delay_ms, 0

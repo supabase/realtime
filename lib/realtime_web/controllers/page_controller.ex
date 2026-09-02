@@ -1,6 +1,8 @@
 defmodule RealtimeWeb.PageController do
   use RealtimeWeb, :controller
 
+  alias Realtime.SignalHandler
+
   def index(conn, _params) do
     render(conn, "index.html")
   end
@@ -11,8 +13,9 @@ defmodule RealtimeWeb.PageController do
   end
 
   def healthcheck(conn, _params) do
-    conn
-    |> put_status(:ok)
-    |> text("ok")
+    case SignalHandler.shutdown_in_progress?() do
+      :ok -> conn |> put_status(:ok) |> text("ok")
+      {:error, :shutdown_in_progress} -> conn |> put_status(:service_unavailable) |> text("shutting down")
+    end
   end
 end

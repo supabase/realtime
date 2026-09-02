@@ -20,9 +20,7 @@ defmodule Realtime.SignalHandler do
   def handle_event(signal, %{handler_mod: handler_mod} = state) do
     Logger.error("#{__MODULE__}: #{inspect(signal)} received")
 
-    if signal == :sigterm do
-      Application.put_env(:realtime, :shutdown_in_progress, true)
-    end
+    if signal == :sigterm, do: start_draining()
 
     handler_mod.handle_event(signal, state)
   end
@@ -32,4 +30,10 @@ defmodule Realtime.SignalHandler do
 
   @impl true
   defdelegate handle_call(request, state), to: :erl_signal_handler
+
+  defp start_draining do
+    Application.put_env(:realtime, :shutdown_in_progress, true)
+    Realtime.RegionMembership.drain()
+    Process.sleep(Application.get_env(:realtime, :shutdown_delay_ms, 1_000))
+  end
 end
