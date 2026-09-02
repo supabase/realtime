@@ -113,6 +113,7 @@ Mimic.copy(RealtimeWeb.Endpoint)
 Mimic.copy(RealtimeWeb.JwtVerification)
 Mimic.copy(RealtimeWeb.TenantBroadcaster)
 Mimic.copy(NimbleZTA.Cloudflare)
+Mimic.copy(Postgrex)
 
 :net_kernel.start([TestEnv.node_name()])
 region = Realtime.Nodes.region()
