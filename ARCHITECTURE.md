@@ -19,20 +19,20 @@ Clients talk to Realtime over a single WebSocket that multiplexes many channels.
 - The **tenant** comes from the request host: `Database.get_external_id/1` turns `<external_id>.realtime.example.com` into an `external_id`.
 - The **token** is the `x-api-key` header, falling back to the `apikey` param. It's a JWT verified against the tenant's `jwt_secret` / `jwt_jwks`.
 
-The process owning the WebSocket is the transport pid. It shows up everywhere below: it's the unit counted for `max_concurrent_users`, the member registered into Muster, and the pid that ultimately receives the encoded frame.
+The process owning the WebSocket is the transport pid. It shows up everywhere below: it's the unit counted for `max_concurrent_users`, the member registered into Muster, and the pid that ultimately receives the encoded WebSocket frame.
 Channel topics look like `realtime:<sub_topic>` and are all handled by `RealtimeWeb.RealtimeChannel`. One socket can hold many of them (`max_channels_per_client`, default 100).
 
 ### 2. What a channel carries
 
-| Feature | Client sends | Produced by |
+| Feature | WebSocket Client sends | Produced by |
 | --- | --- | --- |
-| **Broadcast** | `"broadcast"` | another client, the HTTP API, or an insert into `realtime.messages` |
-| **Presence** | `"presence"` | other clients' track/untrack, diffed and synced per topic |
+| **Broadcast** | event of type `"broadcast"` | another client, the HTTP API, or an insert into `realtime.messages` |
+| **Presence** | event of type `"presence"` | other clients' track/untrack, diffed and synced per topic |
 | **Postgres Changes** | configured at join | the tenant's WAL, via `PostgresCdcRls` |
 
 ### 3. Fan-out and receive
 
-`Realtime.PubSub` reaches other nodes through `Realtime.GenRpcPubSub`, an adapter built on [`gen_rpc`](https://github.com/emqx/gen_rpc) (wrapped locally by `Realtime.GenRpc`) instead of Erlang distribution, so nodes can have more than one TCP connection between them for more bandwidth. How it picks which nodes to send to is the subject of [Broadcast fan-out](#broadcast-fan-out).
+`Realtime.PubSub` reaches other nodes through `Realtime.GenRpcPubSub`, an adapter built on [`gen_rpc`](https://github.com/emqx/gen_rpc) (wrapped locally by `Realtime.GenRpc`) instead of Erlang distribution, so nodes can have more than one TCP connection between them for more bandwidth. How it picks which nodes to send to is the subject of [Broadcast fan-out](#broadcast-fan-out). Erlang distribution is still used for other types of communications including being Muster & `syn` transport layer.
 
 On each receiving node the local PubSub registry calls `MessageDispatcher.dispatch/3` with the topic's subscribers.
 
@@ -50,6 +50,8 @@ Two things are started once per tenant for the whole cluster on a node chosen by
 
 - turning a channel's `postgres_changes` config (schema / table / filter) into rows in the tenant's `realtime.subscription` table;
 - polling the tenant's WAL and delivering each change, already filtered per subscriber by `realtime.list_changes/4`, to only the nodes holding matching subscribers.
+
+This means that if there are Postgres Changes subscriptions Realtime will be streaming two replication slots.
 
 See [Postgres Changes](#postgres-changes) for the details.
 
@@ -101,7 +103,7 @@ flowchart TD
 ```
 
 - Region membership comes from `:syn.members(RegionNodes, region)`, sorted for stability. Tenant regions are mapped to the nearest Realtime region by `platform_region_translator/1` (overridable via `REGION_MAPPING`).
-- The time bucket (default 60s, `:node_selection_time_bucket_seconds`) is the trick: every node computing in the same window picks the same two candidates, so concurrent requests agree. The next window picks a different pair, so placement spreads out over time.
+- The time bucket (default 60s, `:node_selection_time_bucket_seconds`) is the trick: every node computing in the same window picks the same two candidates, so concurrent requests agree. The next window picks a different pair, so placement spreads out over time. Agreement is best-effort not a guarantee. Requests landing on either side of a bucket edge (or on nodes with clock skew) get different candidate pairs. Then two singletons start and `:syn` resolves the conflict via `SynHandler.resolve_registry_conflict/4` (oldest registration wins, node name as tiebreak), stopping the loser with `{:shutdown, :syn_conflict_resolution}`.
 - Load is `:cpu_sup.avg5/0`, fetched over `GenRpc` for remote nodes and cached in `Realtime.Nodes.Cache` for the bucket duration. A node that hasn't been up long enough (`:node_balance_uptime_threshold_in_ms`) reports `{:error, :not_enough_data}` and the picker falls back to consistent hashing — this keeps freshly booted nodes from looking artificially idle and absorbing every tenant.
 
 The same picker is used for Postgres Changes (`PostgresCdcRls.start_distributed/1`).
@@ -194,6 +196,30 @@ flowchart TB
     RP -->|"direct_broadcast to only the nodes<br/>holding matching subscribers"| SUB["Subscriber nodes"]
     SUB --> CH["Channel fastlane → client"]
 ```
+
+### The `realtime.subscription` table
+
+This table is the interface between the channel layer and the WAL layer: a channel writes a row per `postgres_changes` entry and the poller reads those rows back to decide who gets what.
+
+| Column | Type | What it holds |
+| --- | --- | --- |
+| `subscription_id` | `uuid` | generated per `postgres_changes` entry at join and the routing key back to the subscriber |
+| `entity` | `regclass` | the watched table as an OID |
+| `filters` | `realtime.user_defined_filter[]` | the client's `filter` string parsed into `(column_name, op, value, negate)` |
+| `claims` | `jsonb` | the client's verified JWT claims |
+| `claims_role` | `regrole` generated | `claims->>'role'` |
+| `action_filter` | `text` | `*`, `INSERT`, `UPDATE` or `DELETE` |
+| `selected_columns` | `text[]` | optional projection where `NULL` means every column the role may select |
+
+A client joining with `{"event": "UPDATE", "schema": "public", "table": "todos", "filter": "user_id=eq.42"}` gets one row:
+
+| `subscription_id` | `entity` | `filters` | `claims_role` | `action_filter` | `selected_columns` |
+| --- | --- | --- | --- | --- | --- |
+| `3f2b…-11ef-…` | `public.todos` | `{"(user_id,eq,42,f)"}` | `authenticated` | `UPDATE` | `NULL` |
+
+`schema`/`table` may be `*`, in which case the insert expands to one row per published table sharing a single `subscription_id`.
+
+ Every subscription is stored alongside the JWT the client presented when it joined. When a change comes off the WAL, Realtime doesn't hand it to the subscriber directly. It first asks the tenant's own database whether that specific client would have been allowed to read that specific row, using the client's identity and role. Only rows that come back visible are delivered, and columns the client's role can't select are stripped out of the payload before it leaves the database. So Postgres Changes never grants a client more access than a plain select would: the table's own row-level security policies are the thing being evaluated, not a copy of them maintained by Realtime. The one gap is deletes, where the row no longer exists to be checked, so subscribers get only its primary key.
 
 ---
 
