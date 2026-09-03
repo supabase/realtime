@@ -25,7 +25,7 @@ defmodule TestTenantDb.Backend.Docker do
 
   @impl TestTenantDb.Backend
   def prepare! do
-    pull()
+    :ok = pull()
 
     reap_abandoned_containers()
 
@@ -98,20 +98,45 @@ defmodule TestTenantDb.Backend.Docker do
       _ ->
         IO.puts("Pulling image #{image()}. This might take a while...")
         {_, 0} = System.cmd("docker", ["pull", image()])
+        :ok
     end
+  end
+
+  # A container outside the pool, for a test that needs postgres settings the pooled ones
+  # don't carry. Ready to take connections when it returns.
+  @impl TestTenantDb.Backend
+  def start_database!(postgres_args) do
+    :ok = pull()
+    {name, port} = start_available_container(postgres_args: postgres_args)
+    wait_ready!(name)
+    cleanup = fn -> remove_container(name) end
+
+    {port, cleanup}
+  end
+
+  defp remove_container(name) do
+    {_, 0} = System.cmd("docker", ["rm", "-f", name])
+    :ok
   end
 
   # Start a container and let docker publish 5432 on a port of its choosing, then read the
   # port back: nothing else on the machine can be handed the same one.
-  defp start_available_container(attempts \\ 5)
-  defp start_available_container(0), do: raise("TestTenantDb.Backend.Docker: exhausted retries starting a container")
-
-  defp start_available_container(attempts) do
+  #
+  # Options: `:postgres_args` (extra `-c` settings) and `:attempts` (tries left).
+  defp start_available_container(opts \\ []) do
+    postgres_args = Keyword.get(opts, :postgres_args, [])
+    attempts = Keyword.get(opts, :attempts, 5)
     name = container_name()
 
-    case docker_run(name) do
-      {_, 0} -> {name, published_port!(name)}
-      {_output, _code} -> start_available_container(attempts - 1)
+    case docker_run(name, postgres_args) do
+      {_, 0} ->
+        {name, published_port!(name)}
+
+      {_output, _code} when attempts > 1 ->
+        start_available_container(Keyword.put(opts, :attempts, attempts - 1))
+
+      {output, _code} ->
+        raise "TestTenantDb.Backend.Docker: exhausted retries starting a container: #{output}"
     end
   end
 
@@ -197,21 +222,28 @@ defmodule TestTenantDb.Backend.Docker do
     end)
   end
 
-  def wait_ready!(name, attempts \\ 100)
-  def wait_ready!(name, 0), do: raise("Container #{name} is not ready")
+  # Each probe is a `docker exec` costing ~50ms, and the pool starts its containers at once,
+  # so probing tighter than this trades overshoot on the successful probe for exec storms.
+  @ready_probe_interval 100
+  @ready_timeout to_timeout(second: 60)
 
-  def wait_ready!(name, attempts) do
+  def wait_ready!(name), do: wait_ready!(name, System.monotonic_time(:millisecond) + @ready_timeout)
+
+  defp wait_ready!(name, deadline) do
     case System.cmd("docker", ["exec", name, "pg_isready", "-p", "5432", "-h", "localhost"]) do
       {_, 0} ->
         :ok
 
-      {_, _} ->
-        Process.sleep(250)
-        wait_ready!(name, attempts - 1)
+      {output, _} ->
+        if System.monotonic_time(:millisecond) >= deadline,
+          do: raise("Container #{name} is not ready: #{output}")
+
+        Process.sleep(@ready_probe_interval)
+        wait_ready!(name, deadline)
     end
   end
 
-  defp docker_run(name) do
+  defp docker_run(name, postgres_args) do
     initdb_sh = Path.expand("../../../../dev/postgres/za-permit-supabase-admin.sh", __DIR__)
     initdb_sql = Path.expand("../../../../dev/postgres/zb-supabase-schema.sql", __DIR__)
 
@@ -243,7 +275,7 @@ defmodule TestTenantDb.Backend.Docker do
         "max_wal_size=1GB",
         "-c",
         "max_slot_wal_keep_size=32MB"
-      ],
+      ] ++ postgres_args,
       stderr_to_stdout: true
     )
   end

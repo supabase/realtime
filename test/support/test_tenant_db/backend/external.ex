@@ -57,6 +57,11 @@ defmodule TestTenantDb.Backend.External do
   @impl TestTenantDb.Backend
   def storage_up!(_tenant), do: :ok
 
+  @impl TestTenantDb.Backend
+  def start_database!(_postgres_args) do
+    raise "External tenant cannot start a database with custom settings."
+  end
+
   # -- Port configuration
 
   # EXTERNAL_TENANT_DB_PORTS is a comma-separated list, one port per

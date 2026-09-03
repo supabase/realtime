@@ -42,6 +42,9 @@ requires_no_supautils_policy_grants = if has_supautils_realtime_grants, do: :req
 
 skip_orioledb = if orioledb?, do: :skip_orioledb
 
+# `db_args` tests start a tenant database of their own, which only the docker backend can do
+db_args = if backend != TestTenantDb.Backend.Docker, do: :db_args
+
 exclude =
   Enum.reject(
     [
@@ -50,6 +53,7 @@ exclude =
       requires_pg_150000,
       requires_supautils_policy_grants,
       requires_no_supautils_policy_grants,
+      db_args,
       skip_orioledb
     ],
     &is_nil/1
@@ -99,7 +103,6 @@ Mimic.copy(RealtimeWeb.Endpoint)
 Mimic.copy(RealtimeWeb.JwtVerification)
 Mimic.copy(RealtimeWeb.TenantBroadcaster)
 Mimic.copy(NimbleZTA.Cloudflare)
-Mimic.copy(Postgrex)
 
 :net_kernel.start([TestEnv.node_name()])
 region = Application.get_env(:realtime, :region)

@@ -34,6 +34,9 @@ defmodule TestTenantDb.Backend do
   # Ensure the tenant's database exists
   @callback storage_up!(tenant :: struct()) :: :ok
 
+  # A database of its own for a single test started with additional postgres settings.
+  @callback start_database!(postgres_args :: [binary()]) :: {port :: pos_integer(), cleanup :: (-> :ok)}
+
   def resolve! do
     backend = choose()
     :persistent_term.put(@key, backend)

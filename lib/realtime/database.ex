@@ -161,8 +161,10 @@ defmodule Realtime.Database do
   SELECT count(*)::int FROM realtime.schema_migrations
   """
 
+  # Autovacuum workers, walsenders and background workers are listed here without holding a
+  # max_connections slot, so a saturated database counts more backends than max_connections.
   @connections_query """
-  SELECT (current_setting('max_connections')::int - count(*))::int
+  SELECT GREATEST(current_setting('max_connections')::int - count(*), 0)::int
   FROM pg_stat_activity
   WHERE application_name NOT IN ('realtime_connect', 'realtime_connect_probe')
   """
@@ -174,9 +176,7 @@ defmodule Realtime.Database do
     %{rows: [[migrations_ran]]} =
       if table_exists, do: Postgrex.query!(conn, @migrations_count_query, []), else: %{rows: [[0]]}
 
-    # pg_stat_activity also counts non-client backends (autovacuum, walsender, ...) that
-    # don't consume a max_connections slot, so max_connections - count(*) can go negative.
-    {:ok, [max(available_connections, 0), migrations_ran]}
+    {:ok, [available_connections, migrations_ran]}
   rescue
     e ->
       GenServer.stop(conn)
