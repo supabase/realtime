@@ -42,6 +42,10 @@ requires_no_supautils_policy_grants = if has_supautils_realtime_grants, do: :req
 
 skip_orioledb = if orioledb?, do: :skip_orioledb
 
+# Tests that kill and recreate a pooled tenant database; only the docker backend
+# owns its databases, external servers are supplied to us.
+requires_docker_backend = if backend != TestTenantDb.Backend.Docker, do: :requires_docker_backend
+
 exclude =
   Enum.reject(
     [
@@ -50,7 +54,8 @@ exclude =
       requires_pg_150000,
       requires_supautils_policy_grants,
       requires_no_supautils_policy_grants,
-      skip_orioledb
+      skip_orioledb,
+      requires_docker_backend
     ],
     &is_nil/1
   )
@@ -66,6 +71,15 @@ max_cases = ExUnit.configuration()[:max_cases]
 backend.prepare!()
 
 {:ok, _pid} = TestTenantDb.start_link(max_cases)
+
+# after_suite callbacks run in reverse registration order, so teardown is registered
+# first to make it run last — `report_unhealthy_checkouts/1` must be run when the pool
+# still exists.
+ExUnit.after_suite(&TestTenantDb.shutdown/1)
+
+# A wedged tenant database is recovered from silently (the worker is replaced), so
+# the rate has to be reported explicitly or it disappears from CI entirely.
+ExUnit.after_suite(&TestTenantDb.report_unhealthy_checkouts/1)
 
 for tenant <- Api.list_tenants(), do: Api.delete_tenant_by_external_id(tenant.external_id)
 

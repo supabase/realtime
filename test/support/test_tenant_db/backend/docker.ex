@@ -14,9 +14,33 @@ defmodule TestTenantDb.Backend.Docker do
 
   alias Realtime.Database
   alias Realtime.Env
+  alias TestTenantDb.Probe
 
   @container_prefix "realtime-test"
   @container_suffix_length 12
+
+  # Docker states a pool container never comes back from. "created" belongs here
+  # only because we look at it while the pool is stopped — see prune_dead_containers/0.
+  @dead_statuses ["created", "exited", "dead"]
+
+  # -- Timeouts for bringing a worker's container up.
+  #
+  # A worker becoming usable is two phases, and a caller blocked in
+  # `Worker.port/1` is waiting for both:
+  #
+  #   claim      — queue behind other workers, then `docker run -d` + read the port.
+  #                Serialised through this module's GenServer, but it does not wait
+  #                for Postgres, so it is short per worker.
+  #   wait_ready — poll until a real connection from the host succeeds. Runs in the
+  #                worker itself, so all workers do this in parallel.
+  #
+  # `Worker.port/1` must allow more than claim + wait_ready combined.
+  @claim_timeout_ms 30_000
+  @container_ready_timeout_ms 25_000
+  @ready_poll_interval_ms 250
+
+  # Careful that this doesn't go over ~60s / exunits default timeout
+  def worker_ready_timeout_ms, do: @claim_timeout_ms + @container_ready_timeout_ms
 
   # -- TestTenantDb.Backend implementation
 
@@ -31,6 +55,7 @@ defmodule TestTenantDb.Backend.Docker do
 
     existing =
       if Env.get_boolean("REUSE_CONTAINERS", false) do
+        prune_dead_containers()
         existing_containers()
       else
         stop_containers()
@@ -38,6 +63,17 @@ defmodule TestTenantDb.Backend.Docker do
       end
 
     {:ok, _pid} = GenServer.start_link(__MODULE__, existing, name: __MODULE__)
+    :ok
+  end
+
+  # We keep containers around for diagnostics/no `--rm`, hence we need to clean up
+  # after ourselves.
+  #
+  # The registry is stopped before we list, to prevent it from launching more containers.
+  @impl TestTenantDb.Backend
+  def cleanup! do
+    if pid = Process.whereis(__MODULE__), do: GenServer.stop(pid)
+    unless Env.get_boolean("REUSE_CONTAINERS", false), do: stop_containers()
     :ok
   end
 
@@ -65,11 +101,111 @@ defmodule TestTenantDb.Backend.Docker do
     end
   end
 
+  @inspect_format "status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} " <>
+                    "error={{.State.Error}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}"
+
+  @stats_format "mem={{.MemUsage}} mem%={{.MemPerc}} cpu={{.CPUPerc}} pids={{.PIDs}}"
+
+  @activity_query "SELECT pid, state, wait_event_type, wait_event, application_name, " <>
+                    "now() - query_start AS running, left(query, 120) FROM pg_stat_activity ORDER BY query_start"
+
+  @slots_query "SELECT slot_name, active, active_pid, wal_status, safe_wal_size FROM pg_replication_slots"
+
+  @impl TestTenantDb.Backend
+  def diagnose(pid) do
+    case __MODULE__.Worker.container(pid) do
+      nil ->
+        {"unknown container", "worker #{inspect(pid)} did not report a container name"}
+
+      name ->
+        {name, Enum.join(state_of(name) ++ inside(name) ++ logs_of(name), "\n")}
+    end
+  end
+
+  defp state_of(name) do
+    [
+      "verdict: " <> verdict(name),
+      "container: " <> docker(["inspect", "--format", @inspect_format, name]),
+      "resources: " <> docker(["stats", "--no-stream", "--format", @stats_format, name])
+    ]
+  end
+
+  # Say what the state means, so the first line of the dump already narrows it down.
+  defp verdict(name) do
+    # Several `docker inspect` calls vs. one for simplicity: This is for a failure cause only, we can afford the extra time.
+    running = docker(["inspect", "--format", "{{.State.Running}}", name])
+    oom = docker(["inspect", "--format", "{{.State.OOMKilled}}", name])
+    code = docker(["inspect", "--format", "{{.State.ExitCode}}", name])
+
+    case {running, oom, code} do
+      {"true", _, _} ->
+        "container is UP but Postgres did not answer from the host — see the process list and logs below"
+
+      {_, "true", _} ->
+        "OOM-KILLED"
+
+      {_, _, "137"} ->
+        "SIGKILLed from OUTSIDE the container. Postgres did not crash on its own"
+
+      {_, _, "0"} ->
+        "exited cleanly (code 0) — something stopped it on purpose"
+
+      {_, _, other} ->
+        "Postgres exited on its own with code #{other} — the log lines below should say why"
+    end
+  end
+
+  defp inside(name) do
+    if running?(name) do
+      [
+        "backends:\n" <> docker(["exec", name, "ps", "-eo", "pid,stat,etime,args"]),
+        "pg_stat_activity:\n" <> psql(name, @activity_query),
+        "pg_replication_slots:\n" <> psql(name, @slots_query)
+      ]
+    else
+      ["(container is not running, so no in-container state to collect)"]
+    end
+  end
+
+  defp logs_of(name), do: ["last 40 log lines:\n" <> docker(["logs", "--tail", "40", name])]
+
+  defp running?(name) do
+    docker(["inspect", "--format", "{{.State.Running}}", name]) == "true"
+  end
+
+  @impl TestTenantDb.Backend
+  def discard(pid) do
+    case __MODULE__.Worker.container(pid) do
+      nil -> :ok
+      name -> docker(["rm", "-f", name])
+    end
+
+    :ok
+  end
+
+  # Every call here runs against a container that has already stopped answering, so
+  # each one is wrapped in `timeout`. If the container is up but its Postgres is
+  # blocked, `docker exec` inherits that block and never returns — hanging the
+  # test process these diagnostics exist to explain.
+  defp docker(args, seconds \\ 5) do
+    case System.cmd("timeout", [to_string(seconds), "docker" | args], stderr_to_stdout: true) do
+      {output, 0} -> String.trim(output)
+      {_output, 124} -> "(timed out after #{seconds}s: docker #{Enum.join(args, " ")})"
+      {output, code} -> "(docker #{Enum.join(args, " ")} exited #{code}: #{String.trim(output)})"
+    end
+  end
+
+  # Over the unix socket rather than TCP: the probe already established that the
+  # port is not answering, and the postmaster sometimes still serves locally.
+  defp psql(name, query) do
+    docker(["exec", name, "psql", "-U", "postgres", "-h", "/var/run/postgresql", "-tAc", query])
+  end
+
   # -- Container registry (claimed by TestTenantDb.Backend.Docker.Worker)
 
   # Hand a worker a container: reuse a pre-existing one if any remain,
   # otherwise start a fresh one on a free port. Returns {:ok, name, port}.
-  def claim, do: GenServer.call(__MODULE__, :claim, 30_000)
+  def claim, do: GenServer.call(__MODULE__, :claim, @claim_timeout_ms)
 
   @impl GenServer
   def init(existing), do: {:ok, %{existing: existing}}
@@ -139,8 +275,8 @@ defmodule TestTenantDb.Backend.Docker do
   # The docker name filter is a substring match: a run listing "realtime-test" also gets another
   # run's "realtime-test_port4003-...". A container is this run's only if its name is exactly
   # this run's prefix followed by a random suffix.
-  def own_container?(name) do
-    prefix = container_prefix() <> "-"
+  def own_container?(name, prefix \\ container_prefix()) do
+    prefix = prefix <> "-"
 
     String.starts_with?(name, prefix) and byte_size(name) == byte_size(prefix) + @container_suffix_length
   end
@@ -163,18 +299,41 @@ defmodule TestTenantDb.Backend.Docker do
   def reap_abandoned_containers do
     {list, 0} = System.cmd("docker", ["ps", "-a", "--format", "{{.Names}}", "--filter", "name=#{@container_prefix}"])
 
-    for name <- String.split(list, "\n", trim: true), abandoned_container?(name) do
-      System.cmd("docker", ["rm", "-f", name])
-    end
+    list
+    |> String.split("\n", trim: true)
+    |> Enum.filter(&abandoned_container?/1)
+    |> remove!()
   end
 
   def stop_containers() do
     {list, 0} =
       System.cmd("docker", ["ps", "-a", "--format", "{{.Names}}", "--filter", "name=#{container_prefix()}"])
 
-    for name <- String.split(list, "\n", trim: true), own_container?(name) do
-      System.cmd("docker", ["rm", "-f", name])
-    end
+    list
+    |> String.split("\n", trim: true)
+    |> Enum.filter(&own_container?/1)
+    |> remove!()
+  end
+
+  # As we keep dead containers around for diagnostics we also need to clean them up.
+  def prune_dead_containers, do: remove!(dead_containers())
+
+  defp remove!([]), do: :ok
+
+  defp remove!(names) do
+    System.cmd("docker", ["rm", "-f" | names], stderr_to_stdout: true)
+    :ok
+  end
+
+  def dead_containers(prefix \\ container_prefix()) do
+    filters = Enum.flat_map(@dead_statuses, &["--filter", "status=#{&1}"])
+
+    {list, 0} =
+      System.cmd("docker", ["ps", "-a", "--format", "{{.Names}}", "--filter", "name=#{prefix}"] ++ filters)
+
+    list
+    |> String.split("\n", trim: true)
+    |> Enum.filter(&own_container?(&1, prefix))
   end
 
   def existing_containers do
@@ -198,17 +357,25 @@ defmodule TestTenantDb.Backend.Docker do
     end)
   end
 
-  def wait_ready!(name, attempts \\ 100)
-  def wait_ready!(name, 0), do: raise("Container #{name} is not ready")
+  # Gate on exactly what consumers use: a real connection from the host to the published port.
+  def wait_ready!(name, port) do
+    settings = Probe.settings!(port)
+    wait_ready!(name, settings, System.monotonic_time(:millisecond) + @container_ready_timeout_ms)
+  end
 
-  def wait_ready!(name, attempts) do
-    case System.cmd("docker", ["exec", name, "pg_isready", "-p", "5432", "-h", "localhost"]) do
-      {_, 0} ->
+  defp wait_ready!(name, settings, deadline) do
+    case Probe.check(settings) do
+      :ok ->
         :ok
 
-      {_, _} ->
-        Process.sleep(250)
-        wait_ready!(name, attempts - 1)
+      {:error, reason} ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          raise "Container #{name} did not accept connections within " <>
+                  "#{@container_ready_timeout_ms}ms. Last error: #{reason}"
+        else
+          Process.sleep(@ready_poll_interval_ms)
+          wait_ready!(name, settings, deadline)
+        end
     end
   end
 
@@ -216,12 +383,12 @@ defmodule TestTenantDb.Backend.Docker do
     initdb_sh = Path.expand("../../../../dev/postgres/za-permit-supabase-admin.sh", __DIR__)
     initdb_sql = Path.expand("../../../../dev/postgres/zb-supabase-schema.sql", __DIR__)
 
+    # Deliberately no `--rm`, we keep containers around for diagnostics of why they died
     System.cmd(
       "docker",
       [
         "run",
         "-d",
-        "--rm",
         "--name",
         name,
         "-e",
