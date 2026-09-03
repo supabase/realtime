@@ -749,8 +749,8 @@ defmodule Forum.Muster.Scope do
     {:reply, :ok, update_status(put_member_view(state, source, :in_transition, seq, source_pid))}
   end
 
-  # Graceful cluster-leave: evacuate the router role before this node dies (see
-  # `Forum.Muster.drain/2`). We do not rebalance ourselves; instead we broadcast
+  # Graceful cluster-leave: evacuate the router role before this node dies
+  # We do not rebalance ourselves; instead we broadcast
   # `{:muster_leaving, self(), view_seq}` and let each peer rebalance us out of its
   # ring and ack with `{:muster_leaving_ack, node()}` once that eviction is done. The
   # `drain/2` caller is parked in `from` and replied to asynchronously so this
@@ -890,12 +890,7 @@ defmodule Forum.Muster.Scope do
   # view/watermark would let it declare the barrier satisfied (and trust its
   # occupancy table) before that snapshot's data ever lands.
   # Draining: once leaving we suppress every OUTBOUND self-assertion so no peer
-  # re-pairs us after we announced leaving. This gate (and the ones on
-  # :muster_discover_ack, :nodeup and :view_heartbeat below) is deliberately the
-  # ONLY thing draining silences; every INBOUND coordination RPC (:occupied,
-  # :vacant_batch, snapshot/delta/transition applies, :rebalance_marker) keeps
-  # being serviced through the whole drain + settle window -- see
-  # Forum.Muster.drain/2 and forum/README.md.
+  # re-pairs us after we announced leaving.
   @impl true
   def handle_info({:muster_discover, _peer, _view_hash, _seq}, %State{leaving: true} = state) do
     {:noreply, state}
