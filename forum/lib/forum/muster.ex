@@ -289,10 +289,15 @@ defmodule Forum.Muster do
   `settle_ms` window (still servicing inbound RPCs) so in-flight broadcasts routed
   here just before the handoff can fan out.
 
-  This node keeps its own full ring/view and does not rebalance itself. Other peers
-  rebalance it out. It stays draining for the whole call: all outbound
-  self-assertion (heartbeat, re-discovery) is suppressed so no peer re-pairs it,
-  while inbound coordination RPCs keep being serviced.
+  This node keeps its own full ring/view and does not rebalance itself, not even
+  if a peer dies mid-drain. Other peers rebalance it out. It stays draining for
+  the whole call: all outbound self-assertion (heartbeat, re-discovery) is
+  suppressed so no peer re-pairs it, while inbound coordination RPCs keep being
+  serviced. It also publishes `:rebalancing` for the whole drain, so
+  `targets/3` on it returns `{:error, :flood}` and `router/2` returns the full
+  member list: from the first peer's eviction on, its occupancy table is no
+  longer maintained (that peer's new claims go to the newly-elected router), so a
+  sender still routing here under the old view must flood rather than trust it.
 
   ## Shutdown sequencing (host-app contract)
 
@@ -314,17 +319,21 @@ defmodule Forum.Muster do
 
     * `:timeout_ms` (default `5_000`): how long to wait for every peer to ack
       before giving up and returning `{:timeout, unacked_nodes}`.
-    * `:settle_ms` (default `5_000`, must be `>= :rpc_timeout_ms`): the post-ack
-      in-flight-drain window.
+    * `:settle_ms` (default `5_000`): the post-ack in-flight-drain window. It
+      should be at least the scope's `:rpc_timeout_ms` so an RPC a peer
+      dispatched to us just before evicting us can still land; this is not
+      enforced.
 
   Returns `:ok` once all peers acked and the settle elapsed, or
   `{:timeout, unacked_nodes}` if some peer did not ack within `:timeout_ms`. A
   singleton (no peers) returns `:ok` immediately. A peer that *dies* mid-drain
   (rather than acking) is treated as departed: it is dropped from the wait rather
   than counted as unacked, so a peer crashing during a rolling restart does not
-  make `drain` block the full `:timeout_ms`.
+  make `drain` block the full `:timeout_ms`. A second call while a drain is
+  already in flight (or after one completed) returns `{:error, :already_draining}`
+  without disturbing the first.
   """
-  @spec drain(atom, keyword) :: :ok | {:timeout, [node]}
+  @spec drain(atom, keyword) :: :ok | {:timeout, [node]} | {:error, :already_draining}
   def drain(scope, opts \\ []) when is_atom(scope) do
     timeout = Keyword.get(opts, :timeout_ms, 5_000)
     settle = Keyword.get(opts, :settle_ms, 5_000)
