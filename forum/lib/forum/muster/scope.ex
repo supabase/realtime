@@ -749,21 +749,30 @@ defmodule Forum.Muster.Scope do
     {:reply, :ok, update_status(put_member_view(state, source, :in_transition, seq, source_pid))}
   end
 
-  # Graceful cluster-leave: evacuate the ROUTER role before this node dies (see
+  # Graceful cluster-leave: evacuate the router role before this node dies (see
   # `Forum.Muster.drain/2`). We do not rebalance ourselves; instead we broadcast
-  # {:muster_leaving, self(), view_seq} and let each PEER rebalance us out of its
-  # ring and ack with {:muster_leaving_ack, node()} once that eviction is done. The
-  # `drain/2` caller is parked in `from` and replied to asynchronously (via
-  # `GenServer.reply` from the `:leave_settle` / `:leave_deadline handlers`), so this
+  # `{:muster_leaving, self(), view_seq}` and let each peer rebalance us out of its
+  # ring and ack with `{:muster_leaving_ack, node()}` once that eviction is done. The
+  # `drain/2` caller is parked in `from` and replied to asynchronously so this
   # loop never blocks on the remote acks.
   # Start draining immediately (`leaving: true` suppresses every outbound
   # self-assertion) and stop accepting joins. A singleton (no peers) has nobody
   # to evacuate to and nothing routed to it, so it replies `:ok` at once. Otherwise
   # we arm the ack deadline and wait. Inbound coordination RPCs keep being
   # serviced throughout.
+  def handle_call({:drain, _timeout, _settle_ms}, _from, %State{leaving: true} = state) do
+    {:reply, {:error, :already_draining}, state}
+  end
+
   def handle_call({:drain, timeout, settle_ms}, from, %State{} = state) do
     # When atoms or other terms that fit in one machine word are deleted, no global GC is needed.
     :persistent_term.put({Forum.Muster, state.scope, :accepting_joins}, false)
+
+    # Un-ready ourselves for the whole drain. We keep our old ring and view, and
+    # peers evict us one by one, so from the first eviction on our occupancy
+    # table is no longer maintained: a peer that has evicted us sends its new
+    # first-member claims to the newly-elected router, never to us.
+    state = publish_status(%{state | pending_round: nil}, :rebalancing)
     expected = state.peers |> Map.keys() |> Enum.map(&node/1) |> MapSet.new()
 
     tp(:muster_drain_begin, %{
@@ -962,7 +971,10 @@ defmodule Forum.Muster.Scope do
     {:noreply, state}
   end
 
-  # Net split / disconnect: wait for the peer's monitor DOWN.
+  # Net split / disconnect: wait for the peer's monitor DOWN. A non-member going
+  # down (a graceful leaver we already evicted and demonitored) leaves nothing
+  # urgent behind: whatever is still attributable to it is collected by the
+  # periodic reap_departed_sources/1 sweep once it is out of Node.list().
   def handle_info({:nodedown, _node}, state), do: {:noreply, state}
 
   # A peer announced the cluster view it has finished rebalancing into, plus its
@@ -1139,7 +1151,8 @@ defmodule Forum.Muster.Scope do
         {:noreply, %{state | owed_snapshots: owed}}
 
       other ->
-        if router_node in state.members do
+        # Never crash while draining
+        if router_node in state.members and not state.leaving do
           raise "Muster rebalance snapshot to #{router_node} failed: #{inspect(other)}"
         else
           Logger.info(
@@ -1526,6 +1539,11 @@ defmodule Forum.Muster.Scope do
   # us to :ready for the stale view must not. Hold the status until commit.
   defp update_status(%{pending_round: pr} = state) when pr != nil, do: state
 
+  # Draining: we published :rebalancing at drain start and stay there until we
+  # exit (see handle_call({:drain, ...})). A marker or snapshot from a peer must
+  # not recompute us back to :ready for a table we no longer own.
+  defp update_status(%State{leaving: true} = state), do: state
+
   defp update_status(state) do
     status = if ready?(state), do: :ready, else: :converging
 
@@ -1844,35 +1862,26 @@ defmodule Forum.Muster.Scope do
             _ -> state.applied_snapshot_seq
           end
 
-        %{state | member_views: member_views, applied_snapshot_seq: applied_snapshot_seq}
+        %{
+          state
+          | member_views: member_views,
+            applied_snapshot_seq: applied_snapshot_seq,
+            peers: new_peers
+        }
       end
 
-    recompute_members(%{state | peers: new_peers})
+    # A leaver has already handed off its router role
+    if state.leaving, do: state, else: recompute_members(state)
   end
 
-  # Graceful-leave only: re-arm the per-source snapshot guard at the leaver's
-  # announce watermark, which depart_peer/3 just cleared.
-  #
-  # Clearing it is right for a CRASH: a same-named restart comes back with a fresh
-  # VM's monotonic seqs, which regress below anything we recorded, so a retained
-  # watermark would silently drop all of its snapshots. But a drained peer stays
-  # ALIVE through the whole handoff + settle, and its rebalance workers dispatch
-  # by :erpc, off the channel that carried the leave. With the watermark cleared,
-  # one landing late passes the `seq <= applied` guard in {:apply_snapshot, ...} /
-  # {:apply_delta, ...} and re-inserts the departed node's occupancy rows plus a
-  # member_views entry. Rejecting the write beats reaping it later: the phantom
-  # never exists, so no broadcast can read it in the meantime, and a leaver that
-  # never actually dies (an aborted deploy) produces no death to reap on at all.
-  #
-  # `seq` is the leaver's last committed round's snapshot_seq, so any snapshot
-  # still in flight from that round carries exactly it and loses to the `<=`.
-  #
-  # This is the one per-source watermark that outlives its writer, so it is also
-  # the one that could strand a SUCCESSOR of the same node name behind a seq it can
-  # never reach (see the same-named-restart test in muster_distributed_test.exs).
-  # It does not: reap_departed_sources/1 collects it once the leaver is both out
-  # of the view and disconnected, and a same-named successor cannot exist before
-  # that. Nothing else needs to clear it.
+  # Graceful-leave only: re-arm the per-source snapshot guard that depart_peer/3
+  # just cleared, at the leaver's announce watermark (`seq`, its last committed
+  # round's snapshot_seq). Unlike a crashed peer, a drained one is still alive,
+  # and a snapshot/delta its workers dispatched before draining can land
+  # after the eviction; with the guard cleared it would re-insert the leaver's
+  # rows and member_views entry. Any such write carries at most `seq`, so it
+  # loses to the `seq <= applied` check. reap_departed_sources/1 collects the
+  # watermark once the leaver is dead.
   defp leave_watermark(%State{} = state, peer_pid, seq) do
     applied = Map.put(state.applied_snapshot_seq, node(peer_pid), {seq, peer_pid})
     %{state | applied_snapshot_seq: applied}
@@ -2136,61 +2145,16 @@ defmodule Forum.Muster.Scope do
     ])
   end
 
-  # Periodic GC of occupancy rows whose SOURCE has left the cluster.
+  # Periodic GC of per-source state whose source has left the cluster: rows,
+  # member_views and applied_snapshot_seq are all keyed by source.
   #
-  # Every other cleanup path is keyed to a specific departing incarnation --
-  # depart_peer/3's pid-matched wipe, the departure watermark leave_watermark/3
-  # parks -- and all of it is coordinator soft state. The occupancy table is not: Forum.Supervisor owns it
-  # (see the supervision-shape comment in supervisor.ex), so it outlives any
-  # coordinator restart. A Scope crash between a departure and its cleanup
-  # therefore destroys every mechanism that could collect the departed node's
-  # rows while leaving the rows themselves in place, and after that nothing can
-  # judge them: drop_stale_router_entries needs the source to announce OUR view
-  # and a departed source never will, {:nodedown, _} is a no-op, and
-  # reap_tombstones/1 only reaps tombstones. Each survivor is a phantom fan-out
-  # target for the life of the process.
-  #
-  # This sweep is the backstop, and it holds no per-departure state at all: it
-  # re-derives the answer from the current view and the current connection set on
-  # every tick, so a restart has nothing to lose. Being idempotent and repeating
-  # is also what makes it robust where a one-shot timer is not -- a row inserted
-  # by an orphaned RPC AFTER one tick is simply collected by the next, bounding
-  # the exposure to one :tombstone_window_ms interval rather than forever.
-  #
-  # A source qualifies only if it is BOTH outside our committed view and
-  # disconnected. Membership alone is not enough: a node that is mid-join, or
-  # whose claim beat our registration of it as a peer, legitimately writes this
-  # table before it appears in state.members, and dropping those rows would
-  # discard a claim the source has already been told we accepted. Such a node is
-  # by definition still connected, so the connection check is what makes the
-  # membership check safe.
-  #
-  # Disconnected-and-not-a-member is exactly the condition under which
-  # depart_peer/3 already wipes a peer's rows on its :DOWN, so this adds no new
-  # class of loss: a node that comes back (a healed partition, a restart)
-  # re-announces everything it holds in its own rebalance's snapshot.
-  #
-  # Hard delete, not a tombstone: a tombstone exists to fence a LATER write by
-  # seq, and nothing here can be fenced that way -- a claim from the departed
-  # node carries a fresh, higher seq and would win over any tombstone we could
-  # write (see the register note above upsert_if_newer/3). The repeating sweep
-  # covers that case instead.
-  #
-  # It collects all three kinds of per-source state, not just the rows:
-  # member_views and applied_snapshot_seq are keyed by source node too, and a
-  # departed source's entries are just as unjudgeable. applied_snapshot_seq
-  # matters most, because leave_watermark/3 deliberately re-arms it for a
-  # gracefully leaving peer and nothing else ever clears it: left behind, it
-  # would strand a same-named SUCCESSOR behind a seq its fresh VM can never
-  # reach. The disconnected half of the predicate is what makes that safe --
-  # a leaver stays connected for its whole handoff and settle, so the watermark
-  # survives exactly as long as a late :erpc from it can still land, and is
-  # dropped only once no such write is possible.
-  #
-  # Candidates are the union of all three, not just the sources in the table: a
-  # peer whose late snapshot the departure watermark REJECTED leaves no rows at
-  # all, and it is precisely that peer whose watermark would otherwise never be
-  # collected -- the one case the successor hazard above is about.
+  # The occupancy table outlives a coordinator restart (Forum.Supervisor owns
+  # it), so a Scope crash between a departure and its targeted cleanup strands
+  # rows no other path can judge: drop_stale_router_entries/1 skips any row whose
+  # source has not announced our view, and reap_tombstones/1 only reaps
+  # tombstones. This sweep is the stateless, repeating backstop. It reaps a source only once it is both out
+  # of our view and disconnected: a still-connected non-member is mid-join and
+  # writes here legitimately, and a still-member is depart_peer/3's job.
   defp reap_departed_sources(%State{} = state) do
     keep = MapSet.new([node() | Node.list()] ++ state.members)
 
