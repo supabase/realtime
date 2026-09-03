@@ -3,6 +3,7 @@ defmodule Realtime.PromEx.Plugins.Tenant do
 
   use PromEx.Plugin
   alias Realtime.FeatureFlags
+  alias Realtime.MetricsCleaner
   alias Realtime.Telemetry
   alias Realtime.Tenants
   alias Realtime.UsersCounter
@@ -103,19 +104,30 @@ defmodule Realtime.PromEx.Plugins.Tenant do
     local_tenant_counts = UsersCounter.local_tenant_counts()
 
     for {t, count} <- local_tenant_counts do
-      tenant = Tenants.Cache.get_tenant_by_external_id(t)
+      execute_connections(t, count, cluster_counts)
+    end
 
-      if tenant != nil do
-        Telemetry.execute(
-          [:realtime, :connections],
-          %{
-            connected: count,
-            connected_cluster: Map.get(cluster_counts, t, 0),
-            limit: tenant.max_concurrent_users
-          },
-          %{tenant: t}
-        )
-      end
+    # These are `last_value` metrics, so a tenant that lost its last local websocket would keep
+    # exporting its previous count until MetricsCleaner prunes the tenant tag. Report zero for them in
+    # the meantime. A tenant that got a websocket back was already reported above.
+    for t <- MetricsCleaner.recently_vacated_tenants(), not Map.has_key?(local_tenant_counts, t) do
+      execute_connections(t, 0, cluster_counts)
+    end
+  end
+
+  defp execute_connections(tenant_id, count, cluster_counts) do
+    tenant = Tenants.Cache.get_tenant_by_external_id(tenant_id)
+
+    if tenant != nil do
+      Telemetry.execute(
+        [:realtime, :connections],
+        %{
+          connected: count,
+          connected_cluster: Map.get(cluster_counts, tenant_id, 0),
+          limit: tenant.max_concurrent_users
+        },
+        %{tenant: tenant_id}
+      )
     end
   end
 
