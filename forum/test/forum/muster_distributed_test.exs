@@ -2549,9 +2549,7 @@ defmodule Forum.MusterDistributedTest do
 
           assert {:error, :rpc_failed} = Task.await(join_task, 10_000)
 
-          wait_until(fn ->
-            Muster.members(scope) == [t_node] and status(scope) == :ready
-          end)
+          wait_until(fn -> Muster.members(scope) == [t_node] and status(scope) == :ready end)
 
           refute Muster.local_member?(scope, group, member)
           assert Muster.local_member_count(scope, group) == 0
@@ -3746,7 +3744,7 @@ defmodule Forum.MusterDistributedTest do
 
       # A short sweep interval so both GCs that could conceivably collect the
       # orphaned row -- reap_tombstones/1 and the drop_stale_router_entries pass
-      # piggybacked on the same :sweep_tombstones tick -- get several turns inside
+      # piggybacked on the same :sweep_tombstones tick. We get several turns inside
       # the observation window below, and a fast heartbeat so readiness is
       # re-evaluated (and stale entries re-judged) repeatedly alongside them.
       start_supervised!(
@@ -3760,37 +3758,20 @@ defmodule Forum.MusterDistributedTest do
       %{scope: scope}
     end
 
-    # The crash-path sibling of "a claim queued past one sweep is collected by the
-    # next" (in the drain describe): the same hazard, reached through the :DOWN
-    # handler rather than a graceful leave.
-    #
-    # handle_info({:DOWN, ...}) evicts a crashed peer by calling depart_peer/3
-    # immediately, which match_deletes every occupancy row attributable to the
+    # handle_info({:DOWN, ...}) evicts a crashed peer immediately,
+    # which match_deletes every occupancy row attributable to the
     # dying pid. But occupied/5 writes the occupancy table DIRECTLY from its :erpc
     # executor process (upsert_if_newer, no coordinator hop), so nothing
     # serializes that write against the coordinator handling the :DOWN. A claim
-    # request that reached us BEFORE the peer died can still be sitting in our run
+    # request that reached us before the peer died can still be sitting in our run
     # queue when the wipe runs, and insert its row a moment after: a dead node
-    # cannot SEND a new request, but one already delivered still executes.
-    #
-    # Nothing that is keyed to the departure itself collects the row afterwards:
-    #   * drop_stale_router_entries needs source_agrees?/4, and a dead source will
-    #     never announce our view again
-    #   * {:nodedown, _} is a no-op
-    #   * the tombstone reaper only reaps tombstones, and this row is :present
-    #   * the eviction already ran, and it wiped a table that did not yet contain
-    #     this row
+    # cannot send a new request, but one already delivered still executes.
     #
     # Muster.targets/3 returns Scope.occupancy/2 unfiltered, so until something
     # collects it the row is a live fan-out target for a node that no longer
     # exists. reap_departed_sources/1 is what collects it, on the periodic tick,
     # from the current view and connection set rather than from anything the
     # departure left behind.
-    #
-    # Nothing is simulated: :muster_occupied_apply is a span whose :start fires
-    # BEFORE the upsert precisely so a test can park a real claim's router-side
-    # write. We park C's claim, kill C outright, wait for T to finish evicting it,
-    # and only then release -- the genuine interleaving, ordered by snabbkaffe.
     test "a claim queued before the crash lands after the wipe and is never collected",
          %{scope: scope} do
       t_node = node()
@@ -3820,9 +3801,6 @@ defmodule Forum.MusterDistributedTest do
             until: %{:"$kind" => :test_release}
           )
 
-          # C's first-member join cannot return while its claim is parked, and its
-          # :peer.call dies with the node below, so run it off to the side --
-          # Task.start is unlinked, so neither can fail the test.
           {:ok, _} = Task.start(fn -> :peer.call(pc, MusterPeerAux, :join, [scope, g]) end)
 
           # The claim is dispatched from C...
@@ -3841,8 +3819,7 @@ defmodule Forum.MusterDistributedTest do
           Process.sleep(300)
 
           # C dies outright. No drain, so T learns about it from the monitor and
-          # evicts it on the :DOWN -- there is no {:muster_leaving, ...} and so no
-          # departure watermark either.
+          # evicts it on the :DOWN.
           Node.monitor(c_node, true)
           :ok = stop_supervised({:peer, c_name})
           assert_receive {:nodedown, ^c_node}, 5_000
@@ -3852,22 +3829,15 @@ defmodule Forum.MusterDistributedTest do
           wait_until(fn -> Muster.members(scope) == [t_node] end)
           refute c_node in Muster.occupancy(scope, g)
 
-          # Now the queued write executes -- after the wipe, exactly as it would if
+          # Now the queued write executes after the wipe, exactly as it would if
           # the :erpc executor had simply been scheduled late.
           tp(:test_release, %{})
 
-          landed? =
-            match?(
-              {:ok, _},
-              block_until(
-                %{:"$kind" => :muster_occupied, node: ^t_node, source: ^c_node, group: ^g},
-                5_000
-              )
-            )
-
-          assert landed?,
-                 "the queued claim never executed, so this window is not reachable: OTP " <>
-                   "must kill a pending :erpc executor when the caller's node goes down"
+          assert {:ok, _} =
+                   block_until(
+                     %{:"$kind" => :muster_occupied, node: ^t_node, source: ^c_node, group: ^g},
+                     5_000
+                   )
 
           # Give every GC that could conceivably collect the row its turn: the
           # heartbeat fires every 300ms and each :sweep_tombstones tick (500ms)
@@ -3894,10 +3864,8 @@ defmodule Forum.MusterDistributedTest do
     setup do
       scope = :"muster_reap_lost_#{System.unique_integer([:positive])}"
 
-      # Same shape as the drain describe: a fast heartbeat (which also sets
-      # singleton promotion, at 3x, so the restarted coordinator re-readies
-      # quickly) and a short sweep interval, so every GC gets several turns
-      # inside the observation window.
+      # a fast heartbeat (which also sets singleton promotion, at 3x, so the restarted coordinator re-readies
+      # quickly) and a short sweep interval, so every GC gets several turns inside the observation window.
       start_supervised!(
         spec(scope,
           vacant_flush_interval_ms: 100,
@@ -4042,8 +4010,9 @@ defmodule Forum.MusterDistributedTest do
     # EVERY node in :converging (routers flood, never trust occupancy) until
     # the heal, and the stale-entry sweeps run during the split must not
     # delete T's snapshotted rows (T never agreed to the split views).
-    test "peers that lose sight of each other rebalance apart and re-converge on heal",
-         %{scope: scope} do
+    test "peers that lose sight of each other rebalance apart and re-converge on heal", %{
+      scope: scope
+    } do
       t_node = node()
 
       check_trace(
