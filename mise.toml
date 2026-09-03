@@ -49,9 +49,16 @@ mix ecto.migrate
 # The default tenant keeps 5433 so the documented URLs work; docker publishes any other tenant on
 # a port of its choosing, which no other tenant can be handed.
 [ "$tenant" = realtime-dev ] && default_port=5433 || default_port=0
-COMPOSE_PROJECT_NAME="$project" TENANT_DB_PORT="${TENANT_DB_PORT:-$default_port}" $compose up -d --wait
+# The wait-timeout is generous because TENANT_DB_IMAGE may be a Multigres cluster, which takes
+# about a minute to bootstrap. The bootstrap service is what /docker-entrypoint-initdb.d would
+# have done for an image that runs it; it is idempotent, so it runs either way.
+COMPOSE_PROJECT_NAME="$project" TENANT_DB_PORT="${TENANT_DB_PORT:-$default_port}" $compose up -d --wait --wait-timeout 300
 published=$(COMPOSE_PROJECT_NAME="$project" $compose port tenant_db 5432)
 port=${published##*:}
+
+# TENANT_DB_PORT again, and the resolved one: without it compose reads the file's default and
+# recreates the running tenant_db on that port.
+COMPOSE_PROJECT_NAME="$project" TENANT_DB_PORT="$port" $compose run --rm tenant_db_bootstrap
 
 TENANT="$tenant" TENANT_DB_PORT="$port" mix seed
 '''
@@ -69,7 +76,7 @@ description = "Remove TENANT's database (default realtime-dev), discarding its d
 dir = "{{cwd}}"
 run = """
 set -eu
-COMPOSE_PROJECT_NAME="tenant-${TENANT:-realtime-dev}" docker compose -f compose.tenant-db.yml rm -sf
+COMPOSE_PROJECT_NAME="tenant-${TENANT:-realtime-dev}" docker compose -f compose.tenant-db.yml down -v --remove-orphans
 """
 
 [tasks.realtime-start]

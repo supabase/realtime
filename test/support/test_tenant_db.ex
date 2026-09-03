@@ -212,6 +212,7 @@ defmodule TestTenantDb do
       backoff_type: settings.backoff_type,
       socket_options: settings.socket_options,
       parameters: [application_name: settings.application_name],
+      after_connect: Realtime.Tenants.Migrations.after_connect(),
       ssl: settings.ssl
     ]
     |> Realtime.Repo.with_dynamic_repo(fn repo ->
