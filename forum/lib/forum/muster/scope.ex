@@ -1100,7 +1100,7 @@ defmodule Forum.Muster.Scope do
 
       Logger.warning(
         "Muster[#{node()}|#{state.scope}] Draining: ack deadline reached, #{pending_size} " <>
-          "peer(s) did not ack the handoff: #{inspect(unacked)}; proceeding with shutdown anyway"
+          "peer(s) did not ack the handoff: #{inspect(unacked)}. Proceeding with shutdown anyway"
       )
 
       tp(:muster_drain_timeout, %{scope: state.scope, node: node(), unacked: unacked})
@@ -1261,19 +1261,16 @@ defmodule Forum.Muster.Scope do
   # on the coordinator suffices.
   #
   # Piggybacked on the same tick: reap_departed_sources/1 (rows whose source has
-  # left the cluster entirely) and an UNCONDITIONAL re-run of
+  # left the cluster entirely) and an unconditional re-run of
   # drop_stale_router_entries, regardless of the current :status. Without the
   # latter, a claim (occupied/4, vacant_batch/4, the only cross-node writes with
   # no view_hash fencing) whose :erpc was delayed past a rebalance can land on a
-  # router AFTER it already agreed on the view that routes the group away, with
+  # router after it already agreed on the view that routes the group away, with
   # no row yet to judge and no further :ready transition ever coming to re-judge
   # it once the row does appear. do_rebalance's own sweep and the :ready
   # transition's (above) cover the common case promptly; this tick is the
   # backstop that bounds the worst case to one :tombstone_window_ms interval
   # even when the cluster goes quiet right after the delayed write lands.
-  #
-  # Departed sources are reaped BEFORE the stale-router pass, so that pass has
-  # fewer rows to judge (and never judges one whose source is already gone).
   def handle_info(:sweep_tombstones, state) do
     reap_tombstones(state)
     state = reap_departed_sources(state)
@@ -1751,15 +1748,12 @@ defmodule Forum.Muster.Scope do
   # A peer we were awaiting a drain handoff-ack from died before it could ack.
   # depart_peer/3 has already evicted it and re-elected routers for whatever it
   # held, so there is nothing left to hand off to it: resolve it out of the pending
-  # set (which opens the settle window if it was the last one) instead of blocking
-  # until the ack deadline fires and reporting a dead node as unacked. Only logs
-  # the loss for a peer still genuinely pending; a peer that already acked is no
-  # longer in the set and its DOWN is an ordinary departure here.
+  # set instead of blocking until the ack deadline fires.
   defp drop_drain_expectation(%State{leave_from: from} = state, dead_node) when from != nil do
     if MapSet.member?(state.leave_pending, dead_node) do
       Logger.info(
         "Muster[#{node()}|#{state.scope}] Draining: expected peer #{inspect(dead_node)} died " <>
-          "before acking the handoff; dropping it from the wait"
+          "before acking the handoff. Dropping it from the wait"
       )
 
       tp(:muster_drain_peer_lost, %{scope: state.scope, node: node(), peer_node: dead_node})
@@ -1770,13 +1764,9 @@ defmodule Forum.Muster.Scope do
 
   defp drop_drain_expectation(state, _dead_node), do: state
 
-  # A peer we were waiting on has resolved -- it acked the handoff, or it departed
-  # the cluster. Remove it from the pending set; when that empties the set, open
-  # the settle window. The MapSet.member? guard makes this idempotent: a duplicate
-  # ack, or the DOWN of a peer that already acked, finds it already gone and is a
-  # no-op -- which is exactly why the settle window opens once, with no phase flag
-  # or before/after bookkeeping. `leave_pending` only ever shrinks, so it empties
-  # exactly once per drain.
+  # A peer we were waiting on has resolved as it has acked the handoff or it has departed
+  # the cluster. Remove it from the pending set and if that empties the set open
+  # the settle window.
   defp resolve_pending_peer(%State{leave_from: from} = state, peer_node) when from != nil do
     if MapSet.member?(state.leave_pending, peer_node) do
       pending = MapSet.delete(state.leave_pending, peer_node)
@@ -1804,16 +1794,16 @@ defmodule Forum.Muster.Scope do
   end
 
   # Evict a peer (crash via :DOWN, or graceful :muster_leaving): drop occupancy
-  # entries, member_views and applied_snapshot_seq entries ATTRIBUTABLE TO THIS
-  # PID, then rebalance.
+  # entries, member_views and applied_snapshot_seq entries attributable to this
+  # pid, then rebalance.
   #
   # Occupancy rows / member_views / applied_snapshot_seq entries are written
-  # from TWO independent, unordered channels: the peer-registration messages
+  # from two independent, unordered channels: the peer-registration messages
   # (discover/discover_ack/rebalance_marker, which carry the writer's pid) and
   # the data RPCs (occupied/4, vacant_batch/4, receive_node_state/5,
   # apply_delta/5, which carry it too). A peer that restarts in place can have
-  # its fresh DATA (a snapshot applied via receive_node_state/5) land and get
-  # written under the NEW pid before this runs for the OLD pid's DOWN, with NO
+  # its fresh data (a snapshot applied via receive_node_state/5) land and get
+  # written under the new pid before this runs for the old pid's DOWN, with no
   # discover/ack from the new incarnation processed yet: register_peer/peers has
   # no idea a newer incarnation exists. Wiping by node alone (or by "is some
   # other peer currently registered", which only watches the registration
@@ -1821,10 +1811,10 @@ defmodule Forum.Muster.Scope do
   # permanently: membership does not change (nothing new got registered), so
   # recompute_members is a no-op and nothing ever re-announces to repair it.
   #
-  # Wipe only the entries actually attributable to THIS pid. Each of
+  # Wipe only the entries actually attributable to this pid. Each of
   # occupancy / member_views / applied_snapshot_seq carries the writer pid
   # that produced it, independent of whatever `peers` currently holds. A row
-  # written by any OTHER pid was necessarily written by a different
+  # written by any other pid was necessarily written by a different
   # incarnation (only one Scope can be live per node at a time) and is left
   # alone, regardless of whether that incarnation has been registered as a
   # peer yet.
