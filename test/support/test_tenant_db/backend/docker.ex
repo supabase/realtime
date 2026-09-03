@@ -49,7 +49,7 @@ defmodule TestTenantDb.Backend.Docker do
 
   @impl TestTenantDb.Backend
   def prepare! do
-    pull()
+    :ok = pull()
 
     reap_abandoned_containers()
 
@@ -254,20 +254,39 @@ defmodule TestTenantDb.Backend.Docker do
       _ ->
         IO.puts("Pulling image #{image()}. This might take a while...")
         {_, 0} = System.cmd("docker", ["pull", image()])
+        :ok
     end
+  end
+
+  # A container outside the pool, for a test that needs postgres settings the pooled ones
+  # don't carry. Ready to take connections when it returns.
+  @impl TestTenantDb.Backend
+  def start_database!(postgres_args) do
+    :ok = pull()
+    {name, port} = start_available_container(postgres_args: postgres_args)
+    wait_ready!(name, port)
+
+    {port, fn -> remove!([name]) end}
   end
 
   # Start a container and let docker publish 5432 on a port of its choosing, then read the
   # port back: nothing else on the machine can be handed the same one.
-  defp start_available_container(attempts \\ 5)
-  defp start_available_container(0), do: raise("TestTenantDb.Backend.Docker: exhausted retries starting a container")
-
-  defp start_available_container(attempts) do
+  #
+  # Options: `:postgres_args` (extra `-c` settings) and `:attempts` (tries left).
+  defp start_available_container(opts \\ []) do
+    postgres_args = Keyword.get(opts, :postgres_args, [])
+    attempts = Keyword.get(opts, :attempts, 5)
     name = container_name()
 
-    case docker_run(name) do
-      {_, 0} -> {name, published_port!(name)}
-      {_output, _code} -> start_available_container(attempts - 1)
+    case docker_run(name, postgres_args) do
+      {_, 0} ->
+        {name, published_port!(name)}
+
+      {_output, _code} when attempts > 1 ->
+        start_available_container(Keyword.put(opts, :attempts, attempts - 1))
+
+      {output, _code} ->
+        raise "TestTenantDb.Backend.Docker: exhausted retries starting a container: #{output}"
     end
   end
 
@@ -399,7 +418,7 @@ defmodule TestTenantDb.Backend.Docker do
     end
   end
 
-  defp docker_run(name) do
+  defp docker_run(name, postgres_args) do
     initdb_sh = Path.expand("../../../../dev/postgres/za-permit-supabase-admin.sh", __DIR__)
     initdb_sql = Path.expand("../../../../dev/postgres/zb-supabase-schema.sql", __DIR__)
 
@@ -431,7 +450,7 @@ defmodule TestTenantDb.Backend.Docker do
         "max_wal_size=1GB",
         "-c",
         "max_slot_wal_keep_size=32MB"
-      ],
+      ] ++ postgres_args,
       stderr_to_stdout: true
     )
   end

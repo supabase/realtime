@@ -23,6 +23,10 @@ defmodule Realtime.DatabaseTest do
   # Pure tests (DNS resolution, settings structs, pool-size math) never touch a tenant database,
   # so they skip the container checkout.
   defp maybe_checkout_tenant(%{without_db: true}), do: :ok
+
+  # `db_args` tests needs to start a new database
+  defp maybe_checkout_tenant(%{db_args: db_args}), do: %{tenant: TestTenantDb.start_tenant!(db_args)}
+
   defp maybe_checkout_tenant(_context), do: %{tenant: TestTenantDb.checkout_tenant()}
 
   describe "check_tenant_connection/1" do
@@ -73,7 +77,6 @@ defmodule Realtime.DatabaseTest do
       GenServer.stop(conn)
     end
 
-    # Connection limit for docker tenant db is 100
     @tag db_pool: 50,
          subs_pool_size: 73
     test "restricts connection if tenant database cannot receive more connections based on tenant pool",
@@ -83,13 +86,21 @@ defmodule Realtime.DatabaseTest do
              end) =~ ~r/Only \d+ available connections\. At least 125 connections are required/
     end
 
-    test "guard against negative available connnections count", %{tenant: tenant} do
-      expect(Postgrex, :query!, 2, fn _conn, query, _params ->
-        cond do
-          query =~ "max_connections" -> %{rows: [[-5]]}
-          query =~ "to_regclass" -> %{rows: [[false]]}
-        end
-      end)
+    @tag db_args: ["-c", "max_connections=10"]
+    test "reports no available connections instead of a negative count", %{tenant: tenant} do
+      {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
+      {:ok, backends} = Database.connect_db(%{settings | pool_size: 7, max_restarts: 0})
+
+      assert eventually(fn ->
+               %{rows: [[count]]} =
+                 Postgrex.query!(
+                   backends,
+                   "SELECT count(*)::int FROM pg_stat_activity WHERE application_name = 'realtime_test'",
+                   []
+                 )
+
+               count == 7
+             end)
 
       assert capture_log(fn ->
                assert {:error, :tenant_db_too_many_connections} = Database.check_tenant_connection(tenant)
