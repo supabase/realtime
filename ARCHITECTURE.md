@@ -6,7 +6,7 @@ A high-level tour of how Realtime is put together, plus a few highlights of the 
 
 Realtime is a multi-tenant Phoenix app where every node in the cluster runs the same code. A tenant is identified by its `external_id`.
 
-Realtime is deployed across multiple regions in a single cluster. Realtime talks to its own database as well as to individual tenant databases.
+Realtime is designed to run across multiple regions as a single inter-connected global cluster. Realtime talks to its own database as well as to individual tenant databases.
 Realtime doesn't have to be multi-node and multi-region though, it can also be run self-hosted for example in a single node environment.
 
 Clients talk to Realtime over a single WebSocket that multiplexes many channels. Almost everything else in this document exists to serve one job: get a message published on a tenant's topic.
@@ -18,7 +18,7 @@ Clients talk to Realtime over a single WebSocket that multiplexes many channels.
 * [`Muster`](forum/README.md) - a library which helps answer "Which nodes hold clients of a tenant?"
 * [OID](https://www.postgresql.org/docs/current/datatype-oid.html) - object identifiers, for instance for relations
 * postgres_changes entry - a subscription on particular set of postgres changes (table, action, filters etc.)
-* [replication slot](https://www.postgresql.org/docs/current/warm-standby.html#STREAMING-REPLICATION-SLOTS) - ensures retention of relevant WAL entries
+* [replication slot](https://www.postgresql.org/docs/current/logicaldecoding-explanation.html#LOGICALDECODING-REPLICATION-SLOTS) - we use (logical) replication slots to process stream of changes coming from the WAL and translating them into events that can be subscribed to
 * [`:syn`](https://github.com/ostinelli/syn) - process registry and process group manager for clusters
 * tenant - a separate, isolated user of the infrastructure
 * [WAL](https://www.postgresql.org/docs/current/wal-intro.html) - Write-Ahead Log, a log of all changes to a database
