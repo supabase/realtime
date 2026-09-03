@@ -6,9 +6,22 @@ A high-level tour of how Realtime is put together, plus a few highlights of the 
 
 Realtime is a multi-tenant Phoenix app where every node in the cluster runs the same code. A tenant is identified by its `external_id`.
 
+Realtime is designed to run across multiple regions as a single inter-connected global cluster. Realtime talks to its own database as well as to individual tenant databases.
+Realtime doesn't have to be multi-node and multi-region though, it can also be run self-hosted for example in a single node environment.
+
 Clients talk to Realtime over a single WebSocket that multiplexes many channels. Almost everything else in this document exists to serve one job: get a message published on a tenant's topic.
 
 ---
+
+## Glossary
+
+* [`Muster`](forum/README.md) - a library which helps answer "Which nodes hold clients of a tenant?"
+* [OID](https://www.postgresql.org/docs/current/datatype-oid.html) - object identifiers, for instance for relations
+* postgres_changes entry - a subscription on particular set of postgres changes (table, action, filters etc.)
+* [replication slot](https://www.postgresql.org/docs/current/logicaldecoding-explanation.html#LOGICALDECODING-REPLICATION-SLOTS) - we use (logical) replication slots to process stream of changes coming from the WAL and translating them into events that can be subscribed to
+* [`:syn`](https://github.com/ostinelli/syn) - process registry and process group manager for clusters
+* tenant - a separate, isolated user of the infrastructure
+* [WAL](https://www.postgresql.org/docs/current/wal-intro.html) - Write-Ahead Log, a log of all changes to a database
 
 ## The Main Flow
 
@@ -19,7 +32,7 @@ Clients talk to Realtime over a single WebSocket that multiplexes many channels.
 - The **tenant** comes from the request host: `Database.get_external_id/1` turns `<external_id>.realtime.example.com` into an `external_id`.
 - The **token** is the `x-api-key` header, falling back to the `apikey` param. It's a JWT verified against the tenant's `jwt_secret` / `jwt_jwks`.
 
-The process owning the WebSocket is the transport pid. It shows up everywhere below: it's the unit counted for `max_concurrent_users`, the member registered into Muster, and the pid that ultimately receives the encoded WebSocket frame.
+The process owning the WebSocket is the transport pid. It shows up everywhere below: it's the unit counted for `max_concurrent_users`, the member registered into [Muster](forum/README.md), and the pid that ultimately receives the encoded WebSocket frame.
 Channel topics look like `realtime:<sub_topic>` and are all handled by `RealtimeWeb.RealtimeChannel`. One socket can hold many of them (`max_channels_per_client`, default 100).
 
 ### 2. What a channel carries
@@ -32,7 +45,7 @@ Channel topics look like `realtime:<sub_topic>` and are all handled by `Realtime
 
 ### 3. Fan-out and receive
 
-`Realtime.PubSub` reaches other nodes through `Realtime.GenRpcPubSub`, an adapter built on [`gen_rpc`](https://github.com/emqx/gen_rpc) (wrapped locally by `Realtime.GenRpc`) instead of Erlang distribution, so nodes can have more than one TCP connection between them for more bandwidth. How it picks which nodes to send to is the subject of [Broadcast fan-out](#broadcast-fan-out). Erlang distribution is still used for other types of communications including being Muster & `syn` transport layer.
+`Realtime.PubSub` reaches other nodes through `Realtime.GenRpcPubSub`, an adapter built on [`gen_rpc`](https://github.com/emqx/gen_rpc) (wrapped locally by `Realtime.GenRpc`) instead of Erlang distribution, so nodes can have more than one TCP connection between them for more bandwidth. How it picks which nodes to send to is the subject of [Broadcast fan-out](#broadcast-fan-out). Erlang distribution is still used for other types of communications including being Muster & [`:syn`](https://github.com/ostinelli/syn) transport layer.
 
 On each receiving node the local PubSub registry calls `MessageDispatcher.dispatch/3` with the topic's subscribers.
 
@@ -46,7 +59,7 @@ Two things are started once per tenant for the whole cluster on a node chosen by
 - **broadcast from the database**: the `ReplicationConnection` streams inserts into `realtime.messages` off a logical replication slot and republishes each row as a broadcast on the tenant topic;
 - **lifecycle**: it stops itself when the tenant has had no connected users for a while or when it notices it's running in the wrong region.
 
-`Extensions.PostgresCdcRls` is the Postgres Changes driver. Per tenant it runs a `WorkerSupervisor` with a `SubscriptionManager` and a `ReplicationPoller`. What it provides:
+`Extensions.PostgresCdcRls` is the Postgres Changes driver. Per tenant, if Postgres changes is used, it runs a `WorkerSupervisor` with a `SubscriptionManager` and a `ReplicationPoller`. What it provides:
 
 - turning a channel's `postgres_changes` config (schema / table / filter) into rows in the tenant's `realtime.subscription` table;
 - polling the tenant's WAL and delivering each change, already filtered per subscriber by `realtime.list_changes/4`, to only the nodes holding matching subscribers.
@@ -136,9 +149,9 @@ Once a message is on the tenant topic, `Realtime.GenRpcPubSub` has to decide whi
 
 ```mermaid
 flowchart LR
-    O["Origin node<br/>region X"] -->|"ftl: direct"| X2["node X2"]
+    O["Origin node<br/>region X"] -->|"forward_to_local(ftl): direct"| X2["node X2"]
     O --> X3["node X3"]
-    O -->|"ftr: one representative"| Y1["node Y1, region Y"]
+    O -->|"forward_to_region(ftr): one representative"| Y1["node Y1, region Y"]
     Y1 -->|"re-floods its region"| Y2["node Y2"]
     Y1 --> Y3["node Y3"]
 ```
