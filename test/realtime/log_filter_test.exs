@@ -38,13 +38,21 @@ defmodule Realtime.LogFilterTest do
   end
 
   describe "filter/2 - Ranch connection killed reports" do
-    test "stops Ranch reports when connection was killed" do
+    test "stops Ranch reports when connection was killed (binary format)" do
       event = ranch_event(RealtimeWeb.Endpoint.HTTP, :cowboy_clear, self(), :killed)
+      assert :stop = LogFilter.filter(event, [])
+    end
+
+    test "stops Ranch reports when connection was killed (charlist format)" do
+      event = ranch_charlist_event(RealtimeWeb.Endpoint.HTTP, :cowboy_clear, self(), :killed)
       assert :stop = LogFilter.filter(event, [])
     end
 
     test "passes through Ranch reports when connection exited for other reasons" do
       event = ranch_event(RealtimeWeb.Endpoint.HTTP, :cowboy_clear, self(), :some_error)
+      assert ^event = LogFilter.filter(event, [])
+
+      event = ranch_charlist_event(RealtimeWeb.Endpoint.HTTP, :cowboy_clear, self(), :some_error)
       assert ^event = LogFilter.filter(event, [])
     end
   end
@@ -70,9 +78,14 @@ defmodule Realtime.LogFilterTest do
   end
 
   @ranch_format "Ranch listener ~p had connection process started with ~p:start_link/3 at ~p exit with reason: ~0p~n"
+  @ranch_format_charlist String.to_charlist(@ranch_format)
 
   defp ranch_event(ref, protocol, pid, reason) do
     %{msg: {:format, @ranch_format, [ref, protocol, pid, reason]}, meta: %{pid: self()}}
+  end
+
+  defp ranch_charlist_event(ref, protocol, pid, reason) do
+    %{msg: {:format, @ranch_format_charlist, [ref, protocol, pid, reason]}, meta: %{pid: self()}}
   end
 
   defp db_connection_log_event(message) do
