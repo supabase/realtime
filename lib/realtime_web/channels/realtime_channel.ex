@@ -26,6 +26,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Realtime.Tenants.Connect
   alias Realtime.UsersCounter
 
+  alias RealtimeWeb.Channels.Payloads.Broadcast.Replay
   alias RealtimeWeb.Channels.Payloads.Join
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.RealtimeChannel.BroadcastHandler
@@ -106,7 +107,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       RealtimeWeb.Endpoint.subscribe(tenant_topic, metadata: metadata)
       RealtimeWeb.Endpoint.subscribe("realtime:operations:" <> tenant_id, metadata: metadata)
 
-      replication_ready_opt_in? = !!get_in(params, ["config", "broadcast", "replication_ready"])
+      replication_ready_opt_in? = Join.replication_ready?(join)
 
       is_new_api = new_api?(params)
       presence_enabled? = socket.assigns.presence_enabled?
@@ -1147,13 +1148,15 @@ defmodule RealtimeWeb.RealtimeChannel do
          true = _private?
        )
        when is_map(replay_params) do
+    replay_defaults = %Replay{}
+
     with {:ok, messages, message_ids} <-
            Realtime.Messages.replay(
              db_conn,
              tenant_id,
              sub_topic,
-             replay_params["since"],
-             replay_params["limit"] || 25
+             replay_params["since"] || replay_defaults.since,
+             replay_params["limit"] || replay_defaults.limit
            ) do
       # Send to self because we can't write to the socket before finishing the join process
       send(self(), {:replay, messages})

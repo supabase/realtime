@@ -437,16 +437,62 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       assert {:error, %{reason: "UnableToReplayMessages: Replay params are not valid"}} =
                subscribe_and_join(socket, "realtime:test", %{"config" => config})
+    end
 
-      config = %{
-        "private" => true,
-        "broadcast" => %{
-          "replay" => %{}
-        }
+    test "replay params fall back to the schema defaults when omitted", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      %{id: message_id} =
+        message_fixture(tenant, %{
+          "private" => true,
+          "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.shift(minute: -1),
+          "event" => "only",
+          "extension" => "broadcast",
+          "topic" => "test",
+          "payload" => %{"value" => "only"}
+        })
+
+      # An empty replay map is valid and defaults to schema
+      config = %{"private" => true, "broadcast" => %{"replay" => %{}}}
+
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{"config" => config})
+
+      assert_receive %Phoenix.Socket.Message{
+        event: "broadcast",
+        payload: %{"event" => "only", "meta" => %{"id" => ^message_id, "replayed" => true}}
       }
+    end
 
-      assert {:error, %{reason: "UnableToReplayMessages: Replay params are not valid"}} =
-               subscribe_and_join(socket, "realtime:test", %{"config" => config})
+    test "replay limit defaults to the schema default when only since is given", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      for i <- 1..3 do
+        message_fixture(tenant, %{
+          "private" => true,
+          "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.shift(minute: -i),
+          "event" => "event_#{i}",
+          "extension" => "broadcast",
+          "topic" => "test",
+          "payload" => %{"value" => i}
+        })
+      end
+
+      # `since` is an epoch timestamp in milliseconds, so all three messages are within the window.
+      five_minutes_ago = DateTime.utc_now() |> DateTime.shift(minute: -5) |> DateTime.to_unix(:millisecond)
+
+      config = %{"private" => true, "broadcast" => %{"replay" => %{"since" => five_minutes_ago}}}
+
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{"config" => config})
+
+      # All three are under the default limit, so all three replay.
+      for event <- ["event_3", "event_2", "event_1"] do
+        assert_receive %Phoenix.Socket.Message{
+          event: "broadcast",
+          payload: %{"event" => ^event, "meta" => %{"replayed" => true}}
+        }
+      end
     end
 
     test "failure to replay", %{tenant: tenant} do

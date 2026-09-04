@@ -15,6 +15,8 @@ defmodule RealtimeWeb.Channels.Payloads.Join do
     field :user_token, :string
   end
 
+  @type t :: %__MODULE__{}
+
   def changeset(join, attrs) do
     join
     |> cast(attrs, [:access_token, :user_token], message: &error_message/2)
@@ -46,6 +48,21 @@ defmodule RealtimeWeb.Channels.Payloads.Join do
   def self_broadcast?(%__MODULE__{config: %Config{broadcast: %Broadcast{self: self}}}), do: self
   def self_broadcast?(_), do: false
 
+  @doc """
+  Whether the client opted in to the replication ready handshake.
+
+  The value is cast by `RealtimeWeb.Channels.Payloads.FlexibleBoolean`.
+  """
+  @spec replication_ready?(t() | any()) :: boolean()
+  def replication_ready?(%__MODULE__{config: %Config{broadcast: %Broadcast{replication_ready: ready}}}), do: ready
+  def replication_ready?(_), do: false
+
+  @doc """
+  Whether the client asked to join a private channel, which is the channel that runs RLS authorization.
+
+  The value is cast by `RealtimeWeb.Channels.Payloads.FlexibleBoolean`.
+  """
+  @spec private?(t() | any()) :: boolean()
   def private?(%__MODULE__{config: %Config{private: private}}), do: private
   def private?(_), do: false
 
