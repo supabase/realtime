@@ -96,13 +96,7 @@ fi
 
 run_as_nobody() {
     if [ "$(id -u)" = "0" ]; then
-        if command -v runuser >/dev/null 2>&1; then
-            runuser -u nobody -- "$@"
-        elif command -v su >/dev/null 2>&1; then
-            su -s /bin/sh nobody -c 'exec "$@"' _ "$@"
-        else
-            sudo -E -u nobody "$@"
-        fi
+        runuser -u nobody -- "$@"
     else
         "$@"
     fi
