@@ -123,7 +123,7 @@ defmodule Realtime.PromEx.Plugins.Tenant do
     @moduledoc false
     # Milliseconds. 100 is the default `poll_interval_ms`: past it the query outruns its own loop.
     # 15_000 is the Postgrex call timeout, so nothing lands meaningfully above it.
-    use Peep.Buckets.Custom, buckets: [5, 25, 100, 500, 2500, 15_000]
+    use Peep.Buckets.Custom, buckets: [10, 25, 50, 100, 250, 500, 2500, 15_000]
   end
 
   defp replication_metrics do
@@ -188,12 +188,12 @@ defmodule Realtime.PromEx.Plugins.Tenant do
 
   defmodule Latency.Buckets do
     @moduledoc false
-    use Peep.Buckets.Custom, buckets: [5, 10, 25, 50, 100, 250, 1000, 5000, 15_000]
+    use Peep.Buckets.Custom, buckets: [10, 25, 50, 100, 250, 500, 1000, 5000, 15_000]
   end
 
   defmodule BroadcastFromDatabase.Buckets do
     @moduledoc false
-    use Peep.Buckets.Custom, buckets: [5, 10, 25, 50, 100, 250, 1000, 5000, 30_000]
+    use Peep.Buckets.Custom, buckets: [10, 25, 50, 100, 250, 500, 1000, 5000, 30_000]
   end
 
   defp channel_events do
