@@ -3883,8 +3883,8 @@ defmodule Forum.MusterDistributedTest do
       %{scope: scope}
     end
 
-    # The collector must hold no per-departure state, because a coordinator crash
-    # destroys all of it while the rows it guards survive.
+    # reap_departed_sources/1 must hold no per-departure state, because a
+    # coordinator crash destroys all of it while the rows it guards survive.
     #
     # state.peers and the watermark leave_watermark/3 parks die with the
     # coordinator. The occupancy table does not: it is created in
@@ -3892,15 +3892,7 @@ defmodule Forum.MusterDistributedTest do
     # and the sentinel via :rest_for_one so init/1 does not re-run and the rows are left intact.
     #
     # What is left is a row for a node that drained and died, on a coordinator that
-    # never heard of it. drop_stale_router_entries cannot judge it, because
-    # source_agrees?/4 waits for an announcement a dead source will never send;
-    # {:nodedown, _} is a no-op; the tombstone reaper only reaps tombstones.
-    # reap_departed_sources/1 collects it anyway, by re-deriving the answer from the
-    # restarted coordinator's own view and the current connection set.
-    #
-    # Everything here is real: C's claim is a real first-member join whose
-    # router-side write we park with force_ordering until after the eviction, and
-    # the crash is a plain Process.exit(coord, :kill).
+    # never heard of it.
     test "a Scope crash cannot strand a departed peer's row", %{scope: scope} do
       t_node = node()
       c_name = ~c"muster_reap_lost_c_#{System.unique_integer([:positive])}"
@@ -3974,7 +3966,7 @@ defmodule Forum.MusterDistributedTest do
 
           assert c_node in Muster.occupancy(scope, g)
 
-          # T's coordinator crashes while C is still ALIVE, so the watch has not
+          # T's coordinator crashes while C is still alive, so the watch has not
           # fired yet and no reap has been scheduled. Both die here, along with
           # the departure watermark and state.peers.
           t_coord = Process.whereis(Forum.Supervisor.name(scope))
@@ -3987,17 +3979,11 @@ defmodule Forum.MusterDistributedTest do
             is_pid(pid) and pid != t_coord
           end)
 
-          # The row outlived the process that was supposed to reap it, because the
-          # table belongs to Forum.Supervisor.
-          assert :ets.whereis(Scope.occupancy_table_name(scope)) != :undefined,
-                 "the occupancy table died with the coordinator, so this window is not " <>
-                   "reachable and supervisor.ex's ownership comment is wrong"
-
           assert c_node in Muster.occupancy(scope, g),
                  "the row did not survive the coordinator crash, so there is nothing to strand"
 
           # C actually dies. The restarted coordinator never monitored it and knows
-          # nothing about the departure -- only that C is not in its view and not
+          # nothing about the departure. It only knows that C is not in its view and not
           # connected, which is all the sweep needs.
           Node.monitor(c_node, true)
           :ok = stop_supervised({:peer, c_name})
@@ -4008,10 +3994,16 @@ defmodule Forum.MusterDistributedTest do
           wait_until(fn -> status(scope) == :ready end, 15_000)
           assert Muster.members(scope) == [t_node]
 
-          # ...and then every GC that could conceivably collect the row gets
-          # several turns: the heartbeat every 300ms, and reap_tombstones/1 plus
-          # drop_stale_router_entries on each :sweep_tombstones tick (500ms).
-          Process.sleep(2_000)
+          # we wait for the sweep that actually collects the row
+          assert {:ok, %{rows: 1}} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_departed_source_reaped,
+                       node: ^t_node,
+                       source: ^c_node
+                     },
+                     10_000
+                   )
 
           vh = :persistent_term.get({Forum.Muster, scope, :view_hash})
           assert {:ok, srcs} = Muster.targets(scope, g, vh)
@@ -4021,18 +4013,8 @@ defmodule Forum.MusterDistributedTest do
                    "crashed in between, so nothing the departure left behind survived while " <>
                    "the Supervisor-owned table kept the row: targets/3 returns #{inspect(srcs)}"
 
-          %{c_node: c_node}
         end,
-        fn result, trace ->
-          # The row went away because the periodic sweep collected it on the
-          # restarted coordinator, not because anything survived the crash.
-          assert Enum.any?(
-                   of_kind(trace, :muster_departed_source_reaped),
-                   &(&1.source == result.c_node)
-                 ),
-                 "no departed-source reap ran after the crash: the row must have been " <>
-                   "removed by something else"
-        end
+        fn _trace -> :ok end
       )
     end
   end
