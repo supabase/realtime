@@ -94,12 +94,26 @@ if [[ -n "${GENERATE_CLUSTER_CERTS:-}" ]] ; then
     generate_certs
 fi
 
+run_as_nobody() {
+    if [ "$(id -u)" = "0" ]; then
+        if command -v runuser >/dev/null 2>&1; then
+            runuser -u nobody -- "$@"
+        elif command -v su >/dev/null 2>&1; then
+            su -s /bin/sh nobody -c '"$@"' -- "$@"
+        else
+            sudo -E -u nobody "$@"
+        fi
+    else
+        "$@"
+    fi
+}
+
 echo "Running migrations"
-sudo -E -u nobody /app/bin/migrate
+run_as_nobody /app/bin/migrate
 
 if [ "${SEED_SELF_HOST-}" = true ]; then
     echo "Seeding selfhosted Realtime"
-    sudo -E -u nobody /app/bin/realtime eval 'Realtime.Release.seeds(Realtime.Repo)'
+    run_as_nobody /app/bin/realtime eval 'Realtime.Release.seeds(Realtime.Repo)'
 fi
 
 echo "Starting Realtime"
