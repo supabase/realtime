@@ -94,6 +94,7 @@ defmodule RealtimeWeb.Router do
     post("/tenants/:tenant_id/reload", TenantController, :reload)
     post("/tenants/:tenant_id/shutdown", TenantController, :shutdown)
     get("/tenants/:tenant_id/health", TenantController, :health)
+    post("/tenants/health", TenantController, :bulk_health)
   end
 
   scope "/api", RealtimeWeb do
