@@ -90,9 +90,8 @@ defmodule Realtime.Tenants.Janitor do
     {:noreply, %{state | tasks: tasks}}
   end
 
-  def handle_info({:DOWN, ref, _, _, :killed}, state) do
-    %{tasks: tasks} = state
-    tenants = Map.get(tasks, ref)
+  def handle_info({:DOWN, ref, _, _, _reason}, %{tasks: tasks} = state) when is_map_key(tasks, ref) do
+    {tenants, tasks} = Map.pop(tasks, ref)
 
     log_error(
       "JanitorFailedToDeleteOldMessages",
