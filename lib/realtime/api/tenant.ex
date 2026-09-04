@@ -14,8 +14,8 @@ defmodule Realtime.Api.Tenant do
   schema "tenants" do
     field(:name, :string)
     field(:external_id, :string)
-    field(:jwt_secret, :string)
-    field(:jwt_jwks, :map)
+    field(:jwt_secret, :string, redact: true)
+    field(:jwt_jwks, :map, redact: true)
     field(:postgres_cdc_default, :string)
     field(:max_concurrent_users, :integer)
     field(:max_events_per_second, :integer)
