@@ -50,6 +50,31 @@ defmodule Realtime.ApiTest do
     end
   end
 
+  describe "list_existing_external_ids/1" do
+    setup [:create_tenants]
+
+    test "returns only the ids that have a tenant", %{tenants: [tenant1, tenant2, _]} do
+      result = Api.list_existing_external_ids([tenant1.external_id, "nope", tenant2.external_id])
+
+      assert Enum.sort(result) == Enum.sort([tenant1.external_id, tenant2.external_id])
+    end
+
+    test "returns an empty list when no id matches" do
+      assert Api.list_existing_external_ids(["nope", "also-nope"]) == []
+    end
+
+    test "returns an empty list for an empty input" do
+      assert Api.list_existing_external_ids([]) == []
+    end
+
+    test "does not read the replica", %{tenants: [tenant | _]} do
+      # A tenant created moments ago must never read as absent, so the query has to hit the primary.
+      Mimic.reject(&Realtime.Repo.Replica.replica/0)
+
+      assert Api.list_existing_external_ids([tenant.external_id]) == [tenant.external_id]
+    end
+  end
+
   describe "get_tenant!/1" do
     setup [:create_tenants]
 
@@ -672,6 +697,24 @@ defmodule Realtime.ApiTest do
       end)
 
       assert {:ok, %Tenant{external_id: ^external_id}} = Api.create_tenant(attrs)
+    end
+
+    test "list_existing_external_ids dispatches to master with empty opts", %{master_node: master_node} do
+      Mimic.expect(GenRpc, :call, fn ^master_node, Api, :list_existing_external_ids, args, opts ->
+        assert args == [["abc", "def"]]
+        assert opts == []
+        ["abc"]
+      end)
+
+      assert Api.list_existing_external_ids(["abc", "def"]) == ["abc"]
+    end
+
+    test "list_existing_external_ids surfaces an unreachable master", %{master_node: master_node} do
+      Mimic.expect(GenRpc, :call, fn ^master_node, Api, :list_existing_external_ids, _args, _opts ->
+        {:error, :rpc_error, :timeout}
+      end)
+
+      assert Api.list_existing_external_ids(["abc"]) == {:error, :timeout}
     end
   end
 end

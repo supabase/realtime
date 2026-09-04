@@ -3,6 +3,8 @@ defmodule RealtimeWeb.TenantControllerTest do
   # Also using global otel_simple_processor
   use RealtimeWeb.ConnCase, async: false
 
+  use Mimic
+
   import ExUnit.CaptureLog
   require OpenTelemetry.Tracer, as: Tracer
 
@@ -676,6 +678,91 @@ defmodule RealtimeWeb.TenantControllerTest do
 
       assert log =~ "GET /api/tenants"
       assert log =~ "/health"
+    end
+  end
+
+  describe "bulk health check" do
+    setup [:with_tenant]
+
+    test "partitions refs into present and missing", %{conn: conn, tenant: %Tenant{external_id: external_id}} do
+      conn = post(conn, ~p"/api/tenants/health", %{"refs" => [external_id, "nope"]})
+
+      assert %{"present" => [^external_id], "missing" => ["nope"]} = json_response(conn, 200)
+    end
+
+    test "all refs present", %{conn: conn, tenant: %Tenant{external_id: external_id}} do
+      conn = post(conn, ~p"/api/tenants/health", %{"refs" => [external_id]})
+
+      assert %{"present" => [^external_id], "missing" => []} = json_response(conn, 200)
+    end
+
+    test "all refs missing", %{conn: conn} do
+      conn = post(conn, ~p"/api/tenants/health", %{"refs" => ["nope", "also-nope"]})
+
+      assert %{"present" => [], "missing" => ["nope", "also-nope"]} = json_response(conn, 200)
+    end
+
+    test "empty refs", %{conn: conn} do
+      conn = post(conn, ~p"/api/tenants/health", %{"refs" => []})
+
+      assert %{"present" => [], "missing" => []} = json_response(conn, 200)
+    end
+
+    test "duplicate refs are deduplicated", %{conn: conn, tenant: %Tenant{external_id: external_id}} do
+      conn = post(conn, ~p"/api/tenants/health", %{"refs" => [external_id, external_id, "nope", "nope"]})
+
+      assert %{"present" => [^external_id], "missing" => ["nope"]} = json_response(conn, 200)
+    end
+
+    test "returns 422 when refs exceeds the maximum", %{conn: conn} do
+      refs = Enum.map(1..501, &"ref-#{&1}")
+      conn = post(conn, ~p"/api/tenants/health", %{"refs" => refs})
+
+      assert json_response(conn, 422) == %{"message" => "refs exceeds the maximum of 500"}
+    end
+
+    test "returns 422 when refs contains a non-string", %{conn: conn} do
+      conn = post(conn, ~p"/api/tenants/health", %{"refs" => ["ok", 1]})
+
+      assert json_response(conn, 422) == %{"message" => "refs must be a list of strings"}
+    end
+
+    test "returns 422 when refs is not a list", %{conn: conn} do
+      conn = post(conn, ~p"/api/tenants/health", %{"refs" => "nope"})
+
+      assert json_response(conn, 422) == %{"message" => "refs is required"}
+    end
+
+    test "returns 422 when refs is absent", %{conn: conn} do
+      conn = post(conn, ~p"/api/tenants/health", %{})
+
+      assert json_response(conn, 422) == %{"message" => "refs is required"}
+    end
+
+    test "returns 503 when the master region is unreachable", %{conn: conn, tenant: tenant} do
+      previous_region = Application.get_env(:realtime, :region)
+      previous_master_region = Application.get_env(:realtime, :master_region)
+      Application.put_env(:realtime, :region, "ap-southeast-2")
+      Application.put_env(:realtime, :master_region, "us-east-1")
+
+      on_exit(fn ->
+        Application.put_env(:realtime, :region, previous_region)
+        Application.put_env(:realtime, :master_region, previous_master_region)
+      end)
+
+      expect(Realtime.Nodes, :node_from_region, fn "us-east-1", _key -> {:ok, :"master@127.0.0.1"} end)
+      expect(Realtime.GenRpc, :call, fn _node, _mod, _fun, _args, _opts -> {:error, :rpc_error, :timeout} end)
+
+      conn = post(conn, ~p"/api/tenants/health", %{"refs" => [tenant.external_id]})
+
+      assert json_response(conn, 503) == %{"message" => "unable to reach the tenants database"}
+    end
+
+    test "returns 403 when jwt is invalid", %{conn: conn} do
+      conn = put_req_header(conn, "authorization", "Bearer potato")
+      conn = post(conn, ~p"/api/tenants/health", %{"refs" => []})
+
+      assert response(conn, 403) == ""
     end
   end
 
