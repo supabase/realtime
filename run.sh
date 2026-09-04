@@ -96,7 +96,7 @@ fi
 
 run_as_nobody() {
     if [ "$(id -u)" = "0" ]; then
-        runuser -u nobody -- "$@"
+        runuser -m -u nobody -- "$@"
     else
         "$@"
     fi
