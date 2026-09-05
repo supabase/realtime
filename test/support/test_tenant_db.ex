@@ -49,6 +49,19 @@ defmodule TestTenantDb do
   def checkout_tenant(opts \\ []), do: do_checkout_tenant(opts, :sandbox)
   def checkout_tenant_unboxed(opts \\ []), do: do_checkout_tenant(opts, :unboxed)
 
+  @doc """
+  A tenant on a database of its own, started with the given postgres settings (`-c` flags)
+  and disposed of when the test ends. For tests that need settings the pooled databases
+  don't carry; drive it from a `@tag db_args: [...]`, which is also the tag excluded when
+  tenant databases come from external servers.
+  """
+  def start_tenant!(postgres_args) do
+    {port, cleanup} = Backend.current().start_database!(postgres_args)
+    ExUnit.Callbacks.on_exit(cleanup)
+
+    Generators.tenant_fixture(%{port: port})
+  end
+
   # Acquire a tenant database for one test — a pooled supabase/postgres
   # container, or (in external mode) one of the pre-configured external DBs.
   # Either way it's a real pool checkout, released via the returned checkin
