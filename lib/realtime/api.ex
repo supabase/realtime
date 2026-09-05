@@ -471,7 +471,7 @@ defmodule Realtime.Api do
   end
 
   defp master_region? do
-    region = Application.get_env(:realtime, :region)
+    region = Nodes.region()
     master_region = Application.get_env(:realtime, :master_region) || region
     region == master_region
   end
