@@ -4,6 +4,7 @@ defmodule TestTenantDb do
 
   alias Extensions.PostgresCdcRls
   alias Realtime.Tenants.Connect
+  alias Realtime.Tenants.ReplicationConnection
   alias TestTenantDb.Backend
   alias Realtime.Database
 
@@ -84,6 +85,14 @@ defmodule TestTenantDb do
             supervisor = {:via, PartitionSupervisor, {Realtime.Tenants.Connect.DynamicSupervisor, tenant.external_id}}
 
             DynamicSupervisor.terminate_child(supervisor, connect_pid)
+          end
+
+          # Connect's own replication connection is torn down asynchronously
+          # so terminating Connect above doesn't guarantee the
+          # replication slot is free yet.
+          # Stop it here explicitly to avoid race conditions and collisions.
+          if replication_pid = ReplicationConnection.whereis(tenant.external_id) do
+            ReplicationConnection.stop(tenant.external_id, replication_pid)
           end
 
           try do
