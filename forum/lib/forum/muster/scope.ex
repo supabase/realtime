@@ -60,7 +60,11 @@ defmodule Forum.Muster.Scope do
             owed_snapshots: %{node => integer},
             applied_snapshot_seq: %{node => {integer, pid}},
             view_seq: integer,
-            pending_round: nil | %{target: [node], awaiting: MapSet.t(), seq: integer}
+            pending_round: nil | %{target: [node], awaiting: MapSet.t(), seq: integer},
+            leaving: boolean,
+            leave_from: nil | GenServer.from(),
+            leave_pending: MapSet.t(),
+            settle_ms: non_neg_integer
           }
     defstruct [
       :scope,
@@ -114,7 +118,21 @@ defmodule Forum.Muster.Scope do
       # dropped wholesale. This is what makes a *sequence* of overlapping
       # rebalances safe, since the apply is serialized through this process and a
       # late round can never resurrect a group a newer round already dropped.
-      applied_snapshot_seq: %{}
+      applied_snapshot_seq: %{},
+      # Graceful cluster-leave (see Forum.Muster.drain/2). While `leaving` is
+      # true this node is draining: every OUTBOUND self-assertion (heartbeat
+      # announce, re-discovery, discover-ack, nodeup-discovery) is suppressed so
+      # no peer re-pairs us after we announced leaving; INBOUND coordination RPCs
+      # are deliberately still serviced through the whole drain + settle window.
+      # `leave_from` parks the drain/2 caller (replied to asynchronously so the
+      # coordinator loop never blocks); `leave_pending` is the set of peer NODES
+      # we still await an ack from -- a peer is removed the moment it acks OR
+      # departs (crash), so the settle window opens exactly when it empties;
+      # `settle_ms` the post-ack in-flight-drain window stashed at drain time.
+      leaving: false,
+      leave_from: nil,
+      leave_pending: MapSet.new(),
+      settle_ms: 0
     ]
   end
 
@@ -550,6 +568,9 @@ defmodule Forum.Muster.Scope do
       Forum.Muster.view_hash_for_members([node()])
     )
 
+    # Always re-open the join gate in case of a restart during a drain
+    :persistent_term.put({Forum.Muster, scope, :accepting_joins}, true)
+
     Logger.info("Muster[#{node()}|#{scope}] Starting")
 
     state = %State{
@@ -728,6 +749,58 @@ defmodule Forum.Muster.Scope do
     {:reply, :ok, update_status(put_member_view(state, source, :in_transition, seq, source_pid))}
   end
 
+  # Graceful cluster-leave: evacuate the ROUTER role before this node dies (see
+  # `Forum.Muster.drain/2`). We do not rebalance ourselves; instead we broadcast
+  # {:muster_leaving} and let each PEER rebalance us out of its ring and ack. The
+  # `drain/2` caller is parked in `from` and replied to asynchronously (via
+  # `GenServer.reply` from the `:leave_settle` / `:leave_deadline handlers`), so this
+  # loop never blocks on the remote acks.
+  # Start draining immediately (`leaving: true` suppresses every outbound
+  # self-assertion) and stop accepting joins. A singleton (no peers) has nobody
+  # to evacuate to and nothing routed to it, so it replies `:ok` at once. Otherwise
+  # we arm the ack deadline and wait. Inbound coordination RPCs keep being
+  # serviced throughout.
+  def handle_call({:drain, timeout, settle_ms}, from, %State{} = state) do
+    # When atoms or other terms that fit in one machine word are deleted, no global GC is needed.
+    :persistent_term.put({Forum.Muster, state.scope, :accepting_joins}, false)
+    expected = state.peers |> Map.keys() |> Enum.map(&node/1) |> MapSet.new()
+
+    tp(:muster_drain_begin, %{
+      scope: state.scope,
+      node: node(),
+      expected: MapSet.to_list(expected),
+      settle_ms: settle_ms
+    })
+
+    expected_size = MapSet.size(expected)
+
+    if expected_size == 0 do
+      Logger.info(
+        "Muster[#{node()}|#{state.scope}] Draining: singleton (no peers), nothing to hand off; draining immediately"
+      )
+
+      {:reply, :ok, %{state | leaving: true}}
+    else
+      Logger.info(
+        "Muster[#{node()}|#{state.scope}] Draining: broadcasting leave, awaiting acks from " <>
+          "#{expected_size} peer(s) #{inspect(MapSet.to_list(expected))} " <>
+          "(ack timeout #{timeout}ms, settle #{settle_ms}ms)"
+      )
+
+      state.message_module.broadcast(state.scope, {:muster_leaving, self(), state.view_seq})
+      Process.send_after(self(), :leave_deadline, timeout)
+
+      {:noreply,
+       %{
+         state
+         | leaving: true,
+           leave_from: from,
+           leave_pending: expected,
+           settle_ms: settle_ms
+       }}
+    end
+  end
+
   # For tests / introspection: group_states + cooldown are gathered from the
   # shards, which own the per-group state machine.
   def handle_call(:status, _from, state) do
@@ -806,7 +879,18 @@ defmodule Forum.Muster.Scope do
   # discoverer has no trustworthy baseline yet: handing it our post-rebalance
   # view/watermark would let it declare the barrier satisfied (and trust its
   # occupancy table) before that snapshot's data ever lands.
+  # Draining: once leaving we suppress every OUTBOUND self-assertion so no peer
+  # re-pairs us after we announced leaving. This gate (and the ones on
+  # :muster_discover_ack, :nodeup and :view_heartbeat below) is deliberately the
+  # ONLY thing draining silences; every INBOUND coordination RPC (:occupied,
+  # :vacant_batch, snapshot/delta/transition applies, :rebalance_marker) keeps
+  # being serviced through the whole drain + settle window -- see
+  # Forum.Muster.drain/2 and forum/README.md.
   @impl true
+  def handle_info({:muster_discover, _peer, _view_hash, _seq}, %State{leaving: true} = state) do
+    {:noreply, state}
+  end
+
   def handle_info({:muster_discover, peer, view_hash, seq}, %State{} = state) do
     peer_node = node(peer)
 
@@ -835,6 +919,12 @@ defmodule Forum.Muster.Scope do
   # never "newer" than a real seq under put_member_view's guard, would silently
   # brick that source's entry until it announces again anyway -- explicit is
   # clearer than relying on that guard).
+  # Draining: ignore discover-acks while leaving (outbound self-assertion; see
+  # the :muster_discover gate above).
+  def handle_info({:muster_discover_ack, _peer, _view_hash, _seq}, %State{leaving: true} = state) do
+    {:noreply, state}
+  end
+
   def handle_info({:muster_discover_ack, peer, nil, nil}, %State{} = state) do
     {:noreply, register_peer(state, peer)}
   end
@@ -854,10 +944,15 @@ defmodule Forum.Muster.Scope do
     end
   end
 
+  # Draining: don't reach out to pair with a newly-up node while leaving
+  # (outbound self-assertion; see the :muster_discover gate above). The
+  # self-rename clause above is more specific and still matches first.
+  def handle_info({:nodeup, _node}, %State{leaving: true} = state) do
+    {:noreply, state}
+  end
+
   def handle_info({:nodeup, node}, state) do
-    Logger.info(
-      "Muster[#{node()}|#{state.scope}] node up: #{inspect(node)}, reaching out to pair"
-    )
+    Logger.info("Muster[#{node()}|#{state.scope}] node up: #{node}, reaching out to pair")
 
     :telemetry.execute([:forum, state.scope, :node, :up], %{}, %{node: node})
 
@@ -890,75 +985,106 @@ defmodule Forum.Muster.Scope do
     {:noreply, update_status(put_member_view(state, source, view_hash, seq, source_pid))}
   end
 
-  # Peer coordinator crashed/disconnected: drop occupancy entries, member_views
-  # and applied_snapshot_seq entries ATTRIBUTABLE TO THIS DYING PID, and
-  # rebalance.
-  #
-  # Occupancy rows / member_views / applied_snapshot_seq entries are written
-  # from TWO independent, unordered channels: the peer-registration messages
-  # (discover/discover_ack/rebalance_marker, which carry the writer's pid) and
-  # the data RPCs (occupied/4, vacant_batch/4, receive_node_state/5,
-  # apply_delta/5, which carry it too). A peer that restarts in place can have
-  # its fresh DATA (a snapshot applied via receive_node_state/5) land and get
-  # written under the NEW pid before this handler ever runs for the OLD pid's
-  # DOWN, with NO discover/ack from the new incarnation processed yet:
-  # register_peer/peers has no idea a newer incarnation exists. Wiping by node
-  # alone (or by "is some other peer currently registered", which only watches
-  # the registration channel) would destroy that already-applied,
-  # already-correct data permanently: membership does not change (nothing new
-  # got registered), so recompute_members is a no-op and nothing ever
-  # re-announces to repair it.
-  #
-  # So: wipe only the entries actually attributable to THIS pid. Each of
-  # occupancy / member_views / applied_snapshot_seq carries the writer pid
-  # that produced it, independent of whatever `peers` currently holds. A row
-  # written by any OTHER pid was necessarily written by a different
-  # incarnation (only one Scope can be live per node at a time) and is left
-  # alone, regardless of whether that incarnation has been registered as a
-  # peer yet.
+  # Peer coordinator crashed/disconnected. The pid-stamp guard (matching the
+  # monitor ref we hold for this pid) rejects a stale DOWN for a pid we already
+  # dropped -- e.g. one we demonitored-and-flushed when the peer left gracefully
+  # (:muster_leaving), whose real DOWN then lands as a no-op. The actual eviction
+  # is depart_peer/3, shared with the graceful-leave path.
   def handle_info({:DOWN, ref, :process, pid, _reason}, %State{} = state) do
-    case Map.pop(state.peers, pid) do
-      {^ref, new_peers} ->
-        peer_node = node(pid)
-
-        Logger.info(
-          "Muster[#{node()}|#{state.scope}] peer down: #{inspect(peer_node)}, dropping occupancy/view data attributable to this incarnation and rebalancing"
-        )
-
-        tp_span(:muster_peer_down_apply, %{
-          scope: state.scope,
-          node: node(),
-          peer_node: peer_node
-        }) do
-          :ets.match_delete(state.occupancy_table, {{:_, peer_node}, :_, :_, pid})
-          :telemetry.execute([:forum, state.scope, :node, :down], %{}, %{node: peer_node})
-        end
-
-        member_views =
-          case Map.get(state.member_views, peer_node) do
-            {_view_hash, _seq, ^pid} -> Map.delete(state.member_views, peer_node)
-            _ -> state.member_views
-          end
-
-        applied_snapshot_seq =
-          case Map.get(state.applied_snapshot_seq, peer_node) do
-            {_seq, ^pid} -> Map.delete(state.applied_snapshot_seq, peer_node)
-            _ -> state.applied_snapshot_seq
-          end
-
-        state = %{
-          state
-          | peers: new_peers,
-            member_views: member_views,
-            applied_snapshot_seq: applied_snapshot_seq
-        }
-
-        {:noreply, recompute_members(state)}
+    case Map.get(state.peers, pid) do
+      ^ref ->
+        state = depart_peer(state, pid, "down")
+        # If we are mid-drain and this peer was one we awaited an ack from, it is
+        # gone and will never ack: stop waiting on it (else drain blocks the full
+        # timeout and reports a dead node as unacked).
+        {:noreply, drop_drain_expectation(state, node(pid))}
 
       _ ->
         {:noreply, state}
     end
   end
+
+  # A peer is leaving the cluster gracefully. We are still
+  # in its ring at this instant, but we evict it before it dies so our
+  # subsequent claims/routing go to the newly-elected router and our own
+  # rebalance re-announces the groups we hold to that router. depart_peer/3 does
+  # the ring swap + re-announce; we ack only after it returns. We demonitor-and-flush first so the
+  # peer's eventual real :DOWN is a no-op (the guard above rejects it).
+  def handle_info({:muster_leaving, peer_pid, _seq}, %State{} = state) do
+    case Map.get(state.peers, peer_pid) do
+      nil ->
+        {:noreply, state}
+
+      ref ->
+        Logger.info(
+          "Muster[#{node()}|#{state.scope}] peer draining: #{node(peer_pid)}, rebalancing it out of the ring and acking"
+        )
+
+        tp(:muster_leaving_received, %{
+          scope: state.scope,
+          node: node(),
+          peer_node: node(peer_pid)
+        })
+
+        Process.demonitor(ref, [:flush])
+        state = depart_peer(state, peer_pid, "leaving")
+        state.message_module.send(state.scope, node(peer_pid), {:muster_leaving_ack, node()})
+        {:noreply, state}
+    end
+  end
+
+  # An ack from a peer that has finished rebalancing us out of its ring. Only
+  # meaningful while we are the leaver (a parked caller in `leave_from`). Once
+  # every pending peer has acked (or departed), we start the settle window
+  # (still servicing inbound RPCs) to drain in-flight RPCs
+  # peers dispatched before they rebalanced
+  def handle_info({:muster_leaving_ack, peer_node}, %State{leave_from: from} = state)
+      when from != nil do
+    {:noreply, resolve_pending_peer(state, peer_node)}
+  end
+
+  def handle_info({:muster_leaving_ack, _peer_node}, state), do: {:noreply, state}
+
+  # Settle window elapsed: in-flight RPCs peers dispatched before rebalancing us
+  # out have had `settle_ms` to land. Reply :ok to the parked
+  # drain/2 caller. The host app may now tear down its transport and halt.
+  def handle_info(:leave_settle, %State{leave_from: from} = state) when from != nil do
+    Logger.info(
+      "Muster[#{node()}|#{state.scope}] Draining: settle window elapsed, router role fully evacuated; safe to halt"
+    )
+
+    tp(:muster_drain_settled, %{scope: state.scope, node: node()})
+    GenServer.reply(from, :ok)
+    {:noreply, %{state | leave_from: nil}}
+  end
+
+  def handle_info(:leave_settle, state), do: {:noreply, state}
+
+  # Ack deadline fired while the drain caller is still parked. If every expected
+  # peer has already acked (or departed), leave_pending is empty, we are in the
+  # settle window, and this deadline is stale. If peers are still pending we
+  # consider that it timed out.
+  def handle_info(:leave_deadline, %State{leave_from: from} = state) when from != nil do
+    pending_size = MapSet.size(state.leave_pending)
+
+    if pending_size == 0 do
+      # All peers acked/departed; the settle window owns the reply. Stale deadline, no-op.
+      {:noreply, state}
+    else
+      unacked = MapSet.to_list(state.leave_pending)
+
+      Logger.warning(
+        "Muster[#{node()}|#{state.scope}] Draining: ack deadline reached, #{pending_size} " <>
+          "peer(s) did not ack the handoff: #{inspect(unacked)}; proceeding with shutdown anyway"
+      )
+
+      tp(:muster_drain_timeout, %{scope: state.scope, node: node(), unacked: unacked})
+      GenServer.reply(from, {:timeout, unacked})
+      {:noreply, %{state | leave_from: nil}}
+    end
+  end
+
+  def handle_info(:leave_deadline, state), do: {:noreply, state}
 
   # Worker reported back the result of a fire-and-forget :receive_node_state
   # snapshot dispatched during a rebalance.
@@ -996,10 +1122,10 @@ defmodule Forum.Muster.Scope do
 
       other ->
         if router_node in state.members do
-          raise "Muster rebalance snapshot to #{inspect(router_node)} failed: #{inspect(other)}"
+          raise "Muster rebalance snapshot to #{router_node} failed: #{inspect(other)}"
         else
           Logger.info(
-            "Muster[#{node()}|#{state.scope}] rebalance snapshot to #{inspect(router_node)} failed: #{inspect(other)}, but it already left membership; dropping"
+            "Muster[#{node()}|#{state.scope}] rebalance snapshot to #{router_node} failed: #{inspect(other)}, but it already left membership; dropping"
           )
 
           {:noreply, state}
@@ -1039,13 +1165,13 @@ defmodule Forum.Muster.Scope do
 
           other ->
             if member in target do
-              raise "Muster view-change prepare to #{inspect(member)} failed: #{inspect(other)}"
+              raise "Muster view-change prepare to #{member} failed: #{inspect(other)}"
             else
               # Not in the target (being dropped / already leaving): don't crash,
               # and stop awaiting it so a departing old member cannot wedge the
               # round. Commit if it was the last outstanding ack.
               Logger.info(
-                "Muster[#{node()}|#{state.scope}] view-change prepare to #{inspect(member)} failed: #{inspect(other)}, but it is not in the target view; dropping"
+                "Muster[#{node()}|#{state.scope}] view-change prepare to #{member} failed: #{inspect(other)}, but it is not in the target view; dropping"
               )
 
               awaiting = MapSet.delete(awaiting, member)
@@ -1074,6 +1200,11 @@ defmodule Forum.Muster.Scope do
   # the worst-case "restarted in place but never re-paired" window to one
   # interval. Idempotent with member_views (latest-wins) and with discovery
   # (register_peer no-ops a known peer), so a redundant heartbeat is harmless.
+  # Draining: skip the whole heartbeat while leaving.
+  def handle_info(:view_heartbeat, %State{leaving: true} = state) do
+    {:noreply, state}
+  end
+
   def handle_info(:view_heartbeat, state) do
     announce_view(state)
     rediscover(state)
@@ -1579,6 +1710,125 @@ defmodule Forum.Muster.Scope do
         peers = Map.put(state.peers, peer, ref)
         recompute_members(%{state | peers: peers})
     end
+  end
+
+  # A peer we were awaiting a drain handoff-ack from died before it could ack.
+  # depart_peer/3 has already evicted it and re-elected routers for whatever it
+  # held, so there is nothing left to hand off to it: resolve it out of the pending
+  # set (which opens the settle window if it was the last one) instead of blocking
+  # until the ack deadline fires and reporting a dead node as unacked. Only logs
+  # the loss for a peer still genuinely pending; a peer that already acked is no
+  # longer in the set and its DOWN is an ordinary departure here.
+  defp drop_drain_expectation(%State{leave_from: from} = state, dead_node) when from != nil do
+    if MapSet.member?(state.leave_pending, dead_node) do
+      Logger.info(
+        "Muster[#{node()}|#{state.scope}] Draining: expected peer #{inspect(dead_node)} died " <>
+          "before acking the handoff; dropping it from the wait"
+      )
+
+      tp(:muster_drain_peer_lost, %{scope: state.scope, node: node(), peer_node: dead_node})
+    end
+
+    resolve_pending_peer(state, dead_node)
+  end
+
+  defp drop_drain_expectation(state, _dead_node), do: state
+
+  # A peer we were waiting on has resolved -- it acked the handoff, or it departed
+  # the cluster. Remove it from the pending set; when that empties the set, open
+  # the settle window. The MapSet.member? guard makes this idempotent: a duplicate
+  # ack, or the DOWN of a peer that already acked, finds it already gone and is a
+  # no-op -- which is exactly why the settle window opens once, with no phase flag
+  # or before/after bookkeeping. `leave_pending` only ever shrinks, so it empties
+  # exactly once per drain.
+  defp resolve_pending_peer(%State{leave_from: from} = state, peer_node) when from != nil do
+    if MapSet.member?(state.leave_pending, peer_node) do
+      pending = MapSet.delete(state.leave_pending, peer_node)
+      state = %{state | leave_pending: pending}
+      if MapSet.size(pending) == 0, do: open_settle(state), else: state
+    else
+      state
+    end
+  end
+
+  defp resolve_pending_peer(state, _peer_node), do: state
+
+  # Every peer acked or departed: start the settle window (still servicing inbound
+  # RPCs) so in-flight RPCs peers dispatched before rebalancing us out can land,
+  # then :leave_settle replies to the parked drain/2 caller.
+  defp open_settle(%State{} = state) do
+    Logger.info(
+      "Muster[#{node()}|#{state.scope}] Draining: all peers acked or departed; " <>
+        "settling for #{state.settle_ms}ms before shutdown"
+    )
+
+    tp(:muster_drain_acked, %{scope: state.scope, node: node()})
+    Process.send_after(self(), :leave_settle, state.settle_ms)
+    state
+  end
+
+  # Evict a peer (crash via :DOWN, or graceful :muster_leaving): drop occupancy
+  # entries, member_views and applied_snapshot_seq entries ATTRIBUTABLE TO THIS
+  # PID, then rebalance.
+  #
+  # Occupancy rows / member_views / applied_snapshot_seq entries are written
+  # from TWO independent, unordered channels: the peer-registration messages
+  # (discover/discover_ack/rebalance_marker, which carry the writer's pid) and
+  # the data RPCs (occupied/4, vacant_batch/4, receive_node_state/5,
+  # apply_delta/5, which carry it too). A peer that restarts in place can have
+  # its fresh DATA (a snapshot applied via receive_node_state/5) land and get
+  # written under the NEW pid before this runs for the OLD pid's DOWN, with NO
+  # discover/ack from the new incarnation processed yet: register_peer/peers has
+  # no idea a newer incarnation exists. Wiping by node alone (or by "is some
+  # other peer currently registered", which only watches the registration
+  # channel) would destroy that already-applied, already-correct data
+  # permanently: membership does not change (nothing new got registered), so
+  # recompute_members is a no-op and nothing ever re-announces to repair it.
+  #
+  # Wipe only the entries actually attributable to THIS pid. Each of
+  # occupancy / member_views / applied_snapshot_seq carries the writer pid
+  # that produced it, independent of whatever `peers` currently holds. A row
+  # written by any OTHER pid was necessarily written by a different
+  # incarnation (only one Scope can be live per node at a time) and is left
+  # alone, regardless of whether that incarnation has been registered as a
+  # peer yet.
+  defp depart_peer(%State{} = state, pid, why) do
+    peer_node = node(pid)
+    new_peers = Map.delete(state.peers, pid)
+
+    Logger.info(
+      "Muster[#{node()}|#{state.scope}] peer #{why}: #{peer_node}, dropping occupancy/view data attributable to this incarnation and rebalancing"
+    )
+
+    tp_span(:muster_peer_down_apply, %{
+      scope: state.scope,
+      node: node(),
+      peer_node: peer_node
+    }) do
+      :ets.match_delete(state.occupancy_table, {{:_, peer_node}, :_, :_, pid})
+      :telemetry.execute([:forum, state.scope, :node, :down], %{}, %{node: peer_node})
+    end
+
+    member_views =
+      case Map.get(state.member_views, peer_node) do
+        {_view_hash, _seq, ^pid} -> Map.delete(state.member_views, peer_node)
+        _ -> state.member_views
+      end
+
+    applied_snapshot_seq =
+      case Map.get(state.applied_snapshot_seq, peer_node) do
+        {_seq, ^pid} -> Map.delete(state.applied_snapshot_seq, peer_node)
+        _ -> state.applied_snapshot_seq
+      end
+
+    state = %{
+      state
+      | peers: new_peers,
+        member_views: member_views,
+        applied_snapshot_seq: applied_snapshot_seq
+    }
+
+    recompute_members(state)
   end
 
   defp recompute_members(state) do
