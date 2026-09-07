@@ -6206,26 +6206,33 @@ defmodule Forum.MusterDistributedTest do
     # A graceful leave must be final on the peer: nothing the leaver had already
     # put on the wire may resurrect it after the peer rebalanced it out.
     #
-    # The hole this covers: snapshots/deltas are dispatched by monitored workers
-    # via :erpc, not over the coordinator->coordinator dist channel that carries
-    # {:muster_leaving, ...}. Those two channels have no ordering relation, so a
-    # snapshot dispatched by C's rebalance just before it drained can land on T
-    # after T processed the leave and ran depart_peer/3. C is genuinely still alive
-    # to have that RPC land (drain is pre-death).
+    # The hole this covers: rebalance announcements (snapshots and deltas alike)
+    # are dispatched by monitored workers via :erpc, not over the
+    # coordinator->coordinator dist channel that carries {:muster_leaving, ...}.
+    # Those two channels have no ordering relation, so an announcement dispatched
+    # by C's rebalance just before it drained can land on T after T processed the
+    # leave and ran depart_peer/3. C is genuinely still alive to have that RPC
+    # land (drain is pre-death).
     # depart_peer/3 deletes applied_snapshot_seq[C], which would leave the late
-    # apply's only guard (`seq <= watermark`) disarmed, free to re-insert C's
+    # apply's only guard (`seq <= watermark`) disarmed, free to insert C's
     # occupancy rows plus a member_views entry. What holds here is
     # leave_watermark/3 re-arming that guard at the leave's seq. Nothing else
     # would.
     #
-    # We stand in for the delayed :erpc by calling the receiver-side entry point
-    # (Scope.receive_node_state/6) on T directly with the exact arguments C's
-    # worker dispatches -- that call IS what :erpc executes on the receiver --
-    # because the landing order is precisely what we cannot schedule otherwise.
-    test "a late in-flight snapshot cannot resurrect a gracefully drained node", %{scope: scope} do
+    # The announcement is dispatched by C's own rebalance out of the
+    # 3-node view. We only schedule the landing order, by parking C's RPC worker
+    # with force_ordering before it dispatches. That tracepoint fires in the
+    # throwaway worker, not in the coordinator, so C stays free to drain while
+    # this one RPC sits on the wire. One slow hop, which is all this needs.
+    test "a late in-flight rebalance announcement cannot resurrect a gracefully drained node",
+         %{scope: scope} do
       t_node = node()
-      c_name = ~c"muster_drain_late_snap_#{System.unique_integer([:positive])}"
+      c_name = ~c"muster_drain_late_snap_c_#{System.unique_integer([:positive])}"
       c_node = :"#{c_name}@127.0.0.1"
+      x_name = ~c"muster_drain_late_snap_x_#{System.unique_integer([:positive])}"
+      x_node = :"#{x_name}@127.0.0.1"
+      view_tcx = Enum.sort([t_node, c_node, x_node])
+      view_tc = Enum.sort([t_node, c_node])
 
       check_trace(
         fn ->
@@ -6234,45 +6241,86 @@ defmodule Forum.MusterDistributedTest do
           start_remote_muster(pc, scope)
           await_ready([t_node, c_node])
 
-          # T is the router for g and C holds it, so T's occupancy has {g, C} --
-          # exactly the row C's rebalance would (re-)announce to T in a snapshot.
-          g = group_routed_to(scope, t_node)
-          assert g, "no group routing to T found"
-          :ok = :peer.call(pc, MusterPeerAux, :join, [scope, g])
-          wait_until(fn -> c_node in Muster.occupancy(scope, g) end)
+          {:ok, px, ^x_node} = Peer.start(name: x_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(x_node)
+          start_remote_muster(px, scope)
+          await_ready(view_tcx)
 
-          # The exact payload C's snapshot worker carries for the current round:
-          # its coordinator pid (the row's writer stamp), the view it announces,
-          # and that round's watermark. The watermark comes off the wire rather
-          # than out of C's state: the bare marker C sent us when it rebalanced
-          # into the 2-node view carries the round's snapshot_seq, which is
-          # exactly what it sets its view_seq to on commit (and what it stamps
-          # every snapshot of that round with).
-          c_coord = :erpc.call(c_node, Process, :whereis, [Forum.Supervisor.name(scope)])
-          c_view_hash = :peer.call(pc, MusterPeerAux, :view_hash, [scope])
+          # g routes to X in {T,C,X} and to T in {T,C}, and C holds it. X's
+          # departure is then exactly one group moving onto T on C's ring, so C's
+          # rebalance out of the 3-node view has something to announce to T. The
+          # last thing C puts on the wire before it drains.
+          g = pick_group([{view_tcx, x_node}, {view_tc, t_node}])
+          assert :ok = :peer.call(pc, MusterPeerAux, :join, [scope, g])
+          wait_until(fn -> c_node in occupancy_on(x_node, scope, g) end)
 
-          assert {:ok, marker} =
-                   block_until(
-                     %{:"$kind" => :muster_rebalance_marker, node: ^t_node, source: ^c_node},
-                     10_000
-                   )
+          # Park that announcement in C's own RPC worker, ahead of the dispatch.
+          # C was already a member of T's view and owed it nothing, so the
+          # announcement is a delta, stamped with the round's snapshot_seq
+          # which is also the view_seq C's {:muster_leaving, ...} will carry, and
+          # therefore exactly the watermark the leave parks on T.
+          force_ordering(
+            delay: %{
+              :"$kind" => :muster_rpc_worker_start,
+              node: ^c_node,
+              router: ^t_node,
+              function: :apply_delta
+            },
+            until: %{:"$kind" => :test_release}
+          )
 
-          c_seq = marker.seq
+          # X dies -> C rebalances into {T,C}, g's router moves X -> T, and C's
+          # announcement of it to T parks in flight.
+          :ok = stop_supervised({:peer, x_name})
+
+          # C committed that round: it adopts the new view immediately after
+          # spawning the dispatch workers, so by now the announcement has left the
+          # coordinator. We wait on C's view rather than on the parked event
+          # itself. force_ordering withholds that event from the trace until it
+          # is released.
+          wait_until(fn -> :erpc.call(c_node, Muster, :members, [scope]) == view_tc end, 10_000)
+
+          # T has not seen it: it is the router for g holding no row for it (and,
+          # with C's marker riding the parked announcement, correctly not ready).
+          refute c_node in Muster.occupancy(scope, g)
 
           assert :ok = :peer.call(pc, MusterPeerAux, :drain, [scope, [settle_ms: 200]])
           wait_until(fn -> Muster.members(scope) == [t_node] end)
 
-          # The handoff did its job: C's rows are gone from T.
-          refute c_node in Muster.occupancy(scope, g)
+          # The parked announcement now goes out and lands on a T that has already
+          # evicted C. C is still alive to make the call, exactly as it is for the
+          # whole drain. Its worker reporting the RPC's return is our proof that T
+          # processed it.
+          tp(:test_release, %{})
 
-          # Now the snapshot C dispatched just before draining finally lands. C is
-          # still alive at this point, exactly as it is for the whole drain.
-          assert :ok = Scope.receive_node_state(scope, c_node, [g], c_view_hash, c_seq, c_coord)
+          assert {:ok, _} =
+                   block_until(
+                     %{
+                       :"$kind" => :muster_rpc_worker_result,
+                       node: ^c_node,
+                       router: ^t_node,
+                       function: :apply_delta
+                     },
+                     10_000
+                   )
 
-          # C actually dies, and the periodic departed-source sweep collects
-          # whatever is attributable to it. That sweep drops C's rows, so the row
-          # assertion below must not be satisfied by it: the check phase confirms
-          # the snapshot never got in to begin with.
+          assert Muster.members(scope) == [t_node]
+          assert status(scope) == :ready
+
+          # A drained node must not come back as a fan-out target.
+          vh = :persistent_term.get({Forum.Muster, scope, :view_hash})
+          assert {:ok, srcs} = Muster.targets(scope, g, vh)
+
+          refute c_node in srcs,
+                 "#{inspect(c_node)} drained gracefully, but its late in-flight rebalance " <>
+                   "announcement resurrected its occupancy row on #{inspect(t_node)}: " <>
+                   "targets/3 returns #{inspect(srcs)}"
+
+          # The departure watermark is the one per-source watermark that outlives
+          # its writer, and nothing but the departed-source sweep clears it. Once C
+          # is dead and disconnected that sweep must collect it: a dead node's
+          # per-node state is garbage, not something to keep for the life of the
+          # process.
           Node.monitor(c_node, true)
           :ok = stop_supervised({:peer, c_name})
           assert_receive {:nodedown, ^c_node}, 5_000
@@ -6287,55 +6335,31 @@ defmodule Forum.MusterDistributedTest do
                      10_000
                    )
 
-          # T's heartbeat has fired several times by now (300ms in this describe's
-          # setup) and drop_stale_router_entries re-judges on every :ready
-          # evaluation. Neither can touch such a row -- source_agrees?/4 needs C's
-          # announced view to equal ours, and a resurrected marker carries C's
-          # old, C-inclusive hash.
-
-          assert Muster.members(scope) == [t_node]
-          assert status(scope) == :ready
-
-          # A drained node must not come back as a fan-out target. Today it does:
-          # every broadcast for g on this router fans out to a node that is gone,
-          # for the life of this OS process.
-          vh = :persistent_term.get({Forum.Muster, scope, :view_hash})
-          assert {:ok, srcs} = Muster.targets(scope, g, vh)
-
-          refute c_node in srcs,
-                 "#{inspect(c_node)} drained gracefully and is dead, but a late in-flight " <>
-                   "snapshot resurrected its occupancy row on #{inspect(t_node)}: " <>
-                   "targets/3 returns #{inspect(srcs)}"
-
-          # The departure watermark is the one per-source watermark that outlives
-          # its writer, and nothing but the departed-source sweep clears it. The
-          # sweep must have collected it along with the rows: a dead node's
-          # per-node state is garbage, not something to keep for the life of the
-          # process.
           dump = GenServer.call(Forum.Supervisor.name(scope), :dump)
 
           refute Map.has_key?(dump.applied_snapshot_seq, c_node),
                  "the departure watermark for #{inspect(c_node)} outlived its death and the " <>
                    "departed-source sweep left it behind"
 
-          %{c_node: c_node}
+          %{c_node: c_node, t_node: t_node}
         end,
         fn result, trace ->
-          # The mechanism, not just the outcome: the late snapshot was REJECTED at
-          # the guard rather than applied and cleaned up afterwards. C never sent
-          # us a snapshot while it was a member (it held nothing at formation and
-          # its join triggered no rebalance), so a single apply from C anywhere in
-          # this trace is the one we injected getting through.
-          refute Enum.any?(
-                   of_kind(trace, :muster_node_state_received),
-                   &(&1.source == result.c_node)
-                 ),
-                 "the late snapshot was applied; the departure watermark did not reject it"
+          # The late announcement was rejected at the guard rather than applied and cleaned up afterwards.
+          # C's rebalance out of the 3-node view is the only announcement it ever
+          # dispatched to T (it held nothing before that, and no earlier round
+          # moved a group of its onto T), so a single apply from C on T anywhere in
+          # this trace is the one we parked getting through.
+          applies =
+            of_kind(trace, :muster_delta_received) ++
+              of_kind(trace, :muster_node_state_received)
+
+          refute Enum.any?(applies, &(&1.source == result.c_node and &1.node == result.t_node)),
+                 "the late announcement was applied and the departure watermark did not reject it"
         end
       )
     end
 
-    # The sibling of the late-snapshot case, on the OTHER dispatch path.
+    # The sibling of the late-announcement case, on the OTHER dispatch path.
     #
     # A first-member join fires a synchronous :occupied claim from the source's
     # SHARD, in its own :erpc worker, stamped with a seq taken at dispatch time.
