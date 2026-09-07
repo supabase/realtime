@@ -4012,7 +4012,6 @@ defmodule Forum.MusterDistributedTest do
                  "#{c_node} drained and died, and #{t_node}'s coordinator " <>
                    "crashed in between, so nothing the departure left behind survived while " <>
                    "the Supervisor-owned table kept the row: targets/3 returns #{inspect(srcs)}"
-
         end,
         fn _trace -> :ok end
       )
@@ -5937,10 +5936,6 @@ defmodule Forum.MusterDistributedTest do
             until: %{:"$kind" => :test_release}
           )
 
-          # A generous timeout_ms makes the difference stark: with the bug drain
-          # would block ~30s on B; with the fix B's :DOWN drops it from the wait
-          # and the settle window replies in ~settle_ms. Run in a task since the
-          # call blocks the caller until the async reply.
           task =
             Task.async(fn -> Muster.drain(scope, timeout_ms: 30_000, settle_ms: 100) end)
 
@@ -5953,7 +5948,6 @@ defmodule Forum.MusterDistributedTest do
           # drain returns :ok (A acked, B departed) well within timeout_ms.
           assert :ok = Task.await(task, 10_000)
 
-          # Release the (now-dead) ordering hook so check_trace teardown isn't wedged.
           tp(:test_release, %{})
 
           # A leaver never rebalances itself, not even to evict the peer that
@@ -6068,10 +6062,9 @@ defmodule Forum.MusterDistributedTest do
 
     # The settle window keeps Scope + the occupancy table alive after all peers
     # rebalanced the leaver out, so a broadcast routed to the leaver as router just
-    # before the handoff still gets an answer -- and that answer is a FLOOD, never
+    # before the handoff still gets an answer and that answer is a flood, never
     # a decision. A leaver publishes :rebalancing at drain start and stays there:
-    # from the first eviction on its table is no longer maintained (see the
-    # stale-view test below for the miss a decision would cause), so it must
+    # from the first eviction on its table is no longer maintained, so it must
     # send every sender to the flood path. The table itself is intact and the
     # coordinator alive throughout. Observed via :muster_drain_acked, which fires
     # when settle opens.
@@ -6088,7 +6081,7 @@ defmodule Forum.MusterDistributedTest do
           start_remote_muster(pc, scope)
           await_ready([t_node, c_node])
 
-          # C is the router for g; T holds it, so C's occupancy has {g, T}.
+          # C is the router for g. T holds it, so C's occupancy has {g, T}.
           g = group_routed_to(scope, c_node)
           assert g, "no group routing to C found"
           :ok = Muster.join(scope, g, spawn(fn -> Process.sleep(:infinity) end))
@@ -6130,18 +6123,18 @@ defmodule Forum.MusterDistributedTest do
       )
     end
 
-    # Why a leaver must flood. Peers evict it one at a time, and from the FIRST
+    # Why a leaver must flood. Peers evict it one at a time, and from the first
     # eviction its occupancy table is no longer maintained: Q, having evicted C,
     # sends its new first-member claim for g to the newly-elected router (per Q's
-    # ring), never to C. T, which has NOT yet processed the leave, still routes g
-    # to C and asks it under the old {T,C,Q} view hash -- which C still holds,
+    # ring), never to C. T, which has not yet processed the leave, still routes g
+    # to C and asks it under the old {T,C,Q} view hash, which C still holds,
     # since it never rebalances itself. If C were still :ready it would match
     # that hash and answer from a table missing Q's brand-new member: a silent
     # miss the crash path never has (a dead router fails the call and the sender
     # floods). C must answer {:error, :flood}.
     #
     # T's coordinator is parked on the leave with force_ordering, exactly the
-    # state a slow peer is in for the length of one message hop; everything T
+    # state a slow peer is in for the length of one message hop. Everything T
     # does here (router/2, view_hash/1, the targets RPC) is what a broadcaster
     # does and touches no coordinator.
     test "a draining router floods for a broadcaster still on the old view", %{scope: scope} do
@@ -6187,12 +6180,12 @@ defmodule Forum.MusterDistributedTest do
           )
 
           # A first member for g joins on Q. Q's ring no longer has C, so the
-          # claim goes to whichever of {T,Q} now routes g -- never to C.
+          # claim goes to whichever of {T,Q} now routes g but never to C.
           assert :ok = :peer.call(pq, MusterPeerAux, :join, [scope, g])
           refute q_node in occupancy_on(c_node, scope, g)
 
           # T is exactly where a slow broadcaster is: :ready on the old view,
-          # routing g to C, tagging with the old hash -- which C still holds.
+          # routing g to C, tagging with the old hash which C still holds.
           assert status(scope) == :ready
           assert {:ok, ^c_node} = Muster.router(scope, g)
           t_vh = Muster.view_hash(scope)
@@ -6210,22 +6203,20 @@ defmodule Forum.MusterDistributedTest do
       )
     end
 
-    # A graceful leave must be FINAL on the peer: nothing the leaver had already
+    # A graceful leave must be final on the peer: nothing the leaver had already
     # put on the wire may resurrect it after the peer rebalanced it out.
     #
-    # The hole this covers: snapshots/deltas are dispatched by MONITORED WORKERS
-    # via :erpc, NOT over the coordinator->coordinator dist channel that carries
+    # The hole this covers: snapshots/deltas are dispatched by monitored workers
+    # via :erpc, not over the coordinator->coordinator dist channel that carries
     # {:muster_leaving, ...}. Those two channels have no ordering relation, so a
     # snapshot dispatched by C's rebalance just before it drained can land on T
-    # AFTER T processed the leave and ran depart_peer/3 -- and unlike the crash
-    # path, C is genuinely still alive to have that RPC land (drain is pre-death).
-    # depart_peer/3 DELETES applied_snapshot_seq[C], which would leave the late
+    # after T processed the leave and ran depart_peer/3. C is genuinely still alive
+    # to have that RPC land (drain is pre-death).
+    # depart_peer/3 deletes applied_snapshot_seq[C], which would leave the late
     # apply's only guard (`seq <= watermark`) disarmed, free to re-insert C's
     # occupancy rows plus a member_views entry. What holds here is
     # leave_watermark/3 re-arming that guard at the leave's seq. Nothing else
-    # would: {:nodedown, _} is a no-op and drop_stale_router_entries skips the
-    # rows because source_agrees?/4 fails (the resurrected marker carries C's old,
-    # C-inclusive view hash, which can never equal T's).
+    # would.
     #
     # We stand in for the delayed :erpc by calling the receiver-side entry point
     # (Scope.receive_node_state/6) on T directly with the exact arguments C's
