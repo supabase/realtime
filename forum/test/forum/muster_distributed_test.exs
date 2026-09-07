@@ -5768,10 +5768,7 @@ defmodule Forum.MusterDistributedTest do
       # peer must ignore every one of those discover offers.
       #
       # A short tombstone window because it is also the interval of the sweep that
-      # collects a departed source (reap_departed_sources/1): the production
-      # default (rpc_timeout_ms x 5 = 25s) would outlast any test's patience. The
-      # tests that care block on :muster_departed_source_reaped rather than on
-      # this number.
+      # collects a departed source (reap_departed_sources/1).
       start_supervised!(
         spec(scope,
           vacant_flush_interval_ms: 100,
@@ -5809,7 +5806,7 @@ defmodule Forum.MusterDistributedTest do
           start_remote_muster(pc, scope)
           await_ready([t_node, a_node, c_node])
 
-          # A group C is the router for, held (as a member) on A -- so its source
+          # A group C is the router for, held (as a member) on A. So its source
           # row lives on C and must be re-announced to the new router when C leaves.
           g = group_routed_to(scope, c_node)
           assert g, "no group routing to C found"
@@ -5825,7 +5822,7 @@ defmodule Forum.MusterDistributedTest do
           assert Enum.sort(Muster.members(scope)) == Enum.sort([t_node, a_node])
 
           # The group C routed is reachable on the newly elected router, with A's
-          # source row intact -- no missed broadcast across the handoff.
+          # source row intact
           {:ok, r} = Muster.router(scope, g)
           assert r != c_node
           assert a_node in occupancy_on(r, scope, g)
@@ -5874,8 +5871,8 @@ defmodule Forum.MusterDistributedTest do
       )
     end
 
-    # The unacked set on timeout must list exactly the peers that never acked -- a
-    # peer that did rebalance us out must not appear. A acks normally; B's
+    # The unacked set on timeout must list exactly the peers that never acked.
+    # A peer that did rebalance us out must not appear. A acks normally while B's
     # leave-handling is parked. drain must return {:timeout, [B]}, not [A, B] or [A].
     test "timeout lists only the peers that never acked", %{scope: scope} do
       t_node = node()
@@ -5896,14 +5893,14 @@ defmodule Forum.MusterDistributedTest do
           start_remote_muster(pb, scope)
           await_ready([t_node, a_node, b_node])
 
-          # Park ONLY B the instant it receives our leave, so B can neither depart
+          # Park only B the instant it receives our leave, so B can neither depart
           # us nor ack until released. A is untouched and acks normally.
           force_ordering(
             delay: %{:"$kind" => :muster_leaving_received, node: ^b_node},
             until: %{:"$kind" => :test_release}
           )
 
-          # A acks well within timeout_ms; B never does, so the unacked set (the
+          # A acks well within timeout_ms. B never does, so the unacked set (the
           # difference leave_expected -- leave_acked) must be exactly [B].
           assert {:timeout, [^b_node]} =
                    Muster.drain(scope, timeout_ms: 1_000, settle_ms: 100)
@@ -5934,7 +5931,7 @@ defmodule Forum.MusterDistributedTest do
           await_ready([t_node, a_node, b_node])
 
           # Park B the instant it receives our leave so it can neither depart us
-          # nor ack -- it will die still owing an ack. A is untouched and acks.
+          # nor ack as it will die still owing an ack. A is untouched and acks.
           force_ordering(
             delay: %{:"$kind" => :muster_leaving_received, node: ^b_node},
             until: %{:"$kind" => :test_release}
@@ -5961,8 +5958,8 @@ defmodule Forum.MusterDistributedTest do
 
           # A leaver never rebalances itself, not even to evict the peer that
           # died under it: T's ring is still the full 3-node view (B's death only
-          # released it from the drain wait), and A -- which evicted T on the
-          # leave -- was NOT handed a fresh snapshot/delta from T's would-be
+          # released it from the drain wait), and A, which evicted T on the
+          # leave, was not handed a fresh snapshot/delta from T's would-be
           # rebalance. Such a write would carry a seq above the departure
           # watermark A parked, pass A's guard, and resurrect T's member_views
           # entry on A as a phantom until T actually dies.
