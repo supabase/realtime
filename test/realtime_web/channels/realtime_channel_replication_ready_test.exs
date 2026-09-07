@@ -86,10 +86,42 @@ defmodule RealtimeWeb.RealtimeChannelReplicationReadyTest do
     refute_receive %Socket.Message{event: "system"}, 1000
   end
 
-  defp join(tenant) do
+  test "opts in when replication_ready is the string \"true\"", %{tenant: tenant} do
+    expect(Connect, :lookup_or_start_connection, fn _ -> {:ok, self()} end)
+    expect(Connect, :replication_status, fn _ -> {:ok, self()} end)
+
+    assert {:ok, _, _} = join_with(tenant, "true")
+
+    assert_receive %Socket.Message{event: "system", payload: %{message: "Replication connection established"}}, 500
+  end
+
+  test "does not opt in when replication_ready is the string \"false\"", %{tenant: tenant} do
+    expect(Connect, :lookup_or_start_connection, fn _ -> {:ok, self()} end)
+    reject(&Connect.replication_status/1)
+
+    assert {:ok, _, _} = join_with(tenant, "false")
+
+    refute_receive %Socket.Message{event: "system"}, 1000
+  end
+
+  test "does not opt in when replication_ready is not a boolean", %{tenant: tenant} do
+    expect(Connect, :lookup_or_start_connection, fn _ -> {:ok, self()} end)
+    reject(&Connect.replication_status/1)
+
+    assert {:ok, _, _} = join_with(tenant, "maybe")
+
+    refute_receive %Socket.Message{event: "system"}, 1000
+  end
+
+  defp join(tenant), do: join_with(tenant, true)
+
+  defp join_with(tenant, replication_ready) do
     jwt = generate_jwt_token(tenant)
     {:ok, socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
-    subscribe_and_join(socket, "realtime:test", %{"config" => %{"broadcast" => %{"replication_ready" => true}}})
+
+    subscribe_and_join(socket, "realtime:test", %{
+      "config" => %{"broadcast" => %{"replication_ready" => replication_ready}}
+    })
   end
 
   defp conn_opts(tenant, token) do
