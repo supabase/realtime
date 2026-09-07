@@ -85,9 +85,9 @@ defmodule Realtime.MixProject do
       {:libcluster_postgres, "~> 0.2"},
       {:uuid, "~> 1.1"},
       {:prom_ex, "~> 1.10"},
-      # prom_ex depends on peep ~> 3.0 but there is no issue using peep ~> 4.0
-      # https://github.com/akoutmos/prom_ex/pull/270
-      {:peep, "~> 4.3", override: true},
+      # `peep` 4.4.0 doesn't seem backwards compatible for us, tests fail not knowing a struct we use:  `Peep.Persistent`
+      # likely, as it's a record now: https://github.com/rkallos/peep/pull/64/changes#diff-e4d3a94d15db756ca760129d7f80f6794e0a0b3b3967591fc42537f348526b6c
+      {:peep, "~> 4.3.1"},
       {:joken, "~> 2.6"},
       {:nimble_zta, "~> 0.1"},
       {:ex_json_schema, "~> 0.11"},
