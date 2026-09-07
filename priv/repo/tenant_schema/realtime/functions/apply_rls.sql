@@ -57,6 +57,8 @@ declare
     cols_record record;
     -- Subscription ids visible at the role level (before fanning out by selected_columns)
     visible_role_sub_ids uuid[] = '{}';
+    -- Subscription ids whose RLS evaluation raised at the role level
+    errored_role_sub_ids uuid[] = '{}';
 
 begin
     perform set_config('role', null, true);
@@ -193,6 +195,7 @@ begin
 
             -- Collect all visible subscription IDs for this role (filter check + RLS check)
             visible_role_sub_ids = '{}';
+            errored_role_sub_ids = '{}';
 
             for subscription_id, claims in (
                     select
@@ -215,14 +218,29 @@ begin
                 if not is_rls_enabled or action = 'DELETE' then
                     visible_role_sub_ids = visible_role_sub_ids || subscription_id;
                 else
-                    -- Check if RLS allows the role to see the record
-                    perform
-                        -- Trim leading and trailing quotes from working_role because set_config
-                        -- doesn't recognize the role as valid if they are included
-                        set_config('role', trim(both '"' from working_role::text), true),
-                        set_config('request.jwt.claims', claims::text, true);
+                    -- Check if RLS allows the role to see the record.
+                    --
+                    -- A policy (or any function it calls) can raise on this subscription's
+                    -- stored claims - a cast of a malformed claim is enough. Contain that to
+                    -- the subscription it came from: uncaught, the exception propagates out
+                    -- of apply_rls and takes down the whole list_changes call, so every
+                    -- subscriber on the tenant loses the batch - and because the slot's
+                    -- confirmed_flush advances during decoding, those changes are gone
+                    -- rather than replayed on the next poll.
+                    begin
+                        perform
+                            -- Trim leading and trailing quotes from working_role because set_config
+                            -- doesn't recognize the role as valid if they are included
+                            set_config('role', trim(both '"' from working_role::text), true),
+                            set_config('request.jwt.claims', claims::text, true);
 
-                    execute 'execute walrus_rls_stmt' into subscription_has_access;
+                        execute 'execute walrus_rls_stmt' into subscription_has_access;
+                    exception
+                        when others then
+                            subscription_has_access = false;
+                            errored_role_sub_ids = errored_role_sub_ids || subscription_id;
+                            raise warning 'WarnApplyingRlsToSubscription %: %', subscription_id, sqlerrm;
+                    end;
 
                     -- Reset the role on every FOR..LOOP batch execution.
                     -- The first batch of 10 rows is pre-fetched using the current connection role (PG internal behaviour)
@@ -364,6 +382,40 @@ begin
                     end
                 )::realtime.wal_rls;
             end loop;
+
+            -- Fan out 500 error per distinct selected_columns for the subscriptions whose
+            -- RLS evaluation raised. The record itself is withheld - only schema, table and
+            -- action are sent, same shape as the 400/401 rows above - so a policy that fails
+            -- to evaluate never discloses the row it was meant to gate.
+            if array_length(errored_role_sub_ids, 1) > 0 then
+                for cols_record in
+                    select selected_columns
+                    from (
+                        select distinct selected_columns
+                        from unnest(subscriptions) s
+                        where s.claims_role = working_role and s.subscription_id = any(errored_role_sub_ids)
+                    ) t
+                    order by coalesce(array_to_string(selected_columns, ','), '')
+                loop
+                    working_selected_columns := cols_record.selected_columns;
+                    return next (
+                        jsonb_build_object(
+                            'schema', wal ->> 'schema',
+                            'table', wal ->> 'table',
+                            'type', action
+                        ),
+                        is_rls_enabled,
+                        (
+                            select array_agg(s.subscription_id)
+                            from unnest(subscriptions) s
+                            where s.claims_role = working_role
+                              and (s.selected_columns is not distinct from working_selected_columns)
+                              and s.subscription_id = any(errored_role_sub_ids)
+                        ),
+                        array['Error 500: Internal Server Error, RLS policy evaluation failed']
+                    )::realtime.wal_rls;
+                end loop;
+            end if;
 
         end if;
     end loop;
