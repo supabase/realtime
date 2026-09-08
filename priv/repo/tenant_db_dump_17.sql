@@ -1009,10 +1009,19 @@ begin
         '{}'
     ) from unnest(new.filters) f;
 
-    new.selected_columns = (
-        select array_agg(c order by c)
-        from unnest(new.selected_columns) c
-    );
+    -- Normalize selected_columns order so ARRAY['a','b'] and ARRAY['b','a'] are treated
+    -- as the same subscription group in apply_rls. Preserve an empty array as '{}'
+    -- ("primary keys only") so it stays distinct from NULL ("all columns"); array_agg
+    -- over an empty set would otherwise collapse '{}' back to NULL.
+    if new.selected_columns is not null then
+        new.selected_columns = coalesce(
+            (
+                select array_agg(c order by c)
+                from unnest(new.selected_columns) c
+            ),
+            '{}'::text[]
+        );
+    end if;
 
     return new;
 end;
@@ -1499,3 +1508,4 @@ INSERT INTO realtime."schema_migrations" (version) VALUES (20260706120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260707120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260709120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260714120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20260827120000);

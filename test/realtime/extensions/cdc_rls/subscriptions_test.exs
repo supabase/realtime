@@ -1115,8 +1115,8 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
     end
 
     @tag without_db: true
-    test "passing an empty select list is treated as no column selection" do
-      assert {:ok, {"*", "public", "messages", [], nil}} =
+    test "passing an empty select list means primary keys only (distinct from no select)" do
+      assert {:ok, {"*", "public", "messages", [], []}} =
                Subscriptions.parse_subscription_params(%{
                  "schema" => "public",
                  "table" => "messages",
@@ -1172,6 +1172,87 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
         [wal_result, _] = matching
         assert Map.has_key?(wal_result["record"], "id")
         assert Map.has_key?(wal_result["record"], "details")
+      after
+        Postgrex.query(conn, "SELECT pg_drop_replication_slot($1)", [slot_name])
+      end
+    end
+
+    test "subscription with an empty select stores '{}' in the database (primary keys only)", %{conn: conn} do
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test", "select" => []})
+
+      params_list = [
+        %{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}
+      ]
+
+      assert {:ok, [%Postgrex.Result{}]} =
+               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+
+      # '{}' is preserved rather than collapsed to NULL, so it stays distinct from
+      # "no select" (all columns)
+      assert %Postgrex.Result{rows: [[[]]]} =
+               Postgrex.query!(conn, "select selected_columns from realtime.subscription", [])
+    end
+
+    test "a NULL (all columns) and a '{}' (primary keys only) subscription for the same table coexist", %{conn: conn} do
+      # A client can subscribe to the same table both without a select (all columns)
+      # and with select: [] (primary keys only). Each postgres_changes entry gets its
+      # own subscription_id (UUID.uuid1/0 in RealtimeChannel), so the two rows never
+      # share the leading column of the unique index and are never merged by its
+      # `coalesce(selected_columns, '{}')` expression, which otherwise treats NULL and
+      # '{}' as equal. Guard that invariant here: if subscription_id ever stopped being
+      # unique per entry, the coalesce would silently upsert one of these over the other.
+      {:ok, all_columns_params} = Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test"})
+
+      {:ok, pkeys_only_params} =
+        Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test", "select" => []})
+
+      params_list = [
+        %{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: all_columns_params},
+        %{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: pkeys_only_params}
+      ]
+
+      assert {:ok, [%Postgrex.Result{}, %Postgrex.Result{}]} =
+               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+
+      # Two distinct rows survive: NULL (all columns) and '{}' (primary keys only).
+      assert %Postgrex.Result{rows: [[nil], [[]]]} =
+               Postgrex.query!(
+                 conn,
+                 "select selected_columns from realtime.subscription order by selected_columns nulls first",
+                 []
+               )
+    end
+
+    test "apply_rls returns only primary keys in the payload when select is empty", %{conn: conn} do
+      sub_id = UUID.uuid1()
+      slot_name = "test_apply_rls_empty_select_#{:rand.uniform(999_999)}"
+
+      Postgrex.query!(
+        conn,
+        "insert into realtime.subscription (subscription_id, entity, claims, selected_columns) values ($1::text::uuid, 'public.test'::regclass, $2, '{}')",
+        [sub_id, %{"role" => "anon"}]
+      )
+
+      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json')", [slot_name])
+
+      try do
+        Postgrex.query!(conn, "insert into test (details) values ('hello')", [])
+
+        %{rows: rows} =
+          Postgrex.query!(
+            conn,
+            "select wal, subscription_ids from realtime.list_changes($1, $2, 100, 1048576)",
+            ["supabase_realtime_test", slot_name]
+          )
+
+        bin_sub_id = UUID.string_to_binary!(sub_id)
+        matching = Enum.find(rows, fn [_wal, sub_ids] -> bin_sub_id in (sub_ids || []) end)
+        assert matching != nil, "Expected sub_id in list_changes result. rows=#{inspect(rows)}"
+        [wal_result, _] = matching
+        # Only the primary key (id) is present; the non-pkey column is excluded
+        assert Map.has_key?(wal_result["record"], "id")
+        refute Map.has_key?(wal_result["record"], "details")
       after
         Postgrex.query(conn, "SELECT pg_drop_replication_slot($1)", [slot_name])
       end
