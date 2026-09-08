@@ -6555,7 +6555,6 @@ defmodule Forum.MusterDistributedTest do
           # moment it needs to be sent. If it is not sent before C dies, the write
           # never happens at all and the assertion below says so loudly rather
           # than passing vacuously.
-          # If the force_ordering delay emitted a tracepoint we could block on it
           Process.sleep(300)
 
           assert :ok = :peer.call(pc, MusterPeerAux, :drain, [scope, [settle_ms: 100]])
@@ -6610,35 +6609,44 @@ defmodule Forum.MusterDistributedTest do
     end
 
     # Draining is non-resurrecting: once leaving, the node suppresses outbound
-    # self-assertion and ignores inbound discovery, so no peer can re-pair it. T
-    # re-offers discovery every heartbeat (300ms); C must ignore all of them and
-    # stay out of T's membership. C keeps its own full view. Ot never rebalances
-    # itself.
+    # self-assertion and ignores inbound discovery, so no peer can re-pair it.
+    # T re-offers discovery every heartbeat (300ms) to every connected
+    # non-member; C must ignore all of them and stay out of T's membership.
     test "a drained node is not resurrected by discovery", %{scope: scope} do
       t_node = node()
       c_name = ~c"muster_drain_lame_#{System.unique_integer([:positive])}"
       c_node = :"#{c_name}@127.0.0.1"
 
-      {:ok, pc, ^c_node} = Peer.start(name: c_name, aux_mod: @aux_mod)
-      start_remote_muster(pc, scope)
-      wait_until(fn -> Enum.sort(Muster.members(scope)) == Enum.sort([t_node, c_node]) end)
+      check_trace(
+        fn ->
+          {:ok, pc, ^c_node} = Peer.start(name: c_name, aux_mod: @aux_mod)
+          start_remote_muster(pc, scope)
 
-      assert :ok = :peer.call(pc, MusterPeerAux, :drain, [scope, [settle_ms: 200]])
-      wait_until(fn -> Muster.members(scope) == [t_node] end)
+          wait_until(fn ->
+            Enum.sort(Muster.members(scope)) == Enum.sort([t_node, c_node])
+          end)
 
-      # T re-offers discovery ~3x over this window; C must ignore every one.
-      Process.sleep(1_000)
-      assert Muster.members(scope) == [t_node]
+          assert :ok = :peer.call(pc, MusterPeerAux, :drain, [scope, [settle_ms: 200]])
+          wait_until(fn -> Muster.members(scope) == [t_node] end)
 
-      # The departing node kept its own full ring/view (it does not rebalance
-      # itself); only the peers rebalanced it out.
-      assert :erpc.call(c_node, Muster, :members, [scope]) == Enum.sort([t_node, c_node])
+          assert {:ok, _} =
+                   block_until(
+                     %{:"$kind" => :muster_rediscover, node: ^t_node, target: ^c_node},
+                     3,
+                     10_000,
+                     0
+                   )
+
+          assert Muster.members(scope) == [t_node]
+
+          # The departing node kept its own full ring/view (it does not rebalance
+          # itself); only the peers rebalanced it out.
+          assert :erpc.call(c_node, Muster, :members, [scope]) == Enum.sort([t_node, c_node])
+        end,
+        fn _trace -> :ok end
+      )
     end
 
-    # A join on a draining node fails loudly with {:error, :draining} instead of
-    # creating a local member the cluster can no longer route to. A singleton drain
-    # returns :ok immediately (no peers to evacuate to), publishes :rebalancing
-    # like any other leaver, and refuses a repeat.
     test "join is rejected once draining", %{scope: scope} do
       assert :ok = Muster.drain(scope)
 
