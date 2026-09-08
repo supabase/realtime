@@ -21,8 +21,8 @@ defmodule Realtime.Integration.MusterDrainShutdownTest do
     assert :erpc.call(peer, Application, :fetch_env!, [:realtime, :muster_scope]) == scope
 
     assert eventually(fn ->
-      Enum.sort(Muster.members(scope)) == Enum.sort([local, peer]) and Muster.status(scope) == :ready
-    end)
+             Enum.sort(Muster.members(scope)) == Enum.sort([local, peer]) and Muster.status(scope) == :ready
+           end)
 
     # Terminate the drainer child on the peer: this runs Realtime.MusterDrainer's
     # terminate/2 -> Forum.Muster.drain/2 while the peer's coordinator is alive.
