@@ -6359,23 +6359,19 @@ defmodule Forum.MusterDistributedTest do
       )
     end
 
-    # The sibling of the late-announcement case, on the OTHER dispatch path.
-    #
     # A first-member join fires a synchronous :occupied claim from the source's
-    # SHARD, in its own :erpc worker, stamped with a seq taken at dispatch time.
+    # shard, in its own :erpc worker, stamped with a seq taken at dispatch time.
     # That write lands straight in the router's occupancy table: it never touches
     # applied_snapshot_seq, so the departure watermark a graceful leave parks
     # (leave_watermark/3) cannot see it, and it carries a seq far above that
     # watermark anyway. A claim dispatched in the instant before drain/2 closed
     # the join gate can therefore land on us after we evicted the leaver, and no
     # guard can reject it. What catches it is reap_departed_sources/1, once the
-    # leaver is both out of our view and disconnected -- disconnection is what
+    # leaver is both out of our view and disconnected. Disconnection is what
     # provably ends the window, since an :erpc cannot land from a dead node.
-    # Nothing else would collect the row -- {:nodedown, _} is a no-op, and
-    # drop_stale_router_entries cannot judge a row whose source will never
-    # announce our view again.
+    # Nothing else would collect the row.
     #
-    # The claim here is a real first-member join on the leaver; we only schedule
+    # The claim here is a real first-member join on the leaver. We only schedule
     # the landing order, by parking its router-side write with force_ordering
     # until after the eviction.
     test "a late in-flight claim cannot resurrect a gracefully drained node", %{scope: scope} do
@@ -6414,7 +6410,7 @@ defmodule Forum.MusterDistributedTest do
 
           # The claim has left C (the shard is :occupied_pending and its worker is
           # in flight to T, where it will park at the forced :muster_occupied_apply
-          # :start). We wait on this SOURCE-side event because force_ordering
+          # :start). We wait on this source-side event because force_ordering
           # withholds the parked event from the trace until it is released.
           assert {:ok, _} =
                    block_until(
@@ -6498,25 +6494,22 @@ defmodule Forum.MusterDistributedTest do
       )
     end
 
-    # Why the collector has to REPEAT rather than fire once per departure.
+    # Why the "reap_departed_sources/1" repeats instead of firing once per departure.
     #
-    # occupied/5 writes the occupancy table DIRECTLY from the :erpc executor
-    # process (upsert_if_newer, no coordinator hop), so nothing serializes that
-    # write against the coordinator. A claim request that reached T *before* C
-    # died can still be waiting in T's run queue while a sweep runs, and insert
-    # its row a moment after it -- a dead node cannot SEND a new request, but one
-    # already delivered still executes. A one-shot reap keyed to the departure is
-    # spent at that point and the row would be stranded: drop_stale_router_entries
-    # cannot judge a row whose source will never announce our view again, and the
-    # tombstone reaper only reaps tombstones. reap_departed_sources/1 is periodic
-    # and re-derives its answer from the current view and connection set every
-    # tick, so the row is simply collected by the NEXT sweep.
+    # occupied/5 writes the occupancy table straight from the :erpc executor
+    # process (upsert_if_newer, no coordinator hop), so nothing orders that write
+    # against a sweep. A claim that reached T before C died can sit in T's run
+    # queue past a sweep and insert its row just after: a dead node cannot send a
+    # new request, but an already delivered one still runs. A one-shot reap keyed
+    # to the departure is spent by then, and nothing else would collect the row:
+    # drop_stale_router_entries cannot judge a source that will never announce our
+    # view again, and the tombstone reaper only reaps tombstones.
+    # reap_departed_sources/1 runs periodically and re-derives its answer from the
+    # current view and connection set, so the next sweep collects the row.
     #
-    # Nothing is simulated here, unlike the two tests above: :muster_occupied_apply
-    # is a span whose :start fires BEFORE the upsert precisely so a test can park
-    # a real claim's router-side write. We park C's claim, drain and kill C, let a
-    # sweep run with the write still parked, and only then release -- the genuine
-    # interleaving, ordered by snabbkaffe.
+    # :muster_occupied_apply is a span whose :start fires before the upsert, so a
+    # test can park a real claim's router-side write. We park C's claim, drain and
+    # kill C, let a sweep run with the write still parked, then release it.
     test "a claim queued past one sweep is collected by the next", %{scope: scope} do
       t_node = node()
       c_name = ~c"muster_drain_queued_claim_#{System.unique_integer([:positive])}"
@@ -6556,12 +6549,13 @@ defmodule Forum.MusterDistributedTest do
                      10_000
                    )
 
-          # ...and here is the one step we cannot observe: a force_ordering-delayed
+          # Here is the one step we cannot observe: a force_ordering-delayed
           # event stays invisible to the collector until released, so there is no
           # trace point for "the request reached T and parked". Give the :erpc the
           # moment it needs to be sent. If it is not sent before C dies, the write
           # never happens at all and the assertion below says so loudly rather
           # than passing vacuously.
+          # If the force_ordering delay emitted a tracepoint we could block on it
           Process.sleep(300)
 
           assert :ok = :peer.call(pc, MusterPeerAux, :drain, [scope, [settle_ms: 100]])
@@ -6572,8 +6566,7 @@ defmodule Forum.MusterDistributedTest do
           assert_receive {:nodedown, ^c_node}, 5_000
 
           # Let a sweep run while the write is still parked, so the row lands
-          # strictly AFTER a collection rather than before one -- the interleaving
-          # a one-shot reap could not survive.
+          # strictly after a collection rather than before one
           assert {:ok, _} =
                    block_until(
                      %{
@@ -6591,20 +6584,13 @@ defmodule Forum.MusterDistributedTest do
           # exactly as it would if the erpc executor had been scheduled late.
           tp(:test_release, %{})
 
-          landed? =
-            match?(
-              {:ok, _},
-              block_until(
-                %{:"$kind" => :muster_occupied, node: ^t_node, source: ^c_node, group: ^g},
-                5_000
-              )
-            )
+          assert {:ok, _} =
+                   block_until(
+                     %{:"$kind" => :muster_occupied, node: ^t_node, source: ^c_node, group: ^g},
+                     5_000
+                   )
 
-          assert landed?,
-                 "the queued claim never executed, so this window is not reachable: OTP " <>
-                   "must kill a pending :erpc executor when the caller's node goes down"
-
-          # Only the NEXT sweep can collect it now.
+          # Only the next sweep can collect it now.
           wait_until(fn -> c_node not in Muster.occupancy(scope, g) end, 15_000)
 
           assert Muster.members(scope) == [t_node]
