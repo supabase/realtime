@@ -29,7 +29,7 @@ defmodule Realtime.Tenants.Janitor do
     start_after = Application.get_env(:realtime, :janitor_run_after_in_ms, 0)
     chunks = Application.get_env(:realtime, :janitor_chunk_size)
     randomize = Application.get_env(:realtime, :janitor_schedule_randomize)
-    region = Application.get_env(:realtime, :region)
+    region = Realtime.Nodes.region()
 
     state = %__MODULE__{
       timer: timer,

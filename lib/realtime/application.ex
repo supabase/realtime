@@ -75,7 +75,7 @@ defmodule Realtime.Application do
     :syn.set_event_handler(Realtime.SynHandler)
     :ok = :syn.add_node_to_scopes([RegionNodes, Realtime.Tenants.Connect])
 
-    region = Application.get_env(:realtime, :region)
+    region = Realtime.Nodes.region()
     broadcast_pool_size = Application.get_env(:realtime, :broadcast_pool_size, 10)
     presence_pool_size = Application.get_env(:realtime, :presence_pool_size, 10)
     presence_broadcast_period = Application.get_env(:realtime, :presence_broadcast_period, 1_500)
@@ -97,7 +97,7 @@ defmodule Realtime.Application do
     # One Muster scope per region: the atom is otherwise just an identifier, so
     # embedding the region keeps each region's ring/gossip/rebalancing isolated
     # even though ErlDist's broadcast fans out over the whole distribution mesh.
-    muster_scope = :"realtime_channels_#{region || "local"}"
+    muster_scope = :"realtime_channels_#{region}"
     Application.put_env(:realtime, :muster_scope, muster_scope)
 
     :syn.join(RegionNodes, region, self(), node: node())

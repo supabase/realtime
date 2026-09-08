@@ -42,7 +42,7 @@ defmodule Realtime.Repo.Replica do
   """
   @spec replica() :: module()
   def replica do
-    region = Application.get_env(:realtime, :region)
+    region = Realtime.Nodes.region()
     master_region = Application.get_env(:realtime, :master_region) || region
 
     case configured_replica_module(region) do

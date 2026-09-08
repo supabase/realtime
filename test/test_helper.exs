@@ -101,7 +101,7 @@ Mimic.copy(RealtimeWeb.TenantBroadcaster)
 Mimic.copy(NimbleZTA.Cloudflare)
 
 :net_kernel.start([TestEnv.node_name()])
-region = Application.get_env(:realtime, :region)
+region = Realtime.Nodes.region()
 [{pid, _}] = :syn.members(RegionNodes, region)
 :syn.update_member(RegionNodes, region, pid, fn _ -> [node: node()] end)
 
