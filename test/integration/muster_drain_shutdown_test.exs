@@ -28,14 +28,16 @@ defmodule Realtime.Integration.MusterDrainShutdownTest do
     # terminate/2 -> Forum.Muster.drain/2 while the peer's coordinator is alive.
     assert :ok = :erpc.call(peer, Supervisor, :terminate_child, [Realtime.Supervisor, Realtime.MusterDrainer], 30_000)
 
-    # drain/2 stopped the peer from accepting new joins.
-    assert :erpc.call(peer, :persistent_term, :get, [{Forum.Muster, scope, :accepting_joins}, true]) == false
+    # drain/2 stopped the peer from accepting new joins: a join on the peer for a
+    # peer-local pid is rejected instead of producing occupancy no router knows about.
+    peer_pid = :erpc.call(peer, :erlang, :spawn, [:timer, :sleep, [:infinity]])
+    assert :erpc.call(peer, Muster, :join, [scope, :drain_probe, peer_pid]) == {:error, :draining}
 
-    # The survivor rebalanced the peer out of its ring...
+    # The survivor rebalanced the peer out of its ring.
     assert eventually(fn -> Muster.members(scope) == [local] end)
 
-    # ...and it did so while the peer node was still alive and connected -- proof
-    # this was the graceful leave, not an abrupt-death :DOWN.
+    # It did so while the peer node was still alive and connected.
+    # Not an abrupt-death :DOWN.
     assert peer in Node.list()
     assert :erpc.call(peer, Process, :whereis, [Forum.Supervisor.name(scope)]) |> is_pid()
   end

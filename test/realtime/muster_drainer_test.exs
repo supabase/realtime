@@ -13,8 +13,10 @@ defmodule Realtime.MusterDrainerTest do
   end
 
   test "terminating the drainer runs Muster.drain and stops accepting joins", %{scope: scope} do
+    pid = spawn(fn -> Process.sleep(:infinity) end)
+
     # Sanity: joins are accepted before any drain.
-    assert :persistent_term.get({Forum.Muster, scope, :accepting_joins}, true) == true
+    assert Muster.join(scope, "before_drain", pid) == :ok
 
     # The app already runs a Realtime.MusterDrainer under its own name, so give
     # this test instance a distinct registered name.
@@ -25,10 +27,8 @@ defmodule Realtime.MusterDrainerTest do
     :ok = stop_supervised!(Realtime.MusterDrainer)
     refute Process.alive?(drainer)
 
-    # drain/2 flipped accepting_joins off, and a racing join now fails loudly.
-    assert :persistent_term.get({Forum.Muster, scope, :accepting_joins}) == false
-
-    pid = spawn(fn -> Process.sleep(:infinity) end)
-    assert Muster.join(scope, "some_group", pid) == {:error, :draining}
+    # drain/2 stopped this node accepting joins, so a racing join fails loudly
+    # instead of creating a member no router knows about.
+    assert Muster.join(scope, "after_drain", pid) == {:error, :draining}
   end
 end
