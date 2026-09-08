@@ -136,6 +136,15 @@ tenant_max_events_per_second = Env.get_integer("TENANT_MAX_EVENTS_PER_SECOND", 1
 tenant_max_joins_per_second = Env.get_integer("TENANT_MAX_JOINS_PER_SECOND", 100)
 users_scope_shards = Env.get_integer("USERS_SCOPE_SHARDS", 5)
 muster_scope_shards = Env.get_integer("MUSTER_SCOPE_SHARDS", 5)
+
+# Forum.Muster router-role handoff at shutdown (see Realtime.MusterDrainer).
+# `timeout_ms` caps how long we wait for every peer to ack having rebalanced us out
+# of its ring; `settle_ms` is the post-ack window we stay alive servicing inbound
+# route RPCs, and must be at least the Muster scope's :rpc_timeout_ms (5s) so a
+# broadcast a peer routed here just before evicting us can still fan out. The
+# SIGTERM grace period must exceed timeout + settle + the rest of shutdown.
+muster_drain_timeout_ms = Env.get_integer("MUSTER_DRAIN_TIMEOUT_MS", :timer.seconds(10))
+muster_drain_settle_ms = Env.get_integer("MUSTER_DRAIN_SETTLE_MS", 7_500)
 websocket_max_heap_size = div(Env.get_integer("WEBSOCKET_MAX_HEAP_SIZE", 50_000_000), :erlang.system_info(:wordsize))
 
 cluster_strategies = Env.get_binary("CLUSTER_STRATEGIES", "POSTGRES")
@@ -244,6 +253,7 @@ config :realtime,
   presence_permdown_period: presence_permdown_period_in_ms,
   users_scope_shards: users_scope_shards,
   muster_scope_shards: muster_scope_shards,
+  muster_drain_opts: [timeout_ms: muster_drain_timeout_ms, settle_ms: muster_drain_settle_ms],
   postgres_cdc_scope_shards: postgres_cdc_scope_shards,
   master_region: db_master_region,
   region_mapping: region_mapping,

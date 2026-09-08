@@ -3,23 +3,37 @@ defmodule Realtime.MusterDrainer do
   Owns the graceful handoff of this node's Muster **router role** at shutdown.
 
   It does nothing while alive; the whole job is `terminate/2` calling
-  `Forum.Muster.drain/2`. Its child spec sets a `shutdown:` timeout large enough
-  to cover drain's `timeout_ms + settle_ms` plus slack -- the surrounding SIGTERM
-  grace period must exceed that or the BEAM is SIGKILLed mid-drain.
+  `Forum.Muster.drain/2`. Its child spec derives its `shutdown:` timeout from the
+  `:drain_opts` it was given (`timeout_ms + settle_ms` plus slack) and the
+  surrounding SIGTERM grace period must exceed that, plus however long the
+  Endpoint takes to close its websockets first, or the BEAM is SIGKILLed
+  mid-drain.
   """
   use GenServer
   require Logger
 
-  # Must exceed Forum.Muster.drain/2's timeout_ms + settle_ms (defaults 5s + 5s)
-  # so terminate/2 can finish the handoff before the supervisor brutal-kills us.
-  @default_shutdown_ms 20_000
+  # Forum.Muster.drain/2's own defaults, mirrored so the derived shutdown budget
+  # below stays correct when :drain_opts omits either window.
+  @default_timeout_ms 5_000
+  @default_settle_ms 5_000
+
+  # drain/2's GenServer.call already allows timeout + settle + 1s; add slack on
+  # top so the supervisor never brutal-kills terminate/2 mid-handoff.
+  @shutdown_slack_ms 2_500
 
   def child_spec(opts) do
     %{
       id: __MODULE__,
       start: {__MODULE__, :start_link, [opts]},
-      shutdown: Keyword.get(opts, :shutdown, @default_shutdown_ms)
+      shutdown: Keyword.get_lazy(opts, :shutdown, fn -> shutdown_ms(Keyword.get(opts, :drain_opts, [])) end)
     }
+  end
+
+  defp shutdown_ms(drain_opts) do
+    timeout = Keyword.get(drain_opts, :timeout_ms, @default_timeout_ms)
+    settle = Keyword.get(drain_opts, :settle_ms, @default_settle_ms)
+
+    timeout + settle + 1_000 + @shutdown_slack_ms
   end
 
   def start_link(opts) do
