@@ -106,6 +106,16 @@ run = "docker compose -f compose.tests.yml stop"
 description = "Remove the integration test stack"
 run = "docker compose -f compose.tests.yml rm -sf"
 
+[tasks.test-tenant-db-rm]
+description = "Remove the postgres containers `mix test` left behind for TENANT"
+env = { MIX_ENV = "test" }
+run = """
+mix run --no-start -e '
+  TestTenantDb.Backend.Docker.stop_containers()
+  TestTenantDb.Backend.Docker.reap_abandoned_containers()
+'
+"""
+
 [tasks.e2e]
 description = "Run the e2e suite against a local Supabase stack, starting it if needed"
 dir = "test/e2e"
