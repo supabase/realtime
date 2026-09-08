@@ -338,9 +338,6 @@ defmodule Forum.Muster do
     timeout = Keyword.get(opts, :timeout_ms, 5_000)
     settle = Keyword.get(opts, :settle_ms, 5_000)
 
-    # The call blocks the CALLER; the coordinator replies asynchronously after
-    # acks + settle (so its own loop never blocks). Allow for the whole window
-    # plus slack before the call's own timeout.
     GenServer.call(
       Forum.Supervisor.name(scope),
       {:drain, timeout, settle},
