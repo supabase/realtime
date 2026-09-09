@@ -1,7 +1,6 @@
 #!/usr/bin/env bun
 import assert from "assert";
 import { createClient, SupabaseClient, postgresChangesFilter } from "@supabase/supabase-js";
-import { Command } from "commander";
 import kleur from "kleur";
 import { SQL } from "bun";
 import { trace, context, SpanStatusCode, SpanKind, ROOT_CONTEXT } from "@opentelemetry/api";
@@ -10,82 +9,11 @@ import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
-
-const program = new Command()
-  .name("realtime-check")
-  .description("End-to-end Realtime test suite against any Supabase project")
-  .option("--project <ref>", "Supabase project ref (required for staging/prod)")
-  .option("--publishable-key <key>", "Project publishable (anon) key")
-  .option("--secret-key <key>", "Project secret (service role) key")
-  .option("--db-password <password>", "Database password (required for staging/prod)")
-  .option("--env <env>", "Environment: local | staging | development | prod | production (default: prod)", "prod")
-  .option("--domain <domain>", "Email domain for the test user", "example.com")
-  .option("--port <port>", "Override URL port (useful for local)")
-  .option("--url <url>", "Override project URL (e.g. http://127.0.0.1:54321)")
-  .option("--db-url <url>", "Override database URL (e.g. postgresql://postgres:postgres@127.0.0.1:54322/postgres)")
-  .option("--json", "Output results as JSON to stdout")
-  .option("--otel <endpoint>", "OTLP HTTP endpoint for tracing (e.g. http://localhost:4318)")
-  .option("--otel-token <token>", "Bearer token for authenticated OTLP endpoints")
-  .option("--test <categories>", "Comma-separated list of test categories to run: functional,load,connection,load-postgres-changes,load-presence,load-broadcast,load-broadcast-from-db,load-broadcast-replay,broadcast,broadcast-replay,presence,authorization,postgres-changes,postgres-changes-filters,broadcast-changes,broadcast-binary")
-  .option("--debug", "Enable Realtime client debug mode (sets log level to info and enables console logging)")
-  .parse();
-
-const opts = program.opts();
-const ANON_KEY: string = opts.publishableKey;
-const SERVICE_KEY: string = opts.secretKey;
-const dbPassword: string = opts.dbPassword ?? "";
-const { project, domain: EMAIL_DOMAIN, port, json: JSON_OUTPUT, test: TEST_FILTER, otel: OTEL_ARG, otelToken: OTEL_API_TOKEN, url: URL_ARG, dbUrl: DB_URL_ARG, debug: DEBUG } = opts;
-const env: string = opts.env === "production" ? "prod" : opts.env === "development" ? "staging" : opts.env;
-
-const TEST_CATEGORIES = TEST_FILTER
-  ? TEST_FILTER.split(",").map((s: string) => s.trim().toLowerCase())
-  : null;
-
-if (env !== "local" && !project && !(URL_ARG && DB_URL_ARG)) {
-  console.error("--project is required (or provide both --url and --db-url)");
-  process.exit(1);
-}
-if (!ANON_KEY) {
-  console.error("--publishable-key is required");
-  process.exit(1);
-}
-
-const PROJECT_URL = URL_ARG ?? (() => {
-  if (env === "local") return `http://localhost:${port ?? 54321}`;
-  if (env === "staging") return `https://${project}.supabase.red`;
-  return `https://${project}.supabase.co`;
-})();
-
-const DB_URL = DB_URL_ARG ?? (() => {
-  const pw = encodeURIComponent(dbPassword ?? "postgres");
-  if (env === "local") return `postgresql://postgres:${pw}@localhost:${port ?? 54322}/postgres`;
-  if (env === "staging") return `postgresql://postgres:${pw}@db.${project}.supabase.red:5432/postgres`;
-  return `postgresql://postgres:${pw}@db.${project}.supabase.co:5432/postgres`;
-})();
-
-const DB_SSL = env !== "local" ? { rejectUnauthorized: false } : false;
-
-const realtimeLogger = DEBUG
-  ? (kind: string, msg: string, data?: any) => {
-      if (data !== undefined) console.error(`[realtime] ${kind}: ${msg}`, data);
-      else console.error(`[realtime] ${kind}: ${msg}`);
-    }
-  : undefined;
-
-const REALTIME_OPTS = { ...(DEBUG ? { logger: realtimeLogger, logLevel: "info" } : {}) };
-const BROADCAST_CONFIG = { config: { broadcast: { self: true } } };
-const EVENT_TIMEOUT_MS = 8000;
-const RATE_LIMIT_PAUSE_MS = 2000;
-const BROADCAST_API_HEADERS = {
-  "Content-Type": "application/json",
-  "Authorization": `Bearer ${ANON_KEY}`,
-  "apikey": ANON_KEY,
-};
-const LOAD_MESSAGES = 20;
-const LOAD_SETTLE_MS = 5000;
-const LOAD_DELIVERY_SLO = 99;
-
-const OTEL_ENDPOINT = OTEL_ARG;
+import {
+  ANON_KEY, SERVICE_KEY, dbPassword, EMAIL_DOMAIN, JSON_OUTPUT, OTEL_API_TOKEN, DB_URL_ARG, env,
+  TEST_CATEGORIES, PROJECT_URL, DB_URL, DB_SSL, REALTIME_OPTS, BROADCAST_CONFIG, EVENT_TIMEOUT_MS,
+  RATE_LIMIT_PAUSE_MS, BROADCAST_API_HEADERS, LOAD_MESSAGES, LOAD_SETTLE_MS, LOAD_DELIVERY_SLO, OTEL_ENDPOINT,
+} from "./src/context.ts";
 
 let tracer = trace.getTracer("realtime-check");
 let otelProvider: BasicTracerProvider | null = null;
