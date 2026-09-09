@@ -18,6 +18,7 @@ import {
 } from "./src/helpers.ts";
 import { setup, cleanup } from "./src/fixtures.ts";
 import { broadcastBinary } from "./src/suites/broadcast-binary.ts";
+import { authorization } from "./src/suites/authorization.ts";
 
 async function runConnectionTest() {
   suite("connection");
@@ -482,38 +483,6 @@ async function runPresenceTests(_testUser: { email: string; password: string }, 
       assert.strictEqual(joinEvent.key, key);
       assert.strictEqual(joinEvent.newPresences[0].message, message);
       return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "track", value: trackMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
-    } finally {
-      await supabase.removeAllChannels();
-    }
-  });
-}
-
-async function runAuthorizationTests(_testUser: { email: string; password: string }, supabase: SupabaseClient) {
-  suite("authorization check");
-
-  await test("user using private channel cannot connect without permissions", async () => {
-    try {
-      const topic = "restricted:" + crypto.randomUUID();
-      const channel = supabase.channel(topic, { config: { private: true } }).subscribe();
-
-      const { value: finalState, latencyMs: rejectMs } = await waitFor(
-        () => channel.state !== "joining" ? channel.state : null,
-        "channel rejection"
-      );
-
-      assert.notStrictEqual(finalState, "joined", `Expected channel to be rejected but state is: ${finalState}`);
-      return [{ label: "rejection", value: rejectMs, unit: "ms" }];
-    } finally {
-      await supabase.removeAllChannels();
-    }
-  });
-
-  await sleep(RATE_LIMIT_PAUSE_MS);
-  await test("user using private channel can connect with enough permissions", async () => {
-    try {
-      const channel = supabase.channel(randomTopic(), { config: { private: true } });
-      const subscribeMs = await openChannel(channel);
-      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
     } finally {
       await supabase.removeAllChannels();
     }
@@ -1448,7 +1417,7 @@ const descriptors: SuiteDescriptor[] = [
   { name: "broadcast", label: "broadcast extension", needsDb: false, run: () => runBroadcastTests() },
   { name: "broadcast-replay", label: "broadcast replay", needsDb: true, run: ({ testUser, supabase }) => runBroadcastReplayTests(testUser, supabase) },
   { name: "presence", label: "presence extension", needsDb: true, run: ({ testUser, supabase }) => runPresenceTests(testUser, supabase) },
-  { name: "authorization", label: "authorization check", needsDb: true, run: ({ testUser, supabase }) => runAuthorizationTests(testUser, supabase) },
+  authorization,
   { name: "postgres-changes", label: "postgres changes extension", needsDb: true, run: ({ testUser, supabase }) => runPostgresChangesTests(testUser, supabase) },
   { name: "postgres-changes-filters", label: "postgres-changes-filters", needsDb: true, run: ({ testUser, supabase }) => runPostgresChangesFiltersTests(testUser, supabase) },
   { name: "broadcast-changes", label: "broadcast changes", needsDb: true, run: ({ testUser, supabase }) => runBroadcastChangesTests(testUser, supabase) },
