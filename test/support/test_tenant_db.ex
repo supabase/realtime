@@ -228,8 +228,11 @@ defmodule TestTenantDb do
     {label, details} = Backend.current().diagnose(worker)
     _count = :ets.update_counter(@unhealthy_table, label, 1, {label, 0})
 
+    # UTC so it lines up with the container's own log timestamps below.
+    at = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+
     report =
-      "[TestTenantDb] tenant database #{label} (port #{port}) failed its checkout probe: " <>
+      "[TestTenantDb] tenant database #{label} (port #{port}) failed its checkout probe at #{at}: " <>
         "#{reason}\n#{details}"
 
     # Straight to stderr, in the test environment we might not get log lines (capturing etc).

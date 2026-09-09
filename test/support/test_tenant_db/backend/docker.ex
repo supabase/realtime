@@ -106,6 +106,8 @@ defmodule TestTenantDb.Backend.Docker do
 
   @stats_format "mem={{.MemUsage}} mem%={{.MemPerc}} cpu={{.CPUPerc}} pids={{.PIDs}}"
 
+  @all_stats_format "{{.Name}} mem={{.MemUsage}} cpu={{.CPUPerc}} pids={{.PIDs}}"
+
   @activity_query "SELECT pid, state, wait_event_type, wait_event, application_name, " <>
                     "now() - query_start AS running, left(query, 120) FROM pg_stat_activity ORDER BY query_start"
 
@@ -118,7 +120,7 @@ defmodule TestTenantDb.Backend.Docker do
         {"unknown container", "worker #{inspect(pid)} did not report a container name"}
 
       name ->
-        {name, Enum.join(state_of(name) ++ inside(name) ++ logs_of(name), "\n")}
+        {name, Enum.join(state_of(name) ++ host_load() ++ inside(name) ++ logs_of(name), "\n")}
     end
   end
 
@@ -127,6 +129,21 @@ defmodule TestTenantDb.Backend.Docker do
       "verdict: " <> verdict(name),
       "container: " <> docker(["inspect", "--format", @inspect_format, name]),
       "resources: " <> docker(["stats", "--no-stream", "--format", @stats_format, name])
+    ]
+  end
+
+  # One container's CPU number cannot tell it's just this container vs. it's the host
+  # so add host load to distinguish
+  defp host_load do
+    load =
+      case File.read("/proc/loadavg") do
+        {:ok, contents} -> contents |> String.split() |> Enum.take(3) |> Enum.join(" ")
+        _ -> "unknown"
+      end
+
+    [
+      "runner: #{:erlang.system_info(:logical_processors_available)} cores, loadavg #{load}",
+      "all containers:\n" <> docker(["stats", "--no-stream", "--format", @all_stats_format])
     ]
   end
 
@@ -158,7 +175,7 @@ defmodule TestTenantDb.Backend.Docker do
   defp inside(name) do
     if running?(name) do
       [
-        "backends:\n" <> docker(["exec", name, "ps", "-eo", "pid,stat,etime,args"]),
+        "backends:\n" <> docker(["exec", name, "ps", "-eo", "pid,stat,time,etime,rss,args"]),
         "pg_stat_activity:\n" <> psql(name, @activity_query),
         "pg_replication_slots:\n" <> psql(name, @slots_query)
       ]
@@ -167,7 +184,10 @@ defmodule TestTenantDb.Backend.Docker do
     end
   end
 
-  defp logs_of(name), do: ["last 40 log lines:\n" <> docker(["logs", "--tail", "40", name])]
+  # we've seen some tight loops and didn't see where they started,
+  # ---> more log lines to see where it may have started
+  # It's only printed in a failure case so that's ok.
+  defp logs_of(name), do: ["last 200 log lines:\n" <> docker(["logs", "--tail", "200", name])]
 
   defp running?(name) do
     docker(["inspect", "--format", "{{.State.Running}}", name]) == "true"
