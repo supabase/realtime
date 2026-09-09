@@ -18,7 +18,8 @@ defmodule Realtime.Telemetry.Logger do
     [:realtime, :tenants, :migrations, :exception],
     [:realtime, :tenants, :migrations, :reconcile, :stop],
     [:realtime, :tenants, :migrations, :reconcile, :exception],
-    [:phoenix, :error_rendered]
+    [:phoenix, :error_rendered],
+    [:phoenix, :endpoint, :stop]
   ]
 
   def start_link(args) do
@@ -26,6 +27,7 @@ defmodule Realtime.Telemetry.Logger do
   end
 
   def init(handler_id: handler_id) do
+    :telemetry.detach({Phoenix.Logger, [:phoenix, :endpoint, :stop]})
     :telemetry.attach_many(handler_id, @events, &__MODULE__.handle_event/4, [])
 
     {:ok, []}
@@ -100,6 +102,17 @@ defmodule Realtime.Telemetry.Logger do
       log_error("HttpServerError", message)
     else
       log_warning("HttpClientError", message)
+    end
+  end
+
+  def handle_event([:phoenix, :endpoint, :stop], measurements, %{conn: conn}, _config) do
+    duration_ms = System.convert_time_unit(measurements.duration, :native, :millisecond)
+    message = "#{conn.method} #{conn.request_path} - Sent #{conn.status} in #{duration_ms}ms"
+
+    cond do
+      conn.status >= 500 -> log_error("HttpServerError", message)
+      conn.status >= 400 -> log_warning("HttpClientError", message)
+      true -> Logger.info(message)
     end
   end
 

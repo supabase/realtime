@@ -86,4 +86,21 @@ defmodule Realtime.Telemetry.LoggerTest do
       assert {:noreply, []} = TelemetryLogger.handle_info(:unexpected, [])
     end
   end
+
+  describe "phoenix endpoint stop events" do
+    test "logs the request method and path alongside the response" do
+      start_link_supervised!({TelemetryLogger, handler_id: "telemetry-logger-test"})
+
+      conn = %Plug.Conn{method: "GET", request_path: "/api/tenants/abc/health", status: 401, state: :sent}
+
+      log =
+        capture_log(fn ->
+          :telemetry.execute([:phoenix, :endpoint, :stop], %{duration: 1_000_000}, %{conn: conn, options: []})
+        end)
+
+      assert log =~ "GET /api/tenants/abc/health"
+      assert log =~ "401"
+      refute log =~ ~r/^Sent /
+    end
+  end
 end
