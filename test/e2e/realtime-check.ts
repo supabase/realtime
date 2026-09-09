@@ -3,17 +3,20 @@ import assert from "assert";
 import { createClient, SupabaseClient, postgresChangesFilter } from "@supabase/supabase-js";
 import kleur from "kleur";
 import { SQL } from "bun";
-import { trace, context, SpanStatusCode, SpanKind } from "@opentelemetry/api";
 import {
   ANON_KEY, SERVICE_KEY, dbPassword, EMAIL_DOMAIN, JSON_OUTPUT, DB_URL_ARG, env,
   TEST_CATEGORIES, PROJECT_URL, DB_URL, DB_SSL, REALTIME_OPTS, BROADCAST_CONFIG, EVENT_TIMEOUT_MS,
   RATE_LIMIT_PAUSE_MS, BROADCAST_API_HEADERS, LOAD_MESSAGES, LOAD_SETTLE_MS, LOAD_DELIVERY_SLO,
 } from "./src/context.ts";
 import type { Metric } from "./src/runner.ts";
-import { tracer, initOtel, flushOtel, patchFetch, log, test, suite, printSummary, results } from "./src/runner.ts";
+import { initOtel, flushOtel, patchFetch, log, test, suite, printSummary, results } from "./src/runner.ts";
+import type { TableName } from "./src/helpers.ts";
+import {
+  sleep, randomTopic, settle, measureThroughput, waitFor, stopClient, signInUser, waitForSubscribed,
+  openChannel, openPostgresChannel, REPLICATION_READY_CONFIG, openReplicationChannel,
+  executeInsert, executeUpdate, executeDelete,
+} from "./src/helpers.ts";
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const randomTopic = () => "topic:" + crypto.randomUUID();
 const fmtSqlResult = (result: any[]) => {
   const count = (result as any).count ?? result.length;
   return result.length > 0 ? `count=${count} rows=${JSON.stringify(result)}` : `count=${count}`;
@@ -22,141 +25,6 @@ const runSql = (label: string, query: Promise<any[]>): Promise<any[]> =>
   query
     .then((r) => { log(kleur.dim(`setup:   ${label} ok (${fmtSqlResult(r)})`)); return r; })
     .catch((e: unknown) => { log(kleur.red(`setup:   ${label} FAILED: ${e instanceof Error ? e.message : String(e)}`)); throw e; });
-const settle = async (getCount: () => number, expected: number, timeoutMs: number) => {
-  const deadline = performance.now() + timeoutMs;
-  while (getCount() < expected && performance.now() < deadline) await sleep(50);
-};
-
-function measureThroughput(latencies: number[], total: number, label: string, slo: number): Metric[] {
-  const delivered = latencies.length;
-  const deliveryRate = (delivered / total) * 100;
-  const sorted = latencies.slice().sort((a, b) => a - b);
-  if (delivered < total) log(`    ${kleur.yellow(`lost ${total - delivered}/${total} ${label}`)}`);
-  assert(deliveryRate >= slo, `Delivery rate ${deliveryRate.toFixed(1)}% below ${slo}% SLO`);
-  return [
-    { label: "delivered", value: deliveryRate, unit: "%" },
-    { label: "p50", value: sorted[Math.ceil(sorted.length * 0.5) - 1] ?? 0, unit: "ms" },
-    { label: "p95", value: sorted[Math.ceil(sorted.length * 0.95) - 1] ?? 0, unit: "ms" },
-    { label: "p99", value: sorted[Math.ceil(sorted.length * 0.99) - 1] ?? 0, unit: "ms" },
-  ];
-}
-
-async function waitFor<T>(getter: () => T | null, label: string): Promise<{ value: T; latencyMs: number }> {
-  const span = tracer.startSpan(`wait: ${label}`, { kind: SpanKind.INTERNAL });
-  const start = performance.now();
-  const deadline = start + EVENT_TIMEOUT_MS;
-  let value: T | null;
-  return context.with(trace.setSpan(context.active(), span), async () => {
-    while ((value = getter()) === null && performance.now() < deadline) await sleep(50);
-    const latencyMs = performance.now() - start;
-    if (value === null) {
-      const msg = `Timed out waiting for ${label} (${latencyMs.toFixed(0)}ms)`;
-      span.setStatus({ code: SpanStatusCode.ERROR, message: msg });
-      span.end();
-      throw new Error(msg);
-    }
-    span.setAttribute("latency_ms", latencyMs);
-    span.setStatus({ code: SpanStatusCode.OK });
-    span.end();
-    return { value, latencyMs };
-  });
-}
-
-async function stopClient(supabase: SupabaseClient) {
-  await Promise.all([supabase.removeAllChannels(), supabase.auth.stopAutoRefresh()]);
-  const { error } = await supabase.auth.signOut();
-  if (error) log(kleur.dim(`stopClient signOut: ${error.message}`));
-}
-
-async function signInUser(supabase: SupabaseClient, email: string, password: string) {
-  const span = tracer.startSpan("sign in", { kind: SpanKind.INTERNAL });
-  return context.with(trace.setSpan(context.active(), span), async () => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) {
-      span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
-      span.end();
-      throw new Error(`Error signing in: ${error.message}`);
-    }
-    span.setStatus({ code: SpanStatusCode.OK });
-    span.end();
-    return data!.session!.access_token;
-  });
-}
-
-async function waitForSubscribed(channel: ReturnType<SupabaseClient["channel"]>): Promise<number> {
-  const span = tracer.startSpan("wait: subscribe", { kind: SpanKind.INTERNAL });
-  const start = performance.now();
-  const deadline = start + EVENT_TIMEOUT_MS;
-  return context.with(trace.setSpan(context.active(), span), async () => {
-    while (channel.state === "joining" && performance.now() < deadline) await sleep(50);
-    const latencyMs = performance.now() - start;
-    if (channel.state !== "joined") {
-      const msg = `Channel failed to subscribe (topic: ${channel.topic}, state: ${channel.state}, elapsed: ${latencyMs.toFixed(0)}ms)`;
-      span.setStatus({ code: SpanStatusCode.ERROR, message: msg });
-      span.end();
-      throw new Error(msg);
-    }
-    span.setAttribute("latency_ms", latencyMs);
-    span.setStatus({ code: SpanStatusCode.OK });
-    span.end();
-    return latencyMs;
-  });
-}
-
-// Subscribes a channel and waits until it is fully joined.
-// All data operations must happen after this returns to avoid delivery races.
-async function openChannel(channel: ReturnType<SupabaseClient["channel"]>): Promise<number> {
-  channel.subscribe();
-  return waitForSubscribed(channel);
-}
-
-// Subscribes a postgres_changes channel and waits for both the join and the
-// system:ok confirmation that the server-side WAL subscription is active.
-async function openPostgresChannel(channel: ReturnType<SupabaseClient["channel"]>): Promise<{ subscribeMs: number; systemMs: number }> {
-  const start = performance.now();
-  let systemOk = false;
-  channel.on("system", "*", ({ status }: { status: string }) => { if (status === "ok") systemOk = true; });
-  const subscribeMs = await openChannel(channel);
-  const { latencyMs: systemMs } = await waitFor(() => systemOk ? true : null, "system ok");
-  return { subscribeMs, systemMs: performance.now() - start };
-}
-
-// Channel config that opts in to the "Replication connection established" system
-// message, used by broadcast-from-database tests to avoid sleeping while the
-// tenant replication connection comes up.
-const REPLICATION_READY_CONFIG = { config: { private: true, broadcast: { replication_ready: true } } } as any;
-
-// Subscribes a private broadcast-from-database channel and waits for both the join
-// and the server's replication-ready system message, so inserts that rely on the
-// replication connection are not raced.
-async function openReplicationChannel(channel: ReturnType<SupabaseClient["channel"]>): Promise<{ subscribeMs: number; replicationMs: number }> {
-  const start = performance.now();
-  let replicationReady = false;
-  channel.on("system", "*", ({ extension, status }: { extension?: string; status?: string }) => {
-    if (extension === "system" && status === "ok") replicationReady = true;
-  });
-  const subscribeMs = await openChannel(channel);
-  await waitFor(() => replicationReady ? true : null, "replication ready");
-  return { subscribeMs, replicationMs: performance.now() - start };
-}
-
-type TableName = "pg_changes" | "dummy" | "authorization" | "broadcast_changes" | "wallet" | "replay_check";
-
-async function executeInsert(supabase: SupabaseClient, table: TableName, value?: string): Promise<number> {
-  const { data, error } = await supabase.from(table).insert([{ value: value ?? crypto.randomUUID() }]).select("id");
-  if (error) throw new Error(`Error inserting into ${table}: ${error.message}`);
-  return (data as { id: number }[])[0].id;
-}
-
-async function executeUpdate(supabase: SupabaseClient, table: TableName, id: number) {
-  const { error } = await supabase.from(table).update({ value: crypto.randomUUID() }).eq("id", id);
-  if (error) throw new Error(`Error updating ${table}: ${error.message}`);
-}
-
-async function executeDelete(supabase: SupabaseClient, table: TableName, id: number) {
-  const { error } = await supabase.from(table).delete().eq("id", id);
-  if (error) throw new Error(`Error deleting from ${table}: ${error.message}`);
-}
 
 async function setup(): Promise<{ userId: string; testUser: { email: string; password: string }; supabase: SupabaseClient }> {
   const start = performance.now();
