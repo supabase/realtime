@@ -82,16 +82,7 @@ export type SuiteDescriptor = {
   run: (ctx: SuiteCtx) => Promise<void>;
 };
 
-let currentSuite = "";
 export const results: TestResult[] = [];
-
-export async function test(name: string, fn: () => Promise<Metric[]>) {
-  await runTest(currentSuite, name, fn);
-}
-
-export function suite(name: string) {
-  currentSuite = name;
-}
 
 // Suite-bound test() closure: labels results by `suiteName` directly instead of a shared
 // mutable global, so suites stay correctly attributed even if run concurrently in the future.

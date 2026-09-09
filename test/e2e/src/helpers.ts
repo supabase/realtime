@@ -69,7 +69,7 @@ export async function signInUser(supabase: SupabaseClient, email: string, passwo
   });
 }
 
-export async function waitForSubscribed(channel: ReturnType<SupabaseClient["channel"]>): Promise<number> {
+async function waitForSubscribed(channel: ReturnType<SupabaseClient["channel"]>): Promise<number> {
   const span = tracer.startSpan("wait: subscribe", { kind: SpanKind.INTERNAL });
   const start = performance.now();
   const deadline = start + EVENT_TIMEOUT_MS;
@@ -126,7 +126,7 @@ export async function openReplicationChannel(channel: ReturnType<SupabaseClient[
   return { subscribeMs, replicationMs: performance.now() - start };
 }
 
-export type TableName = "pg_changes" | "dummy" | "authorization" | "broadcast_changes" | "wallet" | "replay_check";
+type TableName = "pg_changes" | "dummy" | "authorization" | "broadcast_changes" | "wallet" | "replay_check";
 
 export async function executeInsert(supabase: SupabaseClient, table: TableName, value?: string): Promise<number> {
   const { data, error } = await supabase.from(table).insert([{ value: value ?? crypto.randomUUID() }]).select("id");
