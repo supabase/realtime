@@ -19,6 +19,7 @@ import {
 import { setup, cleanup } from "./src/fixtures.ts";
 import { broadcastBinary } from "./src/suites/broadcast-binary.ts";
 import { authorization } from "./src/suites/authorization.ts";
+import { loadBroadcastFromDb } from "./src/suites/load-broadcast-from-db.ts";
 
 async function runConnectionTest() {
   suite("connection");
@@ -227,44 +228,6 @@ async function runLoadPresenceTests() {
     } finally {
       await Promise.all(senders.map((c) => stopClient(c)));
       await stopClient(observer);
-    }
-  });
-}
-
-async function runLoadBroadcastFromDbTests(testUser: { email: string; password: string }) {
-  suite("load-broadcast-from-db");
-
-  await sleep(RATE_LIMIT_PAUSE_MS);
-  await test("broadcast from database throughput", async () => {
-    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
-    try {
-      await signInUser(supabase, testUser.email, testUser.password);
-      const testTopic = randomTopic();
-      const sendTimes = new Map<string, number>();
-      const latencies: number[] = [];
-
-      const channel = supabase
-        .channel(testTopic, { config: { private: true } })
-        .on("broadcast", { event: "INSERT" }, (res) => {
-          const t = sendTimes.get(res.payload.record.id);
-          if (t !== undefined) latencies.push(performance.now() - t);
-        });
-
-      await openChannel(channel);
-
-      await Promise.all(Array.from({ length: LOAD_MESSAGES }, async () => {
-        const id = crypto.randomUUID();
-        sendTimes.set(id, performance.now());
-        await supabase.from("broadcast_changes").insert({ id, value: crypto.randomUUID(), topic: testTopic });
-      }));
-
-      await settle(() => latencies.length, LOAD_MESSAGES, LOAD_SETTLE_MS);
-
-      await supabase.from("broadcast_changes").delete().in("id", [...sendTimes.keys()]);
-
-      return measureThroughput(latencies, LOAD_MESSAGES, "broadcast-from-db events", LOAD_DELIVERY_SLO);
-    } finally {
-      await stopClient(supabase);
     }
   });
 }
@@ -1412,7 +1375,7 @@ const descriptors: SuiteDescriptor[] = [
   { name: "load-postgres-changes", label: "load-postgres-changes", needsDb: true, run: ({ testUser }) => runLoadPostgresChangesTests(testUser) },
   { name: "load-presence", label: "load-presence", needsDb: false, run: () => runLoadPresenceTests() },
   { name: "load-broadcast", label: "load-broadcast", needsDb: false, run: () => runLoadBroadcastTests() },
-  { name: "load-broadcast-from-db", label: "load-broadcast-from-db", needsDb: true, run: ({ testUser }) => runLoadBroadcastFromDbTests(testUser) },
+  loadBroadcastFromDb,
   { name: "load-broadcast-replay", label: "load-broadcast-replay", needsDb: true, run: ({ testUser }) => runLoadBroadcastReplayTests(testUser) },
   { name: "broadcast", label: "broadcast extension", needsDb: false, run: () => runBroadcastTests() },
   { name: "broadcast-replay", label: "broadcast replay", needsDb: true, run: ({ testUser, supabase }) => runBroadcastReplayTests(testUser, supabase) },
