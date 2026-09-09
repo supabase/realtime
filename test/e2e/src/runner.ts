@@ -74,6 +74,10 @@ export type SuiteCtx = {
 
 export type SuiteDescriptor = {
   name: string;
+  // Display label recorded against each TestResult (what suite() used to be called with) —
+  // kept distinct from `name` because several suites' existing display labels
+  // (e.g. "broadcast extension", "authorization check") differ from their --test category key.
+  label: string;
   needsDb: boolean;
   run: (ctx: SuiteCtx) => Promise<void>;
 };

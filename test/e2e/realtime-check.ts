@@ -8,8 +8,8 @@ import {
   TEST_CATEGORIES, PROJECT_URL, DB_URL, DB_SSL, REALTIME_OPTS, BROADCAST_CONFIG, EVENT_TIMEOUT_MS,
   RATE_LIMIT_PAUSE_MS, BROADCAST_API_HEADERS, LOAD_MESSAGES, LOAD_SETTLE_MS, LOAD_DELIVERY_SLO,
 } from "./src/context.ts";
-import type { Metric } from "./src/runner.ts";
-import { initOtel, flushOtel, patchFetch, log, test, suite, printSummary, results } from "./src/runner.ts";
+import type { Metric, SuiteDescriptor } from "./src/runner.ts";
+import { initOtel, flushOtel, patchFetch, log, test, suite, printSummary, results, createSuiteTest } from "./src/runner.ts";
 import type { TableName } from "./src/helpers.ts";
 import {
   sleep, randomTopic, settle, measureThroughput, waitFor, stopClient, signInUser, waitForSubscribed,
@@ -17,6 +17,7 @@ import {
   executeInsert, executeUpdate, executeDelete,
 } from "./src/helpers.ts";
 import { setup, cleanup } from "./src/fixtures.ts";
+import { broadcastBinary } from "./src/suites/broadcast-binary.ts";
 
 async function runConnectionTest() {
   suite("connection");
@@ -1437,73 +1438,25 @@ async function runBroadcastReplayTests(_testUser: { email: string; password: str
 }
 
 
-type SuiteCtx = { testUser: { email: string; password: string }; supabase: SupabaseClient };
+const descriptors: SuiteDescriptor[] = [
+  { name: "connection", label: "connection", needsDb: false, run: () => runConnectionTest() },
+  { name: "load-postgres-changes", label: "load-postgres-changes", needsDb: true, run: ({ testUser }) => runLoadPostgresChangesTests(testUser) },
+  { name: "load-presence", label: "load-presence", needsDb: false, run: () => runLoadPresenceTests() },
+  { name: "load-broadcast", label: "load-broadcast", needsDb: false, run: () => runLoadBroadcastTests() },
+  { name: "load-broadcast-from-db", label: "load-broadcast-from-db", needsDb: true, run: ({ testUser }) => runLoadBroadcastFromDbTests(testUser) },
+  { name: "load-broadcast-replay", label: "load-broadcast-replay", needsDb: true, run: ({ testUser }) => runLoadBroadcastReplayTests(testUser) },
+  { name: "broadcast", label: "broadcast extension", needsDb: false, run: () => runBroadcastTests() },
+  { name: "broadcast-replay", label: "broadcast replay", needsDb: true, run: ({ testUser, supabase }) => runBroadcastReplayTests(testUser, supabase) },
+  { name: "presence", label: "presence extension", needsDb: true, run: ({ testUser, supabase }) => runPresenceTests(testUser, supabase) },
+  { name: "authorization", label: "authorization check", needsDb: true, run: ({ testUser, supabase }) => runAuthorizationTests(testUser, supabase) },
+  { name: "postgres-changes", label: "postgres changes extension", needsDb: true, run: ({ testUser, supabase }) => runPostgresChangesTests(testUser, supabase) },
+  { name: "postgres-changes-filters", label: "postgres-changes-filters", needsDb: true, run: ({ testUser, supabase }) => runPostgresChangesFiltersTests(testUser, supabase) },
+  { name: "broadcast-changes", label: "broadcast changes", needsDb: true, run: ({ testUser, supabase }) => runBroadcastChangesTests(testUser, supabase) },
+  broadcastBinary,
+];
 
-const SUITES: Record<string, (ctx: SuiteCtx) => Promise<void>> = {
-  "connection": () => runConnectionTest(),
-  "load-postgres-changes": ({ testUser }) => runLoadPostgresChangesTests(testUser),
-  "load-presence": () => runLoadPresenceTests(),
-  "load-broadcast": () => runLoadBroadcastTests(),
-  "load-broadcast-from-db": ({ testUser }) => runLoadBroadcastFromDbTests(testUser),
-  "load-broadcast-replay": ({ testUser }) => runLoadBroadcastReplayTests(testUser),
-  "broadcast": () => runBroadcastTests(),
-  "broadcast-replay": ({ testUser, supabase }) => runBroadcastReplayTests(testUser, supabase),
-  "presence": ({ testUser, supabase }) => runPresenceTests(testUser, supabase),
-  "authorization": ({ testUser, supabase }) => runAuthorizationTests(testUser, supabase),
-  "postgres-changes": ({ testUser, supabase }) => runPostgresChangesTests(testUser, supabase),
-  "postgres-changes-filters": ({ testUser, supabase }) => runPostgresChangesFiltersTests(testUser, supabase),
-  "broadcast-changes": ({ testUser, supabase }) => runBroadcastChangesTests(testUser, supabase),
-  "broadcast-binary": ({ supabase }) => runBroadcastBinaryTests(supabase),
-};
-
-async function runBroadcastBinaryTests(supabase: SupabaseClient) {
-  suite("broadcast binary");
-
-  await sleep(RATE_LIMIT_PAUSE_MS);
-  await test("send_binary delivers a binary broadcast", async () => {
-    const sql = new SQL(DB_URL, { tls: DB_SSL || undefined });
-    try {
-      const event = crypto.randomUUID();
-      const topic = randomTopic();
-      const binary = new Uint8Array([0xde, 0xad, 0xbe, 0xef, 0x00, 0xff]);
-
-      let result: any = null;
-      const channel = supabase
-        .channel(topic, REPLICATION_READY_CONFIG)
-        .on("broadcast", { event }, (msg) => (result = msg.payload));
-
-      const { subscribeMs } = await openReplicationChannel(channel);
-
-      await sql`SELECT realtime.send_binary(${binary}::bytea, ${event}::text, ${topic}::text, true)`;
-
-      const { latencyMs: eventMs } = await waitFor(() => result, "binary broadcast event");
-
-      const received = result instanceof Uint8Array ? result : new Uint8Array(result);
-      assert.strictEqual(received.length, binary.length, "binary payload length mismatch");
-      assert.ok(binary.every((b, i) => received[i] === b), "binary payload bytes mismatch");
-      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
-    } finally {
-      await sql.close().catch(() => {});
-      await supabase.removeAllChannels();
-    }
-  });
-}
-
-const LOAD_SUITES = Object.keys(SUITES).filter((k) => k.startsWith("load"));
-const FUNCTIONAL_SUITES = Object.keys(SUITES).filter((k) => !k.startsWith("load"));
-
-const DB_REQUIRED_SUITES = new Set([
-  "load-postgres-changes",
-  "load-broadcast-from-db",
-  "load-broadcast-replay",
-  "broadcast-replay",
-  "presence",
-  "authorization",
-  "postgres-changes",
-  "postgres-changes-filters",
-  "broadcast-changes",
-  "broadcast-binary",
-]);
+const LOAD_SUITES = descriptors.map((d) => d.name).filter((n) => n.startsWith("load"));
+const FUNCTIONAL_SUITES = descriptors.map((d) => d.name).filter((n) => !n.startsWith("load"));
 
 async function main() {
   initOtel();
@@ -1518,19 +1471,19 @@ async function main() {
     : null;
 
   if (activeCategories) {
-    const unknown = activeCategories.filter((c: string) => !(c in SUITES));
+    const unknown = activeCategories.filter((c: string) => !descriptors.some((d) => d.name === c));
     if (unknown.length > 0) {
-      const valid = ["functional", "load", ...Object.keys(SUITES)].join(", ");
+      const valid = ["functional", "load", ...descriptors.map((d) => d.name)].join(", ");
       log(`Unknown test categories: ${unknown.join(", ")}\nValid categories: ${valid}`);
       process.exit(1);
     }
   }
 
   const suitesToRun = activeCategories
-    ? Object.entries(SUITES).filter(([key]) => activeCategories.includes(key))
-    : Object.entries(SUITES);
+    ? descriptors.filter((d) => activeCategories.includes(d.name))
+    : descriptors;
 
-  const needsDb = suitesToRun.some(([key]) => DB_REQUIRED_SUITES.has(key));
+  const needsDb = suitesToRun.some((d) => d.needsDb);
 
   if (needsDb && !SERVICE_KEY) {
     console.error("--secret-key is required");
@@ -1555,7 +1508,7 @@ async function main() {
 
   const start = performance.now();
   try {
-    for (const [, fn] of suitesToRun) await fn({ testUser, supabase });
+    for (const d of suitesToRun) await d.run({ testUser, supabase, test: createSuiteTest(d.label) });
   } finally {
     await stopClient(supabase);
     if (userId) await cleanup(userId);
