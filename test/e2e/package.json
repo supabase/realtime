@@ -12,6 +12,9 @@
     "commander": "^14.0.3",
     "kleur": "^4.1.5"
   },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
   "scripts": {
     "check": "bun run realtime-check.ts --",
     "build": "bun build --compile --minify-syntax --minify-whitespace --minify-identifiers realtime-check.ts --outfile realtime-check",
