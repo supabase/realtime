@@ -21,54 +21,7 @@ import { broadcastBinary } from "./src/suites/broadcast-binary.ts";
 import { authorization } from "./src/suites/authorization.ts";
 import { loadBroadcastFromDb } from "./src/suites/load-broadcast-from-db.ts";
 import { loadBroadcastReplay } from "./src/suites/load-broadcast-replay.ts";
-
-async function runConnectionTest() {
-  suite("connection");
-
-  await test("first connect latency", async () => {
-    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
-    try {
-      const channel = supabase.channel(randomTopic());
-      const connectMs = await openChannel(channel);
-      return [{ label: "connect", value: connectMs, unit: "ms" }];
-    } finally {
-      await stopClient(supabase);
-    }
-  });
-
-  await test("broadcast message throughput", async () => {
-    const MESSAGES = 50;
-    const SETTLE_MS = 3000;
-    const DELIVERY_SLO = 99;
-    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
-    try {
-      const topic = randomTopic();
-      const event = "load";
-      const sendTimes = new Map<number, number>();
-      const latencies: number[] = [];
-
-      const channel = supabase
-        .channel(topic, BROADCAST_CONFIG)
-        .on("broadcast", { event }, ({ payload }) => {
-          const t = sendTimes.get(payload.seq);
-          if (t !== undefined) latencies.push(performance.now() - t);
-        });
-
-      await openChannel(channel);
-
-      for (let i = 0; i < MESSAGES; i++) {
-        sendTimes.set(i, performance.now());
-        await channel.send({ type: "broadcast", event, payload: { seq: i } });
-      }
-
-      await settle(() => latencies.length, MESSAGES, SETTLE_MS);
-
-      return measureThroughput(latencies, MESSAGES, "messages", DELIVERY_SLO);
-    } finally {
-      await stopClient(supabase);
-    }
-  });
-}
+import { connection } from "./src/suites/connection.ts";
 
 async function runLoadPostgresChangesTests(testUser: { email: string; password: string }) {
   suite("load-postgres-changes");
@@ -1338,7 +1291,7 @@ async function runBroadcastReplayTests(_testUser: { email: string; password: str
 
 
 const descriptors: SuiteDescriptor[] = [
-  { name: "connection", label: "connection", needsDb: false, run: () => runConnectionTest() },
+  connection,
   { name: "load-postgres-changes", label: "load-postgres-changes", needsDb: true, run: ({ testUser }) => runLoadPostgresChangesTests(testUser) },
   { name: "load-presence", label: "load-presence", needsDb: false, run: () => runLoadPresenceTests() },
   { name: "load-broadcast", label: "load-broadcast", needsDb: false, run: () => runLoadBroadcastTests() },
