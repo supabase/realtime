@@ -1,0 +1,67 @@
+name: WALRUS Tests
+
+# pg_regress suite inherited from the retired supabase/walrus repo. It exercises
+# realtime.apply_rls / subscription_check_filters end-to-end over a real logical
+# replication slot, against the tenant schema we actually ship
+# (priv/repo/tenant_db_dump_<major>.sql).
+on:
+  pull_request:
+    paths:
+      - "test/walrus/**"
+      - "priv/repo/tenant_db_dump_*.sql"
+      - "lib/realtime/tenants/repo/migrations/**"
+      - "compose.walrus-db.yml"
+      - "dev/postgres/**"
+      - ".github/workflows/walrus_tests.yml"
+
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  walrus:
+    name: WALRUS regress (${{ matrix.postgres }})
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - postgres: pg15
+            postgres_image: supabase/postgres:15.14.1.167
+          - postgres: pg17
+            postgres_image: supabase/postgres:17.6.1.166
+          - postgres: orioledb17
+            postgres_image: supabase/postgres:17.9.0.019-orioledb
+    env:
+      POSTGRES_IMAGE: ${{ matrix.postgres_image }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Cache Docker images
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        id: docker-cache
+        with:
+          path: /tmp/docker-images
+          key: docker-images-zstd-${{ matrix.postgres_image }}
+
+      - name: Load Docker images from cache
+        if: steps.docker-cache.outputs.cache-hit == 'true'
+        run: zstd -d --stdout /tmp/docker-images/postgres.tar.zst | docker image load
+
+      - name: Pull and save Docker images
+        if: steps.docker-cache.outputs.cache-hit != 'true'
+        run: |
+          docker pull ${{ matrix.postgres_image }}
+          mkdir -p /tmp/docker-images
+          docker image save ${{ matrix.postgres_image }} | zstd -T0 -o /tmp/docker-images/postgres.tar.zst
+
+      - name: Run WALRUS regress suite
+        run: test/walrus/run.sh

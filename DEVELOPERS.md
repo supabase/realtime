@@ -9,6 +9,7 @@
   - [Server setup](#server-setup)
   - [Tenants](#tenants)
   - [Tenant migrations and snapshots](#tenant-migrations-and-snapshots)
+  - [WALRUS regression suite](#walrus-regression-suite)
   - [Devcontainer](#devcontainer)
   - [WebSocket](#websocket)
     - [WebSocket URL](#websocket-url)
@@ -164,6 +165,18 @@ mise run tenant-dumps 17   # only pg17, while iterating
 Each major gets its own throwaway realtime and tenant database, on ports docker picks, so your dev stack keeps running. The dump is taken by `dev/scripts/export-tenant-db-dump.sh`, which runs inside the tenant database's own container. `TENANT_DUMP_IMAGES` in `mise.toml` is the list of majors and the image each dump is generated from.
 
 [update-tenant-db-snapshots.yml](.github/workflows/update-tenant-db-snapshots.yml) also runs the same task on every PR that touches the migrations and commits the result back to the branch if there are changes.
+
+### WALRUS regression suite
+
+These are the Postgres Changes focused tests. `test/walrus` does: a `pg_regress`
+suite inherited from [supabase/walrus](https://github.com/supabase/walrus) repo,
+run against `priv/repo/tenant_db_dump_<major>.sql` which is the dump a fresh tenant gets.
+
+```bash
+mise run walrus  # whole suite, in its own Postgres container
+```
+
+See [test/walrus/README.md](test/walrus/README.md) for more information.
 
 ### Devcontainer
 
