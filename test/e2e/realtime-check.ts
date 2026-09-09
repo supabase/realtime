@@ -24,6 +24,7 @@ import { loadBroadcastReplay } from "./src/suites/load-broadcast-replay.ts";
 import { connection } from "./src/suites/connection.ts";
 import { loadPresence } from "./src/suites/load-presence.ts";
 import { broadcast } from "./src/suites/broadcast.ts";
+import { presence } from "./src/suites/presence.ts";
 
 async function runLoadPostgresChangesTests(testUser: { email: string; password: string }) {
   suite("load-postgres-changes");
@@ -210,62 +211,6 @@ async function runLoadBroadcastTests() {
   });
 }
 
-
-async function runPresenceTests(_testUser: { email: string; password: string }, supabase: SupabaseClient) {
-  suite("presence extension");
-
-  await test("user is able to receive presence updates", async () => {
-    try {
-      let joinEvent: any = null;
-      const topic = randomTopic();
-      const message = crypto.randomUUID();
-      const key = crypto.randomUUID();
-
-      const channel = supabase
-        .channel(topic, { config: { broadcast: { self: true }, presence: { key } } })
-        .on("presence", { event: "join" }, (e) => (joinEvent = e));
-
-      const subscribeMs = await openChannel(channel);
-      const trackStart = performance.now();
-      if (await channel.track({ message }) === "timed out") throw new Error("track() timed out");
-      const trackMs = performance.now() - trackStart;
-      const { latencyMs: eventMs } = await waitFor(() => joinEvent, "presence join");
-
-      assert.strictEqual(joinEvent.key, key);
-      assert.strictEqual(joinEvent.newPresences[0].message, message);
-      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "track", value: trackMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
-    } finally {
-      await supabase.removeAllChannels();
-    }
-  });
-
-  await sleep(RATE_LIMIT_PAUSE_MS);
-  await test("user is able to receive presence updates on private channels", async () => {
-    try {
-
-      let joinEvent: any = null;
-      const topic = randomTopic();
-      const message = crypto.randomUUID();
-      const key = crypto.randomUUID();
-
-      const channel = supabase
-        .channel(topic, { config: { private: true, broadcast: { self: true }, presence: { key } } })
-        .on("presence", { event: "join" }, (e) => (joinEvent = e));
-
-      const subscribeMs = await openChannel(channel);
-      const trackStart = performance.now();
-      if (await channel.track({ message }) === "timed out") throw new Error("track() timed out");
-      const trackMs = performance.now() - trackStart;
-      const { latencyMs: eventMs } = await waitFor(() => joinEvent, "presence join");
-
-      assert.strictEqual(joinEvent.key, key);
-      assert.strictEqual(joinEvent.newPresences[0].message, message);
-      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "track", value: trackMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
-    } finally {
-      await supabase.removeAllChannels();
-    }
-  });
-}
 
 async function runBroadcastChangesTests(_testUser: { email: string; password: string }, supabase: SupabaseClient) {
   suite("broadcast changes");
@@ -1194,7 +1139,7 @@ const descriptors: SuiteDescriptor[] = [
   loadBroadcastReplay,
   broadcast,
   { name: "broadcast-replay", label: "broadcast replay", needsDb: true, run: ({ testUser, supabase }) => runBroadcastReplayTests(testUser, supabase) },
-  { name: "presence", label: "presence extension", needsDb: true, run: ({ testUser, supabase }) => runPresenceTests(testUser, supabase) },
+  presence,
   authorization,
   { name: "postgres-changes", label: "postgres changes extension", needsDb: true, run: ({ testUser, supabase }) => runPostgresChangesTests(testUser, supabase) },
   { name: "postgres-changes-filters", label: "postgres-changes-filters", needsDb: true, run: ({ testUser, supabase }) => runPostgresChangesFiltersTests(testUser, supabase) },
