@@ -4,6 +4,8 @@ on:
     paths:
       - "lib/**"
       - "test/**"
+      # its own workflow: walrus_tests.yml
+      - "!test/walrus/**"
       - "config/**"
       - "priv/**"
       - "!priv/repo/tenant_schema/**"

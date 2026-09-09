@@ -106,6 +106,13 @@ run = "docker compose -f compose.tests.yml stop"
 description = "Remove the integration test stack"
 run = "docker compose -f compose.tests.yml rm -sf"
 
+[tasks.walrus]
+description = "Run the WALRUS pg_regress suite against the committed tenant DB dump"
+usage = '''
+arg "[args]..." help="Test names to run. Defaults to all of them. See test/walrus/README.md."
+'''
+run = "test/walrus/run.sh ${usage_args:-}"
+
 [tasks.e2e]
 description = "Run the e2e suite against a local Supabase stack, starting it if needed"
 dir = "test/e2e"
