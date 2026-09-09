@@ -102,6 +102,10 @@ config :realtime,
 # stops flooding almost immediately instead of after the 30s default.
 config :realtime, muster_singleton_promotion_timeout_ms: 100
 
+config :realtime,
+  users_scope_broadcast_interval_in_ms: 100,
+  users_scope_discover_interval_in_ms: 100
+
 config :realtime, RealtimeWeb.Endpoint,
   http: [port: port],
   server: true

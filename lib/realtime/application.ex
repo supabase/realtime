@@ -86,6 +86,8 @@ defmodule Realtime.Application do
     master_region = Application.get_env(:realtime, :master_region) || region
     user_scope_shards = Application.fetch_env!(:realtime, :users_scope_shards)
     user_scope_broadast_interval_in_ms = Application.get_env(:realtime, :users_scope_broadcast_interval_in_ms, 10_000)
+    user_scope_discover_interval_in_ms = Application.get_env(:realtime, :users_scope_discover_interval_in_ms, 60_000)
+
     muster_scope_shards = Application.fetch_env!(:realtime, :muster_scope_shards)
 
     # Only set in :test, where the single-node scope must reach :ready quickly
@@ -127,6 +129,7 @@ defmodule Realtime.Application do
            [
              partitions: user_scope_shards,
              broadcast_interval_in_ms: user_scope_broadast_interval_in_ms,
+             discover_interval_in_ms: user_scope_discover_interval_in_ms,
              message_module: Realtime.ForumPubSubAdapter
            ]
          ]},
