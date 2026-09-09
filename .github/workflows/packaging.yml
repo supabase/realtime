@@ -59,36 +59,39 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          path: realtime
+          repository: supabase/slim-services
+          ref: 4a4073b1e57f4422d203863decc94baa76640cf7
+          path: slim-services
+          submodules: false
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: supabase/slim-services
-          path: slim-services
-          sparse-checkout: |
-            services/realtime/nix
-            nix/portable-beam
-            scripts
+          path: slim-services/sources/realtime
+          submodules: false
 
       - uses: nixbuild/nix-quick-install-action@9f63be77f412a248c9d9a65a4c82cf066cdf8f0c # v35
 
       - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
         with:
-          primary-key: nix-realtime-${{ runner.os }}-${{ hashFiles('slim-services/services/realtime/nix/**', 'slim-services/nix/portable-beam/**', 'realtime/mix.lock', 'realtime/Dockerfile') }}
-          restore-prefixes-first-match: nix-realtime-${{ runner.os }}-
+          primary-key: nix-realtime-flake-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('slim-services/flake.nix', 'slim-services/flake.lock', 'slim-services/nix/**', 'slim-services/services/realtime/**', 'slim-services/scripts/**', 'slim-services/sources/realtime/mix.lock', 'slim-services/sources/realtime/Dockerfile') }}
+          restore-prefixes-first-match: nix-realtime-flake-${{ runner.os }}-${{ runner.arch }}-
           gc-max-store-size-linux: 8G
 
       - name: Build portable artifact
+        id: artifact
+        env:
+          TARGET_OS: linux
+          ARCH: amd64
+          ARTIFACT_ARCHIVE_ON_BUILD: '0'
         run: |
           set -euo pipefail
-          cp -R slim-services/services/realtime/nix realtime/nix
-          cp -R slim-services/nix/portable-beam realtime/nix/portable-beam
-          version="$(sed -nE 's/^[[:space:]]*version: "([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' realtime/mix.exs | head -n1)"
+          version="$(sed -nE 's/^[[:space:]]*version: "([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' slim-services/sources/realtime/mix.exs | head -n1)"
           [ -n "$version" ] || { echo "::error::could not read version from mix.exs" >&2; exit 1; }
-          cd realtime
-          ../slim-services/scripts/nix-build-with-derived-hashes.sh \
-            nix-build ./nix realtime "$version" ./result ./nix-hashes.json \
-            mix-deps:mix_deps_hash
+          SOURCE_REF="$(git -C slim-services/sources/realtime rev-parse HEAD)"
+          export SOURCE_REF
+          ./slim-services/scripts/build-artifact-from-nix.sh realtime "$version"
+          rootfs="$GITHUB_WORKSPACE/slim-services/artifacts/realtime/$version/linux-amd64/rootfs"
+          echo "rootfs=$rootfs" >> "$GITHUB_OUTPUT"
 
       - name: Smoke the release
         env:
@@ -96,11 +99,7 @@ jobs:
           DB_HOST: 127.0.0.1
           METRICS_JWT_SECRET: realtime-metrics-secret-with-at-least-32
           SECRET_KEY_BASE: realtimerealtimerealtimerealtimerealtimerealtimerealtimereal
+          ROOTFS: ${{ steps.artifact.outputs.rootfs }}
         run: |
           set -euo pipefail
-          ./realtime/result/bin/realtime eval 'IO.puts(:crypto.hash(:sha256, "ok") |> Base.encode16())'
-
-      - name: Explain failure
-        if: failure()
-        run: |
-          echo "::error::Nix packaging build failed. Usually a dependency downloading during \`mix compile\`, or an Elixir/OTP bump the pinned nixpkgs does not provide. Expression lives in supabase/slim-services under services/realtime/nix."
+          "$ROOTFS/bin/realtime" eval 'IO.puts(:crypto.hash(:sha256, "ok") |> Base.encode16())'
