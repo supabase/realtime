@@ -56,7 +56,8 @@ defmodule Realtime.UsersCounterTest do
   describe "tenant_counts/0" do
     test "map of tenant and number of users", %{tenant_id: tenant_id, count: expected} do
       assert UsersCounter.add(self(), tenant_id) == :ok
-      Process.sleep(1000)
+      await_tenant_users!(tenant_id, expected + 1)
+
       counts = UsersCounter.tenant_counts()
 
       assert counts[tenant_id] == expected + 1
@@ -86,9 +87,15 @@ defmodule Realtime.UsersCounterTest do
 
   describe "tenant_users/1" do
     test "returns count of connected clients for tenant on cluster node", %{tenant_id: tenant_id, count: expected} do
-      Process.sleep(1000)
-      assert UsersCounter.tenant_users(tenant_id) == expected
+      await_tenant_users!(tenant_id, expected)
     end
+  end
+
+  defp await_tenant_users!(tenant_id, expected) do
+    eventually(fn -> UsersCounter.tenant_users(tenant_id) == expected end)
+
+    # eventually/2 only answers true/false, so re-assert to get the counts on failure.
+    assert UsersCounter.tenant_users(tenant_id) == expected
   end
 
   defp generate_load(tenant_id) do
@@ -107,38 +114,46 @@ defmodule Realtime.UsersCounterTest do
     on_exit(fn -> Application.put_env(:gen_rpc, :client_config_per_node, {:internal, %{}}) end)
     Application.put_env(:gen_rpc, :client_config_per_node, {:internal, nodes})
 
-    Enum.each(peers, fn {peer, region} ->
-      extra_config = [
-        {:gen_rpc, :tcp_server_port, TestEnv.peer_gen_rpc_port(peer)},
-        {:gen_rpc, :client_config_per_node, {:internal, nodes}},
-        {:realtime, :users_scope_broadcast_interval_in_ms, 100},
-        {:realtime, :region, region}
-      ]
+    joins =
+      Enum.flat_map(peers, fn {peer, region} ->
+        extra_config = [
+          {:gen_rpc, :tcp_server_port, TestEnv.peer_gen_rpc_port(peer)},
+          {:gen_rpc, :client_config_per_node, {:internal, nodes}},
+          {:realtime, :region, region}
+        ]
 
-      {:ok, node} =
-        Clustered.start(@aux_mod,
-          name: peer,
-          extra_config: extra_config,
-          phoenix_port: TestEnv.peer_http_port(peer)
-        )
+        {:ok, node} =
+          Clustered.start(@aux_mod,
+            name: peer,
+            extra_config: extra_config,
+            phoenix_port: TestEnv.peer_http_port(peer)
+          )
 
-      for _ <- 1..processes do
-        pid = Rpc.call(node, Aux, :ping, [])
+        peer_joins =
+          for _ <- 1..processes do
+            pid = Rpc.call(node, Aux, :ping, [])
 
-        for _ <- 1..10 do
-          # replicate same pid added multiple times concurrently
-          Task.start(fn ->
-            Rpc.call(node, Aux, :join, [pid, tenant_id])
-          end)
+            # :rpc.call/5 answers {:badrpc, reason} rather than raising, so without this a
+            # transport failure would surface much later as an unexplained count.
+            assert is_pid(pid)
 
-          # noisy neighbors to test handling of bigger loads on concurrent calls
-          Task.start(fn ->
-            Rpc.call(node, Aux, :join, [pid, random_string()])
-          end)
-        end
-      end
-    end)
+            for _ <- 1..10 do
+              [
+                # replicate same pid added multiple times concurrently
+                Task.async(fn -> Rpc.call(node, Aux, :join, [pid, tenant_id]) end),
+                # noisy neighbors to test handling of bigger loads on concurrent calls
+                Task.async(fn -> Rpc.call(node, Aux, :join, [pid, random_string()]) end)
+              ]
+            end
+          end
 
-    3 * processes
+        List.flatten(peer_joins)
+      end)
+
+    # Awaited rather than fire-and-forget, so the count we return is the number of joins
+    # that actually landed instead of a guess the assertions then have to match.
+    assert Enum.all?(Task.await_many(joins, 15_000), &(&1 == :ok))
+
+    length(peers) * processes
   end
 end
