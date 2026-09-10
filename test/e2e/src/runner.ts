@@ -5,7 +5,7 @@ import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
-import { JSON_OUTPUT, OTEL_ENDPOINT, OTEL_API_TOKEN, PROJECT_URL, env } from "./context.ts";
+import { JSON_OUTPUT, OTEL_ENDPOINT, OTEL_API_TOKEN, PROJECT_URL, env, PARALLEL } from "./context.ts";
 
 export let tracer = trace.getTracer("realtime-check");
 let otelProvider: BasicTracerProvider | null = null;
@@ -77,15 +77,37 @@ export type SuiteDescriptor = {
   // (e.g. "broadcast extension", "authorization check") differ from their --test category key.
   label: string;
   needsDb: boolean;
+  // Defaults to true: a suite's own tests stay sequential even under --parallel until
+  // someone has actually checked it's safe (e.g. load suites that measure
+  // throughput/latency may not want concurrent noise from their own tests) and set this
+  // to false. Suites don't need to know about this at all — a suite's `run()` body
+  // always just writes `await test(...)` in sequence; whether that call blocks is
+  // decided here, not by the suite.
+  sequential?: boolean;
   run: (ctx: SuiteCtx) => Promise<void>;
 };
 
 export const results: TestResult[] = [];
 
-// Suite-bound test() closure: labels results by `suiteName` directly instead of a shared
-// mutable global, so suites stay correctly attributed even if run concurrently in the future.
-export function createSuiteTest(suiteName: string) {
-  return (name: string, fn: () => Promise<Metric[]>) => runTest(suiteName, name, fn);
+// Builds the `test` closure passed to one suite's run(), plus a `drain` to await
+// everything it kicked off. Labels results by `suiteName` directly instead of a shared
+// mutable global, so suites stay correctly attributed even when run concurrently.
+//
+// When --parallel is on and `sequential` is explicitly false, `test()` starts the test
+// immediately but returns before it finishes, so a suite's own back-to-back
+// `await test(...)` calls end up kicking every test off concurrently without the suite
+// ever knowing — `drain()` (called by the orchestrator after `run()` returns) is what
+// actually waits for them all to complete. `sequential` defaults to true (see
+// SuiteDescriptor.sequential).
+export function createSuiteTest(suiteName: string, sequential = true) {
+  const pending: Promise<void>[] = [];
+  const test = (name: string, fn: () => Promise<Metric[]>): Promise<void> => {
+    if (!PARALLEL || sequential) return runTest(suiteName, name, fn);
+    pending.push(runTest(suiteName, name, fn));
+    return Promise.resolve();
+  };
+  const drain = () => Promise.all(pending).then(() => {});
+  return { test, drain };
 }
 
 async function runTest(suiteName: string, name: string, fn: () => Promise<Metric[]>) {
