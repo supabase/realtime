@@ -70,25 +70,6 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y "postgresql-client-${{ matrix.pg_major }}"
           echo "/usr/lib/postgresql/${{ matrix.pg_major }}/bin" >> "$GITHUB_PATH"
-
-      - name: Cache Docker images
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
-        id: docker-cache
-        with:
-          path: /tmp/docker-images
-          key: docker-images-zstd-${{ matrix.postgres_image }}
-
-      - name: Load Docker images from cache
-        if: steps.docker-cache.outputs.cache-hit == 'true'
-        run: zstd -d --stdout /tmp/docker-images/postgres.tar.zst | docker image load
-
-      - name: Pull and save Docker images
-        if: steps.docker-cache.outputs.cache-hit != 'true'
-        run: |
-          docker pull ${{ matrix.postgres_image }}
-          mkdir -p /tmp/docker-images
-          docker image save ${{ matrix.postgres_image }} | zstd -T0 -o /tmp/docker-images/postgres.tar.zst
-
       - name: Start Postgres
         run: docker compose -f compose.dbs.yml up -d --wait
 
