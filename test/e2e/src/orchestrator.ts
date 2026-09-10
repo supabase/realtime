@@ -1,4 +1,4 @@
-import { SERVICE_KEY, dbPassword, DB_URL_ARG, env } from "./context.ts";
+import { SERVICE_KEY, dbPassword, DB_URL_ARG, env, PARALLEL } from "./context.ts";
 import type { SuiteDescriptor } from "./runner.ts";
 import { log, printSummary, flushOtel, results, createSuiteTest } from "./runner.ts";
 import { setup, cleanup } from "./fixtures.ts";
@@ -53,7 +53,11 @@ export async function runSuites(descriptors: SuiteDescriptor[], testCategories: 
 
   const start = performance.now();
   try {
-    for (const d of suitesToRun) await d.run({ testUser, test: createSuiteTest(d.label) });
+    if (PARALLEL) {
+      await Promise.all(suitesToRun.map((d) => d.run({ testUser, test: createSuiteTest(d.label) })));
+    } else {
+      for (const d of suitesToRun) await d.run({ testUser, test: createSuiteTest(d.label) });
+    }
   } finally {
     if (userId) await cleanup(userId);
   }
