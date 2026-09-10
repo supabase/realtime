@@ -11,6 +11,7 @@ export const postgresChanges: SuiteDescriptor = {
   name: "postgres-changes",
   label: "postgres changes extension",
   needsDb: true,
+  sequential: false,
   run: async ({ testUser, test }) => {
     await sleep(RATE_LIMIT_PAUSE_MS);
     await test("user receives INSERT events with filter", async () => {
