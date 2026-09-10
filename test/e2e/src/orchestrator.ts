@@ -3,6 +3,12 @@ import type { SuiteDescriptor } from "./runner.ts";
 import { log, printSummary, flushOtel, results, createSuiteTest } from "./runner.ts";
 import { setup, cleanup } from "./fixtures.ts";
 
+async function runSuite(d: SuiteDescriptor, testUser: { email: string; password: string }) {
+  const { test, drain } = createSuiteTest(d.label, d.sequential);
+  await d.run({ testUser, test });
+  await drain();
+}
+
 // Lives outside runner.ts to avoid an import cycle: fixtures.ts (setup/cleanup) already
 // imports `log` from runner.ts, so runner.ts can't import fixtures.ts back.
 export async function runSuites(descriptors: SuiteDescriptor[], testCategories: string[] | null) {
@@ -54,9 +60,9 @@ export async function runSuites(descriptors: SuiteDescriptor[], testCategories: 
   const start = performance.now();
   try {
     if (PARALLEL) {
-      await Promise.all(suitesToRun.map((d) => d.run({ testUser, test: createSuiteTest(d.label) })));
+      await Promise.all(suitesToRun.map((d) => runSuite(d, testUser)));
     } else {
-      for (const d of suitesToRun) await d.run({ testUser, test: createSuiteTest(d.label) });
+      for (const d of suitesToRun) await runSuite(d, testUser);
     }
   } finally {
     if (userId) await cleanup(userId);
