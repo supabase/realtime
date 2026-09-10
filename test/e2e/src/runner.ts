@@ -1,4 +1,3 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
 import kleur from "kleur";
 import { trace, context, SpanStatusCode, SpanKind, ROOT_CONTEXT } from "@opentelemetry/api";
 import { BasicTracerProvider, BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
@@ -68,7 +67,6 @@ export type TestResult = { suite: string; name: string; passed: boolean; duratio
 
 export type SuiteCtx = {
   testUser: { email: string; password: string };
-  supabase: SupabaseClient;
   test: (name: string, fn: () => Promise<Metric[]>) => Promise<void>;
 };
 

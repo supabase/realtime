@@ -1,8 +1,6 @@
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
-import { ANON_KEY, SERVICE_KEY, dbPassword, DB_URL_ARG, env, PROJECT_URL, REALTIME_OPTS } from "./context.ts";
+import { SERVICE_KEY, dbPassword, DB_URL_ARG, env } from "./context.ts";
 import type { SuiteDescriptor } from "./runner.ts";
 import { log, printSummary, flushOtel, results, createSuiteTest } from "./runner.ts";
-import { stopClient } from "./helpers.ts";
 import { setup, cleanup } from "./fixtures.ts";
 
 // Lives outside runner.ts to avoid an import cycle: fixtures.ts (setup/cleanup) already
@@ -46,20 +44,17 @@ export async function runSuites(descriptors: SuiteDescriptor[], testCategories: 
 
   let userId: string | null = null;
   let testUser: { email: string; password: string } = { email: "", password: "" };
-  let supabase: SupabaseClient = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
 
   if (needsDb) {
     const setupResult = await setup();
     userId = setupResult.userId;
     testUser = setupResult.testUser;
-    supabase = setupResult.supabase;
   }
 
   const start = performance.now();
   try {
-    for (const d of suitesToRun) await d.run({ testUser, supabase, test: createSuiteTest(d.label) });
+    for (const d of suitesToRun) await d.run({ testUser, test: createSuiteTest(d.label) });
   } finally {
-    await stopClient(supabase);
     if (userId) await cleanup(userId);
   }
 
