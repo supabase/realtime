@@ -8,6 +8,7 @@
   - [Architecture](#architecture)
   - [Server setup](#server-setup)
   - [Tenants](#tenants)
+  - [WALRUS regression suite](#walrus-regression-suite)
   - [Devcontainer](#devcontainer)
   - [WebSocket](#websocket)
     - [WebSocket URL](#websocket-url)
@@ -130,6 +131,18 @@ You can start playing around with Broadcast, Presence, and Postgres Changes feat
 The WebSocket URL must contain the subdomain, `external_id` of the tenant on the `tenants` table, and the token must be signed with the `jwt_secret` that was inserted along with the tenant.
 
 If you're using the default tenant, the URL is `ws://realtime-dev.localhost:4000/socket` (make sure the port is correct for your development environment), and you can use `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MDMwMjgwODcsInJvbGUiOiJwb3N0Z3JlcyJ9.tz_XJ89gd6bN8MBpCl7afvPrZiBH6RB65iA1FadPT3Y` for the token. The token must have `exp` and `role` (database role) keys.
+
+### WALRUS regression suite
+
+These are the Postgres Changes focused tests. `test/walrus` does: a `pg_regress`
+suite inherited from [supabase/walrus](https://github.com/supabase/walrus) repo,
+run against `priv/repo/tenant_db_dump_<major>.sql` which is the dump a fresh tenant gets.
+
+```bash
+mise run walrus  # whole suite, in its own Postgres container
+```
+
+See [test/walrus/README.md](test/walrus/README.md) for more information.
 
 ### Devcontainer
 
