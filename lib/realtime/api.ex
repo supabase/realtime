@@ -21,6 +21,7 @@ defmodule Realtime.Api do
   alias Realtime.Tenants
   alias Realtime.Tenants.Cache
   alias Realtime.Tenants.Connect
+  alias Realtime.Tenants.Encryption
   alias RealtimeWeb.UserSocket
 
   defguard requires_disconnect(changeset)
@@ -120,7 +121,7 @@ defmodule Realtime.Api do
 
     if master_region?() do
       %Tenant{}
-      |> Tenant.changeset(attrs)
+      |> Tenant.changeset(attrs, cipher: Encryption.cipher_for(tenant_id))
       |> Repo.insert()
       |> case do
         {:ok, tenant} ->
@@ -149,8 +150,8 @@ defmodule Realtime.Api do
     end
   end
 
-  defp update_tenant(%Tenant{} = tenant, attrs) do
-    changeset = Tenant.changeset(tenant, attrs)
+  defp update_tenant(%Tenant{external_id: external_id} = tenant, attrs) do
+    changeset = Tenant.changeset(tenant, attrs, cipher: Encryption.cipher_for(external_id))
     updated = Repo.update(changeset)
 
     case updated do
