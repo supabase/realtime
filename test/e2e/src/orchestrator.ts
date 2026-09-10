@@ -4,7 +4,7 @@ import { log, printSummary, flushOtel, results, createSuiteTest } from "./runner
 import { setup, cleanup } from "./fixtures.ts";
 
 async function runSuite(d: SuiteDescriptor, testUser: { email: string; password: string }) {
-  const { test, drain } = createSuiteTest(d.label, d.sequential);
+  const { test, drain } = createSuiteTest(d.label, d.parallel);
   await d.run({ testUser, test });
   await drain();
 }
