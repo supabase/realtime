@@ -1,4 +1,6 @@
-import { Command } from "commander";
+import { Command, Option } from "commander";
+
+const DEFAULT_RATE_LIMIT_WAIT_MS = 2000;
 
 const program = new Command()
   .name("realtime-check")
@@ -17,13 +19,14 @@ const program = new Command()
   .option("--otel-token <token>", "Bearer token for authenticated OTLP endpoints")
   .option("--test <categories>", "Comma-separated list of test categories to run: functional,load,connection,load-postgres-changes,load-presence,load-broadcast,load-broadcast-from-db,load-broadcast-replay,broadcast,broadcast-replay,presence,authorization,postgres-changes,postgres-changes-filters,broadcast-changes,broadcast-binary")
   .option("--debug", "Enable Realtime client debug mode (sets log level to info and enables console logging)")
+  .addOption(new Option("--wait-time <wait>", "Time to wait between tests to avoid rate limits in milliseconds").default(DEFAULT_RATE_LIMIT_WAIT_MS, `${DEFAULT_RATE_LIMIT_WAIT_MS / 1000} seconds`))
   .parse();
 
 const opts = program.opts();
 export const ANON_KEY: string = opts.publishableKey;
 export const SERVICE_KEY: string = opts.secretKey;
 export const dbPassword: string = opts.dbPassword ?? "";
-const { project, domain: EMAIL_DOMAIN, port, json: JSON_OUTPUT, test: TEST_FILTER, otel: OTEL_ARG, otelToken: OTEL_API_TOKEN, url: URL_ARG, dbUrl: DB_URL_ARG, debug: DEBUG } = opts;
+const { project, domain: EMAIL_DOMAIN, port, json: JSON_OUTPUT, test: TEST_FILTER, otel: OTEL_ARG, otelToken: OTEL_API_TOKEN, url: URL_ARG, dbUrl: DB_URL_ARG, debug: DEBUG, waitTime: WAIT_TIME_ARG } = opts;
 export { EMAIL_DOMAIN, JSON_OUTPUT, OTEL_API_TOKEN, DB_URL_ARG };
 export const env: string = opts.env === "production" ? "prod" : opts.env === "development" ? "staging" : opts.env;
 
@@ -65,7 +68,7 @@ const realtimeLogger = DEBUG
 export const REALTIME_OPTS = { ...(DEBUG ? { logger: realtimeLogger, logLevel: "info" } : {}) };
 export const BROADCAST_CONFIG = { config: { broadcast: { self: true } } };
 export const EVENT_TIMEOUT_MS = 8000;
-export const RATE_LIMIT_PAUSE_MS = 2000;
+export const RATE_LIMIT_PAUSE_MS = WAIT_TIME_ARG;
 export const BROADCAST_API_HEADERS = {
   "Content-Type": "application/json",
   "Authorization": `Bearer ${ANON_KEY}`,
