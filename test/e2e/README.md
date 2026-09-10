@@ -15,7 +15,7 @@
 | `--db-url` | Override database URL (e.g. `postgresql://postgres:postgres@127.0.0.1:54322/postgres`) |
 | `--otel` | OTLP HTTP endpoint for tracing (e.g. `http://localhost:4318`) |
 | `--otel-token` | Bearer token for authenticated OTLP endpoints |
-| `--wait-time` | Time (in ms) to wait between tests when running sequentially |
+| `--wait-time` | Time (in ms) to wait between tests that use rate limit waiting |
 | `--parallel` | Runs the tests in parallel, tests will be run sequentially by default |
 
 A random test user is created at the start of each run and deleted automatically when it finishes.
