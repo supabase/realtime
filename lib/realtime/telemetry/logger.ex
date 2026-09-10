@@ -105,20 +105,25 @@ defmodule Realtime.Telemetry.Logger do
     end
   end
 
-  def handle_event([:phoenix, :endpoint, :stop], measurements, %{conn: conn}, _config) do
-    duration_ms = System.convert_time_unit(measurements.duration, :native, :millisecond)
-    message = "#{conn.method} #{conn.request_path} - Sent #{conn.status} in #{duration_ms}ms"
+  def handle_event([:phoenix, :endpoint, :stop], measurements, %{conn: conn} = metadata, _config) do
+    case resolve_log_level(metadata[:options][:log], conn) do
+      false ->
+        :ok
 
-    cond do
-      conn.status >= 500 -> log_error("HttpServerError", message)
-      conn.status >= 400 -> log_warning("HttpClientError", message)
-      true -> Logger.info(message)
+      level ->
+        duration_ms = System.convert_time_unit(measurements.duration, :native, :millisecond)
+        message = "#{conn.method} #{conn.request_path} - Sent #{conn.status} in #{duration_ms}ms"
+        Logger.log(level, message)
     end
   end
 
   def handle_event(_event, _measurements, _metadata, _config) do
     :ok
   end
+
+  defp resolve_log_level(nil, _conn), do: :info
+  defp resolve_log_level(level, _conn) when is_atom(level), do: level
+  defp resolve_log_level({mod, fun, args}, conn), do: apply(mod, fun, [conn | args])
 
   defp format_reason(_kind, reason) when is_exception(reason),
     do: "#{inspect(reason.__struct__)} - #{Exception.message(reason)}"
