@@ -1,10 +1,8 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@supabase/supabase-js";
 import kleur from "kleur";
 import { SQL } from "bun";
-import { EMAIL_DOMAIN, DB_URL, DB_SSL, PROJECT_URL, SERVICE_KEY, ANON_KEY, REALTIME_OPTS } from "./context.ts";
+import { EMAIL_DOMAIN, DB_URL, DB_SSL, PROJECT_URL, SERVICE_KEY } from "./context.ts";
 import { log } from "./runner.ts";
-import { signInUser } from "./helpers.ts";
 
 const fmtSqlResult = (result: any[]) => {
   const count = (result as any).count ?? result.length;
@@ -15,7 +13,7 @@ const runSql = (label: string, query: Promise<any[]>): Promise<any[]> =>
     .then((r) => { log(kleur.dim(`setup:   ${label} ok (${fmtSqlResult(r)})`)); return r; })
     .catch((e: unknown) => { log(kleur.red(`setup:   ${label} FAILED: ${e instanceof Error ? e.message : String(e)}`)); throw e; });
 
-export async function setup(): Promise<{ userId: string; testUser: { email: string; password: string }; supabase: SupabaseClient }> {
+export async function setup(): Promise<{ userId: string; testUser: { email: string; password: string } }> {
   const start = performance.now();
   const email = `realtime-check-${crypto.randomUUID()}@${EMAIL_DOMAIN}`;
   const password = crypto.randomUUID();
@@ -180,9 +178,7 @@ export async function setup(): Promise<{ userId: string; testUser: { email: stri
     await sql.close().catch(() => {});
   }
 
-  const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
-  await signInUser(supabase, email, password);
-  return { userId: userId!, testUser: { email, password }, supabase };
+  return { userId: userId!, testUser: { email, password } };
 }
 
 export async function cleanup(userId: string) {

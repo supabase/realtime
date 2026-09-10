@@ -1,8 +1,9 @@
 import assert from "assert";
-import { BROADCAST_CONFIG, RATE_LIMIT_PAUSE_MS } from "../context.ts";
+import { createClient } from "@supabase/supabase-js";
+import { PROJECT_URL, ANON_KEY, REALTIME_OPTS, BROADCAST_CONFIG, RATE_LIMIT_PAUSE_MS } from "../context.ts";
 import type { SuiteDescriptor } from "../runner.ts";
 import {
-  sleep, randomTopic, waitFor, openPostgresChannel,
+  sleep, randomTopic, waitFor, signInUser, stopClient, openPostgresChannel,
   executeInsert, executeUpdate, executeDelete,
 } from "../helpers.ts";
 
@@ -10,10 +11,12 @@ export const postgresChanges: SuiteDescriptor = {
   name: "postgres-changes",
   label: "postgres changes extension",
   needsDb: true,
-  run: async ({ supabase, test }) => {
+  run: async ({ testUser, test }) => {
     await sleep(RATE_LIMIT_PAUSE_MS);
     await test("user receives INSERT events with filter", async () => {
+      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
       try {
+        await signInUser(supabase, testUser.email, testUser.password);
 
         let result: unknown = null;
         const uniqueValue = crypto.randomUUID();
@@ -33,13 +36,15 @@ export const postgresChanges: SuiteDescriptor = {
         assert.strictEqual(result.new.value, uniqueValue);
         return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
       } finally {
-        await supabase.removeAllChannels();
+        await stopClient(supabase);
       }
     });
 
     await sleep(RATE_LIMIT_PAUSE_MS);
     await test("user receives UPDATE events with filter", async () => {
+      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
       try {
+        await signInUser(supabase, testUser.email, testUser.password);
 
         let result: unknown = null;
         const mainId = await executeInsert(supabase, "pg_changes");
@@ -64,13 +69,15 @@ export const postgresChanges: SuiteDescriptor = {
         assert.strictEqual(result.new.id, mainId);
         return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
       } finally {
-        await supabase.removeAllChannels();
+        await stopClient(supabase);
       }
     });
 
     await sleep(RATE_LIMIT_PAUSE_MS);
     await test("user receives DELETE events with filter", async () => {
+      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
       try {
+        await signInUser(supabase, testUser.email, testUser.password);
 
         let result: unknown = null;
         const mainId = await executeInsert(supabase, "pg_changes");
@@ -95,13 +102,15 @@ export const postgresChanges: SuiteDescriptor = {
         assert.strictEqual(result.old.id, mainId);
         return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
       } finally {
-        await supabase.removeAllChannels();
+        await stopClient(supabase);
       }
     });
 
     await sleep(RATE_LIMIT_PAUSE_MS);
     await test("user receives INSERT, UPDATE and DELETE concurrently", async () => {
+      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
       try {
+        await signInUser(supabase, testUser.email, testUser.password);
         let insertResult: unknown = null, updateResult: unknown = null, deleteResult: unknown = null;
 
         const insertValue = crypto.randomUUID();
@@ -138,13 +147,15 @@ export const postgresChanges: SuiteDescriptor = {
           { label: "DELETE", value: deleteMs, unit: "ms" },
         ];
       } finally {
-        await supabase.removeAllChannels();
+        await stopClient(supabase);
       }
     });
 
     await sleep(RATE_LIMIT_PAUSE_MS);
     await test("select — omitting select returns full payload (backward compatible)", async () => {
+      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
       try {
+        await signInUser(supabase, testUser.email, testUser.password);
         let result: any = null;
         const uniqueValue = crypto.randomUUID();
         const details = crypto.randomUUID();
@@ -165,7 +176,7 @@ export const postgresChanges: SuiteDescriptor = {
         assert.strictEqual(result.new.details, details, "details must be present when no select is used");
         return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
       } finally {
-        await supabase.removeAllChannels();
+        await stopClient(supabase);
       }
     });
   },

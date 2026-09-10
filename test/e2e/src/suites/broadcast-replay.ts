@@ -1,16 +1,19 @@
 import assert from "assert";
+import { createClient } from "@supabase/supabase-js";
 import { SQL } from "bun";
-import { DB_URL, DB_SSL } from "../context.ts";
+import { PROJECT_URL, ANON_KEY, REALTIME_OPTS, DB_URL, DB_SSL } from "../context.ts";
 import type { SuiteDescriptor } from "../runner.ts";
-import { sleep, randomTopic, waitFor, openChannel } from "../helpers.ts";
+import { sleep, randomTopic, waitFor, signInUser, stopClient, openChannel } from "../helpers.ts";
 
 export const broadcastReplay: SuiteDescriptor = {
   name: "broadcast-replay",
   label: "broadcast replay",
   needsDb: true,
-  run: async ({ supabase, test }) => {
+  run: async ({ testUser, test }) => {
     await test("replayed messages are delivered on join", async () => {
+      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
       try {
+        await signInUser(supabase, testUser.email, testUser.password);
         const event = crypto.randomUUID();
         const topic = randomTopic();
         const payload = { message: crypto.randomUUID() };
@@ -31,13 +34,15 @@ export const broadcastReplay: SuiteDescriptor = {
         assert.strictEqual(result.message, payload.message);
         return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "replay", value: replayMs, unit: "ms" }];
       } finally {
-        await supabase.removeAllChannels();
+        await stopClient(supabase);
       }
     });
 
     await test("replayed binary messages are delivered on join", async () => {
+      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
       const sql = new SQL(DB_URL, { tls: DB_SSL || undefined });
       try {
+        await signInUser(supabase, testUser.email, testUser.password);
         const event = crypto.randomUUID();
         const topic = randomTopic();
         const binary = new Uint8Array([0xde, 0xad, 0xbe, 0xef, 0x00, 0xff]);
@@ -67,12 +72,14 @@ export const broadcastReplay: SuiteDescriptor = {
         return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "replay", value: replayMs, unit: "ms" }];
       } finally {
         await sql.close().catch(() => {});
-        await supabase.removeAllChannels();
+        await stopClient(supabase);
       }
     });
 
     await test("replayed messages carry meta.replayed flag", async () => {
+      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
       try {
+        await signInUser(supabase, testUser.email, testUser.password);
         const event = crypto.randomUUID();
         const topic = randomTopic();
 
@@ -92,12 +99,14 @@ export const broadcastReplay: SuiteDescriptor = {
         assert.strictEqual(receivedMeta?.replayed, true);
         return [];
       } finally {
-        await supabase.removeAllChannels();
+        await stopClient(supabase);
       }
     });
 
     await test("messages before since are not replayed", async () => {
+      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
       try {
+        await signInUser(supabase, testUser.email, testUser.password);
         const event = crypto.randomUUID();
         const topic = randomTopic();
 
@@ -119,7 +128,7 @@ export const broadcastReplay: SuiteDescriptor = {
         assert.strictEqual(result, null);
         return [];
       } finally {
-        await supabase.removeAllChannels();
+        await stopClient(supabase);
       }
     });
   },
