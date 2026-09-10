@@ -8,6 +8,9 @@ export const postgresChangesFilters: SuiteDescriptor = {
   name: "postgres-changes-filters",
   label: "postgres-changes-filters",
   needsDb: true,
+  // Verified safe for internal concurrency: every test creates its own client + row
+  // tags, and postgresChangesFilter() returns a fresh builder per call (no shared state).
+  sequential: false,
   run: async ({ testUser, test }) => {
     await test("eq: delivers row equal to the value", async () => {
       const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
