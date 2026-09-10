@@ -44,6 +44,10 @@ defmodule TestTenantDb.Backend.External do
     :ok
   end
 
+  # The external servers outlive the run; there is nothing of ours to tear down.
+  @impl TestTenantDb.Backend
+  def cleanup!, do: :ok
+
   @impl TestTenantDb.Backend
   def pool_spec(_max_cases), do: {__MODULE__.Worker, length(ports!())}
 
@@ -56,6 +60,26 @@ defmodule TestTenantDb.Backend.External do
   # existence probe).
   @impl TestTenantDb.Backend
   def storage_up!(_tenant), do: :ok
+
+  @impl TestTenantDb.Backend
+  def diagnose(pid) do
+    # Tolerant of a worker that is dead or not answering: this runs on the failure
+    # path, where raising would bury the failure it is meant to explain.
+    port =
+      try do
+        __MODULE__.Worker.port(pid)
+      catch
+        _, _ -> "unknown"
+      end
+
+    {"127.0.0.1:#{port}", "external tenant DB on 127.0.0.1:#{port} stopped answering."}
+  end
+
+  # The external servers are supplied to us; throwing the worker away cannot
+  # recreate one, and a replacement worker reclaims the very same port. Retrying
+  # the checkout is therefore futile here, and TestTenantDb raises instead.
+  @impl TestTenantDb.Backend
+  def discard(_pid), do: :ok
 
   # -- Port configuration
 
