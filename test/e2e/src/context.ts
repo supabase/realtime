@@ -20,14 +20,15 @@ const program = new Command()
   .option("--test <categories>", "Comma-separated list of test categories to run: functional,load,connection,load-postgres-changes,load-presence,load-broadcast,load-broadcast-from-db,load-broadcast-replay,broadcast,broadcast-replay,presence,authorization,postgres-changes,postgres-changes-filters,broadcast-changes,broadcast-binary")
   .option("--debug", "Enable Realtime client debug mode (sets log level to info and enables console logging)")
   .addOption(new Option("--wait-time <wait>", "Time to wait between tests to avoid rate limits in milliseconds").default(DEFAULT_RATE_LIMIT_WAIT_MS, `${DEFAULT_RATE_LIMIT_WAIT_MS / 1000} seconds`))
+  .option("--parallel", "Run suites concurrently instead of sequentially")
   .parse();
 
 const opts = program.opts();
 export const ANON_KEY: string = opts.publishableKey;
 export const SERVICE_KEY: string = opts.secretKey;
 export const dbPassword: string = opts.dbPassword ?? "";
-const { project, domain: EMAIL_DOMAIN, port, json: JSON_OUTPUT, test: TEST_FILTER, otel: OTEL_ARG, otelToken: OTEL_API_TOKEN, url: URL_ARG, dbUrl: DB_URL_ARG, debug: DEBUG, waitTime: WAIT_TIME_ARG } = opts;
-export { EMAIL_DOMAIN, JSON_OUTPUT, OTEL_API_TOKEN, DB_URL_ARG };
+const { project, domain: EMAIL_DOMAIN, port, json: JSON_OUTPUT, test: TEST_FILTER, otel: OTEL_ARG, otelToken: OTEL_API_TOKEN, url: URL_ARG, dbUrl: DB_URL_ARG, debug: DEBUG, waitTime: WAIT_TIME_ARG, parallel: PARALLEL } = opts;
+export { EMAIL_DOMAIN, JSON_OUTPUT, OTEL_API_TOKEN, DB_URL_ARG, PARALLEL };
 export const env: string = opts.env === "production" ? "prod" : opts.env === "development" ? "staging" : opts.env;
 
 export const TEST_CATEGORIES = TEST_FILTER
