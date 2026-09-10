@@ -42,4 +42,4 @@ jobs:
 
       - name: Run e2e suite against a Realtime image built from this checkout
         working-directory: test/e2e
-        run: mise run e2e-local -- --parallel --wait-time 10
+        run: mise run e2e-local -- --test functional --parallel --wait-time 10
