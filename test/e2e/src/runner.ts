@@ -77,13 +77,13 @@ export type SuiteDescriptor = {
   // (e.g. "broadcast extension", "authorization check") differ from their --test category key.
   label: string;
   needsDb: boolean;
-  // Defaults to true: a suite's own tests stay sequential even under --parallel until
+  // Defaults to false: a suite's own tests stay sequential even under --parallel until
   // someone has actually checked it's safe (e.g. load suites that measure
   // throughput/latency may not want concurrent noise from their own tests) and set this
-  // to false. Suites don't need to know about this at all — a suite's `run()` body
+  // to true. Suites don't need to know about this at all — a suite's `run()` body
   // always just writes `await test(...)` in sequence; whether that call blocks is
   // decided here, not by the suite.
-  sequential?: boolean;
+  parallel?: boolean;
   run: (ctx: SuiteCtx) => Promise<void>;
 };
 
@@ -93,16 +93,16 @@ export const results: TestResult[] = [];
 // everything it kicked off. Labels results by `suiteName` directly instead of a shared
 // mutable global, so suites stay correctly attributed even when run concurrently.
 //
-// When --parallel is on and `sequential` is explicitly false, `test()` starts the test
+// When --parallel is on and `parallel` is explicitly true, `test()` starts the test
 // immediately but returns before it finishes, so a suite's own back-to-back
 // `await test(...)` calls end up kicking every test off concurrently without the suite
 // ever knowing — `drain()` (called by the orchestrator after `run()` returns) is what
-// actually waits for them all to complete. `sequential` defaults to true (see
-// SuiteDescriptor.sequential).
-export function createSuiteTest(suiteName: string, sequential = true) {
+// actually waits for them all to complete. `parallel` defaults to false (see
+// SuiteDescriptor.parallel).
+export function createSuiteTest(suiteName: string, parallel = false) {
   const pending: Promise<void>[] = [];
   const test = (name: string, fn: () => Promise<Metric[]>): Promise<void> => {
-    if (!PARALLEL || sequential) return runTest(suiteName, name, fn);
+    if (!PARALLEL || !parallel) return runTest(suiteName, name, fn);
     pending.push(runTest(suiteName, name, fn));
     return Promise.resolve();
   };
