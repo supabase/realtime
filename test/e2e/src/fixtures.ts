@@ -85,38 +85,40 @@ export async function setup(): Promise<{ userId: string; testUser: { email: stri
 
     stepStart = performance.now();
     log(kleur.dim("setup: creating policies"));
-    await Promise.allSettled([
-      runSql("policy 'authenticated receive on topic'", sql`DO $$ BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'authenticated receive on topic' AND tablename = 'messages' AND schemaname = 'realtime') THEN
-              CREATE POLICY "authenticated receive on topic" ON "realtime"."messages" AS PERMISSIVE
-                FOR SELECT TO authenticated USING (realtime.topic() like 'topic:%');
-            END IF;
-          END $$`),
-      runSql("policy 'authenticated broadcast on topic'", sql`DO $$ BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'authenticated broadcast on topic' AND tablename = 'messages' AND schemaname = 'realtime') THEN
-              CREATE POLICY "authenticated broadcast on topic" ON "realtime"."messages" AS PERMISSIVE
-                FOR INSERT TO authenticated WITH CHECK (realtime.topic() like 'topic:%');
-            END IF;
-          END $$`),
-      runSql("policy 'allow authenticated users all access'", sql`DO $$ BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'allow authenticated users all access' AND tablename = 'pg_changes' AND schemaname = 'public') THEN
-              CREATE POLICY "allow authenticated users all access" ON "public"."pg_changes" AS PERMISSIVE
-                FOR ALL TO authenticated USING (TRUE);
-            END IF;
-          END $$`),
-      runSql("policy 'authenticated have full access to read on broadcast_changes'", sql`DO $$ BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'authenticated have full access to read on broadcast_changes' AND tablename = 'broadcast_changes' AND schemaname = 'public') THEN
-              CREATE POLICY "authenticated have full access to read on broadcast_changes" ON "public"."broadcast_changes" AS PERMISSIVE
-                FOR ALL TO authenticated USING (TRUE);
-            END IF;
-          END $$`),
-      runSql("policy 'authenticated have full access to replay_check'", sql`DO $$ BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'authenticated have full access to replay_check' AND tablename = 'replay_check' AND schemaname = 'public') THEN
-              CREATE POLICY "authenticated have full access to replay_check" ON "public"."replay_check" AS PERMISSIVE
-                FOR ALL TO authenticated USING (TRUE) WITH CHECK (TRUE);
-            END IF;
-          END $$`),
-    ]);
+    // Sequential, not Promise.allSettled: on a fresh database these CREATE POLICY
+    // statements actually run (the IF NOT EXISTS guard only short-circuits once the
+    // policies already exist), and concurrent DDL like this can genuinely deadlock in
+    // Postgres — which allSettled would silently swallow, leaving policies missing.
+    await runSql("policy 'authenticated receive on topic'", sql`DO $$ BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'authenticated receive on topic' AND tablename = 'messages' AND schemaname = 'realtime') THEN
+            CREATE POLICY "authenticated receive on topic" ON "realtime"."messages" AS PERMISSIVE
+              FOR SELECT TO authenticated USING (realtime.topic() like 'topic:%');
+          END IF;
+        END $$`);
+    await runSql("policy 'authenticated broadcast on topic'", sql`DO $$ BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'authenticated broadcast on topic' AND tablename = 'messages' AND schemaname = 'realtime') THEN
+            CREATE POLICY "authenticated broadcast on topic" ON "realtime"."messages" AS PERMISSIVE
+              FOR INSERT TO authenticated WITH CHECK (realtime.topic() like 'topic:%');
+          END IF;
+        END $$`);
+    await runSql("policy 'allow authenticated users all access'", sql`DO $$ BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'allow authenticated users all access' AND tablename = 'pg_changes' AND schemaname = 'public') THEN
+            CREATE POLICY "allow authenticated users all access" ON "public"."pg_changes" AS PERMISSIVE
+              FOR ALL TO authenticated USING (TRUE);
+          END IF;
+        END $$`);
+    await runSql("policy 'authenticated have full access to read on broadcast_changes'", sql`DO $$ BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'authenticated have full access to read on broadcast_changes' AND tablename = 'broadcast_changes' AND schemaname = 'public') THEN
+            CREATE POLICY "authenticated have full access to read on broadcast_changes" ON "public"."broadcast_changes" AS PERMISSIVE
+              FOR ALL TO authenticated USING (TRUE);
+          END IF;
+        END $$`);
+    await runSql("policy 'authenticated have full access to replay_check'", sql`DO $$ BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'authenticated have full access to replay_check' AND tablename = 'replay_check' AND schemaname = 'public') THEN
+            CREATE POLICY "authenticated have full access to replay_check" ON "public"."replay_check" AS PERMISSIVE
+              FOR ALL TO authenticated USING (TRUE) WITH CHECK (TRUE);
+          END IF;
+        END $$`);
     log(kleur.dim(`setup: policies done (${(performance.now() - stepStart).toFixed(0)}ms)`));
 
     stepStart = performance.now();
