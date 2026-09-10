@@ -73,7 +73,7 @@ defmodule TestTenantDb.Backend.Docker do
   @impl TestTenantDb.Backend
   def cleanup! do
     if pid = Process.whereis(__MODULE__), do: GenServer.stop(pid)
-    unless Env.get_boolean("REUSE_CONTAINERS", false), do: stop_containers()
+    if !Env.get_boolean("REUSE_CONTAINERS", false), do: stop_containers()
     :ok
   end
 
