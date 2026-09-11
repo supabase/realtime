@@ -8,7 +8,7 @@ function isLoadSuite(d: SuiteDescriptor) {
 }
 
 async function runSuite(d: SuiteDescriptor, testUser: { email: string; password: string }) {
-  const { test, drain } = createSuiteTest(d.label, isLoadSuite(d) ? false : d.run_cases_in_parallel);
+  const { test, drain } = createSuiteTest(d.label, isLoadSuite(d) ? false : d.runCasesInParallel);
   await d.run({ testUser, test });
   await drain();
 }
