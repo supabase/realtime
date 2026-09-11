@@ -21,6 +21,12 @@
           {Credo.Check.Readability.AliasOrder, []},
           {Credo.Check.Readability.StringSigils, []},
           {Credo.Check.Refactor.Apply, []}
+        ],
+        extra: [
+          # The formatter isn't exact and so sometimes ends up with line length slightly
+          # above 120 - not worth manually fixing imo.
+          # https://elixir.hexdocs.pm/Code.html#format_string!/2-line-length
+          {Credo.Check.Readability.MaxLineLength, [priority: :low, max_length: 123]}
         ]
       }
     }
