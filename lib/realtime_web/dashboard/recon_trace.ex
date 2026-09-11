@@ -716,11 +716,9 @@ defmodule RealtimeWeb.Dashboard.ReconTrace do
   end
 
   defp format_value(val) when is_list(val) do
-    try do
-      {:list, System.unique_integer([:positive]), Enum.map(val, &format_value/1)}
-    rescue
-      _ -> {:scalar, "list", inspect(val, limit: 30)}
-    end
+    {:list, System.unique_integer([:positive]), Enum.map(val, &format_value/1)}
+  rescue
+    _ -> {:scalar, "list", inspect(val, limit: 30)}
   end
 
   defp format_value(val) when is_tuple(val) do
@@ -763,35 +761,29 @@ defmodule RealtimeWeb.Dashboard.ReconTrace do
   defp parse_module(""), do: {:error, "Module is required"}
 
   defp parse_module(":" <> erlang_mod) do
-    try do
-      {:ok, String.to_existing_atom(erlang_mod)}
-    rescue
-      _ -> {:error, "Unknown Erlang module: :#{erlang_mod}"}
-    end
+    {:ok, String.to_existing_atom(erlang_mod)}
+  rescue
+    _ -> {:error, "Unknown Erlang module: :#{erlang_mod}"}
   end
 
   defp parse_module(elixir_mod) do
-    try do
-      {:ok, String.to_existing_atom("Elixir." <> elixir_mod)}
-    rescue
-      _ ->
-        try do
-          {:ok, String.to_existing_atom(elixir_mod)}
-        rescue
-          _ -> {:error, "Unknown module: #{elixir_mod}. Make sure it is loaded."}
-        end
-    end
+    {:ok, String.to_existing_atom("Elixir." <> elixir_mod)}
+  rescue
+    _ ->
+      try do
+        {:ok, String.to_existing_atom(elixir_mod)}
+      rescue
+        _ -> {:error, "Unknown module: #{elixir_mod}. Make sure it is loaded."}
+      end
   end
 
   defp parse_fun("_"), do: :_
   defp parse_fun(""), do: :_
 
   defp parse_fun(f) do
-    try do
-      String.to_existing_atom(f)
-    rescue
-      _ -> {:error, "Unknown function: #{f}"}
-    end
+    String.to_existing_atom(f)
+  rescue
+    _ -> {:error, "Unknown function: #{f}"}
   end
 
   defp parse_max_calls(m) do
