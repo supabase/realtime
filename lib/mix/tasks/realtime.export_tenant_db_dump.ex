@@ -5,47 +5,65 @@ defmodule Mix.Tasks.Realtime.ExportTenantDbDump do
   Dumps the tenant database's `realtime` schema to `priv/repo/tenant_db_dump_<pg_major>.sql`,
   the `supabase_realtime_admin` role definition, and the `realtime.schema_migrations` rows.
 
-  Usage:
+  `mise run tenant-dumps` provisions the databases and calls this task for every major we ship a
+  dump for, so prefer it over calling this task by hand:
 
-      mix realtime.export_tenant_db_dump --pg-major 17
+      mise run tenant-dumps        # every major
+      mise run tenant-dumps 17     # just pg17
 
-  The target tenant DB is expected to already have all tenant migrations applied,
+  Called directly, the target tenant DB is expected to already have all tenant migrations applied,
   so make sure it is in a good state before generating it:
 
-      mise task run db-rm
-      mise task run db-start
-      mix setup
+      mise run db-rm
+      mise run db-start
+      mix realtime.export_tenant_db_dump --container tenant-realtime-dev-tenant_db-1
 
   The target DB is read from `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` env vars.
+  Its major version names the file that comes out, so there is no way to write a dump under a major
+  it was not taken from.
 
-  Requires `pg_dump` and `pg_dumpall` matching the target's major version on `$PATH`.
+  `pg_dump` and `pg_dumpall` run with `docker exec` inside `--container`, the target's own database
+  container, so they always match the target's major version and the host needs no Postgres client
+  installed. Only `docker` and a container we can reach the database through.
   """
   use Mix.Task
 
   @realtime_admin_role "supabase_realtime_admin"
 
+  # What the database listens on inside its own container.
+  @container_port 5432
+
   @impl Mix.Task
   def run(args) do
     {:ok, _} = Application.ensure_all_started(:postgrex)
 
-    {opts, _, _} = OptionParser.parse(args, strict: [pg_major: :integer])
-    pg_major = opts[:pg_major] || Mix.raise("--pg-major is required, e.g. --pg-major 17")
+    {opts, _, _} = OptionParser.parse(args, strict: [container: :string])
 
-    host = System.get_env("DB_HOST", "127.0.0.1")
-    port = Realtime.Env.get_integer("DB_PORT", 5433)
-    database = System.get_env("DB_NAME", "postgres")
-    user = System.get_env("DB_USER", "supabase_admin")
-    password = System.get_env("DB_PASSWORD", "postgres")
+    target = %{
+      host: System.get_env("DB_HOST", "127.0.0.1"),
+      port: Realtime.Env.get_integer("DB_PORT", 5433),
+      database: System.get_env("DB_NAME", "postgres"),
+      user: System.get_env("DB_USER", "supabase_admin"),
+      password: System.get_env("DB_PASSWORD", "postgres"),
+      container: container!(opts)
+    }
+
+    conn = connect!(target)
+    pg_major = pg_major!(conn)
     path = dump_path(pg_major)
 
-    Mix.shell().info("[export_tenant_db_dump] target: #{host}:#{port}/#{database} (pg#{pg_major})")
+    Mix.shell().info("[export_tenant_db_dump] target: #{target.host}:#{target.port}/#{target.database} (pg#{pg_major})")
+
+    Mix.shell().info("[export_tenant_db_dump] container: #{target.container}")
 
     lines = [
       banner(pg_major),
-      realtime_admin_role_sql!(host, port, database, user, password),
-      pg_dump!(host, port, database, user, password) |> postprocess(),
-      schema_migrations_sql!(host, port, database, user, password)
+      realtime_admin_role_sql!(target),
+      target |> pg_dump!() |> postprocess(),
+      schema_migrations_sql!(conn)
     ]
+
+    GenServer.stop(conn)
 
     File.write!(path, lines)
 
@@ -53,6 +71,14 @@ defmodule Mix.Tasks.Realtime.ExportTenantDbDump do
   end
 
   defp dump_path(pg_major), do: Application.app_dir(:realtime, "priv/repo/tenant_db_dump_#{pg_major}.sql")
+
+  defp container!(opts) do
+    opts[:container] ||
+      Mix.raise("""
+      --container is required: pg_dump runs inside the target database's own container, e.g.
+      --container tenant-realtime-dev-tenant_db-1. `mise run tenant-dumps` passes it for you.
+      """)
+  end
 
   @doc false
   def banner(pg_major) do
@@ -72,52 +98,14 @@ defmodule Mix.Tasks.Realtime.ExportTenantDbDump do
     """
   end
 
-  defp pg_dump!(host, port, database, user, password) do
-    pg_dump = System.find_executable("pg_dump") || Mix.raise("pg_dump not found on $PATH")
-
-    args = [
-      "--host",
-      host,
-      "--port",
-      to_string(port),
-      "--username",
-      user,
-      "--dbname",
-      database,
-      "--schema-only",
-      "--schema",
-      "realtime"
-    ]
-
-    case System.cmd(pg_dump, args, env: [{"PGPASSWORD", password}]) do
-      {output, 0} -> output
-      {_output, code} -> Mix.raise("pg_dump exited #{code} - see output above")
-    end
+  defp pg_dump!(target) do
+    docker_exec!(target, "pg_dump", ["--dbname", target.database, "--schema-only", "--schema", "realtime"])
   end
 
-  defp realtime_admin_role_sql!(host, port, database, user, password) do
-    pg_dumpall = System.find_executable("pg_dumpall") || Mix.raise("pg_dumpall not found on $PATH")
-
-    args = [
-      "--host",
-      host,
-      "--port",
-      to_string(port),
-      "--username",
-      user,
-      "--database",
-      database,
-      "--roles-only"
-    ]
-
-    output =
-      case System.cmd(pg_dumpall, args, env: [{"PGPASSWORD", password}], stderr_to_stdout: true) do
-        {output, 0} -> output
-        {output, code} -> Mix.raise("pg_dumpall exited #{code}:\n#{output}")
-      end
-
+  defp realtime_admin_role_sql!(target) do
     lines =
-      output
+      target
+      |> docker_exec!("pg_dumpall", ["--database", target.database, "--roles-only"])
       |> String.split("\n")
       |> Enum.filter(&realtime_admin_role_line?/1)
       |> Enum.uniq()
@@ -146,14 +134,55 @@ defmodule Mix.Tasks.Realtime.ExportTenantDbDump do
       Regex.match?(~r/^GRANT .*TO #{@realtime_admin_role}/, line)
   end
 
-  defp schema_migrations_sql!(host, port, database, user, password) do
-    {:ok, conn} =
-      Postgrex.start_link(hostname: host, port: port, database: database, username: user, password: password)
+  # Runs one of the container's own dump binaries against the database next to it, capturing the
+  # SQL from stdout while diagnostics go straight to our own stderr. The connection is the
+  # container's loopback, not ours. PGPASSWORD is handed over by name so it stays off the command
+  # line.
+  defp docker_exec!(target, binary, args) do
+    docker = System.find_executable("docker") || Mix.raise("docker not found on $PATH")
 
+    argv =
+      [
+        "exec",
+        "--env",
+        "PGPASSWORD",
+        target.container,
+        binary,
+        "--host",
+        "127.0.0.1",
+        "--port",
+        to_string(@container_port),
+        "--username",
+        target.user
+      ] ++ args
+
+    case System.cmd(docker, argv, env: [{"PGPASSWORD", target.password}]) do
+      {output, 0} -> output
+      {_output, code} -> Mix.raise("#{binary} in #{target.container} exited #{code} - see output above")
+    end
+  end
+
+  defp connect!(target) do
+    {:ok, conn} =
+      Postgrex.start_link(
+        hostname: target.host,
+        port: target.port,
+        database: target.database,
+        username: target.user,
+        password: target.password
+      )
+
+    conn
+  end
+
+  defp pg_major!(conn) do
+    {:ok, %{rows: [[version_num]]}} = Postgrex.query(conn, "SELECT current_setting('server_version_num')", [])
+    version_num |> String.to_integer() |> div(10_000)
+  end
+
+  defp schema_migrations_sql!(conn) do
     {:ok, %{rows: rows}} =
       Postgrex.query(conn, ~s(SELECT version FROM realtime."schema_migrations" ORDER BY version), [])
-
-    GenServer.stop(conn)
 
     inserts =
       Enum.map_join(rows, fn [version] ->
