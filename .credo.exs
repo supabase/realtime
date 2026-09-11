@@ -26,7 +26,9 @@
           # The formatter isn't exact and so sometimes ends up with line length slightly
           # above 120 - not worth manually fixing imo.
           # https://elixir.hexdocs.pm/Code.html#format_string!/2-line-length
-          {Credo.Check.Readability.MaxLineLength, [priority: :low, max_length: 123]}
+          {Credo.Check.Readability.MaxLineLength, [priority: :low, max_length: 123]},
+          # Only complain about nested modules 4+ levels deep, 3 is often genuinely helpful context
+          {Credo.Check.Design.AliasUsage, [if_nested_deeper_than: 3]}
         ]
       }
     }
