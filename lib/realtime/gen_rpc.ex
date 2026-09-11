@@ -246,8 +246,8 @@ defmodule Realtime.GenRpc do
     )
   end
 
-  defp max_cast_clients(), do: Application.fetch_env!(:realtime, :max_gen_rpc_clients)
-  defp max_call_clients(), do: Application.fetch_env!(:realtime, :max_gen_rpc_call_clients)
+  defp max_cast_clients, do: Application.fetch_env!(:realtime, :max_gen_rpc_clients)
+  defp max_call_clients, do: Application.fetch_env!(:realtime, :max_gen_rpc_call_clients)
 
   defp cast_rpc_nodes(nodes, key), do: Enum.map(nodes, &cast_rpc_node(&1, key))
   defp call_rpc_nodes(nodes, key), do: Enum.map(nodes, &call_rpc_node(&1, key))

@@ -199,7 +199,7 @@ defmodule Realtime.GenRpcMetrics do
     end)
   end
 
-  defp server_port() do
+  defp server_port do
     if Application.fetch_env!(:gen_rpc, :default_client_driver) == :tcp do
       Application.fetch_env!(:gen_rpc, :tcp_server_port)
     else
