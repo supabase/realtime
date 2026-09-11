@@ -1,9 +1,17 @@
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
-import { ANON_KEY, SERVICE_KEY, dbPassword, DB_URL_ARG, env, PROJECT_URL, REALTIME_OPTS } from "./context.ts";
+import { SERVICE_KEY, dbPassword, DB_URL_ARG, env, PARALLEL } from "./context.ts";
 import type { SuiteDescriptor } from "./runner.ts";
 import { log, printSummary, flushOtel, results, createSuiteTest } from "./runner.ts";
-import { stopClient } from "./helpers.ts";
 import { setup, cleanup } from "./fixtures.ts";
+
+function isLoadSuite(d: SuiteDescriptor) {
+  return d.name.startsWith("load");
+}
+
+async function runSuite(d: SuiteDescriptor, testUser: { email: string; password: string }) {
+  const { test, drain } = createSuiteTest(d.label, isLoadSuite(d) ? false : d.runCasesInParallel);
+  await d.run({ testUser, test });
+  await drain();
+}
 
 // Lives outside runner.ts to avoid an import cycle: fixtures.ts (setup/cleanup) already
 // imports `log` from runner.ts, so runner.ts can't import fixtures.ts back.
@@ -46,20 +54,24 @@ export async function runSuites(descriptors: SuiteDescriptor[], testCategories: 
 
   let userId: string | null = null;
   let testUser: { email: string; password: string } = { email: "", password: "" };
-  let supabase: SupabaseClient = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
 
   if (needsDb) {
     const setupResult = await setup();
     userId = setupResult.userId;
     testUser = setupResult.testUser;
-    supabase = setupResult.supabase;
   }
 
   const start = performance.now();
   try {
-    for (const d of suitesToRun) await d.run({ testUser, supabase, test: createSuiteTest(d.label) });
+    if (PARALLEL) {
+      const loadSuites = suitesToRun.filter(isLoadSuite);
+      const otherSuites = suitesToRun.filter((d) => !isLoadSuite(d));
+      await Promise.all(otherSuites.map((d) => runSuite(d, testUser)));
+      for (const d of loadSuites) await runSuite(d, testUser);
+    } else {
+      for (const d of suitesToRun) await runSuite(d, testUser);
+    }
   } finally {
-    await stopClient(supabase);
     if (userId) await cleanup(userId);
   }
 

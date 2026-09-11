@@ -15,6 +15,8 @@
 | `--db-url` | Override database URL (e.g. `postgresql://postgres:postgres@127.0.0.1:54322/postgres`) |
 | `--otel` | OTLP HTTP endpoint for tracing (e.g. `http://localhost:4318`) |
 | `--otel-token` | Bearer token for authenticated OTLP endpoints |
+| `--wait-time` | Time (in ms) to wait between tests that use rate limit waiting |
+| `--parallel` | Runs the tests in parallel, tests will be run sequentially by default |
 
 A random test user is created at the start of each run and deleted automatically when it finishes.
 
@@ -128,6 +130,20 @@ bun run nix
 ```
 
 `bun run nix` calls `nix-build.sh`, which automatically updates the `outputHash` in `flake.nix` when `package.json` or `bun.lock` change — no manual hash update needed.
+
+## Parallel Execution
+
+Tests can be run in parallel by passing in the `--parallel` flag as a command line parameter. E.g.
+
+```bash
+./realtime-check --env local --parallel
+```
+
+In parallel execution mode, each test suite is run in parallel. Additionally, any test suite that sets
+`parallel` to true in its `SuiteDescriptor` will have all its test cases run in parallel as well. When creating
+a test suite, you don't need to know about the details of the parallel execution, this is all handled by the
+test runner, just declare your test cases and set `parallel: true` if you want them to be executed concurrently.
+This allows parallel test case execution to be opt-in rather than the default, to prioritise safety and correctness.
 
 ---
 
