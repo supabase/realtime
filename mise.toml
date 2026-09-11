@@ -12,6 +12,10 @@ supabase = "latest"
 # default. Setting TENANT yourself wins. A dot becomes a dash: a tenant is a compose project name
 # and a subdomain, and neither takes dots.
 TENANT = "{% if env.TENANT %}{{ env.TENANT }}{% else %}{% set dir = config_root | split(pat='/') | last | replace(from='.', to='-') %}{% if dir == 'realtime' %}realtime-dev{% else %}{{ dir }}{% endif %}{% endif %}"
+# The Postgres majors that get a committed tenant dump (priv/repo/tenant_db_dump_<major>.sql), and
+# the image each one is generated from — both `tenant-dumps` and the workflow that runs it read
+# this list. Keep the images in step with the ones the test workflows run against.
+TENANT_DUMP_IMAGES = "15=supabase/postgres:15.14.1.167 17=supabase/postgres:17.6.1.166"
 REGION = "us-east-1"
 API_JWT_SECRET = "dev"
 DB_ENC_KEY = "1234567890123456"
@@ -77,6 +81,102 @@ run = """
 set -eu
 COMPOSE_PROJECT_NAME="tenant-${TENANT:-realtime-dev}" docker compose -f compose.tenant-db.yml rm -sf
 """
+
+# Regenerates the committed tenant snapshots: priv/repo/tenant_schema, the declarative schema the
+# dashboard compares a tenant against, and priv/repo/tenant_db_dump_<major>.sql, what a brand new
+# tenant database is loaded with instead of replaying every migration. Both come out of a database
+# this task creates and throws away, so it leaves the dev stack alone. Also runs in CI, on every PR
+# that touches the tenant migrations - see .github/workflows/update-tenant-db-snapshots.yml.
+[tasks.tenant-dumps]
+description = "Regenerate priv/repo/tenant_schema and the tenant db dump of every supported Postgres major"
+usage = '''
+arg "[majors]..." help="Only regenerate these majors, such as 17. Defaults to every major in TENANT_DUMP_IMAGES."
+'''
+run = '''
+set -eu
+
+compose="docker compose -f compose.dbs.yml"
+
+db_down() { # <major> <image>
+  COMPOSE_PROJECT_NAME="tenant-dumps-pg$1" POSTGRES_IMAGE="$2" $compose down --volumes --remove-orphans >/dev/null 2>&1 || true
+}
+
+for major in ${usage_majors:-}; do
+  case " $TENANT_DUMP_IMAGES " in
+    *" $major="*) ;;
+    *) echo "pg$major has no tenant dump; TENANT_DUMP_IMAGES is: $TENANT_DUMP_IMAGES" >&2; exit 1 ;;
+  esac
+done
+
+schemas=$(mktemp -d)
+
+cleanup() {
+  rm -rf "$schemas"
+  for pair in $TENANT_DUMP_IMAGES; do
+    db_down "${pair%%=*}" "${pair#*=}"
+    dump="priv/repo/tenant_db_dump_${pair%%=*}.sql"
+    [ -e "$dump" ] || git checkout -- "$dump" 2>/dev/null || true
+  done
+}
+trap cleanup EXIT
+
+reference=""
+for pair in $TENANT_DUMP_IMAGES; do
+  major=${pair%%=*}
+  image=${pair#*=}
+
+  case " ${usage_majors:-} " in
+    "  ") ;;              # nothing asked for, so every major
+    *" $major "*) ;;      # this one was asked for
+    *) continue ;;
+  esac
+
+  echo "==> pg$major ($image)"
+  project="tenant-dumps-pg$major"
+  dump="priv/repo/tenant_db_dump_${major}.sql"
+
+  db_down "$major" "$image"
+  COMPOSE_PROJECT_NAME="$project" POSTGRES_IMAGE="$image" DB_PORT=0 TENANT_DB_PORT=0 $compose up -d --wait
+
+  published=$(COMPOSE_PROJECT_NAME="$project" POSTGRES_IMAGE="$image" $compose port realtime_db 5432)
+  realtime_port=${published##*:}
+  published=$(COMPOSE_PROJECT_NAME="$project" POSTGRES_IMAGE="$image" $compose port tenant_db 5432)
+  tenant_port=${published##*:}
+  tenant_container=$(COMPOSE_PROJECT_NAME="$project" POSTGRES_IMAGE="$image" $compose ps -q tenant_db)
+
+  # The committed dump goes too: with one in place `mix seed` loads it into the fresh tenant
+  # database instead of running the migrations we are here to capture.
+  rm -f "$dump"
+
+  # DB_PORT is the realtime database to the server and the tenant database to the export tasks, so
+  # each command gets the one it means.
+  DB_PORT="$realtime_port" TENANT_DB_PORT="$tenant_port" mix ecto.setup
+  DB_PORT="$tenant_port" mix realtime.export_tenant_schema
+  DB_PORT="$tenant_port" mix realtime.export_tenant_db_dump --container "$tenant_container"
+
+  # The dump names itself after the major it came out of, so the one we removed coming back is what
+  # says this image really is pg$major.
+  if [ ! -e "$dump" ]; then
+    echo "pg$major: $image wrote no $dump, so it is not pg$major. Fix TENANT_DUMP_IMAGES." >&2
+    exit 1
+  fi
+
+  # One schema artifact serves every major. A divergence means it can no longer be a single
+  # directory and needs splitting per major again.
+  cp -R priv/repo/tenant_schema "$schemas/$major"
+  if [ -n "$reference" ]; then
+    diff -r "$schemas/$reference" "$schemas/$major"
+  else
+    reference=$major
+  fi
+
+  db_down "$major" "$image"
+done
+'''
+
+[tasks.tenant-dump-images]
+description = "Print the Postgres image every committed tenant dump is generated from, one per line"
+run = 'for pair in $TENANT_DUMP_IMAGES; do echo "${pair#*=}"; done'
 
 [tasks.realtime-start]
 description = "Start Realtime and its databases in containers"

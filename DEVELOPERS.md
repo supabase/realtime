@@ -8,6 +8,7 @@
   - [Architecture](#architecture)
   - [Server setup](#server-setup)
   - [Tenants](#tenants)
+  - [Tenant migrations and snapshots](#tenant-migrations-and-snapshots)
   - [Devcontainer](#devcontainer)
   - [WebSocket](#websocket)
     - [WebSocket URL](#websocket-url)
@@ -130,6 +131,27 @@ You can start playing around with Broadcast, Presence, and Postgres Changes feat
 The WebSocket URL must contain the subdomain, `external_id` of the tenant on the `tenants` table, and the token must be signed with the `jwt_secret` that was inserted along with the tenant.
 
 If you're using the default tenant, the URL is `ws://realtime-dev.localhost:4000/socket` (make sure the port is correct for your development environment), and you can use `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MDMwMjgwODcsInJvbGUiOiJwb3N0Z3JlcyJ9.tz_XJ89gd6bN8MBpCl7afvPrZiBH6RB65iA1FadPT3Y` for the token. The token must have `exp` and `role` (database role) keys.
+
+### Tenant migrations and snapshots
+
+Adding a migration under `lib/realtime/tenants/repo/migrations/` also changes two committed snapshots of
+where those migrations land:
+
+- `priv/repo/tenant_db_dump_<major>.sql` — one dump per supported Postgres major, loaded into a brand new
+  tenant database in place of replaying every migration.
+- `priv/repo/tenant_schema/` — the declarative schema the dashboard compares a tenant's live state against.
+  It is one directory for all majors, so the task fails if the majors disagree.
+
+Regenerate both:
+
+```bash
+mise run tenant-dumps      # every major
+mise run tenant-dumps 17   # only pg17, while iterating
+```
+
+Each major gets its own throwaway realtime and tenant database, on ports docker picks, so your dev stack keeps running. `pg_dump` runs inside the tenant database's own container, so nothing needs installing. `TENANT_DUMP_IMAGES` in `mise.toml` is the list of majors and the image each dump is generated from.
+
+[update-tenant-db-snapshots.yml](.github/workflows/update-tenant-db-snapshots.yml) also runs the same task on every PR that touches the migrations and commits the result back to the branch if there are changes.
 
 ### Devcontainer
 

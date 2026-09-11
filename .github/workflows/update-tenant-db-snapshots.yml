@@ -24,24 +24,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  export-snapshots:
-    name: Export schema & dump (pg${{ matrix.pg_major }})
+  update-snapshots:
+    name: Export and commit schema & dumps
     runs-on: blacksmith-2vcpu-ubuntu-2404
     # Do not run for dependabot (as usually dependabot upgrades shouldn't touch schema and we don't want to duplicate secrets)
     if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - pg_major: 15
-            postgres_image: supabase/postgres:15.14.1.167
-          - pg_major: 17
-            postgres_image: supabase/postgres:17.6.1.166
-    env:
-      POSTGRES_IMAGE: ${{ matrix.postgres_image }}
 
     steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.GH_APP_MANAGER_ID }}
+          private-key: ${{ secrets.GH_APP_MANAGER_PRIVATE_KEY }}
+
+      # The PR branch itself, not the merge commit: whatever comes out is committed back onto it.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Setup mise
         uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
@@ -59,24 +61,17 @@ jobs:
       - name: Install dependencies
         run: mix deps.get
 
-      - name: Install PostgreSQL client
-        run: |
-          sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail \
-            https://www.postgresql.org/media/keys/ACCC4CF8.asc
-          . /etc/os-release
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
-            | sudo tee /etc/apt/sources.list.d/pgdg.list
-          sudo apt-get update -y
-          sudo apt-get install -y "postgresql-client-${{ matrix.pg_major }}"
-          echo "/usr/lib/postgresql/${{ matrix.pg_major }}/bin" >> "$GITHUB_PATH"
+      # `mise run tenant-dumps` starts a database per major and dumps it from inside its own
+      # container, so these are every image the job needs.
+      - name: Resolve Postgres images
+        run: echo "PG_IMAGES=$(mise run tenant-dump-images | tr '\n' ' ')" >> "$GITHUB_ENV"
 
       - name: Cache Docker images
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         id: docker-cache
         with:
           path: /tmp/docker-images
-          key: docker-images-zstd-${{ matrix.postgres_image }}
+          key: docker-images-zstd-${{ hashFiles('mise.toml') }}
 
       - name: Load Docker images from cache
         if: steps.docker-cache.outputs.cache-hit == 'true'
@@ -85,80 +80,19 @@ jobs:
       - name: Pull and save Docker images
         if: steps.docker-cache.outputs.cache-hit != 'true'
         run: |
-          docker pull ${{ matrix.postgres_image }}
+          for image in $PG_IMAGES; do docker pull "$image"; done
           mkdir -p /tmp/docker-images
-          docker image save ${{ matrix.postgres_image }} | zstd -T0 -o /tmp/docker-images/postgres.tar.zst
+          # PG_IMAGES is a space-separated list; word splitting is intentional here.
+          # shellcheck disable=SC2086
+          docker image save $PG_IMAGES | zstd -T0 -o /tmp/docker-images/postgres.tar.zst
 
-      - name: Start Postgres
-        run: docker compose -f compose.dbs.yml up -d --wait
-
-      # Force re-generating a fresh dump
-      - name: Remove committed db dump
-        run: rm -f priv/repo/tenant_db_dump_${{ matrix.pg_major }}.sql
-
-      - name: Set up realtime DB and migrate tenant DB
-        run: mix ecto.setup
-
-      - name: Export Tenant DB schema
-        run: mix realtime.export_tenant_schema
-
-      - name: Export Tenant DB dump
-        run: mix realtime.export_tenant_db_dump --pg-major ${{ matrix.pg_major }}
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
-        with:
-          name: tenant-dump-${{ matrix.pg_major }}
-          path: |
-            priv/repo/tenant_db_dump_${{ matrix.pg_major }}.sql
-            priv/repo/tenant_schema/
-          # pg-delta .pgdelta-export.json
-          include-hidden-files: true
-          if-no-files-found: ignore
-
-  commit-changes:
-    name: Commit schema and dump snapshots
-    needs: export-snapshots
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    # Do not run for dependabot (as usually dependabot upgrades shouldn't touch schema and we don't want to duplicate secrets)
-    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]'
-
-    steps:
-      - name: Generate GitHub App token
-        id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          client-id: ${{ secrets.GH_APP_MANAGER_ID }}
-          private-key: ${{ secrets.GH_APP_MANAGER_PRIVATE_KEY }}
-
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          token: ${{ steps.app-token.outputs.token }}
-
-      - name: Download artifacts
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
-        with:
-          pattern: tenant-dump-*
-          path: artifacts
-
-      # The schema artifact must be identical on every major; a divergence means it
-      # can no longer be a single directory and needs splitting per major again.
-      - name: Verify the schema artifact matches across majors
-        run: diff -r artifacts/tenant-dump-15/tenant_schema artifacts/tenant-dump-17/tenant_schema
-
-      - name: Move artifacts into place
-        run: |
-          rm -rf priv/repo/tenant_schema
-          cp -R artifacts/tenant-dump-17/. priv/repo/
-          cp artifacts/tenant-dump-15/tenant_db_dump_15.sql priv/repo/
+      - name: Export tenant schema and dumps
+        run: mise run tenant-dumps
 
       - name: Check if schema or dumps changed
         id: check-changes
         run: |
-          git add -A priv/repo/tenant_schema \
-            priv/repo/tenant_db_dump_15.sql priv/repo/tenant_db_dump_17.sql
+          git add -A priv/repo/tenant_schema priv/repo/tenant_db_dump_*.sql
           if git diff --cached --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
