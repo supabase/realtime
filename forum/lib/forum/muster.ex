@@ -236,19 +236,113 @@ defmodule Forum.Muster do
   the table against the live member counts, and never forgets an outstanding router
   assertion, so a shard crash cannot orphan a `{group, node}` entry on a (local or
   remote) router.
+
+  Returns `{:error, :draining}` if this node has begun a graceful cluster-leave
+  (`drain/2`): once leaving, the node is being rebalanced out of every peer's
+  ring, so a new first-member join could produce a local member with no occupancy
+  row on any router (silently missing from every broadcast). The join fails loudly
+  instead. The host app should stop accepting new joins at SIGTERM anyway (see
+  `drain/2`); this is defense-in-depth for a stray join that races the drain.
   """
-  @spec join(atom, group, pid) :: :ok | {:error, :not_local | :rpc_failed | term}
+  @spec join(atom, group, pid) :: :ok | {:error, :not_local | :draining | :rpc_failed | term}
   def join(_scope, _group, pid) when is_pid(pid) and node(pid) != node(),
     do: {:error, :not_local}
 
   def join(scope, group, pid) when is_atom(scope) and is_pid(pid) do
-    call_shard(scope, group, {:join, group, pid})
+    if :persistent_term.get({Forum.Muster, scope, :accepting_joins}, true) do
+      call_shard(scope, group, {:join, group, pid})
+    else
+      {:error, :draining}
+    end
   end
 
   @doc "Remove `pid` from `group` in `scope`."
   @spec leave(atom, group, pid) :: :ok | {:error, term}
   def leave(scope, group, pid) when is_atom(scope) and is_pid(pid) do
     call_shard(scope, group, {:leave, group, pid})
+  end
+
+  @doc """
+  Gracefully evacuates this node's **router role** before it leaves the cluster,
+  and blocks until the evacuation is acknowledged.
+
+  A Muster node plays two independent roles. Its **source role** (holding local
+  members) needs no Muster mechanism on shutdown: as the host app disconnects its
+  clients, membership drops to 0 and the normal vacant-flush retracts occupancy.
+  Its **router role** is the one only a *pre-death* handoff can protect: by
+  consistent hashing this node is the elected router for ~1/N of all groups, and
+  if it dies abruptly a peer's first-member join still hashes to it, fires a
+  synchronous `:occupied` claim to a corpse, and ends up with a local member that
+  has no occupancy row on any router silently missing from every broadcast.
+
+  `drain/2` closes that window while the node is *still alive*: it broadcasts a
+  leave (`{:muster_leaving, coordinator_pid, view_seq}`), and each peer rebalances
+  this node out of its ring (routing its share to the newly-elected routers and
+  re-announcing the groups it holds) and only *then* acks
+  (`{:muster_leaving_ack, node}`) so an ack means that peer's handoff is done.
+  Because this node stays alive after each peer evicts it, a write its shards or
+  rebalance workers had already put on the wire could otherwise land afterwards
+  and resurrect it as a fan-out target. The `view_seq` on the leave is the peer's
+  departure watermark, which rejects such a snapshot; a late claim, which no
+  watermark can stop, is collected when the peer sees this node actually die.
+  `drain` returns only once **every peer has acked** and then waits a
+  `settle_ms` window (still servicing inbound RPCs) so in-flight broadcasts routed
+  here just before the handoff can fan out.
+
+  This node keeps its own full ring/view and does not rebalance itself, not even
+  if a peer dies mid-drain. Other peers rebalance it out. It stays draining for
+  the whole call: all outbound self-assertion (heartbeat, re-discovery) is
+  suppressed so no peer re-pairs it, while inbound coordination RPCs keep being
+  serviced. It also publishes `:rebalancing` for the whole drain, so
+  `targets/3` on it returns `{:error, :flood}` and `router/2` returns the full
+  member list: from the first peer's eviction on, its occupancy table is no
+  longer maintained (that peer's new claims go to the newly-elected router), so a
+  sender still routing here under the old view must flood rather than trust it.
+
+  ## Shutdown sequencing (host-app contract)
+
+  `drain` handles ONLY the router role. Call it **late** in shutdown, in order:
+
+    1. On SIGTERM, close the listener to new connections (the
+       load balancer has usually already pulled the node).
+    2. Close/migrate existing websockets; each leaving socket retracts its
+       occupancy on the current router via the normal vacant-flush.
+    3. Give step 2 a few seconds to drain (well inside the grace period).
+    4. Call `drain/2`.
+    5. **Only then** halt.
+
+  **`drain` is terminal**: it leaves the node draining with its heartbeat off,
+  so a node that calls `drain` but does not actually die (e.g. an aborted deploy)
+  is stranded until it restarts. Call it only when truly shutting down.
+
+  ## Options
+
+    * `:timeout_ms` (default `5_000`): how long to wait for every peer to ack
+      before giving up and returning `{:timeout, unacked_nodes}`.
+    * `:settle_ms` (default `5_000`): the post-ack in-flight-drain window. It
+      should be at least the scope's `:rpc_timeout_ms` so an RPC a peer
+      dispatched to us just before evicting us can still land; this is not
+      enforced.
+
+  Returns `:ok` once all peers acked and the settle elapsed, or
+  `{:timeout, unacked_nodes}` if some peer did not ack within `:timeout_ms`. A
+  singleton (no peers) returns `:ok` immediately. A peer that *dies* mid-drain
+  (rather than acking) is treated as departed: it is dropped from the wait rather
+  than counted as unacked, so a peer crashing during a rolling restart does not
+  make `drain` block the full `:timeout_ms`. A second call while a drain is
+  already in flight (or after one completed) returns `{:error, :already_draining}`
+  without disturbing the first.
+  """
+  @spec drain(atom, keyword) :: :ok | {:timeout, [node]} | {:error, :already_draining}
+  def drain(scope, opts \\ []) when is_atom(scope) do
+    timeout = Keyword.get(opts, :timeout_ms, 5_000)
+    settle = Keyword.get(opts, :settle_ms, 5_000)
+
+    GenServer.call(
+      Forum.Supervisor.name(scope),
+      {:drain, timeout, settle},
+      timeout + settle + 1_000
+    )
   end
 
   @doc """
