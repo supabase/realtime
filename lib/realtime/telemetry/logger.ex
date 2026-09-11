@@ -121,9 +121,10 @@ defmodule Realtime.Telemetry.Logger do
     :ok
   end
 
+  # in practice we always have MFA set --> matching on it first for a micto bit of perf 😇
+  defp resolve_log_level({mod, fun, args}, conn), do: apply(mod, fun, [conn | args])
   defp resolve_log_level(nil, _conn), do: :info
   defp resolve_log_level(level, _conn) when is_atom(level), do: level
-  defp resolve_log_level({mod, fun, args}, conn), do: apply(mod, fun, [conn | args])
 
   defp format_reason(_kind, reason) when is_exception(reason),
     do: "#{inspect(reason.__struct__)} - #{Exception.message(reason)}"
