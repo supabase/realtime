@@ -8,7 +8,7 @@ export const authorization: SuiteDescriptor = {
   name: "authorization",
   label: "authorization check",
   needsDb: true,
-  parallel: true,
+  runCasesInParallel: true,
   run: async ({ testUser, test }) => {
     await test("user using private channel cannot connect without permissions", async () => {
       const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
