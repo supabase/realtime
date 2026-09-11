@@ -3,7 +3,8 @@ defmodule RealtimeWeb.JwtVerification do
   Parse JWT and verify claims
   """
 
-  # Matching error in Dialyzer when using Joken.peek_claims/1 but {:ok, []} is actually possible and covered by our testing
+  # Matching error in Dialyzer when using Joken.peek_claims/1 but {:ok, []} is actually possible and covered by our
+  # testing
   @dialyzer {:no_match, check_claims_format: 1}
 
   defmodule JwtAuthToken do

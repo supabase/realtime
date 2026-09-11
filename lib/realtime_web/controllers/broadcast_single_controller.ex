@@ -60,7 +60,8 @@ defmodule RealtimeWeb.BroadcastSingleController do
       #   required: false,
       #   example: false,
       #   description:
-      #     "Whether to store the broadcast in realtime.messages (requires private and RLS authorization). Defaults to false."
+      #     "Whether to store the broadcast in realtime.messages (requires private and RLS authorization).
+      # Defaults to false."
       # ]
     ],
     request_body: %OpenApiSpex.RequestBody{
