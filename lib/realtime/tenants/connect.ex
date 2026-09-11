@@ -70,7 +70,7 @@ defmodule Realtime.Tenants.Connect do
 
   @tenant_id_spec [{{:"$1", :_, :_, :_, :_, :_}, [], [:"$1"]}]
   @spec list_tenants() :: [binary]
-  def list_tenants() do
+  def list_tenants do
     :syn_registry_by_name
     |> :syn_backbone.get_table_name(__MODULE__)
     |> :ets.select(@tenant_id_spec)
@@ -574,7 +574,7 @@ defmodule Realtime.Tenants.Connect do
   defp tenant_suspended?(%Tenant{suspend: true}), do: {:error, :tenant_suspended}
   defp tenant_suspended?(_), do: :ok
 
-  defp rebalance_check_interval_in_ms(), do: Application.fetch_env!(:realtime, :rebalance_check_interval_in_ms)
+  defp rebalance_check_interval_in_ms, do: Application.fetch_env!(:realtime, :rebalance_check_interval_in_ms)
 
   # Opens the database pool recovery window on the first disconnect. Edge-triggered:
   # a later disconnect while already open keeps the original start time, and any
