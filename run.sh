@@ -94,12 +94,26 @@ if [[ -n "${GENERATE_CLUSTER_CERTS:-}" ]] ; then
     generate_certs
 fi
 
+# Drop to `nobody` only when we start as root. The image sets no USER, so that
+# is the normal case and behaviour is unchanged there. Under an orchestrator
+# that already starts the container as a non-root user (Kubernetes
+# `runAsNonRoot`), `sudo` cannot help: with `allowPrivilegeEscalation: false`
+# the kernel ignores its setuid bit, so the call fails and the container never
+# starts. Already running unprivileged, so just run the command directly.
+run_unprivileged() {
+    if [ "$(id -u)" -eq 0 ]; then
+        sudo -E -u nobody "$@"
+    else
+        "$@"
+    fi
+}
+
 echo "Running migrations"
-sudo -E -u nobody /app/bin/migrate
+run_unprivileged /app/bin/migrate
 
 if [ "${SEED_SELF_HOST-}" = true ]; then
     echo "Seeding selfhosted Realtime"
-    sudo -E -u nobody /app/bin/realtime eval 'Realtime.Release.seeds(Realtime.Repo)'
+    run_unprivileged /app/bin/realtime eval 'Realtime.Release.seeds(Realtime.Repo)'
 fi
 
 echo "Starting Realtime"
