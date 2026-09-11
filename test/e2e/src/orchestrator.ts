@@ -3,8 +3,12 @@ import type { SuiteDescriptor } from "./runner.ts";
 import { log, printSummary, flushOtel, results, createSuiteTest } from "./runner.ts";
 import { setup, cleanup } from "./fixtures.ts";
 
+function isLoadSuite(d: SuiteDescriptor) {
+  return d.name.startsWith("load");
+}
+
 async function runSuite(d: SuiteDescriptor, testUser: { email: string; password: string }) {
-  const { test, drain } = createSuiteTest(d.label, d.parallel);
+  const { test, drain } = createSuiteTest(d.label, isLoadSuite(d) ? false : d.run_cases_in_parallel);
   await d.run({ testUser, test });
   await drain();
 }
@@ -60,7 +64,10 @@ export async function runSuites(descriptors: SuiteDescriptor[], testCategories: 
   const start = performance.now();
   try {
     if (PARALLEL) {
-      await Promise.all(suitesToRun.map((d) => runSuite(d, testUser)));
+      const loadSuites = suitesToRun.filter(isLoadSuite);
+      const otherSuites = suitesToRun.filter((d) => !isLoadSuite(d));
+      await Promise.all(otherSuites.map((d) => runSuite(d, testUser)));
+      for (const d of loadSuites) await runSuite(d, testUser);
     } else {
       for (const d of suitesToRun) await runSuite(d, testUser);
     }
