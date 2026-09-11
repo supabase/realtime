@@ -20,6 +20,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
   alias Realtime.Tenants
   alias Realtime.Tenants.Cache
   alias Realtime.Tenants.Connect
+  alias Realtime.Tenants.ReplicationConnection.Watchdog
   alias RealtimeWeb.RealtimeChannel
   alias RealtimeWeb.Socket.UserBroadcast
   alias RealtimeWeb.TenantBroadcaster
@@ -193,7 +194,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
     slot_name = replication_slot_name(@schema, @table)
 
     {:ok, _watchdog_pid} =
-      Realtime.Tenants.ReplicationConnection.Watchdog.start_link(
+      Watchdog.start_link(
         parent_pid: self(),
         tenant_id: tenant_id,
         replication_slot_name: slot_name
