@@ -421,5 +421,5 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     Process.send_after(self(), {:check_region, MapSet.new(Node.list())}, check_region_interval)
   end
 
-  defp rebalance_check_interval_in_ms(), do: Application.fetch_env!(:realtime, :rebalance_check_interval_in_ms)
+  defp rebalance_check_interval_in_ms, do: Application.fetch_env!(:realtime, :rebalance_check_interval_in_ms)
 end
