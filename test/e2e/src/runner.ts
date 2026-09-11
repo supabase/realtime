@@ -83,7 +83,7 @@ export type SuiteDescriptor = {
   // to true. Suites don't need to know about this at all — a suite's `run()` body
   // always just writes `await test(...)` in sequence; whether that call blocks is
   // decided here, not by the suite.
-  parallel?: boolean;
+  runCasesInParallel?: boolean;
   run: (ctx: SuiteCtx) => Promise<void>;
 };
 
@@ -93,16 +93,16 @@ export const results: TestResult[] = [];
 // everything it kicked off. Labels results by `suiteName` directly instead of a shared
 // mutable global, so suites stay correctly attributed even when run concurrently.
 //
-// When --parallel is on and `parallel` is explicitly true, `test()` starts the test
-// immediately but returns before it finishes, so a suite's own back-to-back
+// When --parallel is on and `runCasesInParallel` is explicitly true, `test()` starts the
+// test immediately but returns before it finishes, so a suite's own back-to-back
 // `await test(...)` calls end up kicking every test off concurrently without the suite
 // ever knowing — `drain()` (called by the orchestrator after `run()` returns) is what
-// actually waits for them all to complete. `parallel` defaults to false (see
-// SuiteDescriptor.parallel).
-export function createSuiteTest(suiteName: string, parallel = false) {
+// actually waits for them all to complete. `runCasesInParallel` defaults to false (see
+// SuiteDescriptor.runCasesInParallel).
+export function createSuiteTest(suiteName: string, runCasesInParallel = false) {
   const pending: Promise<void>[] = [];
   const test = (name: string, fn: () => Promise<Metric[]>): Promise<void> => {
-    if (!PARALLEL || !parallel) return runTest(suiteName, name, fn);
+    if (!PARALLEL || !runCasesInParallel) return runTest(suiteName, name, fn);
     pending.push(runTest(suiteName, name, fn));
     return Promise.resolve();
   };
