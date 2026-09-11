@@ -98,6 +98,44 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
       assert get_in(join_payload, ["name"]) == payload.payload.name
       assert get_in(join_payload, ["t"]) == payload.payload.t
     end
+
+    test "presence automatically enabled by track receives the members already tracked", %{
+      tenant: tenant,
+      topic: topic,
+      serializer: serializer
+    } do
+      parent = self()
+      # Forward the late joiner's frames tagged so they don't collide with the main mailbox.
+      late_inbox = spawn_link(fn -> forward_frames(parent, :late) end)
+
+      topic = "realtime:#{topic}"
+
+      # An early member joins with presence enabled and tracks itself.
+      {early, _} = get_connection(tenant, serializer)
+      WebsocketClient.join(early, topic, %{config: %{presence: %{key: "early", enabled: true}, private: false}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+      assert_receive %Message{event: "presence_state", topic: ^topic}, 500
+
+      early_payload = %{type: "presence", event: "TRACK", payload: %{name: "early"}}
+      WebsocketClient.send_event(early, topic, "presence", early_payload)
+      assert_receive %Message{event: "presence_diff", payload: %{"joins" => %{"early" => _}}, topic: ^topic}, 500
+
+      # A late member joins with presence disabled, so it gets no presence_state at join.
+      {:ok, late_token} = token_valid(tenant, "anon", %{})
+
+      {:ok, late} =
+        WebsocketClient.connect(late_inbox, uri(tenant, serializer), serializer, [{"x-api-key", late_token}])
+
+      WebsocketClient.join(late, topic, %{config: %{presence: %{key: "late", enabled: false}, private: false}})
+      assert_receive {:late, %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}}, 500
+      refute_receive {:late, %Message{event: "presence_state", topic: ^topic}}, 500
+
+      # Tracking enables presence for the late member, which must now learn who is already present.
+      WebsocketClient.send_event(late, topic, "presence", %{type: "presence", event: "TRACK", payload: %{name: "late"}})
+
+      assert_receive {:late, %Message{event: "presence_state", payload: state, topic: ^topic}}, 500
+      assert Map.has_key?(state, "early")
+    end
   end
 
   describe "private presence" do
@@ -384,7 +422,11 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
 
       assert Enum.any?(metas, &(get_in(&1, ["test"]) == "should not go to other"))
 
-      # Other can't receive the diff
+      # Enabling presence syncs the members already tracked, and main holds presence.read.
+      assert_receive %Message{event: "presence_state", topic: ^topic}, 500
+
+      # Other can't receive the diff, nor the state its own track syncs: it is denied presence.read.
+      refute_receive {:other, %Message{event: "presence_state", topic: ^topic}}, 500
       refute_receive {:other, %Message{event: "presence_diff", topic: ^topic}}, 1000
       refute_receive _any
     end
