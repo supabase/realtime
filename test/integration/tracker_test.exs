@@ -93,4 +93,31 @@ defmodule Integration.TrackerTest do
     assert [{_pid, count}] = Tracker.list_pids()
     assert count == 2
   end
+
+  test "a join rejected before tracking does not untrack the socket's live channels", %{tenant: tenant} do
+    assert [] = Tracker.list_pids()
+
+    {socket, _} = get_connection(tenant)
+    config = %{broadcast: %{self: true}, private: false, presence: %{enabled: false}}
+
+    topic = "realtime:#{random_string()}"
+    :ok = WebsocketClient.join(socket, topic, %{config: config})
+    assert_receive %Message{topic: ^topic, event: "phx_reply", payload: %{"status" => "ok"}}, 500
+    assert [{_pid, 1}] = Tracker.list_pids()
+
+    # `realtime:` is rejected by the first join/3 clause, before the channel is tracked
+    for _ <- 1..5 do
+      :ok = WebsocketClient.join(socket, "realtime:", %{config: config})
+
+      assert_receive %Message{topic: "realtime:", event: "phx_reply", payload: %{"status" => "error"}}, 1000
+    end
+
+    assert [{_pid, count}] = Tracker.list_pids()
+    assert count == 1
+
+    # the socket still has a channel open, so the Tracker must not reap it
+    start_supervised!({Tracker, check_interval_in_ms: 100})
+    Process.sleep(300)
+    assert Process.alive?(socket)
+  end
 end
