@@ -21,7 +21,7 @@ alter table "realtime"."messages"
   alter column "id" set default gen_random_uuid();
 
 alter table "realtime"."messages"
-  alter column "inserted_at" set default now();
+  alter column "inserted_at" set default clock_timestamp();
 
 alter table "realtime"."messages"
   alter column "private" set default false;
