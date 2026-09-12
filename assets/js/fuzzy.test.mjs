@@ -48,3 +48,10 @@ test("segments return the text untouched when nothing matches", () => {
   assert.deepEqual(segments("Joined room_a", "zzz"), [{ matched: false, text: "Joined room_a" }]);
   assert.deepEqual(segments("Joined room_a", ""), [{ matched: false, text: "Joined room_a" }]);
 });
+
+test("segments keep emojis and surrogate pairs intact", () => {
+  assert.deepEqual(segments("Joining room_🔥", "🔥"), [
+    { matched: false, text: "Joining room_" },
+    { matched: true, text: "🔥" },
+  ]);
+});
