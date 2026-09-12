@@ -3,6 +3,9 @@ defmodule Realtime.LogFilterTest do
 
   alias Realtime.LogFilter
 
+  @ranch_format ~c"Ranch listener ~p had connection process started with ~p:start_link/3 at ~p exit with reason: ~0p~n"
+  @ranch_format_binary "Ranch listener ~p had connection process started with ~p:start_link/3 at ~p exit with reason: ~0p~n"
+
   describe "filter/2 - gen_statem crash reports" do
     test "stops DBConnection.ConnectionError crashes" do
       event = gen_statem_event(%DBConnection.ConnectionError{message: "tcp connect: connection refused"})
@@ -39,13 +42,17 @@ defmodule Realtime.LogFilterTest do
 
   describe "filter/2 - Ranch connection killed reports" do
     test "stops Ranch reports when connection was killed" do
-      event = ranch_event(RealtimeWeb.Endpoint.HTTP, :cowboy_clear, self(), :killed)
-      assert :stop = LogFilter.filter(event, [])
+      for format <- [@ranch_format, @ranch_format_binary] do
+        event = ranch_event(RealtimeWeb.Endpoint.HTTP, :cowboy_clear, self(), :killed, format)
+        assert :stop = LogFilter.filter(event, [])
+      end
     end
 
     test "passes through Ranch reports when connection exited for other reasons" do
-      event = ranch_event(RealtimeWeb.Endpoint.HTTP, :cowboy_clear, self(), :some_error)
-      assert ^event = LogFilter.filter(event, [])
+      for format <- [@ranch_format, @ranch_format_binary] do
+        event = ranch_event(RealtimeWeb.Endpoint.HTTP, :cowboy_clear, self(), :some_error, format)
+        assert ^event = LogFilter.filter(event, [])
+      end
     end
   end
 
@@ -69,10 +76,8 @@ defmodule Realtime.LogFilterTest do
     }
   end
 
-  @ranch_format "Ranch listener ~p had connection process started with ~p:start_link/3 at ~p exit with reason: ~0p~n"
-
-  defp ranch_event(ref, protocol, pid, reason) do
-    %{msg: {:format, @ranch_format, [ref, protocol, pid, reason]}, meta: %{pid: self()}}
+  defp ranch_event(ref, protocol, pid, reason, format) do
+    %{msg: {:format, format, [ref, protocol, pid, reason]}, meta: %{pid: self()}}
   end
 
   defp db_connection_log_event(message) do
