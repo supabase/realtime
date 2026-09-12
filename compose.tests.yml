@@ -7,18 +7,64 @@ services:
     volumes:
       - ./dev/postgres/za-permit-supabase-admin.sh:/docker-entrypoint-initdb.d/za-permit-supabase-admin.sh
       - ./dev/postgres/zb-supabase-schema.sql:/docker-entrypoint-initdb.d/zb-supabase-schema.sql
+      - ./dev/postgres/zc-template1-orioledb.sql:/docker-entrypoint-initdb.d/zc-template1-orioledb.sql
+    # POSTGRES_IMAGE can also be a Multigres cluster. Everything below is
+    # written to suit both: the cluster's entrypoint ignores this command and
+    # never reads /docker-entrypoint-initdb.d, and supabase/postgres ignores
+    # the MULTIGRES_* settings.
     command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    # A cluster forks every service and returns, so PID 1 must reap.
+    init: true
+    shm_size: "1gb"
     environment:
       POSTGRES_HOST: /var/run/postgresql
       POSTGRES_PASSWORD: postgres
+      # Serve the Postgres wire protocol on the default port.
+      MULTIGRES_GATEWAY_PG_PORT: "5432"
+      # Minimum for the shard's AtLeastN(2) policy to elect a leader.
+      MULTIGRES_NUM_CELLS: "2"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
+      # Over TCP, not the socket: a cluster's PostgreSQL instances sit behind
+      # the pooler in their own socket directory.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U postgres"]
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 30
+      # A cluster takes about a minute to bootstrap.
+      start_period: 90s
+
+  # Adds what /docker-entrypoint-initdb.d would have: needed only when
+  # POSTGRES_IMAGE is a cluster, so it sits behind a profile and is invoked
+  # with `compose run`, which waits for test_db to be healthy first.
+  test_db_bootstrap:
+    profiles: ["bootstrap"]
+    image: ${POSTGRES_IMAGE:-supabase/postgres:17.6.1.166}
+    depends_on:
+      test_db:
+        condition: service_healthy
+    volumes:
+      - ./dev/postgres/zb-supabase-schema.sql:/zb-supabase-schema.sql:ro
+    environment:
+      # The script's `\connect - supabase_admin` reconnects over TCP, where
+      # there is no peer auth to fall back on.
+      PGPASSWORD: postgres
+    entrypoint:
+      - psql
+      - --host=test_db
+      - --port=5432
+      - --username=supabase_admin
+      - --dbname=postgres
+      - --no-psqlrc
+      - --quiet
+      - --set=ON_ERROR_STOP=1
+      # Only POSTGRES_USER gets POSTGRES_PASSWORD; Realtime also uses `postgres`.
+      - --command=alter role postgres with password 'postgres'
+      - --file=/zb-supabase-schema.sql
+
   test_realtime:
     depends_on:
-      - test_db
+      test_db:
+        condition: service_healthy
     build: .
     ports:
       - "${TEST_REALTIME_PORT:-4100}:4100"

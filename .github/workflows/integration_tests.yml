@@ -13,7 +13,8 @@ on:
       - "mix.lock"
       - "Dockerfile"
       - "run.sh"
-      - "docker-compose.test.yml"
+      - "compose.tests.yml"
+      - "dev/**"
       - ".github/workflows/integration_tests.yml"
 
   push:
@@ -39,7 +40,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        postgres: [pg14, pg15, pg15_latest, pg17, orioledb17]
+        postgres: [pg14, pg15, pg15_latest, pg17, orioledb17, multigres]
         include:
           - postgres: pg14
             postgres_image: supabase/postgres:14.1.0.82
@@ -52,6 +53,8 @@ jobs:
             postgres_image: supabase/postgres:17.6.1.166
           - postgres: orioledb17
             postgres_image: supabase/postgres:17.9.0.019-orioledb
+          - postgres: multigres
+            postgres_image: ghcr.io/multigres/multigres-cluster-supabase:sha-360b8f1
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -82,5 +85,8 @@ jobs:
           mkdir -p /tmp/docker-images
           docker image save ${{ env.POSTGRES_IMAGE }} | zstd -T0 -o /tmp/docker-images/postgres.tar.zst
           docker image save ${{ env.DENO_IMAGE }} | zstd -T0 -o /tmp/docker-images/deno.tar.zst
+      - name: Bootstrap the Multigres test database
+        if: matrix.postgres == 'multigres'
+        run: docker compose -f compose.tests.yml run --rm test_db_bootstrap
       - name: Run integration test
         run: docker compose -f compose.tests.yml up --abort-on-container-exit --exit-code-from test-runner
