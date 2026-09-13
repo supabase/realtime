@@ -6,7 +6,7 @@ on:
       - "lib/realtime/tenants/repo/migrations/**"
       - "lib/realtime/tenants/migrations.ex"
       - "lib/mix/tasks/realtime.export_tenant_schema.ex"
-      - "lib/mix/tasks/realtime.export_tenant_db_dump.ex"
+      - "dev/scripts/export-tenant-db-dump.sh"
       - "priv/repo/pgdelta_profile.json"
       - "mix.lock"
       - "mise.toml"

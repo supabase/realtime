@@ -8,7 +8,7 @@
 --   - creates realtime.schema_migrations and records every applied version
 --   - sets ALTER DEFAULT PRIVILEGES and the dashboard_user/postgres grants
 --
--- See Mix.Tasks.Realtime.ExportTenantDbDump
+-- See dev/scripts/export-tenant-db-dump.sh
 --
 DO $$
 BEGIN

@@ -149,7 +149,7 @@ mise run tenant-dumps      # every major
 mise run tenant-dumps 17   # only pg17, while iterating
 ```
 
-Each major gets its own throwaway realtime and tenant database, on ports docker picks, so your dev stack keeps running. `pg_dump` runs inside the tenant database's own container, so nothing needs installing. `TENANT_DUMP_IMAGES` in `mise.toml` is the list of majors and the image each dump is generated from.
+Each major gets its own throwaway realtime and tenant database, on ports docker picks, so your dev stack keeps running. The dump is taken by `dev/scripts/export-tenant-db-dump.sh`, which runs inside the tenant database's own container. `TENANT_DUMP_IMAGES` in `mise.toml` is the list of majors and the image each dump is generated from.
 
 [update-tenant-db-snapshots.yml](.github/workflows/update-tenant-db-snapshots.yml) also runs the same task on every PR that touches the migrations and commits the result back to the branch if there are changes.
 

@@ -148,21 +148,21 @@ for pair in $TENANT_DUMP_IMAGES; do
   # database instead of running the migrations we are here to capture.
   rm -f "$dump"
 
-  # DB_PORT is the realtime database to the server and the tenant database to the export tasks, so
+  # DB_PORT is the realtime database to the server and the tenant database to the export task, so
   # each command gets the one it means.
   DB_PORT="$realtime_port" TENANT_DB_PORT="$tenant_port" mix ecto.setup
   DB_PORT="$tenant_port" mix realtime.export_tenant_schema
-  DB_PORT="$tenant_port" mix realtime.export_tenant_db_dump --container "$tenant_container"
 
-  # The dump names itself after the major it came out of, so the one we removed coming back is what
-  # says this image really is pg$major.
-  if [ ! -e "$dump" ]; then
-    echo "pg$major: $image wrote no $dump, so it is not pg$major. Fix TENANT_DUMP_IMAGES." >&2
-    exit 1
-  fi
+  # The dump comes out of the tenant database's own container.
+  # The script refuses to run if the image is not the pg$major it is filed under.
+  # Landing it via a temp file keeps a failure from leaving a half-written dump behind.
+  export PGUSER="${DB_USER:-supabase_admin}" PGDATABASE="${DB_NAME:-postgres}" PGPASSWORD="${DB_PASSWORD:-postgres}"
+  docker exec -i --env PGUSER --env PGDATABASE --env PGPASSWORD \
+    "$tenant_container" bash -s "$major" \
+    < dev/scripts/export-tenant-db-dump.sh > "$schemas/dump-$major.sql"
+  mv "$schemas/dump-$major.sql" "$dump"
 
-  # One schema artifact serves every major. A divergence means it can no longer be a single
-  # directory and needs splitting per major again.
+  # One schema artifact serves every major. They should not differ
   cp -R priv/repo/tenant_schema "$schemas/$major"
   if [ -n "$reference" ]; then
     diff -r "$schemas/$reference" "$schemas/$major"
