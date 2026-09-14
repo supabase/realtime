@@ -34,6 +34,7 @@ defmodule Mix.Tasks.Realtime.GenToken do
     Mix.shell().info(token)
   end
 
+  @spec missing_secret! :: no_return()
   defp missing_secret! do
     Mix.raise("No JWT secret: set API_JWT_SECRET (mise.toml does under `mise run dev`) or pass --secret")
   end
