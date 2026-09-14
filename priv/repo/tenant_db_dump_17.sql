@@ -8,7 +8,7 @@
 --   - creates realtime.schema_migrations and records every applied version
 --   - sets ALTER DEFAULT PRIVILEGES and the dashboard_user/postgres grants
 --
--- See Mix.Tasks.Realtime.ExportTenantDbDump
+-- See dev/scripts/export-tenant-db-dump.sh
 --
 DO $$
 BEGIN
@@ -29,7 +29,7 @@ END $$;
 
 
 -- Dumped from database version 17.6
--- Dumped by pg_dump version 17.11 (Ubuntu 17.11-1.pgdg24.04+2)
+-- Dumped by pg_dump version 17.6
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
