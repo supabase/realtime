@@ -68,14 +68,17 @@ export const postgresChangesFilters: SuiteDescriptor = {
         await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const value = `a_${tag}`;
+        // A bare `<` comparison against an arbitrary threshold isn't narrow: any other
+        // test's random tag has a good chance of sorting below it too — scope it.
+        const { scope, row } = isolated(tag);
         let result: any = null;
 
         const channel = supabase
           .channel(randomTopic(), BROADCAST_CONFIG)
-          .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: postgresChangesFilter().lt("value", `b_${tag}`) }, (p) => { if (p.new.value === value) result = p; });
+          .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: scope().lt("value", `b_${tag}`) }, (p) => { if (p.new.value === value) result = p; });
 
         const { subscribeMs } = await openPostgresChannel(channel);
-        await executeInsert(supabase, "pg_changes", value);
+        await supabase.from("pg_changes").insert([row({ value })]);
         await waitFor(() => result, "lt event");
 
         assert.strictEqual(result.new.value, value);
@@ -91,14 +94,17 @@ export const postgresChangesFilters: SuiteDescriptor = {
         await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const value = `a_${tag}`;
+        // Same as `lt`: a bare `<=` threshold isn't narrow against other tests' random
+        // tags — scope it.
+        const { scope, row } = isolated(tag);
         let result: any = null;
 
         const channel = supabase
           .channel(randomTopic(), BROADCAST_CONFIG)
-          .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: postgresChangesFilter().lte("value", `b_${tag}`) }, (p) => { if (p.new.value === value) result = p; });
+          .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: scope().lte("value", `b_${tag}`) }, (p) => { if (p.new.value === value) result = p; });
 
         const { subscribeMs } = await openPostgresChannel(channel);
-        await executeInsert(supabase, "pg_changes", value);
+        await supabase.from("pg_changes").insert([row({ value })]);
         await waitFor(() => result, "lte event");
 
         assert.strictEqual(result.new.value, value);
@@ -114,14 +120,16 @@ export const postgresChangesFilters: SuiteDescriptor = {
         await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const value = `c_${tag}`;
+        // Same reasoning as `lt`/`lte`: a bare `>` threshold isn't narrow — scope it.
+        const { scope, row } = isolated(tag);
         let result: any = null;
 
         const channel = supabase
           .channel(randomTopic(), BROADCAST_CONFIG)
-          .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: postgresChangesFilter().gt("value", `b_${tag}`) }, (p) => { if (p.new.value === value) result = p; });
+          .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: scope().gt("value", `b_${tag}`) }, (p) => { if (p.new.value === value) result = p; });
 
         const { subscribeMs } = await openPostgresChannel(channel);
-        await executeInsert(supabase, "pg_changes", value);
+        await supabase.from("pg_changes").insert([row({ value })]);
         await waitFor(() => result, "gt event");
 
         assert.strictEqual(result.new.value, value);
@@ -137,14 +145,16 @@ export const postgresChangesFilters: SuiteDescriptor = {
         await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const value = `c_${tag}`;
+        // Same reasoning as `lt`/`lte`/`gt`: a bare `>=` threshold isn't narrow — scope it.
+        const { scope, row } = isolated(tag);
         let result: any = null;
 
         const channel = supabase
           .channel(randomTopic(), BROADCAST_CONFIG)
-          .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: postgresChangesFilter().gte("value", `b_${tag}`) }, (p) => { if (p.new.value === value) result = p; });
+          .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: scope().gte("value", `b_${tag}`) }, (p) => { if (p.new.value === value) result = p; });
 
         const { subscribeMs } = await openPostgresChannel(channel);
-        await executeInsert(supabase, "pg_changes", value);
+        await supabase.from("pg_changes").insert([row({ value })]);
         await waitFor(() => result, "gte event");
 
         assert.strictEqual(result.new.value, value);
@@ -361,13 +371,15 @@ export const postgresChangesFilters: SuiteDescriptor = {
         const delivered = `${tag}keep`;
         const seen: string[] = [];
 
+        // not(eq) excludes one literal and matches everything else — same firehose
+        // shape as the bare `neq` test, just spelled differently — scope it.
+        const { scope, row } = isolated(tag);
         const channel = supabase
           .channel(randomTopic(), BROADCAST_CONFIG)
-          .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: postgresChangesFilter().not("value", "eq", excluded) }, (p) => { if (p.new.value === excluded || p.new.value === delivered) seen.push(p.new.value); });
+          .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: scope().not("value", "eq", excluded) }, (p) => { if (p.new.value === excluded || p.new.value === delivered) seen.push(p.new.value); });
 
         const { subscribeMs } = await openPostgresChannel(channel);
-        await executeInsert(supabase, "pg_changes", excluded);
-        await executeInsert(supabase, "pg_changes", delivered);
+        await supabase.from("pg_changes").insert([row({ value: excluded }), row({ value: delivered })]);
         await waitFor(() => (seen.includes(delivered) ? true : null), "not event");
         await sleep(1000); // give the excluded row a chance to arrive if the negation were ignored
 
