@@ -207,11 +207,34 @@ description = "Remove the integration test stack"
 run = "docker compose -f compose.tests.yml rm -sf"
 
 [tasks.walrus]
-description = "Run the WALRUS pg_regress suite against the committed tenant DB dump"
+description = "Run the WALRUS pg_regress suite against the tenant realtime schema"
 usage = '''
-arg "[args]..." help="Test names to run. Defaults to all of them. See test/walrus/README.md."
+flag "--migrations" help="Replay the tenant migrations instead of loading the committed dump"
+flag "--major <major>" help="Postgres major to run against, such as 15. Defaults to the last entry in TENANT_DUMP_IMAGES."
+arg "[tests]..." help="Test names to run. Defaults to all of them. See test/walrus/README.md."
 '''
-run = "test/walrus/run.sh ${usage_args:-}"
+run = '''
+set -eu
+
+# Uses TENANT_DUMP_IMAGES if POSTGRES_IMAGE is not set
+if [ -z "${POSTGRES_IMAGE:-}" ]; then
+  for pair in $TENANT_DUMP_IMAGES; do
+    # With no major asked for the loop runs to the end, so the last entry wins.
+    if [ -z "${usage_major:-}" ] || [ "${usage_major:-}" = "${pair%%=*}" ]; then
+      POSTGRES_IMAGE=${pair#*=}
+    fi
+  done
+
+  if [ -z "${POSTGRES_IMAGE:-}" ]; then
+    echo "pg${usage_major:-} has no committed dump; TENANT_DUMP_IMAGES is: $TENANT_DUMP_IMAGES" >&2
+    exit 1
+  fi
+
+  export POSTGRES_IMAGE
+fi
+
+exec test/walrus/run.sh ${usage_migrations:+--migrations} ${usage_tests:-}
+'''
 
 [tasks.e2e]
 description = "Run the e2e suite against a local Supabase stack, starting it if needed"
