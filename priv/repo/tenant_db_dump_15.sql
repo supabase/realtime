@@ -1366,7 +1366,8 @@ GRANT ALL ON FUNCTION realtime.wal2json_escape_identifier(name text) TO dashboar
 -- Name: TABLE messages; Type: ACL; Schema: realtime; Owner: supabase_realtime_admin
 --
 
-GRANT ALL ON TABLE realtime.messages TO postgres;
+GRANT REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE realtime.messages TO postgres;
+GRANT SELECT,INSERT ON TABLE realtime.messages TO postgres WITH GRANT OPTION;
 GRANT ALL ON TABLE realtime.messages TO dashboard_user;
 GRANT SELECT,INSERT,UPDATE ON TABLE realtime.messages TO anon;
 GRANT SELECT,INSERT,UPDATE ON TABLE realtime.messages TO authenticated;
@@ -1508,3 +1509,4 @@ INSERT INTO realtime."schema_migrations" (version) VALUES (20260707120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260709120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260714120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260827120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20260914120000);
