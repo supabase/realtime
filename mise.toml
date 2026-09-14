@@ -41,6 +41,26 @@ description = "Start another dev server in a second region (orange)"
 run = "iex --name ${NODE_NAME}@127.0.0.1 --cookie cookie -S mix phx.server"
 env = { NODE_NAME = "orange", REGION = "eu-west-1" }
 
+[tasks.dev-inspector]
+description = "Open the Realtime Inspector prefilled for TENANT"
+dir = "{{cwd}}"
+run = '''
+set -eu
+tenant=${TENANT:-realtime-dev}
+port=${PORT:-4000}
+host="http://${tenant}.localhost:${port}"
+token=$(mix realtime.gen_token)
+url="http://localhost:${port}/inspector/new?host=${host}&token=${token}"
+
+echo "$url"
+
+if command -v open >/dev/null 2>&1; then
+  open "$url"
+elif command -v xdg-open >/dev/null 2>&1; then
+  xdg-open "$url"
+fi
+'''
+
 # Fixed compose projects, so every checkout shares these instead of starting a set per directory.
 # Nothing stops or removes the realtime database: another checkout may be using it.
 [tasks.db-start]
