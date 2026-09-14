@@ -2,7 +2,7 @@ import assert from "assert";
 import { createClient, postgresChangesFilter } from "@supabase/supabase-js";
 import { PROJECT_URL, ANON_KEY, REALTIME_OPTS, BROADCAST_CONFIG } from "../context.ts";
 import type { SuiteDescriptor } from "../runner.ts";
-import { sleep, randomTopic, waitFor, signInUser, stopClient, openPostgresChannel, executeInsert } from "../helpers.ts";
+import { sleep, randomTopic, waitFor, signInUser, stopClient, openPostgresChannel, executeInsert, isolated } from "../helpers.ts";
 
 export const postgresChangesFilters: SuiteDescriptor = {
   name: "postgres-changes-filters",
@@ -41,14 +41,18 @@ export const postgresChangesFilters: SuiteDescriptor = {
         await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const value = `neq_${tag}`;
+        // neq against a value nobody else inserts matches nearly every row in the
+        // table, so under --parallel it also picks up every other concurrently-running
+        // test's inserts. Scope it to this test's own rows (see helpers.ts `isolated`).
+        const { scope, row } = isolated(tag);
         let result: any = null;
 
         const channel = supabase
           .channel(randomTopic(), BROADCAST_CONFIG)
-          .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: postgresChangesFilter().neq("value", `no_${tag}`) }, (p) => { if (p.new.value === value) result = p; });
+          .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: scope().neq("value", `no_${tag}`) }, (p) => { if (p.new.value === value) result = p; });
 
         const { subscribeMs } = await openPostgresChannel(channel);
-        await executeInsert(supabase, "pg_changes", value);
+        await supabase.from("pg_changes").insert([row({ value })]);
         await waitFor(() => result, "neq event");
 
         assert.strictEqual(result.new.value, value);
@@ -226,14 +230,17 @@ export const postgresChangesFilters: SuiteDescriptor = {
         await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const value = `is_${tag}`; // executeInsert only sets `value`, so nullable_value stays null
+        // nullable_value IS NULL matches nearly every other test's rows too (none of
+        // them set it), so under --parallel this needs its own scope (see `isolated`).
+        const { scope, row } = isolated(tag);
         let result: any = null;
 
         const channel = supabase
           .channel(randomTopic(), BROADCAST_CONFIG)
-          .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: postgresChangesFilter().is("nullable_value", null) }, (p) => { if (p.new.value === value) result = p; });
+          .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: scope().is("nullable_value", null) }, (p) => { if (p.new.value === value) result = p; });
 
         const { subscribeMs } = await openPostgresChannel(channel);
-        await executeInsert(supabase, "pg_changes", value);
+        await supabase.from("pg_changes").insert([row({ value })]);
         await waitFor(() => result, "is event");
 
         assert.strictEqual(result.new.nullable_value, null);
@@ -295,14 +302,17 @@ export const postgresChangesFilters: SuiteDescriptor = {
         await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const value = `isd_${tag}`;
+        // isDistinct against a value nobody else inserts matches nearly every row in
+        // the table, same firehose risk as neq under --parallel — scope it.
+        const { scope, row } = isolated(tag);
         let result: any = null;
 
         const channel = supabase
           .channel(randomTopic(), BROADCAST_CONFIG)
-          .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: postgresChangesFilter().isDistinct("value", `other_${tag}`) }, (p) => { if (p.new.value === value) result = p; });
+          .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: scope().isDistinct("value", `other_${tag}`) }, (p) => { if (p.new.value === value) result = p; });
 
         const { subscribeMs } = await openPostgresChannel(channel);
-        await executeInsert(supabase, "pg_changes", value);
+        await supabase.from("pg_changes").insert([row({ value })]);
         await waitFor(() => result, "isdistinct event");
 
         assert.strictEqual(result.new.value, value);
@@ -475,17 +485,20 @@ export const postgresChangesFilters: SuiteDescriptor = {
         const decoyLike = `${tag}skipme`; // fails the not.like
         const seen: string[] = [];
 
+        // The neq component matches nearly every other test's rows too, same firehose
+        // risk as the standalone neq test — scope it (see `isolated`).
+        const { scope, row } = isolated(tag);
         // value != tag-exact  AND  value NOT LIKE tag-skip%
-        const filter = postgresChangesFilter().neq("value", `${tag}exact`).not("value", "like", `${tag}skip%`);
+        const filter = scope().neq("value", `${tag}exact`).not("value", "like", `${tag}skip%`);
         const channel = supabase
           .channel(randomTopic(), BROADCAST_CONFIG)
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter }, (p) => { if (p.new.value.startsWith(tag)) seen.push(p.new.value); });
 
         const { subscribeMs } = await openPostgresChannel(channel);
         await supabase.from("pg_changes").insert([
-          { value: match },
-          { value: decoyEq },
-          { value: decoyLike },
+          row({ value: match }),
+          row({ value: decoyEq }),
+          row({ value: decoyLike }),
         ]);
         await waitFor(() => (seen.includes(match) ? true : null), "neq+not.like event");
         await sleep(1000);
