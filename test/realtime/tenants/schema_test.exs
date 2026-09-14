@@ -135,6 +135,44 @@ defmodule Realtime.Tenants.SchemaTest do
       Postgrex.query!(conn_postgres, "DROP ROLE role_test", [])
     end
 
+    test "can grant SELECT and INSERT on realtime.messages to a custom role", %{conn_postgres: conn_postgres} do
+      Postgrex.query!(conn_postgres, "CREATE ROLE role_test", [])
+
+      assert {:ok, _} =
+               Postgrex.query(conn_postgres, "GRANT SELECT, INSERT ON realtime.messages TO role_test", [])
+
+      assert %Postgrex.Result{rows: [[true, true]]} =
+               Postgrex.query!(
+                 conn_postgres,
+                 """
+                 SELECT
+                   has_table_privilege('role_test', 'realtime.messages', 'SELECT'),
+                   has_table_privilege('role_test', 'realtime.messages', 'INSERT')
+                 """,
+                 []
+               )
+
+      Postgrex.query!(conn_postgres, "REVOKE SELECT, INSERT ON realtime.messages FROM role_test", [])
+      Postgrex.query!(conn_postgres, "DROP ROLE role_test", [])
+    end
+
+    test "cannot delegate any other realtime.messages privilege to a custom role", %{conn_postgres: conn_postgres} do
+      Postgrex.query!(conn_postgres, "CREATE ROLE role_test", [])
+
+      for privilege <- ~w(UPDATE DELETE TRUNCATE TRIGGER REFERENCES) do
+        Postgrex.query!(conn_postgres, "GRANT #{privilege} ON realtime.messages TO role_test", [])
+
+        assert %Postgrex.Result{rows: [[false]]} =
+                 Postgrex.query!(
+                   conn_postgres,
+                   "SELECT has_table_privilege('role_test', 'realtime.messages', $1)",
+                   [privilege]
+                 )
+      end
+
+      Postgrex.query!(conn_postgres, "DROP ROLE role_test", [])
+    end
+
     test "can insert into realtime.messages", %{conn_postgres: conn_postgres} do
       assert {:ok, %Postgrex.Result{num_rows: 1}} =
                Postgrex.query(
