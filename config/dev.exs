@@ -44,6 +44,12 @@ config :realtime, RealtimeWeb.Endpoint,
   debug_errors: true,
   code_reloader: true,
   check_origin: false,
+  # supabase-js's createClient() always builds the realtime websocket URL as
+  # `${url}/realtime/v1/websocket`, the path a full Supabase stack or hosted project serves
+  # behind a gateway. The bare dev server only serves `/socket`; this mounts the same socket at
+  # that path too, so local tooling built on supabase-js (like the Inspector) can connect
+  # straight to `mise run dev` without a gateway in front.
+  local_gateway_socket: true,
   watchers: [
     # Start the esbuild watcher by calling Esbuild.install_and_run(:default, args)
     esbuild: {Esbuild, :install_and_run, [:default, ~w(--sourcemap=inline --watch)]},

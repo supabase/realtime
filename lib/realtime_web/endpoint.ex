@@ -13,33 +13,45 @@ defmodule RealtimeWeb.Endpoint do
 
   @fullsweep_after Application.compile_env!(:realtime, :websocket_fullsweep_after)
 
-  socket "/socket", RealtimeWeb.UserSocket,
-    websocket: [
-      connect_info: [:peer_data, :uri, :x_headers],
-      error_handler: {RealtimeWeb.UserSocket, :handle_error, []},
-      fullsweep_after: @fullsweep_after,
-      max_frame_size: 5_000_000,
-      # https://github.com/ninenines/cowboy/blob/24d32de931a0c985ff7939077463fc8be939f0e9/doc/src/manual/cowboy_websocket.asciidoc#L228
-      # active_n: The number of packets Cowboy will request from the socket at once.
-      # This can be used to tweak the performance of the server. Higher values reduce
-      # the number of times Cowboy need to request more packets from the port driver at
-      # the expense of potentially higher memory being used.
-      active_n: 100,
-      # Skip validating UTF8 for faster frame processing.
-      # Currently all text frames are handled only with JSON which already requires UTF-8
-      validate_utf8: false,
-      serializer: [
-        {Phoenix.Socket.V1.JSONSerializer, "~> 1.0.0"},
-        {RealtimeWeb.Socket.V2Serializer, "~> 2.0.0"}
-      ]
-    ],
-    longpoll: [
-      connect_info: [:peer_data, :uri, :x_headers],
-      serializer: [
-        {Phoenix.Socket.V1.JSONSerializer, "~> 1.0.0"},
-        {Phoenix.Socket.V2.JSONSerializer, "~> 2.0.0"}
-      ]
+  @user_socket_websocket_opts [
+    connect_info: [:peer_data, :uri, :x_headers],
+    error_handler: {RealtimeWeb.UserSocket, :handle_error, []},
+    fullsweep_after: @fullsweep_after,
+    max_frame_size: 5_000_000,
+    # https://github.com/ninenines/cowboy/blob/24d32de931a0c985ff7939077463fc8be939f0e9/doc/src/manual/cowboy_websocket.asciidoc#L228
+    # active_n: The number of packets Cowboy will request from the socket at once.
+    # This can be used to tweak the performance of the server. Higher values reduce
+    # the number of times Cowboy need to request more packets from the port driver at
+    # the expense of potentially higher memory being used.
+    active_n: 100,
+    # Skip validating UTF8 for faster frame processing.
+    # Currently all text frames are handled only with JSON which already requires UTF-8
+    validate_utf8: false,
+    serializer: [
+      {Phoenix.Socket.V1.JSONSerializer, "~> 1.0.0"},
+      {RealtimeWeb.Socket.V2Serializer, "~> 2.0.0"}
     ]
+  ]
+
+  @user_socket_longpoll_opts [
+    connect_info: [:peer_data, :uri, :x_headers],
+    serializer: [
+      {Phoenix.Socket.V1.JSONSerializer, "~> 1.0.0"},
+      {Phoenix.Socket.V2.JSONSerializer, "~> 2.0.0"}
+    ]
+  ]
+
+  socket "/socket", RealtimeWeb.UserSocket,
+    websocket: @user_socket_websocket_opts,
+    longpoll: @user_socket_longpoll_opts
+
+  @local_gateway_socket? Application.compile_env(:realtime, [__MODULE__, :local_gateway_socket], false)
+
+  if @local_gateway_socket? do
+    socket "/realtime/v1", RealtimeWeb.UserSocket,
+      websocket: @user_socket_websocket_opts,
+      longpoll: @user_socket_longpoll_opts
+  end
 
   socket "/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]]
 
