@@ -352,10 +352,10 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   end
 
   defp parse_select(%{"select" => cols}) when is_list(cols) do
-    case Enum.filter(cols, &is_binary/1) do
-      [] -> {:ok, nil}
-      valid -> {:ok, valid}
-    end
+    # An empty select list means "primary keys only" (stored as '{}'), which is
+    # distinct from omitting select entirely (nil = all columns). Keep the empty
+    # list so it reaches the database as '{}' instead of collapsing to nil.
+    {:ok, Enum.filter(cols, &is_binary/1)}
   end
 
   defp parse_select(%{"select" => str}) when is_binary(str) do

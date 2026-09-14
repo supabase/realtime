@@ -160,11 +160,13 @@ defmodule Realtime.Tenants.JanitorTest do
 
     Process.sleep(250)
 
+    janitor = start_supervised!(Janitor)
+
     assert capture_log(fn ->
-             start_supervised!(Janitor)
              Process.sleep(1000)
            end) =~ "JanitorFailedToDeleteOldMessages"
 
+    assert eventually(fn -> :sys.get_state(janitor).tasks == %{} end)
     assert :ets.tab2list(Connect) == []
   end
 

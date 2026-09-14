@@ -51,25 +51,30 @@ defmodule Realtime.Database do
     |> then(&from_settings(&1, application_name, backoff))
   end
 
+  @encrypted_keys ~w(db_host db_port db_name db_user db_password)
+
   @doc """
-  Creates a database connection struct from the given settings.
+  Creates a database connection struct from a tenant's stored settings.
   """
   @spec from_settings(map(), binary(), :stop | :exp | :rand | :rand_exp) :: {:ok, t()} | {:error, :nxdomain}
   def from_settings(settings, application_name, backoff \\ :rand_exp) do
-    pool = pool_size_by_application_name(application_name, settings)
-
-    settings =
+    decrypted_settings =
       settings
-      |> Map.take([
-        "db_host",
-        "db_port",
-        "db_name",
-        "db_user",
-        "db_password"
-      ])
-      |> Enum.map(fn {k, v} -> {k, Crypto.decrypt!(v)} end)
-      |> Map.new()
-      |> then(&Map.merge(settings, &1))
+      |> Map.take(@encrypted_keys)
+      |> Map.new(fn {k, v} -> {k, Crypto.decrypt!(v)} end)
+
+    settings
+    |> Map.merge(decrypted_settings)
+    |> from_plaintext_settings(application_name, backoff)
+  end
+
+  @doc """
+  Same as `from_settings/3`, for settings whose credentials are already plaintext.
+  """
+  @spec from_plaintext_settings(map(), binary(), :stop | :exp | :rand | :rand_exp) ::
+          {:ok, t()} | {:error, :nxdomain}
+  def from_plaintext_settings(settings, application_name, backoff \\ :rand_exp) do
+    pool = pool_size_by_application_name(application_name, settings)
 
     with {:ok, addrtype} <- detect_ip_version(settings["db_host"]) do
       ssl = if default_ssl_param(settings), do: [verify: :verify_none], else: false

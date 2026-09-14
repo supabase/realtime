@@ -64,7 +64,7 @@ defmodule Realtime.GenRpcPubSub do
   # plus one representative per other region (:ftr, which re-floods its own region).
   defp flood_all(adapter_name, topic, message, dispatcher) do
     worker = worker_name(adapter_name, self())
-    my_region = Application.get_env(:realtime, :region)
+    my_region = Nodes.region()
 
     intra_region_flood(worker, my_region, topic, message, dispatcher)
 
@@ -87,7 +87,7 @@ defmodule Realtime.GenRpcPubSub do
   # an empty set and remote deliveries are dropped.
   defp muster_broadcast(adapter_name, topic, tenant_id, message, dispatcher) do
     worker = worker_name(adapter_name, self())
-    my_region = Application.get_env(:realtime, :region)
+    my_region = Nodes.region()
     scope = Application.get_env(:realtime, :muster_scope)
 
     # Cross-region: route to each remote region's expected router, or flood that
@@ -126,7 +126,7 @@ defmodule Realtime.GenRpcPubSub do
   end
 
   defp intra_region_flood(worker, my_region, topic, message, dispatcher) do
-    abcast_local(worker, Realtime.Nodes.region_nodes(my_region), topic, message, dispatcher)
+    abcast_local(worker, Nodes.region_nodes(my_region), topic, message, dispatcher)
   end
 
   defp nodes_from_other_regions(my_region, key) do
@@ -179,6 +179,8 @@ defmodule Realtime.GenRpcPubSub.Worker do
   use GenServer
   require Logger
 
+  alias Realtime.Nodes
+
   defstruct [:pubsub, :worker, :scope, :my_region]
 
   def forward_to_local(topic, message, dispatcher), do: {:ftl, topic, message, dispatcher}
@@ -196,7 +198,7 @@ defmodule Realtime.GenRpcPubSub.Worker do
   def targets_or_flood(scope, tenant_id, my_region, view_hash) do
     case Forum.Muster.targets(scope, tenant_id, view_hash) do
       {:ok, nodes} -> nodes
-      {:error, :flood} -> Realtime.Nodes.region_nodes(my_region)
+      {:error, :flood} -> Nodes.region_nodes(my_region)
     end
   end
 
@@ -212,7 +214,7 @@ defmodule Realtime.GenRpcPubSub.Worker do
       pubsub: pubsub,
       worker: worker,
       scope: Application.get_env(:realtime, :muster_scope),
-      my_region: Application.get_env(:realtime, :region)
+      my_region: Nodes.region()
     }
 
     {:ok, state}
@@ -236,7 +238,7 @@ defmodule Realtime.GenRpcPubSub.Worker do
 
     # Then broadcast to the rest of my region, keeping the message intact so the
     # downstream :ftl handlers can attribute the fan-out too.
-    other_nodes = for node <- Realtime.Nodes.region_nodes(my_region), node != node(), do: node
+    other_nodes = for node <- Nodes.region_nodes(my_region), node != node(), do: node
 
     if other_nodes != [] do
       Realtime.GenRpc.abcast(other_nodes, worker, forward_to_local(topic, message, dispatcher), [])
@@ -266,7 +268,7 @@ defmodule Realtime.GenRpcPubSub.Worker do
             "Muster router changed during broadcast (:route) for tenant #{tenant_id}, falling back to region flood"
           )
 
-          Realtime.Nodes.region_nodes(my_region)
+          Nodes.region_nodes(my_region)
       end
 
     dispatch_to_nodes(nodes, origin, pubsub, worker, topic, message, dispatcher)
@@ -296,7 +298,7 @@ defmodule Realtime.GenRpcPubSub.Worker do
             "Muster router changed during broadcast (:route_region) for tenant #{tenant_id}, falling back to region flood"
           )
 
-          Realtime.Nodes.region_nodes(my_region)
+          Nodes.region_nodes(my_region)
       end
 
     # No origin to exclude: the sender is in another region and never holds local

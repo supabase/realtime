@@ -70,15 +70,16 @@ defmodule Realtime.Extensions.CdcRlsTest do
       Process.monitor(sup)
 
       RealtimeWeb.Endpoint.subscribe(Realtime.Syn.PostgresCdc.syn_topic(tenant.external_id))
+      RealtimeWeb.Endpoint.subscribe(Realtime.Syn.PostgresCdc.down_topic(tenant.external_id))
 
       Process.exit(sup, :kill)
-      scope_down = Atom.to_string(scope) <> "_down"
 
       assert_receive {:DOWN, _, :process, ^sup, _reason}, 5000
-      assert_receive %{event: ^scope_down}
+      down_event = Realtime.Syn.PostgresCdc.down_event()
+      assert_receive %{event: ^down_event}
       refute_receive %{event: "ready"}, 1000
 
-      :undefined = :syn.lookup(Realtime.Syn.PostgresCdc.scope(tenant.external_id), tenant.external_id)
+      assert :undefined == :syn.lookup(scope, tenant.external_id)
     end
 
     test "Subscription manager updates oids", %{tenant: tenant} do
@@ -177,7 +178,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
                Postgrex.query!(conn, "SELECT count(*)::int FROM pg_replication_slots WHERE slot_name = $1", [slot_name])
     end
 
-    test "Stop tenant supervisor", %{tenant: tenant} do
+    test "stop tenant supervisor", %{tenant: tenant} do
       sup =
         Enum.reduce_while(1..10, nil, fn _, acc ->
           tenant.external_id
@@ -249,7 +250,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
     end
   end
 
-  describe "Region rebalancing" do
+  describe "region rebalancing" do
     setup do
       tenant = TestTenantDb.checkout_tenant(run_migrations: true)
       %Tenant{extensions: extensions, external_id: external_id} = tenant
@@ -526,6 +527,21 @@ defmodule Realtime.Extensions.CdcRlsTest do
           target_node: ^node
         }
       }
+    end
+
+    test "cdc going down on another node notifies subscribers here", %{tenant: tenant, node: remote_node} do
+      %Tenant{external_id: external_id} = tenant
+
+      RealtimeWeb.Endpoint.subscribe(Realtime.Syn.PostgresCdc.down_topic(external_id))
+
+      assert eventually(fn -> match?({:ok, _, _}, PostgresCdcRls.get_manager_conn(external_id)) end)
+      assert {:ok, manager_pid, _conn} = PostgresCdcRls.get_manager_conn(external_id)
+      assert node(manager_pid) == remote_node
+
+      :ok = PostgresCdcRls.handle_stop(external_id, 5_000)
+
+      down_event = Realtime.Syn.PostgresCdc.down_event()
+      assert_receive %{event: ^down_event}, 5000
     end
 
     test "subscription error rate limit", %{tenant: tenant, node: node} do

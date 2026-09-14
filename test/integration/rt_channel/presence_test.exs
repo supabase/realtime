@@ -366,12 +366,22 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
       WebsocketClient.send_event(main, topic, "presence", track.(test))
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
 
-      # Main sees the diff. Main also holds presence.read for this topic, so its diff can legitimately
-      # include other's join alongside its own: both tracks land in the same Phoenix.Tracker broadcast
-      # window and coalesce into a single presence_diff. The order of entries in the joins map is not
-      # deterministic, so match on the tracked payload rather than assuming which entry comes first.
-      assert_receive %Message{event: "presence_diff", payload: %{"joins" => joins}, topic: ^topic}, 1000
-      metas = joins |> Map.values() |> Enum.flat_map(&get_in(&1, ["metas"]))
+      # Main sees its own track, but not necessarily in the first diff it receives. Main also holds
+      # presence.read here, and Phoenix.Presence computes diffs asynchronously, so other's earlier
+      # join reaches main's channel either before main authorizes presence.read on this track (the
+      # gate drops it) or after (delivered on its own, or coalesced with main's). Those are the only
+      # two diffs in flight: read both and look for main's track across them. The second needs only a
+      # short wait, since if it exists it is already queued behind the first.
+      metas =
+        Enum.flat_map([1000, 500], fn timeout ->
+          receive do
+            %Message{event: "presence_diff", payload: %{"joins" => joins}, topic: ^topic} ->
+              joins |> Map.values() |> Enum.flat_map(&get_in(&1, ["metas"]))
+          after
+            timeout -> []
+          end
+        end)
+
       assert Enum.any?(metas, &(get_in(&1, ["test"]) == "should not go to other"))
 
       # Other can't receive the diff

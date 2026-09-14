@@ -18,7 +18,8 @@ defmodule Realtime.Telemetry.Logger do
     [:realtime, :tenants, :migrations, :exception],
     [:realtime, :tenants, :migrations, :reconcile, :stop],
     [:realtime, :tenants, :migrations, :reconcile, :exception],
-    [:phoenix, :error_rendered]
+    [:phoenix, :error_rendered],
+    [:phoenix, :endpoint, :stop]
   ]
 
   def start_link(args) do
@@ -26,6 +27,7 @@ defmodule Realtime.Telemetry.Logger do
   end
 
   def init(handler_id: handler_id) do
+    :telemetry.detach({Phoenix.Logger, [:phoenix, :endpoint, :stop]})
     :telemetry.attach_many(handler_id, @events, &__MODULE__.handle_event/4, [])
 
     {:ok, []}
@@ -103,9 +105,26 @@ defmodule Realtime.Telemetry.Logger do
     end
   end
 
+  def handle_event([:phoenix, :endpoint, :stop], measurements, %{conn: conn} = metadata, _config) do
+    case resolve_log_level(metadata[:options][:log], conn) do
+      false ->
+        :ok
+
+      level ->
+        duration_ms = System.convert_time_unit(measurements.duration, :native, :millisecond)
+        message = "#{conn.method} #{conn.request_path} - Sent #{conn.status} in #{duration_ms}ms"
+        Logger.log(level, message)
+    end
+  end
+
   def handle_event(_event, _measurements, _metadata, _config) do
     :ok
   end
+
+  # in practice we always have MFA set --> matching on it first for a micto bit of perf 😇
+  defp resolve_log_level({mod, fun, args}, conn), do: apply(mod, fun, [conn | args])
+  defp resolve_log_level(nil, _conn), do: :info
+  defp resolve_log_level(level, _conn) when is_atom(level), do: level
 
   defp format_reason(_kind, reason) when is_exception(reason),
     do: "#{inspect(reason.__struct__)} - #{Exception.message(reason)}"

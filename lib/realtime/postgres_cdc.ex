@@ -1,5 +1,11 @@
 defmodule Realtime.PostgresCdc do
-  @moduledoc false
+  @moduledoc """
+  Behaviour and dispatch facade for the Postgres CDC drivers.
+
+  A tenant names its driver through `postgres_cdc_default`, which `driver/1` resolves against the
+  configured `:extensions`. Every function here delegates to that driver's `handle_*` callback, so
+  callers never reach for a driver module directly.
+  """
 
   alias Realtime.Api.Tenant
 
@@ -18,8 +24,16 @@ defmodule Realtime.PostgresCdc do
     apply(module, :handle_after_connect, [connect_response, extension, params, tenant])
   end
 
+  @doc """
+  Subscribes the calling channel to the tenant's Postgres changes.
+
+  It also subscribes to `Realtime.Syn.PostgresCdc.down_topic/1`, where a `postgres_cdc_down` event
+  tells the channel to re-subscribe. That re-subscribe is what starts the CDC tree again, as its
+  supervisor never restarts it.
+  """
+  @spec subscribe(module(), [map()], String.t(), keyword()) :: :ok
   def subscribe(module, pg_change_params, tenant, metadata) do
-    RealtimeWeb.Endpoint.subscribe("postgres_cdc_rls:" <> tenant)
+    RealtimeWeb.Endpoint.subscribe(Realtime.Syn.PostgresCdc.down_topic(tenant))
     apply(module, :handle_subscribe, [pg_change_params, tenant, metadata])
   end
 

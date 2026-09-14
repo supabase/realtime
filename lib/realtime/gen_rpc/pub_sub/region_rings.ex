@@ -202,7 +202,7 @@ defmodule Realtime.GenRpcPubSub.RegionRings do
 
   @spec reconcile(State.t()) :: State.t()
   defp reconcile(%State{} = state) do
-    own_region = Application.get_env(:realtime, :region)
+    own_region = Nodes.region()
     all_regions = Nodes.all_node_regions()
 
     if all_regions != state.all_regions do

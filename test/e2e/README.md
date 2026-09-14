@@ -131,6 +131,16 @@ bun run nix
 
 ---
 
+## Source layout
+
+- `realtime-check.ts` — entrypoint: imports the suite descriptors, builds the descriptor list, calls the orchestrator.
+- `src/context.ts` — CLI parsing and resolved config (URLs, keys, tunables).
+- `src/runner.ts` — test harness (`createSuiteTest()`), OTel setup, result tracking, `printSummary()`.
+- `src/helpers.ts` — cross-suite utilities (channel open/subscribe helpers, DB row helpers, polling).
+- `src/fixtures.ts` — DB setup/teardown (tables, RLS, publications, triggers, test user).
+- `src/orchestrator.ts` — resolves `--test` categories, runs the suites in order, prints the summary.
+- `src/suites/*.ts` — one file per test category, each exporting a `SuiteDescriptor` (`name`, `label`, `needsDb`, `run`).
+
 ## Deno tests (legacy)
 
 See [legacy/README.md](./legacy/README.md).

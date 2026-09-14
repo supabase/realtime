@@ -121,6 +121,32 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       refute_receive {[:realtime, :connections], %{connected: 1, limit: 200, connected_cluster: 2},
                       %{tenant: ^bad_tenant_id}}
     end
+
+    test "reports zero for tenants that recently lost their last local websocket", %{
+      tenant: %{external_id: external_id},
+      node: node
+    } do
+      start_supervised!({Realtime.MetricsCleaner, [metrics_cleaner_schedule_timer_in_ms: 60_000]})
+
+      pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      :ok = Census.join(:users, external_id, pid)
+      _ = Rpc.call(node, FakeUserCounter, :fake_add, [external_id])
+
+      Process.sleep(500)
+      Tenant.execute_tenant_metrics()
+
+      assert_receive {[:realtime, :connections], %{connected: 1, limit: 200, connected_cluster: 2},
+                      %{tenant: ^external_id}},
+                     500
+
+      :ok = Census.leave(:users, external_id, pid)
+      Tenant.execute_tenant_metrics()
+
+      # Local count is zero, the other node still holds one connection
+      assert_receive {[:realtime, :connections], %{connected: 0, limit: 200, connected_cluster: 1},
+                      %{tenant: ^external_id}},
+                     500
+    end
   end
 
   describe "event_metrics/0" do

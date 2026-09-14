@@ -211,6 +211,48 @@ defmodule Realtime.MetricsCleanerTest do
     end
   end
 
+  describe "recently_vacated_tenants/2" do
+    test "returns tenants that vacated within the threshold minus the margin" do
+      table = :ets.new(:test_recently_vacated, [:set, :public, :named_table])
+      now = DateTime.to_unix(DateTime.utc_now(), :second)
+
+      # threshold 600s, margin 60s: only vacancies younger than 540s are returned
+      :ets.insert(table, {"just-vacated", now})
+      :ets.insert(table, {"vacated-a-while-ago", now - 500})
+      :ets.insert(table, {"about-to-be-pruned", now - 580})
+      :ets.insert(table, {"past-threshold", now - 700})
+
+      assert Enum.sort(MetricsCleaner.recently_vacated_tenants(table, 600)) == ["just-vacated", "vacated-a-while-ago"]
+    end
+
+    test "returns an empty list when the table does not exist" do
+      assert MetricsCleaner.recently_vacated_tenants(:does_not_exist, 600) == []
+    end
+
+    test "tracks vacancies from the running MetricsCleaner" do
+      start_supervised!(
+        {MetricsCleaner,
+         [
+           metrics_cleaner_schedule_timer_in_ms: 60_000,
+           vacant_metric_threshold_in_seconds: 600,
+           vacant_websockets_table: :test_running_vacant
+         ]}
+      )
+
+      pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      Census.join(:users, "running-tenant", pid)
+      Census.leave(:users, "running-tenant", pid)
+
+      assert MetricsCleaner.recently_vacated_tenants(:test_running_vacant, 600) == ["running-tenant"]
+
+      # Getting a websocket back removes the vacancy
+      pid2 = spawn_link(fn -> Process.sleep(:infinity) end)
+      Census.join(:users, "running-tenant", pid2)
+
+      assert MetricsCleaner.recently_vacated_tenants(:test_running_vacant, 600) == []
+    end
+  end
+
   describe "handle_forum_event/4" do
     test "inserts and deletes from ETS table" do
       table = :ets.new(:test_forum, [:set, :public])

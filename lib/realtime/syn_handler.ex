@@ -71,8 +71,8 @@ defmodule Realtime.SynHandler do
     :telemetry.execute([:syn, scope, :unregistered], %{}, %{name: name})
 
     case Atom.to_string(scope) do
-      @postgres_cdc_scope_prefix <> _ = scope ->
-        Endpoint.local_broadcast(PostgresCdc.syn_topic(name), scope <> "_down", %{pid: pid, reason: reason})
+      @postgres_cdc_scope_prefix <> _ ->
+        Endpoint.local_broadcast(PostgresCdc.down_topic(name), PostgresCdc.down_event(), %{pid: pid, reason: reason})
 
       _ ->
         topic = topic(scope)

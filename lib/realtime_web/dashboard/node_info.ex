@@ -96,7 +96,7 @@ defmodule RealtimeWeb.Dashboard.NodeInfo do
   end
 
   def gather_local_info do
-    region = Application.get_env(:realtime, :region)
+    region = Realtime.Nodes.region()
     master_region = Application.get_env(:realtime, :master_region) || region
     replica_module = Realtime.Repo.Replica.replica()
     replica_host = Application.get_env(:realtime, replica_module, [])[:hostname]

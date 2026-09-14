@@ -26,6 +26,36 @@ defmodule Realtime.MetricsCleaner do
 
   # 10 minutes
   @default_vacant_metric_threshold_in_seconds 600
+  @vacant_websockets_table :vacant_websockets
+
+  # Vacated tenants closer than this to the cleanup threshold are not reported by
+  # `recently_vacated_tenants/2`. It must cover the time between reading the table and emitting the
+  # metrics so a poll can't recreate a tenant tag that the cleaner has just pruned.
+  @recently_vacated_margin_in_seconds 60
+
+  @doc """
+  Tenants that recently lost their last websocket on this node and still have metrics for this node.
+
+  Returns an empty list when the MetricsCleaner is not running.
+  """
+  @spec recently_vacated_tenants(atom(), non_neg_integer()) :: [String.t()]
+  def recently_vacated_tenants(
+        table \\ @vacant_websockets_table,
+        vacant_metric_threshold_in_seconds \\ @default_vacant_metric_threshold_in_seconds
+      ) do
+    case :ets.whereis(table) do
+      :undefined ->
+        []
+
+      _tid ->
+        cutoff =
+          DateTime.utc_now()
+          |> DateTime.add(-(vacant_metric_threshold_in_seconds - @recently_vacated_margin_in_seconds), :second)
+          |> DateTime.to_unix(:second)
+
+        :ets.select(table, [{{:"$1", :"$2"}, [{:>=, :"$2", cutoff}], [:"$1"]}])
+    end
+  end
 
   @impl true
   def init(opts) do
@@ -38,7 +68,14 @@ defmodule Realtime.MetricsCleaner do
 
     Logger.info("Starting MetricsCleaner")
 
-    vacant_websockets = :ets.new(:vacant_websockets, [:set, :public, read_concurrency: false, write_concurrency: :auto])
+    vacant_websockets =
+      :ets.new(opts[:vacant_websockets_table] || @vacant_websockets_table, [
+        :named_table,
+        :set,
+        :public,
+        read_concurrency: false,
+        write_concurrency: :auto
+      ])
 
     disconnected_tenants =
       :ets.new(:disconnected_tenants, [:set, :public, read_concurrency: false, write_concurrency: :auto])

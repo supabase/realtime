@@ -195,6 +195,25 @@ defmodule Realtime.Api do
     end
   end
 
+  @doc """
+  Returns the subset of the given external ids that have a tenant row in this cluster.
+
+  Always reads the primary so a tenant that was just created is never reported as absent.
+  """
+  @spec list_existing_external_ids([String.t()]) :: [String.t()] | {:error, term()}
+  def list_existing_external_ids([]), do: []
+
+  def list_existing_external_ids(external_ids) when is_list(external_ids) do
+    if master_region?() do
+      Tenant
+      |> where([t], t.external_id in ^external_ids)
+      |> select([t], t.external_id)
+      |> Repo.all()
+    else
+      call(:list_existing_external_ids, [external_ids])
+    end
+  end
+
   @spec list_feature_flags() :: [FeatureFlag.t()]
   def list_feature_flags do
     Replica.replica().all(from f in FeatureFlag, order_by: [asc: f.name])
@@ -452,7 +471,7 @@ defmodule Realtime.Api do
   end
 
   defp master_region? do
-    region = Application.get_env(:realtime, :region)
+    region = Nodes.region()
     master_region = Application.get_env(:realtime, :master_region) || region
     region == master_region
   end
