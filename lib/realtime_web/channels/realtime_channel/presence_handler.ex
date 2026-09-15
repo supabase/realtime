@@ -153,6 +153,11 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
          _ <- RealtimeWeb.TenantBroadcaster.collect_payload_size(socket.assigns.tenant, payload, :presence),
          :ok <- limit_presence_event(socket),
          {:ok, _} <- Presence.track(self(), tenant_topic, presence_key, payload) do
+      # This track is what enables presence for the socket, so it never got the join-time
+      # presence_state and only sees diffs from here on. Sync now, or the members tracked
+      # before this point stay invisible to this client.
+      if !socket.assigns.presence_enabled?, do: send(self(), :sync_presence)
+
       socket =
         socket
         |> assign(:presence_enabled?, true)
