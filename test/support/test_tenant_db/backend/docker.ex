@@ -402,6 +402,7 @@ defmodule TestTenantDb.Backend.Docker do
   defp docker_run(name) do
     initdb_sh = Path.expand("../../../../dev/postgres/za-permit-supabase-admin.sh", __DIR__)
     initdb_sql = Path.expand("../../../../dev/postgres/zb-supabase-schema.sql", __DIR__)
+    initdb_template1_sql = Path.expand("../../../../dev/postgres/zc-template1-orioledb.sql", __DIR__)
 
     # Deliberately no `--rm`, we keep containers around for diagnostics of why they died
     System.cmd(
@@ -419,6 +420,8 @@ defmodule TestTenantDb.Backend.Docker do
         "#{initdb_sh}:/docker-entrypoint-initdb.d/za-permit-supabase-admin.sh",
         "-v",
         "#{initdb_sql}:/docker-entrypoint-initdb.d/zb-supabase-schema.sql",
+        "-v",
+        "#{initdb_template1_sql}:/docker-entrypoint-initdb.d/zc-template1-orioledb.sql",
         "-p",
         "0:5432",
         image(),
