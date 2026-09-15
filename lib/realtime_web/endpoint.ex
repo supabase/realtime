@@ -45,7 +45,7 @@ defmodule RealtimeWeb.Endpoint do
     websocket: @user_socket_websocket_opts,
     longpoll: @user_socket_longpoll_opts
 
-  @local_gateway_socket? Application.compile_env(:realtime, [__MODULE__, :local_gateway_socket], false)
+  @local_gateway_socket? Application.compile_env(:realtime, :local_gateway_socket, false)
 
   if @local_gateway_socket? do
     socket "/realtime/v1", RealtimeWeb.UserSocket,
