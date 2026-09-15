@@ -1,5 +1,5 @@
 import assert from "assert";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { postgresChangesFilter, type SupabaseClient } from "@supabase/supabase-js";
 import kleur from "kleur";
 import { trace, context, SpanStatusCode, SpanKind } from "@opentelemetry/api";
 import { EVENT_TIMEOUT_MS } from "./context.ts";
@@ -124,6 +124,20 @@ export async function openReplicationChannel(channel: ReturnType<SupabaseClient[
   const subscribeMs = await openChannel(channel);
   await waitFor(() => replicationReady ? true : null, "replication ready");
   return { subscribeMs, replicationMs: performance.now() - start };
+}
+
+// Opt-in isolation for pg_changes tests whose filter matches most rows in the table
+// (e.g. neq against a value nobody else inserts, or is-null against a column nobody
+// else sets) — under --parallel those filters otherwise pick up every other
+// concurrently-running test's inserts too, which can push wait time past the event
+// timeout. Pass the test's own tag to both `row()` (on every insert) and `scope()`
+// (ANDed into the filter under test) so the channel only ever sees its own rows.
+// Tests whose filter is already narrow (scoped to a random tag) don't need this.
+export function isolated(tag: string) {
+  return {
+    scope: () => postgresChangesFilter().eq("run_id", tag),
+    row: (row: Record<string, unknown> = {}) => ({ ...row, run_id: tag }),
+  };
 }
 
 type TableName = "pg_changes" | "dummy" | "authorization" | "broadcast_changes" | "wallet" | "replay_check";
