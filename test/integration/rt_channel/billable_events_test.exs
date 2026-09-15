@@ -78,18 +78,12 @@ defmodule Realtime.Integration.RtChannel.BillableEventsTest do
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
       assert_receive %Message{topic: ^topic, event: "system"}, 5000
 
-      # Wait for RateCounter to run
-      RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
-
       # Expected billed
       # 1 joins due to two sockets
       # 0 presence events
       # 0 db events as no postgres changes used
       # 0 events broadcast is not used
-      assert 1 = get_count([:realtime, :rate_counter, :channel, :joins], external_id)
-      assert 0 = get_count([:realtime, :rate_counter, :channel, :presence_events], external_id)
-      assert 0 = get_count([:realtime, :rate_counter, :channel, :db_events], external_id)
-      assert 0 = get_count([:realtime, :rate_counter, :channel, :events], external_id)
+      assert_billed(external_id, joins: 1, presence_events: 0, db_events: 0, events: 0)
     end
   end
 
@@ -122,18 +116,12 @@ defmodule Realtime.Integration.RtChannel.BillableEventsTest do
 
       refute_receive _any
 
-      # Wait for RateCounter to run
-      RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
-
       # Expected billed
       # 2 joins due to two sockets
       # 0 presence events
       # 0 db events as no postgres changes used
       # 15 events as 5 events sent, 5 events received on client 1 and 5 events received on client 2
-      assert 2 = get_count([:realtime, :rate_counter, :channel, :joins], external_id)
-      assert 0 = get_count([:realtime, :rate_counter, :channel, :presence_events], external_id)
-      assert 0 = get_count([:realtime, :rate_counter, :channel, :db_events], external_id)
-      assert 15 = get_count([:realtime, :rate_counter, :channel, :events], external_id)
+      assert_billed(external_id, joins: 2, presence_events: 0, db_events: 0, events: 15)
     end
   end
 
@@ -174,18 +162,12 @@ defmodule Realtime.Integration.RtChannel.BillableEventsTest do
       assert_receive %Message{event: "presence_diff", payload: %{"joins" => _, "leaves" => %{}}, topic: ^topic}
       assert_receive %Message{event: "presence_diff", payload: %{"joins" => _, "leaves" => %{}}, topic: ^topic}
 
-      # Wait for RateCounter to run
-      RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
-
       # Expected billed
       # 2 joins due to two sockets
       # 7 presence events
       # 0 db events as no postgres changes used
       # 0 events as no broadcast used
-      assert 2 = get_count([:realtime, :rate_counter, :channel, :joins], external_id)
-      assert 7 = get_count([:realtime, :rate_counter, :channel, :presence_events], external_id)
-      assert 0 = get_count([:realtime, :rate_counter, :channel, :db_events], external_id)
-      assert 0 = get_count([:realtime, :rate_counter, :channel, :events], external_id)
+      assert_billed(external_id, joins: 2, presence_events: 7, db_events: 0, events: 0)
     end
   end
 
@@ -223,19 +205,13 @@ defmodule Realtime.Integration.RtChannel.BillableEventsTest do
                        5000
       end
 
-      # Wait for RateCounter to run
-      RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
-
       # Expected billed
       # 2 joins due to two sockets
       # 0 presence events due to two sockets
       # 10 db events due to 5 inserts events sent to client 1 and 5 inserts events sent to client 2
-      # 0 events as no broadcast used
-      assert 2 = get_count([:realtime, :rate_counter, :channel, :joins], external_id)
-      assert 0 = get_count([:realtime, :rate_counter, :channel, :presence_events], external_id)
       # (5 for each websocket)
-      assert 10 = get_count([:realtime, :rate_counter, :channel, :db_events], external_id)
-      assert 0 = get_count([:realtime, :rate_counter, :channel, :events], external_id)
+      # 0 events as no broadcast used
+      assert_billed(external_id, joins: 2, presence_events: 0, db_events: 10, events: 0)
     end
 
     test "postgres changes error events", %{tenant: tenant, serializer: serializer} do
@@ -250,23 +226,34 @@ defmodule Realtime.Integration.RtChannel.BillableEventsTest do
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
       assert_receive %Message{topic: ^topic, event: "system"}, 5000
 
-      # Wait for RateCounter to run
-      RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
-
       # Expected billed
       # 1 joins due to one socket
       # 0 presence events due to one socket
       # 0 db events
       # 0 events as no broadcast used
-      assert 1 = get_count([:realtime, :rate_counter, :channel, :joins], external_id)
-      assert 0 = get_count([:realtime, :rate_counter, :channel, :presence_events], external_id)
-      assert 0 = get_count([:realtime, :rate_counter, :channel, :db_events], external_id)
-      assert 0 = get_count([:realtime, :rate_counter, :channel, :events], external_id)
+      assert_billed(external_id, joins: 1, presence_events: 0, db_events: 0, events: 0)
     end
   end
 
-  defp get_count(event, tenant) do
-    [key] = Enum.take(event, -1)
+  # Rate counters are incremented after the message has already been fastlaned to the transport, so
+  # the `assert_receive` above can win the race against the increment.  Re-tick until the counters
+  # settle rather than sampling them once.
+  defp assert_billed(tenant, expected) do
+    eventually(
+      fn ->
+        RateCounterHelper.tick_tenant_rate_counters!(tenant)
+        Enum.all?(expected, fn {key, value} -> get_count(key, tenant) == value end)
+      end,
+      retries: 10,
+      sleep: 50
+    )
+
+    for {key, value} <- expected do
+      assert value == get_count(key, tenant), "expected #{value} #{key}, got #{get_count(key, tenant)}"
+    end
+  end
+
+  defp get_count(key, tenant) do
     Agent.get(:"TestCounter_#{tenant}", fn state -> get_in(state, [tenant, key]) || 0 end)
   end
 end
