@@ -62,6 +62,11 @@ defmodule TestTenantDb.Backend.External do
   def storage_up!(_tenant), do: :ok
 
   @impl TestTenantDb.Backend
+  def start_database!(_postgres_args) do
+    raise "External tenant cannot start a database with custom settings."
+  end
+
+  @impl TestTenantDb.Backend
   def diagnose(pid) do
     # Tolerant of a worker that is dead or not answering: this runs on the failure
     # path, where raising would bury the failure it is meant to explain.
