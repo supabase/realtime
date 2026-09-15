@@ -81,16 +81,16 @@ tenant's dev stack and clear of every other run.
 > **Note**
 > Supabase runs Realtime in production with a separate database that keeps track of all tenants. For local development, the compose setup creates the `_realtime` schema for you.
 
-You can add your own by making a `POST` request to the server. You must change both `name` and `external_id` while you may update other values as you see fit:
+You can add your own by making a `POST` request to the server. You must change both `name` and `external_id` while you may update other values as you see fit — reusing an existing `external_id` (like `realtime-dev`) updates that tenant instead of creating a new one:
 
 ```bash
   curl -X POST \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiIiLCJpYXQiOjE2NzEyMzc4NzMsImV4cCI6MTcwMjc3Mzk5MywiYXVkIjoiIiwic3ViIjoiIn0._ARixa2KFUVsKBf3UGR90qKLCpGjxhKcXY4akVbmeNQ' \
+  -H "Authorization: Bearer $(mix realtime.gen_token)" \
   -d $'{
     "tenant" : {
-      "name": "realtime-dev",
-      "external_id": "realtime-dev",
+      "name": "example-tenant",
+      "external_id": "example-tenant",
       "jwt_secret": "a1d99c8b-91b6-47b2-8f3c-aa7d9a9ad20f",
       "extensions": [
         {
@@ -114,7 +114,7 @@ You can add your own by making a `POST` request to the server. You must change b
 ```
 
 > **Note**
-> The `Authorization` token is signed with the secret set by `API_JWT_SECRET` in the local compose environment.
+> The `Authorization` header is a JWT signed with `API_JWT_SECRET`; `mix realtime.gen_token` generates one for you.
 
 If you want to listen to Postgres changes, you can create a table and then add the table to the `supabase_realtime` publication:
 
@@ -126,11 +126,23 @@ create table test (
 alter publication supabase_realtime add table test;
 ```
 
-You can start playing around with Broadcast, Presence, and Postgres Changes features either with the client libs (e.g. `@supabase/realtime-js`), or use the built in Realtime Inspector on localhost, `http://localhost:4000/inspector/new` (make sure the port is correct for your development environment).
+You can start playing around with Broadcast, Presence, and Postgres Changes features either with the client libs (e.g. `@supabase/realtime-js`), or the built-in Realtime Inspector on localhost, `http://localhost:4000/inspector/new` (make sure the port is correct for your development environment).
 
 The WebSocket URL must contain the subdomain, `external_id` of the tenant on the `tenants` table, and the token must be signed with the `jwt_secret` that was inserted along with the tenant.
 
-If you're using the default tenant, the URL is `ws://realtime-dev.localhost:4000/socket` (make sure the port is correct for your development environment), and you can use `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MDMwMjgwODcsInJvbGUiOiJwb3N0Z3JlcyJ9.tz_XJ89gd6bN8MBpCl7afvPrZiBH6RB65iA1FadPT3Y` for the token. The token must have `exp` and `role` (database role) keys.
+#### Using the Inspector
+
+```bash
+mise run dev-inspector   # opens the Inspector with host and token already filled in for TENANT
+```
+
+Or fill in the connect line at the top yourself:
+
+- **Host**: `http://realtime-dev.localhost:4000`
+- **Token**: `mix realtime.gen_token` (signs with `API_JWT_SECRET`, which is also `realtime-dev`'s `jwt_secret`)
+- **Channel**: anything, e.g. `room_a`
+
+Toggle on **presence** and/or **postgres changes** if you want to exercise them, then hit **Connect**. The event log at the bottom shows everything on the socket as it happens; the form below it sends a broadcast. For Postgres Changes, point the table field at `test` (created above) and insert a row from `psql` to see it land.
 
 ### Tenant migrations and snapshots
 

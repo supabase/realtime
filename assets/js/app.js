@@ -5,7 +5,7 @@ import "phoenix_html";
 import { Socket } from "phoenix";
 import { LiveSocket } from "phoenix_live_view";
 import topbar from "../vendor/topbar";
-import { createClient } from "@supabase/supabase-js";
+import { RealtimeClient } from "@supabase/realtime-js";
 import { matches, segments } from "./fuzzy.mjs";
 
 const Hooks = {};
@@ -13,7 +13,7 @@ const Hooks = {};
 const MAX_STRING = 512;
 const MAX_DEPTH = 6;
 
-// supabase-js logs the socket URL verbatim, apikey query param and all, and that string ends up in
+// realtime-js logs the socket URL verbatim, apikey query param and all, and that string ends up in
 // the log row, its title attribute and the exported file. Strip credentials before anything else
 // sees them.
 const CREDENTIAL_PARAM = /([?&](?:apikey|token|access_token)=)[^&\s]+/gi;
@@ -95,14 +95,14 @@ function reasonText(error, fallback) {
   return text.replace(/^Error:\s*/i, "").trim() || fallback;
 }
 
-// The browser hides the failed handshake's status code, so "transport failure" is all supabase-js
+// The browser hides the failed handshake's status code, so "transport failure" is all realtime-js
 // can report. Re-request the same URL over HTTP to work out what actually broke. A CORS-blocked
 // response still tells us the host answered, so fall back to a no-cors reachability probe rather
 // than blaming the network for what is really a wrong path or a rejected token.
 async function diagnose(host) {
   let url;
   try {
-    url = new URL("/realtime/v1/websocket", host);
+    url = new URL(`${socketPath(host)}/websocket`, host);
   } catch {
     return "That host is not a valid URL.";
   }
@@ -122,6 +122,15 @@ async function diagnose(host) {
       return `Could not reach ${url.host}. Check the URL, your network, or whether the server is running.`;
     }
   }
+}
+
+// A bare local `mix phx.server` instance only speaks the internal `/socket` path. Every hosted
+// project (and anything else pointed at through a gateway) rewrites the public `/realtime/v1`
+// path down to that same internal socket, so that's the path to use for everything else.
+function socketPath(host) {
+  const hostname = new URL(host).hostname;
+  const isLocal = hostname === "localhost" || hostname.endsWith(".localhost");
+  return isLocal ? "/socket" : "/realtime/v1";
 }
 
 function logEvent(hook, category, event, payload, latencyMs = null) {
@@ -153,21 +162,22 @@ Hooks.payload = {
     } = connection;
 
     if (this.channel) this.channel.unsubscribe();
-    if (this.realtimeSocket) this.realtimeSocket.realtime.disconnect();
+    if (this.realtimeSocket) this.realtimeSocket.disconnect();
 
-    this.realtimeSocket = createClient(host, token, {
-      realtime: {
-        params: { log_level },
-        heartbeatCallback: (status, latency) =>
-          this.pushEvent("transport_status", { status, latency_ms: latency ?? null }),
-        logger: (kind, msg, data) => {
-          if (isHeartbeat(msg)) return;
-          logEvent(this, kind, msg, { data });
-        },
+    const endpoint = new URL(socketPath(host), host);
+    endpoint.protocol = endpoint.protocol.replace("http", "ws");
+
+    this.realtimeSocket = new RealtimeClient(endpoint.toString(), {
+      params: { apikey: token, log_level },
+      heartbeatCallback: (status, latency) =>
+        this.pushEvent("transport_status", { status, latency_ms: latency ?? null }),
+      logger: (kind, msg, data) => {
+        if (isHeartbeat(msg)) return;
+        logEvent(this, kind, msg, { data });
       },
     });
 
-    if (bearer) this.realtimeSocket.realtime.setAuth(bearer);
+    if (bearer) this.realtimeSocket.setAuth(bearer);
 
     this.channel = this.realtimeSocket.channel(channelName, {
       config: { broadcast: { self: true }, private: !!private_channel },
