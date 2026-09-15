@@ -1,6 +1,6 @@
 import assert from "assert";
 import { createClient, postgresChangesFilter } from "@supabase/supabase-js";
-import { PROJECT_URL, ANON_KEY, REALTIME_OPTS, BROADCAST_CONFIG } from "../context.ts";
+import { PROJECT_URL, ANON_KEY, REALTIME_OPTS, POSTGRES_CHANGES_CONFIG } from "../context.ts";
 import type { SuiteDescriptor } from "../runner.ts";
 import { sleep, randomTopic, waitFor, signInUser, stopClient, openPostgresChannel, executeInsert, isolated } from "../helpers.ts";
 
@@ -21,7 +21,7 @@ export const postgresChangesFilters: SuiteDescriptor = {
         let result: any = null;
 
         const channel = supabase
-          .channel(randomTopic(), BROADCAST_CONFIG)
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: postgresChangesFilter().eq("value", value) }, (p) => { if (p.new.value === value) result = p; });
 
         const { subscribeMs } = await openPostgresChannel(channel);
@@ -48,7 +48,7 @@ export const postgresChangesFilters: SuiteDescriptor = {
         let result: any = null;
 
         const channel = supabase
-          .channel(randomTopic(), BROADCAST_CONFIG)
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: scope().neq("value", `no_${tag}`) }, (p) => { if (p.new.value === value) result = p; });
 
         const { subscribeMs } = await openPostgresChannel(channel);
@@ -74,7 +74,7 @@ export const postgresChangesFilters: SuiteDescriptor = {
         let result: any = null;
 
         const channel = supabase
-          .channel(randomTopic(), BROADCAST_CONFIG)
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: scope().lt("value", `b_${tag}`) }, (p) => { if (p.new.value === value) result = p; });
 
         const { subscribeMs } = await openPostgresChannel(channel);
@@ -100,7 +100,7 @@ export const postgresChangesFilters: SuiteDescriptor = {
         let result: any = null;
 
         const channel = supabase
-          .channel(randomTopic(), BROADCAST_CONFIG)
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: scope().lte("value", `b_${tag}`) }, (p) => { if (p.new.value === value) result = p; });
 
         const { subscribeMs } = await openPostgresChannel(channel);
@@ -125,7 +125,7 @@ export const postgresChangesFilters: SuiteDescriptor = {
         let result: any = null;
 
         const channel = supabase
-          .channel(randomTopic(), BROADCAST_CONFIG)
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: scope().gt("value", `b_${tag}`) }, (p) => { if (p.new.value === value) result = p; });
 
         const { subscribeMs } = await openPostgresChannel(channel);
@@ -150,7 +150,7 @@ export const postgresChangesFilters: SuiteDescriptor = {
         let result: any = null;
 
         const channel = supabase
-          .channel(randomTopic(), BROADCAST_CONFIG)
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: scope().gte("value", `b_${tag}`) }, (p) => { if (p.new.value === value) result = p; });
 
         const { subscribeMs } = await openPostgresChannel(channel);
@@ -173,7 +173,7 @@ export const postgresChangesFilters: SuiteDescriptor = {
         let result: any = null;
 
         const channel = supabase
-          .channel(randomTopic(), BROADCAST_CONFIG)
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: postgresChangesFilter().in("value", [value, `other_${tag}`]) }, (p) => { if (p.new.value === value) result = p; });
 
         const { subscribeMs } = await openPostgresChannel(channel);
@@ -196,7 +196,7 @@ export const postgresChangesFilters: SuiteDescriptor = {
         let result: any = null;
 
         const channel = supabase
-          .channel(randomTopic(), BROADCAST_CONFIG)
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: postgresChangesFilter().like("value", `${tag}%`) }, (p) => { if (p.new.value === value) result = p; });
 
         const { subscribeMs } = await openPostgresChannel(channel);
@@ -219,7 +219,7 @@ export const postgresChangesFilters: SuiteDescriptor = {
         let result: any = null;
 
         const channel = supabase
-          .channel(randomTopic(), BROADCAST_CONFIG)
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: postgresChangesFilter().ilike("value", `${tag}hello%`) }, (p) => { if (p.new.value === value) result = p; });
 
         const { subscribeMs } = await openPostgresChannel(channel);
@@ -246,7 +246,7 @@ export const postgresChangesFilters: SuiteDescriptor = {
         let result: any = null;
 
         const channel = supabase
-          .channel(randomTopic(), BROADCAST_CONFIG)
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: scope().is("nullable_value", null) }, (p) => { if (p.new.value === value) result = p; });
 
         const { subscribeMs } = await openPostgresChannel(channel);
@@ -269,7 +269,7 @@ export const postgresChangesFilters: SuiteDescriptor = {
         let result: any = null;
 
         const channel = supabase
-          .channel(randomTopic(), BROADCAST_CONFIG)
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: postgresChangesFilter().match("value", `^${tag}`) }, (p) => { if (p.new.value === value) result = p; });
 
         const { subscribeMs } = await openPostgresChannel(channel);
@@ -292,7 +292,7 @@ export const postgresChangesFilters: SuiteDescriptor = {
         let result: any = null;
 
         const channel = supabase
-          .channel(randomTopic(), BROADCAST_CONFIG)
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: postgresChangesFilter().imatch("value", `^${tag}abc`) }, (p) => { if (p.new.value === value) result = p; });
 
         const { subscribeMs } = await openPostgresChannel(channel);
@@ -318,7 +318,7 @@ export const postgresChangesFilters: SuiteDescriptor = {
         let result: any = null;
 
         const channel = supabase
-          .channel(randomTopic(), BROADCAST_CONFIG)
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: scope().isDistinct("value", `other_${tag}`) }, (p) => { if (p.new.value === value) result = p; });
 
         const { subscribeMs } = await openPostgresChannel(channel);
@@ -343,7 +343,7 @@ export const postgresChangesFilters: SuiteDescriptor = {
 
         // value LIKE tag%  AND  details = tag-keep
         const channel = supabase
-          .channel(randomTopic(), BROADCAST_CONFIG)
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: postgresChangesFilter().like("value", `${tag}%`).eq("details", `${tag}keep`) }, (p) => { seen.push(p.new.value); });
 
         const { subscribeMs } = await openPostgresChannel(channel);
@@ -375,7 +375,7 @@ export const postgresChangesFilters: SuiteDescriptor = {
         // shape as the bare `neq` test, just spelled differently — scope it.
         const { scope, row } = isolated(tag);
         const channel = supabase
-          .channel(randomTopic(), BROADCAST_CONFIG)
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: scope().not("value", "eq", excluded) }, (p) => { if (p.new.value === excluded || p.new.value === delivered) seen.push(p.new.value); });
 
         const { subscribeMs } = await openPostgresChannel(channel);
@@ -403,7 +403,7 @@ export const postgresChangesFilters: SuiteDescriptor = {
         // value LIKE tag%  AND  details NOT LIKE skip%  AND  nullable_value IS NULL
         const filter = postgresChangesFilter().like("value", `${tag}%`).not("details", "like", "skip%").is("nullable_value", null);
         const channel = supabase
-          .channel(randomTopic(), BROADCAST_CONFIG)
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter }, (p) => { seen.push(p.new.value); });
 
         const { subscribeMs } = await openPostgresChannel(channel);
@@ -435,7 +435,7 @@ export const postgresChangesFilters: SuiteDescriptor = {
         // value >= tag_b  AND  value <= tag_d
         const filter = postgresChangesFilter().gte("value", `${tag}_b`).lte("value", `${tag}_d`);
         const channel = supabase
-          .channel(randomTopic(), BROADCAST_CONFIG)
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter }, (p) => { if (p.new.value.startsWith(tag)) seen.push(p.new.value); });
 
         const { subscribeMs } = await openPostgresChannel(channel);
@@ -468,7 +468,7 @@ export const postgresChangesFilters: SuiteDescriptor = {
         // value IN (in_tag, other_tag)  AND  details LIKE keep%
         const filter = postgresChangesFilter().in("value", [match, `other_${tag}`]).like("details", "keep%");
         const channel = supabase
-          .channel(randomTopic(), BROADCAST_CONFIG)
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter }, (p) => { if (p.new.value === match) seen.push(p.new.details); });
 
         const { subscribeMs } = await openPostgresChannel(channel);
@@ -503,7 +503,7 @@ export const postgresChangesFilters: SuiteDescriptor = {
         // value != tag-exact  AND  value NOT LIKE tag-skip%
         const filter = scope().neq("value", `${tag}exact`).not("value", "like", `${tag}skip%`);
         const channel = supabase
-          .channel(randomTopic(), BROADCAST_CONFIG)
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter }, (p) => { if (p.new.value.startsWith(tag)) seen.push(p.new.value); });
 
         const { subscribeMs } = await openPostgresChannel(channel);
@@ -537,7 +537,7 @@ export const postgresChangesFilters: SuiteDescriptor = {
         // nullable_value IS NOT NULL  AND  value ILIKE tag-hello%
         const filter = postgresChangesFilter().not("nullable_value", "is", null).ilike("value", `${tag}hello%`);
         const channel = supabase
-          .channel(randomTopic(), BROADCAST_CONFIG)
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter }, (p) => { if (p.new.value.startsWith(tag)) seen.push(p.new.value); });
 
         const { subscribeMs } = await openPostgresChannel(channel);
@@ -572,7 +572,7 @@ export const postgresChangesFilters: SuiteDescriptor = {
         // value = tag-match  AND  details NOT LIKE skip%  AND  details LIKE keep%  AND  nullable_value IS NOT NULL
         const filter = postgresChangesFilter().eq("value", match).not("details", "like", "skip%").like("details", "keep%").not("nullable_value", "is", null);
         const channel = supabase
-          .channel(randomTopic(), BROADCAST_CONFIG)
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter }, (p) => { if (p.new.value.startsWith(tag)) seen.push({ value: p.new.value, details: p.new.details }); });
 
         const { subscribeMs } = await openPostgresChannel(channel);
@@ -603,7 +603,7 @@ export const postgresChangesFilters: SuiteDescriptor = {
 
         // Ask for only id + value; details and nullable_value must be absent from the payload.
         const channel = supabase
-          .channel(randomTopic(), BROADCAST_CONFIG)
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: postgresChangesFilter().eq("value", value), select: ["id", "value"] }, (p) => { if (p.new.value === value) result = p; });
 
         const { subscribeMs } = await openPostgresChannel(channel);

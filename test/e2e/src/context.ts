@@ -68,6 +68,12 @@ const realtimeLogger = DEBUG
 
 export const REALTIME_OPTS = { ...(DEBUG ? { logger: realtimeLogger, logLevel: "info" } : {}) };
 export const BROADCAST_CONFIG = { config: { broadcast: { self: true } } };
+// `wait: true` holds the server's SUBSCRIBED ack until it confirms the postgres_changes
+// subscription is actually active, instead of the default fire-and-forget ack that can race
+// the tenant's replication poller/slot coming up after a cold start.
+export const POSTGRES_CHANGES_CONFIG = {
+  config: { broadcast: { self: true }, postgres_changes_options: { wait: true } },
+};
 export const EVENT_TIMEOUT_MS = 8000;
 export const RATE_LIMIT_PAUSE_MS = WAIT_TIME_ARG;
 export const BROADCAST_API_HEADERS = {
