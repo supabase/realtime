@@ -45,6 +45,11 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @impl true
   def join("realtime:", _params, socket) do
+    # `terminate/2` untracks every channel process, including one whose join was rejected, so
+    # this clause has to track too. Otherwise the socket's other channels are untracked in its
+    # place and the Tracker reaps a transport that still has channels open.
+    Tracker.track(socket.transport_pid)
+
     socket
     |> log_error("TopicNameRequired", "You must provide a topic name")
     |> join_error()
