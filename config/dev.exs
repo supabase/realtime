@@ -39,14 +39,6 @@ port =
       pinned
   end
 
-# supabase-js's createClient() always builds the realtime websocket URL as
-# `${url}/realtime/v1/websocket`, the path a full Supabase stack or hosted project serves behind a
-# gateway. The bare dev server only serves `/socket`; this mounts the same socket at that path too,
-# so local tooling built on supabase-js (like the Inspector) can connect straight to `mise run dev`
-# without a gateway in front. Not a Phoenix Endpoint option, so it's kept out of the Endpoint config
-# below to avoid confusing it with one.
-config :realtime, :local_gateway_socket, true
-
 config :realtime, RealtimeWeb.Endpoint,
   http: [port: port, compress: true],
   debug_errors: true,
