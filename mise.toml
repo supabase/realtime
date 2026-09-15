@@ -49,7 +49,7 @@ set -eu
 tenant=${TENANT:-realtime-dev}
 port=${PORT:-4000}
 host="http://${tenant}.localhost:${port}"
-token=$(mix realtime.gen_token)
+token=$(mix realtime.gen_token | tail -n1)
 url="http://localhost:${port}/inspector/new?host=${host}&token=${token}"
 
 echo "$url"
