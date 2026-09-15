@@ -87,7 +87,7 @@ defmodule Realtime.DatabaseTest do
     end
 
     @tag db_args: ["-c", "max_connections=10"]
-    test "reports no available connections instead of a negative count", %{tenant: tenant} do
+    test "counts only the backends holding a connection slot", %{tenant: tenant} do
       {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
       {:ok, backends} = Database.connect_db(%{settings | pool_size: 7, max_restarts: 0})
 
@@ -104,7 +104,7 @@ defmodule Realtime.DatabaseTest do
 
       assert capture_log(fn ->
                assert {:error, :tenant_db_too_many_connections} = Database.check_tenant_connection(tenant)
-             end) =~ ~r/Only 0 available connections/
+             end) =~ ~r/Only 3 available connections/
     end
 
     @tag db_pool: 3

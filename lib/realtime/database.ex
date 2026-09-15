@@ -166,12 +166,12 @@ defmodule Realtime.Database do
   SELECT count(*)::int FROM realtime.schema_migrations
   """
 
-  # Autovacuum workers, walsenders and background workers are listed here without holding a
-  # max_connections slot, so a saturated database counts more backends than max_connections.
+  # Client backends are the only ones holding a max_connections slot
   @connections_query """
   SELECT GREATEST(current_setting('max_connections')::int - count(*), 0)::int
   FROM pg_stat_activity
-  WHERE application_name NOT IN ('realtime_connect', 'realtime_connect_probe')
+  WHERE backend_type = 'client backend'
+    AND application_name NOT IN ('realtime_connect', 'realtime_connect_probe')
   """
 
   defp query_connection_info(conn) do
