@@ -1,6 +1,6 @@
 import assert from "assert";
 import { createClient } from "@supabase/supabase-js";
-import { PROJECT_URL, ANON_KEY, REALTIME_OPTS, BROADCAST_CONFIG, RATE_LIMIT_PAUSE_MS } from "../context.ts";
+import { PROJECT_URL, ANON_KEY, REALTIME_OPTS, POSTGRES_CHANGES_CONFIG, RATE_LIMIT_PAUSE_MS } from "../context.ts";
 import type { SuiteDescriptor } from "../runner.ts";
 import {
   sleep, randomTopic, waitFor, signInUser, stopClient, openPostgresChannel,
@@ -23,7 +23,7 @@ export const postgresChanges: SuiteDescriptor = {
         const uniqueValue = crypto.randomUUID();
 
         const channel = supabase
-          .channel(randomTopic(), BROADCAST_CONFIG)
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
           .on("postgres_changes",
             { event: "INSERT", schema: "public", table: "pg_changes", filter: `value=eq.${uniqueValue}` },
             (payload) => (result = payload));
@@ -53,7 +53,7 @@ export const postgresChanges: SuiteDescriptor = {
         const dummyId = await executeInsert(supabase, "dummy");
 
         const channel = supabase
-          .channel(randomTopic(), BROADCAST_CONFIG)
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
           .on("postgres_changes",
             { event: "UPDATE", schema: "public", table: "pg_changes", filter: `id=eq.${mainId}` },
             (payload) => (result = payload));
@@ -86,7 +86,7 @@ export const postgresChanges: SuiteDescriptor = {
         const dummyId = await executeInsert(supabase, "dummy");
 
         const channel = supabase
-          .channel(randomTopic(), BROADCAST_CONFIG)
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
           .on("postgres_changes",
             { event: "DELETE", schema: "public", table: "pg_changes", filter: `id=eq.${mainId}` },
             (payload) => (result = payload));
@@ -119,7 +119,7 @@ export const postgresChanges: SuiteDescriptor = {
         const deleteId = await executeInsert(supabase, "pg_changes");
 
         const channel = supabase
-          .channel(randomTopic(), BROADCAST_CONFIG)
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: `value=eq.${insertValue}` }, (p) => (insertResult = p))
           .on("postgres_changes", { event: "UPDATE", schema: "public", table: "pg_changes", filter: `id=eq.${updateId}` }, (p) => (updateResult = p))
           .on("postgres_changes", { event: "DELETE", schema: "public", table: "pg_changes", filter: `id=eq.${deleteId}` }, (p) => (deleteResult = p));
@@ -162,7 +162,7 @@ export const postgresChanges: SuiteDescriptor = {
         const details = crypto.randomUUID();
 
         const channel = supabase
-          .channel(randomTopic(), BROADCAST_CONFIG)
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
           .on("postgres_changes",
             { event: "INSERT", schema: "public", table: "pg_changes", filter: `value=eq.${uniqueValue}` },
             (payload) => (result = payload));
