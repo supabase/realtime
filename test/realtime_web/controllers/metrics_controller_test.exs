@@ -283,4 +283,84 @@ defmodule RealtimeWeb.MetricsControllerTest do
       |> response(403)
     end
   end
+
+
+  describe "JWKS authentication" do
+    @es256_jwks %{
+      "keys" => [
+        %{
+          "kty" => "EC",
+          "x" => "iX_niXPSL2nW-9IyCELzyceAtuE3B98pWML5tQGACD4",
+          "y" => "kT02DoLhXx6gtpkbrN8XwQ2wtzE6cDBaqlWgVXIeqV0",
+          "crv" => "P-256",
+          "d" => "FBVYnsYA2C3FTggEwV8kCRMo4FLl220_cWY2RdXyb_8",
+          "kid" => "key-id-1"
+        }
+      ]
+    }
+
+    # Pre-generated ES256 token signed with the above private key
+    @es256_token "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleS1pZC0xIn0.eyJpYXQiOjE3ODg2NDg1NDQsImV4cCI6MTc4ODY1MjE0NCwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJzdWIiOiJ1c2VyLWlkIn0.kyM903QbEfaQVali0h6p00Q2TMUspizZUerwJ3zvjcg2C1qjmSEO0s728SldHvHKtXrUg9iER8T1eY-RpbhNNQ"
+
+    setup do
+      # Store original config values
+      original_jwt_secret = Application.get_env(:realtime, :metrics_jwt_secret)
+      original_jwks = Application.get_env(:realtime, :metrics_jwt_jwks)
+
+      # Configure for JWKS-only auth (no secret, JWKS only)
+      Application.put_env(:realtime, :metrics_jwt_secret, nil)
+      Application.put_env(:realtime, :metrics_jwt_jwks, @es256_jwks)
+
+      on_exit(fn ->
+        Application.put_env(:realtime, :metrics_jwt_secret, original_jwt_secret)
+        Application.put_env(:realtime, :metrics_jwt_jwks, original_jwks)
+      end)
+
+      :ok
+    end
+
+    test "GET /metrics accepts ES256 JWT from JWKS", %{conn: conn} do
+      response =
+        conn
+        |> put_req_header("authorization", "Bearer #{@es256_token}")
+        |> get(~p"/metrics")
+        |> response(200)
+
+      assert response =~ "# HELP"
+    end
+
+    test "GET /metrics/:region accepts ES256 JWT from JWKS", %{conn: conn} do
+      response =
+        conn
+        |> put_req_header("authorization", "Bearer #{@es256_token}")
+        |> get(~p"/metrics/ap-southeast-2")
+        |> response(200)
+
+      assert response =~ "# HELP"
+    end
+
+    test "GET /metrics rejects JWT with wrong signature" do
+      # Generate a token signed with a DIFFERENT key (not in JWKS)
+      other_key = %{
+        "kty" => "EC",
+        "x" => "j-VTe-Qzh6nh-GqPFMlTNuRLn-4sHmU8HuP02ueTd2E",
+        "y" => "sZKgHeDwKv-zEUeyqRkwIanCIRvM1Bpob9hkIGQhQ4k",
+        "crv" => "P-256",
+        "d" => "TBPiDhcBctdrS66G2rgSWHvbwLbTk7kXNHJFSAYo0po"
+      }
+      {:ok, signer} = Joken.Signer.create("ES256", other_key)
+      bad_token = Joken.generate_and_sign!(%{"jti" => "test"}, %{"role" => "authenticated", "exp" => 999_999_999_999}, signer)
+
+      conn = build_conn()
+
+      response =
+        conn
+        |> put_req_header("authorization", "Bearer " <> bad_token)
+        |> get(~p"/metrics")
+        |> response(403)
+
+      assert response == ""
+    end
+  end
+
 end

@@ -141,10 +141,23 @@ websocket_max_heap_size = div(Env.get_integer("WEBSOCKET_MAX_HEAP_SIZE", 50_000_
 cluster_strategies = Env.get_binary("CLUSTER_STRATEGIES", "POSTGRES")
 
 metrics_jwt_secret =
-  if config_env() == :test do
-    System.get_env("METRICS_JWT_SECRET")
-  else
-    System.fetch_env!("METRICS_JWT_SECRET")
+  case config_env() do
+    :test ->
+      System.get_env("METRICS_JWT_SECRET")
+
+    _ ->
+      cond do
+        secret = System.get_env("METRICS_JWT_SECRET") -> secret
+        jwks = System.get_env("API_JWT_JWKS") -> jwks
+        true -> System.fetch_env!("METRICS_JWT_SECRET")
+      end
+  end
+
+metrics_jwt_jwks =
+  case System.get_env("METRICS_JWT_JWKS") || System.get_env("API_JWT_JWKS") do
+    nil -> nil
+    "" -> nil
+    jwks -> Jason.decode!(jwks)
   end
 
 after_connect_query_args =
@@ -414,6 +427,7 @@ if config_env() != :test do
     api_blocklist: api_token_blocklist,
     metrics_blocklist: metrics_token_blocklist,
     metrics_jwt_secret: metrics_jwt_secret,
+    metrics_jwt_jwks: metrics_jwt_jwks,
     db_enc_key: db_enc_key,
     db_enc_key_gcm: db_enc_key_gcm,
     db_enc_write_gcm: db_enc_write_gcm,
