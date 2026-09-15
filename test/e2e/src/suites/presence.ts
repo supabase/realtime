@@ -1,15 +1,18 @@
 import assert from "assert";
-import { RATE_LIMIT_PAUSE_MS } from "../context.ts";
+import { createClient } from "@supabase/supabase-js";
+import { PROJECT_URL, ANON_KEY, REALTIME_OPTS, RATE_LIMIT_PAUSE_MS } from "../context.ts";
 import type { SuiteDescriptor } from "../runner.ts";
-import { sleep, randomTopic, waitFor, openChannel } from "../helpers.ts";
+import { sleep, randomTopic, waitFor, signInUser, stopClient, openChannel } from "../helpers.ts";
 
 export const presence: SuiteDescriptor = {
   name: "presence",
   label: "presence extension",
   needsDb: true,
-  run: async ({ supabase, test }) => {
+  run: async ({ testUser, test }) => {
     await test("user is able to receive presence updates", async () => {
+      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
       try {
+        await signInUser(supabase, testUser.email, testUser.password);
         let joinEvent: any = null;
         const topic = randomTopic();
         const message = crypto.randomUUID();
@@ -29,13 +32,15 @@ export const presence: SuiteDescriptor = {
         assert.strictEqual(joinEvent.newPresences[0].message, message);
         return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "track", value: trackMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
       } finally {
-        await supabase.removeAllChannels();
+        await stopClient(supabase);
       }
     });
 
     await sleep(RATE_LIMIT_PAUSE_MS);
     await test("user is able to receive presence updates on private channels", async () => {
+      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
       try {
+        await signInUser(supabase, testUser.email, testUser.password);
 
         let joinEvent: any = null;
         const topic = randomTopic();
@@ -56,7 +61,7 @@ export const presence: SuiteDescriptor = {
         assert.strictEqual(joinEvent.newPresences[0].message, message);
         return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "track", value: trackMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
       } finally {
-        await supabase.removeAllChannels();
+        await stopClient(supabase);
       }
     });
   },
