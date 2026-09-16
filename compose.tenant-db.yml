@@ -23,6 +23,8 @@ services:
       MULTIGRES_GATEWAY_PG_PORT: "5432"
       # Minimum for the shard's AtLeastN(2) policy to elect a leader.
       MULTIGRES_NUM_CELLS: "2"
+      # Persistent logical slots in the tests require failover support.
+      MT_ENABLE_SLOT_BASED_REPLICATION: "true"
       # The suite runs a pool per tenant DB plus a replication connection; the
       # cluster's default of 110 is not enough headroom.
       MULTIGRES_PG_MAX_CONNECTIONS: "500"
