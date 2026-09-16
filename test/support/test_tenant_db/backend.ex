@@ -37,9 +37,6 @@ defmodule TestTenantDb.Backend do
   # Ensure the tenant's database exists
   @callback storage_up!(tenant :: struct()) :: :ok
 
-  # A database of its own for a single test started with additional postgres settings.
-  @callback start_database!(postgres_args :: [binary()]) :: {port :: pos_integer(), cleanup :: (-> :ok)}
-
   # Forensics for a worker whose database stopped answering: a short label
   # identifying the backing resource (so repeat offenders can be grouped) and a
   # best-effort human-readable dump. Only ever called on the unhealthy path, so

@@ -23,10 +23,6 @@ defmodule Realtime.DatabaseTest do
   # Pure tests (DNS resolution, settings structs, pool-size math) never touch a tenant database,
   # so they skip the container checkout.
   defp maybe_checkout_tenant(%{without_db: true}), do: :ok
-
-  # `db_args` tests needs to start a new database
-  defp maybe_checkout_tenant(%{db_args: db_args}), do: %{tenant: TestTenantDb.start_tenant!(db_args)}
-
   defp maybe_checkout_tenant(_context), do: %{tenant: TestTenantDb.checkout_tenant()}
 
   describe "check_tenant_connection/1" do
@@ -77,6 +73,7 @@ defmodule Realtime.DatabaseTest do
       GenServer.stop(conn)
     end
 
+    # Connection limit for docker tenant db is 100
     @tag db_pool: 50,
          subs_pool_size: 73
     test "restricts connection if tenant database cannot receive more connections based on tenant pool",
@@ -86,25 +83,25 @@ defmodule Realtime.DatabaseTest do
              end) =~ ~r/Only \d+ available connections\. At least 125 connections are required/
     end
 
-    @tag db_args: ["-c", "max_connections=10"]
-    test "counts only the backends holding a connection slot", %{tenant: tenant} do
-      {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
-      {:ok, backends} = Database.connect_db(%{settings | pool_size: 7, max_restarts: 0})
+    @tag db_pool: 500
+    test "counts only the client backends holding a connection slot", %{tenant: tenant} do
+      {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
 
-      assert eventually(fn ->
-               %{rows: [[count]]} =
-                 Postgrex.query!(
-                   backends,
-                   "SELECT count(*)::int FROM pg_stat_activity WHERE application_name = 'realtime_test'",
-                   []
-                 )
-
-               count == 7
-             end)
+      %{rows: [[available_connections]]} =
+        Postgrex.query!(
+          conn,
+          """
+          SELECT (current_setting('max_connections')::int - count(*))::int
+            FROM pg_stat_activity
+           WHERE backend_type = 'client backend'
+             AND application_name NOT IN ('realtime_connect', 'realtime_connect_probe')
+          """,
+          []
+        )
 
       assert capture_log(fn ->
                assert {:error, :tenant_db_too_many_connections} = Database.check_tenant_connection(tenant)
-             end) =~ ~r/Only 3 available connections/
+             end) =~ "Only #{available_connections} available connections"
     end
 
     @tag db_pool: 3

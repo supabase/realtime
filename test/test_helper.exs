@@ -46,9 +46,6 @@ skip_orioledb = if orioledb?, do: :skip_orioledb
 # owns its databases, external servers are supplied to us.
 requires_docker_backend = if backend != TestTenantDb.Backend.Docker, do: :requires_docker_backend
 
-# `db_args` tests start a tenant database of their own, which only the docker backend can do
-db_args = if backend != TestTenantDb.Backend.Docker, do: :db_args
-
 exclude =
   Enum.reject(
     [
@@ -57,7 +54,6 @@ exclude =
       requires_pg_150000,
       requires_supautils_policy_grants,
       requires_no_supautils_policy_grants,
-      db_args,
       skip_orioledb,
       requires_docker_backend
     ],
