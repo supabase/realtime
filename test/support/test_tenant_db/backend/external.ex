@@ -32,6 +32,13 @@ defmodule TestTenantDb.Backend.External do
     end
   end
 
+  # These servers can be a different image from the realtime database
+  # (TENANT_DB_IMAGE), which therefore cannot answer for them. The first port
+  # identifies the tenant endpoint; test_helper also verifies the other ports
+  # expose the same capabilities.
+  @impl TestTenantDb.Backend
+  def capability_probe_port, do: hd(ports!())
+
   # No image to pull or containers to stop — just start the port registry
   # the pool workers will claim from.
   @impl TestTenantDb.Backend

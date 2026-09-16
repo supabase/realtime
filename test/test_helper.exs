@@ -14,7 +14,7 @@ repo_config = Application.fetch_env!(:realtime, Realtime.Repo)
 # Probe the databases the tenant tests actually exercise. Metadata Postgres can
 # have a different version and permission policy from an external tenant cluster.
 probe_configs =
-  if backend == TestTenantDb.Backend.External do
+  if backend.capability_probe_port() do
     Enum.map(TestTenantDb.Backend.External.ports!(), fn port ->
       [hostname: "127.0.0.1", port: port, username: "supabase_admin", password: "postgres", database: "postgres"]
     end)
