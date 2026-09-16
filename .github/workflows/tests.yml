@@ -71,7 +71,7 @@ jobs:
           # tenant DBs.
           - postgres: multigres
             postgres_image: supabase/postgres:17.6.1.166
-            tenant_db_image: ghcr.io/multigres/multigres-cluster-supabase:sha-360b8f1
+            tenant_db_image: ghcr.io/multigres/multigres-cluster-supabase:sha-0de21aa
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
