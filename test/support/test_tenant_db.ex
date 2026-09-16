@@ -335,10 +335,26 @@ defmodule TestTenantDb do
   defp repo_run(:unboxed, fun), do: Ecto.Adapters.SQL.Sandbox.unboxed_run(Realtime.Repo, fun)
   defp repo_run(:sandbox, fun), do: fun.()
 
-  # Reset the tenant DB's realtime schema to a clean slate before each test.
-  # Backend-neutral: runs against whatever DB was checked out (both docker
-  # and external servers are supabase/postgres-compatible). Mirrors the
-  # supabase/postgres migrations.
+  # Drops every object `query` names. The names come from the catalogue, so they
+  # are interpolated rather than bound: DROP takes an identifier, not a value.
+  defp drop_all!(conn, query, drop_prefix, drop_suffix \\ "") do
+    %{rows: rows} = Postgrex.query!(conn, query, [])
+
+    Enum.each(rows, fn [name] ->
+      Postgrex.query!(conn, drop_prefix <> ~s("#{name}") <> drop_suffix, [])
+    end)
+  end
+
+  # Reset the tenant DB to a clean slate before each test. Backend-neutral:
+  # runs against whatever DB was checked out (both docker and external servers
+  # are supabase/postgres-compatible). Mirrors the supabase/postgres
+  # migrations.
+  #
+  # It has to undo everything a test can leave behind, not just the realtime
+  # schema: the docker backend hands out a fresh container each time, but an
+  # external server is one database reused for the whole run, so leftovers
+  # there change what later tests see. A fresh tenant database has no tables
+  # in `public` and exactly one publication, `supabase_realtime`.
   defp reset_realtime_schema!(settings, attempts \\ 5) do
     {:ok, admin_conn} =
       Postgrex.start_link(
@@ -357,7 +373,19 @@ defmodule TestTenantDb do
         Postgrex.query!(admin_conn, "SELECT pg_drop_replication_slot($1)", [slot_name])
       end)
 
-      Postgrex.query!(admin_conn, "DROP PUBLICATION IF EXISTS supabase_realtime_test", [])
+      drop_all!(
+        admin_conn,
+        "SELECT pubname FROM pg_publication WHERE pubname <> 'supabase_realtime'",
+        "DROP PUBLICATION IF EXISTS "
+      )
+
+      drop_all!(
+        admin_conn,
+        "SELECT tablename FROM pg_tables WHERE schemaname = 'public'",
+        "DROP TABLE IF EXISTS public.",
+        " CASCADE"
+      )
+
       Postgrex.query!(admin_conn, "DROP SCHEMA IF EXISTS realtime CASCADE", [])
       Postgrex.query!(admin_conn, "CREATE SCHEMA realtime", [])
 

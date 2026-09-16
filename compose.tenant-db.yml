@@ -23,9 +23,22 @@ services:
       MULTIGRES_GATEWAY_PG_PORT: "5432"
       # Minimum for the shard's AtLeastN(2) policy to elect a leader.
       MULTIGRES_NUM_CELLS: "2"
-      # The suite runs a pool per tenant DB plus a replication connection; the
-      # cluster's default of 110 is not enough headroom.
-      MULTIGRES_PG_MAX_CONNECTIONS: "500"
+      # Admit non-temporary slots that are registered for failover, which is
+      # what TestHelpers.create_persistent_replication_slot/3 asks for.
+      MT_ENABLE_SLOT_BASED_REPLICATION: "true"
+      # Matches the supabase/postgres images' 100, which the suite's
+      # connection-budget tests assume when sizing a tenant's pool.
+      MULTIGRES_PG_MAX_CONNECTIONS: "100"
+      # The same settings TestTenantDb.Backend.Docker passes its containers,
+      # plus the images' default max_wal_senders: tests drive a slot past its
+      # WAL-retention threshold and exhaust the WAL senders, so both have to
+      # be within reach. max_wal_size stays large - a small one forces
+      # checkpoints that starve DDL.
+      MULTIGRES_PG_EXTRA_CONF: |
+        wal_keep_size = 32MB
+        max_wal_size = 1GB
+        max_slot_wal_keep_size = 32MB
+        max_wal_senders = 10
     healthcheck:
       # Over TCP, not the socket: a cluster's PostgreSQL instances sit behind
       # the pooler in their own socket directory.

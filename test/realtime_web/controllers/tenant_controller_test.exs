@@ -318,7 +318,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
 
       %{rows: [rows]} =
-        Postgrex.query!(db_conn, "SELECT slot_name FROM pg_replication_slots", [])
+        Postgrex.query!(db_conn, "SELECT slot_name FROM pg_replication_slots WHERE slot_type = 'logical'", [])
 
       assert rows > 0
       conn = delete(conn, ~p"/api/tenants/#{tenant.external_id}")
@@ -329,7 +329,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       Process.sleep(500)
 
       assert {:ok, %{rows: []}} =
-               Postgrex.query(db_conn, "SELECT slot_name FROM pg_replication_slots", [])
+               Postgrex.query(db_conn, "SELECT slot_name FROM pg_replication_slots WHERE slot_type = 'logical'", [])
     end
 
     test "tenant doesn't exist", %{conn: conn} do

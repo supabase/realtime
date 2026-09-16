@@ -43,10 +43,16 @@ jobs:
     env:
       POSTGRES_IMAGE: ${{ matrix.postgres_image }}
       TENANT_DB_IMAGE: ${{ matrix.tenant_db_image }}
-      # A cluster is too heavy to start per test, so on multigres tenant DBs
-      # come from the External backend. One port means max_cases 1.
+      # A cluster is too heavy to start per test, so on multigres tenant DBs come from the
+      # External backend. Its port count is the concurrency limit: one database is held back as
+      # a spare, so these five ports are what make max_cases 4. The cluster rejects CREATE
+      # DATABASE, so more concurrency means more clusters and nothing cheaper.
+      #
+      # Measured on partition 1 (441 tests): 940s at max_cases 1, 385s at 4, 340s at 8. The
+      # `async: false` tests are a ~130s floor that no amount of parallelism removes, hence the
+      # sharp diminishing return past this point — four more clusters would buy ~12%.
       USE_EXTERNAL_TENANT_DB: ${{ matrix.postgres == 'multigres' }}
-      EXTERNAL_TENANT_DB_PORTS: "5433"
+      EXTERNAL_TENANT_DB_PORTS: "5433,5434,5435,5436,5437"
       TENANT_DB_PORT: "5433"
     strategy:
       fail-fast: false
@@ -122,6 +128,26 @@ jobs:
         run: docker compose -f compose.dbs.yml up -d --wait --wait-timeout 300
       - name: Bootstrap the tenant database
         run: docker compose -f compose.dbs.yml run --rm tenant_db_bootstrap
+      # The remaining clusters from EXTERNAL_TENANT_DB_PORTS. Started in parallel because each
+      # takes ~30s to report healthy and doing them in series would eat much of what the added
+      # concurrency saves; bootstrapping afterwards is a second of psql each.
+      - name: Set up the additional Multigres tenant databases
+        if: matrix.postgres == 'multigres'
+        run: |
+          # Waited on one pid at a time: `wait` with several only reports the last one's status,
+          # which would let a cluster that never came up fail silently here and confusingly later.
+          pids=()
+          for port in 5434 5435 5436 5437; do
+            COMPOSE_PROJECT_NAME="tenant-db-$port" TENANT_DB_PORT="$port" \
+              docker compose -f compose.tenant-db.yml up -d --wait --wait-timeout 300 &
+            pids+=($!)
+          done
+          for pid in "${pids[@]}"; do wait "$pid"; done
+
+          for port in 5434 5435 5436 5437; do
+            COMPOSE_PROJECT_NAME="tenant-db-$port" TENANT_DB_PORT="$port" \
+              docker compose -f compose.tenant-db.yml run --rm tenant_db_bootstrap
+          done
       - name: Start epmd
         run: epmd -daemon
       # flaky test reporter wants to provide full job URLs, no easier way to allow this found
@@ -145,6 +171,8 @@ jobs:
           MIX_TEST_PARTITION: ${{ matrix.partition }}
           MATRIX_POSTGRES: ${{ matrix.postgres }}
           JOB_URL: ${{ steps.job_url.outputs.url }}
+          # Must match the cell the coverage artifact is uploaded from, below.
+          EXPORT_COVERAGE: ${{ matrix.postgres == 'pg17' }}
         run: .github/scripts/run_tests_with_retry.sh partition-${{ matrix.partition }}
       - name: Upload coverage artifact
         if: matrix.postgres == 'pg17'

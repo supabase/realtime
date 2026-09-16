@@ -96,7 +96,16 @@ defmodule Realtime.DatabaseTest do
         []
       )
 
-      assert {:ok, _conn, _migrations_ran} = Database.check_tenant_connection(tenant)
+      assert {:ok, conn, _migrations_ran} = Database.check_tenant_connection(tenant)
+
+      # Keep every pooled connection busy while counting. An idle client holds
+      # no backend behind a connection pooler, so `pg_stat_activity` would
+      # report none of them; a connection running a query is checked out and
+      # visible on both a bare Postgres and a pooled one.
+      busy =
+        for _ <- 1..3 do
+          Task.async(fn -> Postgrex.query!(conn, "SELECT pg_sleep(5)", [], timeout: 15_000) end)
+        end
 
       # Postgrex opens the pool connections asynchronously, so give it a moment
       # to bring all of them up.
@@ -110,15 +119,19 @@ defmodule Realtime.DatabaseTest do
 
                count == 3
              end)
+
+      Task.await_many(busy, 15_000)
     end
   end
 
   describe "replication_slot_teardown/1" do
     test "removes replication slots with the realtime prefix", %{tenant: tenant} do
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-      Postgrex.query!(conn, "SELECT * FROM pg_create_logical_replication_slot('realtime_test_slot', 'pgoutput')", [])
+      TestHelpers.create_persistent_replication_slot(conn, "realtime_test_slot", "pgoutput")
       Database.replication_slot_teardown(tenant)
-      assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
+
+      assert %{rows: []} =
+               Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots WHERE slot_type = 'logical'", [])
     end
   end
 
@@ -126,18 +139,22 @@ defmodule Realtime.DatabaseTest do
     test "removes replication slots with a given name and existing connection", %{tenant: tenant} do
       name = String.downcase("slot_#{random_string()}")
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-      Postgrex.query!(conn, "SELECT * FROM pg_create_logical_replication_slot('#{name}', 'pgoutput')", [])
+      Postgrex.query!(conn, "SELECT * FROM pg_create_logical_replication_slot('#{name}', 'pgoutput', true)", [])
       Database.replication_slot_teardown(conn, name)
       Process.sleep(1000)
-      assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
+
+      assert %{rows: []} =
+               Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots WHERE slot_type = 'logical'", [])
     end
 
     test "removes replication slots with a given name and a tenant", %{tenant: tenant} do
       name = String.downcase("slot_#{random_string()}")
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-      Postgrex.query!(conn, "SELECT * FROM pg_create_logical_replication_slot('#{name}', 'pgoutput')", [])
+      TestHelpers.create_persistent_replication_slot(conn, name, "pgoutput")
       Database.replication_slot_teardown(tenant, name)
-      assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
+
+      assert %{rows: []} =
+               Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots WHERE slot_type = 'logical'", [])
     end
   end
 
@@ -403,7 +420,7 @@ defmodule Realtime.DatabaseTest do
       slot_name = "test_slot_#{suffix}"
       table_name = "slot_test_#{suffix}"
 
-      Postgrex.query!(db_conn, "SELECT pg_create_logical_replication_slot($1, 'pgoutput')", [slot_name])
+      TestHelpers.create_persistent_replication_slot(db_conn, slot_name, "pgoutput")
       Postgrex.query!(db_conn, "CREATE TABLE IF NOT EXISTS #{table_name} (id INT, data TEXT)", [])
 
       on_exit(fn ->
