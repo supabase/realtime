@@ -67,7 +67,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
       # Use a permanent (non-temporary) slot via a separate connection to avoid
       # connection state issues that temporary slots cause on the same connection
       {:ok, slot_conn} = Realtime.Database.connect(tenant, "realtime_rls", :stop)
-      Postgrex.query!(slot_conn, "select pg_create_logical_replication_slot($1, 'pgoutput')", [slot_name])
+      TestTenantDb.create_logical_replication_slot!(slot_conn, slot_name, "pgoutput")
       GenServer.stop(slot_conn)
 
       assert {:error, :slot_not_found} = Replications.terminate_backend(conn, slot_name)

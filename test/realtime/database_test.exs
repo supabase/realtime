@@ -116,7 +116,7 @@ defmodule Realtime.DatabaseTest do
   describe "replication_slot_teardown/1" do
     test "removes replication slots with the realtime prefix", %{tenant: tenant} do
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-      Postgrex.query!(conn, "SELECT * FROM pg_create_logical_replication_slot('realtime_test_slot', 'pgoutput')", [])
+      TestTenantDb.create_logical_replication_slot!(conn, "realtime_test_slot", "pgoutput")
       Database.replication_slot_teardown(tenant)
       assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
     end
@@ -126,7 +126,7 @@ defmodule Realtime.DatabaseTest do
     test "removes replication slots with a given name and existing connection", %{tenant: tenant} do
       name = String.downcase("slot_#{random_string()}")
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-      Postgrex.query!(conn, "SELECT * FROM pg_create_logical_replication_slot('#{name}', 'pgoutput')", [])
+      TestTenantDb.create_logical_replication_slot!(conn, name, "pgoutput")
       Database.replication_slot_teardown(conn, name)
       Process.sleep(1000)
       assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
@@ -135,7 +135,7 @@ defmodule Realtime.DatabaseTest do
     test "removes replication slots with a given name and a tenant", %{tenant: tenant} do
       name = String.downcase("slot_#{random_string()}")
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-      Postgrex.query!(conn, "SELECT * FROM pg_create_logical_replication_slot('#{name}', 'pgoutput')", [])
+      TestTenantDb.create_logical_replication_slot!(conn, name, "pgoutput")
       Database.replication_slot_teardown(tenant, name)
       assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
     end
@@ -403,7 +403,7 @@ defmodule Realtime.DatabaseTest do
       slot_name = "test_slot_#{suffix}"
       table_name = "slot_test_#{suffix}"
 
-      Postgrex.query!(db_conn, "SELECT pg_create_logical_replication_slot($1, 'pgoutput')", [slot_name])
+      TestTenantDb.create_logical_replication_slot!(db_conn, slot_name, "pgoutput")
       Postgrex.query!(db_conn, "CREATE TABLE IF NOT EXISTS #{table_name} (id INT, data TEXT)", [])
 
       on_exit(fn ->

@@ -513,7 +513,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                  Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
       end
 
-      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json')", [slot_name])
+      TestTenantDb.create_logical_replication_slot!(conn, slot_name, "wal2json")
 
       try do
         Postgrex.query!(conn, "insert into test (details) values ('hello')", [])
@@ -562,7 +562,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                  Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
       end
 
-      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json')", [slot_name])
+      TestTenantDb.create_logical_replication_slot!(conn, slot_name, "wal2json")
 
       try do
         Postgrex.query!(conn, "insert into test (id, details) values (5, 'hello')", [])
@@ -612,7 +612,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                  Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
       end
 
-      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json')", [slot_name])
+      TestTenantDb.create_logical_replication_slot!(conn, slot_name, "wal2json")
 
       try do
         Postgrex.query!(conn, "insert into test (details) values ($1)", [obrien])
@@ -1153,7 +1153,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
         [sub_id, %{"role" => "anon"}]
       )
 
-      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json')", [slot_name])
+      TestTenantDb.create_logical_replication_slot!(conn, slot_name, "wal2json")
 
       try do
         Postgrex.query!(conn, "insert into test (details) values ('hello')", [])
@@ -1234,7 +1234,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
         [sub_id, %{"role" => "anon"}]
       )
 
-      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json')", [slot_name])
+      TestTenantDb.create_logical_replication_slot!(conn, slot_name, "wal2json")
 
       try do
         Postgrex.query!(conn, "insert into test (details) values ('hello')", [])
@@ -1475,7 +1475,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                create_subscriptions(conn, 11, role: "custom_app_role", subscription_params: subscription_params)
 
       slot_name = "test_custom_role_grant_#{:rand.uniform(999_999)}"
-      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json')", [slot_name])
+      TestTenantDb.create_logical_replication_slot!(conn, slot_name, "wal2json")
 
       Postgrex.query!(conn, "insert into test (id, details) values (1, 'hello')", [])
 

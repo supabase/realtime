@@ -24,7 +24,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationsTest do
     test "returns slot_not_found when slot exists but has no active backend", %{conn: conn} do
       slot_name = "test_inactive_slot_#{:rand.uniform(999_999)}"
 
-      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json')", [slot_name])
+      TestTenantDb.create_logical_replication_slot!(conn, slot_name, "wal2json")
 
       try do
         # No replication session is reading from it, so active_pid is nil
@@ -57,7 +57,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationsTest do
       slot_name = "test_list_slot_#{:rand.uniform(999_999)}"
       publication = "supabase_realtime_test"
 
-      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json')", [slot_name])
+      TestTenantDb.create_logical_replication_slot!(conn, slot_name, "wal2json")
 
       try do
         assert {:ok, %Postgrex.Result{columns: columns}} =
@@ -78,7 +78,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationsTest do
 
     test "drops an existing inactive slot", %{conn: conn} do
       slot_name = "test_drop_slot_#{:rand.uniform(999_999)}"
-      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json')", [slot_name])
+      TestTenantDb.create_logical_replication_slot!(conn, slot_name, "wal2json")
 
       assert {:ok, :dropped} = Replications.drop_replication_slot(conn, slot_name)
 

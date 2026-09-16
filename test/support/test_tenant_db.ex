@@ -55,6 +55,16 @@ defmodule TestTenantDb do
   @unhealthy_table __MODULE__.Unhealthy
   @probe_retry_table __MODULE__.ProbeRetries
 
+  # Persistent test slots must be failover-enabled when routed through Multigres.
+  # Query the tenant connection's version (the metadata DB may use another major).
+  # Keep the flag literal so Multigres can validate it before routing the query.
+  def create_logical_replication_slot!(conn, name, plugin) do
+    %{rows: [[version]]} = Postgrex.query!(conn, "SELECT current_setting('server_version_num')::int", [])
+    options = if version >= 170_000, do: ", failover => true", else: ""
+
+    Postgrex.query!(conn, "SELECT * FROM pg_create_logical_replication_slot($1, $2#{options})", [name, plugin])
+  end
+
   def start_link(max_cases), do: GenServer.start_link(__MODULE__, max_cases, name: __MODULE__)
 
   def init(max_cases) do
