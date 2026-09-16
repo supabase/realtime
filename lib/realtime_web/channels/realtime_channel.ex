@@ -163,10 +163,12 @@ defmodule RealtimeWeb.RealtimeChannel do
       # Start presence and add user if presence is enabled
       if presence_enabled?, do: send(self(), :sync_presence)
 
-      UsersCounter.add(transport_pid, tenant_id)
-
       with :ok <- await_muster_join(muster_join_task, socket),
            :ok <- start_postgres_subscribe(socket, join, tenant, pg_change_params) do
+        # Count the client only after all join gates have succeeded. A rejected
+        # join leaves the websocket transport available for another channel, so
+        # counting before this point would retain a phantom tenant user.
+        UsersCounter.add(transport_pid, tenant_id)
         {:ok, state, assign(socket, assigns)}
       end
     else
