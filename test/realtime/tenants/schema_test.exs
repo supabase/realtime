@@ -157,6 +157,7 @@ defmodule Realtime.Tenants.SchemaTest do
       Postgrex.query!(conn_postgres, "DROP ROLE #{role}", [])
     end
 
+    @tag :requires_supautils_policy_grants
     test "cannot delegate any other realtime.messages privilege to a custom role", %{conn_postgres: conn_postgres} do
       role = "role_test_undelegatable_#{System.unique_integer([:positive])}"
       Postgrex.query!(conn_postgres, "CREATE ROLE #{role}", [])
