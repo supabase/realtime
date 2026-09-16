@@ -1,5 +1,5 @@
 services:
-  tenant_db:
+  tenant_db: &tenant_db
     # TENANT_DB_IMAGE can be a Multigres cluster, in which case only the tenant
     # DB changes and the realtime DB stays on POSTGRES_IMAGE. Everything below
     # is written to suit both: the cluster's entrypoint ignores this command and
@@ -42,7 +42,7 @@ services:
   # but it is idempotent, so `db-start` runs it either way rather than carrying
   # a second code path. Behind a profile so `compose up` skips it and
   # `compose run` waits for tenant_db to be healthy first.
-  tenant_db_bootstrap:
+  tenant_db_bootstrap: &tenant_db_bootstrap
     profiles: ["bootstrap"]
     image: ${TENANT_DB_IMAGE:-${POSTGRES_IMAGE:-supabase/postgres:17.6.1.166}}
     depends_on:
@@ -64,5 +64,29 @@ services:
       - --quiet
       - --set=ON_ERROR_STOP=1
       # Only POSTGRES_USER gets POSTGRES_PASSWORD; Realtime also uses `postgres`.
+      - --command=alter role postgres with password 'postgres'
+      - --file=/zb-supabase-schema.sql
+
+  # Separate cluster, not another gateway into the first cluster's database.
+  tenant_db_secondary:
+    <<: *tenant_db
+    profiles: ["multigres"]
+    ports:
+      - "${TENANT_DB_SECONDARY_PORT:-5434}:5432"
+
+  tenant_db_secondary_bootstrap:
+    <<: *tenant_db_bootstrap
+    depends_on:
+      tenant_db_secondary:
+        condition: service_healthy
+    entrypoint:
+      - psql
+      - --host=tenant_db_secondary
+      - --port=5432
+      - --username=supabase_admin
+      - --dbname=postgres
+      - --no-psqlrc
+      - --quiet
+      - --set=ON_ERROR_STOP=1
       - --command=alter role postgres with password 'postgres'
       - --file=/zb-supabase-schema.sql

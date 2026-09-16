@@ -144,6 +144,44 @@ Or fill in the connect line at the top yourself:
 
 Toggle on **presence** and/or **postgres changes** if you want to exercise them, then hit **Connect**. The event log at the bottom shows everything on the socket as it happens; the form below it sends a broadcast. For Postgres Changes, point the table field at `test` (created above) and insert a row from `psql` to see it land.
 
+### Testing against Multigres
+
+Use two independent Multigres tenant clusters and one concurrent test case. Some
+tests hold two tenant databases at once; two gateways into the same cluster do
+not provide isolation because tenant setup resets the `realtime` schema.
+
+With Docker running and the mise toolchain installed, run from the repository root:
+
+```bash
+export COMPOSE_PROJECT_NAME=multigres-realtime-tests
+export COMPOSE_PROFILES=multigres
+export POSTGRES_IMAGE=supabase/postgres:17.6.1.166
+export TENANT_DB_IMAGE=ghcr.io/multigres/multigres-cluster-supabase:sha-0de21aa
+export DB_PORT=35432
+export TENANT_DB_PORT=35433
+export TENANT_DB_SECONDARY_PORT=35434
+export USE_EXTERNAL_TENANT_DB=true
+export EXTERNAL_TENANT_DB_PORTS=35433,35434
+export MAX_CASES=1
+export MIX_ENV=test
+
+docker compose -f compose.dbs.yml up -d --wait --wait-timeout 300
+docker compose -f compose.dbs.yml run --rm tenant_db_bootstrap
+docker compose -f compose.dbs.yml run --rm tenant_db_secondary_bootstrap
+mise exec -- mix test
+```
+
+Choose unused host ports if these conflict with another local deployment. The
+metadata database remains ordinary Postgres. Both tenant services enable
+`MT_ENABLE_SLOT_BASED_REPLICATION`; no local Compose override is required.
+To test a local Multigres build, set `TENANT_DB_IMAGE` to its image tag instead.
+
+The external backend creates one pool worker per configured port. `MAX_CASES`
+controls test concurrency independently and must be between one and the number
+of ports; if omitted, it defaults to the port count. Reserve enough workers for
+tests that acquire multiple tenants. CI uses two clusters with `MAX_CASES=1`.
+The regular Docker backend retains its existing concurrency and spare workers.
+
 ### Tenant migrations and snapshots
 
 Adding a migration under `lib/realtime/tenants/repo/migrations/` also changes two committed snapshots of

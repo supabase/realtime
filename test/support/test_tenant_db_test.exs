@@ -53,6 +53,26 @@ defmodule TestTenantDb.BackendTest do
     end
   end
 
+  describe "External.max_cases_config!/2" do
+    test "defaults to the port count" do
+      assert Backend.External.max_cases_config!(nil, 2) == 2
+      assert Backend.External.max_cases_config!("", 2) == 2
+    end
+
+    test "allows spare databases for multi-tenant tests" do
+      assert Backend.External.max_cases_config!("1", 2) == 1
+      assert Backend.External.max_cases_config!("2", 2) == 2
+    end
+
+    test "rejects invalid concurrency and oversubscription" do
+      for value <- ["0", "-1", "3", "abc", "1x"] do
+        assert_raise RuntimeError, ~r/MAX_CASES must be between 1 and 2/, fn ->
+          Backend.External.max_cases_config!(value, 2)
+        end
+      end
+    end
+  end
+
   describe "External.ports_config!/2" do
     test "parses a comma-separated port list" do
       assert Backend.External.ports_config!("15432, 15433,15434", nil) == [15432, 15433, 15434]

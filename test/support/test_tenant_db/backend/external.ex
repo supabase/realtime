@@ -17,23 +17,19 @@ defmodule TestTenantDb.Backend.External do
 
   # -- TestTenantDb.Backend implementation
 
-  # Each configured port is one independent DB reused for the whole run, so
-  # max_cases must not exceed the port count — oversubscribing causes far
-  # worse, cascading failures than running serially (concurrent tenant
-  # setup, e.g. DROP SCHEMA realtime CASCADE, stomping on each other once
-  # demand exceeds supply). MAX_CASES is therefore ignored.
+  # Pool capacity and test concurrency are independent: a test may hold more
+  # than one tenant database. Lower MAX_CASES to leave spare workers for it.
   @impl TestTenantDb.Backend
-  def max_cases do
-    forced = length(ports!())
+  def max_cases, do: max_cases_config!(System.get_env("MAX_CASES"), length(ports!()))
 
-    if System.get_env("MAX_CASES") do
-      IO.puts(
-        "[TestTenantDb.Backend.External] USE_EXTERNAL_TENANT_DB=true: ignoring MAX_CASES, " <>
-          "forcing max_cases to #{forced} (the number of configured external ports)."
-      )
+  def max_cases_config!(nil, port_count), do: port_count
+  def max_cases_config!("", port_count), do: port_count
+
+  def max_cases_config!(value, port_count) do
+    case Integer.parse(value) do
+      {count, ""} when count > 0 and count <= port_count -> count
+      _ -> raise "MAX_CASES must be between 1 and #{port_count} for the configured external tenant databases"
     end
-
-    forced
   end
 
   # No image to pull or containers to stop — just start the port registry

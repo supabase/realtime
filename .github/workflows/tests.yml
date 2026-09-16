@@ -44,9 +44,12 @@ jobs:
       POSTGRES_IMAGE: ${{ matrix.postgres_image }}
       TENANT_DB_IMAGE: ${{ matrix.tenant_db_image }}
       # A cluster is too heavy to start per test, so on multigres tenant DBs
-      # come from the External backend. One port means max_cases 1.
+      # come from the External backend. Two clusters let one test hold two tenants.
       USE_EXTERNAL_TENANT_DB: ${{ matrix.postgres == 'multigres' }}
-      EXTERNAL_TENANT_DB_PORTS: "5433"
+      EXTERNAL_TENANT_DB_PORTS: "5433,5434"
+      MAX_CASES: ${{ matrix.postgres == 'multigres' && '1' || '4' }}
+      COMPOSE_PROFILES: ${{ matrix.postgres == 'multigres' && 'multigres' || '' }}
+      TENANT_DB_SECONDARY_PORT: "5434"
       TENANT_DB_PORT: "5433"
     strategy:
       fail-fast: false
@@ -122,6 +125,9 @@ jobs:
         run: docker compose -f compose.dbs.yml up -d --wait --wait-timeout 300
       - name: Bootstrap the tenant database
         run: docker compose -f compose.dbs.yml run --rm tenant_db_bootstrap
+      - name: Bootstrap the second Multigres tenant database
+        if: matrix.postgres == 'multigres'
+        run: docker compose -f compose.dbs.yml run --rm tenant_db_secondary_bootstrap
       - name: Start epmd
         run: epmd -daemon
       # flaky test reporter wants to provide full job URLs, no easier way to allow this found
