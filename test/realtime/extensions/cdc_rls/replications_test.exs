@@ -57,7 +57,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationsTest do
       slot_name = "test_list_slot_#{:rand.uniform(999_999)}"
       publication = "supabase_realtime_test"
 
-      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json')", [slot_name])
+      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json', true)", [slot_name])
 
       try do
         assert {:ok, %Postgrex.Result{columns: columns}} =
@@ -78,7 +78,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationsTest do
 
     test "drops an existing inactive slot", %{conn: conn} do
       slot_name = "test_drop_slot_#{:rand.uniform(999_999)}"
-      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json')", [slot_name])
+      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json', true)", [slot_name])
 
       assert {:ok, :dropped} = Replications.drop_replication_slot(conn, slot_name)
 

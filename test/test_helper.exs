@@ -11,10 +11,14 @@ max_cases = backend.max_cases()
 
 repo_config = Application.fetch_env!(:realtime, Realtime.Repo)
 
+# The probes below describe a *tenant* database: every tag they drive gates
+# behaviour of a tenant's realtime schema, not the registry's. The realtime
+# database only answers for them when both run the same image, so the backend
+# says which port to ask.
 {:ok, pg_conn} =
   Postgrex.start_link(
     hostname: repo_config[:hostname],
-    port: repo_config[:port] || 5432,
+    port: backend.capability_probe_port() || repo_config[:port] || 5432,
     username: repo_config[:username],
     password: repo_config[:password],
     database: "postgres"

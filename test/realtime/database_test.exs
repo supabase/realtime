@@ -126,7 +126,7 @@ defmodule Realtime.DatabaseTest do
     test "removes replication slots with a given name and existing connection", %{tenant: tenant} do
       name = String.downcase("slot_#{random_string()}")
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-      Postgrex.query!(conn, "SELECT * FROM pg_create_logical_replication_slot('#{name}', 'pgoutput')", [])
+      Postgrex.query!(conn, "SELECT * FROM pg_create_logical_replication_slot('#{name}', 'pgoutput', true)", [])
       Database.replication_slot_teardown(conn, name)
       Process.sleep(1000)
       assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])

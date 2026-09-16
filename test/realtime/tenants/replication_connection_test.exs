@@ -712,7 +712,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
       name = @replication_slot_name
 
-      Postgrex.query!(db_conn, "SELECT pg_create_logical_replication_slot($1, 'test_decoding')", [name])
+      Postgrex.query!(db_conn, "SELECT pg_create_logical_replication_slot($1, 'test_decoding', true)", [name])
 
       assert {:error, {:shutdown, :replication_slot_in_use}} =
                ReplicationConnection.start(tenant, self())

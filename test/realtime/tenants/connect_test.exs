@@ -901,7 +901,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
       # Simulate a previous replication session still holding the slot during a
       # restart/rebalance race so the initial replication start fails.
-      Postgrex.query!(db_conn, "SELECT pg_create_logical_replication_slot($1, 'test_decoding')", [slot_name])
+      Postgrex.query!(db_conn, "SELECT pg_create_logical_replication_slot($1, 'test_decoding', true)", [slot_name])
 
       log =
         capture_log(fn ->
