@@ -21,7 +21,7 @@ defmodule Realtime.Syn.PostgresCdc do
   Every scope, so they can all be started and handed to `:syn` at boot.
   """
   @spec scopes() :: [atom()]
-  def scopes() do
+  def scopes do
     shards = Application.fetch_env!(:realtime, :postgres_cdc_scope_shards)
     Enum.map(0..(shards - 1), fn shard -> :"realtime_postgres_cdc_#{shard}" end)
   end
@@ -31,7 +31,7 @@ defmodule Realtime.Syn.PostgresCdc do
   tell Postgres CDC registry events from the rest.
   """
   @spec syn_topic_prefix() :: String.t()
-  def syn_topic_prefix(), do: "realtime_postgres_cdc_"
+  def syn_topic_prefix, do: "realtime_postgres_cdc_"
 
   @doc """
   PubSub topic carrying the `ready` event, whose payload holds the tree's own pids.
@@ -51,5 +51,5 @@ defmodule Realtime.Syn.PostgresCdc do
   Event saying the tenant's CDC tree is gone, so its subscribers must re-subscribe.
   """
   @spec down_event() :: String.t()
-  def down_event(), do: "postgres_cdc_down"
+  def down_event, do: "postgres_cdc_down"
 end

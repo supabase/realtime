@@ -28,8 +28,9 @@ defmodule Realtime.LogFilter do
 
   def filter(%{meta: %{mfa: {DBConnection.Connection, _, _}}}, _), do: :stop
 
-  @ranch_format "Ranch listener ~p had connection process started with ~p:start_link/3 at ~p exit with reason: ~0p~n"
-  def filter(%{msg: {:format, @ranch_format, [_, _, _, :killed]}}, _), do: :stop
+  @ranch_format ~c"Ranch listener ~p had connection process started with ~p:start_link/3 at ~p exit with reason: ~0p~n"
+
+  def filter(%{msg: {@ranch_format, [_, _, _, :killed]}}, _), do: :stop
 
   def filter(event, _), do: event
 end

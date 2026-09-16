@@ -1188,7 +1188,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   defp can_read_presence?(%{assigns: %{policies: %Policies{presence: %{read: true}}}}), do: true
   defp can_read_presence?(_socket), do: false
 
-  defp max_heap_size(), do: :persistent_term.get({RealtimeWeb.UserSocket, :websocket_max_heap_size})
+  defp max_heap_size, do: :persistent_term.get({RealtimeWeb.UserSocket, :websocket_max_heap_size})
 
   defp join_error({:error, _} = error) do
     Process.sleep(channel_error_backoff_ms())
@@ -1197,5 +1197,5 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   defp join_error(other), do: other
 
-  defp channel_error_backoff_ms(), do: :persistent_term.get({__MODULE__, :channel_error_backoff_ms})
+  defp channel_error_backoff_ms, do: :persistent_term.get({__MODULE__, :channel_error_backoff_ms})
 end

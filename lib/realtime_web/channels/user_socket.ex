@@ -192,5 +192,5 @@ defmodule RealtimeWeb.UserSocket do
     {:error, reason}
   end
 
-  defp connect_error_backoff_ms(), do: :persistent_term.get({__MODULE__, :connect_error_backoff_ms})
+  defp connect_error_backoff_ms, do: :persistent_term.get({__MODULE__, :connect_error_backoff_ms})
 end
