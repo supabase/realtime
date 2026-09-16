@@ -67,7 +67,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
       # Use a permanent (non-temporary) slot via a separate connection to avoid
       # connection state issues that temporary slots cause on the same connection
       {:ok, slot_conn} = Realtime.Database.connect(tenant, "realtime_rls", :stop)
-      Postgrex.query!(slot_conn, "select pg_create_logical_replication_slot($1, 'pgoutput')", [slot_name])
+      TestHelpers.create_persistent_replication_slot(slot_conn, slot_name, "pgoutput")
       GenServer.stop(slot_conn)
 
       assert {:error, :slot_not_found} = Replications.terminate_backend(conn, slot_name)
@@ -180,6 +180,19 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
       assert slot_changes_count == 1
     end
 
+    test "registers list_changes in the connection's statement cache", %{conn: conn, tenant: tenant} do
+      slot_name = "test_slot_#{System.unique_integer([:positive])}"
+      drop_slot_on_exit(tenant, slot_name)
+
+      {:ok, _} = Replications.prepare_replication(conn, slot_name)
+      refute "realtime_list_changes" in TestHelpers.cached_statement_names(conn)
+
+      assert {:ok, _} = Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+
+      assert "realtime_list_changes" in TestHelpers.cached_statement_names(conn)
+    end
+
+    @tag :requires_observable_statement_cache
     test "caches the prepared statement and reuses it across calls", %{conn: conn, tenant: tenant} do
       slot_name = "test_slot_#{System.unique_integer([:positive])}"
       drop_slot_on_exit(tenant, slot_name)

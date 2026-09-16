@@ -11,10 +11,14 @@ max_cases = backend.max_cases()
 
 repo_config = Application.fetch_env!(:realtime, Realtime.Repo)
 
+# The probes below describe a *tenant* database: every tag they drive gates
+# behaviour of a tenant's realtime schema, not the registry's. The realtime
+# database only answers for them when both run the same image, so the backend
+# says which port to ask.
 {:ok, pg_conn} =
   Postgrex.start_link(
     hostname: repo_config[:hostname],
-    port: repo_config[:port] || 5432,
+    port: backend.capability_probe_port() || repo_config[:port] || 5432,
     username: repo_config[:username],
     password: repo_config[:password],
     database: "postgres"
@@ -31,6 +35,18 @@ repo_config = Application.fetch_env!(:realtime, Realtime.Repo)
 %{rows: [[orioledb?]]} =
   Postgrex.query!(pg_conn, "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'orioledb')")
 
+# Two tests read `pg_prepared_statements` to prove Realtime asked Postgrex to cache a statement.
+# That only works where an *un*cached query leaves no entry behind. A connection pooler prepares
+# every statement it forwards, keyed by the SQL text, so there a cached and an uncached query look
+# identical and the assertion would hold even if the caching were removed from the code.
+Postgrex.query!(pg_conn, "SELECT 1 AS statement_cache_probe", [])
+
+%{rows: [[observable_statement_cache?]]} =
+  Postgrex.query!(
+    pg_conn,
+    "SELECT count(*) = 0 FROM pg_prepared_statements WHERE statement LIKE '%statement_cache_probe%'"
+  )
+
 # `realtime.broadcast_changes(..., NEW record, OLD record, ...)` (introduced in commit 2922658c) called from a trigger via `PERFORM` fails on PG <= 14.5
 requires_pg_140006 = if pg_version_num < 140_006, do: :requires_pg_140006
 
@@ -46,6 +62,9 @@ skip_orioledb = if orioledb?, do: :skip_orioledb
 # owns its databases, external servers are supplied to us.
 requires_docker_backend = if backend != TestTenantDb.Backend.Docker, do: :requires_docker_backend
 
+requires_observable_statement_cache =
+  if !observable_statement_cache?, do: :requires_observable_statement_cache
+
 exclude =
   Enum.reject(
     [
@@ -55,7 +74,8 @@ exclude =
       requires_supautils_policy_grants,
       requires_no_supautils_policy_grants,
       skip_orioledb,
-      requires_docker_backend
+      requires_docker_backend,
+      requires_observable_statement_cache
     ],
     &is_nil/1
   )
