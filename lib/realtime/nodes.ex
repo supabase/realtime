@@ -262,7 +262,7 @@ defmodule Realtime.Nodes do
 
   @spec all_node_regions() :: [String.t()]
   @doc "List all the regions where nodes can be launched"
-  def all_node_regions(), do: :syn.group_names(RegionNodes)
+  def all_node_regions, do: :syn.group_names(RegionNodes)
 
   defp uptime_ms do
     start_time = :erlang.system_info(:start_time)
