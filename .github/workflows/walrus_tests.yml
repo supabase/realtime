@@ -50,9 +50,10 @@ jobs:
             postgres_image: supabase/postgres:17.6.1.166
             mode: migrations
           # OrioleDB we only run migrations at the moment
-          - postgres: orioledb17
-            postgres_image: supabase/postgres:17.9.0.019-orioledb
-            mode: migrations
+          # Waiting for https://github.com/orioledb/orioledb/pull/1157
+          # - postgres: orioledb17
+          #   postgres_image: supabase/postgres:17.9.0.019-orioledb
+          #   mode: migrations
     env:
       POSTGRES_IMAGE: ${{ matrix.postgres_image }}
 
