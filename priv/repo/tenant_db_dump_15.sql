@@ -1211,7 +1211,7 @@ ALTER TABLE realtime.messages ENABLE ROW LEVEL SECURITY;
 GRANT USAGE ON SCHEMA realtime TO postgres WITH GRANT OPTION;
 GRANT USAGE ON SCHEMA realtime TO anon;
 GRANT USAGE ON SCHEMA realtime TO service_role;
-GRANT ALL ON SCHEMA realtime TO supabase_realtime_admin WITH GRANT OPTION;
+GRANT ALL ON SCHEMA realtime TO supabase_realtime_admin;
 GRANT USAGE ON SCHEMA realtime TO authenticated;
 
 
