@@ -92,6 +92,21 @@ defmodule Realtime.Tenants.ConnectTest do
       # assert on the logs rather than trying to observe the transient open state.
       log =
         capture_log(fn ->
+          # An idle client holds no backend behind a connection pooler, so the pool
+          # has to be running a query to have one that shows up and can be killed.
+          busy = Task.async(fn -> Postgrex.query(db_conn, "SELECT pg_sleep(5)", [], timeout: 15_000) end)
+
+          assert wait_until(fn ->
+                   %{num_rows: num_rows} =
+                     Postgrex.query!(
+                       killer,
+                       "SELECT pid FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
+                       []
+                     )
+
+                   num_rows > 0
+                 end)
+
           Postgrex.query!(
             killer,
             "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
@@ -99,6 +114,7 @@ defmodule Realtime.Tenants.ConnectTest do
           )
 
           GenServer.stop(killer)
+          Task.await(busy, 15_000)
 
           assert wait_until(fn -> match?({:ok, _}, Postgrex.query(db_conn, "SELECT 1", [])) end)
           assert wait_until(fn -> :sys.get_state(pid).db_recovery_started_at == nil end)
@@ -314,7 +330,9 @@ defmodule Realtime.Tenants.ConnectTest do
 
         assert is_pid(db_conn)
         Connect.shutdown(tenant.external_id)
-        assert_process_down(db_conn)
+        # Closing a pooled connection through a connection pooler takes longer
+        # than the 100ms default; the process still goes down.
+        assert_process_down(db_conn, 5_000)
 
         tenant.external_id
       end
@@ -552,11 +570,16 @@ defmodule Realtime.Tenants.ConnectTest do
 
       assert {:ok, replication_conn_before} = assert_replication_status(tenant.external_id)
 
-      Postgrex.query!(
-        db_conn,
-        "SELECT pg_terminate_backend(pid) from pg_stat_activity where application_name='realtime_replication_connection'",
-        []
-      )
+      # Identify the backend through the slot it is streaming rather than by
+      # application_name, which a connection pooler rewrites to its own label.
+      slot_name = ReplicationConnection.replication_slot_name("realtime", "messages")
+
+      assert %{num_rows: 1} =
+               Postgrex.query!(
+                 db_conn,
+                 "SELECT pg_terminate_backend(active_pid) FROM pg_replication_slots WHERE slot_name = $1 AND active_pid IS NOT NULL",
+                 [slot_name]
+               )
 
       assert_receive {:DOWN, _, :process, ^replication_connection_pid, _}
 
@@ -622,8 +645,18 @@ defmodule Realtime.Tenants.ConnectTest do
       opts = Database.opts(settings)
       parent = self()
 
+      # The replication connections below publish public.test, and
+      # PostgresReplication.start_link/1 fails outright if it is missing.
+      {:ok, table_conn} = Database.connect(tenant, "realtime_test", :stop)
+      Postgrex.query!(table_conn, "CREATE TABLE IF NOT EXISTS public.test (id serial primary key)", [])
+
+      # Enough connections to claim every WAL sender, read from the server
+      # rather than hardcoded: the budget differs per image, and a Multigres
+      # cluster spends some of it on its own replication.
+      %{rows: [[max_wal_senders]]} = Postgrex.query!(table_conn, "SELECT current_setting('max_wal_senders')::int", [])
+
       pids =
-        for i <- 0..5 do
+        for i <- 0..max_wal_senders do
           replication_slot_opts =
             %PostgresReplication{
               connection_opts: opts,
@@ -644,6 +677,8 @@ defmodule Realtime.Tenants.ConnectTest do
             end
           end)
         end
+
+      GenServer.stop(table_conn)
 
       # Over-provision the replication connections and only wait for enough of
       # them to report ready to occupy every WAL sender, so that Connect's own
@@ -901,7 +936,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
       # Simulate a previous replication session still holding the slot during a
       # restart/rebalance race so the initial replication start fails.
-      Postgrex.query!(db_conn, "SELECT pg_create_logical_replication_slot($1, 'test_decoding')", [slot_name])
+      Postgrex.query!(db_conn, "SELECT pg_create_logical_replication_slot($1, 'test_decoding', true)", [slot_name])
 
       log =
         capture_log(fn ->

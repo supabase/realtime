@@ -11,10 +11,14 @@ max_cases = backend.max_cases()
 
 repo_config = Application.fetch_env!(:realtime, Realtime.Repo)
 
+# The probes below describe a *tenant* database: every tag they drive gates
+# behaviour of a tenant's realtime schema, not the registry's. The realtime
+# database only answers for them when both run the same image, so the backend
+# says which port to ask.
 {:ok, pg_conn} =
   Postgrex.start_link(
     hostname: repo_config[:hostname],
-    port: repo_config[:port] || 5432,
+    port: backend.capability_probe_port() || repo_config[:port] || 5432,
     username: repo_config[:username],
     password: repo_config[:password],
     database: "postgres"
@@ -31,6 +35,19 @@ repo_config = Application.fetch_env!(:realtime, Realtime.Repo)
 %{rows: [[orioledb?]]} =
   Postgrex.query!(pg_conn, "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'orioledb')")
 
+# A connection pooler re-prepares statements on the backend under its own
+# generated names and shares that backend between clients, so a client cannot
+# see its statement by the name it chose, nor see only its own statements.
+{:ok, _} = Postgrex.prepare(pg_conn, "prepared_statements_probe", "SELECT 1", [])
+
+%{rows: [[session_scoped_prepared_statements?]]} =
+  Postgrex.query!(
+    pg_conn,
+    "SELECT count(*) FILTER (WHERE name = 'prepared_statements_probe') = 1 AND count(*) = 1 FROM pg_prepared_statements"
+  )
+
+Postgrex.query!(pg_conn, "DEALLOCATE prepared_statements_probe")
+
 # `realtime.broadcast_changes(..., NEW record, OLD record, ...)` (introduced in commit 2922658c) called from a trigger via `PERFORM` fails on PG <= 14.5
 requires_pg_140006 = if pg_version_num < 140_006, do: :requires_pg_140006
 
@@ -46,6 +63,9 @@ skip_orioledb = if orioledb?, do: :skip_orioledb
 # owns its databases, external servers are supplied to us.
 requires_docker_backend = if backend != TestTenantDb.Backend.Docker, do: :requires_docker_backend
 
+requires_session_scoped_prepared_statements =
+  if !session_scoped_prepared_statements?, do: :requires_session_scoped_prepared_statements
+
 exclude =
   Enum.reject(
     [
@@ -55,7 +75,8 @@ exclude =
       requires_supautils_policy_grants,
       requires_no_supautils_policy_grants,
       skip_orioledb,
-      requires_docker_backend
+      requires_docker_backend,
+      requires_session_scoped_prepared_statements
     ],
     &is_nil/1
   )

@@ -47,6 +47,11 @@ defmodule TestTenantDb.Backend.Docker do
   @impl TestTenantDb.Backend
   def max_cases, do: Env.get_integer("MAX_CASES", 4)
 
+  # POSTGRES_IMAGE is both the realtime database and this backend's containers,
+  # so the realtime database answers for them.
+  @impl TestTenantDb.Backend
+  def capability_probe_port, do: nil
+
   @impl TestTenantDb.Backend
   def prepare! do
     pull()

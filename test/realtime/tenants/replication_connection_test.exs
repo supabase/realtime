@@ -712,7 +712,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
       name = @replication_slot_name
 
-      Postgrex.query!(db_conn, "SELECT pg_create_logical_replication_slot($1, 'test_decoding')", [name])
+      Postgrex.query!(db_conn, "SELECT pg_create_logical_replication_slot($1, 'test_decoding', true)", [name])
 
       assert {:error, {:shutdown, :replication_slot_in_use}} =
                ReplicationConnection.start(tenant, self())
@@ -729,9 +729,19 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       opts = Database.opts(settings)
       parent = self()
 
-      # This creates a loop of errors that occupies all WAL senders and lets us test the error handling
+      # The replication connections below publish public.test, and
+      # PostgresReplication.start_link/1 fails outright if it is missing.
+      {:ok, table_conn} = Database.connect(tenant, "realtime_test", :stop)
+      Postgrex.query!(table_conn, "CREATE TABLE IF NOT EXISTS public.test (id serial primary key)", [])
+
+      # Enough connections to occupy every WAL sender, read from the server
+      # rather than hardcoded: the budget differs per image, and a Multigres
+      # cluster spends some of it on its own replication.
+      %{rows: [[max_wal_senders]]} = Postgrex.query!(table_conn, "SELECT current_setting('max_wal_senders')::int", [])
+      GenServer.stop(table_conn)
+
       pids =
-        for i <- 0..5 do
+        for i <- 0..max_wal_senders do
           replication_slot_opts =
             %PostgresReplication{
               connection_opts: opts,
