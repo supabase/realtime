@@ -725,43 +725,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     end
 
     test "handle standby connections exceeds max_wal_senders", %{tenant: tenant} do
-      {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
-      opts = Database.opts(settings)
-      parent = self()
-
-      # This creates a loop of errors that occupies all WAL senders and lets us test the error handling
-      pids =
-        for i <- 0..5 do
-          replication_slot_opts =
-            %PostgresReplication{
-              connection_opts: opts,
-              table: "test",
-              output_plugin: "pgoutput",
-              output_plugin_options: [proto_version: "1", publication_names: "test_#{i}_publication"],
-              handler_module: Replication.TestHandler,
-              publication_name: "test_#{i}_publication",
-              replication_slot_name: "test_#{i}_slot"
-            }
-
-          spawn(fn ->
-            {:ok, pid} = PostgresReplication.start_link(replication_slot_opts)
-            send(parent, :ready)
-
-            receive do
-              :stop -> Process.exit(pid, :kill)
-            end
-          end)
-        end
-
-      on_exit(fn ->
-        Enum.each(pids, &send(&1, :stop))
-        Process.sleep(2000)
-      end)
-
-      assert_receive :ready, 5000
-      assert_receive :ready, 5000
-      assert_receive :ready, 5000
-      assert_receive :ready, 5000
+      TestTenantDb.exhaust_wal_senders(tenant)
 
       assert {:error, :max_wal_senders_reached} = ReplicationConnection.start(tenant, self())
     end

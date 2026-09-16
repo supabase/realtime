@@ -81,24 +81,41 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "a real pool disconnect opens the recovery window and reconnecting closes it", %{tenant: tenant} do
+      {tenant, proxy} =
+        if TestTenantDb.Backend.current() == TestTenantDb.Backend.External do
+          TestTenantDb.with_fault_proxy(tenant)
+        else
+          {tenant, nil}
+        end
+
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       assert Connect.ready?(tenant.external_id)
       pid = Connect.whereis(tenant.external_id)
 
-      {:ok, killer} = Database.connect(tenant, "realtime_test", :stop)
+      killer =
+        if proxy do
+          nil
+        else
+          {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+          conn
+        end
 
       # The window opens on the disconnect and closes again once the pool reconnects.
       # Since the database itself is healthy, reconnection is near-instant, so we
       # assert on the logs rather than trying to observe the transient open state.
       log =
         capture_log(fn ->
-          Postgrex.query!(
-            killer,
-            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
-            []
-          )
+          if proxy do
+            TcpFaultProxy.disconnect(proxy)
+          else
+            Postgrex.query!(
+              killer,
+              "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
+              []
+            )
+          end
 
-          GenServer.stop(killer)
+          if killer, do: GenServer.stop(killer)
 
           assert wait_until(fn -> match?({:ok, _}, Postgrex.query(db_conn, "SELECT 1", [])) end)
           assert wait_until(fn -> :sys.get_state(pid).db_recovery_started_at == nil end)
@@ -244,6 +261,7 @@ defmodule Realtime.Tenants.ConnectTest do
       }
 
       {:ok, tenant} = update_extension(tenant, extension)
+      tenant = TestTenantDb.exceed_connection_limit(tenant)
 
       parent = self()
 
@@ -453,6 +471,7 @@ defmodule Realtime.Tenants.ConnectTest do
       }
 
       {:ok, tenant} = update_extension(tenant, extension)
+      tenant = TestTenantDb.exceed_connection_limit(tenant)
 
       assert capture_log(fn ->
                assert {:error, :tenant_db_too_many_connections} = Connect.lookup_or_start_connection(tenant.external_id)
@@ -540,7 +559,14 @@ defmodule Realtime.Tenants.ConnectTest do
       assert replication_conn_pid_before == replication_conn_pid_after
     end
 
-    test "on replication connection postgres pid being stopped, Connect module recovers it", %{tenant: tenant} do
+    test "on replication connection disconnect, Connect module recovers it", %{tenant: tenant} do
+      {tenant, proxy} =
+        if TestTenantDb.Backend.current() == TestTenantDb.Backend.External do
+          TestTenantDb.with_fault_proxy(tenant)
+        else
+          {tenant, nil}
+        end
+
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       assert Connect.ready?(tenant.external_id)
 
@@ -552,18 +578,28 @@ defmodule Realtime.Tenants.ConnectTest do
 
       assert {:ok, replication_conn_before} = assert_replication_status(tenant.external_id)
 
-      Postgrex.query!(
-        db_conn,
-        "SELECT pg_terminate_backend(pid) from pg_stat_activity where application_name='realtime_replication_connection'",
-        []
-      )
+      if proxy do
+        TcpFaultProxy.disconnect(proxy)
+      else
+        Postgrex.query!(
+          db_conn,
+          "SELECT pg_terminate_backend(pid) from pg_stat_activity where application_name='realtime_replication_connection'",
+          []
+        )
+      end
 
-      assert_receive {:DOWN, _, :process, ^replication_connection_pid, _}
+      assert_receive {:DOWN, _, :process, ^replication_connection_pid, _}, 5_000
 
-      Process.sleep(100)
-      assert {:error, :not_connected} = Connect.replication_status(tenant.external_id)
-
-      new_replication_connection_pid = assert_pid(fn -> ReplicationConnection.whereis(tenant.external_id) end, 60)
+      new_replication_connection_pid =
+        assert_pid(
+          fn ->
+            case ReplicationConnection.whereis(tenant.external_id) do
+              ^replication_connection_pid -> nil
+              replacement -> replacement
+            end
+          end,
+          60
+        )
 
       assert replication_connection_pid != new_replication_connection_pid
       assert Process.alive?(new_replication_connection_pid)
@@ -618,45 +654,7 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "handles max_wal_senders by logging the correct operational code", %{tenant: tenant} do
-      {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
-      opts = Database.opts(settings)
-      parent = self()
-
-      pids =
-        for i <- 0..5 do
-          replication_slot_opts =
-            %PostgresReplication{
-              connection_opts: opts,
-              table: "test",
-              output_plugin: "pgoutput",
-              output_plugin_options: [proto_version: "1", publication_names: "test_#{i}_publication"],
-              handler_module: Replication.TestHandler,
-              publication_name: "test_#{i}_publication",
-              replication_slot_name: "test_#{i}_slot"
-            }
-
-          spawn(fn ->
-            {:ok, pid} = PostgresReplication.start_link(replication_slot_opts)
-            send(parent, :replication_ready)
-
-            receive do
-              :stop -> Process.exit(pid, :kill)
-            end
-          end)
-        end
-
-      # Over-provision the replication connections and only wait for enough of
-      # them to report ready to occupy every WAL sender, so that Connect's own
-      # replication attempt below is the one that trips max_wal_senders. We don't
-      # pin to specific spawns: bringing up real replication connections is
-      # timing-sensitive (especially on a loaded machine or a freshly reused
-      # tenant DB), so requiring every single one to report by index is flaky.
-      for _ <- 1..4, do: assert_receive(:replication_ready, 30_000)
-
-      on_exit(fn ->
-        Enum.each(pids, &send(&1, :stop))
-        Process.sleep(2000)
-      end)
+      TestTenantDb.exhaust_wal_senders(tenant)
 
       log =
         capture_log(fn ->
@@ -744,6 +742,7 @@ defmodule Realtime.Tenants.ConnectTest do
       }
 
       {:ok, tenant} = update_extension(tenant, extension)
+      tenant = TestTenantDb.exceed_connection_limit(tenant)
       parent = self()
 
       expect(Database, :check_tenant_connection, fn t, listeners ->

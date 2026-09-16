@@ -3,8 +3,8 @@ defmodule TestTenantDb.Backend.External do
   # USE_EXTERNAL_TENANT_DB=true: tenant tests target one or more
   # already-running, external Postgres-wire-compatible servers (e.g.
   # Multigres) on EXTERNAL_TENANT_DB_PORTS, host fixed at 127.0.0.1. Each
-  # configured port is an independent DB — the pool hands out exactly one per
-  # concurrent test, same checkout/checkin contract as the docker pool.
+  # configured port is an independent DB — each checkout holds one until the
+  # test exits, using the same checkout/checkin contract as the docker pool.
   #
   # This module is both the backend implementation and the registry that
   # hands each TestTenantDb.Backend.External.Worker its port. The registry

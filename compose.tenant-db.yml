@@ -28,6 +28,10 @@ services:
       # The suite runs a pool per tenant DB plus a replication connection; the
       # cluster's default of 110 is not enough headroom.
       MULTIGRES_PG_MAX_CONNECTIONS: "500"
+      MULTIGRES_PG_EXTRA_CONF: |
+        max_wal_size = 1GB
+        wal_keep_size = 32MB
+        max_slot_wal_keep_size = 32MB
     healthcheck:
       # Over TCP, not the socket: a cluster's PostgreSQL instances sit behind
       # the pooler in their own socket directory.

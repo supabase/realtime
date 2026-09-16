@@ -73,43 +73,28 @@ defmodule Realtime.DatabaseTest do
       GenServer.stop(conn)
     end
 
-    # Connection limit for docker tenant db is 100
-    @tag db_pool: 50,
-         subs_pool_size: 73
     test "restricts connection if tenant database cannot receive more connections based on tenant pool",
          %{tenant: tenant} do
+      tenant = TestTenantDb.exceed_connection_limit(tenant)
+
       assert capture_log(fn ->
                assert {:error, :tenant_db_too_many_connections} = Database.check_tenant_connection(tenant)
-             end) =~ ~r/Only \d+ available connections\. At least 125 connections are required/
+             end) =~ ~r/Only \d+ available connections\. At least \d+ connections are required/
     end
 
     @tag db_pool: 3
     test "durable pool opens the configured number of realtime_connect connections", %{tenant: tenant} do
-      # pg_stat_activity is server-wide, so draining 'realtime_connect' backends left
-      # behind by earlier tests can inflate the count. Terminate any lingering ones
-      # (using a separate connection that is not counted) to start from a clean slate.
-      {:ok, admin} = Database.connect(tenant, "realtime_test", :stop)
+      assert {:ok, pool, _migrations_ran} = Database.check_tenant_connection(tenant, [self()])
 
-      Postgrex.query!(
-        admin,
-        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
-        []
-      )
+      connections =
+        for _ <- 1..3 do
+          assert_receive {:connected, pid}, 5_000
+          pid
+        end
 
-      assert {:ok, _conn, _migrations_ran} = Database.check_tenant_connection(tenant)
-
-      # Postgrex opens the pool connections asynchronously, so give it a moment
-      # to bring all of them up.
-      assert eventually(fn ->
-               %{rows: [[count]]} =
-                 Postgrex.query!(
-                   admin,
-                   "SELECT count(*)::int FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
-                   []
-                 )
-
-               count == 3
-             end)
+      assert length(Enum.uniq(connections)) == 3
+      refute_receive {:connected, _}
+      assert {:ok, %{rows: [[1]]}} = Postgrex.query(pool, "SELECT 1", [])
     end
   end
 
@@ -118,7 +103,11 @@ defmodule Realtime.DatabaseTest do
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
       TestTenantDb.create_logical_replication_slot!(conn, "realtime_test_slot", "pgoutput")
       Database.replication_slot_teardown(tenant)
-      assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
+
+      assert %{rows: []} =
+               Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots WHERE slot_name = $1", [
+                 "realtime_test_slot"
+               ])
     end
   end
 
@@ -129,7 +118,9 @@ defmodule Realtime.DatabaseTest do
       TestTenantDb.create_logical_replication_slot!(conn, name, "pgoutput")
       Database.replication_slot_teardown(conn, name)
       Process.sleep(1000)
-      assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
+
+      assert %{rows: []} =
+               Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots WHERE slot_name = $1", [name])
     end
 
     test "removes replication slots with a given name and a tenant", %{tenant: tenant} do
@@ -137,7 +128,9 @@ defmodule Realtime.DatabaseTest do
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
       TestTenantDb.create_logical_replication_slot!(conn, name, "pgoutput")
       Database.replication_slot_teardown(tenant, name)
-      assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
+
+      assert %{rows: []} =
+               Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots WHERE slot_name = $1", [name])
     end
   end
 

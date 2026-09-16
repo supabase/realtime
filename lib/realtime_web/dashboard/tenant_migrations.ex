@@ -8,7 +8,8 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   `priv/repo/tenant_schema`, which is the same for every supported Postgres major
   version. Planning creates a short-lived shadow database on the tenant's own
   cluster, so the tenant's `db_user` needs `CREATEDB`. OrioleDB tenants are not
-  supported.
+  supported. `run_pgdelta/2` accepts `shadow_url: url` for an explicitly supplied
+  disposable shadow database when the target cannot create databases.
   """
   use Phoenix.LiveDashboard.PageBuilder
   use Realtime.Logs
@@ -556,7 +557,10 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     end
   end
 
-  def run_pgdelta(%Database{} = settings) do
+  def run_pgdelta(%Database{} = settings), do: run_pgdelta(settings, [])
+
+  @doc "Plan against a tenant using an optional, dedicated disposable shadow database."
+  def run_pgdelta(%Database{} = settings, opts) do
     with_pgdelta(fn path, dir ->
       plan_path = Path.join(dir, "plan.json")
 
@@ -573,6 +577,12 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
         "--out-plan",
         plan_path
       ]
+
+      args =
+        case Keyword.get(opts, :shadow_url) do
+          nil -> args
+          url when is_binary(url) -> args ++ ["--shadow", url]
+        end
 
       case run_pgdelta_cmd(path, args) do
         {_output, 0} -> read_plan(path, plan_path, dir)

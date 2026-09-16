@@ -1042,7 +1042,7 @@ defmodule Realtime.Tenants.SchemaTest do
       Postgrex.query!(conn_superuser, "DROP TABLE realtime.messages CASCADE", [])
 
       assert {:ok, %{status: :changes, plan: plan}} =
-               TenantMigrations.run_pgdelta(%{settings | pool_size: 1})
+               TestTenantDb.run_pgdelta(%{settings | pool_size: 1})
 
       assert :ok = TenantMigrations.apply_pgdelta(tenant, plan)
 

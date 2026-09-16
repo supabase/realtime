@@ -182,6 +182,23 @@ of ports; if omitted, it defaults to the port count. Reserve enough workers for
 tests that acquire multiple tenants. CI uses two clusters with `MAX_CASES=1`.
 The regular Docker backend retains its existing concurrency and spare workers.
 
+The tenant services set test WAL limits using `MULTIGRES_PG_EXTRA_CONF`.
+These settings apply when the cluster initializes: recreate existing tenant
+containers before testing a changed configuration, then rerun both bootstrap
+commands. Tenant cleanup preserves physical replication slots used by Multigres.
+
+Permission/version tags are detected on the tenant databases, and all external
+tenants must have matching capabilities. Connection-limit tests derive their
+requested pool sizes from the server's actual limit. Recovery tests use a local
+TCP proxy to interrupt client connections through the gateway.
+
+pg-delta tests allocate a separate, disposable shadow database on the ordinary
+metadata Postgres server for each plan, and drop it afterward. The tenant remains
+the Multigres target. `TenantMigrations.run_pgdelta(settings, shadow_url: url)`
+allows callers to supply a dedicated shadow explicitly; never pass the metadata
+or tenant database itself as the shadow. The caller owns its lifecycle and must
+avoid sharing it between concurrent plans.
+
 ### Tenant migrations and snapshots
 
 Adding a migration under `lib/realtime/tenants/repo/migrations/` also changes two committed snapshots of

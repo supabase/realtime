@@ -1815,6 +1815,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
         }
 
       {:ok, tenant} = update_extension(tenant, extension)
+      tenant = TestTenantDb.exceed_connection_limit(tenant)
 
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))

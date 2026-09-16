@@ -186,21 +186,35 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
 
       {:ok, _} = Replications.prepare_replication(conn, slot_name)
 
+      parent = self()
+
+      Mimic.stub(Postgrex, :query, fn connection, sql, params, opts ->
+        if opts[:cache_statement] == "realtime_list_changes", do: send(parent, :cached_query)
+        Mimic.call_original(Postgrex, :query, [connection, sql, params, opts])
+      end)
+
       assert {:ok, _} = Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
       assert {:ok, _} = Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
 
-      # pg_prepared_statements is session-scoped and the "realtime_rls" pool has a
-      # single connection, so this query observes the same backend session that ran
-      # list_changes. It must hold exactly one named statement (nothing else on this
-      # connection caches), executed once per list_changes call above.
-      assert {:ok, %Postgrex.Result{rows: rows}} =
-               Postgrex.query(
-                 conn,
-                 "SELECT name, generic_plans + custom_plans FROM pg_prepared_statements",
-                 []
-               )
+      assert_receive :cached_query
+      assert_receive :cached_query
+      refute_receive :cached_query
 
-      assert [["realtime_list_changes", 2]] = rows
+      # Only direct Postgres exposes the client's statement names and session counters.
+      if TestTenantDb.Backend.current() == TestTenantDb.Backend.Docker do
+        # pg_prepared_statements is session-scoped and the "realtime_rls" pool has a
+        # single connection, so this query observes the same backend session that ran
+        # list_changes. It must hold exactly one named statement (nothing else on this
+        # connection caches), executed once per list_changes call above.
+        assert {:ok, %Postgrex.Result{rows: rows}} =
+                 Postgrex.query(
+                   conn,
+                   "SELECT name, generic_plans + custom_plans FROM pg_prepared_statements",
+                   []
+                 )
+
+        assert [["realtime_list_changes", 2]] = rows
+      end
     end
 
     test "slot has changes but no subscribers: returns only the sentinel row with slot_changes_count of 1", %{

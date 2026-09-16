@@ -11,25 +11,45 @@ max_cases = backend.max_cases()
 
 repo_config = Application.fetch_env!(:realtime, Realtime.Repo)
 
-{:ok, pg_conn} =
-  Postgrex.start_link(
-    hostname: repo_config[:hostname],
-    port: repo_config[:port] || 5432,
-    username: repo_config[:username],
-    password: repo_config[:password],
-    database: "postgres"
-  )
+# Probe the databases the tenant tests actually exercise. Metadata Postgres can
+# have a different version and permission policy from an external tenant cluster.
+probe_configs =
+  if backend == TestTenantDb.Backend.External do
+    Enum.map(TestTenantDb.Backend.External.ports!(), fn port ->
+      [hostname: "127.0.0.1", port: port, username: "supabase_admin", password: "postgres", database: "postgres"]
+    end)
+  else
+    [Keyword.take(repo_config, [:hostname, :port, :username, :password]) ++ [database: "postgres"]]
+  end
 
-%{rows: [[pg_version_num]]} = Postgrex.query!(pg_conn, "SELECT current_setting('server_version_num')::int")
+capabilities =
+  Enum.map(probe_configs, fn config ->
+    {:ok, conn} = Postgrex.start_link(config)
 
-%{rows: [[has_supautils_realtime_grants]]} =
-  Postgrex.query!(
-    pg_conn,
-    "SELECT current_setting('supautils.policy_grants', true) LIKE '%realtime.messages%' AND current_setting('supautils.policy_grants', true) LIKE '%realtime.subscription%'"
-  )
+    try do
+      %{rows: [[version, grants, oriole]]} =
+        Postgrex.query!(
+          conn,
+          """
+          SELECT current_setting('server_version_num')::int,
+            COALESCE(current_setting('supautils.policy_grants', true) LIKE '%realtime.messages%'
+              AND current_setting('supautils.policy_grants', true) LIKE '%realtime.subscription%', false),
+            EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'orioledb')
+          """,
+          []
+        )
 
-%{rows: [[orioledb?]]} =
-  Postgrex.query!(pg_conn, "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'orioledb')")
+      {version, grants, oriole}
+    after
+      GenServer.stop(conn)
+    end
+  end)
+
+{pg_version_num, has_supautils_realtime_grants, orioledb?} =
+  case Enum.uniq(capabilities) do
+    [capability] -> capability
+    _ -> raise "Tenant databases must have matching Postgres versions, supautils policies and extensions"
+  end
 
 # `realtime.broadcast_changes(..., NEW record, OLD record, ...)` (introduced in commit 2922658c) called from a trigger via `PERFORM` fails on PG <= 14.5
 requires_pg_140006 = if pg_version_num < 140_006, do: :requires_pg_140006
@@ -41,6 +61,10 @@ requires_supautils_policy_grants = if !has_supautils_realtime_grants, do: :requi
 requires_no_supautils_policy_grants = if has_supautils_realtime_grants, do: :requires_no_supautils_policy_grants
 
 skip_orioledb = if orioledb?, do: :skip_orioledb
+# Older Docker images cannot reliably clean up a shadow database; external tests
+# allocate theirs on the separately configured metadata Postgres server.
+requires_pgdelta_shadow =
+  if backend == TestTenantDb.Backend.Docker and !has_supautils_realtime_grants, do: :requires_pgdelta_shadow
 
 # Tests that kill and recreate a pooled tenant database; only the docker backend
 # owns its databases, external servers are supplied to us.
@@ -55,7 +79,8 @@ exclude =
       requires_supautils_policy_grants,
       requires_no_supautils_policy_grants,
       skip_orioledb,
-      requires_docker_backend
+      requires_docker_backend,
+      requires_pgdelta_shadow
     ],
     &is_nil/1
   )
@@ -85,6 +110,7 @@ for tenant <- Api.list_tenants(), do: Api.delete_tenant_by_external_id(tenant.ex
 
 Ecto.Adapters.SQL.Sandbox.mode(Realtime.Repo, :manual)
 
+Mimic.copy(Postgrex)
 Mimic.copy(:syn)
 Mimic.copy(Cachex)
 Mimic.copy(Ecto.Migrator)

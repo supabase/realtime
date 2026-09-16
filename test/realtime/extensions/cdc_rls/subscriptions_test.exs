@@ -777,6 +777,13 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
       {:ok, subscription_params} =
         Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test"})
 
+      parent = self()
+
+      Mimic.stub(Postgrex, :query, fn connection, sql, params, opts ->
+        if opts[:cache_statement] == "realtime_subscription_insert", do: send(parent, :cached_query)
+        Mimic.call_original(Postgrex, :query, [connection, sql, params, opts])
+      end)
+
       for _ <- 1..2 do
         params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
 
@@ -784,17 +791,24 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                  Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
       end
 
-      # pg_prepared_statements is session-scoped and this pool has a single connection, so this
-      # query observes the same backend session that ran the inserts. Only the cached insert holds
-      # a named statement (nothing else on this connection caches), executed once per create above.
-      assert {:ok, %Postgrex.Result{rows: rows}} =
-               Postgrex.query(
-                 conn,
-                 "SELECT name, generic_plans + custom_plans FROM pg_prepared_statements",
-                 []
-               )
+      assert_receive :cached_query
+      assert_receive :cached_query
+      refute_receive :cached_query
 
-      assert [["realtime_subscription_insert", 2]] = rows
+      # Only direct Postgres exposes the client's statement names and session counters.
+      if TestTenantDb.Backend.current() == TestTenantDb.Backend.Docker do
+        # pg_prepared_statements is session-scoped and this pool has a single connection, so this
+        # query observes the same backend session that ran the inserts. Only the cached insert holds
+        # a named statement (nothing else on this connection caches), executed once per create above.
+        assert {:ok, %Postgrex.Result{rows: rows}} =
+                 Postgrex.query(
+                   conn,
+                   "SELECT name, generic_plans + custom_plans FROM pg_prepared_statements",
+                   []
+                 )
+
+        assert [["realtime_subscription_insert", 2]] = rows
+      end
     end
 
     test "user can subscribe to only INSERT events", %{conn: conn} do
