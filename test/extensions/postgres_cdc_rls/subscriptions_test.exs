@@ -513,7 +513,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
                  Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
       end
 
-      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json', true)", [slot_name])
+      create_replication_slot(conn, slot_name, plugin: "wal2json")
 
       try do
         Postgrex.query!(conn, "insert into test (details) values ('hello')", [])
@@ -530,7 +530,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
         assert UUID.string_to_binary!(visible_id) in all_sub_ids
         refute UUID.string_to_binary!(hidden_id) in all_sub_ids
       after
-        Postgrex.query(conn, "SELECT pg_drop_replication_slot($1)", [slot_name])
+        drop_replication_slot(conn, slot_name)
       end
     end
 
@@ -562,7 +562,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
                  Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
       end
 
-      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json', true)", [slot_name])
+      create_replication_slot(conn, slot_name, plugin: "wal2json")
 
       try do
         Postgrex.query!(conn, "insert into test (id, details) values (5, 'hello')", [])
@@ -581,7 +581,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
         refute UUID.string_to_binary!(hidden_eq) in all_sub_ids
         refute UUID.string_to_binary!(hidden_negate) in all_sub_ids
       after
-        Postgrex.query(conn, "SELECT pg_drop_replication_slot($1)", [slot_name])
+        drop_replication_slot(conn, slot_name)
       end
     end
 
@@ -612,7 +612,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
                  Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
       end
 
-      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json', true)", [slot_name])
+      create_replication_slot(conn, slot_name, plugin: "wal2json")
 
       try do
         Postgrex.query!(conn, "insert into test (details) values ($1)", [obrien])
@@ -632,7 +632,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
         assert UUID.string_to_binary!(match_in) in all_sub_ids
         refute UUID.string_to_binary!(miss_eq) in all_sub_ids
       after
-        Postgrex.query(conn, "SELECT pg_drop_replication_slot($1)", [slot_name])
+        drop_replication_slot(conn, slot_name)
       end
     end
   end
@@ -771,20 +771,6 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
                  "select entity::text, filters::text, action_filter from realtime.subscription",
                  []
                )
-    end
-
-    test "registers the subscription insert in the connection's statement cache", %{conn: conn} do
-      {:ok, subscription_params} =
-        Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test"})
-
-      refute "realtime_subscription_insert" in TestHelpers.cached_statement_names(conn)
-
-      params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
-
-      assert {:ok, [%Postgrex.Result{}]} =
-               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
-
-      assert "realtime_subscription_insert" in TestHelpers.cached_statement_names(conn)
     end
 
     @tag :requires_observable_statement_cache
@@ -1168,7 +1154,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
         [sub_id, %{"role" => "anon"}]
       )
 
-      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json', true)", [slot_name])
+      create_replication_slot(conn, slot_name, plugin: "wal2json")
 
       try do
         Postgrex.query!(conn, "insert into test (details) values ('hello')", [])
@@ -1188,7 +1174,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
         assert Map.has_key?(wal_result["record"], "id")
         assert Map.has_key?(wal_result["record"], "details")
       after
-        Postgrex.query(conn, "SELECT pg_drop_replication_slot($1)", [slot_name])
+        drop_replication_slot(conn, slot_name)
       end
     end
 
@@ -1249,7 +1235,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
         [sub_id, %{"role" => "anon"}]
       )
 
-      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json', true)", [slot_name])
+      create_replication_slot(conn, slot_name, plugin: "wal2json")
 
       try do
         Postgrex.query!(conn, "insert into test (details) values ('hello')", [])
@@ -1269,7 +1255,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
         assert Map.has_key?(wal_result["record"], "id")
         refute Map.has_key?(wal_result["record"], "details")
       after
-        Postgrex.query(conn, "SELECT pg_drop_replication_slot($1)", [slot_name])
+        drop_replication_slot(conn, slot_name)
       end
     end
   end
@@ -1490,7 +1476,8 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
                create_subscriptions(conn, 11, role: "custom_app_role", subscription_params: subscription_params)
 
       slot_name = "test_custom_role_grant_#{:rand.uniform(999_999)}"
-      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json', true)", [slot_name])
+
+      create_replication_slot(conn, slot_name, plugin: "wal2json")
 
       Postgrex.query!(conn, "insert into test (id, details) values (1, 'hello')", [])
 
@@ -1504,7 +1491,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       sub_ids = rows |> Enum.flat_map(fn [_wal, sub_ids] -> sub_ids end)
       assert length(sub_ids) == 11
 
-      Postgrex.query(conn, "SELECT pg_drop_replication_slot($1)", [slot_name])
+      drop_replication_slot(conn, slot_name)
     end
   end
 

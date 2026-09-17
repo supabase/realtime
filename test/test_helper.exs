@@ -18,7 +18,11 @@ repo_config = Application.fetch_env!(:realtime, Realtime.Repo)
 {:ok, pg_conn} =
   Postgrex.start_link(
     hostname: repo_config[:hostname],
-    port: backend.capability_probe_port() || repo_config[:port] || 5432,
+    port:
+      case backend.capability_probe_port() do
+        :realtime_db -> repo_config[:port] || 5432
+        port -> port
+      end,
     username: repo_config[:username],
     password: repo_config[:password],
     database: "postgres"

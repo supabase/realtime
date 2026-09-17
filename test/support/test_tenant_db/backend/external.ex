@@ -24,10 +24,8 @@ defmodule TestTenantDb.Backend.External do
   # demand exceeds supply). MAX_CASES is therefore ignored.
   @impl TestTenantDb.Backend
   def max_cases do
-    # One database is held back from ExUnit's concurrency: a test that briefly
-    # holds a second one (or whose on_exit checkin has not run yet) would
-    # otherwise starve the pool, because unlike the docker backend the pool is
-    # exactly the ports we were given and cannot grow.
+    # One port is held back as a spare: some tests check out a second database while
+    # holding the first, and a checkin can lag the test that made it.
     forced = max(1, length(ports!()) - 1)
 
     if System.get_env("MAX_CASES") do
@@ -40,9 +38,8 @@ defmodule TestTenantDb.Backend.External do
     forced
   end
 
-  # These servers can be a different image from the realtime database
-  # (TENANT_DB_IMAGE), which therefore cannot answer for them. Every configured
-  # port runs the same image, so the first answers for all.
+  # TENANT_DB_IMAGE can differ from the realtime database's image, and every
+  # configured port runs it, so the first port answers for all.
   @impl TestTenantDb.Backend
   def capability_probe_port, do: hd(ports!())
 

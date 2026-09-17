@@ -330,8 +330,6 @@ defmodule Realtime.Tenants.ConnectTest do
 
         assert is_pid(db_conn)
         Connect.shutdown(tenant.external_id)
-        # Closing a pooled connection through a connection pooler takes longer
-        # than the 100ms default; the process still goes down.
         assert_process_down(db_conn, 5_000)
 
         tenant.external_id
@@ -570,8 +568,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
       assert {:ok, replication_conn_before} = assert_replication_status(tenant.external_id)
 
-      # Identify the backend through the slot it is streaming rather than by
-      # application_name, which a connection pooler rewrites to its own label.
+      # Found by slot, not application_name, which a pooler rewrites.
       slot_name = ReplicationConnection.replication_slot_name("realtime", "messages")
 
       assert %{num_rows: 1} =
@@ -645,10 +642,9 @@ defmodule Realtime.Tenants.ConnectTest do
       opts = Database.opts(settings)
       parent = self()
 
-      # The replication connections below publish public.test, and
-      # PostgresReplication.start_link/1 fails outright if it is missing.
+      # PostgresReplication.start_link/1 fails outright without the table it publishes.
       {:ok, table_conn} = Database.connect(tenant, "realtime_test", :stop)
-      Postgrex.query!(table_conn, "CREATE TABLE IF NOT EXISTS public.test (id serial primary key)", [])
+      Postgrex.query!(table_conn, "CREATE TABLE public.test (id serial primary key)", [])
 
       # Enough connections to claim every WAL sender, read from the server
       # rather than hardcoded: the budget differs per image, and a Multigres
@@ -936,7 +932,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
       # Simulate a previous replication session still holding the slot during a
       # restart/rebalance race so the initial replication start fails.
-      Postgrex.query!(db_conn, "SELECT pg_create_logical_replication_slot($1, 'test_decoding', true)", [slot_name])
+      create_replication_slot(db_conn, slot_name, plugin: "test_decoding")
 
       log =
         capture_log(fn ->

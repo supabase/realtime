@@ -105,7 +105,10 @@ defmodule Realtime.DatabaseTest do
     end
 
     @tag db_pool: 3
-    test "durable pool opens the configured number of realtime_connect connections", %{tenant: tenant} do
+    test "durable pool opens the configured number of realtime_connect connections", %{
+      tenant: tenant,
+      db_pool: pool_size
+    } do
       # pg_stat_activity is server-wide, so draining 'realtime_connect' backends left
       # behind by earlier tests can inflate the count. Terminate any lingering ones
       # (using a separate connection that is not counted) to start from a clean slate.
@@ -119,14 +122,10 @@ defmodule Realtime.DatabaseTest do
 
       assert {:ok, conn, _migrations_ran} = Database.check_tenant_connection(tenant)
 
-      # Keep every pooled connection busy while counting. An idle client holds
-      # no backend behind a connection pooler, so `pg_stat_activity` would
-      # report none of them; a connection running a query is checked out and
-      # visible on both a bare Postgres and a pooled one.
+      # An idle client holds no backend behind a pooler, so keep them all busy to be counted.
       busy =
-        for _ <- 1..3 do
-          Task.async(fn -> Postgrex.query!(conn, "SELECT pg_sleep(5)", [], timeout: 15_000) end)
-        end
+        for _ <- 1..pool_size,
+            do: Task.async(fn -> Postgrex.query(conn, "SELECT pg_sleep(5)", [], timeout: 15_000) end)
 
       # Postgrex opens the pool connections asynchronously, so give it a moment
       # to bring all of them up.
@@ -138,17 +137,17 @@ defmodule Realtime.DatabaseTest do
                    []
                  )
 
-               count == 3
+               count == pool_size
              end)
 
-      Task.await_many(busy, 15_000)
+      Enum.each(busy, &Task.shutdown(&1, :brutal_kill))
     end
   end
 
   describe "replication_slot_teardown/1" do
     test "removes replication slots with the realtime prefix", %{tenant: tenant} do
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-      TestHelpers.create_persistent_replication_slot(conn, "realtime_test_slot", "pgoutput")
+      create_replication_slot(conn, "realtime_test_slot", plugin: "pgoutput", temporary: false)
       Database.replication_slot_teardown(tenant)
 
       assert %{rows: []} =
@@ -160,7 +159,9 @@ defmodule Realtime.DatabaseTest do
     test "removes replication slots with a given name and existing connection", %{tenant: tenant} do
       name = String.downcase("slot_#{random_string()}")
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-      Postgrex.query!(conn, "SELECT * FROM pg_create_logical_replication_slot('#{name}', 'pgoutput', true)", [])
+
+      create_replication_slot(conn, name, plugin: "pgoutput")
+
       Database.replication_slot_teardown(conn, name)
       Process.sleep(1000)
 
@@ -171,7 +172,7 @@ defmodule Realtime.DatabaseTest do
     test "removes replication slots with a given name and a tenant", %{tenant: tenant} do
       name = String.downcase("slot_#{random_string()}")
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-      TestHelpers.create_persistent_replication_slot(conn, name, "pgoutput")
+      create_replication_slot(conn, name, plugin: "pgoutput", temporary: false)
       Database.replication_slot_teardown(tenant, name)
 
       assert %{rows: []} =
@@ -441,13 +442,13 @@ defmodule Realtime.DatabaseTest do
       slot_name = "test_slot_#{suffix}"
       table_name = "slot_test_#{suffix}"
 
-      TestHelpers.create_persistent_replication_slot(db_conn, slot_name, "pgoutput")
+      create_replication_slot(db_conn, slot_name, plugin: "pgoutput", temporary: false)
       Postgrex.query!(db_conn, "CREATE TABLE IF NOT EXISTS #{table_name} (id INT, data TEXT)", [])
 
       on_exit(fn ->
         case Database.connect(tenant, "realtime_test_cleanup", :stop) do
           {:ok, conn} ->
-            Postgrex.query(conn, "SELECT pg_drop_replication_slot($1)", [slot_name])
+            drop_replication_slot(conn, slot_name)
             Postgrex.query(conn, "DROP TABLE IF EXISTS #{table_name} CASCADE", [])
             GenServer.stop(conn)
 
