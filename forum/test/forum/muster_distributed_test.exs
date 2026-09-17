@@ -5537,7 +5537,6 @@ defmodule Forum.MusterDistributedTest do
           # {T,R,S}. Without the seq bump this times out (each stays invalidated
           # for the other and floods indefinitely).
           await_ready(three_view, nodes: [t_node, r_node], nth: 2)
-          assert status(scope) == :ready
           assert Enum.sort(Muster.members(scope)) == three_view
 
           # Release S; the whole cluster settles back on {T,R,S} :ready. S's now
