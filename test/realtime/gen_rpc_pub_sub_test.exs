@@ -29,8 +29,17 @@ defmodule Realtime.GenRpcPubSubTest do
                 def subscribe(subscriber, topic) do
                   spawn(fn ->
                     RealtimeWeb.Endpoint.subscribe(topic)
-                    2 = length(Realtime.Nodes.region_nodes("us-east-1"))
-                    2 = length(Realtime.Nodes.region_nodes("ap-southeast-2"))
+
+                    # syn RegionNodes membership propagates asynchronously across the
+                    # cluster. Poll for it, so a slow-converging cluster raises a clear error
+                    converged? =
+                      TestHelpers.eventually(fn ->
+                        length(Realtime.Nodes.region_nodes("us-east-1")) == 2 and
+                          length(Realtime.Nodes.region_nodes("ap-southeast-2")) == 2
+                      end)
+
+                    unless converged?, do: raise("region membership did not converge in time")
+
                     send(subscriber, {:ready, Application.get_env(:realtime, :region)})
 
                     loop = fn f ->
@@ -162,18 +171,20 @@ defmodule Realtime.GenRpcPubSubTest do
           phoenix_port: TestEnv.peer_http_port(ap2_nodeY)
         )
 
-      # Ensuring that syn had enough time to propagate to all nodes the group information
-      Process.sleep(3000)
+      # syn RegionNodes membership propagates asynchronously across the cluster
+      TestHelpers.eventually(fn ->
+        length(Realtime.Nodes.region_nodes("us-east-1")) == 2 and
+          length(Realtime.Nodes.region_nodes("ap-southeast-2")) == 2
+      end)
 
       RealtimeWeb.Endpoint.subscribe(@topic)
       :erpc.multicall(Node.list(), Subscriber, :subscribe, [self(), @topic])
 
-      assert length(Realtime.Nodes.region_nodes("us-east-1")) == 2
-      assert length(Realtime.Nodes.region_nodes("ap-southeast-2")) == 2
+      receive_timeout = to_timeout(second: 2)
 
-      assert_receive {:ready, "us-east-1"}
-      assert_receive {:ready, "ap-southeast-2"}
-      assert_receive {:ready, "ap-southeast-2"}
+      assert_receive {:ready, "us-east-1"}, receive_timeout
+      assert_receive {:ready, "ap-southeast-2"}, receive_timeout
+      assert_receive {:ready, "ap-southeast-2"}, receive_timeout
 
       # Relay the fan-out telemetry emitted on every receiving node back to this process.
       for node <- Node.list(), do: :ok = :erpc.call(node, Subscriber, :attach_fanout, [self()])
