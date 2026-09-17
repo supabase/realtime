@@ -134,5 +134,8 @@ RUN chown nobody /app && mkdir -p /app/.pgdelta-cache && chown nobody /app/.pgde
 COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/realtime ./
 COPY run.sh run.sh
 RUN ls -la /app
+
+USER nobody
+
 ENTRYPOINT ["/usr/bin/tini", "-s", "-g", "--", "/app/run.sh"]
 CMD ["/app/bin/server"]

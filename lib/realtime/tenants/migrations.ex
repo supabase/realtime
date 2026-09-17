@@ -101,6 +101,7 @@ defmodule Realtime.Tenants.Migrations do
     {20_260_709_120_000, Migrations.FixApplyRlsFilterRoleLeak},
     {20_260_714_120_000, Migrations.AddBroadcastPersistence},
     {20_260_827_120_000, Migrations.EmptySelectColumnsReturnPrimaryKeys},
+    {20_260_914_120_000, Migrations.DelegateMessagesGrantsToPostgres},
     {20_260_916_120_000, Migrations.AllowPostgresToDelegateRealtimeSchemaUsage}
   ]
 
@@ -223,7 +224,7 @@ defmodule Realtime.Tenants.Migrations do
 
         try do
           {applied_count, migrations_executed, source} =
-            if load_db_dump?(migrations_ran, repo) do
+            if __MODULE__.load_db_dump?(migrations_ran, repo) do
               case load_db_dump(repo) do
                 {:ok, applied_count} -> {applied_count, applied_count, :dump}
                 {:error, _} -> run_pending_migrations(repo)
@@ -283,10 +284,15 @@ defmodule Realtime.Tenants.Migrations do
   # Best-effort checking to find if it should load the DB dump or fallback to sequential migrations.
   # `migrations_ran` can be stale on DB restore or cluster migration operations,
   # so it needs to also query `realtime.schema_migrations` to make sure.
-  defp load_db_dump?(0 = _migrations_ran, repo), do: schema_migrations_empty?(repo)
-  defp load_db_dump?(_migrations_ran, _repo), do: false
+  @doc false
+  def load_db_dump?(0 = _migrations_ran, repo) do
+    Application.get_env(:realtime, :load_tenant_db_dump, true) and schema_migrations_empty?(repo)
+  end
 
-  defp schema_migrations_empty?(repo) do
+  def load_db_dump?(_migrations_ran, _repo), do: false
+
+  @doc false
+  def schema_migrations_empty?(repo) do
     case Repo.query("SELECT count(*)::int FROM realtime.schema_migrations", [], dynamic_repo: repo) do
       {:ok, %{rows: [[0]]}} ->
         true

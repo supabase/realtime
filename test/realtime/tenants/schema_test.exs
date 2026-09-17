@@ -135,6 +135,47 @@ defmodule Realtime.Tenants.SchemaTest do
       Postgrex.query!(conn_postgres, "DROP ROLE role_test", [])
     end
 
+    test "can grant SELECT and INSERT on realtime.messages to a custom role", %{conn_postgres: conn_postgres} do
+      role = "role_test_delegated_#{System.unique_integer([:positive])}"
+      Postgrex.query!(conn_postgres, "CREATE ROLE #{role}", [])
+
+      assert {:ok, _} =
+               Postgrex.query(conn_postgres, "GRANT SELECT, INSERT ON realtime.messages TO #{role}", [])
+
+      assert %Postgrex.Result{rows: [[true, true]]} =
+               Postgrex.query!(
+                 conn_postgres,
+                 """
+                 SELECT
+                   has_table_privilege($1, 'realtime.messages', 'SELECT'),
+                   has_table_privilege($1, 'realtime.messages', 'INSERT')
+                 """,
+                 [role]
+               )
+
+      Postgrex.query!(conn_postgres, "REVOKE SELECT, INSERT ON realtime.messages FROM #{role}", [])
+      Postgrex.query!(conn_postgres, "DROP ROLE #{role}", [])
+    end
+
+    @tag :requires_supautils_policy_grants
+    test "cannot delegate any other realtime.messages privilege to a custom role", %{conn_postgres: conn_postgres} do
+      role = "role_test_undelegatable_#{System.unique_integer([:positive])}"
+      Postgrex.query!(conn_postgres, "CREATE ROLE #{role}", [])
+
+      for privilege <- ~w(UPDATE DELETE TRUNCATE TRIGGER REFERENCES) do
+        Postgrex.query!(conn_postgres, "GRANT #{privilege} ON realtime.messages TO #{role}", [])
+
+        assert %Postgrex.Result{rows: [[false]]} =
+                 Postgrex.query!(
+                   conn_postgres,
+                   "SELECT has_table_privilege($1, 'realtime.messages', $2)",
+                   [role, privilege]
+                 )
+      end
+
+      Postgrex.query!(conn_postgres, "DROP ROLE #{role}", [])
+    end
+
     test "can insert into realtime.messages", %{conn_postgres: conn_postgres} do
       assert {:ok, %Postgrex.Result{num_rows: 1}} =
                Postgrex.query(

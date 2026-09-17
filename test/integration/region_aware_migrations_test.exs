@@ -31,16 +31,19 @@ defmodule Realtime.Integration.RegionAwareMigrationsTest do
 
     tenant = tenant_fixture(%{extensions: settings})
     region = Application.get_env(:realtime, :region)
+    tenant_region = Tenants.region(tenant)
 
     {:ok, node} =
       Clustered.start(nil,
         extra_config: [
-          {:realtime, :region, Tenants.region(tenant)},
+          {:realtime, :region, tenant_region},
           {:realtime, :master_region, region}
         ]
       )
 
-    Process.sleep(100)
+    # The peer registers itself in the syn `RegionNodes` group asynchronously after
+    # connecting; wait for that
+    assert eventually(fn -> Realtime.Nodes.region_nodes(tenant_region) != [] end)
 
     %{tenant: tenant, node: node}
   end
@@ -69,8 +72,8 @@ defmodule Realtime.Integration.RegionAwareMigrationsTest do
     end)
 
     assert :ok = Migrations.run_migrations(tenant)
-    Process.sleep(1000)
-    tenant = Realtime.Repo.reload!(tenant)
-    refute tenant.migrations_ran == 0
+
+    # Migration runs over gen_rpc on the peer node
+    assert eventually(fn -> Realtime.Repo.reload!(tenant).migrations_ran != 0 end)
   end
 end
