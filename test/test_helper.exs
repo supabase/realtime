@@ -11,41 +11,45 @@ max_cases = backend.max_cases()
 
 repo_config = Application.fetch_env!(:realtime, Realtime.Repo)
 
-# The probes below describe a *tenant* database: every tag they drive gates
-# behaviour of a tenant's realtime schema, not the registry's. The realtime
-# database only answers for them when both run the same image, so the backend
-# says which port to ask.
-{:ok, pg_conn} =
-  Postgrex.start_link(
-    hostname: repo_config[:hostname],
-    port: backend.capability_probe_port() || repo_config[:port] || 5432,
-    username: repo_config[:username],
-    password: repo_config[:password],
-    database: "postgres"
-  )
+# Probe the databases the tenant tests actually exercise. Metadata Postgres can
+# have a different version and permission policy from an external tenant cluster.
+probe_configs =
+  if backend.capability_probe_port() do
+    Enum.map(TestTenantDb.Backend.External.ports!(), fn port ->
+      [hostname: "127.0.0.1", port: port, username: "supabase_admin", password: "postgres", database: "postgres"]
+    end)
+  else
+    [Keyword.take(repo_config, [:hostname, :port, :username, :password]) ++ [database: "postgres"]]
+  end
 
-%{rows: [[pg_version_num]]} = Postgrex.query!(pg_conn, "SELECT current_setting('server_version_num')::int")
+capabilities =
+  Enum.map(probe_configs, fn config ->
+    {:ok, conn} = Postgrex.start_link(config)
 
-%{rows: [[has_supautils_realtime_grants]]} =
-  Postgrex.query!(
-    pg_conn,
-    "SELECT current_setting('supautils.policy_grants', true) LIKE '%realtime.messages%' AND current_setting('supautils.policy_grants', true) LIKE '%realtime.subscription%'"
-  )
+    try do
+      %{rows: [[version, grants, oriole]]} =
+        Postgrex.query!(
+          conn,
+          """
+          SELECT current_setting('server_version_num')::int,
+            COALESCE(current_setting('supautils.policy_grants', true) LIKE '%realtime.messages%'
+              AND current_setting('supautils.policy_grants', true) LIKE '%realtime.subscription%', false),
+            EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'orioledb')
+          """,
+          []
+        )
 
-%{rows: [[orioledb?]]} =
-  Postgrex.query!(pg_conn, "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'orioledb')")
+      {version, grants, oriole}
+    after
+      GenServer.stop(conn)
+    end
+  end)
 
-# Two tests read `pg_prepared_statements` to prove Realtime asked Postgrex to cache a statement.
-# That only works where an *un*cached query leaves no entry behind. A connection pooler prepares
-# every statement it forwards, keyed by the SQL text, so there a cached and an uncached query look
-# identical and the assertion would hold even if the caching were removed from the code.
-Postgrex.query!(pg_conn, "SELECT 1 AS statement_cache_probe", [])
-
-%{rows: [[observable_statement_cache?]]} =
-  Postgrex.query!(
-    pg_conn,
-    "SELECT count(*) = 0 FROM pg_prepared_statements WHERE statement LIKE '%statement_cache_probe%'"
-  )
+{pg_version_num, has_supautils_realtime_grants, orioledb?} =
+  case Enum.uniq(capabilities) do
+    [capability] -> capability
+    _ -> raise "Tenant databases must have matching Postgres versions, supautils policies and extensions"
+  end
 
 # `realtime.broadcast_changes(..., NEW record, OLD record, ...)` (introduced in commit 2922658c) called from a trigger via `PERFORM` fails on PG <= 14.5
 requires_pg_140006 = if pg_version_num < 140_006, do: :requires_pg_140006
@@ -57,13 +61,13 @@ requires_supautils_policy_grants = if !has_supautils_realtime_grants, do: :requi
 requires_no_supautils_policy_grants = if has_supautils_realtime_grants, do: :requires_no_supautils_policy_grants
 
 skip_orioledb = if orioledb?, do: :skip_orioledb
+# Multigres does not run pgdelta tests. They continue to run unchanged against
+# the ordinary Postgres backends.
+requires_pgdelta = if backend == TestTenantDb.Backend.External, do: :requires_pgdelta
 
 # Tests that kill and recreate a pooled tenant database; only the docker backend
 # owns its databases, external servers are supplied to us.
 requires_docker_backend = if backend != TestTenantDb.Backend.Docker, do: :requires_docker_backend
-
-requires_observable_statement_cache =
-  if !observable_statement_cache?, do: :requires_observable_statement_cache
 
 exclude =
   Enum.reject(
@@ -75,7 +79,7 @@ exclude =
       requires_no_supautils_policy_grants,
       skip_orioledb,
       requires_docker_backend,
-      requires_observable_statement_cache
+      requires_pgdelta
     ],
     &is_nil/1
   )

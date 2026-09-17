@@ -513,7 +513,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                  Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
       end
 
-      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json', true)", [slot_name])
+      TestTenantDb.create_logical_replication_slot!(conn, slot_name, "wal2json")
 
       try do
         Postgrex.query!(conn, "insert into test (details) values ('hello')", [])
@@ -562,7 +562,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                  Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
       end
 
-      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json', true)", [slot_name])
+      TestTenantDb.create_logical_replication_slot!(conn, slot_name, "wal2json")
 
       try do
         Postgrex.query!(conn, "insert into test (id, details) values (5, 'hello')", [])
@@ -612,7 +612,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                  Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
       end
 
-      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json', true)", [slot_name])
+      TestTenantDb.create_logical_replication_slot!(conn, slot_name, "wal2json")
 
       try do
         Postgrex.query!(conn, "insert into test (details) values ($1)", [obrien])
@@ -787,29 +787,56 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
       assert "realtime_subscription_insert" in TestHelpers.cached_statement_names(conn)
     end
 
-    @tag :requires_observable_statement_cache
     test "caches the subscription insert statement and reuses it across calls", %{conn: conn} do
       {:ok, subscription_params} =
         Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test"})
 
-      for _ <- 1..2 do
+      PreparedStatementAssertions.assert_reused(conn, "%insert into realtime.subscription as x(%", fn tx, _iteration ->
         params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
 
         assert {:ok, [%Postgrex.Result{}]} =
-                 Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+                 Subscriptions.create(tx, "supabase_realtime_test", params_list, self(), self())
+      end)
+    end
+
+    test "repeated subscription creation preserves each ID and filter", %{conn: conn} do
+      subscriptions = for id <- [101, 202], do: {UUID.uuid1(), id}
+
+      for {subscription_id, id} <- subscriptions do
+        {:ok, params} =
+          Subscriptions.parse_subscription_params(%{
+            "event" => "INSERT",
+            "schema" => "public",
+            "table" => "test",
+            "filter" => "id=eq.#{id}"
+          })
+
+        assert {:ok, [%Postgrex.Result{num_rows: 1}]} =
+                 Subscriptions.create(
+                   conn,
+                   "supabase_realtime_test",
+                   [%{claims: %{"role" => "anon"}, id: subscription_id, subscription_params: params}],
+                   self(),
+                   self()
+                 )
       end
 
-      # pg_prepared_statements is session-scoped and this pool has a single connection, so this
-      # query observes the same backend session that ran the inserts. Only the cached insert holds
-      # a named statement (nothing else on this connection caches), executed once per create above.
-      assert {:ok, %Postgrex.Result{rows: rows}} =
-               Postgrex.query(
-                 conn,
-                 "SELECT name, generic_plans + custom_plans FROM pg_prepared_statements",
-                 []
-               )
+      %{rows: rows} =
+        Postgrex.query!(
+          conn,
+          """
+          SELECT subscription_id::text, entity::text, filters::text, action_filter
+          FROM realtime.subscription
+          """,
+          []
+        )
 
-      assert [["realtime_subscription_insert", 2]] = rows
+      expected =
+        Enum.map(subscriptions, fn {subscription_id, id} ->
+          [subscription_id, "test", ~s|{"(id,eq,#{id},f)"}|, "INSERT"]
+        end)
+
+      assert Enum.sort(rows) == Enum.sort(expected)
     end
 
     test "user can subscribe to only INSERT events", %{conn: conn} do
@@ -1168,7 +1195,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
         [sub_id, %{"role" => "anon"}]
       )
 
-      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json', true)", [slot_name])
+      TestTenantDb.create_logical_replication_slot!(conn, slot_name, "wal2json")
 
       try do
         Postgrex.query!(conn, "insert into test (details) values ('hello')", [])
@@ -1249,7 +1276,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
         [sub_id, %{"role" => "anon"}]
       )
 
-      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json', true)", [slot_name])
+      TestTenantDb.create_logical_replication_slot!(conn, slot_name, "wal2json")
 
       try do
         Postgrex.query!(conn, "insert into test (details) values ('hello')", [])
@@ -1490,7 +1517,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                create_subscriptions(conn, 11, role: "custom_app_role", subscription_params: subscription_params)
 
       slot_name = "test_custom_role_grant_#{:rand.uniform(999_999)}"
-      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json', true)", [slot_name])
+      TestTenantDb.create_logical_replication_slot!(conn, slot_name, "wal2json")
 
       Postgrex.query!(conn, "insert into test (id, details) values (1, 'hello')", [])
 

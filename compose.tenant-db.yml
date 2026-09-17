@@ -1,5 +1,5 @@
 services:
-  tenant_db:
+  tenant_db: &tenant_db
     # TENANT_DB_IMAGE can be a Multigres cluster, in which case only the tenant
     # DB changes and the realtime DB stays on POSTGRES_IMAGE. Everything below
     # is written to suit both: the cluster's entrypoint ignores this command and
@@ -23,22 +23,15 @@ services:
       MULTIGRES_GATEWAY_PG_PORT: "5432"
       # Minimum for the shard's AtLeastN(2) policy to elect a leader.
       MULTIGRES_NUM_CELLS: "2"
-      # Admit non-temporary slots that are registered for failover, which is
-      # what TestHelpers.create_persistent_replication_slot/3 asks for.
+      # Persistent logical slots in the tests require failover support.
       MT_ENABLE_SLOT_BASED_REPLICATION: "true"
-      # Matches the supabase/postgres images' 100, which the suite's
-      # connection-budget tests assume when sizing a tenant's pool.
-      MULTIGRES_PG_MAX_CONNECTIONS: "100"
-      # The same settings TestTenantDb.Backend.Docker passes its containers,
-      # plus the images' default max_wal_senders: tests drive a slot past its
-      # WAL-retention threshold and exhaust the WAL senders, so both have to
-      # be within reach. max_wal_size stays large - a small one forces
-      # checkpoints that starve DDL.
+      # The suite runs a pool per tenant DB plus a replication connection; the
+      # cluster's default of 110 is not enough headroom.
+      MULTIGRES_PG_MAX_CONNECTIONS: "500"
       MULTIGRES_PG_EXTRA_CONF: |
-        wal_keep_size = 32MB
         max_wal_size = 1GB
+        wal_keep_size = 32MB
         max_slot_wal_keep_size = 32MB
-        max_wal_senders = 10
     healthcheck:
       # Over TCP, not the socket: a cluster's PostgreSQL instances sit behind
       # the pooler in their own socket directory.
@@ -53,7 +46,7 @@ services:
   # but it is idempotent, so `db-start` runs it either way rather than carrying
   # a second code path. Behind a profile so `compose up` skips it and
   # `compose run` waits for tenant_db to be healthy first.
-  tenant_db_bootstrap:
+  tenant_db_bootstrap: &tenant_db_bootstrap
     profiles: ["bootstrap"]
     image: ${TENANT_DB_IMAGE:-${POSTGRES_IMAGE:-supabase/postgres:17.6.1.166}}
     depends_on:
@@ -75,5 +68,29 @@ services:
       - --quiet
       - --set=ON_ERROR_STOP=1
       # Only POSTGRES_USER gets POSTGRES_PASSWORD; Realtime also uses `postgres`.
+      - --command=alter role postgres with password 'postgres'
+      - --file=/zb-supabase-schema.sql
+
+  # Separate cluster, not another gateway into the first cluster's database.
+  tenant_db_secondary:
+    <<: *tenant_db
+    profiles: ["multigres"]
+    ports:
+      - "${TENANT_DB_SECONDARY_PORT:-5434}:5432"
+
+  tenant_db_secondary_bootstrap:
+    <<: *tenant_db_bootstrap
+    depends_on:
+      tenant_db_secondary:
+        condition: service_healthy
+    entrypoint:
+      - psql
+      - --host=tenant_db_secondary
+      - --port=5432
+      - --username=supabase_admin
+      - --dbname=postgres
+      - --no-psqlrc
+      - --quiet
+      - --set=ON_ERROR_STOP=1
       - --command=alter role postgres with password 'postgres'
       - --file=/zb-supabase-schema.sql

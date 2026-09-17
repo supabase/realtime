@@ -67,7 +67,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
       # Use a permanent (non-temporary) slot via a separate connection to avoid
       # connection state issues that temporary slots cause on the same connection
       {:ok, slot_conn} = Realtime.Database.connect(tenant, "realtime_rls", :stop)
-      TestHelpers.create_persistent_replication_slot(slot_conn, slot_name, "pgoutput")
+      TestTenantDb.create_logical_replication_slot!(slot_conn, slot_name, "pgoutput")
       GenServer.stop(slot_conn)
 
       assert {:error, :slot_not_found} = Replications.terminate_backend(conn, slot_name)
@@ -192,28 +192,48 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
       assert "realtime_list_changes" in TestHelpers.cached_statement_names(conn)
     end
 
-    @tag :requires_observable_statement_cache
     test "caches the prepared statement and reuses it across calls", %{conn: conn, tenant: tenant} do
       slot_name = "test_slot_#{System.unique_integer([:positive])}"
       drop_slot_on_exit(tenant, slot_name)
 
       {:ok, _} = Replications.prepare_replication(conn, slot_name)
 
-      assert {:ok, _} = Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
-      assert {:ok, _} = Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+      PreparedStatementAssertions.assert_reused(conn, "%FROM realtime.list_changes(%", fn tx, _iteration ->
+        assert {:ok, _} = Replications.list_changes(tx, slot_name, @publication, 100, 1_048_576)
+      end)
+    end
 
-      # pg_prepared_statements is session-scoped and the "realtime_rls" pool has a
-      # single connection, so this query observes the same backend session that ran
-      # list_changes. It must hold exactly one named statement (nothing else on this
-      # connection caches), executed once per list_changes call above.
-      assert {:ok, %Postgrex.Result{rows: rows}} =
-               Postgrex.query(
+    test "repeated polls return new changes without replaying previous changes", %{conn: conn, tenant: tenant} do
+      slot_name = "test_slot_#{System.unique_integer([:positive])}"
+      drop_slot_on_exit(tenant, slot_name)
+
+      {:ok, params} =
+        Subscriptions.parse_subscription_params(%{"event" => "INSERT", "schema" => "public", "table" => "test"})
+
+      subscription_id = UUID.uuid1()
+
+      assert {:ok, [_]} =
+               Subscriptions.create(
                  conn,
-                 "SELECT name, generic_plans + custom_plans FROM pg_prepared_statements",
-                 []
+                 @publication,
+                 [%{claims: %{"role" => "anon"}, id: subscription_id, subscription_params: params}],
+                 self(),
+                 self()
                )
 
-      assert [["realtime_list_changes", 2]] = rows
+      assert {:ok, _} = Replications.prepare_replication(conn, slot_name)
+
+      for {id, details} <- [{101, "first"}, {202, "second"}] do
+        Postgrex.query!(conn, "INSERT INTO public.test (id, details) VALUES ($1, $2)", [id, details])
+
+        assert {:ok, %{rows: [["INSERT", "public", "test", _, record, _, _, _, _, 1]]}} =
+                 Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+
+        assert %{"id" => ^id, "details" => ^details} = Jason.decode!(record)
+      end
+
+      assert {:ok, %{rows: [[nil, nil, nil, "[]", "{}", "{}", nil, nil, nil, 0]]}} =
+               Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
     end
 
     test "slot has changes but no subscribers: returns only the sentinel row with slot_changes_count of 1", %{

@@ -23,6 +23,8 @@ services:
       MULTIGRES_GATEWAY_PG_PORT: "5432"
       # Minimum for the shard's AtLeastN(2) policy to elect a leader.
       MULTIGRES_NUM_CELLS: "2"
+      # Persistent logical slots in the tests require failover support.
+      MT_ENABLE_SLOT_BASED_REPLICATION: "true"
     healthcheck:
       # Over TCP, not the socket: a cluster's PostgreSQL instances sit behind
       # the pooler in their own socket directory.

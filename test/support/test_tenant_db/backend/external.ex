@@ -3,8 +3,8 @@ defmodule TestTenantDb.Backend.External do
   # USE_EXTERNAL_TENANT_DB=true: tenant tests target one or more
   # already-running, external Postgres-wire-compatible servers (e.g.
   # Multigres) on EXTERNAL_TENANT_DB_PORTS, host fixed at 127.0.0.1. Each
-  # configured port is an independent DB — the pool hands out exactly one per
-  # concurrent test, same checkout/checkin contract as the docker pool.
+  # configured port is an independent DB — each checkout holds one until the
+  # test exits, using the same checkout/checkin contract as the docker pool.
   #
   # This module is both the backend implementation and the registry that
   # hands each TestTenantDb.Backend.External.Worker its port. The registry
@@ -17,32 +17,25 @@ defmodule TestTenantDb.Backend.External do
 
   # -- TestTenantDb.Backend implementation
 
-  # Each configured port is one independent DB reused for the whole run, so
-  # max_cases must not exceed the port count — oversubscribing causes far
-  # worse, cascading failures than running serially (concurrent tenant
-  # setup, e.g. DROP SCHEMA realtime CASCADE, stomping on each other once
-  # demand exceeds supply). MAX_CASES is therefore ignored.
+  # Pool capacity and test concurrency are independent: a test may hold more
+  # than one tenant database. Lower MAX_CASES to leave spare workers for it.
   @impl TestTenantDb.Backend
-  def max_cases do
-    # One database is held back from ExUnit's concurrency: a test that briefly
-    # holds a second one (or whose on_exit checkin has not run yet) would
-    # otherwise starve the pool, because unlike the docker backend the pool is
-    # exactly the ports we were given and cannot grow.
-    forced = max(1, length(ports!()) - 1)
+  def max_cases, do: max_cases_config!(System.get_env("MAX_CASES"), length(ports!()))
 
-    if System.get_env("MAX_CASES") do
-      IO.puts(
-        "[TestTenantDb.Backend.External] USE_EXTERNAL_TENANT_DB=true: ignoring MAX_CASES, " <>
-          "forcing max_cases to #{forced} (one fewer than the configured external ports)."
-      )
+  def max_cases_config!(nil, port_count), do: port_count
+  def max_cases_config!("", port_count), do: port_count
+
+  def max_cases_config!(value, port_count) do
+    case Integer.parse(value) do
+      {count, ""} when count > 0 and count <= port_count -> count
+      _ -> raise "MAX_CASES must be between 1 and #{port_count} for the configured external tenant databases"
     end
-
-    forced
   end
 
   # These servers can be a different image from the realtime database
-  # (TENANT_DB_IMAGE), which therefore cannot answer for them. Every configured
-  # port runs the same image, so the first answers for all.
+  # (TENANT_DB_IMAGE), which therefore cannot answer for them. The first port
+  # identifies the tenant endpoint; test_helper also verifies the other ports
+  # expose the same capabilities.
   @impl TestTenantDb.Backend
   def capability_probe_port, do: hd(ports!())
 

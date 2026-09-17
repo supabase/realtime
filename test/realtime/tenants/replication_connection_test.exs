@@ -712,7 +712,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
       name = @replication_slot_name
 
-      Postgrex.query!(db_conn, "SELECT pg_create_logical_replication_slot($1, 'test_decoding', true)", [name])
+      TestTenantDb.create_logical_replication_slot!(db_conn, name, "test_decoding")
 
       assert {:error, {:shutdown, :replication_slot_in_use}} =
                ReplicationConnection.start(tenant, self())
@@ -725,53 +725,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     end
 
     test "handle standby connections exceeds max_wal_senders", %{tenant: tenant} do
-      {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
-      opts = Database.opts(settings)
-      parent = self()
-
-      # The replication connections below publish public.test, and
-      # PostgresReplication.start_link/1 fails outright if it is missing.
-      {:ok, table_conn} = Database.connect(tenant, "realtime_test", :stop)
-      Postgrex.query!(table_conn, "CREATE TABLE IF NOT EXISTS public.test (id serial primary key)", [])
-
-      # Enough connections to occupy every WAL sender, read from the server
-      # rather than hardcoded: the budget differs per image, and a Multigres
-      # cluster spends some of it on its own replication.
-      %{rows: [[max_wal_senders]]} = Postgrex.query!(table_conn, "SELECT current_setting('max_wal_senders')::int", [])
-      GenServer.stop(table_conn)
-
-      pids =
-        for i <- 0..max_wal_senders do
-          replication_slot_opts =
-            %PostgresReplication{
-              connection_opts: opts,
-              table: "test",
-              output_plugin: "pgoutput",
-              output_plugin_options: [proto_version: "1", publication_names: "test_#{i}_publication"],
-              handler_module: Replication.TestHandler,
-              publication_name: "test_#{i}_publication",
-              replication_slot_name: "test_#{i}_slot"
-            }
-
-          spawn(fn ->
-            {:ok, pid} = PostgresReplication.start_link(replication_slot_opts)
-            send(parent, :ready)
-
-            receive do
-              :stop -> Process.exit(pid, :kill)
-            end
-          end)
-        end
-
-      on_exit(fn ->
-        Enum.each(pids, &send(&1, :stop))
-        Process.sleep(2000)
-      end)
-
-      assert_receive :ready, 5000
-      assert_receive :ready, 5000
-      assert_receive :ready, 5000
-      assert_receive :ready, 5000
+      TestTenantDb.exhaust_wal_senders(tenant)
 
       assert {:error, :max_wal_senders_reached} = ReplicationConnection.start(tenant, self())
     end

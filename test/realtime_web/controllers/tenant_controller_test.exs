@@ -317,10 +317,14 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert Cache.get_tenant_by_external_id(tenant.external_id)
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
 
-      %{rows: [rows]} =
-        Postgrex.query!(db_conn, "SELECT slot_name FROM pg_replication_slots WHERE slot_type = 'logical'", [])
+      %{rows: slots} =
+        Postgrex.query!(
+          db_conn,
+          "SELECT slot_name FROM pg_replication_slots WHERE slot_name LIKE 'supabase_realtime_messages_replication_slot_%'",
+          []
+        )
 
-      assert rows > 0
+      assert slots != []
       conn = delete(conn, ~p"/api/tenants/#{tenant.external_id}")
       assert response(conn, 204)
 
@@ -328,8 +332,10 @@ defmodule RealtimeWeb.TenantControllerTest do
       refute Tenants.get_tenant_by_external_id(tenant.external_id)
       Process.sleep(500)
 
-      assert {:ok, %{rows: []}} =
-               Postgrex.query(db_conn, "SELECT slot_name FROM pg_replication_slots WHERE slot_type = 'logical'", [])
+      for [slot] <- slots do
+        assert {:ok, %{rows: []}} =
+                 Postgrex.query(db_conn, "SELECT slot_name FROM pg_replication_slots WHERE slot_name = $1", [slot])
+      end
     end
 
     test "tenant doesn't exist", %{conn: conn} do

@@ -55,6 +55,124 @@ defmodule TestTenantDb do
   @unhealthy_table __MODULE__.Unhealthy
   @probe_retry_table __MODULE__.ProbeRetries
 
+  # Persistent test slots must be failover-enabled when routed through Multigres.
+  # Share the capability-aware persistent slot helper with upstream tests.
+  def create_logical_replication_slot!(conn, name, plugin) do
+    TestHelpers.create_persistent_replication_slot(conn, name, plugin)
+  end
+
+  # Exercise admission control without assuming the server's configured capacity.
+  def exceed_connection_limit(tenant) do
+    {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+    %{rows: [[limit]]} = Postgrex.query!(conn, "SELECT current_setting('max_connections')::int", [])
+    GenServer.stop(conn)
+
+    extensions =
+      Enum.map(tenant.extensions, fn extension ->
+        %{extension | settings: Map.put(extension.settings, "db_pool", limit * 2)}
+      end)
+
+    {:ok, tenant} =
+      Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{
+        extensions:
+          Enum.map(extensions, fn e ->
+            %{
+              "type" => e.type,
+              "settings" =>
+                Map.new(e.settings, fn {k, v} ->
+                  {k,
+                   if(k in ~w(db_host db_port db_user db_password db_name), do: Realtime.Crypto.decrypt!(v), else: v)}
+                end)
+            }
+          end)
+      })
+
+    tenant
+  end
+
+  def exhaust_wal_senders(tenant) do
+    {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
+    {:ok, conn} = Database.connect_db(settings)
+
+    %{rows: [[limit, used]]} =
+      Postgrex.query!(
+        conn,
+        "SELECT current_setting('max_wal_senders')::int, (SELECT count(*) FROM pg_stat_replication)",
+        []
+      )
+
+    supervisor = ExUnit.Callbacks.start_supervised!({DynamicSupervisor, strategy: :one_for_one})
+
+    names =
+      for _ <- List.duplicate(nil, max(limit - used, 0)), do: "sender_pressure_#{System.unique_integer([:positive])}"
+
+    ExUnit.Callbacks.on_exit(fn ->
+      if Process.alive?(supervisor), do: Supervisor.stop(supervisor)
+      {:ok, cleanup} = Database.connect_db(settings)
+
+      try do
+        for name <- names, do: Postgrex.query!(cleanup, "DROP PUBLICATION IF EXISTS #{name}", [])
+      after
+        GenServer.stop(cleanup)
+      end
+    end)
+
+    try do
+      for {name, n} <- Enum.with_index(names, 1) do
+        config = %PostgresReplication{
+          connection_opts: Database.opts(settings),
+          table: :all,
+          output_plugin: "pgoutput",
+          output_plugin_options: [proto_version: "1", publication_names: name],
+          handler_module: Replication.TestHandler,
+          publication_name: name,
+          replication_slot_name: name
+        }
+
+        # Multigres reserves a backend sender for an actual stream; direct
+        # Postgres can hold a sender without also exhausting replication slots.
+        start =
+          if Backend.current() == Backend.External do
+            {PostgresReplication, :start_link, [config]}
+          else
+            {WalSenderClient, :start_link, [Database.opts(settings)]}
+          end
+
+        {:ok, _} =
+          DynamicSupervisor.start_child(
+            supervisor,
+            %{id: name, start: start, restart: :temporary}
+          )
+
+        unless TestHelpers.eventually(fn ->
+                 %{rows: [[count]]} = Postgrex.query!(conn, "SELECT count(*) FROM pg_stat_replication", [])
+                 count >= used + n
+               end),
+               do: raise("test replication client did not begin streaming")
+      end
+    after
+      GenServer.stop(conn)
+    end
+  end
+
+  def with_fault_proxy(tenant) do
+    {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
+    proxy = ExUnit.Callbacks.start_supervised!({TcpFaultProxy, {settings.hostname, settings.port}})
+
+    extensions =
+      Enum.map(tenant.extensions, fn e ->
+        settings =
+          Map.new(e.settings, fn {k, v} ->
+            {k, if(k in ~w(db_host db_port db_user db_password db_name), do: Realtime.Crypto.decrypt!(v), else: v)}
+          end)
+
+        %{"type" => e.type, "settings" => Map.put(settings, "db_port", Integer.to_string(TcpFaultProxy.port(proxy)))}
+      end)
+
+    {:ok, tenant} = Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{extensions: extensions})
+    {tenant, proxy}
+  end
+
   def start_link(max_cases), do: GenServer.start_link(__MODULE__, max_cases, name: __MODULE__)
 
   def init(max_cases) do
@@ -341,7 +459,7 @@ defmodule TestTenantDb do
     %{rows: rows} = Postgrex.query!(conn, query, [])
 
     Enum.each(rows, fn [name] ->
-      Postgrex.query!(conn, drop_prefix <> ~s("#{name}") <> drop_suffix, [])
+      Postgrex.query!(conn, drop_prefix <> ~s("#{String.replace(name, "\"", "\"\"")}") <> drop_suffix, [])
     end)
   end
 
@@ -366,7 +484,12 @@ defmodule TestTenantDb do
       )
 
     try do
-      %{rows: slots} = Postgrex.query!(admin_conn, "SELECT slot_name, active_pid FROM pg_replication_slots", [])
+      %{rows: slots} =
+        Postgrex.query!(
+          admin_conn,
+          "SELECT slot_name, active_pid FROM pg_replication_slots WHERE slot_type = 'logical'",
+          []
+        )
 
       Enum.each(slots, fn [slot_name, active_pid] ->
         if active_pid, do: Postgrex.query!(admin_conn, "SELECT pg_terminate_backend($1)", [active_pid])

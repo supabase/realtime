@@ -138,6 +138,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
     # The 15.1.0.1 image is excluded because its pg_net 0.6 worker never accepts the
     # ProcSignalBarrier, so pg-delta's DROP DATABASE ... WITH (FORCE) shadow cleanup hangs.
     @describetag :requires_supautils_policy_grants
+    @describetag :requires_pgdelta
     setup %{tenant: tenant} do
       {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
       settings = %{settings | pool_size: 1}
@@ -296,6 +297,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
     # The 15.1.0.1 image is excluded because its pg_net 0.6 worker never accepts the
     # ProcSignalBarrier, so pg-delta's DROP DATABASE ... WITH (FORCE) shadow cleanup hangs.
     @describetag :requires_supautils_policy_grants
+    @describetag :requires_pgdelta
     setup %{tenant: tenant} do
       {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
       settings = %{settings | pool_size: 1}

@@ -1029,6 +1029,7 @@ defmodule Realtime.Tenants.SchemaTest do
 
   describe "pg-delta reconciliation" do
     @describetag :requires_supautils_policy_grants
+    @describetag :requires_pgdelta
     @describetag :skip_orioledb
 
     test "recreating realtime.messages leaves the postgres role able to work", %{
