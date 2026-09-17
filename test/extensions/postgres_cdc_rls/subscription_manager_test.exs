@@ -1,4 +1,4 @@
-defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
+defmodule Extensions.PostgresCdcRls.SubscriptionManagerTest do
   # async: false due to global Mimic stubs
   use Realtime.DataCase, async: false
   use Mimic
