@@ -140,13 +140,18 @@ defmodule Clustered do
     await_port_available!(peer_gen_rpc_port, "gen_rpc", "TEST_PEER_GEN_RPC_PORT_BASE")
     await_port_available!(phoenix_port, "Phoenix", "TEST_PEER_PORT_BASE")
 
-    {:ok, _} = :peer.call(pid, Application, :ensure_all_started, [:gen_rpc])
-    {:ok, _} = :peer.call(pid, Application, :ensure_all_started, [:mix])
+    # :peer.call/4 defaults to a 5s gen_server.call timeout, which starting the full
+    # :realtime app (DB pools, endpoint, etc.) on the peer can exceed under CI CPU
+    # contention. Give a more generous timeout instead.
+    peer_call_timeout = to_timeout(second: 12)
+
+    {:ok, _} = :peer.call(pid, Application, :ensure_all_started, [:gen_rpc], peer_call_timeout)
+    {:ok, _} = :peer.call(pid, Application, :ensure_all_started, [:mix], peer_call_timeout)
     :ok = :peer.call(pid, Mix, :env, [Mix.env()])
 
     Enum.each(
       [:logger, :runtime_tools, :prom_ex, :mix, :os_mon, :realtime],
-      fn app -> {:ok, _} = :peer.call(pid, Application, :ensure_all_started, [app]) end
+      fn app -> {:ok, _} = :peer.call(pid, Application, :ensure_all_started, [app], peer_call_timeout) end
     )
 
     if aux_mod do
