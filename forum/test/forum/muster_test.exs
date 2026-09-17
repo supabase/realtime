@@ -638,6 +638,13 @@ defmodule Forum.MusterTest do
       key = {:gc_g, :src@nowhere}
       src = fake_pid()
 
+      # Make the source a cluster member. reap_departed_sources/1 rides the same
+      # :sweep_tombstones tick and deletes rows whose source is both outside the
+      # view and disconnected -- which a bare :src@nowhere is -- so without this
+      # the sweeps below would reap the row outright and the test would no longer
+      # be measuring the tombstone window at all.
+      inject_fake_remote(scope, :src@nowhere)
+
       :ok = Scope.occupied(scope, :gc_g, :src@nowhere, 1, src)
       assert :ok = Scope.vacant_batch(scope, [:gc_g], :src@nowhere, 2, src)
 
@@ -2370,6 +2377,31 @@ defmodule Forum.MusterTest do
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
       assert :ok = Muster.join(scope, g, pid)
       assert :occupied = wait_for_group_state(scope, g, :occupied, 2_000)
+    end
+
+    test "a coordinator crash mid-drain reopens the join gate on restart",
+         %{scope: scope} do
+      # drain/2 closes the join gate by setting the :accepting_joins
+      # persistent_term to false.
+      # Because it lives outside the coordinator's process state, a crash before
+      # the node actually dies would otherwise leave it stuck false forever: the
+      # restarted incarnation re-pairs and routes normally, yet every join would
+      # keep returning {:error, :draining} for the life of the OS process. init/1
+      # must reopen the gate.
+      :persistent_term.put({Forum.Muster, scope, :accepting_joins}, false)
+      pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      assert {:error, :draining} = Muster.join(scope, :drain_crash_g, pid)
+
+      coord = Process.whereis(Forum.Supervisor.name(scope))
+      ref = Process.monitor(coord)
+      Process.exit(coord, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^coord, :killed}, 1_000
+
+      new_coord = wait_for_new_pid(Forum.Supervisor.name(scope), coord)
+      assert is_pid(new_coord)
+
+      assert :ok = wait_until_join_ok(scope, :drain_crash_g, pid)
+      assert :persistent_term.get({Forum.Muster, scope, :accepting_joins}) == true
     end
 
     test "a rejoin during a coordinator restart does not leave targets/3 silently dropping a live member",
