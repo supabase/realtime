@@ -1,4 +1,4 @@
-defmodule Realtime.Extensions.CdcRlsTest do
+defmodule Extensions.PostgresCdcRlsTest do
   # async: false due to global mimic mock
   use Realtime.DataCase, async: false
   use Mimic

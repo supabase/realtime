@@ -13,6 +13,7 @@ presence = System.get_env("PRESENCE", "false") == "false"
 
 config :realtime,
   presence: presence,
+  load_tenant_db_dump: false,
   node_balance_uptime_threshold_in_ms: 100
 
 port_free? = fn port ->

@@ -54,7 +54,7 @@ defmodule TestTenantDb.Backend.Docker do
 
   @impl TestTenantDb.Backend
   def prepare! do
-    pull()
+    :ok = pull()
 
     reap_abandoned_containers()
 
@@ -259,6 +259,7 @@ defmodule TestTenantDb.Backend.Docker do
       _ ->
         IO.puts("Pulling image #{image()}. This might take a while...")
         {_, 0} = System.cmd("docker", ["pull", image()])
+        :ok
     end
   end
 

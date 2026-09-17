@@ -1,4 +1,4 @@
-defmodule Realtime.Extensions.CdcRls.SubscriptionManagerDistributedTest do
+defmodule Extensions.PostgresCdcRls.SubscriptionManagerDistributedTest do
   # Usage of Clustered
   use ExUnit.Case, async: false
   import ExUnit.CaptureLog

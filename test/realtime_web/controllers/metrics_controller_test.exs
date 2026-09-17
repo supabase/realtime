@@ -72,6 +72,20 @@ defmodule RealtimeWeb.MetricsControllerTest do
     {"realtime_channel_error", "realtime_channel_error", [code: "TestError", tenant: "test_tenant"]}
   ]
 
+  # `beam_system_schedulers_online_info` (which we check for)
+  # is populated by a periodic poller under CI CPU contention a tick can be missed,
+  # so poll for a scrape that includes it.
+  defp text_response_when_ready(conn, path) do
+    fetch_scrape = fn -> conn |> get(path) |> text_response(200) end
+
+    assert eventually(fn ->
+             fetch_scrape.() =~ "# HELP beam_system_schedulers_online_info"
+           end)
+
+    # we wastefully query again but it's not trivial to extract it from above and it's not _that_ expensive
+    fetch_scrape.()
+  end
+
   # Fires every telemetry event needed to populate all event-based metrics
   defp fire_all_tenant_events do
     tenant_meta = %{tenant: "test_tenant"}
@@ -146,10 +160,7 @@ defmodule RealtimeWeb.MetricsControllerTest do
     test "contains both global and tenant metrics with values", %{conn: conn} do
       fire_all_tenant_events()
 
-      response =
-        conn
-        |> get(~p"/metrics")
-        |> text_response(200)
+      response = text_response_when_ready(conn, ~p"/metrics")
 
       for {help_metric, value_metric, tags} <- @global_metrics do
         assert response =~ "# HELP #{help_metric}", "expected global metric #{help_metric} to be present"
@@ -222,10 +233,7 @@ defmodule RealtimeWeb.MetricsControllerTest do
     test "returns both global and tenant metrics with values scoped to the given region", %{conn: conn} do
       fire_all_tenant_events()
 
-      response =
-        conn
-        |> get(~p"/metrics/us-east-1")
-        |> text_response(200)
+      response = text_response_when_ready(conn, ~p"/metrics/us-east-1")
 
       for {help_metric, value_metric, tags} <- @global_metrics do
         assert response =~ "# HELP #{help_metric}", "expected global metric #{help_metric} to be present"

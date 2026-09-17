@@ -47,3 +47,6 @@ mise.local.toml
 
 # Scaffolded by `pgdelta schema export` on every run
 priv/repo/tenant_schema/_custom/
+
+# pg_regress output from test/walrus/run.sh
+test/walrus/results/
