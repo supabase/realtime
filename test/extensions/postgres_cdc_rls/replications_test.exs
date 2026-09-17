@@ -186,35 +186,42 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
 
       {:ok, _} = Replications.prepare_replication(conn, slot_name)
 
-      parent = self()
-
-      Mimic.stub(Postgrex, :query, fn connection, sql, params, opts ->
-        if opts[:cache_statement] == "realtime_list_changes", do: send(parent, :cached_query)
-        Mimic.call_original(Postgrex, :query, [connection, sql, params, opts])
+      PreparedStatementAssertions.assert_reused(conn, "%FROM realtime.list_changes(%", fn tx, _iteration ->
+        assert {:ok, _} = Replications.list_changes(tx, slot_name, @publication, 100, 1_048_576)
       end)
+    end
 
-      assert {:ok, _} = Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
-      assert {:ok, _} = Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+    test "repeated polls return new changes without replaying previous changes", %{conn: conn, tenant: tenant} do
+      slot_name = "test_slot_#{System.unique_integer([:positive])}"
+      drop_slot_on_exit(tenant, slot_name)
 
-      assert_receive :cached_query
-      assert_receive :cached_query
-      refute_receive :cached_query
+      {:ok, params} =
+        Subscriptions.parse_subscription_params(%{"event" => "INSERT", "schema" => "public", "table" => "test"})
 
-      # Only direct Postgres exposes the client's statement names and session counters.
-      if TestTenantDb.Backend.current() == TestTenantDb.Backend.Docker do
-        # pg_prepared_statements is session-scoped and the "realtime_rls" pool has a
-        # single connection, so this query observes the same backend session that ran
-        # list_changes. It must hold exactly one named statement (nothing else on this
-        # connection caches), executed once per list_changes call above.
-        assert {:ok, %Postgrex.Result{rows: rows}} =
-                 Postgrex.query(
-                   conn,
-                   "SELECT name, generic_plans + custom_plans FROM pg_prepared_statements",
-                   []
-                 )
+      subscription_id = UUID.uuid1()
 
-        assert [["realtime_list_changes", 2]] = rows
+      assert {:ok, [_]} =
+               Subscriptions.create(
+                 conn,
+                 @publication,
+                 [%{claims: %{"role" => "anon"}, id: subscription_id, subscription_params: params}],
+                 self(),
+                 self()
+               )
+
+      assert {:ok, _} = Replications.prepare_replication(conn, slot_name)
+
+      for {id, details} <- [{101, "first"}, {202, "second"}] do
+        Postgrex.query!(conn, "INSERT INTO public.test (id, details) VALUES ($1, $2)", [id, details])
+
+        assert {:ok, %{rows: [["INSERT", "public", "test", _, record, _, _, _, _, 1]]}} =
+                 Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+
+        assert %{"id" => ^id, "details" => ^details} = Jason.decode!(record)
       end
+
+      assert {:ok, %{rows: [[nil, nil, nil, "[]", "{}", "{}", nil, nil, nil, 0]]}} =
+               Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
     end
 
     test "slot has changes but no subscribers: returns only the sentinel row with slot_changes_count of 1", %{

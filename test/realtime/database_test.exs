@@ -83,18 +83,47 @@ defmodule Realtime.DatabaseTest do
     end
 
     @tag db_pool: 3
-    test "durable pool opens the configured number of realtime_connect connections", %{tenant: tenant} do
-      assert {:ok, pool, _migrations_ran} = Database.check_tenant_connection(tenant, [self()])
+    test "durable pool allows three transactions and queues a fourth", %{tenant: tenant} do
+      assert {:ok, pool, _migrations_ran} = Database.check_tenant_connection(tenant)
+      parent = self()
 
-      connections =
+      start_transaction = fn ->
+        Task.async(fn ->
+          send(parent, {:attempting_checkout, self()})
+
+          Postgrex.transaction(pool, fn tx ->
+            assert %{rows: [[1]]} = Postgrex.query!(tx, "SELECT 1", [])
+            send(parent, {:holding_connection, self()})
+
+            receive do
+              :release -> :released
+            after
+              5_000 -> flunk("test did not release the held transaction")
+            end
+          end)
+        end)
+      end
+
+      holders =
         for _ <- 1..3 do
-          assert_receive {:connected, pid}, 5_000
-          pid
+          task = start_transaction.()
+          pid = task.pid
+          assert_receive {:holding_connection, ^pid}, 5_000
+          task
         end
 
-      assert length(Enum.uniq(connections)) == 3
-      refute_receive {:connected, _}
-      assert {:ok, %{rows: [[1]]}} = Postgrex.query(pool, "SELECT 1", [])
+      fourth = start_transaction.()
+      fourth_pid = fourth.pid
+      assert_receive {:attempting_checkout, ^fourth_pid}, 5_000
+      refute_receive {:holding_connection, ^fourth_pid}, 100
+
+      [first | remaining] = holders
+      send(first.pid, :release)
+      assert {:ok, :released} = Task.await(first)
+      assert_receive {:holding_connection, ^fourth_pid}, 5_000
+
+      for task <- remaining ++ [fourth], do: send(task.pid, :release)
+      for task <- remaining ++ [fourth], do: assert({:ok, :released} = Task.await(task))
     end
   end
 

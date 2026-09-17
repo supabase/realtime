@@ -777,38 +777,52 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
       {:ok, subscription_params} =
         Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test"})
 
-      parent = self()
-
-      Mimic.stub(Postgrex, :query, fn connection, sql, params, opts ->
-        if opts[:cache_statement] == "realtime_subscription_insert", do: send(parent, :cached_query)
-        Mimic.call_original(Postgrex, :query, [connection, sql, params, opts])
-      end)
-
-      for _ <- 1..2 do
+      PreparedStatementAssertions.assert_reused(conn, "%insert into realtime.subscription as x(%", fn tx, _iteration ->
         params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
 
         assert {:ok, [%Postgrex.Result{}]} =
-                 Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
-      end
+                 Subscriptions.create(tx, "supabase_realtime_test", params_list, self(), self())
+      end)
+    end
 
-      assert_receive :cached_query
-      assert_receive :cached_query
-      refute_receive :cached_query
+    test "repeated subscription creation preserves each ID and filter", %{conn: conn} do
+      subscriptions = for id <- [101, 202], do: {UUID.uuid1(), id}
 
-      # Only direct Postgres exposes the client's statement names and session counters.
-      if TestTenantDb.Backend.current() == TestTenantDb.Backend.Docker do
-        # pg_prepared_statements is session-scoped and this pool has a single connection, so this
-        # query observes the same backend session that ran the inserts. Only the cached insert holds
-        # a named statement (nothing else on this connection caches), executed once per create above.
-        assert {:ok, %Postgrex.Result{rows: rows}} =
-                 Postgrex.query(
+      for {subscription_id, id} <- subscriptions do
+        {:ok, params} =
+          Subscriptions.parse_subscription_params(%{
+            "event" => "INSERT",
+            "schema" => "public",
+            "table" => "test",
+            "filter" => "id=eq.#{id}"
+          })
+
+        assert {:ok, [%Postgrex.Result{num_rows: 1}]} =
+                 Subscriptions.create(
                    conn,
-                   "SELECT name, generic_plans + custom_plans FROM pg_prepared_statements",
-                   []
+                   "supabase_realtime_test",
+                   [%{claims: %{"role" => "anon"}, id: subscription_id, subscription_params: params}],
+                   self(),
+                   self()
                  )
-
-        assert [["realtime_subscription_insert", 2]] = rows
       end
+
+      %{rows: rows} =
+        Postgrex.query!(
+          conn,
+          """
+          SELECT subscription_id::text, entity::text, filters::text, action_filter
+          FROM realtime.subscription
+          """,
+          []
+        )
+
+      expected =
+        Enum.map(subscriptions, fn {subscription_id, id} ->
+          [subscription_id, "test", ~s|{"(id,eq,#{id},f)"}|, "INSERT"]
+        end)
+
+      assert Enum.sort(rows) == Enum.sort(expected)
     end
 
     test "user can subscribe to only INSERT events", %{conn: conn} do
