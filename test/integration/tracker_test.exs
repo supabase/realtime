@@ -6,6 +6,7 @@ defmodule Integration.TrackerTest do
   alias Phoenix.Socket.Message
   alias Realtime.Tenants.Connect
   alias Realtime.Integration.WebsocketClient
+  import ExUnit.CaptureLog
 
   setup do
     tenant = TestTenantDb.checkout_tenant(run_migrations: true)
@@ -36,6 +37,30 @@ defmodule Integration.TrackerTest do
     start_supervised!({Tracker, check_interval_in_ms: 100})
     # wait to trigger tracker
     assert_process_down(socket, 1000)
+  end
+
+  test "suppresses Ranch killed connection log when connection is killed by tracker", %{
+    tenant: tenant
+  } do
+    {socket, _} = get_connection(tenant)
+    config = %{broadcast: %{self: true}, private: false, presence: %{enabled: false}}
+    topic = "realtime:#{random_string()}"
+
+    :ok = WebsocketClient.join(socket, topic, %{config: config})
+    assert_receive %Message{topic: ^topic, event: "phx_reply"}, 500
+
+    :ok = WebsocketClient.leave(socket, topic, %{})
+    assert_receive %Message{topic: ^topic, event: "phx_close"}, 500
+
+    log =
+      capture_log(fn ->
+        start_supervised!({Tracker, check_interval_in_ms: 100})
+        assert_process_down(socket, 1000)
+      end)
+
+    assert log =~ "Killing 1 transport pids with no channels open"
+    refute log =~ "had connection process started with"
+    refute log =~ "exit with reason: :killed"
   end
 
   test "failed connections are present in tracker with counter lower than 0 so they are actioned on by tracker", %{
