@@ -104,4 +104,5 @@ This is the list of operational codes that can help you understand your deployme
 | MetricsPusherTaskExited            | A metrics push task exited unexpectedly before completing                                                                                                                                             |
 | MetricsPusherFailed                | Realtime failed to push metrics to the configured endpoint                                                                                                                                            |
 | MetricsPusherException             | An exception was raised while pushing metrics to the configured endpoint                                                                                                                              |
+| AccessTokenRefreshThrottled        | An `access_token` refresh arrived before `ACCESS_TOKEN_THROTTLE_MS` elapsed since the last verification. The newest token is held and applied when the window closes                                   |
 
