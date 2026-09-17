@@ -773,6 +773,20 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                )
     end
 
+    test "registers the subscription insert in the connection's statement cache", %{conn: conn} do
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test"})
+
+      refute "realtime_subscription_insert" in TestHelpers.cached_statement_names(conn)
+
+      params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
+
+      assert {:ok, [%Postgrex.Result{}]} =
+               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+
+      assert "realtime_subscription_insert" in TestHelpers.cached_statement_names(conn)
+    end
+
     test "caches the subscription insert statement and reuses it across calls", %{conn: conn} do
       {:ok, subscription_params} =
         Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test"})

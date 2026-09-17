@@ -61,4 +61,47 @@ defmodule TestHelpers do
         eventually(fun, opts)
     end
   end
+
+  @doc """
+  The `cache_statement` names Postgrex is holding for `conn`.
+
+  Reads Postgrex's own cache rather than `pg_prepared_statements`, because a connection pooler
+  prepares every statement it forwards, keyed by the SQL text: there a query the client did not
+  cache is indistinguishable from one it did, and an assertion on the catalog would still pass
+  with the caching removed. What the client asked for is only visible on the client.
+
+  This reaches into DBConnection and Postgrex internals, so it raises when it cannot find them.
+  A dependency bump then fails loudly instead of silently reporting "nothing cached", which would
+  turn every caller into a tautology.
+  """
+  @spec cached_statement_names(pid()) :: [String.t()]
+  def cached_statement_names(conn) do
+    owners = [conn | elem(Process.info(conn, :links), 1)]
+
+    holder =
+      Enum.find(:ets.all(), fn tab ->
+        ets_info(tab, :name) == DBConnection.Holder and ets_info(tab, :owner) in owners
+      end)
+
+    if !holder, do: raise("no DBConnection.Holder table owned by #{inspect(conn)} or its links")
+
+    protocol =
+      case :ets.lookup(holder, :conn) do
+        [row] -> row |> Tuple.to_list() |> Enum.find(&match?(%Postgrex.Protocol{}, &1))
+        _ -> nil
+      end
+
+    if !protocol, do: raise("no %Postgrex.Protocol{} in the holder row for #{inspect(conn)}")
+
+    case protocol.queries do
+      nil -> []
+      table -> table |> :ets.tab2list() |> Enum.map(&elem(&1, 0)) |> Enum.sort()
+    end
+  end
+
+  defp ets_info(table, key) do
+    :ets.info(table, key)
+  rescue
+    ArgumentError -> nil
+  end
 end
