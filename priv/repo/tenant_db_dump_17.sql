@@ -1212,7 +1212,7 @@ ALTER TABLE realtime.messages ENABLE ROW LEVEL SECURITY;
 GRANT USAGE ON SCHEMA realtime TO postgres WITH GRANT OPTION;
 GRANT USAGE ON SCHEMA realtime TO anon;
 GRANT USAGE ON SCHEMA realtime TO service_role;
-GRANT ALL ON SCHEMA realtime TO supabase_realtime_admin WITH GRANT OPTION;
+GRANT ALL ON SCHEMA realtime TO supabase_realtime_admin;
 GRANT USAGE ON SCHEMA realtime TO authenticated;
 
 
@@ -1512,3 +1512,4 @@ INSERT INTO realtime."schema_migrations" (version) VALUES (20260709120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260714120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260827120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260914120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20260916120000);
