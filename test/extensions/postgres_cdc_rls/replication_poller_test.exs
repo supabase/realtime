@@ -1,4 +1,4 @@
-defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
+defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
   # Tweaking application env
   use Realtime.DataCase, async: false
 
