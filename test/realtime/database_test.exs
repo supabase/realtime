@@ -148,7 +148,7 @@ defmodule Realtime.DatabaseTest do
   describe "replication_slot_teardown/1" do
     test "removes replication slots with the realtime prefix", %{tenant: tenant} do
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-      TestHelpers.create_persistent_replication_slot(conn, "realtime_test_slot", "pgoutput")
+      create_replication_slot(conn, "realtime_test_slot", plugin: "pgoutput", temporary: false)
       Database.replication_slot_teardown(tenant)
 
       assert %{rows: []} =
@@ -160,7 +160,9 @@ defmodule Realtime.DatabaseTest do
     test "removes replication slots with a given name and existing connection", %{tenant: tenant} do
       name = String.downcase("slot_#{random_string()}")
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-      Postgrex.query!(conn, "SELECT * FROM pg_create_logical_replication_slot('#{name}', 'pgoutput', true)", [])
+
+      create_replication_slot(conn, name, plugin: "pgoutput")
+
       Database.replication_slot_teardown(conn, name)
       Process.sleep(1000)
 
@@ -171,7 +173,7 @@ defmodule Realtime.DatabaseTest do
     test "removes replication slots with a given name and a tenant", %{tenant: tenant} do
       name = String.downcase("slot_#{random_string()}")
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-      TestHelpers.create_persistent_replication_slot(conn, name, "pgoutput")
+      create_replication_slot(conn, name, plugin: "pgoutput", temporary: false)
       Database.replication_slot_teardown(tenant, name)
 
       assert %{rows: []} =
@@ -441,13 +443,13 @@ defmodule Realtime.DatabaseTest do
       slot_name = "test_slot_#{suffix}"
       table_name = "slot_test_#{suffix}"
 
-      TestHelpers.create_persistent_replication_slot(db_conn, slot_name, "pgoutput")
+      create_replication_slot(db_conn, slot_name, plugin: "pgoutput", temporary: false)
       Postgrex.query!(db_conn, "CREATE TABLE IF NOT EXISTS #{table_name} (id INT, data TEXT)", [])
 
       on_exit(fn ->
         case Database.connect(tenant, "realtime_test_cleanup", :stop) do
           {:ok, conn} ->
-            Postgrex.query(conn, "SELECT pg_drop_replication_slot($1)", [slot_name])
+            drop_replication_slot(conn, slot_name)
             Postgrex.query(conn, "DROP TABLE IF EXISTS #{table_name} CASCADE", [])
             GenServer.stop(conn)
 

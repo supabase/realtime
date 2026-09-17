@@ -366,7 +366,14 @@ defmodule TestTenantDb do
       )
 
     try do
-      %{rows: slots} = Postgrex.query!(admin_conn, "SELECT slot_name, active_pid FROM pg_replication_slots", [])
+      # Logical only: those are the ones Realtime creates. A cluster keeps a physical slot for
+      # its own replication, and dropping that tears down the cluster's replication instead.
+      %{rows: slots} =
+        Postgrex.query!(
+          admin_conn,
+          "SELECT slot_name, active_pid FROM pg_replication_slots WHERE slot_type = 'logical'",
+          []
+        )
 
       Enum.each(slots, fn [slot_name, active_pid] ->
         if active_pid, do: Postgrex.query!(admin_conn, "SELECT pg_terminate_backend($1)", [active_pid])

@@ -3,35 +3,70 @@ defmodule TestHelpers do
   Generic helpers for tests.
   """
 
-  @failover_supported_query """
-  SELECT EXISTS (
-    SELECT 1 FROM pg_proc p, unnest(p.proargnames) n
-    WHERE p.proname = 'pg_create_logical_replication_slot' AND n = 'failover'
-  )
-  """
-
   @doc """
-  Creates a logical replication slot that outlives the session that made it.
+  Creates a logical replication slot.
 
-  A handful of tests need exactly that: a slot nobody is consuming, or one
-  dropped through another connection. Multigres only admits a non-temporary
-  slot when it is registered for failover, and `failover` is a PostgreSQL 17
-  parameter, so it is passed only where the server has it. Either way the slot
-  ends up in the same state - persistent and inactive.
+  Temporary by default, because that is the only kind Multigres accepts without
+  registering the slot for failover. Pass `temporary: false` for a slot that
+  outlives the session that made it: a handful of tests need one nobody is
+  consuming, or one dropped through another connection.
+
+  `:plugin` (required) - which plugin a slot decodes with
   """
-  @spec create_persistent_replication_slot(pid(), String.t(), String.t()) :: Postgrex.Result.t()
-  def create_persistent_replication_slot(conn, slot_name, plugin) do
-    %{rows: [[failover_supported?]]} = Postgrex.query!(conn, @failover_supported_query, [])
+  @spec create_replication_slot(pid(), String.t(), keyword()) :: Postgrex.Result.t()
+  def create_replication_slot(conn, slot_name, opts) do
+    opts = Keyword.validate!(opts, [:plugin, temporary: true])
+    plugin = Keyword.fetch!(opts, :plugin)
+
+    if opts[:temporary] do
+      Postgrex.query!(
+        conn,
+        "SELECT pg_create_logical_replication_slot(slot_name => $1::name, plugin => $2::name, temporary => true)",
+        [slot_name, plugin]
+      )
+    else
+      create_persistent_slot(conn, slot_name, plugin)
+    end
+  end
+
+  # Multigres only admits a non-temporary slot when it is registered for failover, and
+  # `failover` is a PostgreSQL 17 parameter, so it is passed only where the server has it.
+  # Either way the slot ends up in the same state - persistent and inactive.
+  defp create_persistent_slot(conn, slot_name, plugin) do
+    %{rows: [[failover_supported?]]} =
+      Postgrex.query!(
+        conn,
+        """
+        SELECT EXISTS (
+          SELECT 1 FROM pg_proc p, unnest(p.proargnames) n
+          WHERE p.proname = 'pg_create_logical_replication_slot' AND n = 'failover'
+        )
+        """,
+        []
+      )
 
     if failover_supported? do
       Postgrex.query!(
         conn,
-        "SELECT pg_create_logical_replication_slot($1::name, $2::name, false, false, true)",
+        "SELECT pg_create_logical_replication_slot(slot_name => $1::name, plugin => $2::name, failover => true)",
         [slot_name, plugin]
       )
     else
-      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1::name, $2::name)", [slot_name, plugin])
+      Postgrex.query!(
+        conn,
+        "SELECT pg_create_logical_replication_slot(slot_name => $1::name, plugin => $2::name)",
+        [slot_name, plugin]
+      )
     end
+  end
+
+  @doc """
+  Drops a replication slot, tolerating its absence. For cleanup, not assertions.
+  """
+  @spec drop_replication_slot(pid(), String.t()) :: :ok
+  def drop_replication_slot(conn, slot_name) do
+    Postgrex.query(conn, "SELECT pg_drop_replication_slot($1)", [slot_name])
+    :ok
   end
 
   @doc """

@@ -40,9 +40,8 @@ defmodule TestTenantDb.Backend.External do
     forced
   end
 
-  # These servers can be a different image from the realtime database
-  # (TENANT_DB_IMAGE), which therefore cannot answer for them. Every configured
-  # port runs the same image, so the first answers for all.
+  # TENANT_DB_IMAGE can differ from the realtime database's image, and every
+  # configured port runs it, so the first port answers for all.
   @impl TestTenantDb.Backend
   def capability_probe_port, do: hd(ports!())
 

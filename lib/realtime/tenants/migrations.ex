@@ -341,14 +341,10 @@ defmodule Realtime.Tenants.Migrations do
   def migrations, do: @migrations
 
   @doc """
-  `after_connect` for a connection that applies these migrations.
+  `after_connect` for the connection these migrations run on.
 
-  Multigres' gateway rejects an `EXECUTE` whose statement text is not a
-  constant, which `realtime.cast`, `realtime.check_equality_op` and
-  `realtime.apply_rls` are built on; `multigres.unsafe_connection` opts this
-  connection out. Only migrations need it — calling those functions later works
-  unchanged. On plain Postgres it is an inert namespaced custom setting, so it
-  is sent unconditionally.
+  They build SQL dynamically, which Multigres' gateway refuses to forward;
+  `unsafe_connection` lets it through. A no-op on plain Postgres.
   """
   @spec after_connect() :: {module(), atom(), [term()]}
   def after_connect, do: {Postgrex, :query!, ["SET multigres.unsafe_connection = on", []]}

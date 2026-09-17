@@ -15,8 +15,7 @@ FLAKY_REPORT="flaky-report.md"
 FLAKY_EVENTS="flaky-events.jsonl"
 MAX_SNIPPET_CHARS=8000
 
-# Coverage instrumentation is expensive and only one matrix cell uploads the result, so every
-# other cell runs plain `mix test`. EXPORT_COVERAGE is set by the workflow for that one cell.
+# Coverage instrumentation is expensive, so only the job that uploads it pays for it.
 if [ "${EXPORT_COVERAGE:-false}" = "true" ]; then
   TEST_CMD=(mix coveralls.lcov --partitions 4 --export-coverage "$EXPORT_COVERAGE_SUFFIX" --color)
 else
