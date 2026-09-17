@@ -1029,6 +1029,7 @@ defmodule Realtime.Tenants.SchemaTest do
 
   describe "pg-delta reconciliation" do
     @describetag :requires_supautils_policy_grants
+    @describetag :requires_pgdelta
     @describetag :skip_orioledb
 
     test "recreating realtime.messages leaves the postgres role able to work", %{
@@ -1042,7 +1043,7 @@ defmodule Realtime.Tenants.SchemaTest do
       Postgrex.query!(conn_superuser, "DROP TABLE realtime.messages CASCADE", [])
 
       assert {:ok, %{status: :changes, plan: plan}} =
-               TestTenantDb.run_pgdelta(%{settings | pool_size: 1})
+               TenantMigrations.run_pgdelta(%{settings | pool_size: 1})
 
       assert :ok = TenantMigrations.apply_pgdelta(tenant, plan)
 

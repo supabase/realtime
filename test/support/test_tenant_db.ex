@@ -173,30 +173,6 @@ defmodule TestTenantDb do
     {tenant, proxy}
   end
 
-  # Each plan gets an isolated shadow on ordinary Postgres. Never use the
-  # metadata database itself as a shadow: pg-delta may reset the shadow schema.
-  def run_pgdelta(settings) do
-    alias RealtimeWeb.Dashboard.TenantMigrations
-
-    if Backend.current() == Backend.External do
-      config = Application.fetch_env!(:realtime, Realtime.Repo)
-      opts = Keyword.take(config, [:hostname, :port, :username, :password]) ++ [database: "postgres"]
-      {:ok, admin} = Postgrex.start_link(opts)
-      name = "pgdelta_shadow_#{String.replace(Ecto.UUID.generate(), "-", "")}"
-
-      try do
-        Postgrex.query!(admin, "CREATE DATABASE #{name} TEMPLATE template0", [])
-        shadow = struct(Database, Keyword.merge(opts, database: name, ssl: false))
-        TenantMigrations.run_pgdelta(settings, shadow_url: TenantMigrations.postgres_url(shadow))
-      after
-        Postgrex.query!(admin, "DROP DATABASE IF EXISTS #{name} WITH (FORCE)", [])
-        GenServer.stop(admin)
-      end
-    else
-      TenantMigrations.run_pgdelta(settings)
-    end
-  end
-
   def start_link(max_cases), do: GenServer.start_link(__MODULE__, max_cases, name: __MODULE__)
 
   def init(max_cases) do

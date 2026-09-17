@@ -61,10 +61,9 @@ requires_supautils_policy_grants = if !has_supautils_realtime_grants, do: :requi
 requires_no_supautils_policy_grants = if has_supautils_realtime_grants, do: :requires_no_supautils_policy_grants
 
 skip_orioledb = if orioledb?, do: :skip_orioledb
-# Older Docker images cannot reliably clean up a shadow database; external tests
-# allocate theirs on the separately configured metadata Postgres server.
-requires_pgdelta_shadow =
-  if backend == TestTenantDb.Backend.Docker and !has_supautils_realtime_grants, do: :requires_pgdelta_shadow
+# Multigres does not run pgdelta tests. They continue to run unchanged against
+# the ordinary Postgres backends.
+requires_pgdelta = if backend == TestTenantDb.Backend.External, do: :requires_pgdelta
 
 # Tests that kill and recreate a pooled tenant database; only the docker backend
 # owns its databases, external servers are supplied to us.
@@ -80,7 +79,7 @@ exclude =
       requires_no_supautils_policy_grants,
       skip_orioledb,
       requires_docker_backend,
-      requires_pgdelta_shadow
+      requires_pgdelta
     ],
     &is_nil/1
   )

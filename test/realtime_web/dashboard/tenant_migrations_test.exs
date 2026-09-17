@@ -134,16 +134,11 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
     end
   end
 
-  @tag :requires_pgdelta_shadow
-  test "plans a migrated tenant with an isolated shadow database", %{tenant: tenant} do
-    {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
-    assert {:ok, %{status: :no_changes}} = TestTenantDb.run_pgdelta(%{settings | pool_size: 1})
-  end
-
   describe "run_pgdelta/1" do
     # The 15.1.0.1 image is excluded because its pg_net 0.6 worker never accepts the
     # ProcSignalBarrier, so pg-delta's DROP DATABASE ... WITH (FORCE) shadow cleanup hangs.
     @describetag :requires_supautils_policy_grants
+    @describetag :requires_pgdelta
     setup %{tenant: tenant} do
       {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
       settings = %{settings | pool_size: 1}
@@ -153,7 +148,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
     end
 
     test "reports no drift for a freshly migrated tenant", %{settings: settings} do
-      assert {:ok, %{status: :no_changes, plan: nil}} = TestTenantDb.run_pgdelta(settings)
+      assert {:ok, %{status: :no_changes, plan: nil}} = TenantMigrations.run_pgdelta(settings)
     end
 
     test "plans the drift it can see and leaves the rest alone", %{
@@ -166,7 +161,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
       Postgrex.query!(admin_conn, "CREATE POLICY customer_policy ON realtime.messages FOR SELECT USING (true)", [])
 
       assert {:ok, %{status: :changes, sql: sql, plan: plan, destructive: destructive}} =
-               TestTenantDb.run_pgdelta(settings)
+               TenantMigrations.run_pgdelta(settings)
 
       assert sql =~ "CREATE INDEX messages_inserted_at_topic_index"
       assert sql =~ ~s(ALTER TABLE "realtime"."messages" OWNER TO "supabase_realtime_admin")
@@ -200,7 +195,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
         []
       )
 
-      assert {:ok, %{status: :no_changes}} = TestTenantDb.run_pgdelta(settings)
+      assert {:ok, %{status: :no_changes}} = TenantMigrations.run_pgdelta(settings)
     end
 
     test "detects privilege drift on customer-facing roles", %{
@@ -209,7 +204,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
     } do
       Postgrex.query!(admin_conn, "REVOKE INSERT ON realtime.messages FROM authenticated", [])
 
-      assert {:ok, %{status: :changes, sql: sql}} = TestTenantDb.run_pgdelta(settings)
+      assert {:ok, %{status: :changes, sql: sql}} = TenantMigrations.run_pgdelta(settings)
       assert sql =~ ~s(GRANT INSERT, SELECT, UPDATE ON TABLE "realtime"."messages" TO "authenticated")
     end
 
@@ -219,7 +214,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
     } do
       Postgrex.query!(admin_conn, "REVOKE ALL ON realtime.messages FROM dashboard_user", [])
 
-      assert {:ok, %{status: :no_changes}} = TestTenantDb.run_pgdelta(settings)
+      assert {:ok, %{status: :no_changes}} = TenantMigrations.run_pgdelta(settings)
     end
 
     test "keeps grants on customer-created roles while planning real drift", %{
@@ -240,7 +235,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
       Postgrex.query!(admin_conn, "GRANT SELECT, INSERT ON realtime.messages TO customer_role", [])
       Postgrex.query!(admin_conn, "DROP INDEX realtime.messages_inserted_at_topic_index", [])
 
-      assert {:ok, %{status: :changes, sql: sql, plan: plan}} = TestTenantDb.run_pgdelta(settings)
+      assert {:ok, %{status: :changes, sql: sql, plan: plan}} = TenantMigrations.run_pgdelta(settings)
 
       assert sql =~ "CREATE INDEX messages_inserted_at_topic_index"
       refute sql =~ "customer_role"
@@ -267,7 +262,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
     } do
       Postgrex.query!(admin_conn, "GRANT DELETE ON realtime.messages TO authenticated", [])
 
-      assert {:ok, %{status: :changes, sql: sql, plan: plan}} = TestTenantDb.run_pgdelta(settings)
+      assert {:ok, %{status: :changes, sql: sql, plan: plan}} = TenantMigrations.run_pgdelta(settings)
 
       assert sql =~ ~s(REVOKE ALL ON TABLE "realtime"."messages" FROM "authenticated")
       assert sql =~ ~s(GRANT INSERT, SELECT, UPDATE ON TABLE "realtime"."messages" TO "authenticated")
@@ -302,6 +297,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
     # The 15.1.0.1 image is excluded because its pg_net 0.6 worker never accepts the
     # ProcSignalBarrier, so pg-delta's DROP DATABASE ... WITH (FORCE) shadow cleanup hangs.
     @describetag :requires_supautils_policy_grants
+    @describetag :requires_pgdelta
     setup %{tenant: tenant} do
       {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
       settings = %{settings | pool_size: 1}
@@ -323,10 +319,10 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
       Postgrex.query!(admin_conn, "DELETE FROM realtime.schema_migrations WHERE version > 20211116213934", [])
       {:ok, _} = Api.update_migrations_ran(tenant.external_id, 7)
 
-      assert {:ok, %{status: :changes, plan: plan}} = TestTenantDb.run_pgdelta(settings)
+      assert {:ok, %{status: :changes, plan: plan}} = TenantMigrations.run_pgdelta(settings)
       assert :ok = TenantMigrations.apply_pgdelta(tenant, plan)
 
-      assert {:ok, %{status: :no_changes}} = TestTenantDb.run_pgdelta(settings)
+      assert {:ok, %{status: :no_changes}} = TenantMigrations.run_pgdelta(settings)
 
       %{rows: [[owner]]} =
         Postgrex.query!(
@@ -378,7 +374,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
 
       drift_messages(admin_conn)
 
-      assert {:ok, %{status: :changes, sql: sql, plan: plan}} = TestTenantDb.run_pgdelta(settings)
+      assert {:ok, %{status: :changes, sql: sql, plan: plan}} = TenantMigrations.run_pgdelta(settings)
       assert sql =~ ~s(ALTER TABLE "realtime"."messages" DROP COLUMN "rogue_col")
       refute sql =~ "customer_select"
       refute sql =~ "customer_insert"
@@ -386,7 +382,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
       assert :ok = TenantMigrations.apply_pgdelta(tenant, plan)
 
       assert messages_policies(admin_conn) == policies_before
-      assert {:ok, %{status: :no_changes}} = TestTenantDb.run_pgdelta(settings)
+      assert {:ok, %{status: :no_changes}} = TenantMigrations.run_pgdelta(settings)
     end
 
     test "preserve user-defined policy comments", %{
@@ -404,7 +400,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
 
       drift_messages(admin_conn)
 
-      assert {:ok, %{status: :changes, sql: sql, plan: plan}} = TestTenantDb.run_pgdelta(settings)
+      assert {:ok, %{status: :changes, sql: sql, plan: plan}} = TenantMigrations.run_pgdelta(settings)
       assert sql =~ ~s(ALTER TABLE "realtime"."messages" DROP COLUMN "rogue_col")
       refute sql =~ "select note"
       refute sql =~ "insert note"
@@ -412,7 +408,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
       assert :ok = TenantMigrations.apply_pgdelta(tenant, plan)
 
       assert messages_policy_comments(admin_conn) == comments_before
-      assert {:ok, %{status: :no_changes}} = TestTenantDb.run_pgdelta(settings)
+      assert {:ok, %{status: :no_changes}} = TenantMigrations.run_pgdelta(settings)
     end
   end
 
