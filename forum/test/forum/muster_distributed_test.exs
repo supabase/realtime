@@ -5983,6 +5983,109 @@ defmodule Forum.MusterDistributedTest do
       )
     end
 
+    test "two nodes draining concurrently ack each other and both settle", %{scope: scope} do
+      t_node = node()
+      a_name = ~c"muster_drain_pair_a_#{System.unique_integer([:positive])}"
+      a_node = :"#{a_name}@127.0.0.1"
+      b_name = ~c"muster_drain_pair_b_#{System.unique_integer([:positive])}"
+      b_node = :"#{b_name}@127.0.0.1"
+      c_name = ~c"muster_drain_pair_c_#{System.unique_integer([:positive])}"
+      c_node = :"#{c_name}@127.0.0.1"
+      d_name = ~c"muster_drain_pair_d_#{System.unique_integer([:positive])}"
+      d_node = :"#{d_name}@127.0.0.1"
+
+      check_trace(
+        fn ->
+          # A 5-node cluster: T, A, B survive; C and D drain together.
+          {:ok, pa, ^a_node} = Peer.start(name: a_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(a_node)
+          start_remote_muster(pa, scope)
+          await_ready([t_node, a_node])
+
+          {:ok, pb, ^b_node} = Peer.start(name: b_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(b_node)
+          start_remote_muster(pb, scope)
+          await_ready([t_node, a_node, b_node])
+
+          {:ok, pc, ^c_node} = Peer.start(name: c_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(c_node)
+          start_remote_muster(pc, scope)
+          await_ready([t_node, a_node, b_node, c_node])
+
+          {:ok, pd, ^d_node} = Peer.start(name: d_name, aux_mod: @aux_mod)
+          :ok = :snabbkaffe.forward_trace(d_node)
+          start_remote_muster(pd, scope)
+          await_ready([t_node, a_node, b_node, c_node, d_node])
+
+          # One group routed by each leaver, both held on A: their source rows
+          # live on the leavers and must be re-announced to the newly elected
+          # routers as each leave is processed.
+          gc = group_routed_to(scope, c_node)
+          gd = group_routed_to(scope, d_node)
+          assert gc, "no group routing to C found"
+          assert gd, "no group routing to D found"
+          :ok = :peer.call(pa, MusterPeerAux, :join, [scope, gc])
+          :ok = :peer.call(pa, MusterPeerAux, :join, [scope, gd])
+          assert a_node in occupancy_on(c_node, scope, gc)
+          assert a_node in occupancy_on(d_node, scope, gd)
+
+          # Hold C in its drain until D has entered its own (see above): both
+          # expected-ack sets are then computed before either leave goes out, so
+          # each leaver waits on the other.
+          force_ordering(
+            delay: %{:"$kind" => :muster_drain_begin, node: ^c_node},
+            until: %{:"$kind" => :muster_drain_begin, node: ^d_node}
+          )
+
+          # The :peer.call timeout must outlast the drain's own ack timeout, so a
+          # leaver that never gets its co-leaver's ack reports {:timeout, [peer]}
+          # here rather than blowing up as a dead :peer.call.
+          opts = [timeout_ms: 5_000, settle_ms: 300]
+          drain = fn p -> :peer.call(p, MusterPeerAux, :drain, [scope, opts], 20_000) end
+          dc = Task.async(fn -> drain.(pc) end)
+          dd = Task.async(fn -> drain.(pd) end)
+
+          # Neither times out: the co-leaver's ack arrives like any other.
+          assert :ok = Task.await(dc, 25_000)
+          assert :ok = Task.await(dd, 25_000)
+
+          # The three survivors converged on the view without either leaver.
+          await_ready([t_node, a_node, b_node])
+          assert Enum.sort(Muster.members(scope)) == Enum.sort([t_node, a_node, b_node])
+
+          # Both drained groups are reachable on a surviving router, with A's
+          # source row intact: each of the two departures re-announced what the
+          # survivors hold to the router elected by the view it produced.
+          for g <- [gc, gd] do
+            {:ok, r} = Muster.router(scope, g)
+            assert r not in [c_node, d_node]
+            assert a_node in occupancy_on(r, scope, g)
+          end
+        end,
+        fn trace ->
+          # The interleaving under test really happened: each leaver had the
+          # other in the expected-ack set it snapshotted at drain start.
+          begins = of_kind(trace, :muster_drain_begin)
+          assert %{expected: c_expected} = Enum.find(begins, &(&1.node == c_node))
+          assert %{expected: d_expected} = Enum.find(begins, &(&1.node == d_node))
+          assert d_node in c_expected
+          assert c_node in d_expected
+
+          # Each leaver evicted and acked the other despite draining itself...
+          received = of_kind(trace, :muster_leaving_received)
+          assert Enum.any?(received, &(&1.node == c_node and &1.peer_node == d_node))
+          assert Enum.any?(received, &(&1.node == d_node and &1.peer_node == c_node))
+
+          # ...so both reached the settle window instead of timing out on an ack
+          # that a `leaving` guard would have swallowed.
+          for n <- [c_node, d_node] do
+            assert Enum.any?(of_kind(trace, :muster_drain_settled), &(&1.node == n))
+            refute Enum.any?(of_kind(trace, :muster_drain_timeout), &(&1.node == n))
+          end
+        end
+      )
+    end
+
     # A leaver must refuse a second drain: it would overwrite the parked caller
     # (the first drain/2 would never be replied to) and re-broadcast a leave to
     # peers that already evicted us and will never ack again. The first drain
