@@ -484,6 +484,41 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
   describe "broadcast replay" do
     setup [:rls_context]
 
+    @tag policies: [:authenticated_read_broadcast_and_presence]
+    test "replays messages sent in one transaction in the order they were sent", %{
+      tenant: tenant,
+      topic: topic,
+      db_conn: db_conn,
+      serializer: serializer
+    } do
+      # realtime.send leaves inserted_at to the column default, and replay orders by inserted_at, so
+      # the default has to tell apart messages that share a transaction.
+      {:ok, _} =
+        Postgrex.transaction(db_conn, fn conn ->
+          for value <- 1..5 do
+            Postgrex.query!(
+              conn,
+              "SELECT realtime.send(jsonb_build_object('value', $1::int), 'event', $2::text, TRUE::bool)",
+              [value, topic]
+            )
+          end
+        end)
+
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, topic, %{config: %{private: true, broadcast: %{replay: %{limit: 10, since: 0}}}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+
+      replayed =
+        for _ <- 1..5 do
+          assert_receive %Message{event: "broadcast", topic: ^topic, payload: %{"payload" => %{"value" => value}}}, 1000
+          value
+        end
+
+      assert replayed == [1, 2, 3, 4, 5]
+    end
+
     @tag policies: [:authenticated_read_broadcast_and_presence], serializer: RealtimeWeb.Socket.V2Serializer
     test "replays binary messages as binary frames", %{
       tenant: tenant,
