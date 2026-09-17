@@ -4,6 +4,7 @@ import Ecto.Adapters.SQL, only: [query: 3]
 
 alias Realtime.Api
 alias Realtime.Api.Tenant
+alias Realtime.Env
 alias Realtime.Repo
 alias Realtime.Tenants
 
@@ -37,7 +38,7 @@ default_db_host = "host.docker.internal"
             "region" => "us-east-1",
             "poll_interval_ms" => 100,
             "poll_max_record_bytes" => 1_048_576,
-            "ssl_enforced" => false
+            "ssl_enforced" => Env.get_boolean("DB_SSL", false)
           }
         }
       ]
