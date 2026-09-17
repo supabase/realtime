@@ -3,23 +3,12 @@ require Logger
 import Ecto.Adapters.SQL, only: [query: 3]
 
 alias Realtime.Api.Tenant
+alias Realtime.Env
 alias Realtime.Repo
 alias Realtime.Tenants
 
 tenant_name = System.get_env("SELF_HOST_TENANT_NAME", "realtime-dev")
 default_db_host = "host.docker.internal"
-
-# Tenant per-CDC ssl_enforced flag. Distinct from DB_SSL (which controls
-# Realtime's connection to its own metadata DB) — this flips whether
-# tenant CDC connections use TLS. Defaults to false to preserve existing
-# behavior; set to "true" or "1" when seeding against a managed Postgres
-# that requires TLS (e.g. AWS RDS with rds.force_ssl=1, GCP Cloud SQL
-# with "require SSL/TLS connections" on).
-db_ssl_enforced =
-  System.get_env("DB_SSL_ENFORCED", "false")
-  |> String.trim()
-  |> String.downcase()
-  |> then(&(&1 in ["true", "1"]))
 
 {:ok, tenant} =
   Repo.transaction(fn ->
@@ -46,7 +35,7 @@ db_ssl_enforced =
             "region" => "us-east-1",
             "poll_interval_ms" => 100,
             "poll_max_record_bytes" => 1_048_576,
-            "ssl_enforced" => db_ssl_enforced
+            "ssl_enforced" => Env.get_boolean("DB_SSL", false)
           }
         }
       ]
