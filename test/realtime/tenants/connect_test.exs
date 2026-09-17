@@ -332,7 +332,9 @@ defmodule Realtime.Tenants.ConnectTest do
 
         assert is_pid(db_conn)
         Connect.shutdown(tenant.external_id)
-        assert_process_down(db_conn)
+        # Closing a pooled connection through a connection pooler takes longer
+        # than the 100ms default; the process still goes down.
+        assert_process_down(db_conn, 5_000)
 
         tenant.external_id
       end
