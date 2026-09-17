@@ -12,6 +12,7 @@ broadcast_pool_size = Env.get_integer("BROADCAST_POOL_SIZE", 10)
 channel_error_backoff_ms = Env.get_integer("CHANNEL_ERROR_BACKOFF_MS", :timer.seconds(5))
 client_presence_max_calls = Env.get_integer("CLIENT_PRESENCE_MAX_CALLS", 5)
 client_presence_window_ms = Env.get_integer("CLIENT_PRESENCE_WINDOW_MS", 30_000)
+access_token_throttle_ms = Env.get_integer("ACCESS_TOKEN_THROTTLE_MS", :timer.seconds(10))
 connect_error_backoff_ms = Env.get_integer("CONNECT_ERROR_BACKOFF_MS", :timer.seconds(2))
 connect_partition_slots = Env.get_integer("CONNECT_PARTITION_SLOTS", System.schedulers_online() * 2)
 dashboard_auth = System.get_env("DASHBOARD_AUTH", "basic_auth")
@@ -431,6 +432,7 @@ end
 if config_env() == :prod do
   config :libcluster, debug: false, topologies: cluster_topologies
   config :realtime, node_balance_uptime_threshold_in_ms: node_balance_uptime_threshold_in_ms
+  config :realtime, access_token_throttle_ms: access_token_throttle_ms
   secret_key_base = System.fetch_env!("SECRET_KEY_BASE")
   if app_name == "", do: raise("APP_NAME not available")
 
