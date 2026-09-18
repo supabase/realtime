@@ -1,0 +1,24 @@
+{
+  "name": "broadcast-persistence-example",
+  "private": true,
+  "type": "module",
+  "description": "Per-message broadcast persistence against a local Realtime server",
+  "scripts": {
+    "start": "node index.mjs",
+    "web": "vite"
+  },
+  "dependencies": {
+    "@lumis-sh/lumis": "^0.7.1",
+    "@lumis-sh/themes": "^0.3.1",
+    "@lumis-sh/wasm-javascript": "^0.26.3",
+    "@lumis-sh/wasm-sql": "^0.26.2",
+    "@supabase/realtime-js": "file:../../../supabase-js/packages/core/realtime-js",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "tailwindcss": "^4.3.3",
+    "vite": "^8.3.0"
+  }
+}

@@ -1,0 +1,3 @@
+# esbuild ships a platform binary from a postinstall script, which pnpm blocks unless allowed here.
+allowBuilds:
+  esbuild: true

@@ -1,0 +1,99 @@
+# Tasks for this example only. TENANT and API_JWT_SECRET come from the root mise.toml, because mise
+# merges configs from the root down. See README.md for the run order.
+
+[tasks.tenant-db-port]
+description = "Print the port docker published TENANT's database on"
+hide = true
+# quiet keeps the task runner's own trace off stdout, so `$(mise run tenant-db-port)` captures
+# only the port.
+quiet = true
+dir = "{{config_root}}/../.."
+run = '''
+set -eu
+project="tenant-${TENANT:-realtime-dev}"
+published=$(COMPOSE_PROJECT_NAME="$project" docker compose -f compose.tenant-db.yml port tenant_db 5432 2>/dev/null || true)
+
+if [ -z "$published" ]; then
+  echo "TENANT's database is not running. Run \`mise run db-start\` from the repo root first." >&2
+  exit 1
+fi
+
+echo "${published##*:}"
+'''
+
+[tasks.setup]
+description = "Write the RLS policies and turn the feature flag on for TENANT"
+dir = "{{config_root}}"
+run = '''
+set -eu
+tenant=${TENANT:-realtime-dev}
+port=$(mise run tenant-db-port)
+
+echo "==> policies on ${tenant}'s database, port ${port}"
+psql "postgresql://supabase_admin:postgres@localhost:${port}/postgres" \
+  -v ON_ERROR_STOP=1 -q -f policies.sql
+
+echo "==> presence off and broadcast_persistence flag for ${tenant}"
+# Written straight to the realtime database, so a dev server started after this picks it up.
+cd ../..
+TENANT="$tenant" mix run -e '
+  tenant = System.get_env("TENANT")
+  {:ok, _flag} = Realtime.Api.upsert_feature_flag(%{name: "broadcast_persistence", enabled: false})
+  {:ok, _tenant} = Realtime.FeatureFlags.set_tenant_flag("broadcast_persistence", tenant, true)
+  # This demo never uses presence. Leaving it on would make the read probe insert a presence row,
+  # which then needs its own policy just to let the join through.
+  {:ok, _tenant} = Realtime.Api.update_tenant_by_external_id(tenant, %{presence_enabled: false})
+  IO.puts("    enabled for #{tenant}")
+'
+
+echo
+echo "Start the server with \`mise run dev\` from the repo root, then \`mise run demo\` here."
+'''
+
+[tasks.demo]
+description = "Send one message asking to persist and one not, then read the table back"
+dir = "{{config_root}}"
+run = '''
+set -eu
+port=$(mise run tenant-db-port)
+
+[ -d node_modules ] || pnpm install
+
+DATABASE_URL="postgresql://supabase_admin:postgres@localhost:${port}/postgres" node index.mjs
+'''
+
+[tasks.web]
+description = "Serve the browser demo on http://localhost:5173"
+dir = "{{config_root}}"
+run = '''
+set -eu
+port=$(mise run tenant-db-port)
+
+[ -d node_modules ] || pnpm install
+
+DATABASE_URL="postgresql://supabase_admin:postgres@localhost:${port}/postgres" pnpm web
+'''
+
+[tasks.clean]
+description = "Drop the example's policies and clear the tenant's feature flag override"
+dir = "{{config_root}}"
+run = '''
+set -eu
+tenant=${TENANT:-realtime-dev}
+port=$(mise run tenant-db-port)
+
+psql "postgresql://supabase_admin:postgres@localhost:${port}/postgres" -v ON_ERROR_STOP=1 -q <<'SQL'
+drop policy if exists demo_read on realtime.messages;
+drop policy if exists demo_send on realtime.messages;
+drop policy if exists demo_persist on realtime.messages;
+drop table if exists public.channel_members;
+delete from realtime.messages where topic like 'persisted:%';
+SQL
+
+cd ../..
+TENANT="$tenant" mix run -e '
+  tenant = System.get_env("TENANT")
+  {:ok, _tenant} = Realtime.FeatureFlags.clear_tenant_flag("broadcast_persistence", tenant)
+  IO.puts("cleared the flag override for #{tenant}")
+'
+'''
