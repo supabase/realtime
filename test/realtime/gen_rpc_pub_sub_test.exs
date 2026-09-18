@@ -172,7 +172,7 @@ defmodule Realtime.GenRpcPubSubTest do
         )
 
       # syn RegionNodes membership propagates asynchronously across the cluster
-      TestHelpers.eventually(fn ->
+      eventually(fn ->
         length(Realtime.Nodes.region_nodes("us-east-1")) == 2 and
           length(Realtime.Nodes.region_nodes("ap-southeast-2")) == 2
       end)

@@ -12,18 +12,9 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
     %{conn: conn, tenant: tenant}
   end
 
-  defp drop_slot_on_exit(tenant, slot_name) do
-    on_exit(fn ->
-      {:ok, conn} = Database.connect(tenant, "realtime_rls", :stop)
-      Postgrex.query(conn, "select pg_drop_replication_slot($1)", [slot_name])
-      GenServer.stop(conn)
-    end)
-  end
-
   describe "prepare_replication/2" do
-    test "creates a replication slot", %{conn: conn, tenant: tenant} do
+    test "creates a replication slot", %{conn: conn} do
       slot_name = "test_slot_#{System.unique_integer([:positive])}"
-      drop_slot_on_exit(tenant, slot_name)
 
       assert {:ok, %Postgrex.Result{}} = Replications.prepare_replication(conn, slot_name)
 
@@ -31,9 +22,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
                Postgrex.query(conn, "select 1 from pg_replication_slots where slot_name = $1", [slot_name])
     end
 
-    test "is idempotent when slot already exists", %{conn: conn, tenant: tenant} do
+    test "is idempotent when slot already exists", %{conn: conn} do
       slot_name = "test_slot_#{System.unique_integer([:positive])}"
-      drop_slot_on_exit(tenant, slot_name)
 
       assert {:ok, _} = Replications.prepare_replication(conn, slot_name)
       assert {:ok, _} = Replications.prepare_replication(conn, slot_name)
@@ -62,12 +52,11 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
 
     test "returns slot_not_found when slot exists but has no active backend", %{conn: conn, tenant: tenant} do
       slot_name = "test_slot_#{System.unique_integer([:positive])}"
-      drop_slot_on_exit(tenant, slot_name)
 
       # Use a permanent (non-temporary) slot via a separate connection to avoid
       # connection state issues that temporary slots cause on the same connection
       {:ok, slot_conn} = Realtime.Database.connect(tenant, "realtime_rls", :stop)
-      Postgrex.query!(slot_conn, "select pg_create_logical_replication_slot($1, 'pgoutput')", [slot_name])
+      create_replication_slot(slot_conn, slot_name, plugin: "pgoutput", temporary: false)
       GenServer.stop(slot_conn)
 
       assert {:error, :slot_not_found} = Replications.terminate_backend(conn, slot_name)
@@ -92,9 +81,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
   describe "list_changes/5" do
     @publication "supabase_realtime_test"
 
-    test "slot empty: returns only the sentinel row with slot_changes_count of 0", %{conn: conn, tenant: tenant} do
+    test "slot empty: returns only the sentinel row with slot_changes_count of 0", %{conn: conn} do
       slot_name = "test_slot_#{System.unique_integer([:positive])}"
-      drop_slot_on_exit(tenant, slot_name)
 
       {:ok, _} = Replications.prepare_replication(conn, slot_name)
 
@@ -106,12 +94,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
       assert slot_changes_count == 0
     end
 
-    test "slot has changes visible to subscriber: returns real row and slot_changes_count of 1", %{
-      conn: conn,
-      tenant: tenant
-    } do
+    test "slot has changes visible to subscriber: returns real row and slot_changes_count of 1", %{conn: conn} do
       slot_name = "test_slot_#{System.unique_integer([:positive])}"
-      drop_slot_on_exit(tenant, slot_name)
 
       {:ok, subscription_params} =
         Subscriptions.parse_subscription_params(%{"event" => "*", "schema" => "public", "table" => "test"})
@@ -150,12 +134,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
     end
 
     test "slot has changes but subscriber does not match the INSERT: returns only the sentinel row with slot_changes_count of 1",
-         %{
-           conn: conn,
-           tenant: tenant
-         } do
+         %{conn: conn} do
       slot_name = "test_slot_#{System.unique_integer([:positive])}"
-      drop_slot_on_exit(tenant, slot_name)
 
       {:ok, subscription_params} =
         Subscriptions.parse_subscription_params(%{"event" => "UPDATE", "schema" => "public", "table" => "test"})
@@ -180,9 +160,20 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
       assert slot_changes_count == 1
     end
 
-    test "caches the prepared statement and reuses it across calls", %{conn: conn, tenant: tenant} do
+    test "registers list_changes in the connection's statement cache", %{conn: conn} do
       slot_name = "test_slot_#{System.unique_integer([:positive])}"
-      drop_slot_on_exit(tenant, slot_name)
+
+      {:ok, _} = Replications.prepare_replication(conn, slot_name)
+      refute "realtime_list_changes" in cached_statement_names(conn)
+
+      assert {:ok, _} = Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+
+      assert "realtime_list_changes" in cached_statement_names(conn)
+    end
+
+    @tag :requires_observable_statement_cache
+    test "caches the prepared statement and reuses it across calls", %{conn: conn} do
+      slot_name = "test_slot_#{System.unique_integer([:positive])}"
 
       {:ok, _} = Replications.prepare_replication(conn, slot_name)
 
@@ -204,11 +195,9 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
     end
 
     test "slot has changes but no subscribers: returns only the sentinel row with slot_changes_count of 1", %{
-      conn: conn,
-      tenant: tenant
+      conn: conn
     } do
       slot_name = "test_slot_#{System.unique_integer([:positive])}"
-      drop_slot_on_exit(tenant, slot_name)
 
       {:ok, _} = Replications.prepare_replication(conn, slot_name)
 
@@ -231,7 +220,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
 
     test "drops an existing inactive slot", %{conn: conn} do
       slot_name = "test_drop_slot_#{:rand.uniform(999_999)}"
-      Postgrex.query!(conn, "SELECT pg_create_logical_replication_slot($1, 'wal2json')", [slot_name])
+
+      create_replication_slot(conn, slot_name, plugin: "wal2json")
 
       assert {:ok, :dropped} = Replications.drop_replication_slot(conn, slot_name)
 
@@ -277,7 +267,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
       try do
         Replications.list_changes(conn, slot, pub, 100, 1_048_576)
       after
-        Postgrex.query(conn, "SELECT pg_drop_replication_slot($1)", [slot])
+        drop_replication_slot(conn, slot)
         Postgrex.query(conn, "DROP TABLE IF EXISTS #{qualified}", [])
 
         if schema != "public",

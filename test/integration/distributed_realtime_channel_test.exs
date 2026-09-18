@@ -66,7 +66,7 @@ defmodule Realtime.Integration.DistributedRealtimeChannelTest do
   defp wait_for_muster_ready(node, region) do
     scope = :"realtime_channels_#{region}"
 
-    assert TestHelpers.eventually(
+    assert eventually(
              fn ->
                Muster.status(scope) == :ready and
                  :erpc.call(node, Muster, :status, [scope]) == :ready and

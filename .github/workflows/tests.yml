@@ -44,11 +44,17 @@ jobs:
     runs-on: blacksmith-8vcpu-ubuntu-2404
     env:
       POSTGRES_IMAGE: ${{ matrix.postgres_image }}
+      TENANT_DB_IMAGE: ${{ matrix.tenant_db_image }}
+      # A cluster serves one database, so a port each, and max_cases is one fewer: some tests
+      # hold a second database while holding the first, and checkout blocks until one frees up.
+      USE_EXTERNAL_TENANT_DB: ${{ matrix.postgres == 'multigres' }}
+      EXTERNAL_TENANT_DB_PORTS: "5433,5434,5435,5436,5437"
+      TENANT_DB_PORT: "5433"
     strategy:
       fail-fast: false
       matrix:
         partition: [1, 2, 3, 4]
-        postgres: [pg14, pg15, pg15_latest, pg17, orioledb17]
+        postgres: [pg14, pg15, pg15_latest, pg17, orioledb17, multigres]
         include:
           - postgres: pg14
             postgres_image: supabase/postgres:14.1.0.82
@@ -61,6 +67,11 @@ jobs:
             postgres_image: supabase/postgres:17.6.1.166
           - postgres: orioledb17
             postgres_image: supabase/postgres:17.9.0.019-orioledb
+          # The realtime DB is independent of the tenant databases, so it stays on a plain
+          # Postgres image and only the tenant DBs run a cluster.
+          - postgres: multigres
+            postgres_image: supabase/postgres:17.6.1.166
+            tenant_db_image: ghcr.io/multigres/multigres-cluster-supabase:sha-0de21aa
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -86,16 +97,17 @@ jobs:
         id: docker-cache
         with:
           path: /tmp/docker-images
-          key: docker-images-zstd-${{ env.POSTGRES_IMAGE }}
+          key: docker-images-zstd-${{ env.POSTGRES_IMAGE }}-${{ env.TENANT_DB_IMAGE }}
       - name: Load Docker images from cache
         if: steps.docker-cache.outputs.cache-hit == 'true'
-        run: zstd -d --stdout /tmp/docker-images/postgres.tar.zst | docker image load
+        run: zstd -d --stdout /tmp/docker-images/images.tar.zst | docker image load
       - name: Pull and save Docker images
         if: steps.docker-cache.outputs.cache-hit != 'true'
         run: |
-          docker pull ${{ env.POSTGRES_IMAGE }}
+          for image in ${{ env.POSTGRES_IMAGE }} ${{ env.TENANT_DB_IMAGE }}; do docker pull "$image"; done
           mkdir -p /tmp/docker-images
-          docker image save ${{ env.POSTGRES_IMAGE }} | zstd -T0 -o /tmp/docker-images/postgres.tar.zst
+          docker image save ${{ env.POSTGRES_IMAGE }} ${{ env.TENANT_DB_IMAGE }} |
+            zstd -T0 -o /tmp/docker-images/images.tar.zst
 
       - name: Install pgdelta
         uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
@@ -106,7 +118,32 @@ jobs:
       - name: Install dependencies
         run: mix deps.get
       - name: Set up Postgres
-        run: docker compose -f compose.dbs.yml up -d --wait
+        run: docker compose -f compose.dbs.yml up -d --wait --wait-timeout 300
+      - name: Bootstrap the tenant database
+        run: docker compose -f compose.dbs.yml run --rm tenant_db_bootstrap
+      - name: Set up the additional Multigres tenant databases
+        if: matrix.postgres == 'multigres'
+        run: |
+          # Every port but the one the step above already brought up.
+          ports=()
+          for port in ${EXTERNAL_TENANT_DB_PORTS//,/ }; do
+            [ "$port" = "$TENANT_DB_PORT" ] || ports+=("$port")
+          done
+
+          # Waited on one pid at a time: `wait` with several only reports the last one's status,
+          # which would let a cluster that never came up fail silently here and confusingly later.
+          pids=()
+          for port in "${ports[@]}"; do
+            COMPOSE_PROJECT_NAME="tenant-db-$port" TENANT_DB_PORT="$port" \
+              docker compose -f compose.tenant-db.yml up -d --wait --wait-timeout 300 &
+            pids+=($!)
+          done
+          for pid in "${pids[@]}"; do wait "$pid"; done
+
+          for port in "${ports[@]}"; do
+            COMPOSE_PROJECT_NAME="tenant-db-$port" TENANT_DB_PORT="$port" \
+              docker compose -f compose.tenant-db.yml run --rm tenant_db_bootstrap
+          done
       - name: Start epmd
         run: epmd -daemon
       # flaky test reporter wants to provide full job URLs, no easier way to allow this found
@@ -117,7 +154,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -uo pipefail
-          # github.job is the YAML job key ("tests"), not the per-matrix-cell numeric job ID
+          # github.job is the YAML job key ("tests"), not the per-matrix numeric job ID
           # the /job/<id> URL needs - resolve it by matching this runner against the run's job
           # list (each job in a run gets a distinct runner; RUNNER_NAME is set by the runner).
           JOB_ID="$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" \
@@ -130,6 +167,7 @@ jobs:
           MIX_TEST_PARTITION: ${{ matrix.partition }}
           MATRIX_POSTGRES: ${{ matrix.postgres }}
           JOB_URL: ${{ steps.job_url.outputs.url }}
+          EXPORT_COVERAGE: ${{ matrix.postgres == 'pg17' }}
         run: .github/scripts/run_tests_with_retry.sh partition-${{ matrix.partition }}
       - name: Upload coverage artifact
         if: matrix.postgres == 'pg17'
