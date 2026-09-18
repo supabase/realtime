@@ -144,4 +144,21 @@ defmodule RealtimeWeb.AuthTenantTest do
       assert log =~ "key-id-1"
     end
   end
+
+  describe "with a tenant that only has a JWKS" do
+    setup %{conn: conn} do
+      jwks = %{"keys" => [%{"kty" => "RSA", "kid" => "some_other_kid"}]}
+      tenant = tenant_fixture(%{jwt_secret: nil, jwt_jwks: jwks})
+      now = System.system_time(:second)
+      token = generate_jwt_token("another secret", %{role: "test", iat: now, exp: now + 100_000})
+
+      %{conn: conn |> assign(:tenant, tenant) |> put_req_header("authorization", "Bearer " <> token)}
+    end
+
+    test "returns 401 for an HS256 token it has no secret to verify", %{conn: conn} do
+      conn = AuthTenant.call(conn, %{})
+      assert conn.status == 401
+      assert conn.halted
+    end
+  end
 end
