@@ -44,7 +44,8 @@ defmodule Realtime.Integration.GcmEncryptionBackfillTest do
       assert {:ok, _conn} = Database.connect(tenant, "realtime_backfill_before", :stop)
 
       read_through_cache(external_id)
-      assert eventually(fn -> not is_nil(Api.get_tenant_by_external_id(external_id).gcm_migrated_at) end)
+
+      assert_eventually(not is_nil(Api.get_tenant_by_external_id(external_id).gcm_migrated_at))
 
       migrated = Api.get_tenant_by_external_id(external_id)
 

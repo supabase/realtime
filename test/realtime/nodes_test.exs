@@ -36,7 +36,7 @@ defmodule Realtime.NodesTest do
     test "with no other nodes, returns my region only" do
       # Flaky under CPU-contention in CI runners; not sure why.
       # This is an _attempt_ at fixing it.
-      assert eventually(fn -> Nodes.all_node_regions() == ["us-east-1"] end)
+      assert_eventually(Nodes.all_node_regions() == ["us-east-1"])
     end
   end
 

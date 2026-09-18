@@ -5,6 +5,7 @@ defmodule Realtime.DatabaseTest do
   setup :set_mimic_from_context
 
   import ExUnit.CaptureLog
+  import WaitForIt
 
   alias Realtime.Crypto
   alias Realtime.Database
@@ -121,16 +122,18 @@ defmodule Realtime.DatabaseTest do
 
       # Postgrex opens the pool connections asynchronously, so give it a moment
       # to bring all of them up.
-      assert eventually(fn ->
-               %{rows: [[count]]} =
-                 Postgrex.query!(
-                   admin,
-                   "SELECT count(*)::int FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
-                   []
-                 )
-
-               count == 3
-             end)
+      case_wait(
+        Postgrex.query!(
+          admin,
+          "SELECT count(*)::int FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
+          []
+        )
+      ) do
+        %{rows: [[count]]} when count >= 3 -> assert count == 3, "Expected 3 connections, but found #{count}"
+      else
+        %{rows: [[count]]} -> flunk("Expected 3 connections, but found #{count}")
+        _ -> flunk("Unexpected result from pg_stat_activity")
+      end
     end
   end
 

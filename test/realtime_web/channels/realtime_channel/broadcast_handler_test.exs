@@ -525,12 +525,10 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       assert {:noreply, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
 
-      assert eventually(fn ->
-               match?(
-                 {:ok, [%Message{topic: ^topic, event: "test", skip_broadcast: true}]},
-                 Repo.all(db_conn, messages_for(topic), Message)
-               )
-             end)
+      assert_eventually(
+        {:ok, [%Message{topic: ^topic, event: "test", skip_broadcast: true}]} =
+          Repo.all(db_conn, messages_for(topic), Message)
+      )
     end
 
     test "V2 json user broadcast authorized to persist stores the user payload", %{

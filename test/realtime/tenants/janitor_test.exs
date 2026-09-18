@@ -166,7 +166,7 @@ defmodule Realtime.Tenants.JanitorTest do
              Process.sleep(1000)
            end) =~ "JanitorFailedToDeleteOldMessages"
 
-    assert eventually(fn -> :sys.get_state(janitor).tasks == %{} end)
+    assert_eventually(:sys.get_state(janitor).tasks == %{})
     assert :ets.tab2list(Connect) == []
   end
 
