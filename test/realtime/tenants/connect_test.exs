@@ -627,7 +627,7 @@ defmodule Realtime.Tenants.ConnectTest do
           replication_slot_opts =
             %PostgresReplication{
               connection_opts: opts,
-              table: "test",
+              table: :all,
               output_plugin: "pgoutput",
               output_plugin_options: [proto_version: "1", publication_names: "test_#{i}_publication"],
               handler_module: Replication.TestHandler,
