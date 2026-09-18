@@ -47,7 +47,7 @@ defmodule RealtimeWeb.JwtVerification do
   @doc """
   Verify JWT token and validate claims
   """
-  @spec verify(binary(), binary(), binary() | nil) ::
+  @spec verify(binary(), binary() | nil, binary() | nil) ::
           {:ok, map()}
           | {:error, Joken.error_reason()}
           | {:error, {:error_generating_signer, binary()}}
@@ -145,8 +145,14 @@ defmodule RealtimeWeb.JwtVerification do
     else
       # If there's no JWK, and HS* is being used, instead of erroring, try
       # the jwt_secret instead.
-      {:ok, Joken.Signer.create(alg, jwt_secret)}
+      if jwt_secret,
+        do: {:ok, Joken.Signer.create(alg, jwt_secret)},
+        else: {:error, {:error_generating_signer, kid}}
     end
+  end
+
+  defp generate_signer(%{"alg" => alg}, nil, _jwt_jwks) when alg in @hs_algorithms do
+    {:error, :error_generating_signer}
   end
 
   defp generate_signer(%{"alg" => alg}, jwt_secret, _jwt_jwks) when alg in @hs_algorithms do
