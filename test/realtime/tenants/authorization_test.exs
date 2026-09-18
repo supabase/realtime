@@ -109,6 +109,39 @@ defmodule Realtime.Tenants.AuthorizationTest do
              } == policies
     end
 
+    @tag role: "authenticated", policies: [:authenticated_write_broadcast, :authenticated_write_persistence]
+    test "probes several extensions in one call", context do
+      {:ok, policies} =
+        Authorization.get_write_authorizations(
+          %Policies{},
+          context.db_conn,
+          context.authorization_context,
+          [:broadcast, :persistence]
+        )
+
+      assert %Policies{
+               broadcast: %BroadcastPolicies{read: nil, write: true, persist: true},
+               presence: %PresencePolicies{read: nil, write: nil}
+             } == policies
+    end
+
+    @tag role: "authenticated", policies: [:authenticated_write_broadcast]
+    test "a denial in a batch does not stop the remaining extensions", context do
+      {:ok, policies} =
+        Authorization.get_write_authorizations(
+          %Policies{},
+          context.db_conn,
+          context.authorization_context,
+          [:persistence, :broadcast]
+        )
+
+      # The persistence probe is denied first, and the broadcast probe after it still answers.
+      assert %Policies{
+               broadcast: %BroadcastPolicies{read: nil, write: true, persist: false},
+               presence: %PresencePolicies{read: nil, write: nil}
+             } == policies
+    end
+
     @tag role: "authenticated", policies: [:authenticated_write_broadcast]
     test "denies persistence when only the broadcast write policy exists", context do
       {:ok, policies} =

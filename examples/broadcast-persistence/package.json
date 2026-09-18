@@ -1,0 +1,14 @@
+{
+  "name": "broadcast-persistence-example",
+  "private": true,
+  "type": "module",
+  "description": "Per-message broadcast persistence against a local Realtime server",
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "dependencies": {
+    "@supabase/realtime-js": "file:../../../supabase-js/packages/core/realtime-js",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.13.1"
+  }
+}
