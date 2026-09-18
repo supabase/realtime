@@ -12,6 +12,12 @@ defmodule Realtime.UsersCounter do
     :ok = Census.join(:users, tenant_id, pid)
   end
 
+  @doc "Removes a pid from the tenant census"
+  @spec remove(pid(), String.t()) :: :ok
+  def remove(pid, tenant_id) when is_pid(pid) and is_binary(tenant_id) do
+    :ok = Census.leave(:users, tenant_id, pid)
+  end
+
   @doc "Return true if pid is already counted for tenant_id"
   @spec already_counted?(pid(), String.t()) :: boolean()
   def already_counted?(pid, tenant_id), do: Census.local_member?(:users, tenant_id, pid)
