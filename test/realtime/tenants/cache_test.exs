@@ -118,12 +118,13 @@ defmodule Realtime.Tenants.CacheTest do
 
       assert :ok = Cache.distributed_invalidate_tenant_cache(external_id)
 
-      assert_eventually(fn ->
-        %Api.Tenant{name: ^expected_name} = Cache.get_tenant_by_external_id(external_id)
-
-        %Api.Tenant{name: ^expected_name} =
-          Rpc.enhanced_call(node, Cache, :get_tenant_by_external_id, [external_id])
-      end)
+      assert_eventually(
+        match?(%Api.Tenant{name: ^expected_name}, Cache.get_tenant_by_external_id(external_id)) and
+          match?(
+            %Api.Tenant{name: ^expected_name},
+            Rpc.enhanced_call(node, Cache, :get_tenant_by_external_id, [external_id])
+          )
+      )
     end
   end
 
@@ -160,13 +161,16 @@ defmodule Realtime.Tenants.CacheTest do
 
       assert :ok = Cache.global_cache_update(tenant)
 
-      assert_eventually(fn ->
-        {:ok, %Api.Tenant{name: ^expected_name}} =
+      assert_eventually(
+        match?(
+          {:ok, %Api.Tenant{name: ^expected_name}},
           Cachex.get(Cache, {:get_tenant_by_external_id, external_id})
-
-        {:ok, %Api.Tenant{name: ^expected_name}} =
-          Rpc.enhanced_call(node, Cachex, :get, [Cache, {:get_tenant_by_external_id, external_id}])
-      end)
+        ) and
+          match?(
+            {:ok, %Api.Tenant{name: ^expected_name}},
+            Rpc.enhanced_call(node, Cachex, :get, [Cache, {:get_tenant_by_external_id, external_id}])
+          )
+      )
     end
   end
 
@@ -184,19 +188,5 @@ defmodule Realtime.Tenants.CacheTest do
       other ->
         flunk("Failed to seed remote cache after retries, last result: #{inspect(other)}")
     end
-  end
-
-  defp assert_eventually(fun, attempts \\ 50, interval \\ 100)
-
-  defp assert_eventually(fun, 0, _interval) do
-    fun.()
-  end
-
-  defp assert_eventually(fun, attempts, interval) do
-    fun.()
-  rescue
-    _ ->
-      Process.sleep(interval)
-      assert_eventually(fun, attempts - 1, interval)
   end
 end

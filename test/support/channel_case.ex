@@ -23,16 +23,10 @@ defmodule RealtimeWeb.ChannelCase do
       import Phoenix.ChannelTest
       import Generators
       import TenantConnection
-      import TestHelpers
 
-      # The `TestHelpers` module provides backward-compatible versions of `assert_eventually/2` and
-      # `refute_eventually/2`, which provide the same default timeout and interval values as the
-      # old `retries: 50, sleep: 100` behavior that this test suite relied on before switching to
-      # `wait_for_it`. Any options passed to these functions will override the defaults.
-      import WaitForIt.Test,
-        except: [assert_eventually: 1, assert_eventually: 2, refute_eventually: 1, refute_eventually: 2]
-
-      require WaitForIt
+      # Imports `TestHelpers` plus `WaitForIt.Test`, minus the waiting assertions that
+      # `TestHelpers` overrides with this suite's historical timeout/interval defaults.
+      use TestHelpers
 
       # The default endpoint for testing
       @endpoint RealtimeWeb.Endpoint

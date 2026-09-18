@@ -1,7 +1,38 @@
 defmodule TestHelpers do
   @moduledoc """
   Generic helpers for tests.
+
+  `use TestHelpers` brings these helpers into scope alongside `WaitForIt` and `WaitForIt.Test`;
+  the three case templates in `test/support` do this already, so most tests get it for free.
   """
+
+  @default_timeout 5_000
+  @default_interval 100
+
+  # `assert_eventually` and `refute_eventually` below shadow their `WaitForIt.Test` namesakes so
+  # that they keep this suite's historical wait budget. The arities are derived from
+  # `WaitForIt.Test` rather than hardcoded so that an arity added upstream cannot slip past the
+  # shadow and silently reintroduce the library's much shorter defaults: it surfaces as an
+  # undefined function error here instead.
+  @shadowed_assertions for {name, arity} <- WaitForIt.Test.__info__(:macros),
+                           name in [:assert_eventually, :refute_eventually],
+                           do: {name, arity}
+
+  @doc """
+  Imports this module together with `WaitForIt.Test`, and requires `WaitForIt`.
+
+  The waiting assertions that this module overrides with backward-compatible defaults are
+  excluded from the `WaitForIt.Test` import; everything else it exports (`assert_always/2`, which
+  keeps the library's own 100ms default) comes through untouched.
+  """
+  defmacro __using__(_opts) do
+    quote do
+      import TestHelpers
+      import WaitForIt.Test, except: unquote(@shadowed_assertions)
+
+      require WaitForIt
+    end
+  end
 
   @doc """
   Runs `fun` until it returns a truthy value, retrying until it succeeds or the timeout is reached.
@@ -32,14 +63,12 @@ defmodule TestHelpers do
   def eventually(fun, opts \\ []) do
     retries = Keyword.get(opts, :retries, 50)
     sleep = Keyword.get(opts, :sleep, 100)
-    timeout = Keyword.get(opts, :timeout, retries * sleep)
-    interval = Keyword.get(opts, :interval, sleep)
 
     wait_for_it_opts =
       opts
       |> Keyword.drop([:retries, :sleep])
-      |> Keyword.put_new(:timeout, timeout)
-      |> Keyword.put_new(:interval, interval)
+      |> Keyword.put_new(:timeout, retries * sleep)
+      |> Keyword.put_new(:interval, sleep)
 
     case WaitForIt.until(fun, wait_for_it_opts) do
       {:ok, _value} -> true
@@ -47,14 +76,11 @@ defmodule TestHelpers do
     end
   end
 
-  @default_timeout 5_000
-  @default_interval 100
-
   @doc """
-  Like `WaitForIt.Test.assert_eventually/2`, but defaults `:timeout` to 5000ms and `:interval`
-  to 100ms, matching the wait budget of the old `retries: 50, sleep: 100` default that this test
-  suite relied on before switching to `wait_for_it`. Any options passed here override these
-  defaults.
+  Like `WaitForIt.Test.assert_eventually/2`, but defaults `:timeout` to #{@default_timeout}ms and
+  `:interval` to #{@default_interval}ms, matching the wait budget of the old
+  `retries: 50, sleep: 100` default that this test suite relied on before switching to
+  `wait_for_it`. Any options passed here override these defaults.
   """
   defmacro assert_eventually(expression, opts \\ []) do
     quote do
@@ -66,6 +92,9 @@ defmodule TestHelpers do
   @doc """
   Like `WaitForIt.Test.refute_eventually/2`, but with the same backward-compatible `:timeout`
   and `:interval` defaults as `assert_eventually/2`.
+
+  Note that a passing `refute_eventually` always waits out its whole timeout, so prefer passing a
+  shorter `:timeout` where the negative can be established quickly.
   """
   defmacro refute_eventually(expression, opts \\ []) do
     quote do

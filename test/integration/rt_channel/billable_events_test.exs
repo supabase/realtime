@@ -244,7 +244,7 @@ defmodule Realtime.Integration.RtChannel.BillableEventsTest do
         RateCounterHelper.tick_tenant_rate_counters!(tenant)
         Enum.all?(expected, fn {key, value} -> get_count(key, tenant) == value end)
       end,
-      timeout: 5000,
+      timeout: 500,
       interval: 50
     )
 
