@@ -11,7 +11,6 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   alias Realtime.Api.Message
   alias Realtime.Api.Tenant
-  alias Realtime.Crypto
   alias Realtime.FeatureFlags
   alias Realtime.GenCounter
   alias Realtime.Helpers
@@ -797,7 +796,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     jwt_jwks = Map.get(assigns, :jwt_jwks)
 
-    with jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
+    with jwt_secret_dec <- ChannelsAuthorization.decrypt_jwt_secret(jwt_secret),
          {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
            ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec, jwt_jwks),
          exp_diff when exp_diff > 0 <- exp - Joken.current_time() do

@@ -1760,6 +1760,30 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert log =~ "InvalidJWTToken: Token has expired"
       assert log =~ "sub=#{sub}"
     end
+
+    test "api_key for a tenant that only has a JWKS returns an error", %{tenant: tenant} do
+      jwks = %{"keys" => [%{"kty" => "RSA", "kid" => "some_other_kid"}]}
+
+      {:ok, tenant} =
+        Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{jwt_secret: nil, jwt_jwks: jwks})
+
+      Realtime.Tenants.Cache.update_cache(tenant)
+
+      api_key =
+        Generators.generate_jwt_token("another secret", %{
+          role: "authenticated",
+          exp: System.system_time(:second) + 100_000
+        })
+
+      log =
+        capture_log(fn ->
+          assert {:error, _} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, api_key))
+
+          Process.sleep(300)
+        end)
+
+      assert log =~ "ErrorConnectingToWebsocket"
+    end
   end
 
   describe "checks tenant db connectivity" do
