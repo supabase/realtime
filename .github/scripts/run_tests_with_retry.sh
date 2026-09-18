@@ -15,10 +15,17 @@ FLAKY_REPORT="flaky-report.md"
 FLAKY_EVENTS="flaky-events.jsonl"
 MAX_SNIPPET_CHARS=8000
 
+# Coverage instrumentation is expensive, so only the job that uploads it pays for it.
+if [ "${EXPORT_COVERAGE:-false}" = "true" ]; then
+  TEST_CMD=(mix coveralls.lcov --partitions 4 --export-coverage "$EXPORT_COVERAGE_SUFFIX" --color)
+else
+  TEST_CMD=(mix test --partitions 4 --color)
+fi
+
 # mix's exit code is data we need to branch on, not an error - suspend
 # errexit so a nonzero PIPESTATUS doesn't abort the script before we read it.
 set +e
-mix coveralls.lcov --partitions 4 --export-coverage "$EXPORT_COVERAGE_SUFFIX" --color 2>&1 | tee "$ATTEMPT1_LOG"
+"${TEST_CMD[@]}" 2>&1 | tee "$ATTEMPT1_LOG"
 ATTEMPT1_EXIT="${PIPESTATUS[0]}"
 set -e
 

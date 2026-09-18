@@ -130,6 +130,7 @@ jobs:
           MIX_TEST_PARTITION: ${{ matrix.partition }}
           MATRIX_POSTGRES: ${{ matrix.postgres }}
           JOB_URL: ${{ steps.job_url.outputs.url }}
+          EXPORT_COVERAGE: ${{ matrix.postgres == 'pg17' }}
         run: .github/scripts/run_tests_with_retry.sh partition-${{ matrix.partition }}
       - name: Upload coverage artifact
         if: matrix.postgres == 'pg17'
