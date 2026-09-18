@@ -1,7 +1,7 @@
 defmodule Realtime.Integration.MusterDrainShutdownTest do
   # async: false due to usage of Clustered
   use ExUnit.Case, async: false
-  import TestHelpers
+  import WaitForIt.Test
 
   alias Forum.Muster
 
@@ -20,9 +20,7 @@ defmodule Realtime.Integration.MusterDrainShutdownTest do
     # Both nodes agree on the scope and converge to a 2-node :ready ring.
     assert :erpc.call(peer, Application, :fetch_env!, [:realtime, :muster_scope]) == scope
 
-    assert eventually(fn ->
-             Enum.sort(Muster.members(scope)) == Enum.sort([local, peer]) and Muster.status(scope) == :ready
-           end)
+    assert_eventually(Enum.sort(Muster.members(scope)) == Enum.sort([local, peer]) and Muster.status(scope) == :ready)
 
     # Terminate the drainer child on the peer: this runs Realtime.MusterDrainer's
     # terminate/2 -> Forum.Muster.drain/2 while the peer's coordinator is alive.
@@ -34,7 +32,7 @@ defmodule Realtime.Integration.MusterDrainShutdownTest do
     assert :erpc.call(peer, Muster, :join, [scope, :drain_probe, peer_pid]) == {:error, :draining}
 
     # The survivor rebalanced the peer out of its ring.
-    assert eventually(fn -> Muster.members(scope) == [local] end)
+    assert_eventually(Muster.members(scope) == [local])
 
     # It did so while the peer node was still alive and connected.
     # Not an abrupt-death :DOWN.

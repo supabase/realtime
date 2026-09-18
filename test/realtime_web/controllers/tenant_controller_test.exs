@@ -312,7 +312,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
       # Replication Connections are launched async and can take a while,
       # especially in CI environments.
-      assert eventually(fn -> Realtime.Tenants.ReplicationConnection.ready?(tenant.external_id) end)
+      assert_eventually(Realtime.Tenants.ReplicationConnection.ready?(tenant.external_id))
 
       assert Cache.get_tenant_by_external_id(tenant.external_id)
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
@@ -605,9 +605,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert %{"healthy" => false, "db_connected" => false, "replication_connected" => false, "connected_cluster" => 0} =
                json_response(conn, 200)["data"]
 
-      assert eventually(fn ->
-               match?({:ok, %{healthy: true}}, Realtime.Tenants.health_check(tenant.external_id))
-             end)
+      assert_eventually({:ok, %{healthy: true}} = Realtime.Tenants.health_check(tenant.external_id))
 
       assert {:ok, %{rows: []}} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
 

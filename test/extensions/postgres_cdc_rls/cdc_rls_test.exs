@@ -534,8 +534,8 @@ defmodule Extensions.PostgresCdcRlsTest do
 
       RealtimeWeb.Endpoint.subscribe(Realtime.Syn.PostgresCdc.down_topic(external_id))
 
-      assert eventually(fn -> match?({:ok, _, _}, PostgresCdcRls.get_manager_conn(external_id)) end)
-      assert {:ok, manager_pid, _conn} = PostgresCdcRls.get_manager_conn(external_id)
+      assert_eventually({:ok, manager_pid, _conn} = PostgresCdcRls.get_manager_conn(external_id))
+
       assert node(manager_pid) == remote_node
 
       :ok = PostgresCdcRls.handle_stop(external_id, 5_000)

@@ -106,7 +106,7 @@ defmodule Realtime.Tenants.EncryptionReconcilerTest do
       tenant = rewind_to_legacy_encryption(tenant)
 
       assert :ok = EncryptionReconciler.reconcile(tenant)
-      assert eventually(fn -> migrated?(tenant.external_id) end)
+      assert_eventually(migrated?(tenant.external_id))
 
       reloaded = Api.get_tenant_by_external_id(tenant.external_id)
       assert Crypto.decrypt!(reloaded.jwt_secret) == jwt_secret
@@ -121,7 +121,7 @@ defmodule Realtime.Tenants.EncryptionReconcilerTest do
       tenant = rewind_to_legacy_encryption(tenant)
 
       assert :ok = EncryptionReconciler.reconcile(tenant)
-      assert eventually(fn -> migrated?(tenant.external_id) end)
+      assert_eventually(migrated?(tenant.external_id))
 
       assert %{extensions: [%{settings: %{"region" => ^region}}]} =
                Api.get_tenant_by_external_id(tenant.external_id)
@@ -149,7 +149,7 @@ defmodule Realtime.Tenants.EncryptionReconcilerTest do
       tenant = %{tenant | extensions: Api.get_tenant_by_external_id(tenant.external_id).extensions}
 
       assert :ok = EncryptionReconciler.reconcile(tenant)
-      assert eventually(fn -> migrated?(tenant.external_id) end)
+      assert_eventually(migrated?(tenant.external_id))
 
       assert %Tenant{jwt_secret: nil} = Api.get_tenant_by_external_id(tenant.external_id)
     end
@@ -163,7 +163,7 @@ defmodule Realtime.Tenants.EncryptionReconcilerTest do
       tenant = %{tenant | extensions: [extension]}
 
       assert :ok = EncryptionReconciler.reconcile(tenant)
-      assert eventually(fn -> migrated?(tenant.external_id) end)
+      assert_eventually(migrated?(tenant.external_id))
 
       assert %{extensions: [%{settings: reloaded_settings}]} = Api.get_tenant_by_external_id(tenant.external_id)
       refute Map.has_key?(reloaded_settings, "db_password")
@@ -189,7 +189,7 @@ defmodule Realtime.Tenants.EncryptionReconcilerTest do
 
       assert :ok = EncryptionReconciler.reconcile(tenant)
 
-      assert eventually(fn -> migrated?(tenant.external_id) end)
+      assert_eventually(migrated?(tenant.external_id))
       assert %Tenant{gcm_migrated_at: %DateTime{}} = Api.get_tenant_by_external_id(tenant.external_id)
     end
   end
@@ -224,7 +224,7 @@ defmodule Realtime.Tenants.EncryptionReconcilerTest do
       Tenants.Cache.invalidate_tenant_cache(external_id)
 
       assert %Tenant{} = Tenants.Cache.get_tenant_by_external_id(external_id)
-      assert eventually(fn -> migrated?(external_id) end)
+      assert_eventually(migrated?(external_id))
     end
   end
 
