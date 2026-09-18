@@ -59,6 +59,7 @@ jobs:
             postgres_image: supabase/postgres:15.14.1.167
           - postgres: pg17
             postgres_image: supabase/postgres:17.6.1.166
+            coverage: true
           - postgres: orioledb17
             postgres_image: supabase/postgres:17.9.0.019-orioledb
 
@@ -130,10 +131,10 @@ jobs:
           MIX_TEST_PARTITION: ${{ matrix.partition }}
           MATRIX_POSTGRES: ${{ matrix.postgres }}
           JOB_URL: ${{ steps.job_url.outputs.url }}
-          EXPORT_COVERAGE: ${{ matrix.postgres == 'pg17' }}
+          EXPORT_COVERAGE: ${{ matrix.coverage == true }}
         run: .github/scripts/run_tests_with_retry.sh partition-${{ matrix.partition }}
       - name: Upload coverage artifact
-        if: matrix.postgres == 'pg17'
+        if: matrix.coverage
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: coverage-partition-${{ matrix.partition }}
