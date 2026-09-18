@@ -5,7 +5,6 @@ defmodule Realtime.DatabaseTest do
   setup :set_mimic_from_context
 
   import ExUnit.CaptureLog
-  import WaitForIt
 
   alias Realtime.Crypto
   alias Realtime.Database
@@ -111,28 +110,18 @@ defmodule Realtime.DatabaseTest do
       # behind by earlier tests can inflate the count. Terminate any lingering ones
       # (using a separate connection that is not counted) to start from a clean slate.
       {:ok, admin} = Database.connect(tenant, "realtime_test", :stop)
+      from_realtime_connect = "FROM pg_stat_activity WHERE application_name = 'realtime_connect'"
 
-      Postgrex.query!(
-        admin,
-        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
-        []
-      )
+      Postgrex.query!(admin, "SELECT pg_terminate_backend(pid) " <> from_realtime_connect, [])
 
       assert {:ok, _conn, _migrations_ran} = Database.check_tenant_connection(tenant)
 
       # Postgrex opens the pool connections asynchronously, so give it a moment
       # to bring all of them up.
-      case_wait(
-        Postgrex.query!(
-          admin,
-          "SELECT count(*)::int FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
-          []
-        )
-      ) do
-        %{rows: [[count]]} when count >= 3 -> assert count == 3, "Expected 3 connections, but found #{count}"
+      WaitForIt.case_wait Postgrex.query!(admin, "SELECT count(*)::int " <> from_realtime_connect, []) do
+        %{rows: [[3]]} -> :ok
       else
         %{rows: [[count]]} -> flunk("Expected 3 connections, but found #{count}")
-        _ -> flunk("Unexpected result from pg_stat_activity")
       end
     end
   end

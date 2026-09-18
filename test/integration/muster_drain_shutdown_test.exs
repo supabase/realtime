@@ -1,7 +1,7 @@
 defmodule Realtime.Integration.MusterDrainShutdownTest do
   # async: false due to usage of Clustered
   use ExUnit.Case, async: false
-  import WaitForIt.Test
+  use TestHelpers
 
   alias Forum.Muster
 
