@@ -185,9 +185,11 @@ defmodule Realtime.RateCounterTest do
       # Splitting by the error message returns the error message and the rest of the log only
       assert length(String.split(log, "ErrorMessage: Reason")) == 2
 
-      Process.sleep(400)
-
-      assert {:ok, %RateCounter{limit: %{triggered: false}}} = RateCounter.get(args)
+      # The limit clears itself on a later tick.
+      assert_eventually({:ok, %RateCounter{limit: %{triggered: false}}} = RateCounter.get(args),
+        timeout: 1_000,
+        interval: 20
+      )
     end
 
     test "starts a new rate counter with sum limit to log" do
@@ -239,9 +241,11 @@ defmodule Realtime.RateCounterTest do
       # Splitting by the error message returns the error message and the rest of the log only
       assert length(String.split(log, "ErrorMessage: Reason")) == 2
 
-      Process.sleep(600)
-
-      assert {:ok, %RateCounter{sum: 0, limit: %{triggered: false}}} = RateCounter.get(args)
+      # The bucket drains and the limit clears on later ticks.
+      assert_eventually({:ok, %RateCounter{sum: 0, limit: %{triggered: false}}} = RateCounter.get(args),
+        timeout: 2_000,
+        interval: 20
+      )
     end
 
     test "reset counter if GenCounter already had something" do
@@ -266,8 +270,8 @@ defmodule Realtime.RateCounterTest do
       assert_receive {:DOWN, _ref, :process, ^pid, :normal}, 200
       # Cache has not expired yet
       assert {:ok, %RateCounter{}} = Cachex.get(RateCounter, args.id)
-      Process.sleep(2000)
-      assert {:ok, nil} = Cachex.get(RateCounter, args.id)
+      # ...and is evicted once its TTL elapses.
+      assert_eventually({:ok, nil} = Cachex.get(RateCounter, args.id), timeout: 5_000, interval: 100)
 
       # Ok new RateCounter automatically started now
       assert {:ok, %RateCounter{}} = RateCounter.get(args)

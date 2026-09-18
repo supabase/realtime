@@ -78,9 +78,7 @@ defmodule RealtimeWeb.MetricsControllerTest do
   defp text_response_when_ready(conn, path) do
     fetch_scrape = fn -> conn |> get(path) |> text_response(200) end
 
-    assert eventually(fn ->
-             fetch_scrape.() =~ "# HELP beam_system_schedulers_online_info"
-           end)
+    assert_eventually(fetch_scrape.() =~ "# HELP beam_system_schedulers_online_info")
 
     # we wastefully query again but it's not trivial to extract it from above and it's not _that_ expensive
     fetch_scrape.()

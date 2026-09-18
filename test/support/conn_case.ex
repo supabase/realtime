@@ -26,7 +26,10 @@ defmodule RealtimeWeb.ConnCase do
       import Phoenix.ConnTest
       import Plug.Conn
       import Realtime.DataCase
-      import TestHelpers
+
+      # Imports `TestHelpers` plus `WaitForIt.Test`, minus the waiting assertions that
+      # `TestHelpers` overrides with this suite's historical timeout/interval defaults.
+      use TestHelpers
 
       alias RealtimeWeb.Router.Helpers, as: Routes
 

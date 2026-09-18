@@ -23,7 +23,11 @@ defmodule RealtimeWeb.ChannelCase do
       import Phoenix.ChannelTest
       import Generators
       import TenantConnection
-      import TestHelpers
+
+      # Imports `TestHelpers` plus `WaitForIt.Test`, minus the waiting assertions that
+      # `TestHelpers` overrides with this suite's historical timeout/interval defaults.
+      use TestHelpers
+
       # The default endpoint for testing
       @endpoint RealtimeWeb.Endpoint
     end

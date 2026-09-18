@@ -25,7 +25,10 @@ defmodule Realtime.DataCase do
       import Realtime.DataCase
       import Generators
       import TenantConnection
-      import TestHelpers
+
+      # Imports `TestHelpers` plus `WaitForIt.Test`, minus the waiting assertions that
+      # `TestHelpers` overrides with this suite's historical timeout/interval defaults.
+      use TestHelpers
     end
   end
 

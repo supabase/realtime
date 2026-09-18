@@ -726,12 +726,10 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       assert conn.status == 202
       assert_receive {:socket_push, :text, _data}, 500
 
-      assert eventually(fn ->
-               match?(
-                 {:ok, [%Message{topic: ^sub_topic, event: ^event, skip_broadcast: true}]},
-                 Repo.all(db_conn, messages_for(sub_topic), Message)
-               )
-             end)
+      assert_eventually(
+        {:ok, [%Message{topic: ^sub_topic, event: ^event, skip_broadcast: true}]} =
+          Repo.all(db_conn, messages_for(sub_topic), Message)
+      )
 
       # The stored row reaches the replication stream but must not be delivered a second time
       refute_receive {:socket_push, :text, _}, 500
@@ -759,7 +757,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
 
       assert conn.status == 202
 
-      refute eventually(fn -> match?({:ok, [_ | _]}, Repo.all(db_conn, messages_for(sub_topic), Message)) end)
+      refute_eventually(match?({:ok, [_ | _]}, Repo.all(db_conn, messages_for(sub_topic), Message)))
     end
 
     test "rejects persist=true on a public broadcast", %{conn: conn} do
