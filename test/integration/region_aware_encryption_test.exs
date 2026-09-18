@@ -5,13 +5,16 @@ defmodule Realtime.Integration.RegionAwareEncryptionTest do
   and `Realtime.Api.reencrypt_extension_settings/4`.
   """
   use Realtime.DataCase, async: false
+  import TestHelpers
 
   alias Realtime.Api
   alias Realtime.Crypto
+  alias Realtime.Nodes
 
   setup do
     tenant = tenant_fixture()
     master_region = Application.get_env(:realtime, :region)
+    local = node()
 
     {:ok, node} =
       Clustered.start(nil,
@@ -21,7 +24,8 @@ defmodule Realtime.Integration.RegionAwareEncryptionTest do
         ]
       )
 
-    Process.sleep(100)
+    # we need the nodes available for our region aware encryption to work
+    assert eventually(fn -> :erpc.call(node, Nodes, :region_nodes, [master_region]) == [local] end)
 
     %{tenant: rewind_to_legacy_encryption(tenant), node: node}
   end
