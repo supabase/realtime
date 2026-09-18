@@ -109,7 +109,7 @@ defmodule Realtime.MixProject do
       {:gen_rpc, git: "https://github.com/emqx/gen_rpc.git", tag: "3.6.1"},
       # gen_rpc uses a git dependency
       {:snabbkaffe, "~> 1.0", override: true},
-      {:req, "~> 0.6.2"},
+      {:req, "~> 0.7.4"},
       {:mimic, "~> 2.0", only: :test},
       {:floki, ">= 0.30.0", only: :test},
       {:lazy_html, ">= 0.1.0", only: :test},
