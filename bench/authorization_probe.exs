@@ -23,17 +23,18 @@ tenant =
 
 {:ok, db_conn} = Database.connect(tenant, "realtime_bench", :stop)
 
-# The example's policies match on the `persisted:` prefix.
+# Seeded by the example's policies.sql, as a channel member with the `agent` role.
 topic = "persisted:bench"
+bench_user = "33333333-3333-3333-3333-333333333333"
 
 authorization_context =
   Authorization.build_authorization_params(%{
     tenant_id: tenant.external_id,
     topic: topic,
     headers: [],
-    claims: %{sub: "bench", role: "authenticated"},
+    claims: %{sub: bench_user, role: "authenticated"},
     role: "authenticated",
-    sub: "bench"
+    sub: bench_user
   })
 
 broadcast_only = fn ->

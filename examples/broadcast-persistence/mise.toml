@@ -33,13 +33,16 @@ echo "==> policies on ${tenant}'s database, port ${port}"
 psql "postgresql://supabase_admin:postgres@localhost:${port}/postgres" \
   -v ON_ERROR_STOP=1 -q -f policies.sql
 
-echo "==> broadcast_persistence flag for ${tenant}"
+echo "==> presence off and broadcast_persistence flag for ${tenant}"
 # Written straight to the realtime database, so a dev server started after this picks it up.
 cd ../..
 TENANT="$tenant" mix run -e '
   tenant = System.get_env("TENANT")
   {:ok, _flag} = Realtime.Api.upsert_feature_flag(%{name: "broadcast_persistence", enabled: false})
   {:ok, _tenant} = Realtime.FeatureFlags.set_tenant_flag("broadcast_persistence", tenant, true)
+  # This demo never uses presence. Leaving it on would make the read probe insert a presence row,
+  # which then needs its own policy just to let the join through.
+  {:ok, _tenant} = Realtime.Api.update_tenant_by_external_id(tenant, %{presence_enabled: false})
   IO.puts("    enabled for #{tenant}")
 '
 
@@ -54,9 +57,21 @@ run = '''
 set -eu
 port=$(mise run tenant-db-port)
 
-[ -d node_modules ] || npm install --silent
+[ -d node_modules ] || pnpm install
 
 DATABASE_URL="postgresql://supabase_admin:postgres@localhost:${port}/postgres" node index.mjs
+'''
+
+[tasks.web]
+description = "Serve the browser demo on http://localhost:5173"
+dir = "{{config_root}}"
+run = '''
+set -eu
+port=$(mise run tenant-db-port)
+
+[ -d node_modules ] || pnpm install
+
+DATABASE_URL="postgresql://supabase_admin:postgres@localhost:${port}/postgres" pnpm web
 '''
 
 [tasks.clean]
@@ -69,9 +84,9 @@ port=$(mise run tenant-db-port)
 
 psql "postgresql://supabase_admin:postgres@localhost:${port}/postgres" -v ON_ERROR_STOP=1 -q <<'SQL'
 drop policy if exists demo_read on realtime.messages;
-drop policy if exists demo_presence on realtime.messages;
 drop policy if exists demo_send on realtime.messages;
 drop policy if exists demo_persist on realtime.messages;
+drop table if exists public.channel_members;
 delete from realtime.messages where topic like 'persisted:%';
 SQL
 

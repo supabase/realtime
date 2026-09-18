@@ -20,13 +20,24 @@ const JWT_SECRET = process.env.API_JWT_SECRET ?? 'dev'
 const DATABASE_URL =
   process.env.DATABASE_URL ?? 'postgresql://supabase_admin:postgres@localhost:5433/postgres'
 
-// A fresh topic per run, so runs do not accumulate into each other's assertions. The policies
-// match on the `persisted:` prefix, so any suffix works.
+// A fresh room per run, so runs do not accumulate into each other's assertions.
 const TOPIC = process.env.TOPIC ?? `persisted:demo-${Date.now().toString(36)}`
+const USER = '11111111-1111-1111-1111-111111111111'
 
-const token = jwt.sign({ role: 'authenticated', sub: 'demo-user' }, JWT_SECRET, {
+const token = jwt.sign({ role: 'authenticated', sub: USER }, JWT_SECRET, {
   expiresIn: '1h',
 })
+
+// The policies authorize against the app's own membership table, so this run has to join the
+// session as the human before anything it sends can be stored.
+const db = new pg.Client({ connectionString: DATABASE_URL })
+await db.connect()
+await db.query(
+  `insert into public.session_members (topic, user_id, role)
+   values ($1, $2, 'human')
+   on conflict (topic, user_id) do update set role = excluded.role`,
+  [TOPIC, USER]
+)
 
 const client = new RealtimeClient(REALTIME_URL, {
   params: { apikey: token, vsn: '2.0.0' },
@@ -75,14 +86,11 @@ await send('do not keep this', false)
 // Give the delivery path a moment before reading the table.
 await new Promise((resolve) => setTimeout(resolve, 500))
 
-const db = new pg.Client({ connectionString: DATABASE_URL })
-await db.connect()
-
 const { rows } = await db.query(
   `select id, event, payload, extension, private, skip_broadcast
      from realtime.messages
     where topic = $1
-    order by inserted_at`,
+    order by inserted_at desc`,
   [TOPIC]
 )
 

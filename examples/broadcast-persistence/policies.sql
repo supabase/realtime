@@ -1,44 +1,71 @@
--- Two separate permissions on the same topic.
+-- An AI coding harness. A human and an agent talk on the same channel, and the product decides
+-- how much of that transcript is kept: the human's prompts only, or the whole conversation.
 --
--- The broadcast policy decides who may send. The persistence policy decides whose messages may be
--- stored. A sender can pass the first and fail the second, in which case the message is delivered
--- and not kept.
+-- Sending and storing are two separate permissions, both answered by RLS against your own tables.
+-- The agent can always talk. Whether its messages are kept is a policy decision.
 --
--- Neither policy can see the message itself. The probe inserts a row carrying only topic and
--- extension, so the event and payload are not available to the predicate. That is why asking to
--- persist is a per-message flag and not something a policy can express.
+-- What a policy cannot do is look at the message. The probe inserts a row carrying only topic and
+-- extension, so the event and payload are not available to the predicate. A policy decides who may
+-- store; the per-message `persist` flag decides which of their messages actually are.
+
+create table if not exists public.session_members (
+  topic text not null,
+  user_id uuid not null,
+  role text not null check (role in ('human', 'agent')),
+  primary key (topic, user_id)
+);
+
+alter table public.session_members enable row level security;
+
+insert into public.session_members (topic, user_id, role) values
+  ('persisted:session-1', '11111111-1111-1111-1111-111111111111', 'human'),
+  ('persisted:session-1', '22222222-2222-2222-2222-222222222222', 'agent'),
+  ('persisted:bench',     '33333333-3333-3333-3333-333333333333', 'human')
+on conflict (topic, user_id) do update set role = excluded.role;
+
+-- The policies below read this table, so a member has to be able to see their own row.
+drop policy if exists members_read_own on public.session_members;
+create policy members_read_own on public.session_members for select to authenticated
+  using ( user_id = auth.uid() );
 
 drop policy if exists demo_read on realtime.messages;
 drop policy if exists demo_send on realtime.messages;
 drop policy if exists demo_persist on realtime.messages;
+-- Presence is turned off for this tenant in `mise run setup`, so no presence policy is needed.
 drop policy if exists demo_presence on realtime.messages;
 
--- Read: needed to receive broadcasts and to replay them on join.
+-- Join and receive: anyone in the session.
 create policy demo_read on realtime.messages for select to authenticated
-  using (realtime.topic() like 'persisted:%');
-
--- Presence, which this demo does not use but still has to allow.
---
--- Presence is on unless the tenant turns it off, see presence_enabled?/2, and the read probe
--- inserts one row per enabled extension in a single statement. One denied row fails the whole
--- insert, so without this policy the join dies before the demo starts. The SELECT policy above
--- still decides whether presence is readable.
-create policy demo_presence on realtime.messages for insert to authenticated
-  with check (
-    realtime.messages.extension = 'presence'
-    and realtime.topic() like 'persisted:%'
+  using (
+    exists (
+      select 1
+        from public.session_members m
+       where m.topic = realtime.topic()
+         and m.user_id = auth.uid()
+    )
   );
 
--- Send: who may broadcast on this topic.
+-- Send: human and agent both talk.
 create policy demo_send on realtime.messages for insert to authenticated
   with check (
     realtime.messages.extension = 'broadcast'
-    and realtime.topic() like 'persisted:%'
+    and exists (
+      select 1
+        from public.session_members m
+       where m.topic = realtime.topic()
+         and m.user_id = auth.uid()
+    )
   );
 
--- Store: whose broadcasts may be written to realtime.messages.
+-- Store: prompts only. Flip the checkbox on the page to keep the agent's replies as well.
 create policy demo_persist on realtime.messages for insert to authenticated
   with check (
     realtime.messages.extension = 'persistence'
-    and realtime.topic() like 'persisted:%'
+    and exists (
+      select 1
+        from public.session_members m
+       where m.topic = realtime.topic()
+         and m.user_id = auth.uid()
+         and m.role in ('human')
+    )
   );
