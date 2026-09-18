@@ -320,6 +320,25 @@ defmodule RealtimeWeb.RealtimeChannelTest do
               }} = join_waiting_for_postgres_changes(tenant, %{"wait" => true, "timeout" => 100})
     end
 
+    test "does not count a channel whose postgres_changes join is rejected", %{tenant: tenant} do
+      expect(Extensions.PostgresCdcRls, :handle_connect, fn _ -> nil end)
+      stub(Extensions.PostgresCdcRls, :handle_connect, fn _ -> nil end)
+
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      assert {:error, %{reason: "PostgresChangesSubscribeTimeout: " <> _}} =
+               subscribe_and_join(socket, "realtime:test", %{
+                 "config" => %{
+                   "postgres_changes" => [%{"event" => "INSERT", "schema" => "public"}],
+                   "postgres_changes_options" => %{"wait" => true, "timeout" => 100}
+                 }
+               })
+
+      assert Process.alive?(socket.transport_pid)
+      refute Realtime.UsersCounter.already_counted?(socket.transport_pid, tenant.external_id)
+    end
+
     test "wait does not start a connect attempt once the timeout has passed", %{tenant: tenant} do
       expect(Extensions.PostgresCdcRls, :handle_connect, fn _ ->
         Process.sleep(300)
