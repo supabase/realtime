@@ -60,18 +60,20 @@ defmodule Realtime.SynHandlerTest do
         capture_log(fn ->
           # Connect to peer node to cause a conflict on syn
           true = Node.connect(node)
-          # Give some time for the conflict resolution to happen on the other node
-          Process.sleep(500)
+          # Conflict resolution propagates asynchronously and independently on each node, so
+          # both sides are waited on separately.
+          assert_eventually(
+            {^remote_pid, %{region: "ap-southeast-2", conn: "remote_conn"}} =
+              :peer.call(peer_pid, :syn, :lookup, [Connect, tenant_id])
+          )
 
-          # Both nodes agree
-          assert {^remote_pid, %{region: "ap-southeast-2", conn: "remote_conn"}} =
-                   :peer.call(peer_pid, :syn, :lookup, [Connect, tenant_id])
-
-          assert {^remote_pid, %{region: "ap-southeast-2", conn: "remote_conn"}} = :syn.lookup(Connect, tenant_id)
+          assert_eventually(
+            {^remote_pid, %{region: "ap-southeast-2", conn: "remote_conn"}} = :syn.lookup(Connect, tenant_id)
+          )
 
           assert :peer.call(peer_pid, Process, :alive?, [remote_pid])
 
-          refute Process.alive?(local_pid)
+          assert_eventually(not Process.alive?(local_pid))
         end)
 
       assert log =~ "stop local process: #{inspect(local_pid)}"
@@ -92,16 +94,16 @@ defmodule Realtime.SynHandlerTest do
         capture_log(fn ->
           # Connect to peer node to cause a conflict on syn
           true = Node.connect(node)
-          # Give some time for the conflict resolution to happen on the other node
-          Process.sleep(500)
+          # Conflict resolution propagates asynchronously and independently on each node, so
+          # both sides are waited on separately.
+          assert_eventually({^local_pid, %{region: "us-east-1", conn: "local_conn"}} = :syn.lookup(Connect, tenant_id))
 
-          # Both nodes agree
-          assert {^local_pid, %{region: "us-east-1", conn: "local_conn"}} = :syn.lookup(Connect, tenant_id)
+          assert_eventually(
+            {^local_pid, %{region: "us-east-1", conn: "local_conn"}} =
+              :peer.call(peer_pid, :syn, :lookup, [Connect, tenant_id])
+          )
 
-          assert {^local_pid, %{region: "us-east-1", conn: "local_conn"}} =
-                   :peer.call(peer_pid, :syn, :lookup, [Connect, tenant_id])
-
-          refute :peer.call(peer_pid, Process, :alive?, [remote_pid])
+          assert_eventually(not :peer.call(peer_pid, Process, :alive?, [remote_pid]))
 
           assert Process.alive?(local_pid)
         end)
@@ -138,16 +140,16 @@ defmodule Realtime.SynHandlerTest do
         capture_log(fn ->
           # Connect to peer node to cause a conflict on syn
           true = Node.connect(node)
-          # Give some time for the conflict resolution to happen on the other node
-          Process.sleep(500)
+          # Conflict resolution propagates asynchronously and independently on each node, so
+          # both sides are waited on separately.
+          assert_eventually({^local_pid, %{region: "us-east-1", conn: "local_conn"}} = :syn.lookup(Connect, tenant_id))
 
-          # Both nodes agree
-          assert {^local_pid, %{region: "us-east-1", conn: "local_conn"}} = :syn.lookup(Connect, tenant_id)
+          assert_eventually(
+            {^local_pid, %{region: "us-east-1", conn: "local_conn"}} =
+              :peer.call(peer_pid, :syn, :lookup, [Connect, tenant_id])
+          )
 
-          assert {^local_pid, %{region: "us-east-1", conn: "local_conn"}} =
-                   :peer.call(peer_pid, :syn, :lookup, [Connect, tenant_id])
-
-          refute :peer.call(peer_pid, Process, :alive?, [remote_pid])
+          assert_eventually(not :peer.call(peer_pid, Process, :alive?, [remote_pid]))
 
           assert Process.alive?(local_pid)
         end)
@@ -170,18 +172,20 @@ defmodule Realtime.SynHandlerTest do
         capture_log(fn ->
           # Connect to peer node to cause a conflict on syn
           true = Node.connect(node)
-          # Give some time for the conflict resolution to happen on the other node
-          Process.sleep(500)
+          # Conflict resolution propagates asynchronously and independently on each node, so
+          # both sides are waited on separately.
+          assert_eventually(
+            {^remote_pid, %{region: "ap-southeast-2", conn: "remote_conn"}} =
+              :peer.call(peer_pid, :syn, :lookup, [Connect, tenant_id])
+          )
 
-          # Both nodes agree
-          assert {^remote_pid, %{region: "ap-southeast-2", conn: "remote_conn"}} =
-                   :peer.call(peer_pid, :syn, :lookup, [Connect, tenant_id])
-
-          assert {^remote_pid, %{region: "ap-southeast-2", conn: "remote_conn"}} = :syn.lookup(Connect, tenant_id)
+          assert_eventually(
+            {^remote_pid, %{region: "ap-southeast-2", conn: "remote_conn"}} = :syn.lookup(Connect, tenant_id)
+          )
 
           assert :peer.call(peer_pid, Process, :alive?, [remote_pid])
 
-          refute Process.alive?(local_pid)
+          assert_eventually(not Process.alive?(local_pid))
         end)
 
       assert log =~ "stop local process: #{inspect(local_pid)}"
@@ -216,7 +220,7 @@ defmodule Realtime.SynHandlerTest do
 
           assert :peer.call(peer_pid, Process, :alive?, [remote_pid])
 
-          refute Process.alive?(local_pid)
+          assert_eventually(not Process.alive?(local_pid))
         end)
 
       assert log =~ "stop local process: #{inspect(local_pid)}"

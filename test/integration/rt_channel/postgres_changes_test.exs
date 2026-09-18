@@ -994,6 +994,6 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
 
   defp assert_cdc_stopped(tenant) do
     PostgresCdcRls.handle_stop(tenant.external_id, 5000)
-    eventually(fn -> PostgresCdcRls.get_manager_conn(tenant.external_id) == {:error, nil} end)
+    assert_eventually(PostgresCdcRls.get_manager_conn(tenant.external_id) == {:error, nil})
   end
 end

@@ -1,6 +1,7 @@
 defmodule Realtime.GenRpcPubSub.RegionRingsTest do
   # async: false — Mimic global + distributed integration test
   use ExUnit.Case, async: false
+  use TestHelpers
 
   alias Realtime.GenRpcPubSub.RegionRings
   alias Realtime.Nodes
@@ -10,6 +11,11 @@ defmodule Realtime.GenRpcPubSub.RegionRingsTest do
   setup :set_mimic_from_context
 
   @region "ap-southeast-1"
+
+  # Local ring reconciliation settles in milliseconds; cross-node syn/Muster convergence can take
+  # seconds on a loaded runner, and each probe there is an erpc round trip, so it polls slower.
+  @short_wait [timeout: 1_000, interval: 10]
+  @cluster_wait [timeout: 20_000, interval: 100]
 
   defp members do
     Enum.sort([node(), :"rr1@127.0.0.1", :"rr2@127.0.0.1", :"rr3@127.0.0.1"])
@@ -125,9 +131,10 @@ defmodule Realtime.GenRpcPubSub.RegionRingsTest do
       Process.exit(ring_pid, :kill)
       assert_receive {:DOWN, ^ref, :process, ^ring_pid, :killed}
 
-      wait_until(fn ->
-        match?({:ok, _, _}, RegionRings.expected_router(@region, "tenant_0", table))
-      end)
+      assert_eventually(
+        match?({:ok, _, _}, RegionRings.expected_router(@region, "tenant_0", table)),
+        @short_wait
+      )
 
       new_state = :sys.get_state(pid)
       {_name, new_ring_pid} = Map.fetch!(new_state.rings, @region)
@@ -151,7 +158,7 @@ defmodule Realtime.GenRpcPubSub.RegionRingsTest do
       end)
 
       :telemetry.execute([:syn, RegionNodes, :joined], %{}, %{name: @region})
-      wait_until(fn -> match?({:ok, _, _}, RegionRings.expected_router(@region, "tenant_0", table)) end)
+      assert_eventually(match?({:ok, _, _}, RegionRings.expected_router(@region, "tenant_0", table)), @short_wait)
       {:ok, _node1, vh1} = RegionRings.expected_router(@region, "tenant_0", table)
       assert vh1 == Muster.view_hash_for_members(first)
 
@@ -166,9 +173,10 @@ defmodule Realtime.GenRpcPubSub.RegionRingsTest do
 
       :telemetry.execute([:syn, RegionNodes, :joined], %{}, %{name: @region})
 
-      wait_until(fn ->
-        match?({:ok, _, ^expected_vh2}, RegionRings.expected_router(@region, "tenant_0", table))
-      end)
+      assert_eventually(
+        match?({:ok, _, ^expected_vh2}, RegionRings.expected_router(@region, "tenant_0", table)),
+        @short_wait
+      )
 
       {:ok, _node2, vh2} = RegionRings.expected_router(@region, "tenant_0", table)
       assert vh2 == expected_vh2
@@ -201,7 +209,7 @@ defmodule Realtime.GenRpcPubSub.RegionRingsTest do
 
       # The origin learns the remote region's membership through syn, exactly as
       # RegionRings.reconcile/1 reads it.
-      wait_until(fn -> Nodes.region_nodes(@remote_region) == Enum.sort(remote_nodes) end, 20_000)
+      assert_eventually(Nodes.region_nodes(@remote_region) == Enum.sort(remote_nodes), @cluster_wait)
 
       # An isolated RegionRings that reconciles from live syn membership, with a short
       # backstop so any late syn propagation is folded in without a membership event.
@@ -212,14 +220,12 @@ defmodule Realtime.GenRpcPubSub.RegionRingsTest do
       # Wait until our reconstructed ring has converged on the view the remote scope
       # actually publishes — this is the view_hash equality the router relies on to
       # trust occupancy instead of flooding.
-      wait_until(
-        fn ->
-          case RegionRings.expected_router(@remote_region, "probe", table) do
-            {:ok, _node, vh} -> vh == remote_view_hash.()
-            _ -> false
-          end
+      assert_eventually(
+        case RegionRings.expected_router(@remote_region, "probe", table) do
+          {:ok, _node, vh} -> vh == remote_view_hash.()
+          _ -> false
         end,
-        20_000
+        @cluster_wait
       )
 
       expected_vh = remote_view_hash.()
@@ -266,12 +272,10 @@ defmodule Realtime.GenRpcPubSub.RegionRingsTest do
         n
       end)
 
-    wait_until(
-      fn ->
-        Enum.all?(nodes, fn n -> :erpc.call(n, Muster, :status, [remote_scope]) == :ready end) and
-          nodes |> Enum.map(&:erpc.call(&1, Muster, :view_hash, [remote_scope])) |> Enum.uniq() |> length() == 1
-      end,
-      20_000
+    assert_eventually(
+      Enum.all?(nodes, fn n -> :erpc.call(n, Muster, :status, [remote_scope]) == :ready end) and
+        nodes |> Enum.map(&:erpc.call(&1, Muster, :view_hash, [remote_scope])) |> Enum.uniq() |> length() == 1,
+      @cluster_wait
     )
 
     Enum.sort(nodes)
@@ -282,24 +286,5 @@ defmodule Realtime.GenRpcPubSub.RegionRingsTest do
     # calling :sys.get_state/1 ensures that the above message has been processed
     # as this is a sync call
     :sys.get_state(pid)
-  end
-
-  defp wait_until(fun, timeout \\ 1_000) do
-    deadline = System.monotonic_time(:millisecond) + timeout
-    do_wait_until(fun, deadline)
-  end
-
-  defp do_wait_until(fun, deadline) do
-    cond do
-      fun.() ->
-        :ok
-
-      System.monotonic_time(:millisecond) > deadline ->
-        flunk("condition not met in time")
-
-      true ->
-        Process.sleep(10)
-        do_wait_until(fun, deadline)
-    end
   end
 end

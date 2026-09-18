@@ -40,8 +40,7 @@ defmodule Realtime.PromEx.Plugins.PhoenixTest do
           [{"x-api-key", token}]
         )
 
-      Process.sleep(200)
-      assert metric_value("phoenix_connections_total") >= 2
+      assert_eventually(metric_value("phoenix_connections_total") >= 2)
     end
   end
 
@@ -65,14 +64,14 @@ defmodule Realtime.PromEx.Plugins.PhoenixTest do
           [{"x-api-key", token}]
         )
 
-      Process.sleep(200)
-
-      assert metric_value("phoenix_socket_connected_duration_milliseconds_count",
-               endpoint: "RealtimeWeb.Endpoint",
-               result: "ok",
-               serializer: "Elixir.Phoenix.Socket.V1.JSONSerializer",
-               transport: "websocket"
-             ) >= 1
+      assert_eventually(
+        metric_value("phoenix_socket_connected_duration_milliseconds_count",
+          endpoint: "RealtimeWeb.Endpoint",
+          result: "ok",
+          serializer: "Elixir.Phoenix.Socket.V1.JSONSerializer",
+          transport: "websocket"
+        ) >= 1
+      )
 
       assert metric_value("phoenix_socket_connected_duration_milliseconds_count",
                endpoint: "RealtimeWeb.Endpoint",

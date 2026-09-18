@@ -72,9 +72,8 @@ defmodule RealtimeWeb.RealtimeChannel.TrackerTest do
         pid
       end
 
-    Process.sleep(150)
-
-    for pid <- pids, do: refute(Process.alive?(pid))
-    assert Tracker.table_name() |> :ets.tab2list() |> length() == 0
+    # The tracker reaps on its own schedule; wait for the sweep instead of guessing at it.
+    assert_eventually(Enum.all?(pids, &(not Process.alive?(&1))), timeout: 2_000, interval: 25)
+    assert_eventually(Tracker.table_name() |> :ets.tab2list() |> length() == 0, timeout: 2_000, interval: 25)
   end
 end

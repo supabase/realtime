@@ -1,6 +1,9 @@
 defmodule Realtime.PromEx.Plugins.GenRpcTest do
   # Async false due to Clustered usage
   use ExUnit.Case, async: false
+
+  require WaitForIt
+
   alias Realtime.PromEx.Plugins
 
   defmodule MetricsTest do
@@ -25,8 +28,14 @@ defmodule Realtime.PromEx.Plugins.GenRpcTest do
       Process.sleep(50)
     end
 
-    # Wait for MetricsTest to fetch metrics
-    Process.sleep(200)
+    # The plugin's first poll is what creates the series every test below reads; wait for it
+    # rather than guessing at poll_rate.
+    WaitForIt.wait!(
+      metric_value(PromEx.get_metrics(MetricsTest), "gen_rpc_send_count", origin_node: node(), target_node: node),
+      timeout: 2_000,
+      interval: 25
+    )
+
     %{node: node}
   end
 

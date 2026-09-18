@@ -12,6 +12,8 @@ defmodule TestTenantDb.Backend.Docker do
 
   use GenServer
 
+  require WaitForIt
+
   alias Realtime.Database
   alias Realtime.Env
   alias TestTenantDb.Probe
@@ -37,7 +39,10 @@ defmodule TestTenantDb.Backend.Docker do
   # `Worker.port/1` must allow more than claim + wait_ready combined.
   @claim_timeout_ms 30_000
   @container_ready_timeout_ms 25_000
-  @ready_poll_interval_ms 250
+  # A container is usually ready quickly and occasionally slow, so readiness backs off rather
+  # than probing at a fixed rate for the whole 25s budget.
+  @ready_poll_start_ms 50
+  @ready_poll_max_ms 250
 
   # Careful that this doesn't go over ~60s / exunits default timeout
   def worker_ready_timeout_ms, do: @claim_timeout_ms + @container_ready_timeout_ms
@@ -379,24 +384,20 @@ defmodule TestTenantDb.Backend.Docker do
   end
 
   # Gate on exactly what consumers use: a real connection from the host to the published port.
+  # The `else` clause sees the last probe result, so the failure still names the error that was
+  # actually holding the container back.
   def wait_ready!(name, port) do
     settings = Probe.settings!(port)
-    wait_ready!(name, settings, System.monotonic_time(:millisecond) + @container_ready_timeout_ms)
-  end
 
-  defp wait_ready!(name, settings, deadline) do
-    case Probe.check(settings) do
+    WaitForIt.case_wait Probe.check(settings),
+      timeout: @container_ready_timeout_ms,
+      interval: WaitForIt.Backoff.exponential(start: @ready_poll_start_ms, max: @ready_poll_max_ms) do
       :ok ->
         :ok
-
+    else
       {:error, reason} ->
-        if System.monotonic_time(:millisecond) >= deadline do
-          raise "Container #{name} did not accept connections within " <>
-                  "#{@container_ready_timeout_ms}ms. Last error: #{reason}"
-        else
-          Process.sleep(@ready_poll_interval_ms)
-          wait_ready!(name, settings, deadline)
-        end
+        raise "Container #{name} did not accept connections within " <>
+                "#{@container_ready_timeout_ms}ms. Last error: #{reason}"
     end
   end
 
