@@ -94,15 +94,18 @@ defmodule Realtime.Integration.MeasureTrafficTest do
                        500
       end
 
-      # Wait for RateCounter to run
-      RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
-      Process.sleep(100)
+      # The counters are written after the frames have already been fastlaned, so re-tick until
+      # they settle rather than sampling them once.
+      assert_eventually(
+        (
+          RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
 
-      output_bytes = get_count([:realtime, :channel, :output_bytes], tenant.external_id)
-      input_bytes = get_count([:realtime, :channel, :input_bytes], tenant.external_id)
-
-      assert output_bytes > 0
-      assert input_bytes > 0
+          get_count([:realtime, :channel, :output_bytes], tenant.external_id) > 0 and
+            get_count([:realtime, :channel, :input_bytes], tenant.external_id) > 0
+        ),
+        timeout: 2_000,
+        interval: 50
+      )
     end
 
     test "measure traffic for presence events", %{tenant: tenant} do
@@ -123,15 +126,18 @@ defmodule Realtime.Integration.MeasureTrafficTest do
         })
       end
 
-      # Wait for RateCounter to run
-      RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
-      Process.sleep(100)
+      # The counters are written after the frames have already been fastlaned, so re-tick until
+      # they settle rather than sampling them once.
+      assert_eventually(
+        (
+          RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
 
-      output_bytes = get_count([:realtime, :channel, :output_bytes], tenant.external_id)
-      input_bytes = get_count([:realtime, :channel, :input_bytes], tenant.external_id)
-
-      assert output_bytes > 0, "Expected output_bytes to be greater than 0, got #{output_bytes}"
-      assert input_bytes > 0, "Expected input_bytes to be greater than 0, got #{input_bytes}"
+          get_count([:realtime, :channel, :output_bytes], tenant.external_id) > 0 and
+            get_count([:realtime, :channel, :input_bytes], tenant.external_id) > 0
+        ),
+        timeout: 2_000,
+        interval: 50
+      )
     end
 
     test "measure traffic for postgres changes events", %{tenant: tenant, db_conn: db_conn} do
@@ -170,15 +176,18 @@ defmodule Realtime.Integration.MeasureTrafficTest do
                        500
       end
 
-      # Wait for RateCounter to run
-      RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
-      Process.sleep(100)
+      # The counters are written after the frames have already been fastlaned, so re-tick until
+      # they settle rather than sampling them once.
+      assert_eventually(
+        (
+          RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
 
-      output_bytes = get_count([:realtime, :channel, :output_bytes], tenant.external_id)
-      input_bytes = get_count([:realtime, :channel, :input_bytes], tenant.external_id)
-
-      assert output_bytes > 0, "Expected output_bytes to be greater than 0, got #{output_bytes}"
-      assert input_bytes > 0, "Expected input_bytes to be greater than 0, got #{input_bytes}"
+          get_count([:realtime, :channel, :output_bytes], tenant.external_id) > 0 and
+            get_count([:realtime, :channel, :input_bytes], tenant.external_id) > 0
+        ),
+        timeout: 2_000,
+        interval: 50
+      )
     end
 
     test "measure traffic for db events", %{tenant: tenant, db_conn: db_conn} do
@@ -218,15 +227,18 @@ defmodule Realtime.Integration.MeasureTrafficTest do
                        2000
       end
 
-      # Wait for RateCounter to run
-      RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
-      Process.sleep(100)
+      # The counters are written after the frames have already been fastlaned, so re-tick until
+      # they settle rather than sampling them once.
+      assert_eventually(
+        (
+          RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
 
-      output_bytes = get_count([:realtime, :channel, :output_bytes], tenant.external_id)
-      input_bytes = get_count([:realtime, :channel, :input_bytes], tenant.external_id)
-
-      assert output_bytes > 0, "Expected output_bytes to be greater than 0, got #{output_bytes}"
-      assert input_bytes > 0, "Expected input_bytes to be greater than 0, got #{input_bytes}"
+          get_count([:realtime, :channel, :output_bytes], tenant.external_id) > 0 and
+            get_count([:realtime, :channel, :input_bytes], tenant.external_id) > 0
+        ),
+        timeout: 2_000,
+        interval: 50
+      )
     end
   end
 end

@@ -152,8 +152,9 @@ defmodule Realtime.DatabaseTest do
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
       Postgrex.query!(conn, "SELECT * FROM pg_create_logical_replication_slot('#{name}', 'pgoutput')", [])
       Database.replication_slot_teardown(conn, name)
-      Process.sleep(1000)
-      assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
+
+      # Postgres releases the slot asynchronously once the walsender exits.
+      assert_eventually(%{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", []))
     end
 
     test "removes replication slots with a given name and a tenant", %{tenant: tenant} do

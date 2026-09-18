@@ -5,7 +5,6 @@ defmodule Realtime.Integration.RegionAwareEncryptionTest do
   and `Realtime.Api.reencrypt_extension_settings/4`.
   """
   use Realtime.DataCase, async: false
-  import TestHelpers
 
   alias Realtime.Api
   alias Realtime.Crypto
@@ -24,8 +23,12 @@ defmodule Realtime.Integration.RegionAwareEncryptionTest do
         ]
       )
 
-    # we need the nodes available for our region aware encryption to work
-    assert eventually(fn -> :erpc.call(node, Nodes, :region_nodes, [master_region]) == [local] end)
+    # we need the nodes available for our region aware encryption to work.
+    # Each probe is an erpc round trip, hence the unhurried interval.
+    assert_eventually(:erpc.call(node, Nodes, :region_nodes, [master_region]) == [local],
+      timeout: 5_000,
+      interval: 100
+    )
 
     %{tenant: rewind_to_legacy_encryption(tenant), node: node}
   end

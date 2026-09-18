@@ -6,6 +6,8 @@ defmodule TestTenantDb.Backend.External.Worker do
   # container to start or wait on — the port is already a live server.
   use GenServer
 
+  require WaitForIt
+
   alias TestTenantDb.Backend.External
 
   def start_link(args \\ [], opts \\ []) do
@@ -19,24 +21,23 @@ defmodule TestTenantDb.Backend.External.Worker do
 
   @impl true
   def handle_continue(:assign_port, _state) do
-    {:noreply, %{port: assign_port(10)}}
+    {:noreply, %{port: assign_port()}}
   end
 
   # A replacement worker (started by poolboy after a crash) can momentarily
   # find no port available if it asks before the registry has processed the
   # dead worker's :DOWN and reclaimed its port. Retry briefly instead of
   # crashing this worker outright.
-  defp assign_port(attempts) do
-    case External.claim() do
-      {:error, :no_external_ports_available} when attempts > 1 ->
-        Process.sleep(100)
-        assign_port(attempts - 1)
-
+  #
+  # Blocking in a GenServer callback is normally wrong, but this one runs from `handle_continue`
+  # during startup: the worker has no other work queued and is not usable until it holds a port.
+  defp assign_port do
+    WaitForIt.case_wait External.claim(), timeout: 1_000, interval: 100 do
+      port when is_integer(port) ->
+        port
+    else
       {:error, :no_external_ports_available} ->
         raise "TestTenantDb.Backend.External.Worker: no external port became available after retrying"
-
-      port ->
-        port
     end
   end
 

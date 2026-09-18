@@ -50,3 +50,6 @@ priv/repo/tenant_schema/_custom/
 
 # pg_regress output from test/walrus/run.sh
 test/walrus/results/
+
+# Wait-margin diagnostics from WAIT_MARGIN_REPORT=true (see test/test_helper.exs)
+wait-margin.jsonl

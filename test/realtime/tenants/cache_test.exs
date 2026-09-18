@@ -174,19 +174,20 @@ defmodule Realtime.Tenants.CacheTest do
     end
   end
 
-  defp seed_remote_cache(node, external_id, tenant, attempts \\ 20) do
-    Rpc.enhanced_call(node, Cache, :update_cache, [tenant])
+  defp seed_remote_cache(node, external_id, tenant) do
+    name = tenant.name
 
-    case Rpc.enhanced_call(node, Cachex, :get, [Cache, {:get_tenant_by_external_id, external_id}]) do
-      {:ok, %Api.Tenant{external_id: ^external_id, name: name}} when name == tenant.name ->
-        :ok
-
-      _other when attempts > 0 ->
-        Process.sleep(50)
-        seed_remote_cache(node, external_id, tenant, attempts - 1)
-
-      other ->
-        flunk("Failed to seed remote cache after retries, last result: #{inspect(other)}")
+    WaitForIt.case_wait push_and_read_remote_cache(node, external_id, tenant), timeout: 1_000, interval: 50 do
+      {:ok, %Api.Tenant{external_id: ^external_id, name: ^name}} -> :ok
+    else
+      other -> flunk("Failed to seed remote cache after retries, last result: #{inspect(other)}")
     end
+  end
+
+  # `update_cache` is an idempotent put, so re-pushing on every attempt is safe to repeat inside a
+  # waited-on expression — and it is how a concurrent invalidation on the peer gets won.
+  defp push_and_read_remote_cache(node, external_id, tenant) do
+    Rpc.enhanced_call(node, Cache, :update_cache, [tenant])
+    Rpc.enhanced_call(node, Cachex, :get, [Cache, {:get_tenant_by_external_id, external_id}])
   end
 end
