@@ -1,10 +1,14 @@
 defmodule Realtime.Tenants.Janitor.MaintenanceTaskTest do
   use Realtime.DataCase, async: true
+  use Mimic
 
   alias Realtime.Tenants.Janitor.MaintenanceTask
   alias Realtime.Api.Message
   alias Realtime.Database
+  alias Realtime.Messages
   alias Realtime.Tenants.Repo
+
+  setup :set_mimic_from_context
 
   setup do
     tenant = TestTenantDb.checkout_tenant(run_migrations: true)
@@ -69,6 +73,19 @@ defmodule Realtime.Tenants.Janitor.MaintenanceTaskTest do
 
       assert MapSet.equal?(partitions, expected_names)
     end
+  end
+
+  test "closes the database connection when maintenance raises", %{tenant: tenant} do
+    {:ok, conn} = Agent.start_link(fn -> :ok end)
+
+    expect(Database, :connect, fn ^tenant, "realtime_janitor" -> {:ok, conn} end)
+    expect(Messages, :delete_old_messages, fn ^conn -> raise "maintenance failed" end)
+
+    assert_raise RuntimeError, "maintenance failed", fn ->
+      MaintenanceTask.run(tenant.external_id)
+    end
+
+    refute Process.alive?(conn)
   end
 
   test "exits if fails to remove old messages" do
