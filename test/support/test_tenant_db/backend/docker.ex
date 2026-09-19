@@ -44,6 +44,11 @@ defmodule TestTenantDb.Backend.Docker do
   @ready_poll_start_ms 50
   @ready_poll_max_ms 250
 
+  # Only covers docker publishing the port binding it has already been told to create, which is
+  # near-instant on a healthy daemon. Short on purpose: when the binding is missing it is usually
+  # missing for good, and the caller's retry is what actually recovers.
+  @published_port_timeout_ms 2_000
+
   # Careful that this doesn't go over ~60s / exunits default timeout
   def worker_ready_timeout_ms, do: @claim_timeout_ms + @container_ready_timeout_ms
 
@@ -265,25 +270,58 @@ defmodule TestTenantDb.Backend.Docker do
 
   # Start a container and let docker publish 5432 on a port of its choosing, then read the
   # port back: nothing else on the machine can be handed the same one.
-  defp start_available_container(attempts \\ 5)
-  defp start_available_container(0), do: raise("TestTenantDb.Backend.Docker: exhausted retries starting a container")
+  defp start_available_container(attempts \\ 5, last_error \\ "none")
 
-  defp start_available_container(attempts) do
+  defp start_available_container(0, last_error) do
+    raise "TestTenantDb.Backend.Docker: exhausted retries starting a container. Last error: #{last_error}"
+  end
+
+  defp start_available_container(attempts, _last_error) do
     name = container_name()
 
-    case docker_run(name) do
-      {_, 0} -> {name, published_port!(name)}
-      {_output, _code} -> start_available_container(attempts - 1)
+    with {_, 0} <- docker_run(name),
+         {:ok, port} <- await_published_port(name) do
+      {name, port}
+    else
+      failure ->
+        # Either docker refused the run or it produced a container with no usable binding.
+        # Leaving that container behind would only have it reaped later as a mystery, so drop it
+        # and spend one of the retries on a fresh name.
+        System.cmd("docker", ["rm", "-f", name], stderr_to_stdout: true)
+        start_available_container(attempts - 1, describe_start_failure(failure))
+    end
+  end
+
+  defp describe_start_failure({:error, reason}), do: reason
+  defp describe_start_failure({output, code}), do: "docker run exited #{code}: #{String.trim(output)}"
+
+  # `docker run -d` returns once the container is created, but the host-side binding for `-p
+  # 0:5432` is published a moment later, so `docker port` can briefly answer "no public port ...
+  # published". Under heavy container churn Docker Desktop sometimes never publishes it at all,
+  # which is why a miss here retries the container rather than failing the run.
+  defp await_published_port(name) do
+    WaitForIt.case_wait docker_port(name),
+      timeout: @published_port_timeout_ms,
+      interval: WaitForIt.Backoff.exponential(start: @ready_poll_start_ms, max: @ready_poll_max_ms) do
+      {:ok, port} ->
+        {:ok, port}
+    else
+      {:error, _reason} = error ->
+        error
     end
   end
 
   # "0.0.0.0:32768" / "[::]:32768" — take the first mapping's port.
-  defp published_port!(name) do
-    {output, 0} = System.cmd("docker", ["port", name, "5432/tcp"])
+  defp docker_port(name) do
+    case System.cmd("docker", ["port", name, "5432/tcp"], stderr_to_stdout: true) do
+      {output, 0} ->
+        case Regex.run(~r/:(\d+)\s*$/m, output) do
+          [_, port] -> {:ok, String.to_integer(port)}
+          nil -> {:error, String.trim(output)}
+        end
 
-    case Regex.run(~r/:(\d+)\s*$/m, output) do
-      [_, port] -> String.to_integer(port)
-      nil -> raise "could not read the published port of #{name} from #{inspect(output)}"
+      {output, _code} ->
+        {:error, String.trim(output)}
     end
   end
 

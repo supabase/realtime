@@ -84,7 +84,7 @@ defmodule Realtime.Integration.RtChannel.WalBloatTest do
       original_connect_pid = Connect.whereis(tenant.external_id)
       # Replication now starts asynchronously, so wait for the slot to be active before
       # reading the replication pid (it would otherwise race and return nil).
-      await_replication_slot_active(db_conn, 15_000, 500)
+      await_replication_slot_active(db_conn, 15_000)
       original_db_pid = active_replication_slot_pid!(db_conn)
       original_replication_pid = ReplicationConnection.whereis(tenant.external_id)
 
@@ -97,7 +97,7 @@ defmodule Realtime.Integration.RtChannel.WalBloatTest do
 
       assert Connect.ready?(tenant.external_id)
       {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-      new_db_pid = await_replication_slot_active(db_conn, 60_000, 1_000)
+      new_db_pid = await_replication_slot_active(db_conn, 60_000)
 
       assert new_db_pid != original_db_pid
       assert ^original_connect_pid = Connect.whereis(tenant.external_id)
@@ -145,12 +145,16 @@ defmodule Realtime.Integration.RtChannel.WalBloatTest do
   # watchdog's threshold). A slot can briefly show an active_pid while still
   # replaying leftover WAL from the bloat, only for the watchdog to kill it again
   # moments later - checking the same condition the watchdog checks avoids that race.
-  defp await_replication_slot_active(db_conn, timeout_ms, interval_ms) do
+  defp await_replication_slot_active(db_conn, timeout_ms) do
     slot_name = "supabase_realtime_messages_replication_slot_"
 
     WaitForIt.case_wait Database.check_replication_slot(db_conn, slot_name),
       timeout: timeout_ms,
-      interval: interval_ms do
+      # Start tight so a slot that is already active is picked up straight away, then back off so
+      # a genuinely long wait does not become a busy query loop against the tenant database. The
+      # fixed half- and full-second intervals this replaced spent most of their time asleep after
+      # the slot had already come back.
+      interval: WaitForIt.Backoff.exponential(start: 25, max: 500) do
       :ok -> active_replication_slot_pid!(db_conn)
     else
       last -> flunk("Replication slot did not become active within #{timeout_ms}ms. Last check: #{inspect(last)}")

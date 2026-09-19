@@ -9,6 +9,11 @@ defmodule TestHelpers do
   @default_timeout 5_000
   @default_interval 100
 
+  # See `refute_eventually/2`: a negative assertion pays its timeout on every passing run, so it
+  # gets a much smaller budget and samples more densely within it.
+  @negative_timeout 500
+  @negative_interval 25
+
   # `assert_eventually` and `refute_eventually` below shadow their `WaitForIt.Test` namesakes so
   # that they keep this suite's historical wait budget. The arities are derived from
   # `WaitForIt.Test` rather than hardcoded so that an arity added upstream cannot slip past the
@@ -90,16 +95,20 @@ defmodule TestHelpers do
   end
 
   @doc """
-  Like `WaitForIt.Test.refute_eventually/2`, but with the same backward-compatible `:timeout`
-  and `:interval` defaults as `assert_eventually/2`.
+  Like `WaitForIt.Test.refute_eventually/2`, but defaults `:timeout` to #{@negative_timeout}ms and
+  `:interval` to #{@negative_interval}ms.
 
-  Note that a passing `refute_eventually` always waits out its whole timeout, so prefer passing a
-  shorter `:timeout` where the negative can be established quickly.
+  Deliberately a much smaller budget than `assert_eventually/2`. A passing `assert_eventually`
+  stops as soon as the condition holds, so a generous timeout there costs nothing; a passing
+  `refute_eventually` proves a negative by watching the whole window elapse, so its timeout is
+  paid in full on every run. The default is sized for "the thing that must not happen would have
+  happened by now" against a local database, and samples often enough within that window to
+  catch it. Where the negative genuinely needs longer to settle, pass an explicit `:timeout`.
   """
   defmacro refute_eventually(expression, opts \\ []) do
     quote do
       require WaitForIt.Test
-      WaitForIt.Test.refute_eventually(unquote(expression), TestHelpers.__with_defaults__(unquote(opts)))
+      WaitForIt.Test.refute_eventually(unquote(expression), TestHelpers.__negative_defaults__(unquote(opts)))
     end
   end
 
@@ -108,5 +117,12 @@ defmodule TestHelpers do
     opts
     |> Keyword.put_new(:timeout, @default_timeout)
     |> Keyword.put_new(:interval, @default_interval)
+  end
+
+  @doc false
+  def __negative_defaults__(opts) do
+    opts
+    |> Keyword.put_new(:timeout, @negative_timeout)
+    |> Keyword.put_new(:interval, @negative_interval)
   end
 end
