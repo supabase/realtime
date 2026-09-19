@@ -4,6 +4,7 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
   import Mimic
 
   alias Extensions.PostgresCdcRls
+  alias Realtime.Database
   alias Realtime.Nodes
   alias Realtime.Tenants.Connect
   alias Realtime.UsersCounter
@@ -42,6 +43,20 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
     assert html =~ tenant.external_id
     assert html =~ tenant.name
     assert html =~ "postgres_cdc_rls"
+  end
+
+  test "tenant lookup releases the postgres version connection", %{conn: conn, tenant: tenant} do
+    {:ok, _view, _html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
+
+    {:ok, settings} = Database.from_tenant(tenant, "tenant_info_test", :stop)
+    {:ok, query_conn} = Database.connect_db(settings)
+
+    assert {:ok, %{rows: [[0]]}} =
+             Postgrex.query(
+               query_conn,
+               "SELECT count(*) FROM pg_stat_activity WHERE application_name = $1",
+               ["realtime_dashboard_tenant_info"]
+             )
   end
 
   test "shows tenant info for valid external_id via form submit", %{conn: conn, tenant: tenant} do
