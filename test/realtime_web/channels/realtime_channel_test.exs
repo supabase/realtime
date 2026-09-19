@@ -982,6 +982,102 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       {:error, :too_many_connections} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
     end
+
+    test "removes from UsersCounter when leaving channel", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      assert Realtime.UsersCounter.tenant_users(tenant.external_id) == 0
+
+      {:ok, _, channel_socket} = subscribe_and_join(socket, "realtime:test1", %{})
+      assert Realtime.UsersCounter.tenant_users(tenant.external_id) == 1
+
+      Process.unlink(channel_socket.channel_pid)
+      leave(channel_socket)
+      Process.sleep(100) # Wait for terminate/2 async execution
+
+      assert Realtime.UsersCounter.tenant_users(tenant.external_id) == 0
+    end
+
+    test "removes from UsersCounter when leaving channel only if no channels remaining", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      {:ok, _, channel_socket1} = subscribe_and_join(socket, "realtime:test1", %{})
+      {:ok, _, channel_socket2} = subscribe_and_join(socket, "realtime:test2", %{})
+
+      # Both channels belong to same transport_pid, so count is 1 user.
+      assert Realtime.UsersCounter.tenant_users(tenant.external_id) == 1
+
+      Process.unlink(channel_socket1.channel_pid)
+      leave(channel_socket1)
+      Process.sleep(100)
+
+      # Still 1 because socket2 is still open
+      assert Realtime.UsersCounter.tenant_users(tenant.external_id) == 1
+
+      Process.unlink(channel_socket2.channel_pid)
+      leave(channel_socket2)
+      Process.sleep(100)
+
+      assert Realtime.UsersCounter.tenant_users(tenant.external_id) == 0
+    end
+
+    test "leave everything, then rejoin a channel counts exactly once", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      {:ok, _, channel_socket1} = subscribe_and_join(socket, "realtime:test1", %{})
+      Process.unlink(channel_socket1.channel_pid)
+      leave(channel_socket1)
+      Process.sleep(100)
+
+      assert Realtime.UsersCounter.tenant_users(tenant.external_id) == 0
+
+      # Rejoin
+      {:ok, _, _channel_socket2} = subscribe_and_join(socket, "realtime:test2", %{})
+      assert Realtime.UsersCounter.tenant_users(tenant.external_id) == 1
+    end
+
+    test "two separate sockets for the same tenant do not interfere with each other's count", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket1} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+      {:ok, _, channel_socket1} = subscribe_and_join(socket1, "realtime:test1", %{})
+
+      # Create second socket with a different transport_pid
+      fake_transport = spawn_link(fn -> Process.sleep(:infinity) end)
+      socket2 = %{socket1 | transport_pid: fake_transport}
+      {:ok, _, _channel_socket2} = subscribe_and_join(socket2, "realtime:test2", %{})
+
+      assert Realtime.UsersCounter.tenant_users(tenant.external_id) == 2
+
+      Process.unlink(channel_socket1.channel_pid)
+      leave(channel_socket1)
+      Process.sleep(100)
+
+      assert Realtime.UsersCounter.tenant_users(tenant.external_id) == 1
+    end
+
+    test "max_concurrent_users enforcement immediately passes when first user leaves", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      Realtime.Tenants.Cache.update_cache(%{tenant | max_concurrent_users: 1})
+
+      # Connect first user
+      {:ok, %Socket{} = socket1} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+      {:ok, _, channel_socket1} = subscribe_and_join(socket1, "realtime:test1", %{})
+
+      # Try to connect second user, should fail at connect
+      assert {:error, :too_many_connections} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      # First user leaves all channels
+      Process.unlink(channel_socket1.channel_pid)
+      leave(channel_socket1)
+      Process.sleep(100)
+
+      # Second user can now connect and join immediately
+      assert {:ok, %Socket{} = socket2} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+      assert {:ok, _, _} = subscribe_and_join(socket2, "realtime:test2", %{})
+    end
   end
 
   describe "Muster join" do
