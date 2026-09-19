@@ -9,6 +9,13 @@ defmodule Realtime.MetricsCleanerTest do
   # schedule rather than at the assertion macros' much finer default.
   @probe_interval_ms 50
 
+  # The tests configure `vacant_metric_threshold_in_seconds: 1`, so a metric is protected for a
+  # full second after it goes vacant. Stop just short of that.
+  @pre_threshold_ms 900
+
+  @vacant_tenants ["occupied-tenant", "vacant-tenant1", "vacant-tenant2"]
+  @disconnected_tenants ["connected-tenant", "disconnected-tenant1", "disconnected-tenant2"]
+
   describe "metrics cleanup - vacant websockets" do
     test "cleans up metrics for users that have been disconnected" do
       :telemetry.execute(
@@ -49,22 +56,15 @@ defmodule Realtime.MetricsCleanerTest do
       Census.leave(:users, "vacant-tenant1", pid2)
       Census.leave(:users, "vacant-tenant2", pid3)
 
-      # The cleaner runs every 100ms but must not evict before the 1s threshold: assert the
-      # metrics survive every run in that window rather than sampling once at the end of it.
-      assert_always(
-        exported?("occupied-tenant") and exported?("vacant-tenant1") and exported?("vacant-tenant2"),
-        timeout: 200,
-        interval: @probe_interval_ms
-      )
+      # Nothing may be evicted before the 1s threshold. The cleaner runs every 100ms, so that is
+      # ~10 runs that each have to decline; the window covers all of them, not just the first two.
+      refute_eventually(first_missing(@vacant_tenants), timeout: @pre_threshold_ms, interval: @probe_interval_ms)
 
-      # Past the threshold the next run evicts them.
-      assert_eventually(
-        not exported?("vacant-tenant1") and not exported?("vacant-tenant2"),
+      # Past the threshold the next run evicts the vacant ones and leaves the occupied one.
+      assert_eventually(["occupied-tenant"] = still_exported(@vacant_tenants),
         timeout: 3_000,
         interval: @probe_interval_ms
       )
-
-      assert exported?("occupied-tenant")
     end
 
     test "does not clean up metrics if websockets reconnect before threshold" do
@@ -133,22 +133,18 @@ defmodule Realtime.MetricsCleanerTest do
       :telemetry.execute([:syn, Connect, :unregistered], %{}, %{name: "disconnected-tenant1"})
       :telemetry.execute([:syn, Connect, :unregistered], %{}, %{name: "disconnected-tenant2"})
 
-      # The cleaner runs every 100ms but must not evict before the 1s threshold: assert the
-      # metrics survive every run in that window rather than sampling once at the end of it.
-      assert_always(
-        exported?("connected-tenant") and exported?("disconnected-tenant1") and exported?("disconnected-tenant2"),
-        timeout: 200,
+      # Nothing may be evicted before the 1s threshold. The cleaner runs every 100ms, so that is
+      # ~10 runs that each have to decline; the window covers all of them, not just the first two.
+      refute_eventually(first_missing(@disconnected_tenants),
+        timeout: @pre_threshold_ms,
         interval: @probe_interval_ms
       )
 
-      # Past the threshold the next run evicts them.
-      assert_eventually(
-        not exported?("disconnected-tenant1") and not exported?("disconnected-tenant2"),
+      # Past the threshold the next run evicts the disconnected ones and leaves the connected one.
+      assert_eventually(["connected-tenant"] = still_exported(@disconnected_tenants),
         timeout: 3_000,
         interval: @probe_interval_ms
       )
-
-      assert exported?("connected-tenant")
     end
 
     test "does not clean up metrics if tenant reconnects before threshold" do
@@ -288,7 +284,15 @@ defmodule Realtime.MetricsCleanerTest do
     end
   end
 
-  defp exported?(tenant) do
-    Realtime.TenantPromEx.get_metrics() |> IO.iodata_to_binary() |> String.contains?(~s(tenant="#{tenant}"))
+  defp exported?(tenant), do: tenant in still_exported([tenant])
+
+  # One payload render per probe, not one per tenant, and the *list* is what the assertions wait
+  # on: a combined boolean would only ever report `false` on failure, where this names the tenants
+  # involved. See `first_missing/1` for the same trick in the other direction.
+  defp still_exported(tenants) do
+    payload = Realtime.TenantPromEx.get_metrics() |> IO.iodata_to_binary()
+    Enum.filter(tenants, &String.contains?(payload, ~s(tenant="#{&1}")))
   end
+
+  defp first_missing(tenants), do: Enum.find(tenants, &(&1 not in still_exported(tenants)))
 end

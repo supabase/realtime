@@ -15,6 +15,10 @@ defmodule Realtime.GenRpcPubSubTest do
   # Cross-node syn/Muster convergence, probed over erpc — generous budget, unhurried polling.
   @cluster_wait [timeout: 15_000, interval: 100]
 
+  # Bringing a second region's ring to agreement is the slowest thing here; it had its own
+  # 20s budget before and keeps it.
+  @ring_convergence_wait [timeout: 20_000, interval: 100]
+
   test "it sets off_heap message_queue_data flag on the workers" do
     assert Realtime.PubSubElixir.Realtime.PubSub.Adapter_1
            |> Process.whereis()
@@ -29,20 +33,22 @@ defmodule Realtime.GenRpcPubSubTest do
 
   @aux_mod (quote do
               defmodule Subscriber do
+                require WaitForIt
+
                 # Relay messages to testing node
                 def subscribe(subscriber, topic) do
                   spawn(fn ->
                     RealtimeWeb.Endpoint.subscribe(topic)
 
-                    # syn RegionNodes membership propagates asynchronously across the
-                    # cluster. Poll for it, so a slow-converging cluster raises a clear error
-                    converged? =
-                      TestHelpers.eventually(fn ->
-                        length(Realtime.Nodes.region_nodes("us-east-1")) == 2 and
-                          length(Realtime.Nodes.region_nodes("ap-southeast-2")) == 2
-                      end)
-
-                    unless converged?, do: raise("region membership did not converge in time")
+                    # syn RegionNodes membership propagates asynchronously across the cluster.
+                    # A TimeoutError here names the counts actually seen on this peer, where the
+                    # old `eventually/2` + `raise` could only report a fixed string.
+                    WaitForIt.match_wait!(
+                      %{"us-east-1" => 2, "ap-southeast-2" => 2},
+                      region_node_counts(),
+                      timeout: 15_000,
+                      interval: 100
+                    )
 
                     send(subscriber, {:ready, Application.get_env(:realtime, :region)})
 
@@ -59,6 +65,10 @@ defmodule Realtime.GenRpcPubSubTest do
                 end
 
                 # Register a long-lived local member for the tenant so this node reports hit=true.
+                def region_node_counts do
+                  Map.new(["us-east-1", "ap-southeast-2"], &{&1, length(Realtime.Nodes.region_nodes(&1))})
+                end
+
                 def add_user(tenant_id) do
                   pid = spawn(fn -> Process.sleep(:infinity) end)
                   :ok = Realtime.UsersCounter.add(pid, tenant_id)
@@ -175,11 +185,10 @@ defmodule Realtime.GenRpcPubSubTest do
           phoenix_port: TestEnv.peer_http_port(ap2_nodeY)
         )
 
-      # syn RegionNodes membership propagates asynchronously across the cluster
-      TestHelpers.eventually(fn ->
-        length(Realtime.Nodes.region_nodes("us-east-1")) == 2 and
-          length(Realtime.Nodes.region_nodes("ap-southeast-2")) == 2
-      end)
+      # syn RegionNodes membership propagates asynchronously across the cluster. Waiting on the
+      # counts *per region* rather than on a combined boolean means a failure names the region
+      # that did not converge, and how far it got.
+      assert_eventually(%{"us-east-1" => 2, "ap-southeast-2" => 2} = region_node_counts(), @cluster_wait)
 
       RealtimeWeb.Endpoint.subscribe(@topic)
       :erpc.multicall(Node.list(), Subscriber, :subscribe, [self(), @topic])
@@ -358,15 +367,12 @@ defmodule Realtime.GenRpcPubSubTest do
 
       # The origin (us-east-1) must have learned the ap region's membership via syn
       # and reconciled a local copy of its ring whose view agrees with the ap scope.
-      assert_eventually(length(Realtime.Nodes.region_nodes("ap-southeast-2")) == 2, @cluster_wait)
+      assert_eventually(%{"ap-southeast-2" => 2} = region_node_counts(), @cluster_wait)
 
-      assert_eventually(
-        case RegionRings.expected_router("ap-southeast-2", "probe") do
-          {:ok, _node, vh} -> vh == :erpc.call(ap_holder, Muster, :view_hash, [ap_scope])
-          _ -> false
-        end,
-        @cluster_wait
-      )
+      # Both sides are re-read on every evaluation — the ap ring can still be settling — and the
+      # tagged result means a timeout shows the local router tuple *and* the remote view hash it
+      # disagreed with, where the old `case ... -> boolean` reported only `false`.
+      assert_eventually({:agreed, _node, _vh} = ap_router_agreement(ap_holder, ap_scope), @cluster_wait)
 
       # Pick a tenant whose ap-region router is the holder, so the holder is both the
       # router and the sole occupancy node (the clean, non-flood routed path).
@@ -454,14 +460,36 @@ defmodule Realtime.GenRpcPubSubTest do
         do: [node(), holder_node, bystander_node],
         else: [holder_node, bystander_node]
 
+    # Matching on the collapsed view means a timeout reports what the ring actually looked like —
+    # e.g. `%{statuses: [:ready, :converging], view_hashes: [...]}` — instead of a bare `false`.
     assert_eventually(
-      Enum.all?(nodes, fn n -> :erpc.call(n, Muster, :status, [scope]) == :ready end) and
-        nodes |> Enum.map(&:erpc.call(&1, Muster, :view_hash, [scope])) |> Enum.uniq() |> length() == 1,
-      timeout: 20_000,
-      interval: 100
+      %{statuses: [:ready], view_hashes: [_one]} = muster_convergence(nodes, scope),
+      @ring_convergence_wait
     )
 
     %{holder_node: holder_node, bystander_node: bystander_node, scope: scope}
+  end
+
+  # Both of these collapse a cluster-wide observation into one value, so that the waiting
+  # assertions can match on it and report it verbatim when they time out.
+  defp region_node_counts do
+    Map.new(["us-east-1", "ap-southeast-2"], &{&1, length(Realtime.Nodes.region_nodes(&1))})
+  end
+
+  defp ap_router_agreement(ap_holder, ap_scope) do
+    remote_view_hash = :erpc.call(ap_holder, Muster, :view_hash, [ap_scope])
+
+    case RegionRings.expected_router("ap-southeast-2", "probe") do
+      {:ok, node, ^remote_view_hash} -> {:agreed, node, remote_view_hash}
+      other -> {:disagreed, other, remote_view_hash}
+    end
+  end
+
+  defp muster_convergence(nodes, scope) do
+    %{
+      statuses: nodes |> Enum.map(&:erpc.call(&1, Muster, :status, [scope])) |> Enum.uniq(),
+      view_hashes: nodes |> Enum.map(&:erpc.call(&1, Muster, :view_hash, [scope])) |> Enum.uniq()
+    }
   end
 
   # Find a group key whose consistent-hash router is `target_node` (all nodes agree
