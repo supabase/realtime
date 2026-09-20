@@ -465,8 +465,8 @@ defmodule RealtimeWeb.RealtimeChannel do
     %{tenant: tenant_id} = socket.assigns
 
     with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
-         {:ok, socket} <- PresenceHandler.handle(payload, db_conn, socket) do
-      {:reply, :ok, socket}
+         {:ok, new_socket} <- PresenceHandler.handle(payload, db_conn, socket) do
+      {:reply, :ok, maybe_sync_presence(socket, new_socket)}
     else
       {:error, :client_rate_limit_exceeded} ->
         log_error(socket, "ClientPresenceRateLimitReached", :client_rate_limit_exceeded)
@@ -489,8 +489,8 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_in("presence", payload, %{assigns: %{private?: false}} = socket) do
-    with {:ok, socket} <- PresenceHandler.handle(payload, nil, socket) do
-      {:reply, :ok, socket}
+    with {:ok, new_socket} <- PresenceHandler.handle(payload, nil, socket) do
+      {:reply, :ok, maybe_sync_presence(socket, new_socket)}
     else
       {:error, :client_rate_limit_exceeded} ->
         log_error(socket, "ClientPresenceRateLimitReached", :client_rate_limit_exceeded)
@@ -1180,6 +1180,16 @@ defmodule RealtimeWeb.RealtimeChannel do
     payload = %{"payload" => message.payload, "event" => message.event, "type" => "broadcast", "meta" => meta}
     push(socket, "broadcast", payload)
   end
+
+  # A track message can be what enables presence for this socket: it never got the join-time
+  # presence_state and would only see diffs from here on. Sync now, or the members tracked
+  # before this point stay invisible to this client.
+  defp maybe_sync_presence(%{assigns: %{presence_enabled?: false}}, %{assigns: %{presence_enabled?: true}} = socket) do
+    send(self(), :sync_presence)
+    socket
+  end
+
+  defp maybe_sync_presence(_socket, socket), do: socket
 
   defp presence_enabled?(client_enabled?, %Tenant{presence_enabled: tenant_enabled}) do
     client_enabled? || tenant_enabled
