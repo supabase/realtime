@@ -1455,6 +1455,115 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
   end
 
+  describe "access_token throttling" do
+    # The window is configured for the test env and only ever read, never mutated, so these stay async
+    test "first refresh of a channel is applied immediately", %{tenant: tenant} do
+      socket = join_public_channel(tenant)
+      token = distinct_token(tenant, "first")
+
+      push(socket, "access_token", %{"access_token" => token})
+
+      assigns = Server.socket(socket.channel_pid).assigns
+      assert assigns.access_token == token
+      assert assigns.pending_access_token == nil
+    end
+
+    test "holds refreshes arriving inside the window and applies the newest when it closes", %{tenant: tenant} do
+      socket = join_public_channel(tenant)
+
+      # Consumes the free first refresh and opens the window
+      first = distinct_token(tenant, "first")
+      push(socket, "access_token", %{"access_token" => first})
+      assert Server.socket(socket.channel_pid).assigns.access_token == first
+
+      second = distinct_token(tenant, "second")
+      third = distinct_token(tenant, "third")
+
+      log =
+        capture_log(fn ->
+          push(socket, "access_token", %{"access_token" => second})
+          push(socket, "access_token", %{"access_token" => third})
+
+          # Both were coalesced into the pending slot, newest wins, and neither was verified
+          assigns = Server.socket(socket.channel_pid).assigns
+          assert assigns.access_token == first
+          assert assigns.pending_access_token == third
+
+          assert eventually(fn ->
+                   assigns = Server.socket(socket.channel_pid).assigns
+                   assigns.access_token == third and assigns.pending_access_token == nil
+                 end)
+        end)
+
+      # Warned once for the window, not once per message
+      assert log =~ "AccessTokenRefreshThrottled"
+      assert log |> String.split("Token refresh throttled") |> length() == 2
+    end
+
+    test "rotating between two valid tokens costs one verification per window", %{tenant: tenant} do
+      socket = join_public_channel(tenant)
+      channel_pid = socket.channel_pid
+
+      stub(RealtimeWeb.ChannelsAuthorization, :authorize_conn, fn _token, _, _ ->
+        {:ok, %{"role" => "authenticated", "exp" => System.system_time(:second) + 10_000, "sub" => "rotating"}}
+      end)
+
+      allow(RealtimeWeb.ChannelsAuthorization, self(), channel_pid)
+
+      token_a = distinct_token(tenant, "a")
+      token_b = distinct_token(tenant, "b")
+
+      capture_log(fn ->
+        # First refresh is free, and makes token_a the verified token
+        push(socket, "access_token", %{"access_token" => token_a})
+        assert Server.socket(channel_pid).assigns.access_token == token_a
+        assert newly_verified_tokens() == [token_a]
+
+        # Rotate hard: token_a matches the verified token, token_b matches the pending one,
+        # so none of these reach the verifier
+        for _ <- 1..25 do
+          push(socket, "access_token", %{"access_token" => token_b})
+          push(socket, "access_token", %{"access_token" => token_a})
+        end
+
+        assert Server.socket(channel_pid).assigns.pending_access_token == token_b
+        assert newly_verified_tokens() == []
+
+        # Exactly one more verification once the window closes
+        assert eventually(fn -> Server.socket(channel_pid).assigns.access_token == token_b end)
+        assert newly_verified_tokens() == [token_b]
+      end)
+    end
+
+    test "held refresh is applied when the current token is about to expire", %{tenant: tenant} do
+      socket = join_public_channel(tenant)
+      channel_pid = socket.channel_pid
+      fresh = distinct_token(tenant, "fresh")
+
+      expired =
+        Generators.generate_jwt_token(tenant, %{
+          exp: System.system_time(:second) - 1,
+          role: "authenticated",
+          sub: "expired"
+        })
+
+      # The state the throttle produces near expiry: current token at its exp, newest refresh still
+      # held. Injected rather than timed, so the window timer plays no part in the outcome.
+      :sys.replace_state(channel_pid, fn socket ->
+        %{socket | assigns: %{socket.assigns | access_token: expired, pending_access_token: fresh}}
+      end)
+
+      send(channel_pid, :confirm_token)
+
+      # Queued behind :confirm_token, so this observes the state after it ran. Without the backstop
+      # clause the expired token is re-verified and the channel shuts down, surfacing here as a
+      # GenServer.call exit rather than a failed assertion.
+      assert Server.socket(channel_pid).assigns.access_token == fresh
+      assert Server.socket(channel_pid).assigns.pending_access_token == nil
+      assert Process.alive?(channel_pid)
+    end
+  end
+
   describe "access_token validations" do
     test "access_token has exp and iat in decimal format", %{tenant: tenant} do
       api_key = Generators.generate_jwt_token(tenant)
@@ -1858,6 +1967,30 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   defp assert_process_down(pid) do
     ref = Process.monitor(pid)
     assert_receive {:DOWN, ^ref, :process, ^pid, _reason}
+  end
+
+  defp join_public_channel(tenant) do
+    jwt = Generators.generate_jwt_token(tenant)
+    {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+    subscribe_and_join!(socket, "realtime:test", %{})
+  end
+
+  # Tokens passed to the verifier since the last call, oldest first. Mimic's call log is drained by
+  # reading it, so each call reports only what was verified since the previous one.
+  defp newly_verified_tokens do
+    RealtimeWeb.ChannelsAuthorization
+    |> Mimic.calls(:authorize_conn, 3)
+    |> Enum.map(fn [token | _] -> token end)
+  end
+
+  # The throttle only treats a token as a new refresh if it differs from the current and held ones,
+  # so each one needs a distinct `sub`.
+  defp distinct_token(tenant, sub) do
+    Generators.generate_jwt_token(tenant, %{
+      exp: System.system_time(:second) + 10_000,
+      role: "authenticated",
+      sub: sub
+    })
   end
 
   defp rls_context(%{tenant: tenant, policies: policies}) do
