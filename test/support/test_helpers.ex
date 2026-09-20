@@ -51,7 +51,7 @@ defmodule TestHelpers do
     * `:timeout` - the amount of time to wait (in milliseconds) before giving up, or `:infinity`
       to wait indefinitely
     * `:interval` - the polling interval in milliseconds, or a
-      [`WaitForIt.Backoff`](https://hexdocs.pm/wait_for_it/2.5.0/WaitForIt.Backoff.html) function
+      [`WaitForIt.Backoff`](https://hexdocs.pm/wait_for_it/WaitForIt.Backoff.html) function
     * `:pre_wait` - wait for the given number of milliseconds before evaluating for the first time
     * `:signal` - disable polling and use a signal of the given name instead
 
