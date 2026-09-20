@@ -34,8 +34,9 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias RealtimeWeb.RealtimeChannel.PresenceHandler
   alias RealtimeWeb.RealtimeChannel.Tracker
 
-  # The cap exists because Process.send_after can't take an arbitrary delay
-  @confirm_token_ms_interval :timer.hours(1)
+  # A JWT `exp` can be arbitrarily far in the future and `Process.send_after/3` rejects delays past
+  # Erlang's maximum supported time value, so the re-confirmation timer is capped at this interval.
+  @confirm_token_ms_max_interval :timer.hours(1)
   @replication_ready_check_interval 500
   @postgres_subscribe_backoff_min 100
   @postgres_subscribe_backoff_max 1_000
@@ -544,7 +545,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   def handle_in("access_token", %{"access_token" => refresh_token}, socket) when is_binary(refresh_token) do
     %{assigns: %{access_token_verified_at: verified_at}} = socket
     throttle_ms = access_token_throttle_ms()
-    now = System.monotonic_time(:millisecond)
+    now = now()
 
     # First refresh of the channel, or the window has closed
     if is_nil(verified_at) or now - verified_at >= throttle_ms do
@@ -577,7 +578,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   defp apply_pending_access_token(%{assigns: %{pending_access_token: nil}} = socket), do: {:noreply, socket}
 
   defp apply_pending_access_token(%{assigns: %{pending_access_token: token}} = socket) do
-    apply_access_token(socket, token, System.monotonic_time(:millisecond))
+    apply_access_token(socket, token, now())
   end
 
   defp apply_access_token(socket, refresh_token, now) do
@@ -815,7 +816,9 @@ defmodule RealtimeWeb.RealtimeChannel do
     assign(socket, :presence_client_rate_limit, client_rate_limit)
   end
 
-  defp access_token_throttle_ms, do: Application.get_env(:realtime, :access_token_throttle_ms, 10_000)
+  defp access_token_throttle_ms, do: Application.fetch_env!(:realtime, :access_token_throttle_ms)
+
+  defp now, do: System.monotonic_time(:millisecond)
 
   defp count(%{assigns: %{rate_counter: counter}}), do: GenCounter.add(counter.id)
 
@@ -853,7 +856,7 @@ defmodule RealtimeWeb.RealtimeChannel do
          exp_diff when exp_diff > 0 <- exp - Joken.current_time() do
       if ref = assigns[:confirm_token_ref], do: Helpers.cancel_timer(ref)
 
-      interval = min(@confirm_token_ms_interval, exp_diff * 1000)
+      interval = min(@confirm_token_ms_max_interval, exp_diff * 1000)
       ref = Process.send_after(self(), :confirm_token, interval)
 
       {:ok, claims, ref}

@@ -14,7 +14,8 @@ presence = System.get_env("PRESENCE", "false") == "false"
 config :realtime,
   presence: presence,
   load_tenant_db_dump: false,
-  node_balance_uptime_threshold_in_ms: 100
+  node_balance_uptime_threshold_in_ms: 100,
+  access_token_throttle_ms: to_timeout(second: 10)
 
 port_free? = fn port ->
   case :gen_tcp.listen(port, [:inet, ip: {0, 0, 0, 0}, reuseaddr: true, active: false]) do
