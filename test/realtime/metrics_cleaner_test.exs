@@ -189,6 +189,36 @@ defmodule Realtime.MetricsCleanerTest do
       metrics = Realtime.TenantPromEx.get_metrics() |> IO.iodata_to_binary()
       assert String.contains?(metrics, "tenant=\"reconnect-tenant\"")
     end
+
+    test "does not clean up metrics while the tenant still has local websocket users" do
+      tenant_id = "occupied-disconnected-#{random_string()}"
+
+      :telemetry.execute(
+        [:realtime, :connections],
+        %{connected: 1, connected_cluster: 1, limit: 100},
+        %{tenant: tenant_id}
+      )
+
+      user_pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      Census.join(:users, tenant_id, user_pid)
+
+      start_supervised!(
+        {MetricsCleaner, [metrics_cleaner_schedule_timer_in_ms: 100, vacant_metric_threshold_in_seconds: 1]}
+      )
+
+      :telemetry.execute([:syn, Connect, :unregistered], %{}, %{name: tenant_id})
+
+      Process.sleep(2200)
+
+      metrics = Realtime.TenantPromEx.get_metrics() |> IO.iodata_to_binary()
+      assert String.contains?(metrics, "tenant=\"#{tenant_id}\"")
+
+      Census.leave(:users, tenant_id, user_pid)
+      Process.sleep(200)
+
+      metrics = Realtime.TenantPromEx.get_metrics() |> IO.iodata_to_binary()
+      refute String.contains?(metrics, "tenant=\"#{tenant_id}\"")
+    end
   end
 
   describe "handle_info/2 unexpected message" do

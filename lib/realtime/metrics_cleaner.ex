@@ -4,6 +4,8 @@ defmodule Realtime.MetricsCleaner do
   use GenServer
   require Logger
 
+  alias Forum.Census
+
   defstruct [:check_ref, :interval]
 
   def handle_forum_event([:forum, :users, :group, :vacant], _, %{group: tenant_id}, vacant_websockets) do
@@ -154,15 +156,13 @@ defmodule Realtime.MetricsCleaner do
         :ets.select(cleaner_table, [
           {{:"$1", :"$2"}, [{:<, :"$2", threshold}], [:"$1"]}
         ])
+        |> Enum.reject(&(Census.local_member_count(:users, &1) > 0))
 
       vacant_tenant_ids
       |> Enum.map(fn tenant_id -> %{tenant: tenant_id} end)
       |> then(&Peep.prune_tags(Realtime.TenantPromEx.Metrics, &1))
 
-      # Delete them from the table
-      :ets.select_delete(cleaner_table, [
-        {{:"$1", :"$2"}, [{:<, :"$2", threshold}], [true]}
-      ])
+      Enum.each(vacant_tenant_ids, &:ets.delete(cleaner_table, &1))
     after
       :ets.safe_fixtable(cleaner_table, false)
     end
