@@ -123,7 +123,7 @@ defmodule Realtime.MixProject do
       {:dialyxir, "~> 1.4", only: :dev, runtime: false},
       {:poolboy, "~> 1.5", only: :test},
       {:mix_test_watch, "~> 1.0", only: [:dev, :test], runtime: false},
-      {:wait_for_it, "~> 2.5", only: :test}
+      {:wait_for_it, "~> 2.6", only: [:dev, :test]}
     ]
   end
 
