@@ -757,7 +757,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
 
       assert conn.status == 202
 
-      refute_eventually(match?({:ok, [_ | _]}, Repo.all(db_conn, messages_for(sub_topic), Message)))
+      refute_eventually match?({:ok, [_ | _]}, Repo.all(db_conn, messages_for(sub_topic), Message))
     end
 
     test "rejects persist=true on a public broadcast", %{conn: conn} do

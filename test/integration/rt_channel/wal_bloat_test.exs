@@ -148,7 +148,7 @@ defmodule Realtime.Integration.RtChannel.WalBloatTest do
   defp await_replication_slot_active(db_conn, timeout_ms) do
     slot_name = "supabase_realtime_messages_replication_slot_"
 
-    WaitForIt.case_wait Database.check_replication_slot(db_conn, slot_name),
+    case_wait Database.check_replication_slot(db_conn, slot_name),
       timeout: timeout_ms,
       # Start tight so a slot that is already active is picked up straight away, then back off so
       # a genuinely long wait does not become a busy query loop against the tenant database. The

@@ -1,7 +1,7 @@
 defmodule RateCounterHelper do
   alias Realtime.RateCounter
 
-  require WaitForIt
+  import WaitForIt
 
   @spec new!(RateCounter.Args.t()) :: pid()
   def new!(args) do
@@ -15,7 +15,7 @@ defmodule RateCounterHelper do
   # need a counter that is ready to be read. Polled rather than spun on, so a counter that never
   # ticks fails with a TimeoutError naming this call instead of pinning a core indefinitely.
   defp await_initial_tick(pid) do
-    WaitForIt.match_wait!(%RateCounter{bucket: [_ | _]}, :sys.get_state(pid), timeout: 5_000, interval: 10)
+    match_wait! %RateCounter{bucket: [_ | _]}, :sys.get_state(pid), timeout: 5_000, interval: 10
   end
 
   @spec stop(term()) :: :ok

@@ -46,7 +46,7 @@ defmodule Realtime.Integration.GcmEncryptionBackfillTest do
 
       read_through_cache(external_id)
 
-      assert_eventually(not is_nil(Api.get_tenant_by_external_id(external_id).gcm_migrated_at))
+      assert_eventually not is_nil(Api.get_tenant_by_external_id(external_id).gcm_migrated_at)
 
       migrated = Api.get_tenant_by_external_id(external_id)
 
@@ -97,7 +97,7 @@ defmodule Realtime.Integration.GcmEncryptionBackfillTest do
   # The backfill writes asynchronously, so "still on the legacy cipher" is an invariant that has to
   # hold for the whole window, not just at the end of it.
   defp assert_still_on_legacy_cipher(external_id) do
-    assert_always(on_legacy_cipher?(external_id), timeout: @async_write_window, interval: @probe_interval)
+    assert_always on_legacy_cipher?(external_id), timeout: @async_write_window, interval: @probe_interval
   end
 
   defp on_legacy_cipher?(external_id) do

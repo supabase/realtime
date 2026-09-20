@@ -96,7 +96,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       refute settings["db_password"]
 
       # Migrations run asynchronously after the create call returns.
-      assert_eventually(Tenants.get_tenant_by_external_id(external_id).migrations_ran > 0)
+      assert_eventually Tenants.get_tenant_by_external_id(external_id).migrations_ran > 0
 
       assert %{broadcast_adapter: :gen_rpc, extensions: [%{settings: settings}]} =
                Tenants.get_tenant_by_external_id(external_id)
@@ -125,7 +125,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       refute settings["db_password"]
 
       # Migrations run asynchronously after the create call returns.
-      assert_eventually(Tenants.get_tenant_by_external_id(external_id).migrations_ran > 0)
+      assert_eventually Tenants.get_tenant_by_external_id(external_id).migrations_ran > 0
 
       assert %{extensions: [%{settings: settings}]} = Tenants.get_tenant_by_external_id(external_id)
       assert Crypto.decrypt!(settings["db_password"]) == "postgres"
@@ -313,7 +313,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
       # Replication Connections are launched async and can take a while,
       # especially in CI environments.
-      assert_eventually(Realtime.Tenants.ReplicationConnection.ready?(tenant.external_id))
+      assert_eventually Realtime.Tenants.ReplicationConnection.ready?(tenant.external_id)
 
       assert Cache.get_tenant_by_external_id(tenant.external_id)
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
@@ -329,7 +329,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       refute Tenants.get_tenant_by_external_id(tenant.external_id)
 
       # Slot teardown happens after the delete responds.
-      assert_eventually({:ok, %{rows: []}} = Postgrex.query(db_conn, "SELECT slot_name FROM pg_replication_slots", []))
+      assert_eventually {:ok, %{rows: []}} = Postgrex.query(db_conn, "SELECT slot_name FROM pg_replication_slots", [])
     end
 
     test "tenant doesn't exist", %{conn: conn} do
@@ -605,7 +605,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert %{"healthy" => false, "db_connected" => false, "replication_connected" => false, "connected_cluster" => 0} =
                json_response(conn, 200)["data"]
 
-      assert_eventually({:ok, %{healthy: true}} = Realtime.Tenants.health_check(tenant.external_id))
+      assert_eventually {:ok, %{healthy: true}} = Realtime.Tenants.health_check(tenant.external_id)
 
       assert {:ok, %{rows: []}} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
 
@@ -793,7 +793,7 @@ defmodule RealtimeWeb.TenantControllerTest do
   end
 
   defp wait_on_postgres_cdc_rls(external_id) do
-    WaitForIt.case_wait Extensions.PostgresCdcRls.get_manager_conn(external_id), timeout: 1_000, interval: 100 do
+    case_wait Extensions.PostgresCdcRls.get_manager_conn(external_id), timeout: 1_000, interval: 100 do
       {:ok, _, _} -> :ok
     else
       last ->

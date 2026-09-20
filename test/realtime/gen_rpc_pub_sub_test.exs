@@ -33,7 +33,7 @@ defmodule Realtime.GenRpcPubSubTest do
 
   @aux_mod (quote do
               defmodule Subscriber do
-                require WaitForIt
+                import WaitForIt
 
                 # Relay messages to testing node
                 def subscribe(subscriber, topic) do
@@ -43,7 +43,7 @@ defmodule Realtime.GenRpcPubSubTest do
                     # syn RegionNodes membership propagates asynchronously across the cluster.
                     # A TimeoutError here names the counts actually seen on this peer, where the
                     # old `eventually/2` + `raise` could only report a fixed string.
-                    WaitForIt.match_wait!(
+                    match_wait!(
                       %{"us-east-1" => 2, "ap-southeast-2" => 2},
                       region_node_counts(),
                       timeout: 15_000,
@@ -188,7 +188,7 @@ defmodule Realtime.GenRpcPubSubTest do
       # syn RegionNodes membership propagates asynchronously across the cluster. Waiting on the
       # counts *per region* rather than on a combined boolean means a failure names the region
       # that did not converge, and how far it got.
-      assert_eventually(%{"us-east-1" => 2, "ap-southeast-2" => 2} = region_node_counts(), @cluster_wait)
+      assert_eventually %{"us-east-1" => 2, "ap-southeast-2" => 2} = region_node_counts(), @cluster_wait
 
       RealtimeWeb.Endpoint.subscribe(@topic)
       :erpc.multicall(Node.list(), Subscriber, :subscribe, [self(), @topic])
@@ -263,7 +263,7 @@ defmodule Realtime.GenRpcPubSubTest do
 
     test "delivers to origin subscribers exactly once (routed path excludes the origin)" do
       scope = Application.fetch_env!(:realtime, :muster_scope)
-      assert_eventually(Muster.status(scope) == :ready, @cluster_wait)
+      assert_eventually Muster.status(scope) == :ready, @cluster_wait
 
       tenant_id = "muster-bcast-#{System.unique_integer([:positive])}"
       topic = "muster-bcast-#{System.unique_integer([:positive])}"
@@ -367,12 +367,12 @@ defmodule Realtime.GenRpcPubSubTest do
 
       # The origin (us-east-1) must have learned the ap region's membership via syn
       # and reconciled a local copy of its ring whose view agrees with the ap scope.
-      assert_eventually(%{"ap-southeast-2" => 2} = region_node_counts(), @cluster_wait)
+      assert_eventually %{"ap-southeast-2" => 2} = region_node_counts(), @cluster_wait
 
       # Both sides are re-read on every evaluation — the ap ring can still be settling — and the
       # tagged result means a timeout shows the local router tuple *and* the remote view hash it
       # disagreed with, where the old `case ... -> boolean` reported only `false`.
-      assert_eventually({:agreed, _node, _vh} = ap_router_agreement(ap_holder, ap_scope), @cluster_wait)
+      assert_eventually {:agreed, _node, _vh} = ap_router_agreement(ap_holder, ap_scope), @cluster_wait
 
       # Pick a tenant whose ap-region router is the holder, so the holder is both the
       # router and the sole occupancy node (the clean, non-flood routed path).

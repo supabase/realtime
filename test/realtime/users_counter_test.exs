@@ -92,7 +92,7 @@ defmodule Realtime.UsersCounterTest do
   end
 
   defp await_tenant_users!(tenant_id, expected) do
-    assert_eventually(UsersCounter.tenant_users(tenant_id) == expected)
+    assert_eventually UsersCounter.tenant_users(tenant_id) == expected
   end
 
   defp generate_load(tenant_id) do

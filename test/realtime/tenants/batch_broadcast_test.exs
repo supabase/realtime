@@ -541,7 +541,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       assert :ok = BatchBroadcast.broadcast(auth_params, tenant, messages, false)
 
-      refute_eventually(match?({:ok, [_ | _]}, Repo.all(db_conn, messages_for(topic), Message)))
+      refute_eventually match?({:ok, [_ | _]}, Repo.all(db_conn, messages_for(topic), Message))
     end
   end
 

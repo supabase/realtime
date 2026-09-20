@@ -26,7 +26,7 @@ defmodule Realtime.Tenants.JanitorTest do
         fn tenant ->
           tenant = Realtime.Repo.preload(tenant, :extensions)
           Connect.lookup_or_start_connection(tenant.external_id)
-          assert_eventually(Connect.ready?(tenant.external_id), timeout: 5_000, interval: 50)
+          assert_eventually Connect.ready?(tenant.external_id), timeout: 5_000, interval: 50
           tenant
         end
       )
@@ -83,7 +83,7 @@ defmodule Realtime.Tenants.JanitorTest do
         conn
       end)
 
-    assert_eventually(remaining_messages(conns) == to_keep, timeout: 5_000, interval: 100)
+    assert_eventually remaining_messages(conns) == to_keep, timeout: 5_000, interval: 100
 
     Enum.each(conns, &verify_partitions/1)
     current = remaining_messages(conns)
@@ -98,7 +98,7 @@ defmodule Realtime.Tenants.JanitorTest do
          tenants: tenants
        } do
     Connect.shutdown(hd(tenants).external_id)
-    assert_eventually(is_nil(Connect.whereis(hd(tenants).external_id)))
+    assert_eventually is_nil(Connect.whereis(hd(tenants).external_id))
 
     utc_now = NaiveDateTime.utc_now()
     limit = NaiveDateTime.add(utc_now, -72, :hour)
@@ -126,7 +126,7 @@ defmodule Realtime.Tenants.JanitorTest do
         conn
       end)
 
-    assert_eventually(remaining_messages(conns) == to_keep, timeout: 5_000, interval: 100)
+    assert_eventually remaining_messages(conns) == to_keep, timeout: 5_000, interval: 100
 
     Enum.each(conns, &verify_partitions/1)
     current = remaining_messages(conns)
@@ -166,7 +166,7 @@ defmodule Realtime.Tenants.JanitorTest do
              Process.sleep(1000)
            end) =~ "JanitorFailedToDeleteOldMessages"
 
-    assert_eventually(:sys.get_state(janitor).tasks == %{})
+    assert_eventually :sys.get_state(janitor).tasks == %{}
     assert :ets.tab2list(Connect) == []
   end
 

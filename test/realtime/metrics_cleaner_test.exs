@@ -58,7 +58,7 @@ defmodule Realtime.MetricsCleanerTest do
 
       # Nothing may be evicted before the 1s threshold. The cleaner runs every 100ms, so that is
       # ~10 runs that each have to decline; the window covers all of them, not just the first two.
-      refute_eventually(first_missing(@vacant_tenants), timeout: @pre_threshold_ms, interval: @probe_interval_ms)
+      refute_eventually first_missing(@vacant_tenants), timeout: @pre_threshold_ms, interval: @probe_interval_ms
 
       # Past the threshold the next run evicts the vacant ones and leaves the occupied one.
       assert_eventually(["occupied-tenant"] = still_exported(@vacant_tenants),
@@ -94,7 +94,7 @@ defmodule Realtime.MetricsCleanerTest do
 
       # Every cleaner run past the threshold must leave the reconnected tenant alone, so assert
       # across the whole window rather than at one instant in it.
-      assert_always(exported?("reconnect-tenant"), timeout: 2_200, interval: @probe_interval_ms)
+      assert_always exported?("reconnect-tenant"), timeout: 2_200, interval: @probe_interval_ms
     end
   end
 
@@ -135,10 +135,7 @@ defmodule Realtime.MetricsCleanerTest do
 
       # Nothing may be evicted before the 1s threshold. The cleaner runs every 100ms, so that is
       # ~10 runs that each have to decline; the window covers all of them, not just the first two.
-      refute_eventually(first_missing(@disconnected_tenants),
-        timeout: @pre_threshold_ms,
-        interval: @probe_interval_ms
-      )
+      refute_eventually first_missing(@disconnected_tenants), timeout: @pre_threshold_ms, interval: @probe_interval_ms
 
       # Past the threshold the next run evicts the disconnected ones and leaves the connected one.
       assert_eventually(["connected-tenant"] = still_exported(@disconnected_tenants),
@@ -169,7 +166,7 @@ defmodule Realtime.MetricsCleanerTest do
 
       # Every cleaner run past the threshold must leave the reconnected tenant alone, so assert
       # across the whole window rather than at one instant in it.
-      assert_always(exported?("reconnect-tenant"), timeout: 2_200, interval: @probe_interval_ms)
+      assert_always exported?("reconnect-tenant"), timeout: 2_200, interval: @probe_interval_ms
     end
   end
 

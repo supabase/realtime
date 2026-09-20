@@ -57,8 +57,8 @@ defmodule Realtime.PromEx.Plugins.MusterTest do
       # There is no state to wait *for* here, so wait out whatever the previous test left in the
       # gauge and then assert the all-zero shape holds across several polls rather than sampling
       # it once.
-      assert_eventually(all_zero?(), interval: @poll_interval_ms)
-      assert_always(all_zero?(), timeout: 250, interval: @poll_interval_ms)
+      assert_eventually all_zero?(), interval: @poll_interval_ms
+      assert_always all_zero?(), timeout: 250, interval: @poll_interval_ms
     end
   end
 
@@ -66,7 +66,7 @@ defmodule Realtime.PromEx.Plugins.MusterTest do
   # poll. Waiting for the one-hot shape identifies a post-stub snapshot unambiguously, where a
   # fixed sleep only guesses at how many cycles that takes.
   defp poll_until(expected_state) do
-    case WaitForIt.until(fn -> one_hot_snapshot(expected_state) end, timeout: 2_000, interval: @poll_interval_ms) do
+    case until(fn -> one_hot_snapshot(expected_state) end, timeout: 2_000, interval: @poll_interval_ms) do
       {:ok, metrics} -> metrics
       {:timeout, _last} -> flunk("muster_node_status never settled to a one-hot #{expected_state}")
     end

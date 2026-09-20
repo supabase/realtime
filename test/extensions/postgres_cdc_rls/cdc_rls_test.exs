@@ -53,7 +53,7 @@ defmodule Extensions.PostgresCdcRlsTest do
       scope = Realtime.Syn.PostgresCdc.scope(tenant.external_id)
 
       sup =
-        WaitForIt.case_wait :syn.lookup(scope, tenant.external_id), timeout: 15_000, interval: 500 do
+        case_wait :syn.lookup(scope, tenant.external_id), timeout: 15_000, interval: 500 do
           {pid, _} when is_pid(pid) -> pid
         else
           :undefined -> flunk("PostgresCdc supervisor never registered for #{tenant.external_id}")
@@ -77,7 +77,7 @@ defmodule Extensions.PostgresCdcRlsTest do
 
     test "Subscription manager updates oids", %{tenant: tenant} do
       {subscriber_manager_pid, conn} =
-        WaitForIt.case_wait PostgresCdcRls.get_manager_conn(tenant.external_id), timeout: 5_000, interval: 200 do
+        case_wait PostgresCdcRls.get_manager_conn(tenant.external_id), timeout: 5_000, interval: 200 do
           {:ok, pid, conn} -> {pid, conn}
         else
           last -> flunk("SubscriptionManager connection never became ready. Last result: #{inspect(last)}")
@@ -170,7 +170,7 @@ defmodule Extensions.PostgresCdcRlsTest do
       scope = Realtime.Syn.PostgresCdc.scope(tenant.external_id)
 
       sup =
-        WaitForIt.case_wait :syn.lookup(scope, tenant.external_id), timeout: 5_000, interval: 500 do
+        case_wait :syn.lookup(scope, tenant.external_id), timeout: 5_000, interval: 500 do
           {pid, _} when is_pid(pid) -> pid
         else
           :undefined -> flunk("PostgresCdc supervisor never registered for #{tenant.external_id}")
@@ -516,7 +516,7 @@ defmodule Extensions.PostgresCdcRlsTest do
 
       RealtimeWeb.Endpoint.subscribe(Realtime.Syn.PostgresCdc.down_topic(external_id))
 
-      assert_eventually({:ok, manager_pid, _conn} = PostgresCdcRls.get_manager_conn(external_id))
+      assert_eventually {:ok, manager_pid, _conn} = PostgresCdcRls.get_manager_conn(external_id)
 
       assert node(manager_pid) == remote_node
 

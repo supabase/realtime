@@ -177,7 +177,7 @@ defmodule Realtime.Tenants.CacheTest do
   defp seed_remote_cache(node, external_id, tenant) do
     name = tenant.name
 
-    WaitForIt.case_wait push_and_read_remote_cache(node, external_id, tenant), timeout: 1_000, interval: 50 do
+    case_wait push_and_read_remote_cache(node, external_id, tenant), timeout: 1_000, interval: 50 do
       {:ok, %Api.Tenant{external_id: ^external_id, name: ^name}} -> :ok
     else
       other -> flunk("Failed to seed remote cache after retries, last result: #{inspect(other)}")

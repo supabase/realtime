@@ -2,7 +2,7 @@ defmodule Realtime.PromEx.Plugins.DistributedTest do
   # Async false due to Clustered usage
   use ExUnit.Case, async: false
 
-  require WaitForIt
+  import WaitForIt
 
   alias Realtime.PromEx.Plugins
 
@@ -21,7 +21,7 @@ defmodule Realtime.PromEx.Plugins.DistributedTest do
     25 = :erpc.call(node, String, :to_integer, ["25"])
     # The plugin's first poll is what creates the series every test below reads; wait for it
     # rather than guessing at poll_rate.
-    WaitForIt.wait!(
+    wait!(
       metric_value(PromEx.get_metrics(MetricsTest), "dist_send_count", origin_node: node(), target_node: node),
       timeout: 2_000,
       interval: 25

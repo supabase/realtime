@@ -12,7 +12,7 @@ defmodule TestTenantDb.Backend.Docker do
 
   use GenServer
 
-  require WaitForIt
+  import WaitForIt
 
   alias Realtime.Database
   alias Realtime.Env
@@ -300,7 +300,7 @@ defmodule TestTenantDb.Backend.Docker do
   # published". Under heavy container churn Docker Desktop sometimes never publishes it at all,
   # which is why a miss here retries the container rather than failing the run.
   defp await_published_port(name) do
-    WaitForIt.case_wait docker_port(name),
+    case_wait docker_port(name),
       timeout: @published_port_timeout_ms,
       interval: WaitForIt.Backoff.exponential(start: @ready_poll_start_ms, max: @ready_poll_max_ms) do
       {:ok, port} ->
@@ -427,7 +427,7 @@ defmodule TestTenantDb.Backend.Docker do
   def wait_ready!(name, port) do
     settings = Probe.settings!(port)
 
-    WaitForIt.case_wait Probe.check(settings),
+    case_wait Probe.check(settings),
       timeout: @container_ready_timeout_ms,
       interval: WaitForIt.Backoff.exponential(start: @ready_poll_start_ms, max: @ready_poll_max_ms) do
       :ok ->

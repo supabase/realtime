@@ -3,7 +3,7 @@ defmodule Clustered do
   Uses the gist https://gist.github.com/ityonemo/177cbc96f8c8722bfc4d127ff9baec62 to start a node for testing
   """
 
-  require WaitForIt
+  import WaitForIt
 
   alias Realtime.Env
 
@@ -193,7 +193,7 @@ defmodule Clustered do
   # Anything still holding it after that is another test run or a dev server, and starting
   # the peer anyway only fails later and less clearly.
   defp await_port_available!(port, label, env_var) do
-    unless WaitForIt.wait(Env.port_available?(port),
+    unless wait(Env.port_available?(port),
              timeout: @port_wait_timeout_ms,
              interval: @port_wait_interval_ms
            ) do
@@ -208,7 +208,7 @@ defmodule Clustered do
 
   # The `else` clause sees the last connect error, so a server that never binds says why.
   defp wait_for_port(host, port) do
-    WaitForIt.case_wait :gen_tcp.connect(host, port, [:binary, active: false], 200),
+    case_wait :gen_tcp.connect(host, port, [:binary, active: false], 200),
       timeout: @gen_rpc_wait_timeout_ms,
       interval: WaitForIt.Backoff.exponential(start: @gen_rpc_poll_start_ms, max: @gen_rpc_poll_max_ms) do
       {:ok, socket} ->

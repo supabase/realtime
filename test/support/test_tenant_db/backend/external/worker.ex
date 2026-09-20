@@ -6,7 +6,7 @@ defmodule TestTenantDb.Backend.External.Worker do
   # container to start or wait on — the port is already a live server.
   use GenServer
 
-  require WaitForIt
+  import WaitForIt
 
   alias TestTenantDb.Backend.External
 
@@ -32,7 +32,7 @@ defmodule TestTenantDb.Backend.External.Worker do
   # Blocking in a GenServer callback is normally wrong, but this one runs from `handle_continue`
   # during startup: the worker has no other work queued and is not usable until it holds a port.
   defp assign_port do
-    WaitForIt.case_wait External.claim(), timeout: 1_000, interval: 100 do
+    case_wait External.claim(), timeout: 1_000, interval: 100 do
       port when is_integer(port) ->
         port
     else

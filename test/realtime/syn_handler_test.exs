@@ -73,7 +73,7 @@ defmodule Realtime.SynHandlerTest do
 
           assert :peer.call(peer_pid, Process, :alive?, [remote_pid])
 
-          assert_eventually(not Process.alive?(local_pid))
+          assert_eventually not Process.alive?(local_pid)
         end)
 
       assert log =~ "stop local process: #{inspect(local_pid)}"
@@ -96,14 +96,14 @@ defmodule Realtime.SynHandlerTest do
           true = Node.connect(node)
           # Conflict resolution propagates asynchronously and independently on each node, so
           # both sides are waited on separately.
-          assert_eventually({^local_pid, %{region: "us-east-1", conn: "local_conn"}} = :syn.lookup(Connect, tenant_id))
+          assert_eventually {^local_pid, %{region: "us-east-1", conn: "local_conn"}} = :syn.lookup(Connect, tenant_id)
 
           assert_eventually(
             {^local_pid, %{region: "us-east-1", conn: "local_conn"}} =
               :peer.call(peer_pid, :syn, :lookup, [Connect, tenant_id])
           )
 
-          assert_eventually(not :peer.call(peer_pid, Process, :alive?, [remote_pid]))
+          assert_eventually not :peer.call(peer_pid, Process, :alive?, [remote_pid])
 
           assert Process.alive?(local_pid)
         end)
@@ -142,14 +142,14 @@ defmodule Realtime.SynHandlerTest do
           true = Node.connect(node)
           # Conflict resolution propagates asynchronously and independently on each node, so
           # both sides are waited on separately.
-          assert_eventually({^local_pid, %{region: "us-east-1", conn: "local_conn"}} = :syn.lookup(Connect, tenant_id))
+          assert_eventually {^local_pid, %{region: "us-east-1", conn: "local_conn"}} = :syn.lookup(Connect, tenant_id)
 
           assert_eventually(
             {^local_pid, %{region: "us-east-1", conn: "local_conn"}} =
               :peer.call(peer_pid, :syn, :lookup, [Connect, tenant_id])
           )
 
-          assert_eventually(not :peer.call(peer_pid, Process, :alive?, [remote_pid]))
+          assert_eventually not :peer.call(peer_pid, Process, :alive?, [remote_pid])
 
           assert Process.alive?(local_pid)
         end)
@@ -185,7 +185,7 @@ defmodule Realtime.SynHandlerTest do
 
           assert :peer.call(peer_pid, Process, :alive?, [remote_pid])
 
-          assert_eventually(not Process.alive?(local_pid))
+          assert_eventually not Process.alive?(local_pid)
         end)
 
       assert log =~ "stop local process: #{inspect(local_pid)}"
@@ -220,7 +220,7 @@ defmodule Realtime.SynHandlerTest do
 
           assert :peer.call(peer_pid, Process, :alive?, [remote_pid])
 
-          assert_eventually(not Process.alive?(local_pid))
+          assert_eventually not Process.alive?(local_pid)
         end)
 
       assert log =~ "stop local process: #{inspect(local_pid)}"

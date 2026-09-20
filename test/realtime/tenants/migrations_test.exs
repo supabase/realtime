@@ -72,7 +72,7 @@ defmodule Realtime.Tenants.MigrationsTest do
       assert Migrations.run_migrations(tenant) == :ok
       assert_receive {:migrations_metadata, :migrator, ^total}
 
-      assert_eventually(Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total)
+      assert_eventually Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total
     end
 
     test "reconciles migrations_ran instead of reloading the dump when the database is already migrated" do
@@ -81,7 +81,7 @@ defmodule Realtime.Tenants.MigrationsTest do
 
       assert Migrations.run_migrations(tenant) == :ok
 
-      assert_eventually(Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total)
+      assert_eventually Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total
 
       :telemetry.attach(
         "reconcile-test",
@@ -98,7 +98,7 @@ defmodule Realtime.Tenants.MigrationsTest do
       assert Migrations.run_migrations(stale_tenant) == :ok
       assert_receive {:migrations_metadata, :migrator, 0}
 
-      assert_eventually(Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total)
+      assert_eventually Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total
     end
 
     @tag :skip_orioledb
@@ -146,7 +146,7 @@ defmodule Realtime.Tenants.MigrationsTest do
       assert Migrations.run_migrations(tenant) == :ok
       assert_receive {:migrations_metadata, :dump, ^total}
 
-      assert_eventually(Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total)
+      assert_eventually Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total
     end
 
     test "falls back to sequential migrations without crashing when the schema_migrations check errors unexpectedly" do
@@ -164,7 +164,7 @@ defmodule Realtime.Tenants.MigrationsTest do
 
       assert log =~ "TenantMigrationsRanCheckFailed"
 
-      assert_eventually(Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total)
+      assert_eventually Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total
     end
 
     test "does not check the database when migrations_ran is already greater than 0" do

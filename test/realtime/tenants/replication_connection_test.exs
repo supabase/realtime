@@ -51,7 +51,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
       # A temporary connection must stay unregistered after it dies, so assert the absence holds
       # across the window rather than sampling it once at the end.
-      assert_always(is_nil(ReplicationConnection.whereis(tenant.external_id)), timeout: 1_000, interval: 50)
+      assert_always is_nil(ReplicationConnection.whereis(tenant.external_id)), timeout: 1_000, interval: 50
     end
   end
 
@@ -1210,11 +1210,11 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
   end
 
   defp assert_replication_started(db_conn, slot_name, timeout_ms \\ 100, interval_ms \\ 10) do
-    WaitForIt.case_wait Postgrex.query!(db_conn, "SELECT active FROM pg_replication_slots WHERE slot_name = $1", [
-                          slot_name
-                        ]),
-                        timeout: timeout_ms,
-                        interval: interval_ms do
+    case_wait Postgrex.query!(db_conn, "SELECT active FROM pg_replication_slots WHERE slot_name = $1", [
+                slot_name
+              ]),
+              timeout: timeout_ms,
+              interval: interval_ms do
       %{rows: [[true]]} -> :ok
     else
       %{rows: rows} -> flunk("Replication slot #{slot_name} did not become active. Last rows: #{inspect(rows)}")

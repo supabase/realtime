@@ -131,10 +131,7 @@ defmodule Realtime.GenRpcPubSub.RegionRingsTest do
       Process.exit(ring_pid, :kill)
       assert_receive {:DOWN, ^ref, :process, ^ring_pid, :killed}
 
-      assert_eventually(
-        match?({:ok, _, _}, RegionRings.expected_router(@region, "tenant_0", table)),
-        @short_wait
-      )
+      assert_eventually match?({:ok, _, _}, RegionRings.expected_router(@region, "tenant_0", table)), @short_wait
 
       new_state = :sys.get_state(pid)
       {_name, new_ring_pid} = Map.fetch!(new_state.rings, @region)
@@ -158,7 +155,7 @@ defmodule Realtime.GenRpcPubSub.RegionRingsTest do
       end)
 
       :telemetry.execute([:syn, RegionNodes, :joined], %{}, %{name: @region})
-      assert_eventually(match?({:ok, _, _}, RegionRings.expected_router(@region, "tenant_0", table)), @short_wait)
+      assert_eventually match?({:ok, _, _}, RegionRings.expected_router(@region, "tenant_0", table)), @short_wait
       {:ok, _node1, vh1} = RegionRings.expected_router(@region, "tenant_0", table)
       assert vh1 == Muster.view_hash_for_members(first)
 
@@ -209,7 +206,7 @@ defmodule Realtime.GenRpcPubSub.RegionRingsTest do
 
       # The origin learns the remote region's membership through syn, exactly as
       # RegionRings.reconcile/1 reads it.
-      assert_eventually(Nodes.region_nodes(@remote_region) == Enum.sort(remote_nodes), @cluster_wait)
+      assert_eventually Nodes.region_nodes(@remote_region) == Enum.sort(remote_nodes), @cluster_wait
 
       # An isolated RegionRings that reconciles from live syn membership, with a short
       # backstop so any late syn propagation is folded in without a membership event.

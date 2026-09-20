@@ -35,7 +35,7 @@ defmodule TestHelpers do
       import TestHelpers
       import WaitForIt.Test, except: unquote(@shadowed_assertions)
 
-      require WaitForIt
+      import WaitForIt
     end
   end
 

@@ -113,7 +113,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
 
       # Census broadcasts per-group counts on an interval, so the peer's join lands here
       # asynchronously; snapshot the metrics only once both nodes are counted.
-      assert_eventually(Census.member_count(:users, external_id) == 2, timeout: 1_000)
+      assert_eventually Census.member_count(:users, external_id) == 2, timeout: 1_000
       Tenant.execute_tenant_metrics()
 
       assert_receive {[:realtime, :connections], %{connected: 1, limit: 200, connected_cluster: 2},
@@ -134,7 +134,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       :ok = Census.join(:users, external_id, pid)
       _ = Rpc.call(node, FakeUserCounter, :fake_add, [external_id])
 
-      assert_eventually(Census.member_count(:users, external_id) == 2, timeout: 1_000)
+      assert_eventually Census.member_count(:users, external_id) == 2, timeout: 1_000
       Tenant.execute_tenant_metrics()
 
       assert_receive {[:realtime, :connections], %{connected: 1, limit: 200, connected_cluster: 2},
@@ -173,7 +173,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       metric_value = metric_value("realtime_channel_events", tenant: external_id) || 0
       FakeUserCounter.fake_event(external_id)
 
-      assert_eventually(metric_value("realtime_channel_events", tenant: external_id) == metric_value + 1)
+      assert_eventually metric_value("realtime_channel_events", tenant: external_id) == metric_value + 1
     end
 
     test "global event exists after counter added", %{tenant: %{external_id: external_id}} do
@@ -181,33 +181,33 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
 
       FakeUserCounter.fake_event(external_id)
 
-      assert_eventually(metric_value("realtime_channel_global_events") >= metric_value + 1)
+      assert_eventually metric_value("realtime_channel_global_events") >= metric_value + 1
     end
 
     test "db_event exists after counter added", %{tenant: %{external_id: external_id}} do
       metric_value = metric_value("realtime_channel_db_events", tenant: external_id) || 0
       FakeUserCounter.fake_db_event(external_id)
-      assert_eventually(metric_value("realtime_channel_db_events", tenant: external_id) == metric_value + 1)
+      assert_eventually metric_value("realtime_channel_db_events", tenant: external_id) == metric_value + 1
     end
 
     test "global db_event exists after counter added", %{tenant: %{external_id: external_id}} do
       metric_value = metric_value("realtime_channel_global_db_events") || 0
 
       FakeUserCounter.fake_db_event(external_id)
-      assert_eventually(metric_value("realtime_channel_global_db_events") >= metric_value + 1)
+      assert_eventually metric_value("realtime_channel_global_db_events") >= metric_value + 1
     end
 
     test "presence_event exists after counter added", %{tenant: %{external_id: external_id}} do
       metric_value = metric_value("realtime_channel_presence_events", tenant: external_id) || 0
 
       FakeUserCounter.fake_presence_event(external_id)
-      assert_eventually(metric_value("realtime_channel_presence_events", tenant: external_id) == metric_value + 1)
+      assert_eventually metric_value("realtime_channel_presence_events", tenant: external_id) == metric_value + 1
     end
 
     test "global presence_event exists after counter added", %{tenant: %{external_id: external_id}} do
       metric_value = metric_value("realtime_channel_global_presence_events") || 0
       FakeUserCounter.fake_presence_event(external_id)
-      assert_eventually(metric_value("realtime_channel_global_presence_events") >= metric_value + 1)
+      assert_eventually metric_value("realtime_channel_global_presence_events") >= metric_value + 1
     end
 
     test "metric read_authorization_check exists after check", context do
@@ -221,7 +221,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
           context.authorization_context
         )
 
-      assert_eventually(metric_value(metric, tenant: context.tenant.external_id) == metric_value + 1)
+      assert_eventually metric_value(metric, tenant: context.tenant.external_id) == metric_value + 1
 
       assert metric_value("realtime_tenants_read_authorization_check_bucket",
                tenant: context.tenant.external_id,
@@ -241,7 +241,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
           :broadcast
         )
 
-      assert_eventually(metric_value(metric, tenant: context.tenant.external_id) == metric_value + 1)
+      assert_eventually metric_value(metric, tenant: context.tenant.external_id) == metric_value + 1
 
       assert metric_value("realtime_tenants_write_authorization_check_bucket",
                tenant: context.tenant.external_id,
@@ -256,7 +256,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
 
       assert {:ok, _, _} = Realtime.Messages.replay(context.db_conn, external_id, "test", 0, 1)
 
-      assert_eventually(metric_value(metric, tenant: external_id) == metric_value + 1)
+      assert_eventually metric_value(metric, tenant: external_id) == metric_value + 1
 
       assert metric_value("realtime_tenants_replay_bucket", tenant: external_id, le: "250.0") > 0
     end
@@ -267,7 +267,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       metric_value = metric_value(metric, tenant: external_id) || 0
 
       FakeUserCounter.fake_broadcast_from_database(context.tenant.external_id)
-      assert_eventually(metric_value(metric, tenant: external_id) == metric_value + 1)
+      assert_eventually metric_value(metric, tenant: external_id) == metric_value + 1
 
       assert metric_value("realtime_tenants_broadcast_from_database_latency_committed_at_bucket",
                tenant: external_id,
@@ -281,7 +281,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       metric_value = metric_value(metric, tenant: external_id) || 0
 
       FakeUserCounter.fake_broadcast_from_database(context.tenant.external_id)
-      assert_eventually(metric_value(metric, tenant: external_id) == metric_value + 1)
+      assert_eventually metric_value(metric, tenant: external_id) == metric_value + 1
 
       assert metric_value("realtime_tenants_broadcast_from_database_latency_inserted_at_bucket",
                tenant: external_id,
@@ -297,7 +297,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       message = %{topic: "a topic", event: "an event", payload: ["a", %{"b" => "c"}, 1, 23]}
       RealtimeWeb.TenantBroadcaster.pubsub_broadcast(external_id, "a topic", message, Phoenix.PubSub, :presence)
 
-      assert_eventually(metric_value(metric, message_type: "presence", tenant: external_id) == metric_value + 1)
+      assert_eventually metric_value(metric, message_type: "presence", tenant: external_id) == metric_value + 1
 
       assert metric_value("realtime_tenants_payload_size_bucket", tenant: external_id, le: "250") > 0
     end
@@ -311,7 +311,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       message = %{topic: "a topic", event: "an event", payload: ["a", %{"b" => "c"}, 1, 23]}
       RealtimeWeb.TenantBroadcaster.pubsub_broadcast(external_id, "a topic", message, Phoenix.PubSub, :broadcast)
 
-      assert_eventually(metric_value(metric, message_type: "broadcast") == metric_value + 1)
+      assert_eventually metric_value(metric, message_type: "broadcast") == metric_value + 1
 
       assert metric_value("realtime_payload_size_bucket", le: "250.0") > 0
     end
@@ -329,7 +329,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
         hit: true
       })
 
-      assert_eventually(metric_value(metric, tenant: external_id, hit: true) == metric_value + 1)
+      assert_eventually metric_value(metric, tenant: external_id, hit: true) == metric_value + 1
     end
 
     test "broadcast fan-out counter is not recorded when track_fanout_metric is disabled", %{
@@ -357,7 +357,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
         hit: false
       })
 
-      assert_eventually(metric_value(metric, hit: false) >= metric_value + 1)
+      assert_eventually metric_value(metric, hit: false) >= metric_value + 1
     end
 
     test "channel input bytes", context do
@@ -366,7 +366,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       FakeUserCounter.fake_input_bytes(external_id)
       FakeUserCounter.fake_input_bytes(external_id)
 
-      assert_eventually(metric_value("realtime_channel_input_bytes", tenant: external_id) == 20)
+      assert_eventually metric_value("realtime_channel_input_bytes", tenant: external_id) == 20
     end
 
     test "channel output bytes", context do
@@ -375,7 +375,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       FakeUserCounter.fake_output_bytes(external_id)
       FakeUserCounter.fake_output_bytes(external_id)
 
-      assert_eventually(metric_value("realtime_channel_output_bytes", tenant: external_id) == 20)
+      assert_eventually metric_value("realtime_channel_output_bytes", tenant: external_id) == 20
     end
   end
 
@@ -477,7 +477,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
 
       TenantGlobal.execute_global_connection_metrics()
 
-      assert_eventually(metric_value("realtime_connections_global_connected") >= 0)
+      assert_eventually metric_value("realtime_connections_global_connected") >= 0
       assert metric_value("realtime_connections_global_connected_cluster") >= 0
     end
   end

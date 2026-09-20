@@ -104,8 +104,8 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManagerTest do
       send(subscriber, :stop)
 
       # The two tables are pruned independently, so each is waited on separately.
-      assert_eventually([{^self, ^uuid3, _ref, ^node}] = :ets.tab2list(args["subscribers_pids_table"]))
-      assert_eventually([{^bin_uuid3, ^node}] = :ets.tab2list(args["subscribers_nodes_table"]))
+      assert_eventually [{^self, ^uuid3, _ref, ^node}] = :ets.tab2list(args["subscribers_pids_table"])
+      assert_eventually [{^bin_uuid3, ^node}] = :ets.tab2list(args["subscribers_nodes_table"])
     end
   end
 
@@ -138,8 +138,8 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManagerTest do
       send(subscriber, :stop)
 
       # The two tables are pruned independently, so each is waited on separately.
-      assert_eventually(:ets.info(args["subscribers_pids_table"], :size) == 0)
-      assert_eventually(:ets.info(args["subscribers_nodes_table"], :size) == 0)
+      assert_eventually :ets.info(args["subscribers_pids_table"], :size) == 0
+      assert_eventually :ets.info(args["subscribers_nodes_table"], :size) == 0
 
       # Force check delete queue on manager
       send(pid, :check_delete_queue)

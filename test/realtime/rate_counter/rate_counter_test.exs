@@ -271,7 +271,7 @@ defmodule Realtime.RateCounterTest do
       # Cache has not expired yet
       assert {:ok, %RateCounter{}} = Cachex.get(RateCounter, args.id)
       # ...and is evicted once its TTL elapses.
-      assert_eventually({:ok, nil} = Cachex.get(RateCounter, args.id), timeout: 5_000, interval: 100)
+      assert_eventually {:ok, nil} = Cachex.get(RateCounter, args.id), timeout: 5_000, interval: 100
 
       # Ok new RateCounter automatically started now
       assert {:ok, %RateCounter{}} = RateCounter.get(args)

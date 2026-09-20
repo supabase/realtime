@@ -118,7 +118,7 @@ defmodule Realtime.DatabaseTest do
 
       # Postgrex opens the pool connections asynchronously, so give it a moment
       # to bring all of them up.
-      WaitForIt.case_wait Postgrex.query!(admin, "SELECT count(*)::int " <> from_realtime_connect, []) do
+      case_wait Postgrex.query!(admin, "SELECT count(*)::int " <> from_realtime_connect, []) do
         %{rows: [[3]]} -> :ok
       else
         %{rows: [[count]]} -> flunk("Expected 3 connections, but found #{count}")
@@ -154,7 +154,7 @@ defmodule Realtime.DatabaseTest do
       Database.replication_slot_teardown(conn, name)
 
       # Postgres releases the slot asynchronously once the walsender exits.
-      assert_eventually(%{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", []))
+      assert_eventually %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
     end
 
     test "removes replication slots with a given name and a tenant", %{tenant: tenant} do

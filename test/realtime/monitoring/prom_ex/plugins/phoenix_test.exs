@@ -40,7 +40,7 @@ defmodule Realtime.PromEx.Plugins.PhoenixTest do
           [{"x-api-key", token}]
         )
 
-      assert_eventually(metric_value("phoenix_connections_total") >= 2)
+      assert_eventually metric_value("phoenix_connections_total") >= 2
     end
   end
 
