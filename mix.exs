@@ -99,7 +99,7 @@ defmodule Realtime.MixProject do
       {:cachex, "~> 4.0"},
       {:open_api_spex, "~> 3.16"},
       {:corsica, "~> 2.0"},
-      {:observer_cli, "~> 1.7"},
+      {:observer_cli, "~> 2.0"},
       {:opentelemetry_exporter, "~> 1.10"},
       {:opentelemetry, "~> 1.7"},
       {:opentelemetry_api, "~> 1.5"},
