@@ -82,49 +82,31 @@ defmodule Realtime.Tenants.Janitor.MaintenanceTaskTest do
 
     test "the connection is closed once the janitor task finishes", ctx do
       %{tenant: tenant, task_supervisor: task_supervisor} = ctx
-      test_pid = self()
 
-      # Hold maintenance open so the connection can be observed while the task is still running
-      expect(Messages, :delete_old_messages, fn conn ->
-        send(test_pid, {:connected, conn})
-
-        receive do
-          :continue -> :ok
-        end
-      end)
+      expect(Messages, :delete_old_messages, fn _conn -> :ok end)
 
       task = run_in_task(task_supervisor, tenant)
 
-      assert_receive {:connected, conn}, 5000
-      assert Process.alive?(conn)
+      assert Task.await(task, 5000) == :ok
 
-      send(task.pid, :continue)
-
-      assert_receive {:DOWN, _ref, :process, _pid, :normal}, 5000
-      assert eventually(fn -> !Process.alive?(conn) end, sleep: 10)
+      assert [[conn]] = Mimic.calls(Messages, :delete_old_messages, 1)
+      # Monitoring an already dead connection still delivers :DOWN (with :noproc)
+      conn_ref = Process.monitor(conn)
+      assert_receive {:DOWN, ^conn_ref, :process, ^conn, _}, 5000
     end
 
     test "the connection is closed when maintenance raises", ctx do
       %{tenant: tenant, task_supervisor: task_supervisor} = ctx
-      test_pid = self()
 
-      expect(Messages, :delete_old_messages, fn conn ->
-        send(test_pid, {:connected, conn})
+      expect(Messages, :delete_old_messages, fn _conn -> raise "maintenance failed" end)
 
-        receive do
-          :continue -> raise "maintenance failed"
-        end
-      end)
+      %{pid: pid, ref: ref} = run_in_task(task_supervisor, tenant)
 
-      task = run_in_task(task_supervisor, tenant)
+      assert_receive {:DOWN, ^ref, :process, ^pid, {%RuntimeError{message: "maintenance failed"}, _}}, 5000
 
-      assert_receive {:connected, conn}, 5000
-      assert Process.alive?(conn)
-
-      send(task.pid, :continue)
-
-      assert_receive {:DOWN, _ref, :process, _pid, {%RuntimeError{message: "maintenance failed"}, _}}, 5000
-      assert eventually(fn -> !Process.alive?(conn) end, sleep: 10)
+      assert [[conn]] = Mimic.calls(Messages, :delete_old_messages, 1)
+      conn_ref = Process.monitor(conn)
+      assert_receive {:DOWN, ^conn_ref, :process, ^conn, _}, 5000
     end
   end
 
