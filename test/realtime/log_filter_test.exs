@@ -3,6 +3,9 @@ defmodule Realtime.LogFilterTest do
 
   alias Realtime.LogFilter
 
+  @ranch_format ~c"Ranch listener ~p had connection process started with ~p:start_link/3 at ~p exit with reason: ~0p~n"
+  @cowboy_stream_format ~c"Ranch listener ~p, connection process ~p, stream ~p had its request process ~p exit with reason ~0p~n"
+
   describe "filter/2 - gen_statem crash reports" do
     test "stops DBConnection.ConnectionError crashes" do
       event = gen_statem_event(%DBConnection.ConnectionError{message: "tcp connect: connection refused"})
@@ -47,6 +50,16 @@ defmodule Realtime.LogFilterTest do
       event = ranch_event(RealtimeWeb.Endpoint.HTTP, :cowboy_clear, self(), :some_error)
       assert ^event = LogFilter.filter(event, [])
     end
+
+    test "stops cowboy stream reports when the request process was killed" do
+      event = cowboy_stream_event(RealtimeWeb.Endpoint.HTTP, self(), 1, self(), :killed)
+      assert :stop = LogFilter.filter(event, [])
+    end
+
+    test "passes through cowboy stream reports when the request process exited for other reasons" do
+      event = cowboy_stream_event(RealtimeWeb.Endpoint.HTTP, self(), 1, self(), :some_error)
+      assert ^event = LogFilter.filter(event, [])
+    end
   end
 
   describe "setup/0" do
@@ -69,10 +82,12 @@ defmodule Realtime.LogFilterTest do
     }
   end
 
-  @ranch_format "Ranch listener ~p had connection process started with ~p:start_link/3 at ~p exit with reason: ~0p~n"
-
   defp ranch_event(ref, protocol, pid, reason) do
-    %{msg: {:format, @ranch_format, [ref, protocol, pid, reason]}, meta: %{pid: self()}}
+    %{msg: {@ranch_format, [ref, protocol, pid, reason]}, meta: %{pid: self()}}
+  end
+
+  defp cowboy_stream_event(ref, conn_pid, stream_id, pid, reason) do
+    %{msg: {@cowboy_stream_format, [ref, conn_pid, stream_id, pid, reason]}, meta: %{pid: self()}}
   end
 
   defp db_connection_log_event(message) do

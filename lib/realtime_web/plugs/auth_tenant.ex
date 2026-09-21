@@ -54,9 +54,10 @@ defmodule RealtimeWeb.AuthTenant do
           nil
 
         [value | _] ->
-          [bearer, token] = value |> String.split(" ")
-          bearer = String.downcase(bearer)
-          if bearer == "bearer", do: token
+          case String.split(value, " ", parts: 2) do
+            [bearer, token] -> if String.downcase(bearer) == "bearer", do: token
+            _ -> nil
+          end
       end
 
     apikey =

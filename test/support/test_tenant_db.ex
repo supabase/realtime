@@ -385,7 +385,7 @@ defmodule TestTenantDb do
       )
 
       Postgrex.query!(admin_conn, "GRANT USAGE ON SCHEMA realtime TO anon, authenticated, service_role", [])
-      Postgrex.query!(admin_conn, "GRANT ALL ON SCHEMA realtime TO supabase_realtime_admin WITH GRANT OPTION", [])
+      Postgrex.query!(admin_conn, "GRANT ALL ON SCHEMA realtime TO supabase_realtime_admin", [])
     rescue
       # Retry in case of OrioleDB OTablesMetaTranche LWLock
       e in [Postgrex.Error, DBConnection.ConnectionError] ->

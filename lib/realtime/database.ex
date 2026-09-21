@@ -166,10 +166,12 @@ defmodule Realtime.Database do
   SELECT count(*)::int FROM realtime.schema_migrations
   """
 
+  # Client backends are the only ones holding a max_connections slot
   @connections_query """
-  SELECT (current_setting('max_connections')::int - count(*))::int
+  SELECT GREATEST(current_setting('max_connections')::int - count(*), 0)::int
   FROM pg_stat_activity
-  WHERE application_name NOT IN ('realtime_connect', 'realtime_connect_probe')
+  WHERE backend_type = 'client backend'
+    AND application_name NOT IN ('realtime_connect', 'realtime_connect_probe')
   """
 
   defp query_connection_info(conn) do
@@ -404,8 +406,9 @@ defmodule Realtime.Database do
     query =
       "select slot_name from pg_replication_slots where slot_name like '%realtime%'"
 
-    with {:ok, %{rows: [rows]}} <- Postgrex.query(conn, query, []) do
+    with {:ok, %{rows: rows}} <- Postgrex.query(conn, query, []) do
       rows
+      |> List.flatten()
       |> Enum.reject(&is_nil/1)
       |> Enum.each(&replication_slot_teardown(conn, &1))
     end

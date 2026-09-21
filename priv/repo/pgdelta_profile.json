@@ -47,6 +47,32 @@
       },
       {
         "match": {
+          "all": [
+            { "kind": "acl" },
+            { "verb": "remove" },
+            {
+              "not": {
+                "idField": {
+                  "field": "grantee",
+                  "glob": [
+                    "anon",
+                    "authenticated",
+                    "service_role",
+                    "postgres",
+                    "dashboard_user",
+                    "supabase_admin",
+                    "supabase_realtime_admin"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "action": "exclude",
+        "audit": { "reasonCode": "realtime.keep-unknown-grants", "classification": "acknowledged" }
+      },
+      {
+        "match": {
           "any": [
             { "schema": "realtime" },
             { "target": { "schema": "realtime" } },

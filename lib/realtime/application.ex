@@ -16,7 +16,7 @@ defmodule Realtime.Application do
   defmodule JwtClaimValidatorsError, do: defexception([:message])
   defmodule RegionMappingError, do: defexception([:message])
 
-  defp check_for_local_ipv6_host() do
+  defp check_for_local_ipv6_host do
     hostname = Node.self() |> Atom.to_string()
 
     if String.contains?(hostname, "fd00:ec2::172:2") do
@@ -148,6 +148,12 @@ defmodule Realtime.Application do
                else: []
              )
          ]},
+        # Placed right after Forum.Muster (and before RealtimeWeb.Endpoint): on
+        # shutdown children terminate in reverse start order, so this drains the
+        # Muster router role AFTER the Endpoint closed its websockets and BEFORE
+        # the Muster coordinator terminates. See Realtime.MusterDrainer.
+        {Realtime.MusterDrainer,
+         scope: muster_scope, drain_opts: Application.get_env(:realtime, :muster_drain_opts, [])},
         Supervisor.child_spec({Cachex, name: Realtime.RateCounter}, id: Realtime.RateCounter),
         Supervisor.child_spec({Cachex, name: Realtime.Nodes.Cache}, id: Realtime.Nodes.Cache),
         Supervisor.child_spec(

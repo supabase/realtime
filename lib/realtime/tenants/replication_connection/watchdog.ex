@@ -66,42 +66,40 @@ defmodule Realtime.Tenants.ReplicationConnection.Watchdog do
 
   @impl true
   def handle_info(:health_check, state) do
-    try do
-      case ReplicationConnection.health_check(state.parent_pid, state.timeout) do
-        :ok ->
-          case check_slot(state) do
-            :ok ->
-              Process.send_after(self(), :health_check, state.check_interval)
-              {:noreply, state}
+    case ReplicationConnection.health_check(state.parent_pid, state.timeout) do
+      :ok ->
+        case check_slot(state) do
+          :ok ->
+            Process.send_after(self(), :health_check, state.check_interval)
+            {:noreply, state}
 
-            {:error, reason} when reason in [:slot_not_found, :slot_inactive] ->
-              log_error(
-                "ReplicationSlotNotAlive",
-                "Replication slot #{state.replication_slot_name} is not alive (#{reason}), shutting down"
-              )
+          {:error, reason} when reason in [:slot_not_found, :slot_inactive] ->
+            log_error(
+              "ReplicationSlotNotAlive",
+              "Replication slot #{state.replication_slot_name} is not alive (#{reason}), shutting down"
+            )
 
-              {:stop, :replication_slot_not_alive, state}
+            {:stop, :replication_slot_not_alive, state}
 
-            {:error, :lag_too_high} ->
-              log_error(
-                "ReplicationSlotLagTooHigh",
-                "Replication slot lag exceeds 50% of max_slot_wal_keep_size, shutting down"
-              )
+          {:error, :lag_too_high} ->
+            log_error(
+              "ReplicationSlotLagTooHigh",
+              "Replication slot lag exceeds 50% of max_slot_wal_keep_size, shutting down"
+            )
 
-              {:stop, :slot_lag_too_high, state}
+            {:stop, :slot_lag_too_high, state}
 
-            {:error, reason} ->
-              log_warning("ReplicationSlotCheckSkipped", "Could not check replication slot: #{inspect(reason)}")
-              Process.send_after(self(), :health_check, state.check_interval)
-              {:noreply, state}
-          end
-      end
-    catch
-      :exit, {:timeout, _} ->
-        log_error("ReplicationConnectionWatchdogTimeout", "ReplicationConnection is not responding")
-
-        {:stop, :watchdog_timeout, state}
+          {:error, reason} ->
+            log_warning("ReplicationSlotCheckSkipped", "Could not check replication slot: #{inspect(reason)}")
+            Process.send_after(self(), :health_check, state.check_interval)
+            {:noreply, state}
+        end
     end
+  catch
+    :exit, {:timeout, _} ->
+      log_error("ReplicationConnectionWatchdogTimeout", "ReplicationConnection is not responding")
+
+      {:stop, :watchdog_timeout, state}
   end
 
   defp check_slot(%{replication_slot_name: nil}), do: :ok

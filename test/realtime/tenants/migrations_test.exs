@@ -18,6 +18,14 @@ defmodule Realtime.Tenants.MigrationsTest do
   end
 
   describe "run_migrations/1" do
+    setup do
+      stub(Migrations, :load_db_dump?, fn migrations_ran, repo ->
+        migrations_ran == 0 and Migrations.schema_migrations_empty?(repo)
+      end)
+
+      :ok
+    end
+
     test "migrations for a given tenant only run once" do
       tenant = TestTenantDb.checkout_tenant()
 

@@ -46,7 +46,7 @@ tenant =
 Postgrex.transaction(admin_conn, fn db_conn ->
   [
     "grant usage on schema realtime to postgres, anon, authenticated, service_role",
-    "grant all on schema realtime to supabase_realtime_admin with grant option",
+    "grant all on schema realtime to supabase_realtime_admin",
     "create table if not exists public.test_tenant ( id SERIAL PRIMARY KEY, details text )",
     "grant all on table public.test_tenant to anon, authenticated, supabase_realtime_admin"
   ]

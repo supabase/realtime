@@ -8,7 +8,7 @@
 --   - creates realtime.schema_migrations and records every applied version
 --   - sets ALTER DEFAULT PRIVILEGES and the dashboard_user/postgres grants
 --
--- See Mix.Tasks.Realtime.ExportTenantDbDump
+-- See dev/scripts/export-tenant-db-dump.sh
 --
 DO $$
 BEGIN
@@ -29,7 +29,7 @@ END $$;
 
 
 -- Dumped from database version 15.14
--- Dumped by pg_dump version 15.19 (Ubuntu 15.19-1.pgdg24.04+2)
+-- Dumped by pg_dump version 15.14
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -1211,7 +1211,7 @@ ALTER TABLE realtime.messages ENABLE ROW LEVEL SECURITY;
 GRANT USAGE ON SCHEMA realtime TO postgres WITH GRANT OPTION;
 GRANT USAGE ON SCHEMA realtime TO anon;
 GRANT USAGE ON SCHEMA realtime TO service_role;
-GRANT ALL ON SCHEMA realtime TO supabase_realtime_admin WITH GRANT OPTION;
+GRANT ALL ON SCHEMA realtime TO supabase_realtime_admin;
 GRANT USAGE ON SCHEMA realtime TO authenticated;
 
 
@@ -1366,7 +1366,8 @@ GRANT ALL ON FUNCTION realtime.wal2json_escape_identifier(name text) TO dashboar
 -- Name: TABLE messages; Type: ACL; Schema: realtime; Owner: supabase_realtime_admin
 --
 
-GRANT ALL ON TABLE realtime.messages TO postgres;
+GRANT REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE realtime.messages TO postgres;
+GRANT SELECT,INSERT ON TABLE realtime.messages TO postgres WITH GRANT OPTION;
 GRANT ALL ON TABLE realtime.messages TO dashboard_user;
 GRANT SELECT,INSERT,UPDATE ON TABLE realtime.messages TO anon;
 GRANT SELECT,INSERT,UPDATE ON TABLE realtime.messages TO authenticated;
@@ -1415,7 +1416,8 @@ ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA realtime GRANT ALL ON
 -- Name: DEFAULT PRIVILEGES FOR TABLES; Type: DEFAULT ACL; Schema: realtime; Owner: supabase_admin
 --
 
-ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA realtime GRANT ALL ON TABLES  TO postgres;
+ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA realtime GRANT REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLES  TO postgres;
+ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA realtime GRANT SELECT,INSERT ON TABLES  TO postgres WITH GRANT OPTION;
 ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA realtime GRANT ALL ON TABLES  TO dashboard_user;
 
 
@@ -1508,4 +1510,6 @@ INSERT INTO realtime."schema_migrations" (version) VALUES (20260707120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260709120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260714120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260827120000);
-INSERT INTO realtime."schema_migrations" (version) VALUES (20260910120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20260914120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20260916120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20260921120000);

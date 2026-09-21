@@ -83,6 +83,27 @@ defmodule Realtime.DatabaseTest do
              end) =~ ~r/Only \d+ available connections\. At least 125 connections are required/
     end
 
+    @tag db_pool: 500
+    test "counts only the client backends holding a connection slot", %{tenant: tenant} do
+      {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+
+      %{rows: [[available_connections]]} =
+        Postgrex.query!(
+          conn,
+          """
+          SELECT (current_setting('max_connections')::int - count(*))::int
+            FROM pg_stat_activity
+           WHERE backend_type = 'client backend'
+             AND application_name NOT IN ('realtime_connect', 'realtime_connect_probe')
+          """,
+          []
+        )
+
+      assert capture_log(fn ->
+               assert {:error, :tenant_db_too_many_connections} = Database.check_tenant_connection(tenant)
+             end) =~ "Only #{available_connections} available connections"
+    end
+
     @tag db_pool: 3
     test "durable pool opens the configured number of realtime_connect connections", %{tenant: tenant} do
       # pg_stat_activity is server-wide, so draining 'realtime_connect' backends left
@@ -117,6 +138,17 @@ defmodule Realtime.DatabaseTest do
     test "removes replication slots with the realtime prefix", %{tenant: tenant} do
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
       Postgrex.query!(conn, "SELECT * FROM pg_create_logical_replication_slot('realtime_test_slot', 'pgoutput')", [])
+      Database.replication_slot_teardown(tenant)
+      assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
+    end
+
+    test "removes every replication slot with the realtime prefix", %{tenant: tenant} do
+      {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+
+      for slot <- ~w(realtime_test_slot_a realtime_test_slot_b) do
+        Postgrex.query!(conn, "SELECT * FROM pg_create_logical_replication_slot('#{slot}', 'pgoutput')", [])
+      end
+
       Database.replication_slot_teardown(tenant)
       assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
     end

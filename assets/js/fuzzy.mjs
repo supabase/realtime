@@ -16,7 +16,8 @@ export function positions(text, query) {
     at = haystack.indexOf(char, at);
     if (at === -1) return null;
     found.push(at);
-    at += 1;
+    if (char.length === 2) found.push(at + 1);
+    at += char.length;
   }
 
   return found;
