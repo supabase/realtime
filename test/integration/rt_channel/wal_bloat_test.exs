@@ -150,10 +150,6 @@ defmodule Realtime.Integration.RtChannel.WalBloatTest do
 
     case_wait Database.check_replication_slot(db_conn, slot_name),
       timeout: timeout_ms,
-      # Start tight so a slot that is already active is picked up straight away, then back off so
-      # a genuinely long wait does not become a busy query loop against the tenant database. The
-      # fixed half- and full-second intervals this replaced spent most of their time asleep after
-      # the slot had already come back.
       interval: WaitForIt.Backoff.exponential(start: 25, max: 500) do
       :ok -> active_replication_slot_pid!(db_conn)
     else

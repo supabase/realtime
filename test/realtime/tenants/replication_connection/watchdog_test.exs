@@ -71,8 +71,7 @@ defmodule Realtime.Tenants.ReplicationConnection.WatchdogTest do
         {Watchdog, parent_pid: fake_pid, tenant_id: "test-tenant", watchdog_interval: 50, watchdog_timeout: 100}
       )
 
-    # The health-check count is the thing being waited on, so wait on it directly instead of
-    # guessing at how long two 50ms cycles take.
+    # Wait for at least 2 health check cycles and verify health checks were performed.
     assert_eventually FakeReplicationConnection.get_health_check_count(fake_pid) >= 2, timeout: 1_000, interval: 10
 
     assert Process.alive?(watchdog_pid)
@@ -173,8 +172,6 @@ defmodule Realtime.Tenants.ReplicationConnection.WatchdogTest do
       Mimic.allow(Connect, self(), watchdog_pid)
       Mimic.allow(Database, self(), watchdog_pid)
 
-      # The point of the test is that nothing kills the watchdog, so assert it stays up across
-      # the whole window rather than checking once at the end of it.
       assert_always Process.alive?(watchdog_pid), timeout: 120, interval: 10
     end
 
@@ -221,8 +218,6 @@ defmodule Realtime.Tenants.ReplicationConnection.WatchdogTest do
 
           Mimic.allow(Connect, self(), watchdog_pid)
 
-          # The point of the test is that nothing kills the watchdog, so assert it stays up across
-          # the whole window rather than checking once at the end of it.
           assert_always Process.alive?(watchdog_pid), timeout: 120, interval: 10
         end)
 
@@ -282,8 +277,6 @@ defmodule Realtime.Tenants.ReplicationConnection.WatchdogTest do
       Mimic.allow(Connect, self(), watchdog_pid)
       Mimic.allow(Database, self(), watchdog_pid)
 
-      # The point of the test is that nothing kills the watchdog, so assert it stays up across
-      # the whole window rather than checking once at the end of it.
       assert_always Process.alive?(watchdog_pid), timeout: 120, interval: 10
     end
   end

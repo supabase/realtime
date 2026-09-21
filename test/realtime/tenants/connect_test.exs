@@ -15,8 +15,6 @@ defmodule Realtime.Tenants.ConnectTest do
   alias Realtime.Tenants.ReplicationConnection
   alias Realtime.UsersCounter
 
-  # Recovering a replication connection goes out to the tenant database, so it gets a generous
-  # budget and an unhurried poll; everything else here is local process/registry state.
   @replication_wait [timeout: 15_000, interval: 100]
   @slow_replication_wait [timeout: 30_000, interval: 100]
   @local_wait [timeout: 2_500, interval: 50]
@@ -51,7 +49,7 @@ defmodule Realtime.Tenants.ConnectTest do
       assert_process_down(pid)
 
       # Temporary process must not be registered in syn at any point after it dies, so assert the
-      # absence holds across the window rather than sampling it once at the end.
+      # absence holds.
       assert_always is_nil(Connect.whereis(tenant.external_id)), timeout: 1_000, interval: 50
     end
   end
@@ -387,8 +385,6 @@ defmodule Realtime.Tenants.ConnectTest do
 
       region = Tenants.region(tenant)
 
-      # The reaper checks every 100ms; until it decides, the registration must survive every one
-      # of those checks, not merely be present when the window ends.
       assert_always(match?({_, %{conn: _, region: ^region}}, :syn.lookup(Connect, tenant_id)),
         timeout: 400,
         interval: 20
@@ -414,7 +410,6 @@ defmodule Realtime.Tenants.ConnectTest do
       region = Tenants.region(tenant)
       assert {pid, %{conn: conn_pid, region: ^region}} = :syn.lookup(Connect, tenant_id)
 
-      # With a user connected the reaper must never take it, so assert across the window.
       assert_always(match?({^pid, %{conn: ^conn_pid, region: ^region}}, :syn.lookup(Connect, tenant_id)),
         timeout: 300,
         interval: 20
@@ -828,7 +823,6 @@ defmodule Realtime.Tenants.ConnectTest do
       # The real replication connection is active, so pg_stat_activity returns num_rows: 1 naturally
       send(pid, :recover_replication_connection)
 
-      # The point is that recovery reschedules rather than stopping, so assert it stays up.
       assert_always Process.alive?(pid), timeout: 100, interval: 10
     end
 
@@ -877,8 +871,6 @@ defmodule Realtime.Tenants.ConnectTest do
 
       send(pid, {:DOWN, ref, :process, self(), :simulated_crash})
 
-      # `:sys.get_state/1` is queued behind the message above, so it observes the state only once
-      # that clause has run — no sleep needed.
       state = :sys.get_state(pid)
       assert state.replication_recovery_started_at == original_ts
 
@@ -1009,9 +1001,6 @@ defmodule Realtime.Tenants.ConnectTest do
     Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{extensions: extensions})
   end
 
-  # `ReplicationConnection.whereis/1` answers `nil` until the connection registers, so the truthy
-  # form is what waits here: a `pid = whereis(...)` match pattern would bind `nil` and halt on the
-  # very first evaluation.
   defp await_replication_connection!(tenant_id, opts \\ @replication_wait) do
     wait! ReplicationConnection.whereis(tenant_id), opts
   end

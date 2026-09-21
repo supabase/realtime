@@ -11,9 +11,6 @@ defmodule RateCounterHelper do
     pid
   end
 
-  # The counter fills its bucket on its first tick, which is scheduled asynchronously; callers
-  # need a counter that is ready to be read. Polled rather than spun on, so a counter that never
-  # ticks fails with a TimeoutError naming this call instead of pinning a core indefinitely.
   defp await_initial_tick(pid) do
     match_wait! %RateCounter{bucket: [_ | _]}, :sys.get_state(pid), timeout: 5_000, interval: 10
   end

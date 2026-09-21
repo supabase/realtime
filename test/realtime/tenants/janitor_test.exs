@@ -75,8 +75,6 @@ defmodule Realtime.Tenants.JanitorTest do
 
     start_supervised!(Janitor)
 
-    # One connection per tenant, reused for every probe: the sweep runs on the janitor's own
-    # schedule, so this waits for it instead of guessing how long it takes.
     conns =
       Enum.map(tenants, fn tenant ->
         {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
@@ -118,8 +116,6 @@ defmodule Realtime.Tenants.JanitorTest do
 
     start_supervised!(Janitor)
 
-    # One connection per tenant, reused for every probe: the sweep runs on the janitor's own
-    # schedule, so this waits for it instead of guessing how long it takes.
     conns =
       Enum.map(tenants, fn tenant ->
         {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)

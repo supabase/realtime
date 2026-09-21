@@ -23,8 +23,7 @@ defmodule Realtime.Integration.RegionAwareEncryptionTest do
         ]
       )
 
-    # we need the nodes available for our region aware encryption to work.
-    # Each probe is an erpc round trip, hence the unhurried interval.
+    # We need the nodes available for our region aware encryption to work.
     assert_eventually :erpc.call(node, Nodes, :region_nodes, [master_region]) == [local], timeout: 5_000, interval: 100
 
     %{tenant: rewind_to_legacy_encryption(tenant), node: node}

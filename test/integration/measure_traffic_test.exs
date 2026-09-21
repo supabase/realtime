@@ -94,8 +94,6 @@ defmodule Realtime.Integration.MeasureTrafficTest do
                        500
       end
 
-      # The counters are written after the frames have already been fastlaned, so re-tick until
-      # they settle rather than sampling them once.
       assert_eventually(
         (
           RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
@@ -126,8 +124,6 @@ defmodule Realtime.Integration.MeasureTrafficTest do
         })
       end
 
-      # The counters are written after the frames have already been fastlaned, so re-tick until
-      # they settle rather than sampling them once.
       assert_eventually(
         (
           RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
@@ -176,8 +172,6 @@ defmodule Realtime.Integration.MeasureTrafficTest do
                        500
       end
 
-      # The counters are written after the frames have already been fastlaned, so re-tick until
-      # they settle rather than sampling them once.
       assert_eventually(
         (
           RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
@@ -227,8 +221,6 @@ defmodule Realtime.Integration.MeasureTrafficTest do
                        2000
       end
 
-      # The counters are written after the frames have already been fastlaned, so re-tick until
-      # they settle rather than sampling them once.
       assert_eventually(
         (
           RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)

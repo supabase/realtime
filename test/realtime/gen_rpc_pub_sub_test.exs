@@ -12,11 +12,8 @@ defmodule Realtime.GenRpcPubSubTest do
   alias Realtime.GenRpcPubSub.Worker
   alias RealtimeWeb.RealtimeChannel.MessageDispatcher
 
-  # Cross-node syn/Muster convergence, probed over erpc — generous budget, unhurried polling.
   @cluster_wait [timeout: 15_000, interval: 100]
 
-  # Bringing a second region's ring to agreement is the slowest thing here; it had its own
-  # 20s budget before and keeps it.
   @ring_convergence_wait [timeout: 20_000, interval: 100]
 
   test "it sets off_heap message_queue_data flag on the workers" do
@@ -369,9 +366,6 @@ defmodule Realtime.GenRpcPubSubTest do
       # and reconciled a local copy of its ring whose view agrees with the ap scope.
       assert_eventually %{"ap-southeast-2" => 2} = region_node_counts(), @cluster_wait
 
-      # Both sides are re-read on every evaluation — the ap ring can still be settling — and the
-      # tagged result means a timeout shows the local router tuple *and* the remote view hash it
-      # disagreed with, where the old `case ... -> boolean` reported only `false`.
       assert_eventually {:agreed, _node, _vh} = ap_router_agreement(ap_holder, ap_scope), @cluster_wait
 
       # Pick a tenant whose ap-region router is the holder, so the holder is both the
@@ -460,8 +454,6 @@ defmodule Realtime.GenRpcPubSubTest do
         do: [node(), holder_node, bystander_node],
         else: [holder_node, bystander_node]
 
-    # Matching on the collapsed view means a timeout reports what the ring actually looked like —
-    # e.g. `%{statuses: [:ready, :converging], view_hashes: [...]}` — instead of a bare `false`.
     assert_eventually(
       %{statuses: [:ready], view_hashes: [_one]} = muster_convergence(nodes, scope),
       @ring_convergence_wait
@@ -470,8 +462,6 @@ defmodule Realtime.GenRpcPubSubTest do
     %{holder_node: holder_node, bystander_node: bystander_node, scope: scope}
   end
 
-  # Both of these collapse a cluster-wide observation into one value, so that the waiting
-  # assertions can match on it and report it verbatim when they time out.
   defp region_node_counts do
     Map.new(["us-east-1", "ap-southeast-2"], &{&1, length(Realtime.Nodes.region_nodes(&1))})
   end

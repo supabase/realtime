@@ -10,10 +10,6 @@ defmodule Clustered do
   @port_wait_timeout_ms 5_000
   @port_wait_interval_ms 100
 
-  # A gen_rpc server that is coming up usually binds within a few tens of milliseconds, so the
-  # probe starts fast and backs off rather than paying a flat 100ms for the common case.
-  # 15s matches the old 50-attempt loop's worst case (a 200ms connect timeout plus a 100ms sleep
-  # per attempt); a peer coming up slowly on a loaded CI runner must not newly fail here.
   @gen_rpc_wait_timeout_ms 15_000
   @gen_rpc_poll_start_ms 20
   @gen_rpc_poll_max_ms 200
@@ -206,7 +202,6 @@ defmodule Clustered do
     :ok
   end
 
-  # The `else` clause sees the last connect error, so a server that never binds says why.
   defp wait_for_port(host, port) do
     case_wait :gen_tcp.connect(host, port, [:binary, active: false], 200),
       timeout: @gen_rpc_wait_timeout_ms,

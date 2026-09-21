@@ -92,8 +92,6 @@ defmodule Realtime.MetricsCleanerTest do
       pid2 = spawn_link(fn -> Process.sleep(:infinity) end)
       Census.join(:users, "reconnect-tenant", pid2)
 
-      # Every cleaner run past the threshold must leave the reconnected tenant alone, so assert
-      # across the whole window rather than at one instant in it.
       assert_always exported?("reconnect-tenant"), timeout: 2_200, interval: @probe_interval_ms
     end
   end
@@ -164,8 +162,6 @@ defmodule Realtime.MetricsCleanerTest do
       # Re-register before threshold
       :telemetry.execute([:syn, Connect, :registered], %{}, %{name: "reconnect-tenant"})
 
-      # Every cleaner run past the threshold must leave the reconnected tenant alone, so assert
-      # across the whole window rather than at one instant in it.
       assert_always exported?("reconnect-tenant"), timeout: 2_200, interval: @probe_interval_ms
     end
   end
@@ -182,7 +178,6 @@ defmodule Realtime.MetricsCleanerTest do
       log =
         capture_log(fn ->
           send(pid, :something_unexpected)
-          # Queued behind the message above, so it returns only once that clause has logged.
           :sys.get_state(pid)
         end)
 

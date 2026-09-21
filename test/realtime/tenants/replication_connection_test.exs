@@ -49,8 +49,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       assert_process_down(pid)
       assert_process_down(conn)
 
-      # A temporary connection must stay unregistered after it dies, so assert the absence holds
-      # across the window rather than sampling it once at the end.
+      # A temporary connection must stay unregistered after it dies.
       assert_always is_nil(ReplicationConnection.whereis(tenant.external_id)), timeout: 1_000, interval: 50
     end
   end

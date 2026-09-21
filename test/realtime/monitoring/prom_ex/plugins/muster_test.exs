@@ -63,8 +63,7 @@ defmodule Realtime.PromEx.Plugins.MusterTest do
   end
 
   # PromEx polls every 100ms, so the stub a test just installed only reaches the gauge on the next
-  # poll. Waiting for the one-hot shape identifies a post-stub snapshot unambiguously, where a
-  # fixed sleep only guesses at how many cycles that takes.
+  # poll. Waiting for the one-hot shape identifies a post-stub snapshot unambiguously.
   defp poll_until(expected_state) do
     case until(fn -> one_hot_snapshot(expected_state) end, timeout: 2_000, interval: @poll_interval_ms) do
       {:ok, metrics} -> metrics

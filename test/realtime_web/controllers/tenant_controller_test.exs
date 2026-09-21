@@ -95,7 +95,6 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert Crypto.decrypt!(settings["db_user"]) == "supabase_admin"
       refute settings["db_password"]
 
-      # Migrations run asynchronously after the create call returns.
       assert_eventually Tenants.get_tenant_by_external_id(external_id).migrations_ran > 0
 
       assert %{broadcast_adapter: :gen_rpc, extensions: [%{settings: settings}]} =
@@ -124,7 +123,6 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert Crypto.decrypt!(settings["db_user"]) == "supabase_admin"
       refute settings["db_password"]
 
-      # Migrations run asynchronously after the create call returns.
       assert_eventually Tenants.get_tenant_by_external_id(external_id).migrations_ran > 0
 
       assert %{extensions: [%{settings: settings}]} = Tenants.get_tenant_by_external_id(external_id)

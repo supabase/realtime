@@ -19,8 +19,7 @@ defmodule Realtime.PromEx.Plugins.DistributedTest do
     start_supervised!(MetricsTest)
     # Send some data back and forth
     25 = :erpc.call(node, String, :to_integer, ["25"])
-    # The plugin's first poll is what creates the series every test below reads; wait for it
-    # rather than guessing at poll_rate.
+
     wait!(
       metric_value(PromEx.get_metrics(MetricsTest), "dist_send_count", origin_node: node(), target_node: node),
       timeout: 2_000,

@@ -28,8 +28,6 @@ defmodule Realtime.PromEx.Plugins.GenRpcTest do
       Process.sleep(50)
     end
 
-    # The plugin's first poll is what creates the series every test below reads; wait for it
-    # rather than guessing at poll_rate.
     wait!(
       metric_value(PromEx.get_metrics(MetricsTest), "gen_rpc_send_count", origin_node: node(), target_node: node),
       timeout: 2_000,

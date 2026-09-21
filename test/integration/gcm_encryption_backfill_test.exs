@@ -94,8 +94,6 @@ defmodule Realtime.Integration.GcmEncryptionBackfillTest do
     assert %Tenant{} = Tenants.Cache.get_tenant_by_external_id(external_id)
   end
 
-  # The backfill writes asynchronously, so "still on the legacy cipher" is an invariant that has to
-  # hold for the whole window, not just at the end of it.
   defp assert_still_on_legacy_cipher(external_id) do
     assert_always on_legacy_cipher?(external_id), timeout: @async_write_window, interval: @probe_interval
   end

@@ -32,8 +32,6 @@ defmodule Realtime.PromEx.Plugins.TenantsTest do
 
     test "global success", %{tenant: tenant} do
       metric = "realtime_global_rpc_count"
-      # The baseline is only meaningful once PromEx has scraped at least once, so wait for
-      # the series to appear rather than guessing at the poll rate.
       previous_value = wait(metric_value(metric, mechanism: "erpc", success: true), timeout: 200) || 0
       assert {:ok, "success"} = Rpc.enhanced_call(node(), Test, :success, [], tenant_id: tenant)
       assert_eventually metric_value(metric, mechanism: "erpc", success: true) == previous_value + 1
@@ -41,8 +39,6 @@ defmodule Realtime.PromEx.Plugins.TenantsTest do
 
     test "global failure", %{tenant: tenant} do
       metric = "realtime_global_rpc_count"
-      # The baseline is only meaningful once PromEx has scraped at least once, so wait for
-      # the series to appear rather than guessing at the poll rate.
       previous_value = wait(metric_value(metric, mechanism: "erpc", success: false), timeout: 200) || 0
       assert {:error, "failure"} = Rpc.enhanced_call(node(), Test, :failure, [], tenant_id: tenant)
       assert_eventually metric_value(metric, mechanism: "erpc", success: false) == previous_value + 1
@@ -50,8 +46,6 @@ defmodule Realtime.PromEx.Plugins.TenantsTest do
 
     test "global exception", %{tenant: tenant} do
       metric = "realtime_global_rpc_count"
-      # The baseline is only meaningful once PromEx has scraped at least once, so wait for
-      # the series to appear rather than guessing at the poll rate.
       previous_value = wait(metric_value(metric, mechanism: "erpc", success: false), timeout: 200) || 0
 
       assert {:error, :rpc_error, %RuntimeError{message: "runtime error"}} =
@@ -68,8 +62,6 @@ defmodule Realtime.PromEx.Plugins.TenantsTest do
 
     test "global success", %{tenant: tenant} do
       metric = "realtime_global_rpc_count"
-      # The baseline is only meaningful once PromEx has scraped at least once, so wait for
-      # the series to appear rather than guessing at the poll rate.
       previous_value = wait(metric_value(metric, mechanism: "gen_rpc", success: true), timeout: 200) || 0
       assert GenRpc.multicall(Test, :success, [], tenant_id: tenant) == [{node(), {:ok, "success"}}]
       assert_eventually metric_value(metric, mechanism: "gen_rpc", success: true) == previous_value + 1
@@ -77,8 +69,6 @@ defmodule Realtime.PromEx.Plugins.TenantsTest do
 
     test "global failure", %{tenant: tenant} do
       metric = "realtime_global_rpc_count"
-      # The baseline is only meaningful once PromEx has scraped at least once, so wait for
-      # the series to appear rather than guessing at the poll rate.
       previous_value = wait(metric_value(metric, mechanism: "gen_rpc", success: false), timeout: 200) || 0
       assert GenRpc.multicall(Test, :failure, [], tenant_id: tenant) == [{node(), {:error, "failure"}}]
       assert_eventually metric_value(metric, mechanism: "gen_rpc", success: false) == previous_value + 1
@@ -86,8 +76,6 @@ defmodule Realtime.PromEx.Plugins.TenantsTest do
 
     test "global exception", %{tenant: tenant} do
       metric = "realtime_global_rpc_count"
-      # The baseline is only meaningful once PromEx has scraped at least once, so wait for
-      # the series to appear rather than guessing at the poll rate.
       previous_value = wait(metric_value(metric, mechanism: "gen_rpc", success: false), timeout: 200) || 0
       node = node()
 
@@ -105,8 +93,6 @@ defmodule Realtime.PromEx.Plugins.TenantsTest do
     end
 
     test "conneted based on Connect module information for local node only", %{tenant: tenant} do
-      # The baseline is only meaningful once PromEx has scraped at least once, so wait for
-      # the series to appear rather than guessing at the poll rate.
       previous_value = wait!(metric_value("realtime_tenants_connected"), timeout: 1_000)
       {:ok, _} = Connect.lookup_or_start_connection(tenant.external_id)
       assert_eventually metric_value("realtime_tenants_connected") == previous_value + 1

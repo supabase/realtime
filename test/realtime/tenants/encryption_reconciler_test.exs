@@ -133,8 +133,6 @@ defmodule Realtime.Tenants.EncryptionReconcilerTest do
 
       assert :ok = EncryptionReconciler.reconcile(tenant)
 
-      # The reconciler writes asynchronously; "does nothing" means the rows are never touched, so
-      # assert that across the window instead of checking once after it.
       assert_always(
         (
           reloaded = Api.get_tenant_by_external_id(tenant.external_id)
@@ -247,8 +245,6 @@ defmodule Realtime.Tenants.EncryptionReconcilerTest do
       Enum.all?(tenant.extensions, &(not Crypto.legacy_settings?(&1.settings, encrypted_settings_keys())))
   end
 
-  # The backfill writes asynchronously, so "still on the legacy cipher" is an invariant that has to
-  # hold for the whole window, not just at the end of it.
   defp assert_still_on_legacy_cipher(external_id) do
     assert_always on_legacy_cipher?(external_id), timeout: @async_write_window, interval: @probe_interval
   end

@@ -9,16 +9,11 @@ defmodule TestHelpers do
   @default_timeout 5_000
   @default_interval 100
 
-  # See `refute_eventually/2`: a negative assertion pays its timeout on every passing run, so it
-  # gets a much smaller budget and samples more densely within it.
   @negative_timeout 500
   @negative_interval 25
 
   # `assert_eventually` and `refute_eventually` below shadow their `WaitForIt.Test` namesakes so
-  # that they keep this suite's historical wait budget. The arities are derived from
-  # `WaitForIt.Test` rather than hardcoded so that an arity added upstream cannot slip past the
-  # shadow and silently reintroduce the library's much shorter defaults: it surfaces as an
-  # undefined function error here instead.
+  # that they keep this suite's historical wait budget.
   @shadowed_assertions for {name, arity} <- WaitForIt.Test.__info__(:macros),
                            name in [:assert_eventually, :refute_eventually],
                            do: {name, arity}
