@@ -131,7 +131,7 @@ defmodule Realtime.GenRpcPubSub.RegionRingsTest do
       Process.exit(ring_pid, :kill)
       assert_receive {:DOWN, ^ref, :process, ^ring_pid, :killed}
 
-      assert_eventually match?({:ok, _, _}, RegionRings.expected_router(@region, "tenant_0", table)), @short_wait
+      assert_eventually {:ok, _, _} = RegionRings.expected_router(@region, "tenant_0", table), @short_wait
 
       new_state = :sys.get_state(pid)
       {_name, new_ring_pid} = Map.fetch!(new_state.rings, @region)
@@ -155,7 +155,7 @@ defmodule Realtime.GenRpcPubSub.RegionRingsTest do
       end)
 
       :telemetry.execute([:syn, RegionNodes, :joined], %{}, %{name: @region})
-      assert_eventually match?({:ok, _, _}, RegionRings.expected_router(@region, "tenant_0", table)), @short_wait
+      assert_eventually {:ok, _, _} = RegionRings.expected_router(@region, "tenant_0", table), @short_wait
       {:ok, _node1, vh1} = RegionRings.expected_router(@region, "tenant_0", table)
       assert vh1 == Muster.view_hash_for_members(first)
 
@@ -171,7 +171,7 @@ defmodule Realtime.GenRpcPubSub.RegionRingsTest do
       :telemetry.execute([:syn, RegionNodes, :joined], %{}, %{name: @region})
 
       assert_eventually(
-        match?({:ok, _, ^expected_vh2}, RegionRings.expected_router(@region, "tenant_0", table)),
+        {:ok, _, ^expected_vh2} = RegionRings.expected_router(@region, "tenant_0", table),
         @short_wait
       )
 

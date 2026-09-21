@@ -79,7 +79,7 @@ defmodule Realtime.Tenants.ConnectTest do
       assert Process.alive?(pid)
 
       # And the pool recovers so queries succeed again
-      assert_eventually match?({:ok, _}, Postgrex.query(db_conn, "SELECT 1", [])), @local_wait
+      assert_eventually {:ok, _} = Postgrex.query(db_conn, "SELECT 1", []), @local_wait
       assert Process.alive?(pid)
     end
 
@@ -103,7 +103,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
           GenServer.stop(killer)
 
-          assert_eventually match?({:ok, _}, Postgrex.query(db_conn, "SELECT 1", [])), @local_wait
+          assert_eventually {:ok, _} = Postgrex.query(db_conn, "SELECT 1", []), @local_wait
           assert_eventually :sys.get_state(pid).db_recovery_started_at == nil, @local_wait
         end)
 
@@ -385,10 +385,9 @@ defmodule Realtime.Tenants.ConnectTest do
 
       region = Tenants.region(tenant)
 
-      assert_always(match?({_, %{conn: _, region: ^region}}, :syn.lookup(Connect, tenant_id)),
+      assert_always {_, %{conn: _, region: ^region}} = :syn.lookup(Connect, tenant_id),
         timeout: 400,
         interval: 20
-      )
 
       assert_process_down(db_conn, 1000)
 
@@ -410,10 +409,9 @@ defmodule Realtime.Tenants.ConnectTest do
       region = Tenants.region(tenant)
       assert {pid, %{conn: conn_pid, region: ^region}} = :syn.lookup(Connect, tenant_id)
 
-      assert_always(match?({^pid, %{conn: ^conn_pid, region: ^region}}, :syn.lookup(Connect, tenant_id)),
+      assert_always {^pid, %{conn: ^conn_pid, region: ^region}} = :syn.lookup(Connect, tenant_id),
         timeout: 300,
         interval: 20
-      )
 
       assert Process.alive?(db_conn)
 

@@ -38,6 +38,28 @@ defmodule Realtime.Integration.MeasureTrafficTest do
     |> Agent.get(fn state -> get_in(state, [tenant, key]) || 0 end)
   end
 
+  defp tick_and_get_counts(tenant) do
+    tenant_id = tenant.external_id
+    RateCounterHelper.tick_tenant_rate_counters!(tenant_id)
+
+    {
+      get_count([:realtime, :channel, :output_bytes], tenant_id),
+      get_count([:realtime, :channel, :input_bytes], tenant_id)
+    }
+  end
+
+  defp assert_counts(tenant) do
+    case_wait tick_and_get_counts(tenant), timeout: 2_000, interval: 50 do
+      {output_bytes, input_bytes}
+      when output_bytes > 0 and input_bytes > 0 ->
+        :ok
+    else
+      {output_bytes, input_bytes} ->
+        assert output_bytes > 0, "Expected output_bytes > 0, got #{output_bytes}"
+        assert input_bytes > 0, "Expected input_bytes > 0, got #{input_bytes}"
+    end
+  end
+
   describe "measure traffic" do
     setup %{tenant: tenant} do
       events = [
@@ -94,16 +116,7 @@ defmodule Realtime.Integration.MeasureTrafficTest do
                        500
       end
 
-      assert_eventually(
-        (
-          RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
-
-          get_count([:realtime, :channel, :output_bytes], tenant.external_id) > 0 and
-            get_count([:realtime, :channel, :input_bytes], tenant.external_id) > 0
-        ),
-        timeout: 2_000,
-        interval: 50
-      )
+      assert_counts(tenant)
     end
 
     test "measure traffic for presence events", %{tenant: tenant} do
@@ -124,16 +137,7 @@ defmodule Realtime.Integration.MeasureTrafficTest do
         })
       end
 
-      assert_eventually(
-        (
-          RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
-
-          get_count([:realtime, :channel, :output_bytes], tenant.external_id) > 0 and
-            get_count([:realtime, :channel, :input_bytes], tenant.external_id) > 0
-        ),
-        timeout: 2_000,
-        interval: 50
-      )
+      assert_counts(tenant)
     end
 
     test "measure traffic for postgres changes events", %{tenant: tenant, db_conn: db_conn} do
@@ -172,16 +176,7 @@ defmodule Realtime.Integration.MeasureTrafficTest do
                        500
       end
 
-      assert_eventually(
-        (
-          RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
-
-          get_count([:realtime, :channel, :output_bytes], tenant.external_id) > 0 and
-            get_count([:realtime, :channel, :input_bytes], tenant.external_id) > 0
-        ),
-        timeout: 2_000,
-        interval: 50
-      )
+      assert_counts(tenant)
     end
 
     test "measure traffic for db events", %{tenant: tenant, db_conn: db_conn} do
@@ -221,16 +216,7 @@ defmodule Realtime.Integration.MeasureTrafficTest do
                        2000
       end
 
-      assert_eventually(
-        (
-          RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
-
-          get_count([:realtime, :channel, :output_bytes], tenant.external_id) > 0 and
-            get_count([:realtime, :channel, :input_bytes], tenant.external_id) > 0
-        ),
-        timeout: 2_000,
-        interval: 50
-      )
+      assert_counts(tenant)
     end
   end
 end
