@@ -160,6 +160,10 @@ defmodule Realtime.ApiTest do
       assert Map.has_key?(extension.settings, "db_password")
       assert Crypto.decrypt!(extension.settings["db_password"]) == "postgres"
     end
+
+    test "rejects unknown options", %{tenants: [tenant | _]} do
+      assert_raise ArgumentError, fn -> Api.get_tenant_by_external_id(tenant.external_id, use_replica: false) end
+    end
   end
 
   describe "update_tenant_by_external_id/2" do
