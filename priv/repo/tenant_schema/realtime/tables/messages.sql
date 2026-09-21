@@ -30,7 +30,7 @@ alter table "realtime"."messages"
   alter column "skip_broadcast" set default false;
 
 alter table "realtime"."messages"
-  alter column "updated_at" set default now();
+  alter column "updated_at" set default clock_timestamp();
 
 alter table "realtime"."messages"
   add constraint "messages_payload_exclusive" check (((payload IS NULL) OR (binary_payload IS NULL))) not valid;
