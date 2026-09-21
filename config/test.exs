@@ -130,7 +130,7 @@ config :realtime,
   max_gen_rpc_clients: 5,
   max_gen_rpc_call_clients: 1,
   metrics_pusher_req_options: [
-    adapter: &Realtime.ReqTestRawAdapter.call(&1, Realtime.MetricsPusher)
+    adapter: Realtime.MetricsPusherReqAdapter
   ]
 
 # Print nothing during tests unless captured or a test failure happens
