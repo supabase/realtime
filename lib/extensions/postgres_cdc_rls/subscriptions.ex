@@ -141,12 +141,15 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
     |> Enum.map_join(", ", fn {k, v} -> "#{k}: #{to_log(v)}" end)
   end
 
-  @spec delete(conn(), String.t()) :: {:ok, Postgrex.Result.t()} | {:error, any()}
+  @spec delete(conn(), String.t()) :: :ok | {:ok, Postgrex.Result.t()} | {:error, any()}
   def delete(conn, id) do
     Logger.debug("Delete subscription")
     sql = "delete from realtime.subscription where subscription_id = $1"
 
     case query(conn, sql, [id]) do
+      {:error, %Postgrex.Error{postgres: %{code: :undefined_table}}} ->
+        :ok
+
       {:error, reason} ->
         log_error("SubscriptionDeletionFailed", reason)
         {:error, reason}
@@ -166,6 +169,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
     case query(conn, "delete from realtime.subscription;", []) do
       {:ok, _} -> :ok
+      {:error, %Postgrex.Error{postgres: %{code: :undefined_table}}} -> :ok
       {:error, reason} -> log_error("SubscriptionDeletionFailed", reason)
     end
   catch
