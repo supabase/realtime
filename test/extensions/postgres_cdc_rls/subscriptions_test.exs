@@ -773,7 +773,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
                )
     end
 
-    @tag :requires_observable_statement_cache
+    @tag :requires_direct_connection
     test "caches the subscription insert statement and reuses it across calls", %{conn: conn} do
       {:ok, subscription_params} =
         Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test"})

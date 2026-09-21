@@ -160,7 +160,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
       assert slot_changes_count == 1
     end
 
-    @tag :requires_observable_statement_cache
+    @tag :requires_direct_connection
     test "caches the prepared statement and reuses it across calls", %{conn: conn} do
       slot_name = "test_slot_#{System.unique_integer([:positive])}"
 

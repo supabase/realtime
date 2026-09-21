@@ -5,6 +5,8 @@ defmodule Realtime.GenRpcPubSubTest do
   # Application env being changed
   use ExUnit.Case, async: false
 
+  import TestHelpers
+
   alias Forum.Muster
   alias Realtime.FeatureFlags
   alias Realtime.GenRpcPubSub.RegionRings
@@ -172,10 +174,10 @@ defmodule Realtime.GenRpcPubSubTest do
         )
 
       # syn RegionNodes membership propagates asynchronously across the cluster
-      eventually(fn ->
-        length(Realtime.Nodes.region_nodes("us-east-1")) == 2 and
-          length(Realtime.Nodes.region_nodes("ap-southeast-2")) == 2
-      end)
+      assert eventually(fn ->
+               length(Realtime.Nodes.region_nodes("us-east-1")) == 2 and
+                 length(Realtime.Nodes.region_nodes("ap-southeast-2")) == 2
+             end)
 
       RealtimeWeb.Endpoint.subscribe(@topic)
       :erpc.multicall(Node.list(), Subscriber, :subscribe, [self(), @topic])

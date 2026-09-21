@@ -2,19 +2,14 @@ start_time = :os.system_time(:millisecond)
 
 alias Realtime.Api
 
-# Where tenant DBs come from — docker containers (default) or external
-# servers (USE_EXTERNAL_TENANT_DB=true). The backend is resolved exactly
-# once per run, here; everything else dispatches through
-# TestTenantDb.Backend.current().
+# USE_EXTERNAL_TENANT_DB=true swaps per-test docker containers for pre-existing servers listed
+# in EXTERNAL_TENANT_DB_PORTS. Resolved once here; the rest read Backend.current().
 backend = TestTenantDb.Backend.resolve!()
 max_cases = backend.max_cases()
 
 repo_config = Application.fetch_env!(:realtime, Realtime.Repo)
 
-# The probes below describe a *tenant* database: every tag they drive gates
-# behaviour of a tenant's realtime schema, not the registry's. The realtime
-# database only answers for them when both run the same image, so the backend
-# says which port to ask.
+# Probe a tenant database, not the realtime one: TENANT_DB_IMAGE can differ from POSTGRES_IMAGE.
 {:ok, pg_conn} =
   Postgrex.start_link(
     hostname: repo_config[:hostname],
@@ -39,16 +34,14 @@ repo_config = Application.fetch_env!(:realtime, Realtime.Repo)
 %{rows: [[orioledb?]]} =
   Postgrex.query!(pg_conn, "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'orioledb')")
 
-# Two tests read `pg_prepared_statements` to prove Realtime asked Postgrex to cache a statement.
-# That only works where an *un*cached query leaves no entry behind. A connection pooler prepares
-# every statement it forwards, keyed by the SQL text, so there a cached and an uncached query look
-# identical and the assertion would hold even if the caching were removed from the code.
-Postgrex.query!(pg_conn, "SELECT 1 AS statement_cache_probe", [])
+# Postgrex leaves no pg_prepared_statements row for a query without :cache_statement. A pooler
+# re-prepares everything it forwards, so a row here means one backend is shared by many clients.
+Postgrex.query!(pg_conn, "SELECT 1 AS direct_connection_probe", [])
 
-%{rows: [[observable_statement_cache?]]} =
+%{rows: [[direct_connection?]]} =
   Postgrex.query!(
     pg_conn,
-    "SELECT count(*) = 0 FROM pg_prepared_statements WHERE statement LIKE '%statement_cache_probe%'"
+    "SELECT count(*) = 0 FROM pg_prepared_statements WHERE statement LIKE '%direct_connection_probe%'"
   )
 
 # `realtime.broadcast_changes(..., NEW record, OLD record, ...)` (introduced in commit 2922658c) called from a trigger via `PERFORM` fails on PG <= 14.5
@@ -62,12 +55,10 @@ requires_no_supautils_policy_grants = if has_supautils_realtime_grants, do: :req
 
 skip_orioledb = if orioledb?, do: :skip_orioledb
 
-# Tests that kill and recreate a pooled tenant database; only the docker backend
-# owns its databases, external servers are supplied to us.
+# Only the docker backend can drop and recreate a tenant database mid-run.
 requires_docker_backend = if backend != TestTenantDb.Backend.Docker, do: :requires_docker_backend
 
-requires_observable_statement_cache =
-  if !observable_statement_cache?, do: :requires_observable_statement_cache
+requires_direct_connection = if !direct_connection?, do: :requires_direct_connection
 
 exclude =
   Enum.reject(
@@ -79,7 +70,7 @@ exclude =
       requires_no_supautils_policy_grants,
       skip_orioledb,
       requires_docker_backend,
-      requires_observable_statement_cache
+      requires_direct_connection
     ],
     &is_nil/1
   )

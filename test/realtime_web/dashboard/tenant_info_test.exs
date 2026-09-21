@@ -45,6 +45,7 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
     assert html =~ "postgres_cdc_rls"
   end
 
+  @tag :requires_direct_connection
   test "tenant lookup releases the postgres version connection", %{conn: conn, tenant: tenant} do
     {:ok, _view, _html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
 

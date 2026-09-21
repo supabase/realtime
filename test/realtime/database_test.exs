@@ -158,11 +158,13 @@ defmodule Realtime.DatabaseTest do
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
 
       for slot <- ~w(realtime_test_slot_a realtime_test_slot_b) do
-        Postgrex.query!(conn, "SELECT * FROM pg_create_logical_replication_slot('#{slot}', 'pgoutput')", [])
+        create_replication_slot(conn, slot, plugin: "pgoutput", temporary: false)
       end
 
       Database.replication_slot_teardown(tenant)
-      assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
+
+      assert %{rows: []} =
+               Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots WHERE slot_type = 'logical'", [])
     end
   end
 
