@@ -122,7 +122,7 @@ defmodule Realtime.DatabaseTest do
 
       assert {:ok, conn, _migrations_ran} = Database.check_tenant_connection(tenant)
 
-      # An idle client holds no backend behind a pooler, so keep them all busy to be counted.
+      # Multigres multiplexes idle clients onto one backend, so keep them all mid-query to count.
       busy =
         for _ <- 1..pool_size,
             do: Task.async(fn -> Postgrex.query(conn, "SELECT pg_sleep(5)", [], timeout: 15_000) end)

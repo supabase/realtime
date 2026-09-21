@@ -92,8 +92,8 @@ defmodule Realtime.Tenants.ConnectTest do
       # assert on the logs rather than trying to observe the transient open state.
       log =
         capture_log(fn ->
-          # An idle client holds no backend behind a connection pooler, so the pool
-          # has to be running a query to have one that shows up and can be killed.
+          # Multigres multiplexes idle clients onto one backend, so the pool has to be
+          # mid-query for pg_stat_activity to list a pid per connection to terminate.
           busy = Task.async(fn -> Postgrex.query(db_conn, "SELECT pg_sleep(5)", [], timeout: 15_000) end)
 
           assert wait_until(fn ->

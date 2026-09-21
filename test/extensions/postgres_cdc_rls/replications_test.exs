@@ -53,8 +53,9 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
     test "returns slot_not_found when slot exists but has no active backend", %{conn: conn, tenant: tenant} do
       slot_name = "test_slot_#{System.unique_integer([:positive])}"
 
-      # Use a permanent (non-temporary) slot via a separate connection to avoid
-      # connection state issues that temporary slots cause on the same connection
+      # The slot has to outlive the connection that made it: a temporary one would go with
+      # `slot_conn` below, and `terminate_backend` would report :slot_not_found because the
+      # slot was gone rather than because it had no backend.
       {:ok, slot_conn} = Realtime.Database.connect(tenant, "realtime_rls", :stop)
       create_replication_slot(slot_conn, slot_name, plugin: "pgoutput", temporary: false)
       GenServer.stop(slot_conn)
