@@ -3,10 +3,16 @@ defmodule Clustered do
   Uses the gist https://gist.github.com/ityonemo/177cbc96f8c8722bfc4d127ff9baec62 to start a node for testing
   """
 
+  import WaitForIt
+
   alias Realtime.Env
 
-  @port_wait_attempts 50
-  @port_wait_delay_ms 100
+  @port_wait_timeout_ms 5_000
+  @port_wait_interval_ms 100
+
+  @gen_rpc_wait_timeout_ms 15_000
+  @gen_rpc_poll_start_ms 20
+  @gen_rpc_poll_max_ms 200
 
   @doc """
   Starts a node for testing.
@@ -165,7 +171,7 @@ defmodule Clustered do
     port = :peer.call(pid, Application, :get_env, [:gen_rpc, :tcp_server_port])
 
     case port do
-      port when is_integer(port) and port > 0 -> wait_for_port({127, 0, 0, 1}, port, 50, 100)
+      port when is_integer(port) and port > 0 -> wait_for_port({127, 0, 0, 1}, port)
       _ -> raise "gen_rpc tcp_server_port is not configured: #{inspect(port)}"
     end
   end
@@ -184,14 +190,14 @@ defmodule Clustered do
   # the peer anyway only fails later and less clearly.
   defp await_port_available!(port, label, env_var) do
     available? =
-      TestHelpers.eventually(fn -> Env.port_available?(port) end,
-        retries: @port_wait_attempts,
-        sleep: @port_wait_delay_ms
+      wait(Env.port_available?(port),
+        timeout: @port_wait_timeout_ms,
+        interval: @port_wait_interval_ms
       )
 
-    if !available? do
+    if not available? do
       raise """
-      #{label} port #{port} is still in use after #{div(@port_wait_attempts * @port_wait_delay_ms, 1000)}s.
+      #{label} port #{port} is still in use after #{div(@port_wait_timeout_ms, 1000)}s.
       Another test run or a dev server is bound to it. Set #{env_var} to move this run to a free block.
       """
     end
@@ -199,17 +205,16 @@ defmodule Clustered do
     :ok
   end
 
-  defp wait_for_port(_host, _port, 0, _delay_ms), do: raise("gen_rpc tcp server did not start in time")
-
-  defp wait_for_port(host, port, attempts, delay_ms) do
-    case :gen_tcp.connect(host, port, [:binary, active: false], 200) do
+  defp wait_for_port(host, port) do
+    case_wait :gen_tcp.connect(host, port, [:binary, active: false], 200),
+      timeout: @gen_rpc_wait_timeout_ms,
+      interval: WaitForIt.Backoff.exponential(start: @gen_rpc_poll_start_ms, max: @gen_rpc_poll_max_ms) do
       {:ok, socket} ->
         :ok = :gen_tcp.close(socket)
         :ok
-
-      {:error, _reason} ->
-        Process.sleep(delay_ms)
-        wait_for_port(host, port, attempts - 1, delay_ms)
+    else
+      {:error, reason} ->
+        raise "gen_rpc tcp server on port #{port} did not start in time. Last error: #{inspect(reason)}"
     end
   end
 end

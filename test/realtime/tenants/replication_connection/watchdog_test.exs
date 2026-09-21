@@ -2,6 +2,7 @@ defmodule Realtime.Tenants.ReplicationConnection.WatchdogTest do
   use ExUnit.Case, async: true
 
   use Mimic
+  use TestHelpers
 
   setup :set_mimic_from_context
 
@@ -70,15 +71,11 @@ defmodule Realtime.Tenants.ReplicationConnection.WatchdogTest do
         {Watchdog, parent_pid: fake_pid, tenant_id: "test-tenant", watchdog_interval: 50, watchdog_timeout: 100}
       )
 
-    # Wait for at least 2 health check cycles
-    Process.sleep(150)
+    # Wait for at least 2 health check cycles and verify health checks were performed.
+    assert_eventually FakeReplicationConnection.get_health_check_count(fake_pid) >= 2, timeout: 1_000, interval: 10
 
     assert Process.alive?(watchdog_pid)
     assert Process.alive?(fake_pid)
-
-    # Verify health checks were performed
-    count = FakeReplicationConnection.get_health_check_count(fake_pid)
-    assert count >= 2
   end
 
   describe "timeout handling" do
@@ -135,8 +132,7 @@ defmodule Realtime.Tenants.ReplicationConnection.WatchdogTest do
           {Watchdog, parent_pid: fake_pid, tenant_id: "test-tenant", watchdog_interval: 50, watchdog_timeout: 100}
         )
 
-      # Wait for first successful health check
-      Process.sleep(80)
+      assert_eventually FakeReplicationConnection.get_health_check_count(fake_pid) >= 1, timeout: 1_000, interval: 10
       assert Process.alive?(watchdog_pid)
 
       ref = Process.monitor(watchdog_pid)
@@ -176,9 +172,7 @@ defmodule Realtime.Tenants.ReplicationConnection.WatchdogTest do
       Mimic.allow(Connect, self(), watchdog_pid)
       Mimic.allow(Database, self(), watchdog_pid)
 
-      Process.sleep(120)
-
-      assert Process.alive?(watchdog_pid)
+      assert_always Process.alive?(watchdog_pid), timeout: 120, interval: 10
     end
 
     test "stops with :slot_lag_too_high when lag exceeds threshold", %{fake_pid: fake_pid} do
@@ -224,9 +218,7 @@ defmodule Realtime.Tenants.ReplicationConnection.WatchdogTest do
 
           Mimic.allow(Connect, self(), watchdog_pid)
 
-          Process.sleep(120)
-
-          assert Process.alive?(watchdog_pid)
+          assert_always Process.alive?(watchdog_pid), timeout: 120, interval: 10
         end)
 
       assert logs =~ "ReplicationSlotCheckSkipped"
@@ -285,9 +277,7 @@ defmodule Realtime.Tenants.ReplicationConnection.WatchdogTest do
       Mimic.allow(Connect, self(), watchdog_pid)
       Mimic.allow(Database, self(), watchdog_pid)
 
-      Process.sleep(120)
-
-      assert Process.alive?(watchdog_pid)
+      assert_always Process.alive?(watchdog_pid), timeout: 120, interval: 10
     end
   end
 end

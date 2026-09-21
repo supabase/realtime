@@ -48,11 +48,9 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       Process.exit(pid, :kill)
       assert_process_down(pid)
       assert_process_down(conn)
-      # Wait to ensure that the process has not restarted
-      Process.sleep(1000)
 
-      # Temporary process should not be registered
-      refute ReplicationConnection.whereis(tenant.external_id)
+      # A temporary connection must stay unregistered after it dies.
+      assert_always is_nil(ReplicationConnection.whereis(tenant.external_id)), timeout: 1_000, interval: 50
     end
   end
 
@@ -1210,26 +1208,15 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     assert valid_tables, "Expected only realtime.messages or its partitions, got: #{inspect(rows)}"
   end
 
-  defp assert_replication_started(db_conn, slot_name, retries \\ 10, interval_ms \\ 10) do
-    case check_replication_status(db_conn, slot_name, retries, interval_ms) do
-      :ok -> :ok
-      :error -> flunk("Replication slot #{slot_name} did not become active")
-    end
-  end
-
-  defp check_replication_status(_db_conn, _slot_name, 0, _interval_ms), do: :error
-
-  defp check_replication_status(db_conn, slot_name, retries_remaining, interval_ms) do
-    %{rows: rows} =
-      Postgrex.query!(db_conn, "SELECT active FROM pg_replication_slots WHERE slot_name = $1", [slot_name])
-
-    case rows do
-      [[true]] ->
-        :ok
-
-      _ ->
-        Process.sleep(interval_ms)
-        check_replication_status(db_conn, slot_name, retries_remaining - 1, interval_ms)
+  defp assert_replication_started(db_conn, slot_name, timeout_ms \\ 100, interval_ms \\ 10) do
+    case_wait Postgrex.query!(db_conn, "SELECT active FROM pg_replication_slots WHERE slot_name = $1", [
+                slot_name
+              ]),
+              timeout: timeout_ms,
+              interval: interval_ms do
+      %{rows: [[true]]} -> :ok
+    else
+      %{rows: rows} -> flunk("Replication slot #{slot_name} did not become active. Last rows: #{inspect(rows)}")
     end
   end
 end

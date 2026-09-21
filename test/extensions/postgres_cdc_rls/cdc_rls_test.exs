@@ -53,18 +53,11 @@ defmodule Extensions.PostgresCdcRlsTest do
       scope = Realtime.Syn.PostgresCdc.scope(tenant.external_id)
 
       sup =
-        Enum.reduce_while(1..30, nil, fn _, acc ->
-          scope
-          |> :syn.lookup(tenant.external_id)
-          |> case do
-            :undefined ->
-              Process.sleep(500)
-              {:cont, acc}
-
-            {pid, _} when is_pid(pid) ->
-              {:halt, pid}
-          end
-        end)
+        case_wait :syn.lookup(scope, tenant.external_id), timeout: 15_000, interval: 500 do
+          {pid, _} when is_pid(pid) -> pid
+        else
+          :undefined -> flunk("PostgresCdc supervisor never registered for #{tenant.external_id}")
+        end
 
       assert Process.alive?(sup)
       Process.monitor(sup)
@@ -84,16 +77,11 @@ defmodule Extensions.PostgresCdcRlsTest do
 
     test "Subscription manager updates oids", %{tenant: tenant} do
       {subscriber_manager_pid, conn} =
-        Enum.reduce_while(1..25, nil, fn _, acc ->
-          case PostgresCdcRls.get_manager_conn(tenant.external_id) do
-            {:error, :wait} ->
-              Process.sleep(200)
-              {:cont, acc}
-
-            {:ok, pid, conn} ->
-              {:halt, {pid, conn}}
-          end
-        end)
+        case_wait PostgresCdcRls.get_manager_conn(tenant.external_id), timeout: 5_000, interval: 200 do
+          {:ok, pid, conn} -> {pid, conn}
+        else
+          last -> flunk("SubscriptionManager connection never became ready. Last result: #{inspect(last)}")
+        end
 
       %SubscriptionManager.State{oids: oids} = :sys.get_state(subscriber_manager_pid)
 
@@ -179,20 +167,14 @@ defmodule Extensions.PostgresCdcRlsTest do
     end
 
     test "stop tenant supervisor", %{tenant: tenant} do
-      sup =
-        Enum.reduce_while(1..10, nil, fn _, acc ->
-          tenant.external_id
-          |> Realtime.Syn.PostgresCdc.scope()
-          |> :syn.lookup(tenant.external_id)
-          |> case do
-            :undefined ->
-              Process.sleep(500)
-              {:cont, acc}
+      scope = Realtime.Syn.PostgresCdc.scope(tenant.external_id)
 
-            {pid, _} ->
-              {:halt, pid}
-          end
-        end)
+      sup =
+        case_wait :syn.lookup(scope, tenant.external_id), timeout: 5_000, interval: 500 do
+          {pid, _} when is_pid(pid) -> pid
+        else
+          :undefined -> flunk("PostgresCdc supervisor never registered for #{tenant.external_id}")
+        end
 
       assert Process.alive?(sup)
       PostgresCdc.stop(@cdc_module, tenant)
@@ -534,8 +516,8 @@ defmodule Extensions.PostgresCdcRlsTest do
 
       RealtimeWeb.Endpoint.subscribe(Realtime.Syn.PostgresCdc.down_topic(external_id))
 
-      assert eventually(fn -> match?({:ok, _, _}, PostgresCdcRls.get_manager_conn(external_id)) end)
-      assert {:ok, manager_pid, _conn} = PostgresCdcRls.get_manager_conn(external_id)
+      assert_eventually {:ok, manager_pid, _conn} = PostgresCdcRls.get_manager_conn(external_id)
+
       assert node(manager_pid) == remote_node
 
       :ok = PostgresCdcRls.handle_stop(external_id, 5_000)

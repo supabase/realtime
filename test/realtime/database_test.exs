@@ -110,27 +110,19 @@ defmodule Realtime.DatabaseTest do
       # behind by earlier tests can inflate the count. Terminate any lingering ones
       # (using a separate connection that is not counted) to start from a clean slate.
       {:ok, admin} = Database.connect(tenant, "realtime_test", :stop)
+      from_realtime_connect = "FROM pg_stat_activity WHERE application_name = 'realtime_connect'"
 
-      Postgrex.query!(
-        admin,
-        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
-        []
-      )
+      Postgrex.query!(admin, "SELECT pg_terminate_backend(pid) " <> from_realtime_connect, [])
 
       assert {:ok, _conn, _migrations_ran} = Database.check_tenant_connection(tenant)
 
       # Postgrex opens the pool connections asynchronously, so give it a moment
       # to bring all of them up.
-      assert eventually(fn ->
-               %{rows: [[count]]} =
-                 Postgrex.query!(
-                   admin,
-                   "SELECT count(*)::int FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
-                   []
-                 )
-
-               count == 3
-             end)
+      case_wait Postgrex.query!(admin, "SELECT count(*)::int " <> from_realtime_connect, []) do
+        %{rows: [[3]]} -> :ok
+      else
+        %{rows: [[count]]} -> flunk("Expected 3 connections, but found #{count}")
+      end
     end
   end
 
@@ -160,8 +152,9 @@ defmodule Realtime.DatabaseTest do
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
       Postgrex.query!(conn, "SELECT * FROM pg_create_logical_replication_slot('#{name}', 'pgoutput')", [])
       Database.replication_slot_teardown(conn, name)
-      Process.sleep(1000)
-      assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
+
+      # Postgres releases the slot asynchronously once the walsender exits.
+      assert_eventually %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
     end
 
     test "removes replication slots with a given name and a tenant", %{tenant: tenant} do

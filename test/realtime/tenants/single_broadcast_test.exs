@@ -447,22 +447,20 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
                  persist: true
                )
 
-      assert eventually(fn ->
-               match?(
-                 {:ok,
-                  [
-                    %Message{
-                      topic: ^topic,
-                      event: "event",
-                      payload: ^payload,
-                      extension: :broadcast,
-                      private: true,
-                      skip_broadcast: true
-                    }
-                  ]},
-                 Repo.all(db_conn, messages_for(topic), Message)
-               )
-             end)
+      assert_eventually(
+        {:ok,
+         [
+           %Message{
+             topic: ^topic,
+             event: "event",
+             payload: ^payload,
+             extension: :broadcast,
+             private: true,
+             skip_broadcast: true
+           }
+         ]} =
+          Repo.all(db_conn, messages_for(topic), Message)
+      )
     end
 
     test "does not store the message without a persistence policy", %{
@@ -545,23 +543,21 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
                  persist: true
                )
 
-      assert eventually(fn ->
-               match?(
-                 {:ok,
-                  [
-                    %Message{
-                      topic: ^topic,
-                      event: "event",
-                      payload: nil,
-                      binary_payload: ^binary,
-                      extension: :broadcast,
-                      private: true,
-                      skip_broadcast: true
-                    }
-                  ]},
-                 Repo.all(db_conn, messages_for(topic), Message)
-               )
-             end)
+      assert_eventually(
+        {:ok,
+         [
+           %Message{
+             topic: ^topic,
+             event: "event",
+             payload: nil,
+             binary_payload: ^binary,
+             extension: :broadcast,
+             private: true,
+             skip_broadcast: true
+           }
+         ]} =
+          Repo.all(db_conn, messages_for(topic), Message)
+      )
     end
   end
 
