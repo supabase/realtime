@@ -310,8 +310,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
 
     test "wait rejects the join when the subscription is not established in time", %{tenant: tenant} do
-      expect(Extensions.PostgresCdcRls, :handle_connect, fn _ -> nil end)
-      stub(Extensions.PostgresCdcRls, :handle_connect, fn _ -> nil end)
+      expect(Extensions.PostgresCdcRls, :handle_connect, 2, fn _ -> nil end)
 
       assert {:error,
               %{
@@ -321,8 +320,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
 
     test "does not count a channel whose postgres_changes join is rejected", %{tenant: tenant} do
-      expect(Extensions.PostgresCdcRls, :handle_connect, fn _ -> nil end)
-      stub(Extensions.PostgresCdcRls, :handle_connect, fn _ -> nil end)
+      expect(Extensions.PostgresCdcRls, :handle_connect, 2, fn _ -> nil end)
 
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
