@@ -23,5 +23,5 @@ grant usage on schema extensions to supabase_realtime_admin;
 grant usage on schema auth to supabase_realtime_admin;
 grant execute on all functions in schema auth to supabase_realtime_admin;
 grant usage on schema realtime to postgres, anon, authenticated, service_role;
-grant all on schema realtime to supabase_realtime_admin with grant option;
+grant all on schema realtime to supabase_realtime_admin;
 grant create, usage on schema _realtime to supabase_realtime_admin;

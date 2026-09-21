@@ -59,6 +59,13 @@ defmodule RealtimeWeb.AuthTenantTest do
       assert conn.halted
     end
 
+    @tag api_key: "Bearer", header: "authorization"
+    test "returns 401 when the authorization header has no token", %{conn: conn} do
+      conn = AuthTenant.call(conn, %{})
+      assert conn.status == 401
+      assert conn.halted
+    end
+
     @tag header: "authorization"
     test "returns non halted and null status if token in authorization header is valid", %{
       conn: conn

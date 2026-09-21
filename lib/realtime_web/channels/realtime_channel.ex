@@ -34,7 +34,9 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias RealtimeWeb.RealtimeChannel.PresenceHandler
   alias RealtimeWeb.RealtimeChannel.Tracker
 
-  @confirm_token_ms_interval :timer.minutes(5)
+  # A JWT `exp` can be arbitrarily far in the future and `Process.send_after/3` rejects delays past
+  # Erlang's maximum supported time value, so the re-confirmation timer is capped at this interval.
+  @confirm_token_ms_max_interval :timer.hours(1)
   @replication_ready_check_interval 500
   @postgres_subscribe_backoff_min 100
   @postgres_subscribe_backoff_max 1_000
@@ -139,7 +141,9 @@ defmodule RealtimeWeb.RealtimeChannel do
         channel_name: sub_topic,
         presence_enabled?: presence_enabled?,
         fastlane_metadata: metadata,
-        replayed_message_ids: replayed_message_ids
+        replayed_message_ids: replayed_message_ids,
+        access_token_verified_at: nil,
+        pending_access_token: nil
       }
 
       assigns =
@@ -163,10 +167,9 @@ defmodule RealtimeWeb.RealtimeChannel do
       # Start presence and add user if presence is enabled
       if presence_enabled?, do: send(self(), :sync_presence)
 
-      UsersCounter.add(transport_pid, tenant_id)
-
       with :ok <- await_muster_join(muster_join_task, socket),
            :ok <- start_postgres_subscribe(socket, join, tenant, pg_change_params) do
+        UsersCounter.add(transport_pid, tenant_id)
         {:ok, state, assign(socket, assigns)}
       end
     else
@@ -397,6 +400,13 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe(5, 10))}
   end
 
+  def handle_info(:apply_pending_access_token, socket), do: apply_pending_access_token(socket)
+
+  # Apply the pending token if confirm_token fires first, instead of validating the old one
+  def handle_info(:confirm_token, %{assigns: %{pending_access_token: pending}} = socket) when is_binary(pending) do
+    apply_pending_access_token(socket)
+  end
+
   def handle_info(:confirm_token, %{assigns: %{pg_change_params: pg_change_params}} = socket) do
     case confirm_token(socket) do
       {:ok, claims, confirm_token_ref} ->
@@ -512,21 +522,65 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  def handle_in("access_token", %{"access_token" => "sb_" <> _}, socket) do
-    {:noreply, socket}
-  end
+  def handle_in("access_token", %{"access_token" => "sb_" <> _}, socket), do: {:noreply, socket}
 
   def handle_in("access_token", %{"access_token" => refresh_token}, %{assigns: %{access_token: access_token}} = socket)
       when refresh_token == access_token do
     {:noreply, socket}
   end
 
-  def handle_in("access_token", %{"access_token" => refresh_token}, %{assigns: %{access_token: _access_token}} = socket)
-      when is_nil(refresh_token) do
+  def handle_in("access_token", %{"access_token" => nil}, socket), do: {:noreply, socket}
+
+  # Already held for the current window, nothing new to verify
+  def handle_in(
+        "access_token",
+        %{"access_token" => refresh_token},
+        %{assigns: %{pending_access_token: pending}} = socket
+      )
+      when refresh_token == pending do
     {:noreply, socket}
   end
 
   def handle_in("access_token", %{"access_token" => refresh_token}, socket) when is_binary(refresh_token) do
+    %{assigns: %{access_token_verified_at: verified_at}} = socket
+    throttle_ms = access_token_throttle_ms()
+    now = now()
+
+    # First refresh of the channel, or the window has closed
+    if is_nil(verified_at) or now - verified_at >= throttle_ms do
+      apply_access_token(socket, refresh_token, now)
+    else
+      {:noreply, hold_access_token(socket, refresh_token, throttle_ms - (now - verified_at))}
+    end
+  end
+
+  def handle_in(type, payload, socket) do
+    count(socket)
+
+    # Log info here so that bad messages from clients won't flood Logflare
+    # Can subscribe to a Channel with `log_level` `info` to see these messages
+    message = "Unexpected message from client of type `#{type}` with payload: #{inspect(payload)}"
+    Logger.info(message)
+
+    {:noreply, socket}
+  end
+
+  # Validate and update token later.
+  defp hold_access_token(%{assigns: %{pending_access_token: nil}} = socket, refresh_token, remaining_ms) do
+    log_warning(socket, "AccessTokenRefreshThrottled", "Token refresh throttled, applying in #{remaining_ms}ms")
+    Process.send_after(self(), :apply_pending_access_token, remaining_ms)
+    assign(socket, :pending_access_token, refresh_token)
+  end
+
+  defp hold_access_token(socket, refresh_token, _remaining_ms), do: assign(socket, :pending_access_token, refresh_token)
+
+  defp apply_pending_access_token(%{assigns: %{pending_access_token: nil}} = socket), do: {:noreply, socket}
+
+  defp apply_pending_access_token(%{assigns: %{pending_access_token: token}} = socket) do
+    apply_access_token(socket, token, now())
+  end
+
+  defp apply_access_token(socket, refresh_token, now) do
     %{
       assigns: %{
         tenant: tenant_id,
@@ -539,8 +593,13 @@ defmodule RealtimeWeb.RealtimeChannel do
     # Keep track of the policies evaluated with the previous token so we can detect revoked permissions
     previous_policies = socket.assigns.policies
 
-    # Update token and reset policies
-    socket = assign(socket, %{access_token: refresh_token, policies: nil})
+    socket =
+      assign(socket, %{
+        access_token: refresh_token,
+        policies: nil,
+        access_token_verified_at: now,
+        pending_access_token: nil
+      })
 
     with {:ok, claims, confirm_token_ref} <- confirm_token(socket),
          socket = assign_authorization_context(socket, channel_name, claims),
@@ -605,17 +664,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, error} ->
         shutdown_response(socket, inspect(error))
     end
-  end
-
-  def handle_in(type, payload, socket) do
-    count(socket)
-
-    # Log info here so that bad messages from clients won't flood Logflare
-    # Can subscribe to a Channel with `log_level` `info` to see these messages
-    message = "Unexpected message from client of type `#{type}` with payload: #{inspect(payload)}"
-    Logger.info(message)
-
-    {:noreply, socket}
   end
 
   @impl true
@@ -767,6 +815,10 @@ defmodule RealtimeWeb.RealtimeChannel do
     assign(socket, :presence_client_rate_limit, client_rate_limit)
   end
 
+  defp access_token_throttle_ms, do: Application.fetch_env!(:realtime, :access_token_throttle_ms)
+
+  defp now, do: System.monotonic_time(:millisecond)
+
   defp count(%{assigns: %{rate_counter: counter}}), do: GenCounter.add(counter.id)
 
   defp assign_access_token(%{assigns: %{tenant_token: tenant_token}} = socket, params) do
@@ -803,7 +855,7 @@ defmodule RealtimeWeb.RealtimeChannel do
          exp_diff when exp_diff > 0 <- exp - Joken.current_time() do
       if ref = assigns[:confirm_token_ref], do: Helpers.cancel_timer(ref)
 
-      interval = min(@confirm_token_ms_interval, exp_diff * 1000)
+      interval = min(@confirm_token_ms_max_interval, exp_diff * 1000)
       ref = Process.send_after(self(), :confirm_token, interval)
 
       {:ok, claims, ref}

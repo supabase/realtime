@@ -362,13 +362,19 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
   defp fetch_pg_version(%Tenant{} = tenant) do
     with {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop),
          {:ok, conn} <- Database.connect_db(settings),
-         {:ok, %{rows: [[version]]}} <- Postgrex.query(conn, "SELECT version()", []) do
+         {:ok, %{rows: [[version]]}} <- query_pg_version(conn) do
       {:ok, version}
     else
       {:error, reason} ->
         log_warning("TenantInfoPgVersionFailed", reason)
         {:error, "Failed to query postgres version: #{inspect(reason)}"}
     end
+  end
+
+  defp query_pg_version(conn) do
+    Postgrex.query(conn, "SELECT version()", [])
+  after
+    if Process.alive?(conn), do: GenServer.stop(conn)
   end
 
   defp resolve_host(host) do

@@ -406,8 +406,9 @@ defmodule Realtime.Database do
     query =
       "select slot_name from pg_replication_slots where slot_name like '%realtime%'"
 
-    with {:ok, %{rows: [rows]}} <- Postgrex.query(conn, query, []) do
+    with {:ok, %{rows: rows}} <- Postgrex.query(conn, query, []) do
       rows
+      |> List.flatten()
       |> Enum.reject(&is_nil/1)
       |> Enum.each(&replication_slot_teardown(conn, &1))
     end

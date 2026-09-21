@@ -956,24 +956,67 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
     end
 
     @tag without_db: true
-    test "returns ok when connection is unavailable" do
+    test "logs error when connection is unavailable" do
       conn = spawn(fn -> :ok end)
-      assert :ok = Subscriptions.delete_all(conn)
+
+      log = capture_log(fn -> assert :ok = Subscriptions.delete_all(conn) end)
+      assert log =~ "SubscriptionDeletionFailed"
     end
 
-    test "logs error when subscription table is dropped", %{conn: conn} do
+    test "does not log error when subscription table is dropped", %{conn: conn} do
       Postgrex.query!(conn, "drop table if exists realtime.subscription cascade", [])
 
-      log = capture_log(fn -> Subscriptions.delete_all(conn) end)
+      log = capture_log(fn -> assert :ok = Subscriptions.delete_all(conn) end)
+      refute log =~ "SubscriptionDeletionFailed"
+    end
+
+    test "still logs other postgres deletion errors", %{conn: conn, tenant: tenant} do
+      create_subscriptions(conn, 1)
+
+      Postgrex.query!(
+        conn,
+        """
+        create or replace function realtime.fail_subscription_delete()
+        returns trigger language plpgsql as $$
+        begin raise exception 'delete failed'; end;
+        $$;
+        """,
+        []
+      )
+
+      Postgrex.query!(
+        conn,
+        """
+        create trigger fail_subscription_delete
+        before delete on realtime.subscription
+        for each row execute function realtime.fail_subscription_delete();
+        """,
+        []
+      )
+
+      on_exit(fn ->
+        {:ok, db_settings} = Database.from_tenant(tenant, "realtime_rls")
+        {:ok, cleanup_conn} = db_settings |> Map.from_struct() |> Keyword.new() |> Postgrex.start_link()
+        Postgrex.query(cleanup_conn, "drop trigger if exists fail_subscription_delete on realtime.subscription", [])
+        Postgrex.query(cleanup_conn, "drop function if exists realtime.fail_subscription_delete()", [])
+        GenServer.stop(cleanup_conn)
+      end)
+
+      log = capture_log(fn -> assert :ok = Subscriptions.delete_all(conn) end)
       assert log =~ "SubscriptionDeletionFailed"
     end
   end
 
   describe "delete/2" do
-    test "returns error when subscription table is dropped", %{conn: conn} do
+    test "returns ok without logging when subscription table is dropped", %{conn: conn} do
       Postgrex.query!(conn, "drop table if exists realtime.subscription cascade", [])
 
-      assert {:error, %Postgrex.Error{}} = Subscriptions.delete(conn, UUID.string_to_binary!(UUID.uuid1()))
+      log =
+        capture_log(fn ->
+          assert :ok = Subscriptions.delete(conn, UUID.string_to_binary!(UUID.uuid1()))
+        end)
+
+      refute log =~ "SubscriptionDeletionFailed"
     end
 
     test "delete", %{conn: conn} do
@@ -995,9 +1038,11 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
     end
 
     @tag without_db: true
-    test "returns error when connection is unavailable" do
+    test "logs error when connection is unavailable" do
       conn = spawn(fn -> :ok end)
-      assert {:error, _} = Subscriptions.delete(conn, UUID.uuid1())
+
+      log = capture_log(fn -> assert {:error, _} = Subscriptions.delete(conn, UUID.uuid1()) end)
+      assert log =~ "SubscriptionDeletionFailed"
     end
   end
 
