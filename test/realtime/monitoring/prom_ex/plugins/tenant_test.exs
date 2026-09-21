@@ -345,7 +345,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
         hit: true
       })
 
-      assert_eventually((metric_value(metric, tenant: external_id, hit: true) || 0) == metric_value)
+      assert_always((metric_value(metric, tenant: external_id, hit: true) || 0) == metric_value)
     end
 
     test "global broadcast fan-out counter increments tagged by hit only", %{tenant: %{external_id: external_id}} do

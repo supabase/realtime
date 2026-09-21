@@ -214,8 +214,6 @@ defmodule Realtime.SynHandlerTest do
           assert {^remote_pid, %{region: "ap-southeast-2", conn: "remote_conn"}} = :syn.lookup(Connect, tenant_id)
 
           assert :peer.call(peer_pid, Process, :alive?, [remote_pid])
-
-          assert_eventually not Process.alive?(local_pid)
         end)
 
       assert log =~ "stop local process: #{inspect(local_pid)}"

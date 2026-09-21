@@ -70,7 +70,7 @@ defmodule Realtime.Integration.DistributedRealtimeChannelTest do
       Muster.status(scope) == :ready and
         :erpc.call(node, Muster, :status, [scope]) == :ready and
         Muster.view_hash(scope) == :erpc.call(node, Muster, :view_hash, [scope]),
-      timeout: :timer.seconds(15)
+      timeout: to_timeout(second: 15)
     )
   end
 end

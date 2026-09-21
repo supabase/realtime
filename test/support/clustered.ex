@@ -189,10 +189,13 @@ defmodule Clustered do
   # Anything still holding it after that is another test run or a dev server, and starting
   # the peer anyway only fails later and less clearly.
   defp await_port_available!(port, label, env_var) do
-    unless wait(Env.port_available?(port),
-             timeout: @port_wait_timeout_ms,
-             interval: @port_wait_interval_ms
-           ) do
+    available? =
+      wait(Env.port_available?(port),
+        timeout: @port_wait_timeout_ms,
+        interval: @port_wait_interval_ms
+      )
+
+    if not available? do
       raise """
       #{label} port #{port} is still in use after #{div(@port_wait_timeout_ms, 1000)}s.
       Another test run or a dev server is bound to it. Set #{env_var} to move this run to a free block.

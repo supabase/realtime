@@ -239,7 +239,7 @@ defmodule Realtime.Integration.RtChannel.BillableEventsTest do
   # the `assert_receive` above can win the race against the increment.  Re-tick until the counters
   # settle rather than sampling them once.
   defp assert_billed(tenant, expected) do
-    until(
+    eventually(
       fn ->
         RateCounterHelper.tick_tenant_rate_counters!(tenant)
         Enum.all?(expected, fn {key, value} -> get_count(key, tenant) == value end)

@@ -39,14 +39,11 @@ defmodule TestTenantDb.Backend.Docker do
   # `Worker.port/1` must allow more than claim + wait_ready combined.
   @claim_timeout_ms 30_000
   @container_ready_timeout_ms 25_000
-  # A container is usually ready quickly and occasionally slow, so readiness backs off rather
-  # than probing at a fixed rate for the whole 25s budget.
+  # Readiness polling backs off from start to max rather than a fixed interval.
   @ready_poll_start_ms 50
   @ready_poll_max_ms 250
 
-  # Only covers docker publishing the port binding it has already been told to create, which is
-  # near-instant on a healthy daemon. Short on purpose: when the binding is missing it is usually
-  # missing for good, and the caller's retry is what actually recovers.
+  # Time to wait for docker to publish the port binding, not for Postgres itself to be ready.
   @published_port_timeout_ms 2_000
 
   # Careful that this doesn't go over ~60s / exunits default timeout
@@ -284,9 +281,7 @@ defmodule TestTenantDb.Backend.Docker do
       {name, port}
     else
       failure ->
-        # Either docker refused the run or it produced a container with no usable binding.
-        # Leaving that container behind would only have it reaped later as a mystery, so drop it
-        # and spend one of the retries on a fresh name.
+        # Remove the failed container before retrying with a fresh name.
         System.cmd("docker", ["rm", "-f", name], stderr_to_stdout: true)
         start_available_container(attempts - 1, describe_start_failure(failure))
     end
@@ -295,10 +290,8 @@ defmodule TestTenantDb.Backend.Docker do
   defp describe_start_failure({:error, reason}), do: reason
   defp describe_start_failure({output, code}), do: "docker run exited #{code}: #{String.trim(output)}"
 
-  # `docker run -d` returns once the container is created, but the host-side binding for `-p
-  # 0:5432` is published a moment later, so `docker port` can briefly answer "no public port ...
-  # published". Under heavy container churn Docker Desktop sometimes never publishes it at all,
-  # which is why a miss here retries the container rather than failing the run.
+  # The port binding for `-p 0:5432` publishes shortly after `docker run -d` returns, and under
+  # heavy container churn Docker Desktop can fail to publish one at all.
   defp await_published_port(name) do
     case_wait docker_port(name),
       timeout: @published_port_timeout_ms,
@@ -421,9 +414,7 @@ defmodule TestTenantDb.Backend.Docker do
     end)
   end
 
-  # Gate on exactly what consumers use: a real connection from the host to the published port.
-  # The `else` clause sees the last probe result, so the failure still names the error that was
-  # actually holding the container back.
+  # Gates on a real connection from the host, exactly what consumers use.
   def wait_ready!(name, port) do
     settings = Probe.settings!(port)
 
