@@ -167,10 +167,9 @@ defmodule RealtimeWeb.RealtimeChannel do
       # Start presence and add user if presence is enabled
       if presence_enabled?, do: send(self(), :sync_presence)
 
-      UsersCounter.add(transport_pid, tenant_id)
-
       with :ok <- await_muster_join(muster_join_task, socket),
            :ok <- start_postgres_subscribe(socket, join, tenant, pg_change_params) do
+        UsersCounter.add(transport_pid, tenant_id)
         {:ok, state, assign(socket, assigns)}
       end
     else
