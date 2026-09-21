@@ -19,6 +19,7 @@ defmodule Realtime.Tenants.EncryptionReconcilerTest do
   # reconcile/1 writes from a detached task, so there is nothing to poll on when asserting that no
   # write happens: give a stray write time to land instead.
   @async_write_window 200
+  @probe_interval 20
 
   describe "reconcile/1" do
     setup do
@@ -106,7 +107,7 @@ defmodule Realtime.Tenants.EncryptionReconcilerTest do
       tenant = rewind_to_legacy_encryption(tenant)
 
       assert :ok = EncryptionReconciler.reconcile(tenant)
-      assert eventually(fn -> migrated?(tenant.external_id) end)
+      assert_eventually migrated?(tenant.external_id)
 
       reloaded = Api.get_tenant_by_external_id(tenant.external_id)
       assert Crypto.decrypt!(reloaded.jwt_secret) == jwt_secret
@@ -121,7 +122,7 @@ defmodule Realtime.Tenants.EncryptionReconcilerTest do
       tenant = rewind_to_legacy_encryption(tenant)
 
       assert :ok = EncryptionReconciler.reconcile(tenant)
-      assert eventually(fn -> migrated?(tenant.external_id) end)
+      assert_eventually migrated?(tenant.external_id)
 
       assert %{extensions: [%{settings: %{"region" => ^region}}]} =
                Api.get_tenant_by_external_id(tenant.external_id)
@@ -131,11 +132,17 @@ defmodule Realtime.Tenants.EncryptionReconcilerTest do
       tenant = TestTenantDb.checkout_tenant()
 
       assert :ok = EncryptionReconciler.reconcile(tenant)
-      Process.sleep(@async_write_window)
 
-      reloaded = Api.get_tenant_by_external_id(tenant.external_id)
-      assert reloaded.updated_at == tenant.updated_at
-      assert Enum.map(reloaded.extensions, & &1.updated_at) == Enum.map(tenant.extensions, & &1.updated_at)
+      assert_always(
+        (
+          reloaded = Api.get_tenant_by_external_id(tenant.external_id)
+
+          reloaded.updated_at == tenant.updated_at and
+            Enum.map(reloaded.extensions, & &1.updated_at) == Enum.map(tenant.extensions, & &1.updated_at)
+        ),
+        timeout: @async_write_window,
+        interval: @probe_interval
+      )
     end
 
     test "migrates the extensions of a tenant authenticated via jwt_jwks only" do
@@ -149,7 +156,7 @@ defmodule Realtime.Tenants.EncryptionReconcilerTest do
       tenant = %{tenant | extensions: Api.get_tenant_by_external_id(tenant.external_id).extensions}
 
       assert :ok = EncryptionReconciler.reconcile(tenant)
-      assert eventually(fn -> migrated?(tenant.external_id) end)
+      assert_eventually migrated?(tenant.external_id)
 
       assert %Tenant{jwt_secret: nil} = Api.get_tenant_by_external_id(tenant.external_id)
     end
@@ -163,7 +170,7 @@ defmodule Realtime.Tenants.EncryptionReconcilerTest do
       tenant = %{tenant | extensions: [extension]}
 
       assert :ok = EncryptionReconciler.reconcile(tenant)
-      assert eventually(fn -> migrated?(tenant.external_id) end)
+      assert_eventually migrated?(tenant.external_id)
 
       assert %{extensions: [%{settings: reloaded_settings}]} = Api.get_tenant_by_external_id(tenant.external_id)
       refute Map.has_key?(reloaded_settings, "db_password")
@@ -189,7 +196,7 @@ defmodule Realtime.Tenants.EncryptionReconcilerTest do
 
       assert :ok = EncryptionReconciler.reconcile(tenant)
 
-      assert eventually(fn -> migrated?(tenant.external_id) end)
+      assert_eventually migrated?(tenant.external_id)
       assert %Tenant{gcm_migrated_at: %DateTime{}} = Api.get_tenant_by_external_id(tenant.external_id)
     end
   end
@@ -224,7 +231,7 @@ defmodule Realtime.Tenants.EncryptionReconcilerTest do
       Tenants.Cache.invalidate_tenant_cache(external_id)
 
       assert %Tenant{} = Tenants.Cache.get_tenant_by_external_id(external_id)
-      assert eventually(fn -> migrated?(external_id) end)
+      assert_eventually migrated?(external_id)
     end
   end
 
@@ -239,11 +246,14 @@ defmodule Realtime.Tenants.EncryptionReconcilerTest do
   end
 
   defp assert_still_on_legacy_cipher(external_id) do
-    Process.sleep(@async_write_window)
+    assert_always on_legacy_cipher?(external_id), timeout: @async_write_window, interval: @probe_interval
+  end
 
+  defp on_legacy_cipher?(external_id) do
     tenant = Api.get_tenant_by_external_id(external_id)
-    refute Crypto.gcm?(tenant.jwt_secret)
-    assert Enum.all?(tenant.extensions, &Crypto.legacy_settings?(&1.settings, encrypted_settings_keys()))
-    assert is_nil(tenant.gcm_migrated_at)
+
+    not Crypto.gcm?(tenant.jwt_secret) and
+      Enum.all?(tenant.extensions, &Crypto.legacy_settings?(&1.settings, encrypted_settings_keys())) and
+      is_nil(tenant.gcm_migrated_at)
   end
 end

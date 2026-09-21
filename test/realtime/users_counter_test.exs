@@ -92,10 +92,7 @@ defmodule Realtime.UsersCounterTest do
   end
 
   defp await_tenant_users!(tenant_id, expected) do
-    eventually(fn -> UsersCounter.tenant_users(tenant_id) == expected end)
-
-    # eventually/2 only answers true/false, so re-assert to get the counts on failure.
-    assert UsersCounter.tenant_users(tenant_id) == expected
+    assert_eventually UsersCounter.tenant_users(tenant_id) == expected
   end
 
   defp generate_load(tenant_id) do

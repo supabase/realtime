@@ -102,13 +102,11 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManagerTest do
       assert [{^bin_uuid3, ^node}] = :ets.lookup(args["subscribers_nodes_table"], bin_uuid3)
 
       send(subscriber, :stop)
-      # Wait for subscription manager to receive the :DOWN message
-      Process.sleep(200)
 
-      # Only the subscription we have not stopped should remain
-
-      assert [{^self, ^uuid3, _ref, ^node}] = :ets.tab2list(args["subscribers_pids_table"])
-      assert [{^bin_uuid3, ^node}] = :ets.tab2list(args["subscribers_nodes_table"])
+      # Once the subcription manager receives the :DOWN message, only the subscription we have
+      # not stopped should remain.
+      assert_eventually [{^self, ^uuid3, _ref, ^node}] = :ets.tab2list(args["subscribers_pids_table"])
+      assert_eventually [{^bin_uuid3, ^node}] = :ets.tab2list(args["subscribers_nodes_table"])
     end
   end
 
@@ -139,11 +137,9 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManagerTest do
       assert after_create > baseline
 
       send(subscriber, :stop)
-      # Wait for subscription manager to receive the :DOWN message
-      Process.sleep(200)
 
-      assert :ets.info(args["subscribers_pids_table"], :size) == 0
-      assert :ets.info(args["subscribers_nodes_table"], :size) == 0
+      assert_eventually :ets.info(args["subscribers_pids_table"], :size) == 0
+      assert_eventually :ets.info(args["subscribers_nodes_table"], :size) == 0
 
       # Force check delete queue on manager
       send(pid, :check_delete_queue)

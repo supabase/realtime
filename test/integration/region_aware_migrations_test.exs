@@ -43,7 +43,7 @@ defmodule Realtime.Integration.RegionAwareMigrationsTest do
 
     # The peer registers itself in the syn `RegionNodes` group asynchronously after
     # connecting; wait for that
-    assert eventually(fn -> Realtime.Nodes.region_nodes(tenant_region) != [] end)
+    assert_eventually Realtime.Nodes.region_nodes(tenant_region) != []
 
     %{tenant: tenant, node: node}
   end
@@ -74,6 +74,6 @@ defmodule Realtime.Integration.RegionAwareMigrationsTest do
     assert :ok = Migrations.run_migrations(tenant)
 
     # Migration runs over gen_rpc on the peer node
-    assert eventually(fn -> Realtime.Repo.reload!(tenant).migrations_ran != 0 end)
+    assert_eventually Realtime.Repo.reload!(tenant).migrations_ran != 0
   end
 end

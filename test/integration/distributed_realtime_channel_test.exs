@@ -66,14 +66,11 @@ defmodule Realtime.Integration.DistributedRealtimeChannelTest do
   defp wait_for_muster_ready(node, region) do
     scope = :"realtime_channels_#{region}"
 
-    assert eventually(
-             fn ->
-               Muster.status(scope) == :ready and
-                 :erpc.call(node, Muster, :status, [scope]) == :ready and
-                 Muster.view_hash(scope) == :erpc.call(node, Muster, :view_hash, [scope])
-             end,
-             retries: 150,
-             sleep: 100
-           )
+    assert_eventually(
+      Muster.status(scope) == :ready and
+        :erpc.call(node, Muster, :status, [scope]) == :ready and
+        Muster.view_hash(scope) == :erpc.call(node, Muster, :view_hash, [scope]),
+      timeout: to_timeout(second: 15)
+    )
   end
 end

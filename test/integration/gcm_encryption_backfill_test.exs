@@ -21,6 +21,7 @@ defmodule Realtime.Integration.GcmEncryptionBackfillTest do
   # The backfill writes from a detached task, so there is nothing to poll on when asserting that no
   # write happens: give a stray write time to land instead.
   @async_write_window 500
+  @probe_interval 50
 
   setup do
     tenant = TestTenantDb.checkout_tenant(run_migrations: true)
@@ -44,7 +45,8 @@ defmodule Realtime.Integration.GcmEncryptionBackfillTest do
       assert {:ok, _conn} = Database.connect(tenant, "realtime_backfill_before", :stop)
 
       read_through_cache(external_id)
-      assert eventually(fn -> not is_nil(Api.get_tenant_by_external_id(external_id).gcm_migrated_at) end)
+
+      assert_eventually Api.get_tenant_by_external_id(external_id).gcm_migrated_at
 
       migrated = Api.get_tenant_by_external_id(external_id)
 
@@ -93,11 +95,19 @@ defmodule Realtime.Integration.GcmEncryptionBackfillTest do
   end
 
   defp assert_still_on_legacy_cipher(external_id) do
-    Process.sleep(@async_write_window)
+    assert_always on_legacy_cipher?(external_id), timeout: @async_write_window, interval: @probe_interval
+  end
 
+  defp on_legacy_cipher?(external_id) do
     untouched = Api.get_tenant_by_external_id(external_id)
+
     refute Crypto.gcm?(untouched.jwt_secret)
-    assert Enum.all?(untouched.extensions, &Crypto.legacy_settings?(&1.settings, encrypted_settings_keys()))
     assert is_nil(untouched.gcm_migrated_at)
+
+    Enum.each(untouched.extensions, fn extension ->
+      assert Crypto.legacy_settings?(extension.settings, encrypted_settings_keys())
+    end)
+
+    true
   end
 end

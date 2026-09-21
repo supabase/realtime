@@ -113,12 +113,9 @@ defmodule Realtime.DatabaseTest do
       # behind by earlier tests can inflate the count. Terminate any lingering ones
       # (using a separate connection that is not counted) to start from a clean slate.
       {:ok, admin} = Database.connect(tenant, "realtime_test", :stop)
+      from_realtime_connect = "FROM pg_stat_activity WHERE application_name = 'realtime_connect'"
 
-      Postgrex.query!(
-        admin,
-        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
-        []
-      )
+      Postgrex.query!(admin, "SELECT pg_terminate_backend(pid) " <> from_realtime_connect, [])
 
       assert {:ok, conn, _migrations_ran} = Database.check_tenant_connection(tenant)
 
@@ -129,16 +126,11 @@ defmodule Realtime.DatabaseTest do
 
       # Postgrex opens the pool connections asynchronously, so give it a moment
       # to bring all of them up.
-      assert eventually(fn ->
-               %{rows: [[count]]} =
-                 Postgrex.query!(
-                   admin,
-                   "SELECT count(*)::int FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
-                   []
-                 )
-
-               count == pool_size
-             end)
+      case_wait Postgrex.query!(admin, "SELECT count(*)::int " <> from_realtime_connect, []) do
+        %{rows: [[^pool_size]]} -> :ok
+      else
+        %{rows: [[count]]} -> flunk("Expected #{pool_size} connections, but found #{count}")
+      end
 
       Enum.each(busy, &Task.shutdown(&1, :brutal_kill))
     end
@@ -176,10 +168,14 @@ defmodule Realtime.DatabaseTest do
       create_replication_slot(conn, name, plugin: "pgoutput")
 
       Database.replication_slot_teardown(conn, name)
-      Process.sleep(1000)
 
-      assert %{rows: []} =
-               Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots WHERE slot_type = 'logical'", [])
+      # Postgres releases the slot asynchronously once the walsender exits.
+      assert_eventually %{rows: []} =
+                          Postgrex.query!(
+                            conn,
+                            "SELECT slot_name FROM pg_replication_slots WHERE slot_type = 'logical'",
+                            []
+                          )
     end
 
     test "removes replication slots with a given name and a tenant", %{tenant: tenant} do

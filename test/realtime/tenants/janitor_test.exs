@@ -26,7 +26,7 @@ defmodule Realtime.Tenants.JanitorTest do
         fn tenant ->
           tenant = Realtime.Repo.preload(tenant, :extensions)
           Connect.lookup_or_start_connection(tenant.external_id)
-          Process.sleep(500)
+          assert_eventually Connect.ready?(tenant.external_id), timeout: 5_000, interval: 50
           tenant
         end
       )
@@ -46,7 +46,7 @@ defmodule Realtime.Tenants.JanitorTest do
 
     on_exit(fn ->
       Enum.each(tenants, &Connect.shutdown(&1.external_id))
-      Process.sleep(10)
+      Enum.each(tenants, &assert_eventually(is_nil(Connect.whereis(&1.external_id)), timeout: 1_000, interval: 10))
       Application.put_env(:realtime, :janitor_schedule_timer, timer)
     end)
 
@@ -74,19 +74,17 @@ defmodule Realtime.Tenants.JanitorTest do
       |> MapSet.new()
 
     start_supervised!(Janitor)
-    Process.sleep(500)
 
-    current =
+    conns =
       Enum.map(tenants, fn tenant ->
         {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-        {:ok, res} = Repo.all(conn, from(m in Message), Message)
-
-        verify_partitions(conn)
-
-        res
+        conn
       end)
-      |> List.flatten()
-      |> MapSet.new()
+
+    assert_eventually remaining_messages(conns) == to_keep, timeout: 5_000, interval: 100
+
+    Enum.each(conns, &verify_partitions/1)
+    current = remaining_messages(conns)
 
     assert MapSet.difference(current, to_keep) |> MapSet.size() == 0
 
@@ -98,7 +96,7 @@ defmodule Realtime.Tenants.JanitorTest do
          tenants: tenants
        } do
     Connect.shutdown(hd(tenants).external_id)
-    Process.sleep(100)
+    assert_eventually is_nil(Connect.whereis(hd(tenants).external_id))
 
     utc_now = NaiveDateTime.utc_now()
     limit = NaiveDateTime.add(utc_now, -72, :hour)
@@ -117,19 +115,17 @@ defmodule Realtime.Tenants.JanitorTest do
       |> MapSet.new()
 
     start_supervised!(Janitor)
-    Process.sleep(500)
 
-    current =
+    conns =
       Enum.map(tenants, fn tenant ->
         {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-        {:ok, res} = Repo.all(conn, from(m in Message), Message)
-
-        verify_partitions(conn)
-
-        res
+        conn
       end)
-      |> List.flatten()
-      |> MapSet.new()
+
+    assert_eventually remaining_messages(conns) == to_keep, timeout: 5_000, interval: 100
+
+    Enum.each(conns, &verify_partitions/1)
+    current = remaining_messages(conns)
 
     assert MapSet.difference(current, to_keep) |> MapSet.size() == 0
     assert :ets.tab2list(Connect) == []
@@ -166,7 +162,7 @@ defmodule Realtime.Tenants.JanitorTest do
              Process.sleep(1000)
            end) =~ "JanitorFailedToDeleteOldMessages"
 
-    assert eventually(fn -> :sys.get_state(janitor).tasks == %{} end)
+    assert_eventually :sys.get_state(janitor).tasks == %{}
     assert :ets.tab2list(Connect) == []
   end
 
@@ -189,5 +185,14 @@ defmodule Realtime.Tenants.JanitorTest do
       MapSet.new(dates, fn date -> "messages_#{date |> Date.to_iso8601() |> String.replace("-", "_")}" end)
 
     assert MapSet.equal?(partitions, expected_names)
+  end
+
+  defp remaining_messages(conns) do
+    conns
+    |> Enum.flat_map(fn conn ->
+      {:ok, res} = Repo.all(conn, from(m in Message), Message)
+      res
+    end)
+    |> MapSet.new()
   end
 end

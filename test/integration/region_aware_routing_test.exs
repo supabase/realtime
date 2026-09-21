@@ -29,7 +29,9 @@ defmodule Realtime.Integration.RegionAwareRoutingTest do
         ]
       )
 
-    Process.sleep(100)
+    # This node is the one doing the routing, so it is this node's view of the master region that
+    # has to have caught up. The peer joins the syn `RegionNodes` group asynchronously.
+    assert_eventually Nodes.region_nodes("eu-west-2") == [master_node], timeout: 5_000, interval: 25
 
     %{master_node: master_node}
   end

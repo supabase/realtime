@@ -1,6 +1,8 @@
 defmodule RateCounterHelper do
   alias Realtime.RateCounter
 
+  import WaitForIt
+
   @spec new!(RateCounter.Args.t()) :: pid()
   def new!(args) do
     {:ok, _} = RateCounter.new(args)
@@ -10,10 +12,7 @@ defmodule RateCounterHelper do
   end
 
   defp await_initial_tick(pid) do
-    case :sys.get_state(pid) do
-      %RateCounter{bucket: []} -> await_initial_tick(pid)
-      state -> state
-    end
+    match_wait! %RateCounter{bucket: [_ | _]}, :sys.get_state(pid), timeout: 5_000, interval: 10
   end
 
   @spec stop(term()) :: :ok

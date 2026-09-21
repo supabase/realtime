@@ -1,6 +1,9 @@
 defmodule Realtime.PromEx.Plugins.DistributedTest do
   # Async false due to Clustered usage
   use ExUnit.Case, async: false
+
+  import WaitForIt
+
   alias Realtime.PromEx.Plugins
 
   defmodule MetricsTest do
@@ -16,8 +19,13 @@ defmodule Realtime.PromEx.Plugins.DistributedTest do
     start_supervised!(MetricsTest)
     # Send some data back and forth
     25 = :erpc.call(node, String, :to_integer, ["25"])
-    # Wait for MetricsTest to fetch metrics
-    Process.sleep(200)
+
+    wait!(
+      metric_value(PromEx.get_metrics(MetricsTest), "dist_send_count", origin_node: node(), target_node: node),
+      timeout: 2_000,
+      interval: 25
+    )
+
     %{node: node}
   end
 

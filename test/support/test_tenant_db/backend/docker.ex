@@ -12,6 +12,8 @@ defmodule TestTenantDb.Backend.Docker do
 
   use GenServer
 
+  import WaitForIt
+
   alias Realtime.Database
   alias Realtime.Env
   alias TestTenantDb.Probe
@@ -37,7 +39,12 @@ defmodule TestTenantDb.Backend.Docker do
   # `Worker.port/1` must allow more than claim + wait_ready combined.
   @claim_timeout_ms 30_000
   @container_ready_timeout_ms 25_000
-  @ready_poll_interval_ms 250
+  # Readiness polling backs off from start to max rather than a fixed interval.
+  @ready_poll_start_ms 50
+  @ready_poll_max_ms 250
+
+  # Time to wait for docker to publish the port binding, not for Postgres itself to be ready.
+  @published_port_timeout_ms 2_000
 
   # Careful that this doesn't go over ~60s / exunits default timeout
   def worker_ready_timeout_ms, do: @claim_timeout_ms + @container_ready_timeout_ms
@@ -264,25 +271,54 @@ defmodule TestTenantDb.Backend.Docker do
 
   # Start a container and let docker publish 5432 on a port of its choosing, then read the
   # port back: nothing else on the machine can be handed the same one.
-  defp start_available_container(attempts \\ 5)
-  defp start_available_container(0), do: raise("TestTenantDb.Backend.Docker: exhausted retries starting a container")
+  defp start_available_container(attempts \\ 5, last_error \\ "none")
 
-  defp start_available_container(attempts) do
+  defp start_available_container(0, last_error) do
+    raise "TestTenantDb.Backend.Docker: exhausted retries starting a container. Last error: #{last_error}"
+  end
+
+  defp start_available_container(attempts, _last_error) do
     name = container_name()
 
-    case docker_run(name) do
-      {_, 0} -> {name, published_port!(name)}
-      {_output, _code} -> start_available_container(attempts - 1)
+    with {_, 0} <- docker_run(name),
+         {:ok, port} <- await_published_port(name) do
+      {name, port}
+    else
+      failure ->
+        # Remove the failed container before retrying with a fresh name.
+        System.cmd("docker", ["rm", "-f", name], stderr_to_stdout: true)
+        start_available_container(attempts - 1, describe_start_failure(failure))
+    end
+  end
+
+  defp describe_start_failure({:error, reason}), do: reason
+  defp describe_start_failure({output, code}), do: "docker run exited #{code}: #{String.trim(output)}"
+
+  # The port binding for `-p 0:5432` publishes shortly after `docker run -d` returns, and under
+  # heavy container churn Docker Desktop can fail to publish one at all.
+  defp await_published_port(name) do
+    case_wait docker_port(name),
+      timeout: @published_port_timeout_ms,
+      interval: WaitForIt.Backoff.exponential(start: @ready_poll_start_ms, max: @ready_poll_max_ms) do
+      {:ok, port} ->
+        {:ok, port}
+    else
+      {:error, _reason} = error ->
+        error
     end
   end
 
   # "0.0.0.0:32768" / "[::]:32768" — take the first mapping's port.
-  defp published_port!(name) do
-    {output, 0} = System.cmd("docker", ["port", name, "5432/tcp"])
+  defp docker_port(name) do
+    case System.cmd("docker", ["port", name, "5432/tcp"], stderr_to_stdout: true) do
+      {output, 0} ->
+        case Regex.run(~r/:(\d+)\s*$/m, output) do
+          [_, port] -> {:ok, String.to_integer(port)}
+          nil -> {:error, String.trim(output)}
+        end
 
-    case Regex.run(~r/:(\d+)\s*$/m, output) do
-      [_, port] -> String.to_integer(port)
-      nil -> raise "could not read the published port of #{name} from #{inspect(output)}"
+      {output, _code} ->
+        {:error, String.trim(output)}
     end
   end
 
@@ -382,25 +418,19 @@ defmodule TestTenantDb.Backend.Docker do
     end)
   end
 
-  # Gate on exactly what consumers use: a real connection from the host to the published port.
+  # Gates on a real connection from the host, exactly what consumers use.
   def wait_ready!(name, port) do
     settings = Probe.settings!(port)
-    wait_ready!(name, settings, System.monotonic_time(:millisecond) + @container_ready_timeout_ms)
-  end
 
-  defp wait_ready!(name, settings, deadline) do
-    case Probe.check(settings) do
+    case_wait Probe.check(settings),
+      timeout: @container_ready_timeout_ms,
+      interval: WaitForIt.Backoff.exponential(start: @ready_poll_start_ms, max: @ready_poll_max_ms) do
       :ok ->
         :ok
-
+    else
       {:error, reason} ->
-        if System.monotonic_time(:millisecond) >= deadline do
-          raise "Container #{name} did not accept connections within " <>
-                  "#{@container_ready_timeout_ms}ms. Last error: #{reason}"
-        else
-          Process.sleep(@ready_poll_interval_ms)
-          wait_ready!(name, settings, deadline)
-        end
+        raise "Container #{name} did not accept connections within " <>
+                "#{@container_ready_timeout_ms}ms. Last error: #{reason}"
     end
   end
 
