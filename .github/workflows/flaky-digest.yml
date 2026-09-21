@@ -142,7 +142,7 @@ jobs:
                   md: "**\($g.key)** — \($g.count)x\($envs_suffix)\n\(md_links($g.job_urls))\($md_test_line)```\n\($snippet)\n```"
                 };
 
-            # `wait_margin` events (see test_helper.exs's WAIT_MARGIN_REPORT) are a different
+            # `wait_margin` events (see WAIT_MARGIN_REPORT in test_helper.exs) are a different
             # phenomenon from a test flake - a wait close to or over its budget, possibly on a
             # fully green run - so they group separately by file:line too, and get their own
             # section further down rather than mixing into the flaky-test counts.
