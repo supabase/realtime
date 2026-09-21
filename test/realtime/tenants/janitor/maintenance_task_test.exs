@@ -75,17 +75,57 @@ defmodule Realtime.Tenants.Janitor.MaintenanceTaskTest do
     end
   end
 
-  test "closes the database connection when maintenance raises", %{tenant: tenant} do
-    {:ok, conn} = Agent.start_link(fn -> :ok end)
-
-    expect(Database, :connect, fn ^tenant, "realtime_janitor" -> {:ok, conn} end)
-    expect(Messages, :delete_old_messages, fn ^conn -> raise "maintenance failed" end)
-
-    assert_raise RuntimeError, "maintenance failed", fn ->
-      MaintenanceTask.run(tenant.external_id)
+  describe "connection lifecycle" do
+    setup do
+      %{task_supervisor: start_supervised!(Task.Supervisor)}
     end
 
-    refute Process.alive?(conn)
+    test "the connection is closed once the janitor task finishes", ctx do
+      %{tenant: tenant, task_supervisor: task_supervisor} = ctx
+      test_pid = self()
+
+      # Hold maintenance open so the connection can be observed while the task is still running
+      expect(Messages, :delete_old_messages, fn conn ->
+        send(test_pid, {:connected, conn})
+
+        receive do
+          :continue -> :ok
+        end
+      end)
+
+      task = run_in_task(task_supervisor, tenant)
+
+      assert_receive {:connected, conn}, 5000
+      assert Process.alive?(conn)
+
+      send(task.pid, :continue)
+
+      assert_receive {:DOWN, _ref, :process, _pid, :normal}, 5000
+      assert eventually(fn -> !Process.alive?(conn) end, sleep: 10)
+    end
+
+    test "the connection is closed when maintenance raises", ctx do
+      %{tenant: tenant, task_supervisor: task_supervisor} = ctx
+      test_pid = self()
+
+      expect(Messages, :delete_old_messages, fn conn ->
+        send(test_pid, {:connected, conn})
+
+        receive do
+          :continue -> raise "maintenance failed"
+        end
+      end)
+
+      task = run_in_task(task_supervisor, tenant)
+
+      assert_receive {:connected, conn}, 5000
+      assert Process.alive?(conn)
+
+      send(task.pid, :continue)
+
+      assert_receive {:DOWN, _ref, :process, _pid, {%RuntimeError{message: "maintenance failed"}, _}}, 5000
+      assert eventually(fn -> !Process.alive?(conn) end, sleep: 10)
+    end
   end
 
   test "exits if fails to remove old messages" do
@@ -122,5 +162,23 @@ defmodule Realtime.Tenants.Janitor.MaintenanceTaskTest do
     ref = t.ref
     assert_receive {:EXIT, ^pid, :killed}
     assert_receive {:DOWN, ^ref, :process, ^pid, :killed}
+  end
+
+  # Run maintenance the way the Janitor does: inside a task, which owns the connection.
+  # The task waits for :go so Mimic can allow it before the expectation is called.
+  defp run_in_task(task_supervisor, tenant) do
+    test_pid = self()
+
+    task =
+      Task.Supervisor.async_nolink(task_supervisor, fn ->
+        receive do
+          :go -> MaintenanceTask.run(tenant.external_id)
+        end
+      end)
+
+    Mimic.allow(Messages, test_pid, task.pid)
+    send(task.pid, :go)
+
+    task
   end
 end

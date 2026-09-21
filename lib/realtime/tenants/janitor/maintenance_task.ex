@@ -10,14 +10,11 @@ defmodule Realtime.Tenants.Janitor.MaintenanceTask do
   @spec run(String.t()) :: :ok | {:error, any}
   def run(tenant_external_id) do
     with %Realtime.Api.Tenant{} = tenant <- Realtime.Tenants.Cache.get_tenant_by_external_id(tenant_external_id),
-         {:ok, conn} <- Realtime.Database.connect(tenant, "realtime_janitor") do
-      try do
-        with :ok <- Realtime.Messages.delete_old_messages(conn) do
-          Realtime.Tenants.create_messages_partitions(conn)
-        end
-      after
-        GenServer.stop(conn)
-      end
+         {:ok, conn} <- Realtime.Database.connect(tenant, "realtime_janitor"),
+         :ok <- Realtime.Messages.delete_old_messages(conn),
+         :ok <- Realtime.Tenants.create_messages_partitions(conn) do
+      GenServer.stop(conn)
+      :ok
     end
   end
 end
