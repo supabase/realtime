@@ -12,6 +12,8 @@ jobs:
   docker_x86_release:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 120
+    permissions:
+      contents: read
     env:
       arch: amd64
     outputs:
@@ -45,6 +47,8 @@ jobs:
   docker_arm_release:
     runs-on: blacksmith-4vcpu-ubuntu-2404-arm
     timeout-minutes: 120
+    permissions:
+      contents: read
     env:
       arch: arm64
     outputs:
