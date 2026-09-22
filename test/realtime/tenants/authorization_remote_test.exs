@@ -161,21 +161,26 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
   end
 
   describe "database error" do
+    @hold_seconds 10
+
     @tag role: "authenticated",
          policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence],
+         db_queue_target: 50,
          timeout: :timer.minutes(1)
     test "handles small pool size", context do
-      task =
+      TestHelpers.await_pool_ready!(context.db_conn)
+
+      holder =
         Task.async(fn ->
           :erpc.call(node(context.db_conn), Postgrex, :query!, [
             context.db_conn,
-            "SELECT pg_sleep(19)",
+            "SELECT pg_sleep(#{@hold_seconds})",
             [],
-            [timeout: :timer.seconds(20)]
+            [timeout: to_timeout(second: @hold_seconds + 1)]
           ])
         end)
 
-      Process.sleep(100)
+      TestHelpers.await_pool_saturated!(context.db_conn)
 
       log =
         capture_log(fn ->
@@ -210,7 +215,7 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
       assert log =~
                "project=#{external_id} external_id=#{external_id} [critical] IncreaseConnectionPool: Too many database timeouts"
 
-      Task.await(task, :timer.seconds(30))
+      Task.shutdown(holder, :brutal_kill)
     end
 
     @tag role: "authenticated",
@@ -257,7 +262,9 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
   end
 
   defp remote_rls_context(%{node: node} = context) do
-    tenant = TestTenantDb.checkout_tenant_unboxed(run_migrations: true)
+    tenant =
+      TestTenantDb.checkout_tenant_unboxed(run_migrations: true)
+      |> maybe_set_queue_target(Map.get(context, :db_queue_target))
 
     {:ok, local_db_conn} = Database.connect(tenant, "realtime_test", :stop)
     topic = random_string()
@@ -290,5 +297,36 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
       node: node,
       authorization_context: authorization_context
     }
+  end
+
+  # Writing extensions back re-encrypts the credential fields, so they have to go in as
+  # plaintext or the next connection attempt resolves a ciphertext as a hostname.
+  @encrypted_settings ~w(db_host db_port db_name db_user db_password)
+
+  defp maybe_set_queue_target(tenant, nil), do: tenant
+
+  defp maybe_set_queue_target(tenant, target) do
+    extensions =
+      Enum.map(tenant.extensions, fn extension ->
+        decrypted =
+          extension.settings
+          |> Map.take(@encrypted_settings)
+          |> Map.new(fn {key, value} -> {key, Realtime.Crypto.decrypt!(value)} end)
+
+        settings =
+          extension.settings
+          |> Map.merge(decrypted)
+          |> Map.put("db_queue_target", target)
+
+        %{"type" => extension.type, "settings" => settings}
+      end)
+
+    # The tenant row was created outside the sandbox, so update it outside too.
+    {:ok, tenant} =
+      Ecto.Adapters.SQL.Sandbox.unboxed_run(Realtime.Repo, fn ->
+        Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{extensions: extensions})
+      end)
+
+    tenant
   end
 end

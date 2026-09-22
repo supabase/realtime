@@ -216,12 +216,8 @@ defmodule Realtime.Tenants.AuthorizationTest do
          ],
          timeout: :timer.minutes(1)
     test "handles small pool size", context do
-      task =
-        Task.async(fn ->
-          Postgrex.query!(context.db_conn, "SELECT pg_sleep(19)", [], timeout: :timer.seconds(20))
-        end)
-
-      Process.sleep(100)
+      db_conn = saturable_conn(context.tenant)
+      release = hold_only_connection!(db_conn)
 
       log =
         capture_log(fn ->
@@ -230,7 +226,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
               assert {:error, :increase_connection_pool} =
                        Authorization.get_read_authorizations(
                          %Policies{},
-                         context.db_conn,
+                         db_conn,
                          context.authorization_context
                        )
             end)
@@ -240,7 +236,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
               assert {:error, :increase_connection_pool} =
                        Authorization.get_write_authorizations(
                          %Policies{},
-                         context.db_conn,
+                         db_conn,
                          context.authorization_context,
                          :broadcast
                        )
@@ -257,7 +253,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
       assert log =~
                "project=#{external_id} external_id=#{external_id} [critical] IncreaseConnectionPool: Too many database timeouts"
 
-      Task.await(task, :timer.seconds(30))
+      release.()
     end
 
     @tag role: "authenticated",
@@ -489,5 +485,42 @@ defmodule Realtime.Tenants.AuthorizationTest do
     {:ok, tenant} = Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{extensions: extensions})
 
     Realtime.Tenants.Cache.update_cache(tenant)
+  end
+
+  # A one-connection pool whose CoDel loop sheds a queued checkout in a few hundred milliseconds
+  # so tests can assert how Authorization reports a `:queue_timeout` error.
+  defp saturable_conn(tenant) do
+    {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
+    # Linked to the test process, so it comes down with the test; no explicit teardown needed.
+    {:ok, db_conn} = Database.connect_db(settings, queue_target: 50, queue_interval: 100)
+    db_conn
+  end
+
+  # Checks out the pool's only connection and keeps it until the returned function is called.
+  # The connection is given back once the test is done with it.
+  defp hold_only_connection!(db_conn) do
+    parent = self()
+
+    holder =
+      Task.async(fn ->
+        Postgrex.transaction(
+          db_conn,
+          fn _conn ->
+            send(parent, :holding)
+
+            receive do
+              :release -> :ok
+            end
+          end,
+          timeout: :timer.minutes(1)
+        )
+      end)
+
+    assert_receive :holding, 5_000
+
+    fn ->
+      send(holder.pid, :release)
+      assert {:ok, :ok} = Task.await(holder, 5_000)
+    end
   end
 end

@@ -19,6 +19,8 @@ defmodule Realtime.Tenants.ConnectTest do
   @slow_replication_wait [timeout: 30_000, interval: 100]
   @local_wait [timeout: 2_500, interval: 50]
 
+  @connect_errors_bucket_len 5
+
   setup do
     tenant = TestTenantDb.checkout_tenant(run_migrations: true)
 
@@ -743,13 +745,12 @@ defmodule Realtime.Tenants.ConnectTest do
     test "rate limit connect will not trigger if connection is successful", %{tenant: tenant} do
       log =
         capture_log(fn ->
-          res =
-            for _ <- 1..20 do
-              Process.sleep(500)
-              Connect.lookup_or_start_connection(tenant.external_id)
-            end
+          res = for _ <- 1..20, do: Connect.lookup_or_start_connection(tenant.external_id)
 
           refute Enum.any?(res, fn {_, res} -> res == :tenant_db_too_many_connections end)
+
+          rate_counter = Tenants.connect_errors_per_second_rate(tenant)
+          for _ <- 1..@connect_errors_bucket_len, do: RateCounterHelper.tick!(rate_counter)
         end)
 
       refute log =~ "DatabaseConnectionRateLimitReached: Too many connection attempts against the tenant database"
