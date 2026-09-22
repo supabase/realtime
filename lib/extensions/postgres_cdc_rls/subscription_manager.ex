@@ -21,6 +21,8 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
   @check_no_users_interval 60_000
   @check_active_pids_interval 120_000
   @stop_after 60_000 * 10
+  @statement_timeout :timer.seconds(10)
+  @subs_pool_statement_timeout :timer.seconds(5)
 
   defmodule State do
     @moduledoc false
@@ -89,8 +91,12 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     with {:ok, subscription_manager_settings} <- Database.from_settings(extension, "realtime_subscription_manager"),
          {:ok, subscription_manager_pub_settings} <-
            Database.from_settings(extension, "realtime_subscription_manager_pub"),
-         {:ok, conn} <- Database.connect_db(subscription_manager_settings),
-         {:ok, conn_pub} <- Database.connect_db(subscription_manager_pub_settings),
+         {:ok, conn} <-
+           Database.connect_db(subscription_manager_settings, after_connect: after_connect(@statement_timeout)),
+         {:ok, conn_pub} <-
+           Database.connect_db(subscription_manager_pub_settings,
+             after_connect: after_connect(@subs_pool_statement_timeout)
+           ),
          {:ok, oids} <- Subscriptions.fetch_publication_tables(conn, publication) do
       # The subscribers ETS tables are owned by the WorkerSupervisor, so they survive a
       # SubscriptionManager-only restart. An empty pids table means a cold start (fresh
@@ -405,6 +411,8 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
   def not_alive_pids(pids) do
     Enum.reduce(pids, [], fn pid, acc -> if Process.alive?(pid), do: acc, else: [pid | acc] end)
   end
+
+  defp after_connect(statement_timeout), do: {Postgrex, :query!, ["SET statement_timeout = #{statement_timeout}", []]}
 
   defp check_oids, do: Process.send_after(self(), :check_oids, @check_oids_interval)
 

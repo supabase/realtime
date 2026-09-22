@@ -947,6 +947,44 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
     end
   end
 
+  describe "database timeouts" do
+    test "an insert cancelled by a statement timeout is retryable, not a parameter error", %{conn: conn} do
+      Postgrex.query!(conn, "SET statement_timeout = 200", [])
+      install_slow_insert_trigger(conn)
+
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test"})
+
+      params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
+
+      assert {:error, {:database_timeout, %Postgrex.Error{postgres: %{code: :query_canceled}}}} =
+               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+    end
+
+    defp install_slow_insert_trigger(conn) do
+      Postgrex.query!(
+        conn,
+        """
+          create or replace function realtime.slow_subscription_insert()
+          returns trigger language plpgsql as $$
+          begin perform pg_sleep(10); return new; end;
+          $$;
+        """,
+        []
+      )
+
+      Postgrex.query!(
+        conn,
+        """
+          create trigger slow_subscription_insert
+          before insert on realtime.subscription
+          for each row execute function realtime.slow_subscription_insert();
+        """,
+        []
+      )
+    end
+  end
+
   describe "delete_all/1" do
     test "delete_all", %{conn: conn} do
       create_subscriptions(conn, 10)

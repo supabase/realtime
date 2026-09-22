@@ -248,6 +248,23 @@ defmodule Extensions.PostgresCdcRlsTest do
       assert {:error, "Too many database timeouts"} =
                PostgresCdcRls.handle_after_connect({:manager_pid, self()}, postgres_extension, %{}, external_id)
     end
+
+    test "a statement timeout cancellation counts as a database timeout", %{tenant: tenant} do
+      %Tenant{extensions: extensions, external_id: external_id} = tenant
+      postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
+
+      expect(Subscriptions, :create, fn _conn, _publication, _subscription_list, _manager, _caller ->
+        {:error, {:database_timeout, %Postgrex.Error{postgres: %{code: :query_canceled}}}}
+      end)
+
+      assert {:error, "Too many database timeouts"} =
+               PostgresCdcRls.handle_after_connect({:manager_pid, self()}, postgres_extension, %{}, external_id)
+
+      rate = Realtime.Tenants.subscription_errors_per_second_rate(external_id, 4)
+
+      assert {:ok, %RateCounter{id: {:channel, :subscription_errors, ^external_id}, sum: 1}} =
+               RateCounterHelper.tick!(rate)
+    end
   end
 
   describe "region rebalancing" do
