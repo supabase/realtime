@@ -92,6 +92,7 @@ peer_gen_rpc_base = get_integer.("TEST_PEER_GEN_RPC_PORT_BASE", nil) || 26_000 +
 config :realtime,
   test_run_tag: run_tag,
   test_node_suffix: node_suffix,
+  test_node_name: :"main#{node_suffix}@127.0.0.1",
   test_http_port: port,
   test_peer_http_base: peer_http_base,
   test_peer_gen_rpc_base: peer_gen_rpc_base,

@@ -205,14 +205,6 @@ socket_options =
       end
   end
 
-[_, node_host] = node() |> Atom.to_string() |> String.split("@")
-
-metrics_tags = %{
-  region: region,
-  host: node_host,
-  id: Realtime.Nodes.short_node_id_from_name(node())
-}
-
 repo_opts = [
   pool_size: db_pool_size,
   queue_target: db_queue_target,
@@ -258,7 +250,6 @@ config :realtime,
   postgres_cdc_scope_shards: postgres_cdc_scope_shards,
   master_region: db_master_region,
   region_mapping: region_mapping,
-  metrics_tags: metrics_tags,
   measure_traffic_interval_in_ms: measure_traffic_interval_in_ms,
   client_presence_rate_limit: [
     max_calls: client_presence_max_calls,

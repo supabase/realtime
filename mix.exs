@@ -156,6 +156,7 @@ defmodule Realtime.MixProject do
       seed: ["run priv/repo/dev_seeds.exs"],
       "test.setup": [
         "cmd epmd -daemon",
+        &start_distribution/1,
         "ecto.create --quiet",
         "ecto.migrate"
       ],
@@ -164,6 +165,16 @@ defmodule Realtime.MixProject do
       "crap.ci": ["compile", &merge_coverdata/1, "crap"],
       "assets.deploy": ["esbuild default --minify", "tailwind default --minify", "phx.digest"]
     ]
+  end
+
+  defp start_distribution(_args) do
+    name = Application.fetch_env!(:realtime, :test_node_name)
+
+    case :net_kernel.start([name, :longnames]) do
+      {:ok, _pid} -> :ok
+      {:error, {:already_started, _pid}} -> :ok
+      {:error, reason} -> Mix.raise("could not start distribution as #{name}: #{inspect(reason)}")
+    end
   end
 
   defp merge_coverdata(_args) do

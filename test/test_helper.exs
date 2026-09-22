@@ -115,10 +115,9 @@ Mimic.copy(RealtimeWeb.JwtVerification)
 Mimic.copy(RealtimeWeb.TenantBroadcaster)
 Mimic.copy(NimbleZTA.Cloudflare)
 
-:net_kernel.start([TestEnv.node_name()])
-region = Realtime.Nodes.region()
-[{pid, _}] = :syn.members(RegionNodes, region)
-:syn.update_member(RegionNodes, region, pid, fn _ -> [node: node()] end)
+self_node = TestEnv.node_name()
+^self_node = node()
+[{_pid, [node: ^self_node]}] = :syn.members(RegionNodes, Realtime.Nodes.region())
 
 end_time = :os.system_time(:millisecond)
 IO.puts("[test_helper.exs] Time to start tests: #{end_time - start_time} ms")

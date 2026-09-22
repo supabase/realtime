@@ -133,16 +133,9 @@ defmodule RealtimeWeb.MetricsControllerTest do
   end
 
   setup_all do
-    metrics_tags = %{
-      region: "ap-southeast-2",
-      host: "anothernode@something.com",
-      id: "someid"
-    }
-
-    {:ok, _} =
-      Clustered.start(nil,
-        extra_config: [{:realtime, :region, "ap-southeast-2"}, {:realtime, :metrics_tags, metrics_tags}]
-      )
+    # The peer tags its own metrics from its own region, so setting the region is all it takes
+    # for the `region=` assertions below to tell the two nodes apart.
+    {:ok, _} = Clustered.start(nil, extra_config: [{:realtime, :region, "ap-southeast-2"}])
 
     :ok
   end
