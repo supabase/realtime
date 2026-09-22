@@ -31,8 +31,17 @@ defmodule Realtime.LogFilter do
   @ranch_conn_format ~c"Ranch listener ~p had connection process started with ~p:start_link/3 at ~p exit with reason: ~0p~n"
   @ranch_stream_format ~c"Ranch listener ~p, connection process ~p, stream ~p had its request process ~p exit with reason ~0p~n"
 
-  def filter(%{msg: {@ranch_conn_format, [_, _, _, :killed]}}, _), do: :stop
-  def filter(%{msg: {@ranch_stream_format, [_, _, _, _, :killed]}}, _), do: :stop
+  def filter(%{msg: {:report, %{label: {:error_logger, :error_msg}, format: format, args: args}}} = event, _) do
+    if ranch_killed?(format, args), do: :stop, else: event
+  end
+
+  def filter(%{msg: {format, args}} = event, _) when is_list(format) do
+    if ranch_killed?(format, args), do: :stop, else: event
+  end
 
   def filter(event, _), do: event
+
+  defp ranch_killed?(@ranch_conn_format, [_, _, _, :killed]), do: true
+  defp ranch_killed?(@ranch_stream_format, [_, _, _, _, :killed]), do: true
+  defp ranch_killed?(_, _), do: false
 end
