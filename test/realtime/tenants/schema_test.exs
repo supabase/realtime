@@ -1116,6 +1116,29 @@ defmodule Realtime.Tenants.SchemaTest do
     end
   end
 
+  describe "supabase_realtime_admin grants on the realtime schema" do
+    test "keeps usage and create", %{conn_superuser: conn_superuser} do
+      assert has_schema_privilege?(conn_superuser, "USAGE")
+      assert has_schema_privilege?(conn_superuser, "CREATE")
+    end
+
+    test "holds no grant option", %{conn_superuser: conn_superuser} do
+      refute has_schema_privilege?(conn_superuser, "USAGE WITH GRANT OPTION")
+      refute has_schema_privilege?(conn_superuser, "CREATE WITH GRANT OPTION")
+    end
+  end
+
+  defp has_schema_privilege?(conn, privilege) do
+    %Postgrex.Result{rows: [[granted]]} =
+      Postgrex.query!(
+        conn,
+        "SELECT has_schema_privilege('supabase_realtime_admin', 'realtime', $1)",
+        [privilege]
+      )
+
+    granted
+  end
+
   defp relacl(conn, table) do
     %Postgrex.Result{rows: [[acl]]} =
       Postgrex.query!(

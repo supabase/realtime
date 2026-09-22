@@ -102,7 +102,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_260_714_120_000, Migrations.AddBroadcastPersistence},
     {20_260_827_120_000, Migrations.EmptySelectColumnsReturnPrimaryKeys},
     {20_260_914_120_000, Migrations.DelegateMessagesGrantsToPostgres},
-    {20_260_916_120_000, Migrations.AllowPostgresToDelegateRealtimeSchemaUsage}
+    {20_260_916_120_000, Migrations.AllowPostgresToDelegateRealtimeSchemaUsage},
+    {20_260_922_120_000, Migrations.RevokeRealtimeSchemaGrantOptionFromRealtimeAdmin}
   ]
 
   defstruct [:tenant_external_id, :settings, migrations_ran: 0]
