@@ -1,8 +1,8 @@
 import assert from "assert";
-import { postgresChangesFilter, type SupabaseClient } from "@supabase/supabase-js";
+import { createClient, postgresChangesFilter, type SupabaseClient } from "@supabase/supabase-js";
 import kleur from "kleur";
 import { trace, context, SpanStatusCode, SpanKind } from "@opentelemetry/api";
-import { EVENT_TIMEOUT_MS } from "./context.ts";
+import { EVENT_TIMEOUT_MS, PROJECT_URL, ANON_KEY, REALTIME_OPTS } from "./context.ts";
 import type { Metric } from "./runner.ts";
 import { tracer, log } from "./runner.ts";
 
@@ -50,23 +50,31 @@ export async function waitFor<T>(getter: () => T | null, label: string): Promise
 
 export async function stopClient(supabase: SupabaseClient) {
   await Promise.all([supabase.removeAllChannels(), supabase.auth.stopAutoRefresh()]);
-  const { error } = await supabase.auth.signOut();
-  if (error) log(kleur.dim(`stopClient signOut: ${error.message}`));
 }
 
-export async function signInUser(supabase: SupabaseClient, email: string, password: string) {
-  const span = tracer.startSpan("sign in", { kind: SpanKind.INTERNAL });
-  return context.with(trace.setSpan(context.active(), span), async () => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) {
-      span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+export type TestSession = { access_token: string; refresh_token: string };
+export type AuthedClientFactory = () => Promise<SupabaseClient>;
+
+// Builds the one function each suite needs to get a signed-in client: it hides both the
+// client construction (URL/key/realtime opts) and the session-restore mechanics behind a
+// single call, so suites don't need to know how auth works at all. The session itself is
+// obtained once during setup (see fixtures.ts) and reused here via setSession().
+export function makeAuthedClientFactory(session: TestSession): AuthedClientFactory {
+  return async () => {
+    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+    const span = tracer.startSpan("restore session", { kind: SpanKind.INTERNAL });
+    return context.with(trace.setSpan(context.active(), span), async () => {
+      const { error } = await supabase.auth.setSession(session);
+      if (error) {
+        span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+        span.end();
+        throw new Error(`Error restoring session: ${error.message}`);
+      }
+      span.setStatus({ code: SpanStatusCode.OK });
       span.end();
-      throw new Error(`Error signing in: ${error.message}`);
-    }
-    span.setStatus({ code: SpanStatusCode.OK });
-    span.end();
-    return data!.session!.access_token;
-  });
+      return supabase;
+    });
+  };
 }
 
 async function waitForSubscribed(channel: ReturnType<SupabaseClient["channel"]>): Promise<number> {

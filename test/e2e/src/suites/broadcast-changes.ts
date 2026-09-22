@@ -1,19 +1,17 @@
 import assert from "assert";
-import { createClient } from "@supabase/supabase-js";
-import { PROJECT_URL, ANON_KEY, REALTIME_OPTS, RATE_LIMIT_PAUSE_MS } from "../context.ts";
+import { RATE_LIMIT_PAUSE_MS } from "../context.ts";
 import type { SuiteDescriptor } from "../runner.ts";
-import { sleep, randomTopic, waitFor, signInUser, stopClient, openReplicationChannel, REPLICATION_READY_CONFIG } from "../helpers.ts";
+import { sleep, randomTopic, waitFor, stopClient, openReplicationChannel, REPLICATION_READY_CONFIG } from "../helpers.ts";
 
 export const broadcastChanges: SuiteDescriptor = {
   name: "broadcast-changes",
   label: "broadcast changes",
   needsDb: true,
-  run: async ({ testUser, test }) => {
+  run: async ({ authedClient, test }) => {
     await sleep(RATE_LIMIT_PAUSE_MS);
     await test("authenticated user receives INSERT broadcast change", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const testTopic = randomTopic();
         const id = crypto.randomUUID();
         const value = crypto.randomUUID();
@@ -41,9 +39,8 @@ export const broadcastChanges: SuiteDescriptor = {
 
     await sleep(RATE_LIMIT_PAUSE_MS);
     await test("authenticated user receives UPDATE broadcast change", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const testTopic = randomTopic();
         const id = crypto.randomUUID();
         const originalValue = crypto.randomUUID();
@@ -74,9 +71,8 @@ export const broadcastChanges: SuiteDescriptor = {
 
     await sleep(RATE_LIMIT_PAUSE_MS);
     await test("authenticated user receives DELETE broadcast change", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const testTopic = randomTopic();
         const id = crypto.randomUUID();
         const value = crypto.randomUUID();

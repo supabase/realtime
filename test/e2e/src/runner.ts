@@ -6,6 +6,7 @@ import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-ho
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
 import { JSON_OUTPUT, OTEL_ENDPOINT, OTEL_API_TOKEN, PROJECT_URL, env, PARALLEL } from "./context.ts";
+import type { AuthedClientFactory } from "./helpers.ts";
 
 export let tracer = trace.getTracer("realtime-check");
 let otelProvider: BasicTracerProvider | null = null;
@@ -67,6 +68,7 @@ export type TestResult = { suite: string; name: string; passed: boolean; duratio
 
 export type SuiteCtx = {
   testUser: { email: string; password: string };
+  authedClient: AuthedClientFactory;
   test: (name: string, fn: () => Promise<Metric[]>) => Promise<void>;
 };
 

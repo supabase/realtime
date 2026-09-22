@@ -1,8 +1,7 @@
-import { createClient } from "@supabase/supabase-js";
-import { PROJECT_URL, ANON_KEY, REALTIME_OPTS, BROADCAST_CONFIG, RATE_LIMIT_PAUSE_MS, LOAD_MESSAGES, LOAD_SETTLE_MS, LOAD_DELIVERY_SLO } from "../context.ts";
+import { BROADCAST_CONFIG, RATE_LIMIT_PAUSE_MS, LOAD_MESSAGES, LOAD_SETTLE_MS, LOAD_DELIVERY_SLO } from "../context.ts";
 import type { SuiteDescriptor } from "../runner.ts";
 import {
-  sleep, randomTopic, settle, measureThroughput, signInUser, stopClient, openPostgresChannel,
+  sleep, randomTopic, settle, measureThroughput, stopClient, openPostgresChannel,
   executeInsert, executeUpdate, executeDelete,
 } from "../helpers.ts";
 
@@ -10,12 +9,11 @@ export const loadPostgresChanges: SuiteDescriptor = {
   name: "load-postgres-changes",
   label: "load-postgres-changes",
   needsDb: true,
-  run: async ({ testUser, test }) => {
+  run: async ({ authedClient, test }) => {
     await sleep(RATE_LIMIT_PAUSE_MS);
     await test("postgres changes system message latency", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const channel = supabase
           .channel(randomTopic(), BROADCAST_CONFIG)
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes" }, () => {});
@@ -28,9 +26,8 @@ export const loadPostgresChanges: SuiteDescriptor = {
 
     await sleep(RATE_LIMIT_PAUSE_MS);
     await test("postgres changes INSERT throughput", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const sendTimes = new Map<number, number>();
         const latencies: number[] = [];
 
@@ -59,9 +56,8 @@ export const loadPostgresChanges: SuiteDescriptor = {
 
     await sleep(RATE_LIMIT_PAUSE_MS);
     await test("postgres changes UPDATE throughput", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const sendTimes = new Map<number, number>();
         const latencies: number[] = [];
 
@@ -91,9 +87,8 @@ export const loadPostgresChanges: SuiteDescriptor = {
 
     await sleep(RATE_LIMIT_PAUSE_MS);
     await test("postgres changes DELETE throughput", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const sendTimes = new Map<number, number>();
         const latencies: number[] = [];
 

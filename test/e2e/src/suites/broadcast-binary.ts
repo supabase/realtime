@@ -1,21 +1,19 @@
 import assert from "assert";
-import { createClient } from "@supabase/supabase-js";
 import { SQL } from "bun";
-import { PROJECT_URL, ANON_KEY, REALTIME_OPTS, DB_URL, DB_SSL, RATE_LIMIT_PAUSE_MS } from "../context.ts";
+import { DB_URL, DB_SSL, RATE_LIMIT_PAUSE_MS } from "../context.ts";
 import type { SuiteDescriptor } from "../runner.ts";
-import { sleep, randomTopic, waitFor, signInUser, stopClient, openReplicationChannel, REPLICATION_READY_CONFIG } from "../helpers.ts";
+import { sleep, randomTopic, waitFor, stopClient, openReplicationChannel, REPLICATION_READY_CONFIG } from "../helpers.ts";
 
 export const broadcastBinary: SuiteDescriptor = {
   name: "broadcast-binary",
   label: "broadcast binary",
   needsDb: true,
-  run: async ({ testUser, test }) => {
+  run: async ({ authedClient, test }) => {
     await sleep(RATE_LIMIT_PAUSE_MS);
     await test("send_binary delivers a binary broadcast", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       const sql = new SQL(DB_URL, { tls: DB_SSL || undefined });
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const event = crypto.randomUUID();
         const topic = randomTopic();
         const binary = new Uint8Array([0xde, 0xad, 0xbe, 0xef, 0x00, 0xff]);

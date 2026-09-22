@@ -1,19 +1,17 @@
 import assert from "assert";
-import { createClient } from "@supabase/supabase-js";
 import { SQL } from "bun";
-import { PROJECT_URL, ANON_KEY, REALTIME_OPTS, DB_URL, DB_SSL } from "../context.ts";
+import { DB_URL, DB_SSL } from "../context.ts";
 import type { SuiteDescriptor } from "../runner.ts";
-import { sleep, randomTopic, waitFor, signInUser, stopClient, openChannel } from "../helpers.ts";
+import { sleep, randomTopic, waitFor, stopClient, openChannel } from "../helpers.ts";
 
 export const broadcastReplay: SuiteDescriptor = {
   name: "broadcast-replay",
   label: "broadcast replay",
   needsDb: true,
-  run: async ({ testUser, test }) => {
+  run: async ({ authedClient, test }) => {
     await test("replayed messages are delivered on join", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const event = crypto.randomUUID();
         const topic = randomTopic();
         const payload = { message: crypto.randomUUID() };
@@ -39,10 +37,9 @@ export const broadcastReplay: SuiteDescriptor = {
     });
 
     await test("replayed binary messages are delivered on join", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       const sql = new SQL(DB_URL, { tls: DB_SSL || undefined });
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const event = crypto.randomUUID();
         const topic = randomTopic();
         const binary = new Uint8Array([0xde, 0xad, 0xbe, 0xef, 0x00, 0xff]);
@@ -77,9 +74,8 @@ export const broadcastReplay: SuiteDescriptor = {
     });
 
     await test("replayed messages carry meta.replayed flag", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const event = crypto.randomUUID();
         const topic = randomTopic();
 
@@ -104,9 +100,8 @@ export const broadcastReplay: SuiteDescriptor = {
     });
 
     await test("messages before since are not replayed", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const event = crypto.randomUUID();
         const topic = randomTopic();
 

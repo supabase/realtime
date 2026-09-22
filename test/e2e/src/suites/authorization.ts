@@ -1,19 +1,17 @@
 import assert from "assert";
-import { createClient } from "@supabase/supabase-js";
-import { PROJECT_URL, ANON_KEY, REALTIME_OPTS, RATE_LIMIT_PAUSE_MS } from "../context.ts";
+import { RATE_LIMIT_PAUSE_MS } from "../context.ts";
 import type { SuiteDescriptor } from "../runner.ts";
-import { sleep, randomTopic, waitFor, signInUser, stopClient, openChannel } from "../helpers.ts";
+import { sleep, randomTopic, waitFor, stopClient, openChannel } from "../helpers.ts";
 
 export const authorization: SuiteDescriptor = {
   name: "authorization",
   label: "authorization check",
   needsDb: true,
   runCasesInParallel: true,
-  run: async ({ testUser, test }) => {
+  run: async ({ authedClient, test }) => {
     await test("user using private channel cannot connect without permissions", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const topic = "restricted:" + crypto.randomUUID();
         const channel = supabase.channel(topic, { config: { private: true } }).subscribe();
 
@@ -31,9 +29,8 @@ export const authorization: SuiteDescriptor = {
 
     await sleep(RATE_LIMIT_PAUSE_MS);
     await test("user using private channel can connect with enough permissions", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const channel = supabase.channel(randomTopic(), { config: { private: true } });
         const subscribeMs = await openChannel(channel);
         return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
