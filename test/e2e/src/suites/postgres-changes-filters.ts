@@ -1,8 +1,8 @@
 import assert from "assert";
-import { createClient, postgresChangesFilter } from "@supabase/supabase-js";
-import { PROJECT_URL, ANON_KEY, REALTIME_OPTS, POSTGRES_CHANGES_CONFIG } from "../context.ts";
+import { postgresChangesFilter } from "@supabase/supabase-js";
+import { POSTGRES_CHANGES_CONFIG, RATE_LIMIT_PAUSE_MS } from "../context.ts";
 import type { SuiteDescriptor } from "../runner.ts";
-import { sleep, randomTopic, waitFor, signInUser, stopClient, openPostgresChannel, executeInsert, isolated } from "../helpers.ts";
+import { sleep, randomTopic, waitFor, stopClient, openPostgresChannel, executeInsert, isolated } from "../helpers.ts";
 
 export const postgresChangesFilters: SuiteDescriptor = {
   name: "postgres-changes-filters",
@@ -11,11 +11,10 @@ export const postgresChangesFilters: SuiteDescriptor = {
   // Verified safe for internal concurrency: every test creates its own client + row
   // tags, and postgresChangesFilter() returns a fresh builder per call (no shared state).
   runCasesInParallel: true,
-  run: async ({ testUser, test }) => {
+  run: async ({ authedClient, test }) => {
     await test("eq: delivers row equal to the value", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const value = `eq_${tag}`;
         let result: any = null;
@@ -35,10 +34,11 @@ export const postgresChangesFilters: SuiteDescriptor = {
       }
     });
 
+    await sleep(RATE_LIMIT_PAUSE_MS);
+
     await test("neq: delivers row not equal to the value", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const value = `neq_${tag}`;
         // neq against a value nobody else inserts matches nearly every row in the
@@ -62,10 +62,11 @@ export const postgresChangesFilters: SuiteDescriptor = {
       }
     });
 
+    await sleep(RATE_LIMIT_PAUSE_MS);
+
     await test("lt: delivers row less than the value", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const value = `a_${tag}`;
         // A bare `<` comparison against an arbitrary threshold isn't narrow: any other
@@ -88,10 +89,11 @@ export const postgresChangesFilters: SuiteDescriptor = {
       }
     });
 
+    await sleep(RATE_LIMIT_PAUSE_MS);
+
     await test("lte: delivers row less than or equal to the value", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const value = `a_${tag}`;
         // Same as `lt`: a bare `<=` threshold isn't narrow against other tests' random
@@ -114,10 +116,11 @@ export const postgresChangesFilters: SuiteDescriptor = {
       }
     });
 
+    await sleep(RATE_LIMIT_PAUSE_MS);
+
     await test("gt: delivers row greater than the value", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const value = `c_${tag}`;
         // Same reasoning as `lt`/`lte`: a bare `>` threshold isn't narrow — scope it.
@@ -139,10 +142,11 @@ export const postgresChangesFilters: SuiteDescriptor = {
       }
     });
 
+    await sleep(RATE_LIMIT_PAUSE_MS);
+
     await test("gte: delivers row greater than or equal to the value", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const value = `c_${tag}`;
         // Same reasoning as `lt`/`lte`/`gt`: a bare `>=` threshold isn't narrow — scope it.
@@ -164,10 +168,11 @@ export const postgresChangesFilters: SuiteDescriptor = {
       }
     });
 
+    await sleep(RATE_LIMIT_PAUSE_MS);
+
     await test("in: delivers row whose value is in the list", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const value = `in_${tag}`;
         let result: any = null;
@@ -187,10 +192,11 @@ export const postgresChangesFilters: SuiteDescriptor = {
       }
     });
 
+    await sleep(RATE_LIMIT_PAUSE_MS);
+
     await test("like: delivers row matching the pattern", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const value = `${tag}hello`;
         let result: any = null;
@@ -210,10 +216,11 @@ export const postgresChangesFilters: SuiteDescriptor = {
       }
     });
 
+    await sleep(RATE_LIMIT_PAUSE_MS);
+
     await test("ilike: matches the pattern case-insensitively", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const value = `${tag}HELLO`; // upper-cased value, lower-cased filter
         let result: any = null;
@@ -233,11 +240,12 @@ export const postgresChangesFilters: SuiteDescriptor = {
       }
     });
 
+    await sleep(RATE_LIMIT_PAUSE_MS);
+
 
     await test("is: delivers row whose nullable column is null", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const value = `is_${tag}`; // executeInsert only sets `value`, so nullable_value stays null
         // nullable_value IS NULL matches nearly every other test's rows too (none of
@@ -260,10 +268,11 @@ export const postgresChangesFilters: SuiteDescriptor = {
       }
     });
 
+    await sleep(RATE_LIMIT_PAUSE_MS);
+
     await test("match: delivers row matching the regex", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const value = `${tag}abc123`;
         let result: any = null;
@@ -283,10 +292,11 @@ export const postgresChangesFilters: SuiteDescriptor = {
       }
     });
 
+    await sleep(RATE_LIMIT_PAUSE_MS);
+
     await test("imatch: matches the regex case-insensitively", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const value = `${tag}ABC`; // upper-cased value, lower-cased regex
         let result: any = null;
@@ -306,10 +316,11 @@ export const postgresChangesFilters: SuiteDescriptor = {
       }
     });
 
+    await sleep(RATE_LIMIT_PAUSE_MS);
+
     await test("isdistinct: delivers row whose value is distinct from the literal", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const value = `isd_${tag}`;
         // isDistinct against a value nobody else inserts matches nearly every row in
@@ -332,10 +343,11 @@ export const postgresChangesFilters: SuiteDescriptor = {
       }
     });
 
+    await sleep(RATE_LIMIT_PAUSE_MS);
+
     await test("and: delivers only rows matching every comma-separated condition", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const match = `${tag}both`;
         const decoy = `${tag}one`;
@@ -362,10 +374,11 @@ export const postgresChangesFilters: SuiteDescriptor = {
       }
     });
 
+    await sleep(RATE_LIMIT_PAUSE_MS);
+
     await test("not: excludes the negated value and delivers the rest", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const excluded = `${tag}skip`;
         const delivered = `${tag}keep`;
@@ -391,10 +404,11 @@ export const postgresChangesFilters: SuiteDescriptor = {
       }
     });
 
+    await sleep(RATE_LIMIT_PAUSE_MS);
+
     await test("compose: combines and, not and a pattern filter", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const match = `${tag}ok`;
         const decoy = `${tag}ok2`;
@@ -422,10 +436,11 @@ export const postgresChangesFilters: SuiteDescriptor = {
       }
     });
 
+    await sleep(RATE_LIMIT_PAUSE_MS);
+
     await test("compose: bounded range with gte and lte on the same column", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const match = `${tag}_c`; // inside [b, d]
         const tooLow = `${tag}_a`; // below the lower bound
@@ -456,10 +471,11 @@ export const postgresChangesFilters: SuiteDescriptor = {
       }
     });
 
+    await sleep(RATE_LIMIT_PAUSE_MS);
+
     await test("compose: combines in list with a like pattern across columns", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const match = `in_${tag}`;
         const decoy = `in_${tag}`; // same value, but details fail the like condition
@@ -487,10 +503,11 @@ export const postgresChangesFilters: SuiteDescriptor = {
       }
     });
 
+    await sleep(RATE_LIMIT_PAUSE_MS);
+
     await test("compose: combines neq with not.like", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const match = `${tag}keep`;
         const decoyEq = `${tag}exact`; // fails the neq
@@ -524,10 +541,11 @@ export const postgresChangesFilters: SuiteDescriptor = {
       }
     });
 
+    await sleep(RATE_LIMIT_PAUSE_MS);
+
     await test("compose: combines is.not.null with an ilike pattern", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const match = `${tag}HELLO`;
         const decoyNull = `${tag}HELLO2`; // fails is.not.null (nullable_value stays null)
@@ -558,10 +576,11 @@ export const postgresChangesFilters: SuiteDescriptor = {
       }
     });
 
+    await sleep(RATE_LIMIT_PAUSE_MS);
+
     await test("compose: four conditions across three columns", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const match = `${tag}match`;
         const decoyValue = `${tag}other`; // fails value=eq
@@ -593,10 +612,11 @@ export const postgresChangesFilters: SuiteDescriptor = {
       }
     });
 
+    await sleep(RATE_LIMIT_PAUSE_MS);
+
     await test("select: restricts the payload to the chosen columns", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const tag = crypto.randomUUID().replace(/-/g, "");
         const value = `select_${tag}`;
         let result: any = null;

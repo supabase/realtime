@@ -1,7 +1,8 @@
 import { SERVICE_KEY, dbPassword, DB_URL_ARG, env, PARALLEL } from "./context.ts";
-import type { SuiteDescriptor } from "./runner.ts";
+import type { SuiteDescriptor, SuiteCtx } from "./runner.ts";
 import { log, printSummary, flushOtel, results, createSuiteTest } from "./runner.ts";
 import { setup, cleanup } from "./fixtures.ts";
+import { makeAuthedClientFactory, type TestSession } from "./helpers.ts";
 
 function isLoadSuite(d: SuiteDescriptor) {
   return d.name.startsWith("load");
@@ -17,9 +18,9 @@ function sharesPgChanges(d: SuiteDescriptor) {
   return d.name === "postgres-changes" || d.name === "postgres-changes-filters";
 }
 
-async function runSuite(d: SuiteDescriptor, testUser: { email: string; password: string }) {
+async function runSuite(d: SuiteDescriptor, testUser: { email: string; password: string }, authedClient: SuiteCtx["authedClient"]) {
   const { test, drain } = createSuiteTest(d.label, isLoadSuite(d) ? false : d.runCasesInParallel);
-  await d.run({ testUser, test });
+  await d.run({ testUser, authedClient, test });
   await drain();
 }
 
@@ -64,12 +65,16 @@ export async function runSuites(descriptors: SuiteDescriptor[], testCategories: 
 
   let userId: string | null = null;
   let testUser: { email: string; password: string } = { email: "", password: "" };
+  let session: TestSession = { access_token: "", refresh_token: "" };
 
   if (needsDb) {
     const setupResult = await setup();
     userId = setupResult.userId;
     testUser = setupResult.testUser;
+    session = setupResult.session;
   }
+
+  const authedClient = makeAuthedClientFactory(session);
 
   const start = performance.now();
   try {
@@ -79,12 +84,12 @@ export async function runSuites(descriptors: SuiteDescriptor[], testCategories: 
       const pgChangesSuites = otherSuites.filter(sharesPgChanges);
       const concurrentSuites = otherSuites.filter((d) => !sharesPgChanges(d));
       await Promise.all([
-        ...concurrentSuites.map((d) => runSuite(d, testUser)),
-        (async () => { for (const d of pgChangesSuites) await runSuite(d, testUser); })(),
+        ...concurrentSuites.map((d) => runSuite(d, testUser, authedClient)),
+        (async () => { for (const d of pgChangesSuites) await runSuite(d, testUser, authedClient); })(),
       ]);
-      for (const d of loadSuites) await runSuite(d, testUser);
+      for (const d of loadSuites) await runSuite(d, testUser, authedClient);
     } else {
-      for (const d of suitesToRun) await runSuite(d, testUser);
+      for (const d of suitesToRun) await runSuite(d, testUser, authedClient);
     }
   } finally {
     if (userId) await cleanup(userId);

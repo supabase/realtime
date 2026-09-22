@@ -1,8 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
 import kleur from "kleur";
 import { SQL } from "bun";
-import { EMAIL_DOMAIN, DB_URL, DB_SSL, PROJECT_URL, SERVICE_KEY } from "./context.ts";
+import { EMAIL_DOMAIN, DB_URL, DB_SSL, PROJECT_URL, ANON_KEY, SERVICE_KEY } from "./context.ts";
 import { log } from "./runner.ts";
+import type { TestSession } from "./helpers.ts";
 
 const fmtSqlResult = (result: any[]) => {
   const count = (result as any).count ?? result.length;
@@ -13,7 +14,7 @@ const runSql = (label: string, query: Promise<any[]>): Promise<any[]> =>
     .then((r) => { log(kleur.dim(`setup:   ${label} ok (${fmtSqlResult(r)})`)); return r; })
     .catch((e: unknown) => { log(kleur.red(`setup:   ${label} FAILED: ${e instanceof Error ? e.message : String(e)}`)); throw e; });
 
-export async function setup(): Promise<{ userId: string; testUser: { email: string; password: string } }> {
+export async function setup(): Promise<{ userId: string; testUser: { email: string; password: string }; session: TestSession }> {
   const start = performance.now();
   const email = `realtime-check-${crypto.randomUUID()}@${EMAIL_DOMAIN}`;
   const password = crypto.randomUUID();
@@ -21,6 +22,7 @@ export async function setup(): Promise<{ userId: string; testUser: { email: stri
   log("setup: connecting to database");
   const sql = new SQL(DB_URL, { tls: DB_SSL || undefined });
   let userId: string;
+  let session: TestSession | undefined;
   try {
     let stepStart = performance.now();
     log(kleur.dim("setup: truncating existing tables"));
@@ -176,12 +178,22 @@ export async function setup(): Promise<{ userId: string; testUser: { email: stri
     const { data, error } = await admin.auth.admin.createUser({ email, password, email_confirm: true });
     if (error) throw new Error(`Failed to create test user: ${error.message}`);
     userId = data.user.id;
+
+    // Signed in once here; every suite reuses this session (see helpers.ts `restoreSession`)
+    // instead of each test case doing its own password-grant sign-in.
+    log(kleur.dim("setup: signing in test user"));
+    const authClient = createClient(PROJECT_URL, ANON_KEY);
+    const { data: signInData, error: signInError } = await authClient.auth.signInWithPassword({ email, password });
+    if (signInError) throw new Error(`Failed to sign in test user: ${signInError.message}`);
+    session = { access_token: signInData.session!.access_token, refresh_token: signInData.session!.refresh_token };
+    await authClient.auth.stopAutoRefresh();
+
     log(kleur.dim(`setup: done (${(performance.now() - start).toFixed(0)}ms)`));
   } finally {
     await sql.close().catch(() => {});
   }
 
-  return { userId: userId!, testUser: { email, password } };
+  return { userId: userId!, testUser: { email, password }, session: session! };
 }
 
 export async function cleanup(userId: string) {

@@ -1,9 +1,8 @@
 import assert from "assert";
-import { createClient } from "@supabase/supabase-js";
-import { PROJECT_URL, ANON_KEY, REALTIME_OPTS, POSTGRES_CHANGES_CONFIG, RATE_LIMIT_PAUSE_MS } from "../context.ts";
+import { POSTGRES_CHANGES_CONFIG, RATE_LIMIT_PAUSE_MS } from "../context.ts";
 import type { SuiteDescriptor } from "../runner.ts";
 import {
-  sleep, randomTopic, waitFor, signInUser, stopClient, openPostgresChannel,
+  sleep, randomTopic, waitFor, stopClient, openPostgresChannel,
   executeInsert, executeUpdate, executeDelete,
 } from "../helpers.ts";
 
@@ -12,12 +11,11 @@ export const postgresChanges: SuiteDescriptor = {
   label: "postgres changes extension",
   needsDb: true,
   runCasesInParallel: true,
-  run: async ({ testUser, test }) => {
+  run: async ({ authedClient, test }) => {
     await sleep(RATE_LIMIT_PAUSE_MS);
     await test("user receives INSERT events with filter", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
 
         let result: unknown = null;
         const uniqueValue = crypto.randomUUID();
@@ -43,9 +41,8 @@ export const postgresChanges: SuiteDescriptor = {
 
     await sleep(RATE_LIMIT_PAUSE_MS);
     await test("user receives UPDATE events with filter", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
 
         let result: unknown = null;
         const mainId = await executeInsert(supabase, "pg_changes");
@@ -76,9 +73,8 @@ export const postgresChanges: SuiteDescriptor = {
 
     await sleep(RATE_LIMIT_PAUSE_MS);
     await test("user receives DELETE events with filter", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
 
         let result: unknown = null;
         const mainId = await executeInsert(supabase, "pg_changes");
@@ -109,9 +105,8 @@ export const postgresChanges: SuiteDescriptor = {
 
     await sleep(RATE_LIMIT_PAUSE_MS);
     await test("user receives INSERT, UPDATE and DELETE concurrently", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         let insertResult: unknown = null, updateResult: unknown = null, deleteResult: unknown = null;
 
         const insertValue = crypto.randomUUID();
@@ -154,9 +149,8 @@ export const postgresChanges: SuiteDescriptor = {
 
     await sleep(RATE_LIMIT_PAUSE_MS);
     await test("select — omitting select returns full payload (backward compatible)", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         let result: any = null;
         const uniqueValue = crypto.randomUUID();
         const details = crypto.randomUUID();

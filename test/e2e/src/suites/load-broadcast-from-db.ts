@@ -1,18 +1,16 @@
-import { createClient } from "@supabase/supabase-js";
-import { PROJECT_URL, ANON_KEY, REALTIME_OPTS, RATE_LIMIT_PAUSE_MS, LOAD_MESSAGES, LOAD_SETTLE_MS, LOAD_DELIVERY_SLO } from "../context.ts";
+import { RATE_LIMIT_PAUSE_MS, LOAD_MESSAGES, LOAD_SETTLE_MS, LOAD_DELIVERY_SLO } from "../context.ts";
 import type { SuiteDescriptor } from "../runner.ts";
-import { sleep, randomTopic, settle, measureThroughput, signInUser, stopClient, openChannel } from "../helpers.ts";
+import { sleep, randomTopic, settle, measureThroughput, stopClient, openChannel } from "../helpers.ts";
 
 export const loadBroadcastFromDb: SuiteDescriptor = {
   name: "load-broadcast-from-db",
   label: "load-broadcast-from-db",
   needsDb: true,
-  run: async ({ testUser, test }) => {
+  run: async ({ authedClient, test }) => {
     await sleep(RATE_LIMIT_PAUSE_MS);
     await test("broadcast from database throughput", async () => {
-      const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+      const supabase = await authedClient();
       try {
-        await signInUser(supabase, testUser.email, testUser.password);
         const testTopic = randomTopic();
         const sendTimes = new Map<string, number>();
         const latencies: number[] = [];
