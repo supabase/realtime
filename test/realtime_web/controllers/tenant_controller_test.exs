@@ -330,6 +330,17 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert_eventually {:ok, %{rows: []}} = Postgrex.query(db_conn, "SELECT slot_name FROM pg_replication_slots", [])
     end
 
+    test "does not read the replica", %{conn: conn, tenant: tenant} do
+      # A tenant created moments ago may not have reached the replica yet. Reading it there would
+      # answer 204 without deleting anything, so the lookup has to hit the primary.
+      Mimic.reject(&Realtime.Repo.Replica.replica/0)
+
+      conn = delete(conn, ~p"/api/tenants/#{tenant.external_id}")
+      assert response(conn, 204)
+
+      refute Realtime.Api.get_tenant_by_external_id(tenant.external_id, use_replica?: false)
+    end
+
     test "tenant doesn't exist", %{conn: conn} do
       conn = delete(conn, ~p"/api/tenants/nope")
       assert response(conn, 204)

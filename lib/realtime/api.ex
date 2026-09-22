@@ -181,7 +181,8 @@ defmodule Realtime.Api do
 
   @spec get_tenant_by_external_id(String.t(), Keyword.t()) :: Tenant.t() | nil
   def get_tenant_by_external_id(external_id, opts \\ []) do
-    use_replica? = Keyword.get(opts, :use_replica?, true)
+    opts = Keyword.validate!(opts, use_replica?: true)
+    use_replica? = Keyword.fetch!(opts, :use_replica?)
 
     cond do
       use_replica? ->
