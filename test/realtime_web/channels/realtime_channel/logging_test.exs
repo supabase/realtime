@@ -1,8 +1,12 @@
 defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
   # async: false due to changes in Logger levels and shared Cachex state
   use Realtime.DataCase, async: false
+  use Errata
   import ExUnit.CaptureLog
+  alias Realtime.Messages.ReplayFailed
+  alias Realtime.Messages.ReplayRejected
   alias RealtimeWeb.RealtimeChannel.Logging
+  import LogEvents
 
   def handle_telemetry(event, measures, metadata, pid: pid), do: send(pid, {event, measures, metadata})
 
@@ -39,6 +43,53 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
       assert log =~ "exp=#{exp}"
       assert log =~ "iss=#{iss}"
       assert log =~ "error_code=TestError"
+    end
+  end
+
+  describe "log_error/2" do
+    setup :capture_log_events
+
+    test "logs an Errata error under its code, with its fields as metadata" do
+      tenant = random_string()
+      socket = %{assigns: %{log_level: :error, tenant: tenant, access_token: nil}}
+      context = %{tenant_id: tenant, topic: "test", since: 0, limit: 10}
+      error = Errata.wrap(ReplayFailed, :postgrex_exception, context: context)
+
+      log =
+        capture_log(fn ->
+          assert Logging.log_error(socket, error) ==
+                   {:error, %{reason: "UnableToReplayMessages: Realtime was unable to replay messages"}}
+        end)
+
+      assert log =~ "[error] UnableToReplayMessages: Realtime was unable to replay messages"
+      assert log =~ "error_code=UnableToReplayMessages"
+      assert log =~ "project=#{tenant}"
+
+      assert_receive {:log_event, :error, %{error_code: "UnableToReplayMessages", error: error_meta} = meta}
+      assert meta.project == tenant
+      assert error_meta.error_type == "Realtime.Messages.ReplayFailed"
+      assert error_meta.reason == nil
+      assert error_meta.context == context
+      assert error_meta.cause == :postgrex_exception
+      assert %{module: module, file: file, line: line} = error_meta.env
+      assert module == inspect(__MODULE__)
+      assert file =~ "logging_test.exs"
+      assert is_integer(line)
+
+      assert_receive {[:realtime, :channel, :error], %{count: 1}, %{code: "UnableToReplayMessages", tenant: ^tenant}}
+    end
+
+    test "uses the error's display message and reason" do
+      socket = %{assigns: %{log_level: :error, tenant: random_string(), access_token: nil}}
+      error = Errata.create(ReplayRejected, reason: :public_channel, context: %{topic: "test"})
+
+      assert Logging.log_error(socket, error) ==
+               {:error, %{reason: "UnableToReplayMessages: Replay is not allowed for public channels"}}
+
+      assert_receive {:log_event, :error, %{error_code: "UnableToReplayMessages", error: error_meta}}
+      assert error_meta.reason == :public_channel
+      assert error_meta.context == %{topic: "test"}
+      assert error_meta.cause == nil
     end
   end
 

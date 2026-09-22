@@ -438,7 +438,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       config = %{
         "private" => true,
         "broadcast" => %{
-          "replay" => %{"limit" => "not a number", "since" => :erlang.system_time(:millisecond) - 5 * 60000}
+          "replay" => %{"limit" => "not a number", "since" => System.system_time(:millisecond) - 5 * 60000}
         }
       }
 
@@ -515,13 +515,10 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     test "failure to replay", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
-
-      config = %{
-        "private" => true,
-        "broadcast" => %{
-          "replay" => %{"limit" => 12, "since" => :erlang.system_time(:millisecond) - 5 * 60000}
-        }
-      }
+      external_id = tenant.external_id
+      since = System.system_time(:millisecond) - 5 * 60000
+      config = %{"private" => true, "broadcast" => %{"replay" => %{"limit" => 12, "since" => since}}}
+      LogEvents.capture_log_events()
 
       Authorization
       |> expect(:get_read_authorizations, fn _, _, _, _ ->
@@ -538,6 +535,16 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       assert {:error, %{reason: "UnableToReplayMessages: Realtime was unable to replay messages"}} =
                subscribe_and_join(socket, "realtime:test", %{"config" => config})
+
+      # The channel logs it under the existing code, with the replay context and the origin attached
+      assert_receive {:log_event, :error,
+                      %{error_code: "UnableToReplayMessages", error: %{context: %{tenant_id: ^external_id}} = error} =
+                        meta}
+
+      assert error.context == %{tenant_id: external_id, topic: "test", since: since, limit: 12}
+      assert error.error_type == "Realtime.Messages.ReplayFailed"
+      assert error.env.module == "Realtime.Messages"
+      assert meta.project == external_id
     end
 
     test "replay messages on public topic not allowed", %{tenant: tenant} do
@@ -545,7 +552,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
       config = %{
-        "broadcast" => %{"replay" => %{"limit" => 2, "since" => :erlang.system_time(:millisecond) - 5 * 60000}}
+        "broadcast" => %{"replay" => %{"limit" => 2, "since" => System.system_time(:millisecond) - 5 * 60000}}
       }
 
       assert {
@@ -604,7 +611,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       config = %{
         "private" => true,
-        "broadcast" => %{"replay" => %{"limit" => 2, "since" => :erlang.system_time(:millisecond) - 5 * 60000}}
+        "broadcast" => %{"replay" => %{"limit" => 2, "since" => System.system_time(:millisecond) - 5 * 60000}}
       }
 
       assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{"config" => config})

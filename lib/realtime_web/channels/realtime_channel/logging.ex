@@ -3,6 +3,8 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   Log functions for Realtime channels
   """
 
+  use Errata
+
   alias Realtime.Telemetry
   require Logger
 
@@ -21,6 +23,22 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   def log_error(socket, code, msg) do
     msg = build_msg(code, msg)
     log(socket, :error, code, msg)
+    {:error, %{reason: msg}}
+  end
+
+  @doc """
+  Logs an Errata error at the error's own severity.
+
+  The error's `code` becomes the `error_code`, so existing dashboards and alerts keep working, and
+  the error's type, reason, context, cause and origin are attached as Logger metadata under the
+  `:error` key instead of being flattened into the message. They are nested because the Logflare
+  backend overwrites top-level `context`, `level` and `stacktrace` metadata with its own.
+  """
+  @spec log_error(socket :: Phoenix.Socket.t(), error :: Errata.error()) :: {:error, %{reason: binary}}
+  def log_error(socket, error) when is_error(error) do
+    code = Errata.code(error) || "UnknownErrorOnChannel"
+    msg = build_msg(code, Errata.display_message(error) || Exception.message(error))
+    log(socket, Errata.severity(error), code, msg, error_metadata(error))
     {:error, %{reason: msg}}
   end
 
@@ -64,20 +82,25 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   defp build_msg(nil, msg), do: stringify!(msg)
   defp build_msg(code, msg), do: "#{code}: #{stringify!(msg)}"
 
-  defp log(%{assigns: assigns}, level, code, msg) do
+  defp log(%{assigns: assigns}, level, code, msg, metadata \\ []) do
     tenant = assigns.tenant
     Logger.metadata(external_id: tenant, project: tenant)
     enrich_metadata(level, Map.get(assigns, :access_token))
-    Logger.log(level, msg, error_code: code)
+    Logger.log(level, msg, [error_code: code] ++ metadata)
     emit_telemetry(level, code, tenant)
   end
 
-  defp enrich_metadata(level, token) when level in [:error, :warning],
+  @error_metadata_keys [:error_type, :reason, :context, :cause, :env]
+  defp error_metadata(error), do: [error: Errata.to_map(error, only: @error_metadata_keys)]
+
+  @error_levels [:error, :critical, :alert, :emergency]
+
+  defp enrich_metadata(level, token) when level in [:warning | @error_levels],
     do: update_metadata_with_token_claims(token)
 
   defp enrich_metadata(_level, _token), do: :ok
 
-  defp emit_telemetry(:error, code, tenant),
+  defp emit_telemetry(level, code, tenant) when level in @error_levels,
     do: Telemetry.execute([:realtime, :channel, :error], %{count: 1}, %{code: code, tenant: tenant})
 
   defp emit_telemetry(_level, _code, _tenant), do: :ok
