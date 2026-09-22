@@ -73,6 +73,40 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
     assert has_element?(view, "h6", "pg-delta plan vs committed schema")
   end
 
+  @pgdelta_running ~s([data-test-id="pgdelta-running"])
+
+  describe "shadow database provisioning" do
+    test "pg-delta starts on the live mount, not on the dead render", %{conn: conn, tenant: tenant} do
+      conn = get(conn, "/admin/dashboard/tenant_migrations?external_id=#{tenant.external_id}")
+
+      doc = conn |> html_response(200) |> Floki.parse_document!()
+      assert doc |> Floki.find("h6") |> Floki.text() =~ "pg-delta plan vs committed schema"
+      assert Floki.find(doc, @pgdelta_running) == []
+
+      {:ok, view, _html} = live(conn)
+      assert view |> element(@pgdelta_running) |> has_element?()
+    end
+
+    test "looking up another tenant does not leave the previous plan running", %{conn: conn, tenant: tenant} do
+      {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_migrations?external_id=#{tenant.external_id}")
+      assert view |> element(@pgdelta_running) |> has_element?()
+
+      running = task_supervisor_children()
+
+      view
+      |> element("form[phx-submit=lookup]")
+      |> render_submit(%{external_id: "nonexistent"})
+
+      assert view |> element("p.text-danger", "Tenant not found") |> has_element?()
+      refute view |> element(@pgdelta_running) |> has_element?()
+      assert_eventually(task_supervisor_children() <= running)
+    end
+  end
+
+  defp task_supervisor_children do
+    Realtime.TaskSupervisor |> Task.Supervisor.children() |> length()
+  end
+
   test "shows 0 rows instead of an error when realtime.schema_migrations is missing", %{conn: conn, tenant: tenant} do
     {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
     {:ok, admin_conn} = Database.connect_db(%{settings | username: "supabase_admin", pool_size: 1})

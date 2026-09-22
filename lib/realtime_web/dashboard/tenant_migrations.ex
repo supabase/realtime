@@ -41,6 +41,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
          {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop),
          {:ok, schema_migrations, orioledb?} <- with_tenant_conn(settings, &fetch_tenant_state/1) do
       socket
+      |> cancel_pgdelta()
       |> reset_assigns()
       |> assign(external_id: ref, tenant: tenant, schema_migrations: {:ok, schema_migrations})
       |> start_pgdelta(tenant, orioledb?)
@@ -56,7 +57,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   end
 
   def handle_params(_params, _uri, socket) do
-    {:noreply, reset_assigns(socket)}
+    {:noreply, socket |> cancel_pgdelta() |> reset_assigns()}
   end
 
   @impl true
@@ -180,11 +181,21 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
         <%= schema_migrations(@schema_migrations) %>
 
         <h6 class="mt-4">pg-delta plan vs committed schema</h6>
-        <div :if={@pgdelta_running} class="alert alert-info d-flex align-items-center" style="gap: 8px;">
+        <div
+          :if={@pgdelta_running}
+          data-test-id="pgdelta-running"
+          class="alert alert-info d-flex align-items-center"
+          style="gap: 8px;"
+        >
           <div class="spinner-border spinner-border-sm" role="status"></div>
           <span>Processing... (<%= div(@pgdelta_elapsed_ms, 1000) %>s)</span>
         </div>
-        <div :if={@applying} class="alert alert-info d-flex align-items-center" style="gap: 8px;">
+        <div
+          :if={@applying}
+          data-test-id="pgdelta-applying"
+          class="alert alert-info d-flex align-items-center"
+          style="gap: 8px;"
+        >
           <div class="spinner-border spinner-border-sm" role="status"></div>
           <span>Applying plan to tenant database...</span>
         </div>
@@ -212,6 +223,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
 
   defp assign_error(socket, ref, msg) do
     socket
+    |> cancel_pgdelta()
     |> reset_assigns()
     |> assign(external_id: ref, error: msg)
   end
@@ -239,13 +251,25 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   defp start_pgdelta(socket, _tenant, true = _orioledb?), do: assign(socket, pgdelta_result: :unsupported)
 
   defp start_pgdelta(socket, %Tenant{} = tenant, false = _orioledb?) do
-    task =
-      Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn ->
-        run_pgdelta(tenant)
-      end)
+    if connected?(socket) do
+      task =
+        Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn ->
+          run_pgdelta(tenant)
+        end)
 
-    running_pgdelta(socket, task)
+      running_pgdelta(socket, task)
+    else
+      socket
+    end
   end
+
+  defp cancel_pgdelta(%{assigns: %{pgdelta_task: %Task{} = task}} = socket) do
+    Task.Supervisor.terminate_child(Realtime.TaskSupervisor, task.pid)
+    Process.demonitor(task.ref, [:flush])
+    socket
+  end
+
+  defp cancel_pgdelta(socket), do: socket
 
   defp start_recheck(socket, %Tenant{} = tenant, %Database{} = settings) do
     task =
