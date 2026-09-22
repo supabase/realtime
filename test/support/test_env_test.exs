@@ -3,10 +3,19 @@ defmodule TestEnvTest do
   # read while tests run.
   use ExUnit.Case, async: false
 
+  # config/test.exs derives the suffix and the node name from the same claimed port, so a run
+  # simulated here has to move both of them together.
   defp put_node_suffix(suffix) do
-    original = Application.fetch_env!(:realtime, :test_node_suffix)
+    original_suffix = Application.fetch_env!(:realtime, :test_node_suffix)
+    original_name = Application.fetch_env!(:realtime, :test_node_name)
+
     Application.put_env(:realtime, :test_node_suffix, suffix)
-    on_exit(fn -> Application.put_env(:realtime, :test_node_suffix, original) end)
+    Application.put_env(:realtime, :test_node_name, :"main#{suffix}@127.0.0.1")
+
+    on_exit(fn ->
+      Application.put_env(:realtime, :test_node_suffix, original_suffix)
+      Application.put_env(:realtime, :test_node_name, original_name)
+    end)
   end
 
   describe "node_name/0 and peer names" do

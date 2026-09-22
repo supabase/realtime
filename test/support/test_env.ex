@@ -48,8 +48,9 @@ defmodule TestEnv do
   @spec http_port() :: pos_integer()
   def http_port, do: Application.fetch_env!(:realtime, :test_http_port)
 
+  # Built in config/test.exs, because mix.exs needs this name before this module is compiled.
   @spec node_name() :: node()
-  def node_name, do: :"main#{node_suffix()}@127.0.0.1"
+  def node_name, do: Application.fetch_env!(:realtime, :test_node_name)
 
   @spec peer_name(atom() | charlist() | binary()) :: atom() | charlist() | binary()
   def peer_name(name) do

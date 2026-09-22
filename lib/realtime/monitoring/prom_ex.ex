@@ -89,9 +89,20 @@ defmodule Realtime.PromEx do
       Peep.child_spec(
         name: name,
         metrics: metrics,
-        global_tags: Application.get_env(:realtime, :metrics_tags, %{}),
+        global_tags: global_tags(),
         storage: {Realtime.Monitoring.Peep.PartitionedTables, tables: 4, routing_tag: :tenant}
       )
+    end
+
+    defp global_tags do
+      node = node()
+      [_name, host] = node |> Atom.to_string() |> String.split("@", parts: 2)
+
+      %{
+        region: Realtime.Nodes.region(),
+        host: host,
+        id: Realtime.Nodes.short_node_id_from_name(node)
+      }
     end
   end
 
