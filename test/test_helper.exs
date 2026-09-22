@@ -34,14 +34,17 @@ repo_config = Application.fetch_env!(:realtime, Realtime.Repo)
 %{rows: [[orioledb?]]} =
   Postgrex.query!(pg_conn, "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'orioledb')")
 
-# Postgrex leaves no pg_prepared_statements row for a query without :cache_statement. A pooler
-# re-prepares everything it forwards, so a row here means one backend is shared by many clients.
-Postgrex.query!(pg_conn, "SELECT 1 AS direct_connection_probe", [])
+# Postgrex leaves nothing in pg_prepared_statements for a query without :cache_statement
+# but Multigres re-prepares everything it forwards under a name of its own,
+# so this probe serves to find if it's behind a pooler or has direct connection.
+probe_marker = "direct_connection_probe_#{System.unique_integer([:positive])}"
+Postgrex.query!(pg_conn, "SELECT 1 AS #{probe_marker}", [])
 
 %{rows: [[direct_connection?]]} =
   Postgrex.query!(
     pg_conn,
-    "SELECT count(*) = 0 FROM pg_prepared_statements WHERE statement LIKE '%direct_connection_probe%'"
+    "SELECT count(*) = 0 FROM pg_prepared_statements WHERE statement LIKE $1",
+    ["%#{probe_marker}%"]
   )
 
 # `realtime.broadcast_changes(..., NEW record, OLD record, ...)` (introduced in commit 2922658c) called from a trigger via `PERFORM` fails on PG <= 14.5
