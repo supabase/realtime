@@ -301,21 +301,14 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
 
   # Writing extensions back re-encrypts the credential fields, so they have to go in as
   # plaintext or the next connection attempt resolves a ciphertext as a hostname.
-  @encrypted_settings ~w(db_host db_port db_name db_user db_password)
-
   defp maybe_set_queue_target(tenant, nil), do: tenant
 
   defp maybe_set_queue_target(tenant, target) do
     extensions =
       Enum.map(tenant.extensions, fn extension ->
-        decrypted =
-          extension.settings
-          |> Map.take(@encrypted_settings)
-          |> Map.new(fn {key, value} -> {key, Realtime.Crypto.decrypt!(value)} end)
-
         settings =
           extension.settings
-          |> Map.merge(decrypted)
+          |> Database.decrypt_settings()
           |> Map.put("db_queue_target", target)
 
         %{"type" => extension.type, "settings" => settings}

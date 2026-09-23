@@ -920,7 +920,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       {:ok, subscription_params} =
         Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test"})
 
-      # Just has to outlast the ~300ms the tagged CoDel loop needs to shed the queued checkout.
+      # Just has to outlast the ~300ms the pool needs to shed the queued checkout.
       Task.start(fn -> Postgrex.query!(conn, "SELECT pg_sleep(5)", []) end)
 
       subscription_list = [

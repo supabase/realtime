@@ -487,8 +487,8 @@ defmodule Realtime.Tenants.AuthorizationTest do
     Realtime.Tenants.Cache.update_cache(tenant)
   end
 
-  # A one-connection pool whose CoDel loop sheds a queued checkout in a few hundred milliseconds
-  # so tests can assert how Authorization reports a `:queue_timeout` error.
+  # A one-connection pool that sheds a queued checkout in a few hundred milliseconds so tests
+  # can assert how Authorization reports a `:queue_timeout` error.
   defp saturable_conn(tenant) do
     {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
     # Linked to the test process, so it comes down with the test; no explicit teardown needed.
