@@ -48,6 +48,9 @@ defmodule Realtime.Tenants.Reconnector do
       {:ok, _} ->
         :ok
 
+      {:error, :rpc_error, reason} ->
+        Logger.warning("Reconnector could not restart connection for #{tenant_id}: #{inspect(reason)}")
+
       {:error, reason} ->
         Logger.warning("Reconnector could not restart connection for #{tenant_id}: #{inspect(reason)}")
     end
