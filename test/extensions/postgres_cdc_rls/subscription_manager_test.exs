@@ -399,12 +399,30 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManagerTest do
 
   describe "error handling" do
     test "stops cleanly when database connection fails", %{args: args} do
-      stub(Database, :connect_db, fn _settings -> {:error, :econnrefused} end)
+      expect(Database, :connect_db, fn _settings, _opts -> {:error, :econnrefused} end)
 
       pid = start_supervised!({SubscriptionManager, args}, restart: :temporary)
       ref = Process.monitor(pid)
 
       assert_receive {:DOWN, ^ref, :process, ^pid, {:shutdown, :econnrefused}}, 1000
+    end
+  end
+
+  describe "statement timeout" do
+    test "the manager's own connection carries one", %{pid: pid} do
+      # Everything on this connection - the deletes, the publication-table lookups - runs
+      # straight from the GenServer with no explicit :timeout of its own.
+      %{conn: conn} = :sys.get_state(pid)
+
+      assert %{rows: [["10s"]]} = Postgrex.query!(conn, "show statement_timeout", [])
+    end
+
+    test "the subscription pool carries a tighter one", %{pid: pid, args: args} do
+      # Everything on this pool goes through `Subscriptions.create/5`, whose transaction deadline
+      # is 10s, so its statements get less than that.
+      {:ok, ^pid, conn_pub} = PostgresCdcRls.get_manager_conn(args["id"])
+
+      assert %{rows: [["5s"]]} = Postgrex.query!(conn_pub, "show statement_timeout", [])
     end
   end
 

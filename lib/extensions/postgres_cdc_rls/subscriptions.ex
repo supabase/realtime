@@ -19,13 +19,20 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   # All supported filter operators.
   @filter_types ["eq", "neq", "lt", "lte", "gt", "gte", "in", "like", "ilike", "is", "match", "imatch", "isdistinct"]
 
+  # The subscribe path nests three timeouts, each strictly inside the next:
+  #
+  #   statement_timeout (5s, Postgres) < transaction deadline (10s, here) < RPC (15s)
+  @transaction_timeout 10_000
+
   @spec create(conn(), String.t(), subscription_list, pid(), pid()) ::
           {:ok, Postgrex.Result.t()}
-          | {:error, Exception.t() | {:exit, term} | {:subscription_insert_failed, String.t()}}
+          | {:error,
+             Exception.t()
+             | {:exit, term}
+             | {:database_timeout, Exception.t()}
+             | {:subscription_insert_failed, String.t()}}
 
   def create(conn, publication, subscription_list, manager, caller) do
-    opts = [timeout: 10_000]
-
     transaction(
       conn,
       fn conn ->
@@ -42,20 +49,30 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
               rollback(conn, {:subscription_insert_failed, msg})
 
             {:error, exception} ->
-              msg =
-                "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [#{params_to_log(params)}]. Exception: #{Exception.message(exception)}"
+              if database_timeout?(exception) do
+                rollback(conn, {:database_timeout, exception})
+              else
+                msg =
+                  "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [#{params_to_log(params)}]. Exception: #{Exception.message(exception)}"
 
-              rollback(conn, {:subscription_insert_failed, msg})
+                rollback(conn, {:subscription_insert_failed, msg})
+              end
           end
         end)
       end,
-      opts
+      timeout: @transaction_timeout
     )
   rescue
     e in DBConnection.ConnectionError -> {:error, e}
   catch
     :exit, reason -> {:error, {:exit, reason}}
   end
+
+  # A statement cancelled by `statement_timeout` (57014), or a connection torn down under us by
+  # DBConnection's deadline, means the database is slow
+  defp database_timeout?(%DBConnection.ConnectionError{}), do: true
+  defp database_timeout?(%Postgrex.Error{postgres: %{code: :query_canceled}}), do: true
+  defp database_timeout?(_), do: false
 
   defp query(conn, publication, id, claims, subscription_params) do
     sql = "with sub_tables as (
