@@ -54,6 +54,10 @@ defmodule TestTenantDb.Backend.Docker do
   @impl TestTenantDb.Backend
   def max_cases, do: Env.get_integer("MAX_CASES", 4)
 
+  # POSTGRES_IMAGE is both the realtime database and this backend's containers.
+  @impl TestTenantDb.Backend
+  def capability_probe_port, do: :realtime_db
+
   @impl TestTenantDb.Backend
   def prepare! do
     :ok = pull()
@@ -433,6 +437,7 @@ defmodule TestTenantDb.Backend.Docker do
   defp docker_run(name) do
     initdb_sh = Path.expand("../../../../dev/postgres/za-permit-supabase-admin.sh", __DIR__)
     initdb_sql = Path.expand("../../../../dev/postgres/zb-supabase-schema.sql", __DIR__)
+    initdb_template1_sql = Path.expand("../../../../dev/postgres/zc-template1-orioledb.sql", __DIR__)
 
     # Deliberately no `--rm`, we keep containers around for diagnostics of why they died
     System.cmd(
@@ -450,6 +455,8 @@ defmodule TestTenantDb.Backend.Docker do
         "#{initdb_sh}:/docker-entrypoint-initdb.d/za-permit-supabase-admin.sh",
         "-v",
         "#{initdb_sql}:/docker-entrypoint-initdb.d/zb-supabase-schema.sql",
+        "-v",
+        "#{initdb_template1_sql}:/docker-entrypoint-initdb.d/zc-template1-orioledb.sql",
         "-p",
         "0:5432",
         image(),

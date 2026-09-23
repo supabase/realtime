@@ -216,6 +216,7 @@ defmodule Realtime.Tenants.Migrations do
         backoff_type: settings.backoff_type,
         socket_options: settings.socket_options,
         parameters: [application_name: settings.application_name],
+        after_connect: after_connect(),
         ssl: settings.ssl
       ]
       |> Repo.with_dynamic_repo(fn repo ->
@@ -340,4 +341,13 @@ defmodule Realtime.Tenants.Migrations do
   """
   @spec migrations() :: [{pos_integer(), module()}]
   def migrations, do: @migrations
+
+  @doc """
+  `after_connect` for the connection these migrations run on.
+
+  They build SQL dynamically, which Multigres' gateway refuses to forward;
+  `unsafe_connection` lets it through. A no-op on plain Postgres.
+  """
+  @spec after_connect() :: {module(), atom(), [term()]}
+  def after_connect, do: {Postgrex, :query!, ["SET multigres.unsafe_connection = on", []]}
 end

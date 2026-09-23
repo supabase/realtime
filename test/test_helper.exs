@@ -2,19 +2,22 @@ start_time = :os.system_time(:millisecond)
 
 alias Realtime.Api
 
-# Where tenant DBs come from — docker containers (default) or external
-# servers (USE_EXTERNAL_TENANT_DB=true). The backend is resolved exactly
-# once per run, here; everything else dispatches through
-# TestTenantDb.Backend.current().
+# USE_EXTERNAL_TENANT_DB=true swaps per-test docker containers for pre-existing servers listed
+# in EXTERNAL_TENANT_DB_PORTS. Resolved once here; the rest read Backend.current().
 backend = TestTenantDb.Backend.resolve!()
 max_cases = backend.max_cases()
 
 repo_config = Application.fetch_env!(:realtime, Realtime.Repo)
 
+# Probe a tenant database, not the realtime one: TENANT_DB_IMAGE can differ from POSTGRES_IMAGE.
 {:ok, pg_conn} =
   Postgrex.start_link(
     hostname: repo_config[:hostname],
-    port: repo_config[:port] || 5432,
+    port:
+      case backend.capability_probe_port() do
+        :realtime_db -> repo_config[:port] || 5432
+        port -> port
+      end,
     username: repo_config[:username],
     password: repo_config[:password],
     database: "postgres"
@@ -31,6 +34,19 @@ repo_config = Application.fetch_env!(:realtime, Realtime.Repo)
 %{rows: [[orioledb?]]} =
   Postgrex.query!(pg_conn, "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'orioledb')")
 
+# Postgrex leaves nothing in pg_prepared_statements for a query without :cache_statement
+# but Multigres re-prepares everything it forwards under a name of its own,
+# so this probe serves to find if it's behind a pooler or has direct connection.
+probe_marker = "direct_connection_probe_#{System.unique_integer([:positive])}"
+Postgrex.query!(pg_conn, "SELECT 1 AS #{probe_marker}", [])
+
+%{rows: [[direct_connection?]]} =
+  Postgrex.query!(
+    pg_conn,
+    "SELECT count(*) = 0 FROM pg_prepared_statements WHERE statement LIKE $1",
+    ["%#{probe_marker}%"]
+  )
+
 # `realtime.broadcast_changes(..., NEW record, OLD record, ...)` (introduced in commit 2922658c) called from a trigger via `PERFORM` fails on PG <= 14.5
 requires_pg_140006 = if pg_version_num < 140_006, do: :requires_pg_140006
 
@@ -42,9 +58,10 @@ requires_no_supautils_policy_grants = if has_supautils_realtime_grants, do: :req
 
 skip_orioledb = if orioledb?, do: :skip_orioledb
 
-# Tests that kill and recreate a pooled tenant database; only the docker backend
-# owns its databases, external servers are supplied to us.
+# Only the docker backend can drop and recreate a tenant database mid-run.
 requires_docker_backend = if backend != TestTenantDb.Backend.Docker, do: :requires_docker_backend
+
+requires_direct_connection = if !direct_connection?, do: :requires_direct_connection
 
 exclude =
   Enum.reject(
@@ -55,7 +72,8 @@ exclude =
       requires_supautils_policy_grants,
       requires_no_supautils_policy_grants,
       skip_orioledb,
-      requires_docker_backend
+      requires_docker_backend,
+      requires_direct_connection
     ],
     &is_nil/1
   )

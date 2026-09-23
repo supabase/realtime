@@ -22,6 +22,10 @@ defmodule TestTenantDb.Backend do
   # Number of concurrent ExUnit cases this backend supports.
   @callback max_cases() :: pos_integer()
 
+  # Where to probe the capabilities the suite's tags gate on. `:realtime_db` when
+  # that database runs the same image and can answer for the tenants.
+  @callback capability_probe_port() :: pos_integer() | :realtime_db
+
   # One-off setup before the pool starts. Runs before TestTenantDb.start_link/1.
   @callback prepare!() :: :ok
 

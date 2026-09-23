@@ -24,17 +24,24 @@ defmodule TestTenantDb.Backend.External do
   # demand exceeds supply). MAX_CASES is therefore ignored.
   @impl TestTenantDb.Backend
   def max_cases do
-    forced = length(ports!())
+    # One port is held back as a spare: some tests check out a second database while
+    # holding the first, and a checkin can lag the test that made it.
+    forced = max(1, length(ports!()) - 1)
 
     if System.get_env("MAX_CASES") do
       IO.puts(
         "[TestTenantDb.Backend.External] USE_EXTERNAL_TENANT_DB=true: ignoring MAX_CASES, " <>
-          "forcing max_cases to #{forced} (the number of configured external ports)."
+          "forcing max_cases to #{forced} (one fewer than the configured external ports)."
       )
     end
 
     forced
   end
+
+  # TENANT_DB_IMAGE can differ from the realtime database's image, and every
+  # configured port runs it, so the first port answers for all.
+  @impl TestTenantDb.Backend
+  def capability_probe_port, do: hd(ports!())
 
   # No image to pull or containers to stop — just start the port registry
   # the pool workers will claim from.

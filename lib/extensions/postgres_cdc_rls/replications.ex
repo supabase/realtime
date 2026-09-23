@@ -17,7 +17,7 @@ defmodule Extensions.PostgresCdcRls.Replications do
           where slot_name = $1
         )
         then (
-          select 1 from pg_create_logical_replication_slot($1, 'wal2json', 'true')
+          select 1 from pg_create_logical_replication_slot(slot_name => $1, plugin => 'wal2json', temporary => true)
         )
         else 1
         end;",

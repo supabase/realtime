@@ -317,7 +317,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
 
       %{rows: [rows]} =
-        Postgrex.query!(db_conn, "SELECT slot_name FROM pg_replication_slots", [])
+        Postgrex.query!(db_conn, "SELECT slot_name FROM pg_replication_slots WHERE slot_type = 'logical'", [])
 
       assert rows > 0
       conn = delete(conn, ~p"/api/tenants/#{tenant.external_id}")
@@ -327,7 +327,12 @@ defmodule RealtimeWeb.TenantControllerTest do
       refute Tenants.get_tenant_by_external_id(tenant.external_id)
 
       # Slot teardown happens after the delete responds.
-      assert_eventually {:ok, %{rows: []}} = Postgrex.query(db_conn, "SELECT slot_name FROM pg_replication_slots", [])
+      assert_eventually {:ok, %{rows: []}} =
+                          Postgrex.query(
+                            db_conn,
+                            "SELECT slot_name FROM pg_replication_slots WHERE slot_type = 'logical'",
+                            []
+                          )
     end
 
     test "does not read the replica", %{conn: conn, tenant: tenant} do
