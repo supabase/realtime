@@ -1,18 +1,17 @@
 defmodule Extensions.PostgresCdcRls.SynchronousCommitDeliveryTest do
-  # Postgres Changes delivers every committed change,
-  # including one whose COMMIT waited for a synchronous standby.
+  # Postgres Changes delivers every committed change, including one whose COMMIT waited for a
+  # synchronous standby.
   #
-  # PostgreSQL writes the commit record to disk before that wait, so logical decoding returns the
-  # INSERT while the writer is still in the proc array and no snapshot can see the row yet. A
-  # policy that reads the row then matches nothing, so the change has to survive being decoded
-  # early rather than being authorized for zero subscribers and consumed from the slot.
+  # PostgreSQL writes the commit record to disk before that wait, so logical decoding can return
+  # the INSERT while the writer is still in the proc array and no snapshot can see the row. A
+  # policy that reads the row then matches nothing and the change is authorized for zero
+  # subscribers, yet list_changes still consumes it from the slot.
   #
   # Both tests need RLS: without a policy that reads the row, apply_rls authorizes straight from
-  # the WAL record and never looks the row up, so neither exercises the window.
+  # the WAL record and never looks the row up, so neither would exercise the window.
   #
-  # These currently fail. A Multigres cluster runs `synchronous_standby_names = ANY 1 (...)`, so
-  # the window is open on every commit there; plain PostgreSQL defaults to no synchronous standby
-  # and the second test has to arrange one.
+  # `realtime.settled_changes` closes it by leaving a transaction that is still in flight in the
+  # slot, so the next poll delivers it rather than authorizing it against a row nobody can see.
   use Realtime.DataCase, async: false
 
   alias Extensions.PostgresCdcRls.Replications
@@ -27,8 +26,8 @@ defmodule Extensions.PostgresCdcRls.SynchronousCommitDeliveryTest do
     {:ok, conn} = Database.connect(tenant, "realtime_rls", :stop)
     Integrations.setup_postgres_changes(conn)
 
-    # setup_postgres_changes leaves public.test without RLS, which is the one thing this repro
-    # needs: a policy that has to read the row before the change can be authorized.
+    # setup_postgres_changes leaves public.test without RLS, which is the one thing these tests
+    # need: a policy that has to read the row before the change can be authorized.
     Postgrex.query!(conn, "ALTER TABLE public.test ENABLE ROW LEVEL SECURITY", [])
 
     Postgrex.query!(
@@ -42,13 +41,17 @@ defmodule Extensions.PostgresCdcRls.SynchronousCommitDeliveryTest do
 
     slot = "sync_commit_#{System.unique_integer([:positive])}"
     {:ok, _} = subscribe(conn)
-    {:ok, _} = Replications.prepare_replication(conn, slot)
 
     %{conn: conn, tenant: tenant, slot: slot}
   end
 
-  # Multigres already commits behind a synchronous standby, so nothing has to be arranged here.
+  # A Multigres cluster commits behind a synchronous standby on every write and points
+  # synchronized_standby_slots at its followers, so the window is open here without arranging
+  # anything. On a single-server image there is no window and this would pass vacuously.
+  @tag :requires_synchronous_standby
   test "concurrent writes all reach the subscriber", %{conn: conn, tenant: tenant, slot: slot} do
+    {:ok, _} = Replications.prepare_replication(conn, slot)
+
     {:ok, writer} = Database.connect(tenant, "realtime_test", :stop)
     inserts = 200
     parent = self()
@@ -65,19 +68,24 @@ defmodule Extensions.PostgresCdcRls.SynchronousCommitDeliveryTest do
              "reached the subscriber"
   end
 
-  # The same window on a database that has no synchronous standby of its own, to show the bug is
-  # Realtime's rather than Multigres'. Needs the docker backend for ALTER SYSTEM.
+  # The same window on a plain single server, which shows the fix is Realtime's rather than
+  # anything the cluster does for us. Naming a standby that does not exist parks the commit
+  # indefinitely, so the poll is guaranteed to land inside a window that is microseconds wide in
+  # production. Needs the docker backend for ALTER SYSTEM.
   @tag :requires_docker_backend
-  test "an INSERT committing behind a synchronous standby reaches the subscriber", %{
+  test "a change committing behind a synchronous standby is deferred, not dropped", %{
     conn: conn,
     tenant: tenant,
     slot: slot
   } do
     on_exit(fn ->
       {:ok, reset} = Database.connect(tenant, "realtime_test", :stop)
+      Postgrex.query(reset, "SELECT pg_cancel_backend(pid) FROM (#{waiting_in_syncrep()}) w", [])
       Postgrex.query(reset, "ALTER SYSTEM RESET synchronous_standby_names", [])
       Postgrex.query(reset, "SELECT pg_reload_conf()", [])
     end)
+
+    {:ok, _} = Replications.prepare_replication(conn, slot)
 
     Postgrex.query!(conn, "ALTER SYSTEM SET synchronous_standby_names = 'FIRST 1 (absent_standby)'", [])
     Postgrex.query!(conn, "SELECT pg_reload_conf()", [])
@@ -89,17 +97,73 @@ defmodule Extensions.PostgresCdcRls.SynchronousCommitDeliveryTest do
     spawn(fn -> Postgrex.query(writer, "INSERT INTO public.test (details) VALUES ('allowed')", [], timeout: 30_000) end)
 
     assert_eventually %{num_rows: 1} = Postgrex.query!(conn, waiting_in_syncrep(), [])
+
+    # The commit record is already on disk and decodable, but no snapshot can see the row.
     assert %{rows: [[0]]} = Postgrex.query!(conn, "SELECT count(*)::int FROM public.test", [])
+    assert authorized(conn, slot) == 0
 
-    during_wait = authorized(conn, slot)
-
-    # Release the wait so the row becomes visible, then take whatever is left in the slot.
     Postgrex.query!(conn, "SELECT pg_cancel_backend(pid) FROM (#{waiting_in_syncrep()}) w", [])
     assert_eventually %{rows: [[1]]} = Postgrex.query!(conn, "SELECT count(*)::int FROM public.test", [])
 
-    assert during_wait + authorized(conn, slot) == 1,
-           "the INSERT was consumed from the slot while its row was invisible, authorized for no " <>
-             "subscribers, and never re-delivered once it became visible"
+    # Left in the slot rather than consumed, so it arrives now instead of being lost.
+    assert_eventually authorized(conn, slot) == 1
+  end
+
+  # An in-flight transaction puts a row in the same invisible state a synchronous commit does,
+  # without needing a standby. list_changes must leave that change in the slot rather than
+  # resolving a policy against a row it cannot see, and must deliver it once it settles.
+  test "an invisible change is deferred and delivered once it settles", %{conn: conn, tenant: tenant, slot: slot} do
+    {:ok, _} = Replications.prepare_replication(conn, slot)
+    {:ok, settled_writer} = Database.connect(tenant, "realtime_settled", :stop)
+    {:ok, holder} = Database.connect(tenant, "realtime_holder", :stop)
+
+    Postgrex.query!(settled_writer, "INSERT INTO public.test (details) VALUES ('allowed')", [])
+
+    parent = self()
+
+    held =
+      spawn(fn ->
+        Postgrex.transaction(
+          holder,
+          fn tx ->
+            Postgrex.query!(tx, "INSERT INTO public.test (details) VALUES ('allowed')", [])
+            send(parent, :inserted)
+            receive do: (:release -> :ok)
+          end,
+          timeout: 30_000
+        )
+
+        send(parent, :committed)
+      end)
+
+    assert_receive :inserted, 5_000
+
+    # Only the settled row is delivered, and the in-flight one is not consumed.
+    assert authorized(conn, slot) == 1
+    assert authorized(conn, slot) == 0
+
+    send(held, :release)
+    assert_receive :committed, 5_000
+
+    # Still in the slot, so it arrives now rather than being lost.
+    assert_eventually authorized(conn, slot) == 1
+  end
+
+  # Deferral keys on visibility, never on authorization. A change the policy denies reaches
+  # nobody, but it must still leave the slot: retrying it would wedge the poller on any row no
+  # subscriber is entitled to, which is the common case on a multi-tenant table.
+  test "a change the policy denies is consumed rather than retried", %{conn: conn, tenant: tenant, slot: slot} do
+    {:ok, _} = Replications.prepare_replication(conn, slot)
+    {:ok, writer} = Database.connect(tenant, "realtime_test", :stop)
+
+    Postgrex.query!(writer, "INSERT INTO public.test (details) VALUES ('denied')", [])
+    Postgrex.query!(writer, "INSERT INTO public.test (details) VALUES ('allowed')", [])
+
+    # Both changes leave the slot; only the authorized one is delivered.
+    assert {1, 2} = poll(conn, slot)
+
+    # Nothing is left behind, so the denied change is not waiting to be retried.
+    assert {0, 0} = poll(conn, slot)
   end
 
   defp subscribe(conn) do
@@ -117,6 +181,24 @@ defmodule Extensions.PostgresCdcRls.SynchronousCommitDeliveryTest do
 
   defp waiting_in_syncrep do
     "SELECT pid FROM pg_stat_activity WHERE wait_event = 'SyncRep' AND backend_type = 'client backend'"
+  end
+
+  # slot_changes_count rides on every row, including the sentinel, and counts what the poll took
+  # from the slot regardless of who it reached.
+  defp poll(conn, slot) do
+    {:ok, %Postgrex.Result{rows: rows}} = Replications.list_changes(conn, slot, @publication, 1000, 1_048_576)
+
+    delivered =
+      Enum.count(rows, fn
+        ["INSERT", "public", "test", _cols, _record, _old, _ts, subscription_ids, _errors, _count] ->
+          subscription_ids != []
+
+        _sentinel ->
+          false
+      end)
+
+    consumed = rows |> Enum.map(&List.last/1) |> Enum.max(fn -> 0 end)
+    {delivered, consumed}
   end
 
   # A change authorized for nobody is not returned at all - only the sentinel's consumed count

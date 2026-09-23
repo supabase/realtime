@@ -355,7 +355,32 @@ defmodule TestTenantDb do
   # external server is one database reused for the whole run, so leftovers
   # there change what later tests see. A fresh tenant database has no tables
   # in `public` and exactly one publication, `supabase_realtime`.
-  defp reset_realtime_schema!(settings, attempts \\ 5) do
+  #
+  # Retried because a pooler can drop the connection mid-statement and OrioleDB can block on
+  # OTablesMetaTranche. The schema is dropped before it is recreated, so a lost attempt leaves the
+  # database with no realtime schema and every migration then fails with 3F000.
+  defp reset_realtime_schema!(settings) do
+    case WaitForIt.until(fn -> reset_realtime_schema(settings) end, timeout: 2_500, interval: 500) do
+      {:ok, _} ->
+        :ok
+
+      {:timeout, _} ->
+        # Unguarded, so the underlying error surfaces instead of a bare timeout.
+        reset_realtime_schema_once!(settings)
+    end
+  end
+
+  defp reset_realtime_schema(settings) do
+    reset_realtime_schema_once!(settings)
+    true
+  rescue
+    _ -> false
+  catch
+    # A pooler dropping the connection mid-statement exits rather than raising.
+    :exit, _ -> false
+  end
+
+  defp reset_realtime_schema_once!(settings) do
     {:ok, admin_conn} =
       Postgrex.start_link(
         hostname: settings.hostname,
@@ -421,17 +446,12 @@ defmodule TestTenantDb do
 
       Postgrex.query!(admin_conn, "GRANT USAGE ON SCHEMA realtime TO anon, authenticated, service_role", [])
       Postgrex.query!(admin_conn, "GRANT ALL ON SCHEMA realtime TO supabase_realtime_admin", [])
-    rescue
-      # Retry in case of OrioleDB OTablesMetaTranche LWLock
-      e in [Postgrex.Error, DBConnection.ConnectionError] ->
-        GenServer.stop(admin_conn)
 
-        if attempts > 1 do
-          Process.sleep(500)
-          reset_realtime_schema!(settings, attempts - 1)
-        else
-          reraise e, __STACKTRACE__
-        end
+      # Confirm the schema landed rather than trusting that no statement above was lost.
+      %{rows: [[true]]} =
+        Postgrex.query!(admin_conn, "SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'realtime')", [])
+
+      :ok
     after
       if Process.alive?(admin_conn), do: GenServer.stop(admin_conn)
     end
