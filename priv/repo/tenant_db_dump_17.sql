@@ -1080,8 +1080,8 @@ CREATE TABLE realtime.messages (
     payload jsonb,
     event text,
     private boolean DEFAULT false,
-    updated_at timestamp without time zone DEFAULT now() NOT NULL,
-    inserted_at timestamp without time zone DEFAULT now() NOT NULL,
+    updated_at timestamp without time zone DEFAULT clock_timestamp() NOT NULL,
+    inserted_at timestamp without time zone DEFAULT clock_timestamp() NOT NULL,
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     binary_payload bytea,
     skip_broadcast boolean DEFAULT false NOT NULL
@@ -1513,3 +1513,4 @@ INSERT INTO realtime."schema_migrations" (version) VALUES (20260714120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260827120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260914120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260916120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20260921120000);
