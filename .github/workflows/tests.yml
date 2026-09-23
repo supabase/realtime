@@ -173,6 +173,7 @@ jobs:
         run: .github/scripts/run_tests_with_retry.sh partition-${{ matrix.partition }}
       - name: Merge wait margin diagnostics into flaky events
         if: always()
+        continue-on-error: true # a bug in this script must never mark the test job as failed
         env:
           MIX_TEST_PARTITION: ${{ matrix.partition }}
           MATRIX_POSTGRES: ${{ matrix.postgres }}

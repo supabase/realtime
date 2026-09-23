@@ -85,7 +85,7 @@ jobs:
           #
           # postgres/partition/job_url may be absent from previous runs or `job_url` failures
           # - every use below tolerates that via `// ""`/`// empty`.
-          AGGREGATED_JSON="$(jq -sc --argjson max_entries 20 --argjson max_margin_entries 10 --argjson max_job_links 5 '
+          AGGREGATED_JSON="$(jq -sc --argjson max_entries 10 --argjson max_margin_entries 10 --argjson max_job_links 5 '
             def truncate_at_line($budget):
               if (. | length) <= $budget then .
               else
