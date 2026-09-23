@@ -19,20 +19,29 @@ defmodule RealtimeWeb.Socket.UserBroadcast do
 
   @spec convert_to_json_broadcast(t) :: {:ok, Broadcast.t()} | {:error, String.t()}
   def convert_to_json_broadcast(%__MODULE__{user_payload_encoding: :json} = user_broadcast) do
-    payload = %{
-      "event" => user_broadcast.user_event,
-      "payload" => Jason.Fragment.new(user_broadcast.user_payload),
-      "type" => "broadcast"
-    }
+    # The payload bytes are emitted verbatim as a Jason.Fragment, so we must
+    # confirm they are a single well-formed JSON value with no trailing content
+    # before trusting them.
+    case Jason.decode(user_broadcast.user_payload) do
+      {:ok, _} ->
+        payload = %{
+          "event" => user_broadcast.user_event,
+          "payload" => Jason.Fragment.new(user_broadcast.user_payload),
+          "type" => "broadcast"
+        }
 
-    payload =
-      if user_broadcast.metadata do
-        Map.put(payload, "meta", user_broadcast.metadata)
-      else
-        payload
-      end
+        payload =
+          if user_broadcast.metadata do
+            Map.put(payload, "meta", user_broadcast.metadata)
+          else
+            payload
+          end
 
-    {:ok, %Broadcast{event: "broadcast", payload: payload, topic: user_broadcast.topic}}
+        {:ok, %Broadcast{event: "broadcast", payload: payload, topic: user_broadcast.topic}}
+
+      {:error, _} ->
+        {:error, "User payload is not valid JSON"}
+    end
   end
 
   def convert_to_json_broadcast(%__MODULE__{}), do: {:error, "User payload encoding is not JSON"}
