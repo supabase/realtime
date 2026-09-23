@@ -461,6 +461,10 @@ defmodule RealtimeWeb.RealtimeChannel do
     with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id) do
       BroadcastHandler.handle(payload, db_conn, socket)
     else
+      {:error, :rpc_error, error} ->
+        log_error(socket, "UnableToHandleBroadcast", error)
+        {:noreply, socket}
+
       {:error, error} ->
         log_error(socket, "UnableToHandleBroadcast", error)
         {:noreply, socket}
@@ -491,6 +495,10 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, :invalid_payload} ->
         log_error(socket, "InvalidPresencePayload", :invalid_payload)
         {:reply, {:error, %{reason: "Presence track payload must be a map"}}, socket}
+
+      {:error, :rpc_error, error} ->
+        log_error(socket, "UnableToHandlePresence", error)
+        {:reply, :error, socket}
 
       {:error, error} ->
         log_error(socket, "UnableToHandlePresence", error)

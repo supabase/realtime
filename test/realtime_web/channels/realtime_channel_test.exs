@@ -633,6 +633,28 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       refute_receive %Socket.Message{}
     end
+
+    test "private broadcast but Connect had an RPC error", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      assert %Socket{channel_pid: channel_pid} =
+               socket = subscribe_and_join!(socket, "realtime:test", %{"config" => %{"private" => true}})
+
+      log =
+        capture_log(fn ->
+          expect(Connect, :lookup_or_start_connection, fn _ -> {:error, :rpc_error, :timeout} end)
+          allow(Connect, self(), channel_pid)
+
+          push(socket, "broadcast", %{"event" => "my_event", "payload" => %{"hello" => "world"}})
+
+          # Waits for the channel to handle the broadcast
+          :sys.get_state(channel_pid)
+        end)
+
+      assert log =~ "UnableToHandleBroadcast: :timeout"
+      assert Process.alive?(channel_pid)
+    end
   end
 
   describe "presence" do
@@ -854,6 +876,29 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       assert_receive %Socket.Message{event: "presence_state"}, 500
       assert socket.assigns.presence_enabled? == true
+    end
+
+    @tag policies: [:authenticated_all_topic_read]
+    test "private presence track but Connect had an RPC error", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      config = %{"config" => %{"private" => true, "presence" => %{"enabled" => true}}}
+      assert %Socket{channel_pid: channel_pid} = socket = subscribe_and_join!(socket, "realtime:test", config)
+
+      assert_receive %Socket.Message{topic: "realtime:test", event: "presence_state"}, 500
+
+      log =
+        capture_log(fn ->
+          expect(Connect, :lookup_or_start_connection, fn _ -> {:error, :rpc_error, :timeout} end)
+          allow(Connect, self(), channel_pid)
+
+          ref = push(socket, "presence", %{"type" => "presence", "event" => "TRACK", "payload" => %{"user" => "a"}})
+          assert_receive %Socket.Reply{ref: ^ref, status: :error}, 500
+        end)
+
+      assert log =~ "UnableToHandlePresence: :timeout"
+      assert Process.alive?(channel_pid)
     end
   end
 

@@ -1,5 +1,10 @@
 defmodule Realtime.Tenants.ReconnectorTest do
   use Realtime.DataCase, async: true
+  use Mimic
+
+  setup :set_mimic_from_context
+
+  import ExUnit.CaptureLog
 
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Reconnector
@@ -49,6 +54,40 @@ defmodule Realtime.Tenants.ReconnectorTest do
 
       refute_receive %{event: "ready"}, 500
       refute Connect.whereis(tenant.external_id)
+    end
+
+    test "logs a warning when Connect had an RPC error", %{tenant: tenant} do
+      %{external_id: tenant_id} = tenant
+      {:ok, reconnector} = Reconnector.start_link([])
+
+      user_pid = spawn(fn -> Process.sleep(:infinity) end)
+      UsersCounter.add(user_pid, tenant_id)
+
+      test_pid = self()
+
+      # Holds the reconnect task until it is monitored, so its exit reason can be asserted
+      stub(Connect, :lookup_or_start_connection, fn
+        ^tenant_id ->
+          send(test_pid, {:reconnecting, self()})
+          receive do: (:continue -> {:error, :rpc_error, :timeout})
+
+        other_tenant_id ->
+          call_original(Connect, :lookup_or_start_connection, [other_tenant_id])
+      end)
+
+      allow(Connect, self(), reconnector)
+      send(reconnector, :check)
+
+      assert_receive {:reconnecting, task_pid}, 5000
+      ref = Process.monitor(task_pid)
+
+      log =
+        capture_log(fn ->
+          send(task_pid, :continue)
+          assert_receive {:DOWN, ^ref, :process, ^task_pid, :normal}
+        end)
+
+      assert log =~ "Reconnector could not restart connection for #{tenant_id}: :timeout"
     end
   end
 end
