@@ -41,6 +41,34 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
       assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 500
     end
 
+    @tag serializer: RealtimeWeb.Socket.V2Serializer
+    test "a V2 json user broadcast with an invalid payload is dropped for a V1 subscriber", %{tenant: tenant} do
+      topic = "realtime:any"
+      config = %{broadcast: %{self: false}, private: false}
+
+      {v2_sender, _} = get_connection(tenant, RealtimeWeb.Socket.V2Serializer)
+      {v1_receiver, _} = get_connection(tenant, Phoenix.Socket.V1.JSONSerializer)
+
+      WebsocketClient.join(v2_sender, topic, %{config: config})
+      WebsocketClient.join(v1_receiver, topic, %{config: config})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+
+      WebsocketClient.send_user_broadcast(v2_sender, topic, "evt", "not json at all", encoding: :json)
+      refute_receive %Message{event: "broadcast"}, 500
+
+      # valid JSON still delivers
+      WebsocketClient.send_user_broadcast(v2_sender, topic, "evt", ~s|{"a":1}|, encoding: :json)
+
+      assert_receive %Message{
+                       event: "broadcast",
+                       topic: ^topic,
+                       payload: %{"event" => "evt", "payload" => %{"a" => 1}, "type" => "broadcast"}
+                     },
+                     1000
+    end
+
     test "broadcast to another tenant does not get mixed up", %{tenant: tenant, serializer: serializer} do
       other_tenant = TestTenantDb.checkout_tenant(run_migrations: true)
 

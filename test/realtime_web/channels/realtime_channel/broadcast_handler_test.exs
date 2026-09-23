@@ -562,10 +562,11 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
               ]} = Repo.all(db_conn, messages_for(topic), Message)
     end
 
-    test "V2 json user broadcast with an invalid user payload is delivered but not persisted", %{
+    test "V2 json user broadcast with an invalid user payload is not persisted, and dropped for V1", %{
       topic: topic,
       tenant: tenant,
-      db_conn: db_conn
+      db_conn: db_conn,
+      serializer: serializer
     } do
       socket =
         socket_fixture(tenant, topic,
@@ -582,9 +583,13 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           assert {:reply, :ok, _socket} = BroadcastHandler.handle(v2_payload, db_conn, socket)
         end)
 
-      assert_receive {:socket_push, _encoding, _data}
-      assert log =~ "UnableToPersistMessage"
+      case serializer do
+        # V1 rejects it
+        Phoenix.Socket.V1.JSONSerializer -> refute_receive {:socket_push, _encoding, _data}
+        RealtimeWeb.Socket.V2Serializer -> assert_receive {:socket_push, _encoding, _data}
+      end
 
+      assert log =~ "UnableToPersistMessage"
       assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
 
