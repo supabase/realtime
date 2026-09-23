@@ -121,18 +121,6 @@ defmodule Realtime.Application do
         RealtimeWeb.Telemetry,
         Realtime.GenRpcPubSub.RegionRings,
         {Cluster.Supervisor, [topologies, [name: Realtime.ClusterSupervisor]]},
-        {Phoenix.PubSub,
-         name: Realtime.PubSub, pool_size: 10, adapter: pubsub_adapter(), broadcast_pool_size: broadcast_pool_size},
-        {Forum.Census,
-         [
-           :users,
-           [
-             partitions: user_scope_shards,
-             broadcast_interval_in_ms: user_scope_broadast_interval_in_ms,
-             discover_interval_in_ms: user_scope_discover_interval_in_ms,
-             message_module: Realtime.ForumPubSubAdapter
-           ]
-         ]},
         {Forum.Muster,
          [
            muster_scope,
@@ -154,6 +142,18 @@ defmodule Realtime.Application do
         # the Muster coordinator terminates. See Realtime.MusterDrainer.
         {Realtime.MusterDrainer,
          scope: muster_scope, drain_opts: Application.get_env(:realtime, :muster_drain_opts, [])},
+        {Phoenix.PubSub,
+         name: Realtime.PubSub, pool_size: 10, adapter: pubsub_adapter(), broadcast_pool_size: broadcast_pool_size},
+        {Forum.Census,
+         [
+           :users,
+           [
+             partitions: user_scope_shards,
+             broadcast_interval_in_ms: user_scope_broadast_interval_in_ms,
+             discover_interval_in_ms: user_scope_discover_interval_in_ms,
+             message_module: Realtime.ForumPubSubAdapter
+           ]
+         ]},
         Supervisor.child_spec({Cachex, name: Realtime.RateCounter}, id: Realtime.RateCounter),
         Supervisor.child_spec({Cachex, name: Realtime.Nodes.Cache}, id: Realtime.Nodes.Cache),
         Supervisor.child_spec(
