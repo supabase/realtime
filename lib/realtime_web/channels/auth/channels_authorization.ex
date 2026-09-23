@@ -3,15 +3,6 @@ defmodule RealtimeWeb.ChannelsAuthorization do
   Check connection is authorized to access channel
   """
 
-  alias Realtime.Crypto
-
-  @doc """
-  Decrypts a tenant's `jwt_secret`.
-  """
-  @spec decrypt_jwt_secret(binary() | nil) :: binary() | nil
-  def decrypt_jwt_secret(nil), do: nil
-  def decrypt_jwt_secret(jwt_secret), do: Crypto.decrypt!(jwt_secret)
-
   @doc """
   Authorize connection to access channel
   """

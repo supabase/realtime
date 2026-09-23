@@ -18,7 +18,7 @@ defmodule RealtimeWeb.AuthTenant do
 
     with %Tenant{jwt_secret: jwt_secret, jwt_jwks: jwt_jwks} <- tenant,
          token when is_binary(token) <- access_token(conn),
-         jwt_secret_dec <- ChannelsAuthorization.decrypt_jwt_secret(jwt_secret),
+         jwt_secret_dec <- Tenant.decrypt_jwt_secret(jwt_secret),
          {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec, jwt_jwks) do
       conn
       |> assign(:claims, claims)

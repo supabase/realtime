@@ -51,6 +51,7 @@ defmodule RealtimeWeb.JwtVerification do
           {:ok, map()}
           | {:error, Joken.error_reason()}
           | {:error, {:error_generating_signer, binary()}}
+          | {:error, :error_generating_signer}
   def verify(token, jwt_secret, jwt_jwks) when is_binary(token) do
     with {:ok, _claims} <- check_claims_format(token),
          {:ok, header} <- check_header_format(token),
