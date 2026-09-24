@@ -463,11 +463,27 @@ defmodule RealtimeWeb.RealtimeChannel do
     else
       {:error, :rpc_error, error} ->
         log_error(socket, "UnableToHandleBroadcast", error)
-        {:noreply, socket}
+        BroadcastHandler.maybe_reply_error(socket, :unknown_error)
+
+      {:error, :tenant_database_unavailable} ->
+        log_error(socket, "UnableToHandleBroadcast", :tenant_database_unavailable)
+        BroadcastHandler.maybe_reply_error(socket, :tenant_database_unavailable)
+
+      {:error, :tenant_db_too_many_connections} ->
+        log_error(socket, "UnableToHandleBroadcast", :tenant_db_too_many_connections)
+        BroadcastHandler.maybe_reply_error(socket, :tenant_db_too_many_connections)
+
+      {:error, :connect_rate_limit_reached} ->
+        log_error(socket, "UnableToHandleBroadcast", :connect_rate_limit_reached)
+        BroadcastHandler.maybe_reply_error(socket, :connect_rate_limit_reached)
+
+      {:error, reason} when reason in [:initializing, :tenant_database_connection_initializing] ->
+        log_error(socket, "UnableToHandleBroadcast", reason)
+        BroadcastHandler.maybe_reply_error(socket, :initializing)
 
       {:error, error} ->
         log_error(socket, "UnableToHandleBroadcast", error)
-        {:noreply, socket}
+        BroadcastHandler.maybe_reply_error(socket, :unknown_error)
     end
   end
 
