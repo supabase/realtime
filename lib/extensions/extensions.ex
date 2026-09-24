@@ -19,4 +19,10 @@ defmodule Realtime.Extensions do
       %{default: %{}, required: []}
     end
   end
+
+  @doc "Names of the settings fields stored encrypted for the given extension type."
+  @spec encrypted_settings_keys(String.t()) :: [String.t()]
+  def encrypted_settings_keys(type) do
+    for {field, _checker, true} <- db_settings(type).required, do: field
+  end
 end

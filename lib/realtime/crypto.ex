@@ -5,8 +5,8 @@ defmodule Realtime.Crypto do
   AES-256-GCM ciphertext carries a `"g1:"` prefix, legacy AES-128-ECB ciphertext is bare base64.
   `:` is not in the base64 alphabet, so `decrypt!/1` picks the cipher from the value itself.
 
-  New writes use GCM when `:db_enc_write_gcm` is set; `Realtime.Tenants.EncryptionReconciler`
-  re-encrypts legacy values in place. Once nothing is on ECB, the ECB branch and `:db_enc_key` go.
+  Which cipher a given tenant's writes use is decided by `Realtime.Tenants.Encryption.cipher_for/1`,
+  not here. Once nothing is on ECB, the ECB branch and `:db_enc_key` go.
   """
 
   require Logger
@@ -16,11 +16,12 @@ defmodule Realtime.Crypto do
   @type cipher :: :gcm | :ecb
 
   @doc """
-  Encrypts the given text. Uses `:db_enc_write_gcm` to pick the cipher unless `:cipher` is given.
+  Encrypts the given text with the legacy cipher unless `:cipher` asks for GCM, so a caller that has
+  not resolved `Realtime.Tenants.Encryption.cipher_for/1` can never write GCM by accident.
   """
   @spec encrypt!(binary(), [{:cipher, cipher()}]) :: binary()
   def encrypt!(text, opts \\ []) do
-    case Keyword.get(opts, :cipher, default_cipher()) do
+    case Keyword.get(opts, :cipher, :ecb) do
       :gcm -> encrypt_gcm!(text)
       :ecb -> encrypt_ecb!(text)
     end
@@ -81,10 +82,6 @@ defmodule Realtime.Crypto do
   @spec legacy_settings?(map(), [String.t()]) :: boolean()
   def legacy_settings?(settings, keys) do
     Enum.any?(keys, &(is_binary(settings[&1]) and not gcm?(settings[&1])))
-  end
-
-  defp default_cipher do
-    if write_gcm?(), do: :gcm, else: :ecb
   end
 
   defp gcm_requested?, do: Application.get_env(:realtime, :db_enc_write_gcm, false)

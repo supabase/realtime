@@ -19,7 +19,7 @@ defmodule Realtime.Api.Extensions do
     timestamps()
   end
 
-  def changeset(extension, attrs) do
+  def changeset(extension, attrs, opts \\ []) do
     {new_attrs, required_settings} =
       case attrs["type"] do
         nil ->
@@ -39,14 +39,14 @@ defmodule Realtime.Api.Extensions do
     |> validate_required([:type, :settings])
     |> unique_constraint([:tenant_external_id, :type])
     |> validate_required_settings(required_settings)
-    |> encrypt_settings(required_settings)
+    |> encrypt_settings(required_settings, opts)
   end
 
-  def encrypt_settings(changeset, fields) do
+  def encrypt_settings(changeset, fields, opts \\ []) do
     update_change(changeset, :settings, fn settings ->
       Enum.reduce(fields, settings, fn
         {field, _, true}, acc ->
-          if is_nil(acc[field]), do: acc, else: Map.put(acc, field, Crypto.encrypt!(acc[field]))
+          if is_nil(acc[field]), do: acc, else: Map.put(acc, field, Crypto.encrypt!(acc[field], opts))
 
         _, acc ->
           acc

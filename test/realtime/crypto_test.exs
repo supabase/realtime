@@ -21,9 +21,9 @@ defmodule Realtime.CryptoTest do
       end
     end
 
-    test "defaults to GCM when :db_enc_write_gcm is set" do
+    test "defaults to the legacy cipher even with :db_enc_write_gcm set - GCM is opt-in per call" do
       assert Crypto.write_gcm?()
-      assert Crypto.gcm?(Crypto.encrypt!("my-secret"))
+      refute Crypto.gcm?(Crypto.encrypt!("my-secret"))
     end
 
     test "GCM is non-deterministic - a fresh random IV is used every call" do
