@@ -675,7 +675,106 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert log =~ "UnableToHandleBroadcast: :timeout"
     end
 
-    test "private broadcast with ack but Connect had an error", %{tenant: tenant} do
+    test "private broadcast with ack but Connect had an unknown error", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      config = %{"config" => %{"private" => true, "broadcast" => %{"ack" => true}}}
+      assert %Socket{channel_pid: channel_pid} = socket = subscribe_and_join!(socket, "realtime:test", config)
+
+      log =
+        capture_log(fn ->
+          expect(Connect, :lookup_or_start_connection, fn _ -> {:error, :something_unexpected} end)
+          allow(Connect, self(), channel_pid)
+
+          ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{"hello" => "world"}})
+          assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{error: :unknown_error}}, 500
+        end)
+
+      assert log =~ "UnableToHandleBroadcast: :something_unexpected"
+    end
+
+    test "private broadcast with ack but Connect reached the connect rate limit", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      config = %{"config" => %{"private" => true, "broadcast" => %{"ack" => true}}}
+      assert %Socket{channel_pid: channel_pid} = socket = subscribe_and_join!(socket, "realtime:test", config)
+
+      log =
+        capture_log(fn ->
+          expect(Connect, :lookup_or_start_connection, fn _ -> {:error, :connect_rate_limit_reached} end)
+          allow(Connect, self(), channel_pid)
+
+          ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{"hello" => "world"}})
+
+          assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{error: :connect_rate_limit_reached}},
+                         500
+        end)
+
+      assert log =~ "UnableToHandleBroadcast: :connect_rate_limit_reached"
+    end
+
+    test "private broadcast with ack but Connect was initializing", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      config = %{"config" => %{"private" => true, "broadcast" => %{"ack" => true}}}
+      assert %Socket{channel_pid: channel_pid} = socket = subscribe_and_join!(socket, "realtime:test", config)
+
+      log =
+        capture_log(fn ->
+          expect(Connect, :lookup_or_start_connection, fn _ -> {:error, :initializing} end)
+          allow(Connect, self(), channel_pid)
+
+          ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{"hello" => "world"}})
+          assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{error: :initializing}}, 500
+        end)
+
+      assert log =~ "UnableToHandleBroadcast: :initializing"
+    end
+
+    test "private broadcast with ack but Connect was initializing the database connection", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      config = %{"config" => %{"private" => true, "broadcast" => %{"ack" => true}}}
+      assert %Socket{channel_pid: channel_pid} = socket = subscribe_and_join!(socket, "realtime:test", config)
+
+      log =
+        capture_log(fn ->
+          expect(Connect, :lookup_or_start_connection, fn _ -> {:error, :tenant_database_connection_initializing} end)
+          allow(Connect, self(), channel_pid)
+
+          ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{"hello" => "world"}})
+          assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{error: :initializing}}, 500
+        end)
+
+      assert log =~ "UnableToHandleBroadcast: :tenant_database_connection_initializing"
+    end
+
+    test "private broadcast with ack but Connect had too many connections", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      config = %{"config" => %{"private" => true, "broadcast" => %{"ack" => true}}}
+      assert %Socket{channel_pid: channel_pid} = socket = subscribe_and_join!(socket, "realtime:test", config)
+
+      log =
+        capture_log(fn ->
+          expect(Connect, :lookup_or_start_connection, fn _ -> {:error, :tenant_db_too_many_connections} end)
+          allow(Connect, self(), channel_pid)
+
+          ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{"hello" => "world"}})
+
+          assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{error: :tenant_db_too_many_connections}},
+                         500
+        end)
+
+      assert log =~ "UnableToHandleBroadcast: :tenant_db_too_many_connections"
+    end
+
+    test "private broadcast with ack but Connect had the tenant database unavailable", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
@@ -688,7 +787,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
           allow(Connect, self(), channel_pid)
 
           ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{"hello" => "world"}})
-          assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{error: :unknown_error}}, 500
+          assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{error: :tenant_database_unavailable}}, 500
         end)
 
       assert log =~ "UnableToHandleBroadcast: :tenant_database_unavailable"
