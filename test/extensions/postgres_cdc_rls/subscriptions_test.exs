@@ -14,15 +14,19 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
   # context conn/tenant, so they skip the expensive tenant checkout + postgres_changes setup.
   defp maybe_checkout_tenant(%{without_db: true}), do: :ok
 
-  defp maybe_checkout_tenant(_context) do
+  defp maybe_checkout_tenant(context) do
     tenant = TestTenantDb.checkout_tenant(run_migrations: true)
 
     {:ok, db_settings} = Database.from_tenant(tenant, "realtime_rls")
+
+    # Allow individual tests to override the pool queue settings.
+    pool_opts = Map.get(context, :pool_queue, [])
 
     {:ok, conn} =
       db_settings
       |> Map.from_struct()
       |> Keyword.new()
+      |> Keyword.merge(pool_opts)
       |> Postgrex.start_link()
 
     Integrations.setup_postgres_changes(conn)
@@ -909,13 +913,15 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
                Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
     end
 
+    @tag pool_queue: [queue_target: 50, queue_interval: 100]
     test "subscription creation fails gracefully when the connection pool is exhausted", %{
       conn: conn
     } do
       {:ok, subscription_params} =
         Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test"})
 
-      Task.start(fn -> Postgrex.query!(conn, "SELECT pg_sleep(11)", []) end)
+      # Just has to outlast the ~300ms the pool needs to shed the queued checkout.
+      Task.start(fn -> Postgrex.query!(conn, "SELECT pg_sleep(5)", []) end)
 
       subscription_list = [
         %{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}
