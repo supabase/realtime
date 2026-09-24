@@ -5,6 +5,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   setup :set_mimic_from_context
 
   import ExUnit.CaptureLog
+  import WaitForIt
 
   alias Phoenix.Channel.Server
   alias Phoenix.Socket
@@ -1003,6 +1004,37 @@ defmodule RealtimeWeb.RealtimeChannelTest do
         end)
 
       refute log =~ "ChannelRateLimitReached"
+    end
+  end
+
+  describe "maximum number of events per second" do
+    test "applies a raised limit once the rate counter restarts", %{tenant: tenant} do
+      {:ok, tenant} = Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{max_events_per_second: 1})
+
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+      assert {:ok, _, %Socket{} = socket} = subscribe_and_join(socket, "realtime:test", %{})
+      %{rate_counter: %{id: rate_counter_id}} = socket.assigns
+
+      {:ok, _} = Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{max_events_per_second: 1_000})
+
+      # The update stops the RateCounter; the next get/1 starts a new one once its cache entry expires
+      wait!(Cachex.get(RateCounter, rate_counter_id) == {:ok, nil}, timeout: 3_000, interval: 50)
+
+      # Dispatching a message to the channel is what gets the RateCounter again
+      send(socket.channel_pid, :update_rate_counter)
+      :sys.get_state(socket.channel_pid)
+
+      Realtime.GenCounter.add(rate_counter_id, 100)
+
+      assert {:ok, %RateCounter{limit: %{value: 1_000, triggered: false}}} =
+               RateCounterHelper.tick!(socket.assigns.rate_counter)
+
+      send(socket.channel_pid, :update_rate_counter)
+      :sys.get_state(socket.channel_pid)
+
+      refute_push "system", %{message: "Too many messages per second"}
+      assert Process.alive?(socket.channel_pid)
     end
   end
 

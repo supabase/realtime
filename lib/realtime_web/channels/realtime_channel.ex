@@ -301,7 +301,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   def handle_info(:update_rate_counter, socket) do
     count(socket)
 
-    {:ok, rate_counter} = RateCounter.get(socket.assigns.rate_counter)
+    {:ok, rate_counter} = RateCounter.get(rate_counter_args(socket))
 
     if rate_counter.limit.triggered do
       message = "Too many messages per second"
@@ -828,6 +828,15 @@ defmodule RealtimeWeb.RealtimeChannel do
   defp now, do: System.monotonic_time(:millisecond)
 
   defp count(%{assigns: %{rate_counter: counter}}), do: GenCounter.add(counter.id)
+
+  # A limit change restarts the RateCounter and whichever caller gets it first starts it again with its own args,
+  # so build them from the cached tenant instead of reusing the ones assigned at join
+  defp rate_counter_args(%{assigns: %{tenant: tenant_id, rate_counter: rate_counter}}) do
+    case Cache.get_tenant_by_external_id(tenant_id) do
+      %Tenant{} = tenant -> Tenants.events_per_second_rate(tenant)
+      nil -> rate_counter
+    end
+  end
 
   defp assign_access_token(%{assigns: %{tenant_token: tenant_token}} = socket, params) do
     access_token = Map.get(params, "access_token") || Map.get(params, "user_token")
