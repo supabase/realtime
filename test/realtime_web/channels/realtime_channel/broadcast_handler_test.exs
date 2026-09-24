@@ -28,6 +28,9 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
   setup [:initiate_tenant]
 
   @payload %{"event" => "test", "payload" => %{"a" => "b"}}
+  # Per-message persistence intent travels in the frame metadata, so a persisting broadcast is
+  # always the V2 user_broadcast_push shape.
+  @persist_payload {"test", :json, ~s({"a":"b"}), %{"persist" => true}}
 
   describe "handle/3" do
     test "with write true policy, user is able to send message",
@@ -187,9 +190,9 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
          %{topic: topic, tenant: tenant, db_conn: db_conn, serializer: serializer} do
       socket = socket_fixture(tenant, topic)
 
-      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context, extension ->
-        assert extension == :broadcast
-        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context, extension])
+      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context, extensions ->
+        assert extensions == [:broadcast]
+        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context, extensions])
       end)
 
       reject(&Authorization.get_write_authorizations/4)
@@ -216,9 +219,9 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     test "validation only runs once on nil and blocking policies", %{topic: topic, tenant: tenant, db_conn: db_conn} do
       socket = socket_fixture(tenant, topic)
 
-      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context, extension ->
-        assert extension == :broadcast
-        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context, extension])
+      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context, extensions ->
+        assert extensions == [:broadcast]
+        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context, extensions])
       end)
 
       for _ <- 1..100, reduce: socket do
@@ -493,7 +496,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           }
         )
 
-      assert {:reply, {:ok, %{id: id}}, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+      assert {:reply, {:ok, %{id: id}}, _socket} = BroadcastHandler.handle(@persist_payload, db_conn, socket)
       expected_payload = @payload["payload"]
 
       assert {:ok,
@@ -523,7 +526,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           }
         )
 
-      assert {:noreply, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+      assert {:noreply, _socket} = BroadcastHandler.handle(@persist_payload, db_conn, socket)
 
       assert_eventually(
         {:ok, [%Message{topic: ^topic, event: "test", skip_broadcast: true}]} =
@@ -544,7 +547,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           }
         )
 
-      v2_payload = {"event123", :json, Jason.encode!(%{"a" => "b"}), %{}}
+      v2_payload = {"event123", :json, Jason.encode!(%{"a" => "b"}), %{"persist" => true}}
 
       assert {:reply, {:ok, %{id: id}}, _socket} = BroadcastHandler.handle(v2_payload, db_conn, socket)
 
@@ -576,7 +579,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           }
         )
 
-      v2_payload = {"event123", :json, "not json at all", %{}}
+      v2_payload = {"event123", :json, "not json at all", %{"persist" => true}}
 
       log =
         capture_log(fn ->
@@ -609,7 +612,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       binary = <<0, 1, 2, 3>>
 
       assert {:reply, {:ok, %{id: id}}, _socket} =
-               BroadcastHandler.handle({"event123", :binary, binary, %{}}, db_conn, socket)
+               BroadcastHandler.handle({"event123", :binary, binary, %{"persist" => true}}, db_conn, socket)
 
       assert {:ok,
               [
@@ -643,7 +646,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           assert {:reply, :ok, _socket} = BroadcastHandler.handle(%{"no" => "event or payload"}, db_conn, socket)
         end)
 
-      assert log =~ "UnableToPersistMessage"
+      # A map frame carries no metadata, so there is no intent and persistence is never attempted.
+      refute log =~ "UnableToPersistMessage"
       assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
 
@@ -664,10 +668,10 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       log =
         capture_log(fn ->
-          assert {:reply, :ok, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+          assert {:reply, :ok, _socket} = BroadcastHandler.handle(@persist_payload, db_conn, socket)
         end)
 
-      assert_receive {:socket_push, :text, _data}
+      assert_receive {:socket_push, _encoding, _data}
       assert log =~ "UnableToPersistMessage"
       assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
@@ -684,7 +688,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           }
         )
 
-      assert {:reply, :ok, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+      assert {:reply, :ok, _socket} = BroadcastHandler.handle(@persist_payload, db_conn, socket)
 
       assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
@@ -696,7 +700,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     } do
       socket = socket_fixture(tenant, topic, policies: %Policies{broadcast: %BroadcastPolicies{write: false}})
 
-      assert {:noreply, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+      assert {:noreply, _socket} = BroadcastHandler.handle(@persist_payload, db_conn, socket)
 
       assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
@@ -720,6 +724,123 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       socket = socket_fixture(tenant, topic, private?: false, policies: nil)
 
       assert {:reply, :ok, _socket} = BroadcastHandler.handle(@payload, nil, socket)
+    end
+  end
+
+  describe "per-message persistence intent" do
+    setup do
+      stub(FeatureFlags, :enabled?, fn
+        "broadcast_persistence", _tenant_id -> true
+        flag, tenant_id -> call_original(FeatureFlags, :enabled?, [flag, tenant_id])
+      end)
+
+      :ok
+    end
+
+    @persist_off {"test", :json, ~s({"a":"b"}), %{}}
+
+    test "a later message can opt out after an earlier one opted in", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket =
+        socket_fixture(tenant, topic,
+          ack_broadcast: true,
+          policies: %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}}
+        )
+
+      assert {:reply, {:ok, %{id: id}}, socket} = BroadcastHandler.handle(@persist_payload, db_conn, socket)
+      assert {:reply, :ok, _socket} = BroadcastHandler.handle(@persist_off, db_conn, socket)
+
+      assert {:ok, [%Message{id: ^id}]} = Repo.all(db_conn, messages_for(topic), Message)
+    end
+
+    test "a later message can opt in after an earlier one opted out", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket =
+        socket_fixture(tenant, topic,
+          ack_broadcast: true,
+          policies: %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}}
+        )
+
+      assert {:reply, :ok, socket} = BroadcastHandler.handle(@persist_off, db_conn, socket)
+      assert {:reply, {:ok, %{id: id}}, _socket} = BroadcastHandler.handle(@persist_payload, db_conn, socket)
+
+      assert {:ok, [%Message{id: ^id}]} = Repo.all(db_conn, messages_for(topic), Message)
+    end
+
+    test "intent without an authorizing policy stores nothing", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket =
+        socket_fixture(tenant, topic,
+          ack_broadcast: true,
+          policies: %Policies{broadcast: %BroadcastPolicies{write: true, persist: false}}
+        )
+
+      assert {:reply, :ok, _socket} = BroadcastHandler.handle(@persist_payload, db_conn, socket)
+      assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
+    end
+  end
+
+  describe "extensions_to_probe/2" do
+    test "probes broadcast when the write policy is unchecked" do
+      assert [:broadcast] = BroadcastHandler.extensions_to_probe(%Policies{}, false)
+    end
+
+    test "probes both when the message asks to persist and neither is checked" do
+      assert [:broadcast, :persistence] = BroadcastHandler.extensions_to_probe(%Policies{}, true)
+    end
+
+    test "does not probe persistence when the message does not ask" do
+      policies = %Policies{broadcast: %BroadcastPolicies{write: true}}
+      assert [] = BroadcastHandler.extensions_to_probe(policies, false)
+    end
+
+    test "probes only persistence when write is already known" do
+      policies = %Policies{broadcast: %BroadcastPolicies{write: true}}
+      assert [:persistence] = BroadcastHandler.extensions_to_probe(policies, true)
+    end
+
+    test "a cached denial is not probed again" do
+      policies = %Policies{broadcast: %BroadcastPolicies{write: true, persist: false}}
+      assert [] = BroadcastHandler.extensions_to_probe(policies, true)
+    end
+  end
+
+  describe "persist?/2" do
+    test "requires both intent and an authorizing policy" do
+      allowed = %Policies{broadcast: %BroadcastPolicies{persist: true}}
+      denied = %Policies{broadcast: %BroadcastPolicies{persist: false}}
+      unchecked = %Policies{broadcast: %BroadcastPolicies{persist: nil}}
+
+      assert BroadcastHandler.persist?(allowed, true)
+      refute BroadcastHandler.persist?(allowed, false)
+      refute BroadcastHandler.persist?(denied, true)
+      refute BroadcastHandler.persist?(unchecked, true)
+    end
+  end
+
+  describe "persist_intent/1" do
+    test "reads the flag from frame metadata" do
+      assert BroadcastHandler.persist_intent({"e", :json, "{}", %{"persist" => true}})
+      refute BroadcastHandler.persist_intent({"e", :json, "{}", %{"persist" => false}})
+      refute BroadcastHandler.persist_intent({"e", :json, "{}", %{}})
+    end
+
+    test "a map frame has no metadata, so no intent" do
+      refute BroadcastHandler.persist_intent(%{"event" => "e", "payload" => %{}})
+    end
+
+    test "only a literal true counts" do
+      refute BroadcastHandler.persist_intent({"e", :json, "{}", %{"persist" => "true"}})
+      refute BroadcastHandler.persist_intent({"e", :json, "{}", %{"persist" => 1}})
     end
   end
 
