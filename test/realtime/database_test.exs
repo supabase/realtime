@@ -205,7 +205,11 @@ defmodule Realtime.DatabaseTest do
       }
 
       {:ok, tenant} = update_extension(context.tenant, extension)
-      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+
+      # Split database connection and pool creation into two steps so individual tests
+      # can control the pool_queue settings.
+      {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
+      {:ok, db_conn} = Database.connect_db(settings, Map.get(context, :pool_queue, []))
 
       %{db_conn: db_conn}
     end
@@ -217,19 +221,21 @@ defmodule Realtime.DatabaseTest do
                end)
     end
 
-    @tag db_pool: 1
+    @tag db_pool: 1, pool_queue: [queue_target: 50, queue_interval: 100]
     test "on checkout error, handles raised exception as an error", %{db_conn: db_conn} do
+      TestHelpers.await_pool_ready!(db_conn)
+
       for _ <- 1..5 do
         Task.start(fn ->
           Database.transaction(
             db_conn,
-            fn conn -> Postgrex.query!(conn, "SELECT pg_sleep(20)", []) end,
+            fn conn -> Postgrex.query!(conn, "SELECT pg_sleep(10)", []) end,
             timeout: 20000
           )
         end)
       end
 
-      Process.sleep(100)
+      TestHelpers.await_pool_saturated!(db_conn)
 
       log =
         capture_log(fn ->

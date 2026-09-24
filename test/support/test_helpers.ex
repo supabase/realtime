@@ -6,6 +6,8 @@ defmodule TestHelpers do
   the three case templates in `test/support` do this already, so most tests get it for free.
   """
 
+  import WaitForIt
+
   @default_timeout 5_000
   @default_interval 100
 
@@ -185,5 +187,37 @@ defmodule TestHelpers do
     opts
     |> Keyword.put_new(:timeout, @negative_timeout)
     |> Keyword.put_new(:interval, @negative_interval)
+  end
+
+  @doc """
+  Blocks until `db_conn`'s pool has no connection left to hand out.
+
+  Useful for tests that deliberately exhaust a pool and then assert on the resulting
+  `:queue_timeout`. Also works for a pool on another node.
+  """
+  @spec await_pool_saturated!(pid() | atom()) :: :ok
+  def await_pool_saturated!(db_conn) do
+    match_wait!([%{ready_conn_count: 0}], DBConnection.get_connection_metrics(db_conn),
+      timeout: @default_timeout,
+      interval: 10
+    )
+
+    :ok
+  end
+
+  @doc """
+  Blocks until `db_conn`'s pool has a connection ready to hand out.
+
+  Pair with `await_pool_saturated!/1` around whatever checks the connection out.
+  """
+  @spec await_pool_ready!(pid() | atom()) :: :ok
+  def await_pool_ready!(db_conn) do
+    case_wait DBConnection.get_connection_metrics(db_conn),
+      timeout: @default_timeout,
+      interval: 10 do
+      [%{ready_conn_count: ready}] when ready > 0 -> :ok
+    else
+      metrics -> raise "pool #{inspect(db_conn)} had no connection ready: #{inspect(metrics)}"
+    end
   end
 end

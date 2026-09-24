@@ -54,17 +54,25 @@ defmodule Realtime.Database do
   @encrypted_keys ~w(db_host db_port db_name db_user db_password)
 
   @doc """
-  Creates a database connection struct from a tenant's stored settings.
+  Decrypts the credential fields in a tenant's stored settings.
   """
-  @spec from_settings(map(), binary(), :stop | :exp | :rand | :rand_exp) :: {:ok, t()} | {:error, :nxdomain}
-  def from_settings(settings, application_name, backoff \\ :rand_exp) do
+  @spec decrypt_settings(map()) :: map()
+  def decrypt_settings(settings) do
     decrypted_settings =
       settings
       |> Map.take(@encrypted_keys)
       |> Map.new(fn {k, v} -> {k, Crypto.decrypt!(v)} end)
 
+    Map.merge(settings, decrypted_settings)
+  end
+
+  @doc """
+  Creates a database connection struct from a tenant's stored settings.
+  """
+  @spec from_settings(map(), binary(), :stop | :exp | :rand | :rand_exp) :: {:ok, t()} | {:error, :nxdomain}
+  def from_settings(settings, application_name, backoff \\ :rand_exp) do
     settings
-    |> Map.merge(decrypted_settings)
+    |> decrypt_settings()
     |> from_plaintext_settings(application_name, backoff)
   end
 
