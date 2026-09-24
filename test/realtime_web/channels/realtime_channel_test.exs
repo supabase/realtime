@@ -5,6 +5,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   setup :set_mimic_from_context
 
   import ExUnit.CaptureLog
+  import WaitForIt
 
   alias Phoenix.Channel.Server
   alias Phoenix.Socket
@@ -1007,8 +1008,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   end
 
   describe "maximum number of events per second" do
-    import WaitForIt
-
     test "applies a raised limit once the rate counter restarts", %{tenant: tenant} do
       {:ok, tenant} = Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{max_events_per_second: 1})
 
