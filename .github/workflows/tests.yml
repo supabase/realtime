@@ -169,7 +169,16 @@ jobs:
           MATRIX_POSTGRES: ${{ matrix.postgres }}
           JOB_URL: ${{ steps.job_url.outputs.url }}
           EXPORT_COVERAGE: ${{ matrix.coverage == true }}
+          WAIT_MARGIN_REPORT: "true"
         run: .github/scripts/run_tests_with_retry.sh partition-${{ matrix.partition }}
+      - name: Merge wait margin diagnostics into flaky events
+        if: always()
+        continue-on-error: true # a bug in this script must never mark the test job as failed
+        env:
+          MIX_TEST_PARTITION: ${{ matrix.partition }}
+          MATRIX_POSTGRES: ${{ matrix.postgres }}
+          JOB_URL: ${{ steps.job_url.outputs.url }}
+        run: .github/scripts/append_wait_margin_events.sh
       - name: Upload coverage artifact
         if: matrix.coverage
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
@@ -179,7 +188,7 @@ jobs:
             cover/lcov.info
             cover/partition-${{ matrix.partition }}.coverdata
       - name: Upload flaky test report
-        if: hashFiles('flaky-report.md') != ''
+        if: hashFiles('flaky-report.md', 'flaky-events.jsonl') != ''
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: flaky-${{ matrix.postgres }}-p${{ matrix.partition }}
