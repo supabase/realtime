@@ -426,6 +426,14 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManagerTest do
     end
   end
 
+  describe "queue target" do
+    test "the subscription pool sheds a saturated queue earlier", %{pid: pid, args: args} do
+      {:ok, ^pid, conn_pub} = PostgresCdcRls.get_manager_conn(args["id"])
+
+      assert {_status, _queue, %{target: 2_000}, _ts} = :sys.get_state(conn_pub)
+    end
+  end
+
   describe "phantom subscriber cleanup" do
     test "check_active_pids queues dead pids for deletion", %{
       pid: pid,
