@@ -675,10 +675,17 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   @impl true
-  def terminate(reason, %{transport_pid: transport_pid}) do
+  def terminate(reason, %{transport_pid: transport_pid, assigns: %{tenant: tenant_id}}) do
     Logger.debug("Channel terminated with reason: #{inspect(reason)}")
     :telemetry.execute([:prom_ex, :plugin, :realtime, :disconnected], %{})
-    Tracker.untrack(transport_pid)
+
+    # Note: `terminate/2` is not guaranteed to run if the channel process crashes or is killed.
+    # In those cases, the user will remain in the UsersCounter until the idle socket sweeper 
+    # (Tracker) eventually kills the transport_pid, at which point Census automatically removes it.
+    if Tracker.untrack(transport_pid) <= 0 do
+      UsersCounter.remove(transport_pid, tenant_id)
+    end
+
     :ok
   end
 
