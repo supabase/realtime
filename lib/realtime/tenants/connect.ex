@@ -381,9 +381,25 @@ defmodule Realtime.Tenants.Connect do
     end
   end
 
-  def handle_info(:shutdown_no_connected_users, state) do
-    Logger.info("Tenant has no connected users, database connection will be terminated")
-    {:stop, :shutdown, state}
+  def handle_info(
+        :shutdown_no_connected_users,
+        %{
+          tenant_id: tenant_id,
+          check_connected_user_interval: check_connected_user_interval,
+          connected_users_bucket: connected_users_bucket
+        } = state
+      ) do
+    case update_connected_users_bucket(tenant_id, connected_users_bucket) do
+      @connected_users_bucket_shutdown ->
+        Logger.info("Tenant has no connected users, database connection will be terminated")
+        {:stop, :shutdown, state}
+
+      connected_users_bucket ->
+        connected_users_bucket =
+          send_connected_user_check_message(connected_users_bucket, check_connected_user_interval)
+
+        {:noreply, %{state | connected_users_bucket: connected_users_bucket}}
+    end
   end
 
   def handle_info(:shutdown_connect, state) do
@@ -556,10 +572,11 @@ defmodule Realtime.Tenants.Connect do
   end
 
   defp send_connected_user_check_message(
-         @connected_users_bucket_shutdown,
+         @connected_users_bucket_shutdown = connected_users_bucket,
          check_connected_user_interval
        ) do
     Process.send_after(self(), :shutdown_no_connected_users, check_connected_user_interval)
+    connected_users_bucket
   end
 
   defp send_connected_user_check_message(connected_users_bucket, check_connected_user_interval) do
