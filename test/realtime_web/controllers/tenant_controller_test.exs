@@ -325,6 +325,7 @@ defmodule RealtimeWeb.TenantControllerTest do
                             "SELECT slot_name FROM pg_replication_slots WHERE slot_name = $1",
                             [slot_name]
                           )
+
       conn = delete(conn, ~p"/api/tenants/#{tenant.external_id}")
       assert response(conn, 204)
 
