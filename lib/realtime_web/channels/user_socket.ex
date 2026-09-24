@@ -6,7 +6,6 @@ defmodule RealtimeWeb.UserSocket do
   use Realtime.Logs
 
   alias Realtime.Api.Tenant
-  alias Realtime.Crypto
   alias Realtime.Database
   alias Realtime.Tenants
 
@@ -74,7 +73,7 @@ defmodule RealtimeWeb.UserSocket do
             suspend: false
           } = tenant} <- Tenants.Cache.fetch_tenant_by_external_id(external_id),
          {:ok, token} <- validate_token(token),
-         jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
+         jwt_secret_dec <- Tenant.decrypt_jwt_secret(jwt_secret),
          {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec, jwt_jwks),
          :ok <- TenantRateLimiters.check_tenant(tenant) do
       assigns = %RealtimeChannel.Assigns{
