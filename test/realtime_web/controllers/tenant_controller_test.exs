@@ -319,10 +319,12 @@ defmodule RealtimeWeb.TenantControllerTest do
 
       slot_name = Realtime.Tenants.ReplicationConnection.replication_slot_name("realtime", "messages")
 
-      %{rows: rows} =
-        Postgrex.query!(db_conn, "SELECT slot_name FROM pg_replication_slots WHERE slot_name = $1", [slot_name])
-
-      assert length(rows) == 1
+      assert_eventually {:ok, %{rows: [_row]}} =
+                          Postgrex.query(
+                            db_conn,
+                            "SELECT slot_name FROM pg_replication_slots WHERE slot_name = $1",
+                            [slot_name]
+                          )
       conn = delete(conn, ~p"/api/tenants/#{tenant.external_id}")
       assert response(conn, 204)
 
