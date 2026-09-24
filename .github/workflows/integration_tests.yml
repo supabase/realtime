@@ -54,7 +54,7 @@ jobs:
           - postgres: orioledb17
             postgres_image: supabase/postgres:17.9.0.019-orioledb
           - postgres: multigres
-            postgres_image: ghcr.io/multigres/multigres-cluster-supabase:sha-0de21aa
+            postgres_image: ghcr.io/multigres/multigres-cluster-supabase:sha-d96b2f9
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
