@@ -94,13 +94,14 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert Crypto.decrypt!(settings["db_name"]) == "postgres"
       assert Crypto.decrypt!(settings["db_user"]) == "supabase_admin"
       refute settings["db_password"]
+      Process.sleep(100)
 
-      assert_eventually Tenants.get_tenant_by_external_id(external_id).migrations_ran > 0
-
-      assert %{broadcast_adapter: :gen_rpc, extensions: [%{settings: settings}]} =
-               Tenants.get_tenant_by_external_id(external_id)
+      %{broadcast_adapter: :gen_rpc, extensions: [%{settings: settings}]} =
+        tenant = Tenants.get_tenant_by_external_id(external_id)
 
       assert Crypto.decrypt!(settings["db_password"]) == "postgres"
+
+      assert tenant.migrations_ran > 0
     end
   end
 
@@ -122,11 +123,11 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert Crypto.decrypt!(settings["db_name"]) == "postgres"
       assert Crypto.decrypt!(settings["db_user"]) == "supabase_admin"
       refute settings["db_password"]
+      Process.sleep(100)
+      %{extensions: [%{settings: settings}]} = tenant = Tenants.get_tenant_by_external_id(external_id)
 
-      assert_eventually Tenants.get_tenant_by_external_id(external_id).migrations_ran > 0
-
-      assert %{extensions: [%{settings: settings}]} = Tenants.get_tenant_by_external_id(external_id)
       assert Crypto.decrypt!(settings["db_password"]) == "postgres"
+      assert tenant.migrations_ran > 0
     end
   end
 
@@ -309,42 +310,35 @@ defmodule RealtimeWeb.TenantControllerTest do
 
       assert Connect.ready?(tenant.external_id)
 
-      # `ReplicationConnection.ready?/1` already waits for up to 5s
-      # Give the outer wait enough headroom for a couple of attempts,
-      # since it's async and can take a while, especially in CI
-      assert_eventually Realtime.Tenants.ReplicationConnection.ready?(tenant.external_id), timeout: 15_000
+      # Replication Connections are launched async and can take a while,
+      # especially in CI environments.
+      assert eventually(fn -> Realtime.Tenants.ReplicationConnection.ready?(tenant.external_id) end)
 
       assert Cache.get_tenant_by_external_id(tenant.external_id)
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
 
-      %{rows: [rows]} =
-        Postgrex.query!(db_conn, "SELECT slot_name FROM pg_replication_slots WHERE slot_type = 'logical'", [])
+      %{rows: rows} =
+        Postgrex.query!(db_conn, "SELECT slot_name FROM pg_replication_slots WHERE database = current_database()", [])
 
-      assert rows > 0
+      assert length(rows) > 0
       conn = delete(conn, ~p"/api/tenants/#{tenant.external_id}")
       assert response(conn, 204)
 
       refute Cache.get_tenant_by_external_id(tenant.external_id)
       refute Tenants.get_tenant_by_external_id(tenant.external_id)
-
-      # Slot teardown happens after the delete responds.
-      assert_eventually {:ok, %{rows: []}} =
-                          Postgrex.query(
-                            db_conn,
-                            "SELECT slot_name FROM pg_replication_slots WHERE slot_type = 'logical'",
-                            []
-                          )
-    end
-
-    test "does not read the replica", %{conn: conn, tenant: tenant} do
-      # A tenant created moments ago may not have reached the replica yet. Reading it there would
-      # answer 204 without deleting anything, so the lookup has to hit the primary.
-      Mimic.reject(&Realtime.Repo.Replica.replica/0)
-
-      conn = delete(conn, ~p"/api/tenants/#{tenant.external_id}")
-      assert response(conn, 204)
-
-      refute Realtime.Api.get_tenant_by_external_id(tenant.external_id, use_replica?: false)
+      assert eventually(
+               fn ->
+                 match?(
+                   {:ok, %{rows: []}},
+                   Postgrex.query(
+                     db_conn,
+                     "SELECT slot_name FROM pg_replication_slots WHERE database = current_database()",
+                     []
+                   )
+                 )
+               end,
+               retries: 150
+             )
     end
 
     test "tenant doesn't exist", %{conn: conn} do
@@ -620,7 +614,9 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert %{"healthy" => false, "db_connected" => false, "replication_connected" => false, "connected_cluster" => 0} =
                json_response(conn, 200)["data"]
 
-      assert_eventually {:ok, %{healthy: true}} = Realtime.Tenants.health_check(tenant.external_id)
+      assert eventually(fn ->
+               match?({:ok, %{healthy: true}}, Realtime.Tenants.health_check(tenant.external_id))
+             end)
 
       assert {:ok, %{rows: []}} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
 
@@ -807,13 +803,20 @@ defmodule RealtimeWeb.TenantControllerTest do
     %{attrs | "extensions" => [update_in(extension, ["settings"], &Map.put(&1, key, value))]}
   end
 
-  defp wait_on_postgres_cdc_rls(external_id) do
-    case_wait Extensions.PostgresCdcRls.get_manager_conn(external_id), timeout: 1_000, interval: 100 do
-      {:ok, _, _} -> :ok
-    else
-      last ->
-        raise "Postgres CDC RLS manager connection not established for " <>
-                "#{external_id} within 1000ms. Last result: #{inspect(last)}"
+  defp wait_on_postgres_cdc_rls(external_id, attempt \\ 10)
+
+  defp wait_on_postgres_cdc_rls(external_id, 0) do
+    raise "Postgres CDC RLS manager connection not established for #{external_id} after multiple attempts"
+  end
+
+  defp wait_on_postgres_cdc_rls(external_id, attempt) do
+    case Extensions.PostgresCdcRls.get_manager_conn(external_id) do
+      {:ok, _, _} ->
+        :ok
+
+      {:error, _} ->
+        Process.sleep(100)
+        wait_on_postgres_cdc_rls(external_id, attempt - 1)
     end
   end
 

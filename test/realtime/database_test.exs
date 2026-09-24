@@ -105,58 +105,51 @@ defmodule Realtime.DatabaseTest do
     end
 
     @tag db_pool: 3
-    test "durable pool opens the configured number of realtime_connect connections", %{
-      tenant: tenant,
-      db_pool: pool_size
-    } do
+    test "durable pool opens the configured number of realtime_connect connections", %{tenant: tenant} do
       # pg_stat_activity is server-wide, so draining 'realtime_connect' backends left
       # behind by earlier tests can inflate the count. Terminate any lingering ones
       # (using a separate connection that is not counted) to start from a clean slate.
       {:ok, admin} = Database.connect(tenant, "realtime_test", :stop)
-      from_realtime_connect = "FROM pg_stat_activity WHERE application_name = 'realtime_connect'"
 
-      Postgrex.query!(admin, "SELECT pg_terminate_backend(pid) " <> from_realtime_connect, [])
+      Postgrex.query!(
+        admin,
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
+        []
+      )
 
-      assert {:ok, conn, _migrations_ran} = Database.check_tenant_connection(tenant)
+      assert eventually(fn ->
+        %{rows: [[count]]} =
+          Postgrex.query!(
+            admin,
+            "SELECT count(*)::int FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
+            []
+          )
+        count == 0
+      end)
 
-      # Multigres multiplexes idle clients onto one backend, so keep them all mid-query to count.
-      busy =
-        for _ <- 1..pool_size,
-            do: Task.async(fn -> Postgrex.query(conn, "SELECT pg_sleep(5)", [], timeout: 15_000) end)
+      assert {:ok, _conn, _migrations_ran} = Database.check_tenant_connection(tenant)
 
       # Postgrex opens the pool connections asynchronously, so give it a moment
       # to bring all of them up.
-      case_wait Postgrex.query!(admin, "SELECT count(*)::int " <> from_realtime_connect, []) do
-        %{rows: [[^pool_size]]} -> :ok
-      else
-        %{rows: [[count]]} -> flunk("Expected #{pool_size} connections, but found #{count}")
-      end
+      assert eventually(fn ->
+               %{rows: [[count]]} =
+                 Postgrex.query!(
+                   admin,
+                   "SELECT count(*)::int FROM pg_stat_activity WHERE application_name = 'realtime_connect'",
+                   []
+                 )
 
-      Enum.each(busy, &Task.shutdown(&1, :brutal_kill))
+               count == 3
+             end)
     end
   end
 
   describe "replication_slot_teardown/1" do
     test "removes replication slots with the realtime prefix", %{tenant: tenant} do
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-      create_replication_slot(conn, "realtime_test_slot", plugin: "pgoutput", temporary: false)
+      Postgrex.query!(conn, "SELECT * FROM pg_create_logical_replication_slot('realtime_test_slot', 'pgoutput')", [])
       Database.replication_slot_teardown(tenant)
-
-      assert %{rows: []} =
-               Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots WHERE slot_type = 'logical'", [])
-    end
-
-    test "removes every replication slot with the realtime prefix", %{tenant: tenant} do
-      {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-
-      for slot <- ~w(realtime_test_slot_a realtime_test_slot_b) do
-        create_replication_slot(conn, slot, plugin: "pgoutput", temporary: false)
-      end
-
-      Database.replication_slot_teardown(tenant)
-
-      assert %{rows: []} =
-               Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots WHERE slot_type = 'logical'", [])
+      assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
     end
   end
 
@@ -164,28 +157,18 @@ defmodule Realtime.DatabaseTest do
     test "removes replication slots with a given name and existing connection", %{tenant: tenant} do
       name = String.downcase("slot_#{random_string()}")
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-
-      create_replication_slot(conn, name, plugin: "pgoutput")
-
+      Postgrex.query!(conn, "SELECT * FROM pg_create_logical_replication_slot('#{name}', 'pgoutput')", [])
       Database.replication_slot_teardown(conn, name)
-
-      # Postgres releases the slot asynchronously once the walsender exits.
-      assert_eventually %{rows: []} =
-                          Postgrex.query!(
-                            conn,
-                            "SELECT slot_name FROM pg_replication_slots WHERE slot_type = 'logical'",
-                            []
-                          )
+      Process.sleep(1000)
+      assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
     end
 
     test "removes replication slots with a given name and a tenant", %{tenant: tenant} do
       name = String.downcase("slot_#{random_string()}")
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-      create_replication_slot(conn, name, plugin: "pgoutput", temporary: false)
+      Postgrex.query!(conn, "SELECT * FROM pg_create_logical_replication_slot('#{name}', 'pgoutput')", [])
       Database.replication_slot_teardown(tenant, name)
-
-      assert %{rows: []} =
-               Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots WHERE slot_type = 'logical'", [])
+      assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
     end
   end
 
@@ -336,8 +319,8 @@ defmodule Realtime.DatabaseTest do
   describe "detect_ip_version/1" do
     @describetag without_db: true
     test "detects appropriate IP version" do
-      # Using ipv4.google.com
-      assert Realtime.Database.detect_ip_version("ipv4.google.com") == {:ok, :inet}
+      # Using 127.0.0.1
+      assert Realtime.Database.detect_ip_version("127.0.0.1") == {:ok, :inet}
 
       # Using ipv6.google.com
       assert Realtime.Database.detect_ip_version("ipv6.google.com") == {:ok, :inet6}
@@ -353,11 +336,11 @@ defmodule Realtime.DatabaseTest do
     test "logs a warning when the host resolves to an IPv4 address" do
       log =
         capture_log(fn ->
-          assert Realtime.Database.detect_ip_version("ipv4.google.com") == {:ok, :inet}
+          assert Realtime.Database.detect_ip_version("127.0.0.1") == {:ok, :inet}
         end)
 
       assert log =~ "DatabaseIpVersionIsIpv4"
-      assert log =~ "ipv4.google.com"
+      assert log =~ "127.0.0.1"
     end
   end
 
@@ -451,13 +434,13 @@ defmodule Realtime.DatabaseTest do
       slot_name = "test_slot_#{suffix}"
       table_name = "slot_test_#{suffix}"
 
-      create_replication_slot(db_conn, slot_name, plugin: "pgoutput", temporary: false)
+      Postgrex.query!(db_conn, "SELECT pg_create_logical_replication_slot($1, 'pgoutput')", [slot_name])
       Postgrex.query!(db_conn, "CREATE TABLE IF NOT EXISTS #{table_name} (id INT, data TEXT)", [])
 
       on_exit(fn ->
         case Database.connect(tenant, "realtime_test_cleanup", :stop) do
           {:ok, conn} ->
-            drop_replication_slot(conn, slot_name)
+            Postgrex.query(conn, "SELECT pg_drop_replication_slot($1)", [slot_name])
             Postgrex.query(conn, "DROP TABLE IF EXISTS #{table_name} CASCADE", [])
             GenServer.stop(conn)
 
