@@ -139,8 +139,8 @@ defmodule Realtime.Tenants.Connect do
           | {:error, :tenant_db_too_many_connections}
   def get_status(tenant_id) do
     case :syn.lookup(__MODULE__, tenant_id) do
-      {pid, %{conn: nil}} ->
-        wait_for_connection(pid, tenant_id)
+      {_pid, %{conn: nil}} ->
+        wait_for_connection(tenant_id)
 
       {_, %{conn: conn, replication_conn: nil}} ->
         {:ok, conn}
@@ -159,33 +159,58 @@ defmodule Realtime.Tenants.Connect do
 
   def syn_topic(tenant_id), do: "connect:#{tenant_id}"
 
-  defp wait_for_connection(pid, tenant_id) do
+  defp wait_for_connection(tenant_id) do
     RealtimeWeb.Endpoint.subscribe(syn_topic(tenant_id))
+    deadline = System.monotonic_time(:millisecond) + connection_ready_timeout()
 
     # We do a lookup after subscribing because we could've missed a message while subscribing
+    wait_for_current_connection(tenant_id, deadline)
+  after
+    RealtimeWeb.Endpoint.unsubscribe(syn_topic(tenant_id))
+  end
+
+  defp wait_for_current_connection(tenant_id, deadline) do
     case :syn.lookup(__MODULE__, tenant_id) do
       {_pid, %{conn: conn}} when is_pid(conn) ->
         {:ok, conn}
 
       _ ->
-        # Wait for up to 5 seconds for the ready event
-        receive do
-          %{event: "ready", payload: %{pid: ^pid, conn: conn}} ->
-            {:ok, conn}
-
-          %{event: "connect_down", payload: %{pid: ^pid, reason: {:shutdown, :tenant_db_too_many_connections}}} ->
-            {:error, :tenant_db_too_many_connections}
-
-          %{event: "connect_down", payload: %{pid: ^pid, reason: _reason}} ->
-            metadata = [external_id: tenant_id, project: tenant_id]
-            log_error("UnableToConnectToTenantDatabase", "Unable to connect to tenant database", metadata)
-            {:error, :tenant_database_unavailable}
-        after
-          connection_ready_timeout() -> {:error, :initializing}
-        end
+        wait_for_connection_event(tenant_id, deadline)
     end
-  after
-    RealtimeWeb.Endpoint.unsubscribe(syn_topic(tenant_id))
+  end
+
+  defp wait_for_connection_event(tenant_id, deadline) do
+    timeout = max(deadline - System.monotonic_time(:millisecond), 0)
+
+    receive do
+      %{event: "ready", payload: %{pid: pid}} ->
+        case :syn.lookup(__MODULE__, tenant_id) do
+          {^pid, %{conn: conn}} when is_pid(conn) -> {:ok, conn}
+          _ -> wait_for_current_connection(tenant_id, deadline)
+        end
+
+      %{event: "connect_down", payload: %{pid: pid, reason: reason}} ->
+        case :syn.lookup(__MODULE__, tenant_id) do
+          {^pid, _} -> connection_error(reason, tenant_id)
+          :undefined -> connection_error(reason, tenant_id)
+          _ -> wait_for_current_connection(tenant_id, deadline)
+        end
+
+      _ ->
+        wait_for_current_connection(tenant_id, deadline)
+    after
+      timeout -> {:error, :initializing}
+    end
+  end
+
+  defp connection_error({:shutdown, :tenant_db_too_many_connections}, _tenant_id) do
+    {:error, :tenant_db_too_many_connections}
+  end
+
+  defp connection_error(_reason, tenant_id) do
+    metadata = [external_id: tenant_id, project: tenant_id]
+    log_error("UnableToConnectToTenantDatabase", "Unable to connect to tenant database", metadata)
+    {:error, :tenant_database_unavailable}
   end
 
   # How long a caller waits for a tenant connection to become ready before giving up.

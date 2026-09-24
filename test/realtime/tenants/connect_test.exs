@@ -19,10 +19,13 @@ defmodule Realtime.Tenants.ConnectTest do
   @slow_replication_wait [timeout: 30_000, interval: 100]
   @local_wait [timeout: 2_500, interval: 50]
 
-  setup do
-    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
-
-    %{tenant: tenant}
+  setup context do
+    if context[:without_tenant] do
+      :ok
+    else
+      tenant = TestTenantDb.checkout_tenant(run_migrations: true)
+      %{tenant: tenant}
+    end
   end
 
   defp assert_process_down(pid, timeout \\ 100, reason \\ nil) do
@@ -159,6 +162,52 @@ defmodule Realtime.Tenants.ConnectTest do
   end
 
   describe "handle cold start" do
+    @tag :without_tenant
+    test "waits for the current Connect generation to become ready" do
+      parent = self()
+      tenant_id = "tenant-generation-handoff"
+      old_connect = spawn(fn -> Process.sleep(:infinity) end)
+      new_connect = spawn(fn -> Process.sleep(:infinity) end)
+      db_conn = spawn(fn -> Process.sleep(:infinity) end)
+      lookup = start_supervised!({Agent, fn -> %{calls: 0, ready: false} end})
+
+      on_exit(fn ->
+        Enum.each([old_connect, new_connect, db_conn], &Process.exit(&1, :kill))
+      end)
+
+      stub(:syn, :lookup, fn
+        Connect, ^tenant_id ->
+          Agent.get_and_update(lookup, fn state ->
+            state = %{state | calls: state.calls + 1}
+
+            result =
+              case state do
+                %{calls: 1} -> {old_connect, %{conn: nil}}
+                %{ready: true} -> {new_connect, %{conn: db_conn}}
+                _ -> {new_connect, %{conn: nil}}
+              end
+
+            if state.calls == 2, do: send(parent, :replacement_lookup)
+            {result, state}
+          end)
+
+        scope, name ->
+          call_original(:syn, :lookup, [scope, name])
+      end)
+
+      task = Task.async(fn -> Connect.get_status(tenant_id) end)
+      assert_receive :replacement_lookup
+
+      Agent.update(lookup, &%{&1 | ready: true})
+
+      RealtimeWeb.Endpoint.local_broadcast(Connect.syn_topic(tenant_id), "ready", %{
+        pid: new_connect,
+        conn: db_conn
+      })
+
+      assert Task.await(task, 3_000) == {:ok, db_conn}
+    end
+
     test "multiple processes connecting calling Connect.connect", %{tenant: tenant} do
       parent = self()
 
