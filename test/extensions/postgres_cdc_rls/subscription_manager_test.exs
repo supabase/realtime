@@ -414,7 +414,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManagerTest do
       # straight from the GenServer with no explicit :timeout of its own.
       %{conn: conn} = :sys.get_state(pid)
 
-      assert %{rows: [["10s"]]} = Postgrex.query!(conn, "show statement_timeout", [])
+      assert %{rows: [["10s"]]} = Postgrex.query!(conn, "SELECT current_setting('statement_timeout')", [])
     end
 
     test "the subscription pool carries a tighter one", %{pid: pid, args: args} do
@@ -422,7 +422,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManagerTest do
       # is 10s, so its statements get less than that.
       {:ok, ^pid, conn_pub} = PostgresCdcRls.get_manager_conn(args["id"])
 
-      assert %{rows: [["5s"]]} = Postgrex.query!(conn_pub, "show statement_timeout", [])
+      assert %{rows: [["5s"]]} = Postgrex.query!(conn_pub, "SELECT current_setting('statement_timeout')", [])
     end
   end
 
