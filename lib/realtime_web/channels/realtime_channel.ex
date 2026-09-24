@@ -463,11 +463,11 @@ defmodule RealtimeWeb.RealtimeChannel do
     else
       {:error, :rpc_error, error} ->
         log_error(socket, "UnableToHandleBroadcast", error)
-        {:noreply, socket}
+        BroadcastHandler.maybe_reply_error(socket, :unknown_error)
 
       {:error, error} ->
         log_error(socket, "UnableToHandleBroadcast", error)
-        {:noreply, socket}
+        BroadcastHandler.maybe_reply_error(socket, :unknown_error)
     end
   end
 

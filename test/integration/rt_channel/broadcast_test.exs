@@ -224,6 +224,32 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
       assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 500
     end
 
+    @tag policies: [:authenticated_read_broadcast_and_presence]
+    test "private broadcast with ack and no write permissions replies with an unauthorized error", %{
+      tenant: tenant,
+      topic: topic,
+      serializer: serializer
+    } do
+      config = %{broadcast: %{self: true, ack: true}, private: true}
+      topic = "realtime:#{topic}"
+
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      WebsocketClient.join(socket, topic, %{config: config})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+
+      payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+      WebsocketClient.send_event(socket, topic, "broadcast", payload)
+
+      assert_receive %Message{
+                       topic: ^topic,
+                       event: "phx_reply",
+                       payload: %{"response" => %{"error" => "unauthorized"}, "status" => "error"}
+                     },
+                     500
+
+      refute_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 500
+    end
+
     @tag policies: []
     test "private broadcast with valid channel and no read permissions won't join", %{
       tenant: tenant,
