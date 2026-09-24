@@ -99,6 +99,84 @@ ExUnit.after_suite(&TestTenantDb.shutdown/1)
 # the rate has to be reported explicitly or it disappears from CI entirely.
 ExUnit.after_suite(&TestTenantDb.report_unhealthy_checkouts/1)
 
+# A wait that succeeded on its 48th of 50 attempts is a flake that has not happened yet, and a
+# green run says nothing about it. `[:wait_for_it, :wait, :stop]` reports how many evaluations a
+# wait actually took, so with WAIT_MARGIN_REPORT=true every wait that timed out or burned more
+# than half its budget is written to wait-margin.jsonl for the flaky digest to pick up.
+#
+# Off by default: it is a diagnostic for CI and for chasing a specific flake, not something every
+# local `mix test` should pay for.
+if Realtime.Env.get_boolean("WAIT_MARGIN_REPORT", false) do
+  try do
+    # Appended to, never truncated: `mix test --failed` reruns only the failures, and wiping
+    # the file here would throw away everything the full run had already written.
+    path = System.get_env("WAIT_MARGIN_REPORT_PATH", "wait-margin.jsonl")
+    {:ok, io} = File.open(path, [:append, :utf8])
+
+    # Serialised through one agent: waits run in every test process at once, and interleaved
+    # appends from 4+ schedulers would tear the lines apart.
+    {:ok, writer} = Agent.start_link(fn -> io end)
+
+    :telemetry.attach(
+      "wait-for-it-margin",
+      [:wait_for_it, :wait, :stop],
+      fn _event, %{duration: duration, evaluations: evaluations}, meta, _config ->
+        try do
+          # `refute_eventually` and `assert_always` pass *by* timing out, so their timeouts are
+          # not news. WaitForIt tags them, which is the only way to tell them apart from a real one.
+          expected_timeout? = meta.wait_context[:construct] in [:refute_eventually, :assert_always]
+
+          budget =
+            case {meta.timeout, meta.interval} do
+              {:infinity, _} -> nil
+              {timeout, interval} when is_integer(interval) and interval > 0 -> div(timeout, interval)
+              _ -> nil
+            end
+
+          over_budget? = is_integer(budget) and budget > 0 and evaluations > div(budget, 2)
+          # A plain `:timeout` is not counted on its own: it already shows up in the flaky
+          # report as a failure (or a failure-then-pass on retry), so counting it here too
+          # would double it up. Only a wait that ran well past half its budget adds new signal.
+          report? = not expected_timeout? and over_budget?
+
+          if report? do
+            entry =
+              %{
+                result: meta.result,
+                wait_type: meta.wait_type,
+                construct: meta.wait_context && meta.wait_context[:construct],
+                evaluations: evaluations,
+                budget: budget,
+                timeout: meta.timeout,
+                duration_ms: System.convert_time_unit(duration, :native, :millisecond),
+                # `until/2` is a plain function and carries no caller env.
+                file: meta.env && Path.relative_to_cwd(meta.env.file),
+                line: meta.env && meta.env.line
+              }
+              |> Jason.encode!()
+
+            Agent.cast(writer, fn io ->
+              IO.write(io, entry <> "\n")
+              io
+            end)
+          end
+        rescue
+          # A diagnostic must never take a real test failure down with it.
+          error -> IO.warn("WAIT_MARGIN_REPORT telemetry handler failed: #{Exception.message(error)}")
+        end
+      end,
+      nil
+    )
+
+    ExUnit.after_suite(fn _ ->
+      Agent.get(writer, & &1, :infinity)
+      File.close(io)
+    end)
+  rescue
+    error -> IO.warn("failed to set up WAIT_MARGIN_REPORT: #{Exception.message(error)}")
+  end
+end
+
 for tenant <- Api.list_tenants(), do: Api.delete_tenant_by_external_id(tenant.external_id)
 
 Ecto.Adapters.SQL.Sandbox.mode(Realtime.Repo, :manual)
