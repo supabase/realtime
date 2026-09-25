@@ -101,6 +101,7 @@ config :realtime, Realtime.PromEx, ets_flush_interval: 90_000
 config :realtime, Realtime.TenantPromEx, ets_flush_interval: 90_000
 
 config :errata,
+  capture_stacktrace: false,
   redact: [
     # credentials clients send
     :access_token,

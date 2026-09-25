@@ -110,7 +110,7 @@ defmodule Realtime.MixProject do
       # gen_rpc uses a git dependency
       {:snabbkaffe, "~> 1.0", override: true},
       {:req, "~> 0.7.4"},
-      {:errata, "~> 1.10"},
+      {:errata, "~> 1.11"},
       {:mimic, "~> 2.0", only: :test},
       {:floki, ">= 0.30.0", only: :test},
       {:lazy_html, ">= 0.1.0", only: :test},

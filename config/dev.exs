@@ -128,4 +128,6 @@ config :open_api_spex, :cache_adapter, OpenApiSpex.Plug.NoneCache
 # config :opentelemetry, traces_exporter: {:otel_exporter_stdout, []}
 config :opentelemetry, traces_exporter: :none
 
+config :errata, capture_stacktrace: true
+
 config :mix_test_watch, clear: true
