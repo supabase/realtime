@@ -10,6 +10,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManagerTest do
   alias Extensions.PostgresCdcRls.Subscriptions
   alias Realtime.Database
   alias Realtime.GenRpc
+  alias Realtime.PostgresCdc
   alias Realtime.Tenants.Rebalancer
 
   import ExUnit.CaptureLog
@@ -41,7 +42,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManagerTest do
     {:ok, pid} = SubscriptionManager.start_link(args)
     # This serves so that we know that handle_continue has finished
     :sys.get_state(pid)
-    %{args: args, pid: pid, publication: publication}
+    %{args: args, pid: pid, publication: publication, tenant: tenant}
   end
 
   describe "subscription" do
@@ -427,10 +428,46 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManagerTest do
   end
 
   describe "queue target" do
-    test "the subscription pool sheds a saturated queue earlier", %{pid: pid, args: args} do
+    # How long a saturated subs pool may take to answer. DBConnection drops a checkout once it has
+    # been queued for more than `2 * queue_target`, and only notices at the next `queue_interval`
+    # poll, so our 2s target over the 2s default interval puts the reply at ~6s at worst
+    # 8 seconds seems like a good ceiling
+    @shed_within 8_000
+
+    test "a saturated pool answers well inside the caller's RPC deadline", %{
+      pid: pid,
+      args: args,
+      tenant: tenant,
+      publication: publication
+    } do
       {:ok, ^pid, conn_pub} = PostgresCdcRls.get_manager_conn(args["id"])
 
-      assert {_status, _queue, %{target: 2_000}, _ts} = :sys.get_state(conn_pub)
+      pool_size =
+        "postgres_cdc_rls"
+        |> PostgresCdc.filter_settings(tenant.extensions)
+        |> Map.get("subcriber_pool_size", 4)
+
+      TestHelpers.hold_connections!(conn_pub, pool_size)
+
+      {_uuid, _bin_uuid, pg_change_params} = pg_change_params()
+
+      started_at = System.monotonic_time(:millisecond)
+
+      assert {:error, "Too many database timeouts"} =
+               PostgresCdcRls.create_subscription(
+                 conn_pub,
+                 tenant.external_id,
+                 publication,
+                 pool_size,
+                 [pg_change_params],
+                 pid,
+                 self()
+               )
+
+      elapsed = System.monotonic_time(:millisecond) - started_at
+
+      assert elapsed < @shed_within,
+             "a subscribe against a saturated pool took #{elapsed}ms to come back. It has to be shed within #{@shed_within}ms"
     end
   end
 

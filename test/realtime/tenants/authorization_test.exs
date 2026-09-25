@@ -217,7 +217,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
          timeout: :timer.minutes(1)
     test "handles small pool size", context do
       db_conn = saturable_conn(context.tenant)
-      release = hold_only_connection!(db_conn)
+      TestHelpers.hold_connections!(db_conn)
 
       log =
         capture_log(fn ->
@@ -252,8 +252,6 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
       assert log =~
                "project=#{external_id} external_id=#{external_id} [critical] IncreaseConnectionPool: Too many database timeouts"
-
-      release.()
     end
 
     @tag role: "authenticated",
@@ -494,33 +492,5 @@ defmodule Realtime.Tenants.AuthorizationTest do
     # Linked to the test process, so it comes down with the test; no explicit teardown needed.
     {:ok, db_conn} = Database.connect_db(settings, queue_target: 50, queue_interval: 100)
     db_conn
-  end
-
-  # Checks out the pool's only connection and keeps it until the returned function is called.
-  # The connection is given back once the test is done with it.
-  defp hold_only_connection!(db_conn) do
-    parent = self()
-
-    holder =
-      Task.async(fn ->
-        Postgrex.transaction(
-          db_conn,
-          fn _conn ->
-            send(parent, :holding)
-
-            receive do
-              :release -> :ok
-            end
-          end,
-          timeout: :timer.minutes(1)
-        )
-      end)
-
-    assert_receive :holding, 5_000
-
-    fn ->
-      send(holder.pid, :release)
-      assert {:ok, :ok} = Task.await(holder, 5_000)
-    end
   end
 end

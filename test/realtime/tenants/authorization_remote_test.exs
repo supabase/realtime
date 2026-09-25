@@ -161,26 +161,12 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
   end
 
   describe "database error" do
-    @hold_seconds 10
-
     @tag role: "authenticated",
          policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence],
          db_queue_target: 50,
          timeout: :timer.minutes(1)
     test "handles small pool size", context do
-      TestHelpers.await_pool_ready!(context.db_conn)
-
-      holder =
-        Task.async(fn ->
-          :erpc.call(node(context.db_conn), Postgrex, :query!, [
-            context.db_conn,
-            "SELECT pg_sleep(#{@hold_seconds})",
-            [],
-            [timeout: to_timeout(second: @hold_seconds + 1)]
-          ])
-        end)
-
-      TestHelpers.await_pool_saturated!(context.db_conn)
+      TestHelpers.hold_connections!(context.db_conn)
 
       log =
         capture_log(fn ->
@@ -214,8 +200,6 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
 
       assert log =~
                "project=#{external_id} external_id=#{external_id} [critical] IncreaseConnectionPool: Too many database timeouts"
-
-      Task.shutdown(holder, :brutal_kill)
     end
 
     @tag role: "authenticated",
