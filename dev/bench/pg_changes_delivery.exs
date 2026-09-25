@@ -148,16 +148,28 @@ exit_code =
       end)
     end
 
+    # The throwaway database has no tenant record, so the sync_standby flag cannot be resolved
+    # here. SETTLED picks the SQL function directly instead, which is what the flag would do.
+    function =
+      if System.get_env("SETTLED", "true") == "true",
+        do: "realtime.list_changes_settled",
+        else: "realtime.list_changes"
+
+    IO.puts("using #{function}")
+
     poll = fn ->
       {:ok, %Postgrex.Result{rows: rows}} =
-        Replications.list_changes(conn,
-          slot_name: slot,
-          publication: publication,
-          max_changes: 10_000,
-          max_record_bytes: 1_048_576
+        Postgrex.query(
+          conn,
+          """
+          SELECT wal->>'type', wal->>'schema', wal->>'table', COALESCE(wal->>'record', '{}'),
+                 subscription_ids
+          FROM #{function}($1, $2, $3, $4)
+          """,
+          [publication, slot, 10_000, 1_048_576]
         )
 
-      for ["INSERT", "public", "delivery", _cols, record, _old, _ts, ids, _errors, _count] <- rows,
+      for ["INSERT", "public", "delivery", record, ids] <- rows,
           ids != [],
           do: Jason.decode!(record)["id"]
     end

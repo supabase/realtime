@@ -980,10 +980,12 @@ CREATE FUNCTION realtime.settled_changes(slot_name name, max_changes integer, VA
     AS $$
 declare
   peek_opts text[] := opts;
-  xids text[];
+  xids xid[];
   commit_lsns pg_lsn[];
   boundary pg_lsn;
   snapshot pg_snapshot;
+  running_xids xid[];
+  xmax_age int;
   i int;
 begin
   -- Each statement in a volatile function takes its own snapshot, which is what lets the
@@ -1002,14 +1004,12 @@ begin
 
   -- One row per transaction, in commit order, rather than per change: the whole batch would
   -- otherwise be carried back through the pooler a second time just to locate the cut.
-  select array_agg(t.xid::text order by t.commit_lsn), array_agg(t.commit_lsn order by t.commit_lsn)
+  -- Keep only commit markers. Each transaction emits one, so grouping every change by xid
+  -- before filtering adds work without changing the boundary candidates.
+  select array_agg(p.xid order by p.lsn), array_agg(p.lsn order by p.lsn)
     into xids, commit_lsns
-    from (
-      select p.xid, max(p.lsn) filter (where p.data::jsonb->>'action' = 'C') as commit_lsn
-      from pg_logical_slot_peek_changes(slot_name, null, max_changes, variadic peek_opts) p
-      group by p.xid
-    ) t
-    where t.commit_lsn is not null;
+    from pg_logical_slot_peek_changes(slot_name, null, max_changes, variadic peek_opts) p
+    where p.data::jsonb->>'action' = 'C';
 
   if xids is null then
     return;
@@ -1028,15 +1028,16 @@ begin
   -- too. age() counts backwards from the current xid and so compares correctly across
   -- wraparound.
   --
-  -- Stopping at the first unsettled transaction rather than discarding the whole batch:
-  -- bailing entirely starves the poller wherever writes overlap polls, which on a cluster
-  -- that commits behind a standby is most of the time.
+  -- Materialize the active XIDs once. Repeatedly scanning pg_snapshot_xip for each commit
+  -- costs most of the boundary check on a batch with many settled transactions. Keep the
+  -- early exit so an unsettled transaction near the front does not scan the rest.
+  select coalesce(array_agg(running.x::xid), array[]::xid[])
+    into running_xids
+    from pg_snapshot_xip(snapshot) running(x);
+  xmax_age := age(pg_snapshot_xmax(snapshot)::xid);
+
   for i in 1..array_length(xids, 1) loop
-    if exists (
-         select 1 from pg_snapshot_xip(snapshot) running(x)
-         where running.x::xid::text = xids[i]
-       )
-       or age(xids[i]::xid) <= age(pg_snapshot_xmax(snapshot)::xid) then
+    if xids[i] = any(running_xids) or age(xids[i]) <= xmax_age then
       exit;
     end if;
 

@@ -10,11 +10,13 @@
 # Reads DB_HOST / DB_PORT / DB_NAME / DB_USER / DB_PASSWORD, defaulting to the tenant database
 # that db-start brings up. The connecting role needs CREATEDB.
 
-alias Extensions.PostgresCdcRls.Replications
 alias Realtime.Repo
 alias Realtime.Tenants.Migrations
 
 {:ok, _} = Application.ensure_all_started(:ecto_sql)
+
+# Migration DDL is logged at :info and buries the results.
+Logger.configure(level: :warning)
 
 conn_opts = [
   hostname: System.get_env("DB_HOST", "127.0.0.1"),
@@ -81,17 +83,6 @@ try do
     []
   )
 
-  {:ok, _} = Replications.prepare_replication(conn, slot)
-
-  # Drain whatever setup produced so the first measured poll starts from an empty slot.
-  {:ok, _} =
-    Replications.list_changes(conn,
-      slot_name: slot,
-      publication: publication,
-      max_changes: 100_000,
-      max_record_bytes: 1_048_576
-    )
-
   fill = fn count ->
     Postgrex.query!(
       writer,
@@ -100,39 +91,75 @@ try do
     )
   end
 
-  drain = fn ->
-    {:ok, %Postgrex.Result{rows: rows}} =
-      Replications.list_changes(conn,
-        slot_name: slot,
-        publication: publication,
-        max_changes: 100_000,
-        max_record_bytes: 1_048_576
-      )
+  # Empties a slot with the plain decoder rather than the function under test: the settled variant
+  # defers by design, so it cannot be relied on to leave the slot empty for the next iteration.
+  drain_fully = fn name ->
+    Stream.repeatedly(fn ->
+      %Postgrex.Result{num_rows: n} =
+        Postgrex.query!(
+          conn,
+          "SELECT 1 FROM pg_logical_slot_get_changes($1::name, null, null, 'format-version', '2')",
+          [name]
+        )
 
-    rows
+      n
+    end)
+    |> Enum.find(&(&1 == 0))
   end
 
-  Benchee.run(
-    %{"list_changes" => fn _ -> drain.() end},
-    inputs: %{
-      "1 change" => 1,
-      "100 changes" => 100,
-      "1000 changes" => 1000,
-      "10000 changes" => 10_000
-    },
-    # Each poll consumes the slot, so every run needs its own batch. Hook time is excluded
-    # from the measurement.
-    before_each: fn count ->
-      fill.(count)
-      count
-    end,
-    warmup: 2,
-    time: 10,
-    print: %{configuration: false}
-  )
+  # One benchee run per function, each against a slot created just beforehand. Running both in a
+  # single benchee run makes the idle one accumulate WAL for the whole of the other's run, so it
+  # then decodes a backlog and reports several times its real cost.
+  measure = fn function ->
+    name = "#{slot}_#{:erlang.phash2(function)}"
 
-  # The slot is temporary, so it goes with the session that made it. The database cannot be
-  # dropped while it is still held.
+    Postgrex.query!(
+      conn,
+      "SELECT pg_create_logical_replication_slot($1::name, 'wal2json', temporary => true)",
+      [name]
+    )
+
+    poll = fn ->
+      {:ok, %Postgrex.Result{rows: rows}} =
+        Postgrex.query(
+          conn,
+          """
+          SELECT wal->>'type', subscription_ids, slot_changes_count
+          FROM #{function}($1, $2, $3, $4)
+          """,
+          [publication, name, 100_000, 1_048_576]
+        )
+
+      rows
+    end
+
+    Benchee.run(
+      %{function => fn _ -> poll.() end},
+      inputs: %{
+        "1 change" => 1,
+        "100 changes" => 100,
+        "1000 changes" => 1000,
+        "10000 changes" => 10_000
+      },
+      # Every measured call sees exactly `count` changes: the slot is emptied, the batch written,
+      # then the writer is given a moment to leave the proc array so the settled variant is not
+      # measured deferring. Hook time is excluded from the measurement.
+      before_each: fn count ->
+        drain_fully.(name)
+        fill.(count)
+        Process.sleep(5)
+        count
+      end,
+      warmup: 2,
+      time: 10,
+      print: %{configuration: false}
+    )
+
+    Postgrex.query!(conn, "SELECT pg_drop_replication_slot($1::name)", [name])
+  end
+
+  Enum.each(["realtime.list_changes", "realtime.list_changes_settled"], measure)
+
   GenServer.stop(conn)
   GenServer.stop(writer)
 after
