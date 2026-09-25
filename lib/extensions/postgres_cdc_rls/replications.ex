@@ -5,6 +5,8 @@ defmodule Extensions.PostgresCdcRls.Replications do
 
   import Postgrex, only: [query: 3, query: 4]
 
+  alias Realtime.FeatureFlags
+
   @spec prepare_replication(pid(), String.t()) ::
           {:ok, Postgrex.Result.t()} | {:error, Postgrex.Error.t()}
   def prepare_replication(conn, slot_name) do
@@ -84,7 +86,36 @@ defmodule Extensions.PostgresCdcRls.Replications do
     end
   end
 
-  def list_changes(conn, slot_name, publication, max_changes, max_record_bytes) do
+  @doc """
+  Drains the slot and authorizes each change.
+
+  ## Options
+
+    * `:slot_name` (required, `t:String.t/0`) - the replication slot to drain
+    * `:publication` (required, `t:String.t/0`) - the publication to decode
+    * `:max_changes` (required, `t:pos_integer/0`) - most changes to take in one poll
+    * `:max_record_bytes` (required, `t:pos_integer/0`) - records above this are truncated
+    * `:tenant_id` (optional, `t:String.t/0`) - resolves the `sync_standby` feature flag
+
+  The `sync_standby` flag picks the SQL function: `realtime.list_changes_settled` defers a change
+  whose transaction is still in flight, which only matters where a COMMIT waits for a synchronous standby.
+  """
+  @spec list_changes(pid(), keyword()) :: {:ok, Postgrex.Result.t()} | {:error, Postgrex.Error.t()}
+  def list_changes(conn, opts) do
+    opts =
+      Keyword.validate!(opts, [:slot_name, :publication, :max_changes, :max_record_bytes, tenant_id: nil])
+
+    publication = Keyword.fetch!(opts, :publication)
+    slot_name = Keyword.fetch!(opts, :slot_name)
+    max_changes = Keyword.fetch!(opts, :max_changes)
+    max_record_bytes = Keyword.fetch!(opts, :max_record_bytes)
+    tenant_id = opts[:tenant_id]
+
+    function =
+      if tenant_id && FeatureFlags.enabled?("sync_standby", tenant_id),
+        do: "realtime.list_changes_settled",
+        else: "realtime.list_changes"
+
     query(
       conn,
       """
@@ -98,15 +129,10 @@ defmodule Extensions.PostgresCdcRls.Replications do
              subscription_ids,
              errors,
              slot_changes_count
-      FROM realtime.list_changes($1, $2, $3, $4)
+      FROM #{function}($1, $2, $3, $4)
       """,
-      [
-        publication,
-        slot_name,
-        max_changes,
-        max_record_bytes
-      ],
-      cache_statement: "realtime_list_changes"
+      [publication, slot_name, max_changes, max_record_bytes],
+      cache_statement: String.replace(function, ".", "_")
     )
   end
 end

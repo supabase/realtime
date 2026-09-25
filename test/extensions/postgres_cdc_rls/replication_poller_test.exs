@@ -67,7 +67,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
 
       # unless specified it will return empty results
       empty_results = {:ok, %Postgrex.Result{rows: [], num_rows: 0}}
-      stub(Replications, :list_changes, fn _, _, _, _, _ -> empty_results end)
+      stub(Replications, :list_changes, fn _, _ -> empty_results end)
 
       # Default to a publication with tables so the poller actually polls.
       # Tests that need an empty publication override this stub explicitly.
@@ -135,7 +135,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
          }}
 
       stub(Replications, :get_pg_stat_activity_diff, fn _conn, _pid -> {:ok, 42} end)
-      stub(Replications, :list_changes, fn _, _, _, _, _ -> slot_in_use_error end)
+      stub(Replications, :list_changes, fn _, _ -> slot_in_use_error end)
       expect(Replications, :terminate_backend, fn _conn, _slot -> {:ok, :terminated} end)
 
       pid = start_link_supervised!({Poller, args})
@@ -153,7 +153,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
     test "gives up and stops after max retries", %{args: args} do
       tenant_id = args["id"]
       error = {:error, %Postgrex.Error{message: "boom"}}
-      stub(Replications, :list_changes, fn _, _, _, _, _ -> error end)
+      stub(Replications, :list_changes, fn _, _ -> error end)
 
       pid = start_supervised!({Poller, args}, restart: :temporary)
       ref = Process.monitor(pid)
@@ -209,7 +209,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
           <<251, 188, 190, 118, 168, 119, 17, 240, 188, 87, 118, 202, 193, 157, 232, 187>>
         ])
 
-      expect(Replications, :list_changes, fn _, _, _, _, _ -> results end)
+      expect(Replications, :list_changes, fn _, _ -> results end)
       reject(&TenantBroadcaster.pubsub_direct_broadcast/6)
 
       # Broadcast to the whole cluster due to missing node information
@@ -256,7 +256,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
           <<251, 188, 190, 118, 168, 119, 17, 240, 188, 87, 118, 202, 193, 157, 232, 187>>
         ])
 
-      expect(Replications, :list_changes, fn _, _, _, _, _ -> results end)
+      expect(Replications, :list_changes, fn _, _ -> results end)
       reject(&TenantBroadcaster.pubsub_direct_broadcast/6)
 
       # Broadcast to the whole cluster due to missing node information
@@ -305,7 +305,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
 
       :ets.insert(args["subscribers_nodes_table"], {sub1, node()})
 
-      expect(Replications, :list_changes, fn _, _, _, _, _ -> results end)
+      expect(Replications, :list_changes, fn _, _ -> results end)
       reject(&TenantBroadcaster.pubsub_direct_broadcast/6)
 
       # Broadcast to the whole cluster due to missing node information
@@ -358,7 +358,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
       :ets.insert(args["subscribers_nodes_table"], {sub2, :"someothernode@127.0.0.1"})
       :ets.insert(args["subscribers_nodes_table"], {sub3, node()})
 
-      expect(Replications, :list_changes, fn _, _, _, _, _ -> results end)
+      expect(Replications, :list_changes, fn _, _ -> results end)
       reject(&TenantBroadcaster.pubsub_broadcast/5)
 
       topic = "realtime:postgres:" <> tenant_id
@@ -408,7 +408,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
       tenant_id = args["id"]
 
       expect(Subscriptions, :fetch_publication_tables, fn _, _ -> {:ok, %{}} end)
-      reject(&Replications.list_changes/5)
+      reject(&Replications.list_changes/2)
 
       start_link_supervised!({Poller, args})
 
@@ -426,7 +426,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
       assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 500
 
       expect(Subscriptions, :fetch_publication_tables, fn _, _ -> {:ok, %{}} end)
-      reject(&Replications.list_changes/5)
+      reject(&Replications.list_changes/2)
 
       send(pid, :check_oids)
       # Force the GenServer to process :check_oids before we assert.
@@ -451,7 +451,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
       end)
 
       expect(Subscriptions, :fetch_publication_tables, fn _, _ -> {:ok, %{}} end)
-      reject(&Replications.list_changes/5)
+      reject(&Replications.list_changes/2)
 
       send(pid, :check_oids)
 
@@ -577,7 +577,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
       tenant_id = args["id"]
 
       expect(Subscriptions, :fetch_publication_tables, fn _, _ -> {:ok, %{}} end)
-      reject(&Replications.list_changes/5)
+      reject(&Replications.list_changes/2)
 
       pid = start_link_supervised!({Poller, args})
 
