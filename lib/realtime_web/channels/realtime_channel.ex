@@ -4,6 +4,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   """
   use RealtimeWeb, :channel
   use RealtimeWeb.RealtimeChannel.Logging
+  use Errata
 
   alias DBConnection.Backoff
 
@@ -15,6 +16,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Realtime.FeatureFlags
   alias Realtime.GenCounter
   alias Realtime.Helpers
+  alias Realtime.Messages.ReplayRejected
   alias Realtime.PostgresCdc
   alias Realtime.RateCounter
   alias Realtime.SignalHandler
@@ -254,15 +256,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, :shutdown_in_progress} ->
         log_error(socket, "RealtimeRestarting", "Realtime is restarting, please standby")
 
-      {:error, :failed_to_replay_messages} ->
-        log_error(socket, "UnableToReplayMessages", "Realtime was unable to replay messages")
-
-      {:error, :invalid_replay_params} ->
-        log_error(socket, "UnableToReplayMessages", "Replay params are not valid")
-
-      {:error, :invalid_replay_channel} ->
-        log_error(socket, "UnableToReplayMessages", "Replay is not allowed for public channels")
-
       {:error, {:error_generating_signer, kid}} ->
         log_error(
           socket,
@@ -276,6 +269,9 @@ defmodule RealtimeWeb.RealtimeChannel do
           "JwtSignerError",
           "Failed to generate JWT signer, check your JWT secret or JWKS configuration"
         )
+
+      {:error, error} when is_error(error) ->
+        log_error(socket, error)
 
       {:error, error} ->
         log_error(socket, "UnknownErrorOnChannel", error)
@@ -1196,8 +1192,9 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp maybe_replay_messages(%{"broadcast" => %{"replay" => _}}, _sub_topic, _db_conn, _tenant_id, false = _private?) do
-    {:error, :invalid_replay_channel}
+  defp maybe_replay_messages(%{"broadcast" => %{"replay" => _}}, sub_topic, _db_conn, tenant_id, false = _private?) do
+    context = %{tenant_id: tenant_id, topic: sub_topic}
+    {:error, Errata.create(ReplayRejected, reason: :public_channel, context: context)}
   end
 
   defp maybe_replay_messages(

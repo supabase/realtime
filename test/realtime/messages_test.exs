@@ -1,10 +1,13 @@
 defmodule Realtime.MessagesTest do
   # usage of Clustered
   use Realtime.DataCase, async: false
+  use Mimic
 
   alias Realtime.Api.Message
   alias Realtime.Database
   alias Realtime.Messages
+  alias Realtime.Messages.ReplayFailed
+  alias Realtime.Messages.ReplayRejected
   alias Realtime.Tenants.Repo
 
   setup do
@@ -60,14 +63,31 @@ defmodule Realtime.MessagesTest do
 
   describe "replay/5" do
     test "invalid replay params", %{tenant: tenant} do
-      assert Messages.replay(self(), tenant.external_id, "a topic", "not a number", 123) ==
-               {:error, :invalid_replay_params}
+      external_id = tenant.external_id
 
-      assert Messages.replay(self(), tenant.external_id, "a topic", 123, "not a number") ==
-               {:error, :invalid_replay_params}
+      assert {:error, %ReplayRejected{reason: :invalid_params} = error} =
+               Messages.replay(self(), external_id, "a topic", "not a number", 123)
 
-      assert Messages.replay(self(), tenant.external_id, "a topic", 253_402_300_800_000, 10) ==
-               {:error, :invalid_replay_params}
+      assert Errata.context(error) == %{tenant_id: external_id, topic: "a topic", since: "not a number", limit: 123}
+
+      assert {:error, %ReplayRejected{reason: :invalid_params}} =
+               Messages.replay(self(), external_id, "a topic", 123, "not a number")
+
+      # Past the end of the calendar, so not a valid Unix timestamp
+      assert {:error, %ReplayRejected{reason: :invalid_params} = error} =
+               Messages.replay(self(), external_id, "a topic", 253_402_300_800_000, 10)
+
+      assert Errata.context(error) == %{tenant_id: external_id, topic: "a topic", since: 253_402_300_800_000, limit: 10}
+    end
+
+    test "wraps a query failure with the replay context", %{conn: conn, tenant: tenant} do
+      external_id = tenant.external_id
+      postgrex_error = %Postgrex.Error{postgres: %{code: :undefined_table, message: "relation does not exist"}}
+      expect(Repo, :all, fn ^conn, _query, Message, _opts -> {:error, postgrex_error} end)
+
+      assert {:error, %ReplayFailed{} = error} = Messages.replay(conn, external_id, "test", 0, 10)
+      assert Errata.cause(error) == postgrex_error
+      assert Errata.context(error) == %{tenant_id: external_id, topic: "test", since: 0, limit: 10}
     end
 
     test "empty replay", %{conn: conn} do
@@ -285,7 +305,7 @@ defmodule Realtime.MessagesTest do
                {:ok, [m], MapSet.new([m.id])}
     end
 
-    test "distributed replay error", %{tenant: tenant} do
+    test "distributed replay wraps the failure with its context", %{tenant: tenant} do
       message_fixture(tenant, %{
         "inserted_at" => NaiveDateTime.utc_now(),
         "event" => "event",
@@ -300,8 +320,18 @@ defmodule Realtime.MessagesTest do
       # Call remote node passing the database connection that is local to this node
       pid = spawn(fn -> :ok end)
 
-      assert :erpc.call(node, Messages, :replay, [pid, tenant.external_id, "test", 0, 30]) ==
-               {:error, :failed_to_replay_messages}
+      # The error is created on the remote node and travels back as a struct, context and all
+      assert {:error, %ReplayFailed{} = error} =
+               :erpc.call(node, Messages, :replay, [pid, tenant.external_id, "test", 0, 30])
+
+      assert Errata.context(error) == %{tenant_id: tenant.external_id, topic: "test", since: 0, limit: 30}
+      assert error.env.module == Messages
+
+      # TODO: The tenant Repo rescues the underlying exception, logs it separately and returns
+      # this bare atom, so the cause carries nothing of use. Having Repo return the exception
+      # itself, so it travels here as the cause, is a follow-up item that could be addressed in
+      # a separate PR.
+      assert Errata.cause(error) == :postgrex_exception
     end
   end
 

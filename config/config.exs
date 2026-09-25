@@ -100,6 +100,23 @@ config :prom_ex, :storage_adapter, Realtime.PromEx.Store
 config :realtime, Realtime.PromEx, ets_flush_interval: 90_000
 config :realtime, Realtime.TenantPromEx, ets_flush_interval: 90_000
 
+config :errata,
+  capture_stacktrace: false,
+  redact: [
+    # credentials clients send
+    :access_token,
+    :user_token,
+    :auth_token,
+    :apikey,
+    "x-api-key",
+    :authorization,
+
+    # tenant secrets
+    :jwt_secret,
+    :db_password,
+    :password
+  ]
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{Mix.env()}.exs"

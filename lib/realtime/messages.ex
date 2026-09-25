@@ -3,7 +3,11 @@ defmodule Realtime.Messages do
   Handles `realtime.messages` table operations
   """
 
+  use Errata
+
   alias Realtime.Api.Message
+  alias Realtime.Messages.ReplayFailed
+  alias Realtime.Messages.ReplayRejected
   alias Realtime.Tenants.Repo
 
   import Ecto.Query, only: [from: 2]
@@ -71,18 +75,26 @@ defmodule Realtime.Messages do
   Only allowed for private channels
   """
   @spec replay(pid, String.t(), String.t(), non_neg_integer, non_neg_integer) ::
-          {:ok, Message.t(), [String.t()]} | {:error, term} | {:error, :rpc_error, term}
+          {:ok, [Message.t()], MapSet.t(String.t())}
+          | {:error, ReplayRejected.t() | ReplayFailed.t()}
+          | {:error, :rpc_error, term}
   def replay(conn, tenant_id, topic, since, limit)
       when node(conn) == node() and is_integer(since) and is_integer(limit) do
+    context = replay_context(tenant_id, topic, since, limit)
     limit = max(min(limit, @hard_limit), 1)
 
     with {:ok, since} <- DateTime.from_unix(since, :millisecond),
          {:ok, messages} <- messages(conn, tenant_id, topic, since, limit) do
       {:ok, Enum.reverse(messages), MapSet.new(messages, & &1.id)}
     else
-      {:error, :postgrex_exception} -> {:error, :failed_to_replay_messages}
-      {:error, :invalid_unix_time} -> {:error, :invalid_replay_params}
-      error -> error
+      {:error, :invalid_unix_time} ->
+        {:error, Errata.create(ReplayRejected, reason: :invalid_params, context: context)}
+
+      {:error, reason} ->
+        {:error, Errata.wrap(ReplayFailed, reason, context: context)}
+
+      other ->
+        {:error, Errata.wrap(ReplayFailed, other, context: context)}
     end
   end
 
@@ -93,7 +105,14 @@ defmodule Realtime.Messages do
     )
   end
 
-  def replay(_, _, _, _, _), do: {:error, :invalid_replay_params}
+  def replay(_conn, tenant_id, topic, since, limit) do
+    context = replay_context(tenant_id, topic, since, limit)
+    {:error, Errata.create(ReplayRejected, reason: :invalid_params, context: context)}
+  end
+
+  # What the client asked for, before any clamping
+  defp replay_context(tenant_id, topic, since, limit),
+    do: %{tenant_id: tenant_id, topic: topic, since: since, limit: limit}
 
   defp messages(conn, tenant_id, topic, since, limit) do
     since = DateTime.to_naive(since)
