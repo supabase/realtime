@@ -190,6 +190,47 @@ defmodule TestHelpers do
   end
 
   @doc """
+  Checks out every connection in `db_conn`'s pool and holds them, so the next caller has to queue.
+
+  `count` is the size of the pool: this blocks until the pool reports it has nothing left to hand
+  out, so a smaller number raises.
+
+  The holders sleep in Elixir inside a transaction rather than in a `pg_sleep/1`, so a pool with a
+  `statement_timeout` cannot hand a connection back in the middle of a test. Works for a pool on
+  another node: the holders run there.
+  """
+  @spec hold_connections!(pid() | atom(), pos_integer()) :: :ok
+  def hold_connections!(db_conn, count \\ 1) do
+    test = self()
+
+    holders = for _ <- 1..count, do: Node.spawn_link(node(db_conn), __MODULE__, :__hold_connection__, [db_conn, test])
+
+    for _ <- holders do
+      receive do
+        {:holding, _holder} -> :ok
+      after
+        @default_timeout ->
+          raise "only some of the #{count} connection(s) on #{inspect(db_conn)} were checked out in time"
+      end
+    end
+
+    # And the pool agrees there is nothing left for the next caller.
+    await_pool_saturated!(db_conn)
+  end
+
+  @doc false
+  def __hold_connection__(db_conn, test) do
+    Postgrex.transaction(
+      db_conn,
+      fn _conn ->
+        send(test, {:holding, self()})
+        Process.sleep(:infinity)
+      end,
+      timeout: to_timeout(minute: 1)
+    )
+  end
+
+  @doc """
   Blocks until `db_conn`'s pool has no connection left to hand out.
 
   Useful for tests that deliberately exhaust a pool and then assert on the resulting
