@@ -88,7 +88,12 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
       {:ok, _} = Replications.prepare_replication(conn, slot_name)
 
       assert {:ok, %Postgrex.Result{rows: rows}} =
-               Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+               Replications.list_changes(conn,
+                 slot_name: slot_name,
+                 publication: @publication,
+                 max_changes: 100,
+                 max_record_bytes: 1_048_576
+               )
 
       assert [sentinel] = rows
       [nil, nil, nil, "[]", "{}", "{}", nil, nil, nil, slot_changes_count] = sentinel
@@ -114,7 +119,12 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
       Postgrex.query!(conn, "INSERT INTO public.test (details) VALUES ('hello')", [])
 
       assert {:ok, %Postgrex.Result{rows: rows}} =
-               Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+               Replications.list_changes(conn,
+                 slot_name: slot_name,
+                 publication: @publication,
+                 max_changes: 100,
+                 max_record_bytes: 1_048_576
+               )
 
       assert [row] = rows
 
@@ -154,7 +164,12 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
       Postgrex.query!(conn, "INSERT INTO public.test (details) VALUES ('hello')", [])
 
       assert {:ok, %Postgrex.Result{rows: rows}} =
-               Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+               Replications.list_changes(conn,
+                 slot_name: slot_name,
+                 publication: @publication,
+                 max_changes: 100,
+                 max_record_bytes: 1_048_576
+               )
 
       assert [sentinel] = rows
       [nil, nil, nil, "[]", "{}", "{}", nil, nil, nil, slot_changes_count] = sentinel
@@ -167,11 +182,24 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
 
       {:ok, _} = Replications.prepare_replication(conn, slot_name)
 
-      assert {:ok, _} = Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
-      assert {:ok, _} = Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+      assert {:ok, _} =
+               Replications.list_changes(conn,
+                 slot_name: slot_name,
+                 publication: @publication,
+                 max_changes: 100,
+                 max_record_bytes: 1_048_576
+               )
+
+      assert {:ok, _} =
+               Replications.list_changes(conn,
+                 slot_name: slot_name,
+                 publication: @publication,
+                 max_changes: 100,
+                 max_record_bytes: 1_048_576
+               )
 
       # pg_prepared_statements is session-scoped and the "realtime_rls" pool has a
-      # single connection, so this query observes the same backend session that ran
+      # single connection, tenant_id: so this query observes the same backend session that ran
       # list_changes. It must hold exactly one named statement (nothing else on this
       # connection caches), executed once per list_changes call above.
       assert {:ok, %Postgrex.Result{rows: rows}} =
@@ -194,7 +222,12 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
       Postgrex.query!(conn, "INSERT INTO public.test (details) VALUES ('hello'), ('hithere')", [])
 
       assert {:ok, %Postgrex.Result{rows: rows}} =
-               Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+               Replications.list_changes(conn,
+                 slot_name: slot_name,
+                 publication: @publication,
+                 max_changes: 100,
+                 max_record_bytes: 1_048_576
+               )
 
       assert [sentinel] = rows
       [nil, nil, nil, "[]", "{}", "{}", nil, nil, nil, slot_changes_count] = sentinel
@@ -255,7 +288,12 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
       Postgrex.query!(conn, "INSERT INTO #{qualified} VALUES ('list_changes_test')", [])
 
       try do
-        Replications.list_changes(conn, slot, pub, 100, 1_048_576)
+        Replications.list_changes(conn,
+          slot_name: slot,
+          publication: pub,
+          max_changes: 100,
+          max_record_bytes: 1_048_576
+        )
       after
         drop_replication_slot(conn, slot)
         Postgrex.query(conn, "DROP TABLE IF EXISTS #{qualified}", [])

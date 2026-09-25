@@ -16,7 +16,9 @@ defmodule Extensions.PostgresCdcRls.SynchronousCommitDeliveryTest do
 
   alias Extensions.PostgresCdcRls.Replications
   alias Extensions.PostgresCdcRls.Subscriptions
+  alias Realtime.Api
   alias Realtime.Database
+  alias Realtime.FeatureFlags
 
   @publication "supabase_realtime_test"
   @claims %{"role" => "anon", "audience" => "allowed"}
@@ -38,6 +40,8 @@ defmodule Extensions.PostgresCdcRls.SynchronousCommitDeliveryTest do
       """,
       []
     )
+
+    enable_sync_standby_flag!(tenant)
 
     slot = "sync_commit_#{System.unique_integer([:positive])}"
     {:ok, _} = subscribe(conn)
@@ -61,7 +65,7 @@ defmodule Extensions.PostgresCdcRls.SynchronousCommitDeliveryTest do
       send(parent, :writes_done)
     end)
 
-    delivered = collect(conn, slot, 0)
+    delivered = collect(conn, slot, 0, tenant.external_id)
 
     assert delivered == inserts,
            "#{inserts - delivered} of #{inserts} INSERTs were consumed from the slot but never " <>
@@ -100,13 +104,13 @@ defmodule Extensions.PostgresCdcRls.SynchronousCommitDeliveryTest do
 
     # The commit record is already on disk and decodable, but no snapshot can see the row.
     assert %{rows: [[0]]} = Postgrex.query!(conn, "SELECT count(*)::int FROM public.test", [])
-    assert authorized(conn, slot) == 0
+    assert authorized(conn, slot, tenant.external_id) == 0
 
     Postgrex.query!(conn, "SELECT pg_cancel_backend(pid) FROM (#{waiting_in_syncrep()}) w", [])
     assert_eventually %{rows: [[1]]} = Postgrex.query!(conn, "SELECT count(*)::int FROM public.test", [])
 
     # Left in the slot rather than consumed, so it arrives now instead of being lost.
-    assert_eventually authorized(conn, slot) == 1
+    assert_eventually authorized(conn, slot, tenant.external_id) == 1
   end
 
   # An in-flight transaction puts a row in the same invisible state a synchronous commit does,
@@ -139,14 +143,14 @@ defmodule Extensions.PostgresCdcRls.SynchronousCommitDeliveryTest do
     assert_receive :inserted, 5_000
 
     # Only the settled row is delivered, and the in-flight one is not consumed.
-    assert authorized(conn, slot) == 1
-    assert authorized(conn, slot) == 0
+    assert authorized(conn, slot, tenant.external_id) == 1
+    assert authorized(conn, slot, tenant.external_id) == 0
 
     send(held, :release)
     assert_receive :committed, 5_000
 
     # Still in the slot, so it arrives now rather than being lost.
-    assert_eventually authorized(conn, slot) == 1
+    assert_eventually authorized(conn, slot, tenant.external_id) == 1
   end
 
   # Deferral keys on visibility, never on authorization. A change the policy denies reaches
@@ -160,10 +164,21 @@ defmodule Extensions.PostgresCdcRls.SynchronousCommitDeliveryTest do
     Postgrex.query!(writer, "INSERT INTO public.test (details) VALUES ('allowed')", [])
 
     # Both changes leave the slot; only the authorized one is delivered.
-    assert {1, 2} = poll(conn, slot)
+    assert {1, 2} = poll(conn, slot, tenant.external_id)
 
     # Nothing is left behind, so the denied change is not waiting to be retried.
-    assert {0, 0} = poll(conn, slot)
+    assert {0, 0} = poll(conn, slot, tenant.external_id)
+  end
+
+  # The flag row has to exist: enabled?/2 returns false for an unknown flag even when the tenant
+  # has an override. Pushed into the local cache so the poller reads it synchronously, and torn
+  # down so it does not leak through the shared cache.
+  defp enable_sync_standby_flag!(tenant) do
+    {:ok, flag} = Api.upsert_feature_flag(%{name: "sync_standby", enabled: false})
+    FeatureFlags.Cache.update_cache(flag)
+    {:ok, tenant} = FeatureFlags.set_tenant_flag("sync_standby", tenant.external_id, true)
+    Realtime.Tenants.Cache.update_cache(tenant)
+    on_exit(fn -> FeatureFlags.Cache.invalidate_cache("sync_standby") end)
   end
 
   defp subscribe(conn) do
@@ -185,8 +200,15 @@ defmodule Extensions.PostgresCdcRls.SynchronousCommitDeliveryTest do
 
   # slot_changes_count rides on every row, including the sentinel, and counts what the poll took
   # from the slot regardless of who it reached.
-  defp poll(conn, slot) do
-    {:ok, %Postgrex.Result{rows: rows}} = Replications.list_changes(conn, slot, @publication, 1000, 1_048_576)
+  defp poll(conn, slot, tenant_id) do
+    {:ok, %Postgrex.Result{rows: rows}} =
+      Replications.list_changes(conn,
+        slot_name: slot,
+        publication: @publication,
+        max_changes: 1000,
+        max_record_bytes: 1_048_576,
+        tenant_id: tenant_id
+      )
 
     delivered =
       Enum.count(rows, fn
@@ -203,8 +225,15 @@ defmodule Extensions.PostgresCdcRls.SynchronousCommitDeliveryTest do
 
   # A change authorized for nobody is not returned at all - only the sentinel's consumed count
   # moves - so counting the authorized rows is what shows the loss.
-  defp authorized(conn, slot) do
-    {:ok, %Postgrex.Result{rows: rows}} = Replications.list_changes(conn, slot, @publication, 1000, 1_048_576)
+  defp authorized(conn, slot, tenant_id) do
+    {:ok, %Postgrex.Result{rows: rows}} =
+      Replications.list_changes(conn,
+        slot_name: slot,
+        publication: @publication,
+        max_changes: 1000,
+        max_record_bytes: 1_048_576,
+        tenant_id: tenant_id
+      )
 
     Enum.count(rows, fn
       ["INSERT", "public", "test", _cols, _record, _old, _ts, subscription_ids, _errors, _count] ->
@@ -215,25 +244,25 @@ defmodule Extensions.PostgresCdcRls.SynchronousCommitDeliveryTest do
     end)
   end
 
-  defp collect(conn, slot, delivered) do
-    delivered = delivered + authorized(conn, slot)
+  defp collect(conn, slot, delivered, tenant_id) do
+    delivered = delivered + authorized(conn, slot, tenant_id)
 
     receive do
-      :writes_done -> drain(conn, slot, delivered)
+      :writes_done -> drain(conn, slot, delivered, tenant_id)
     after
-      0 -> collect(conn, slot, delivered)
+      0 -> collect(conn, slot, delivered, tenant_id)
     end
   end
 
   # Stop only after several consecutive empty polls: one proves nothing while the writer's WAL
   # is still being decoded.
-  defp drain(conn, slot, delivered, empty \\ 0)
-  defp drain(_conn, _slot, delivered, 5), do: delivered
+  defp drain(conn, slot, delivered, tenant_id, empty \\ 0)
+  defp drain(_conn, _slot, delivered, _tenant_id, 5), do: delivered
 
-  defp drain(conn, slot, delivered, empty) do
-    case authorized(conn, slot) do
-      0 -> drain(conn, slot, delivered, empty + 1)
-      n -> drain(conn, slot, delivered + n, 0)
+  defp drain(conn, slot, delivered, tenant_id, empty) do
+    case authorized(conn, slot, tenant_id) do
+      0 -> drain(conn, slot, delivered, tenant_id, empty + 1)
+      n -> drain(conn, slot, delivered + n, tenant_id, 0)
     end
   end
 end

@@ -150,7 +150,12 @@ exit_code =
 
     poll = fn ->
       {:ok, %Postgrex.Result{rows: rows}} =
-        Replications.list_changes(conn, slot, publication, 10_000, 1_048_576)
+        Replications.list_changes(conn,
+          slot_name: slot,
+          publication: publication,
+          max_changes: 10_000,
+          max_record_bytes: 1_048_576
+        )
 
       for ["INSERT", "public", "delivery", _cols, record, _old, _ts, ids, _errors, _count] <- rows,
           ids != [],

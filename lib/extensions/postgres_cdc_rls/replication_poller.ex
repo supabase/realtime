@@ -15,7 +15,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   ## Poll loop
 
-  Each `:poll` calls `Replications.list_changes/5`, which drains the slot and
+  Each `:poll` calls `Replications.list_changes/2`, which drains the slot and
   fans changes out to subscriber nodes. Reschedule cadence depends on activity:
 
     * rows processed → poll again immediately
@@ -49,9 +49,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   @max_retries 6
   @check_oids_interval 60_000
 
-  # Column order returned by realtime.list_changes/4 (see Replications.list_changes/5
-  # and the SQL function in
-  # lib/realtime/tenants/repo/migrations/20260326120000_list_changes_with_slot_count.ex).
+  # Column order returned by realtime.list_changes/4
+  # See Replications.list_changes/2 and the SQL function in 20260326120000_list_changes_with_slot_count.ex
   # generate_record/1 below pattern-matches positionally on this order; the runtime
   # check in handle_list_changes_result/4 fails loudly if the SQL ever changes.
   @expected_columns ~w(type schema table columns record old_record commit_timestamp subscription_ids errors slot_changes_count)
@@ -167,7 +166,17 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     cancel_timer(poll_ref)
     cancel_timer(retry_ref)
 
-    args = [conn, slot_name, publication, max_changes, max_record_bytes]
+    args = [
+      conn,
+      [
+        slot_name: slot_name,
+        publication: publication,
+        max_changes: max_changes,
+        max_record_bytes: max_record_bytes,
+        tenant_id: tenant_id
+      ]
+    ]
+
     {time, list_changes} = :timer.tc(Replications, :list_changes, args)
     record_list_changes_telemetry(time, tenant_id)
 

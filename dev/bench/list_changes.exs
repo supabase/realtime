@@ -84,7 +84,13 @@ try do
   {:ok, _} = Replications.prepare_replication(conn, slot)
 
   # Drain whatever setup produced so the first measured poll starts from an empty slot.
-  {:ok, _} = Replications.list_changes(conn, slot, publication, 100_000, 1_048_576)
+  {:ok, _} =
+    Replications.list_changes(conn,
+      slot_name: slot,
+      publication: publication,
+      max_changes: 100_000,
+      max_record_bytes: 1_048_576
+    )
 
   fill = fn count ->
     Postgrex.query!(
@@ -96,7 +102,12 @@ try do
 
   drain = fn ->
     {:ok, %Postgrex.Result{rows: rows}} =
-      Replications.list_changes(conn, slot, publication, 100_000, 1_048_576)
+      Replications.list_changes(conn,
+        slot_name: slot,
+        publication: publication,
+        max_changes: 100_000,
+        max_record_bytes: 1_048_576
+      )
 
     rows
   end

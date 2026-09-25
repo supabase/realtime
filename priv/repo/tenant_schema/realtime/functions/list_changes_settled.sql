@@ -1,4 +1,4 @@
-create or replace function realtime.list_changes (
+create or replace function realtime.list_changes_settled (
   publication      name,
   slot_name        name,
   max_changes      integer,
@@ -35,12 +35,12 @@ create or replace function realtime.list_changes (
     GROUP BY pp.pubname
     LIMIT 1
   ),
-  -- MATERIALIZED ensures pg_logical_slot_get_changes is called exactly once
-  w2j AS MATERIALIZED (
+  -- MATERIALIZED ensures the slot is read exactly once.
+  consumed AS MATERIALIZED (
     SELECT x.*, pub.w2j_add_tables
     FROM pub,
-         pg_logical_slot_get_changes(
-           slot_name, null, max_changes,
+         realtime.settled_changes(
+           slot_name, max_changes,
            'include-pk', 'true',
            'include-transaction', 'false',
            'include-timestamp', 'true',
@@ -52,17 +52,17 @@ create or replace function realtime.list_changes (
   ),
   slot_count AS (
     SELECT count(*)::bigint AS cnt
-    FROM w2j
-    WHERE w2j.w2j_add_tables <> ''
+    FROM consumed
+    WHERE consumed.w2j_add_tables <> ''
   ),
   rls_filtered AS (
     SELECT xyz.wal, xyz.is_rls_enabled, xyz.subscription_ids, xyz.errors
-    FROM w2j,
+    FROM consumed,
          realtime.apply_rls(
-           wal := w2j.data::jsonb,
+           wal := consumed.data::jsonb,
            max_record_bytes := max_record_bytes
          ) xyz(wal, is_rls_enabled, subscription_ids, errors)
-    WHERE w2j.w2j_add_tables <> ''
+    WHERE consumed.w2j_add_tables <> ''
       AND xyz.subscription_ids[1] IS NOT NULL
   )
   SELECT rf.wal, rf.is_rls_enabled, rf.subscription_ids, rf.errors, sc.cnt
@@ -75,4 +75,4 @@ create or replace function realtime.list_changes (
   WHERE NOT EXISTS (SELECT 1 FROM rls_filtered)
 $function$;
 
-alter function "realtime"."list_changes"(name, name, integer, integer) owner to "supabase_realtime_admin";
+alter function "realtime"."list_changes_settled"(name, name, integer, integer) owner to "supabase_realtime_admin";

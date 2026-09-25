@@ -1,4 +1,4 @@
-defmodule Realtime.Tenants.Migrations.DeferUnsettledChangesInListChanges do
+defmodule Realtime.Tenants.Migrations.AddListChangesSettled do
   @moduledoc false
 
   use Ecto.Migration
@@ -91,10 +91,8 @@ defmodule Realtime.Tenants.Migrations.DeferUnsettledChangesInListChanges do
     $$;
     """)
 
-    execute("DROP FUNCTION IF EXISTS realtime.list_changes(name, name, int, int)")
-
     execute(~S"""
-    CREATE FUNCTION realtime.list_changes(publication name, slot_name name, max_changes int, max_record_bytes int)
+    CREATE FUNCTION realtime.list_changes_settled(publication name, slot_name name, max_changes int, max_record_bytes int)
     RETURNS TABLE(
       wal jsonb,
       is_rls_enabled boolean,
@@ -167,9 +165,10 @@ defmodule Realtime.Tenants.Migrations.DeferUnsettledChangesInListChanges do
     $$;
     """)
 
-    # Recreating list_changes resets it to the migration runner, undoing the ownership
-    # RestrictRealtimeSchema gave it.
     execute("ALTER FUNCTION realtime.settled_changes(name, integer, text[]) OWNER TO supabase_realtime_admin")
-    execute("ALTER FUNCTION realtime.list_changes(name, name, integer, integer) OWNER TO supabase_realtime_admin")
+
+    execute(
+      "ALTER FUNCTION realtime.list_changes_settled(name, name, integer, integer) OWNER TO supabase_realtime_admin"
+    )
   end
 end
