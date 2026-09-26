@@ -86,8 +86,10 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
         ) rr
         where
         pub.pubname = $1
-        and pub.schemaname like (case $2 when '*' then '%' else $2 end) escape ''
-        and pub.tablename like (case $3 when '*' then '%' else $3 end) escape ''
+        -- Exact match: `_` and `%` are ordinary characters in a schema or table name, so a LIKE
+        -- would also subscribe to every other table the name happens to match as a pattern.
+        and ($2 = '*' or pub.schemaname = $2)
+        and ($3 = '*' or pub.tablename = $3)
      )
      insert into realtime.subscription as x(
         subscription_id,
