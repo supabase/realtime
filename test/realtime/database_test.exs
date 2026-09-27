@@ -223,19 +223,7 @@ defmodule Realtime.DatabaseTest do
 
     @tag db_pool: 1, pool_queue: [queue_target: 50, queue_interval: 100]
     test "on checkout error, handles raised exception as an error", %{db_conn: db_conn} do
-      TestHelpers.await_pool_ready!(db_conn)
-
-      for _ <- 1..5 do
-        Task.start(fn ->
-          Database.transaction(
-            db_conn,
-            fn conn -> Postgrex.query!(conn, "SELECT pg_sleep(10)", []) end,
-            timeout: 20000
-          )
-        end)
-      end
-
-      TestHelpers.await_pool_saturated!(db_conn)
+      TestHelpers.hold_connections!(db_conn)
 
       log =
         capture_log(fn ->
