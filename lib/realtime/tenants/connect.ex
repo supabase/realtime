@@ -29,7 +29,7 @@ defmodule Realtime.Tenants.Connect do
 
   @rpc_timeout_default 30_000
   @check_connected_user_interval_default :timer.seconds(60)
-  @connected_users_bucket_shutdown [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  @connected_users_bucket_shutdown [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
   # How long the database pool may stay disconnected before we give up and stop
   # Connect. The durable pool reconnects forever with backoff, so without a bound
@@ -332,14 +332,10 @@ defmodule Realtime.Tenants.Connect do
   end
 
   def handle_continue(:setup_connected_user_events, state) do
-    %{
-      check_connected_user_interval: check_connected_user_interval,
-      connected_users_bucket: connected_users_bucket,
-      tenant_id: tenant_id
-    } = state
+    %{check_connected_user_interval: check_connected_user_interval, tenant_id: tenant_id} = state
 
     :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant_id)
-    send_connected_user_check_message(connected_users_bucket, check_connected_user_interval)
+    schedule_connected_user_check(check_connected_user_interval)
     :ets.insert(__MODULE__, {tenant_id})
     {:noreply, state, {:continue, :start_connect_region_check}}
   end
@@ -358,12 +354,15 @@ defmodule Realtime.Tenants.Connect do
           connected_users_bucket: connected_users_bucket
         } = state
       ) do
-    connected_users_bucket =
-      tenant_id
-      |> update_connected_users_bucket(connected_users_bucket)
-      |> send_connected_user_check_message(check_connected_user_interval)
+    case update_connected_users_bucket(tenant_id, connected_users_bucket) do
+      @connected_users_bucket_shutdown ->
+        Logger.info("Tenant has no connected users, database connection will be terminated")
+        {:stop, :shutdown, state}
 
-    {:noreply, %{state | connected_users_bucket: connected_users_bucket}}
+      connected_users_bucket ->
+        schedule_connected_user_check(check_connected_user_interval)
+        {:noreply, %{state | connected_users_bucket: connected_users_bucket}}
+    end
   end
 
   def handle_info({:check_connect_region, previous_nodes_set}, state) do
@@ -378,27 +377,6 @@ defmodule Realtime.Tenants.Connect do
       {:error, :wrong_region} ->
         Logger.warning("Rebalancing Tenant database connection for a closer region")
         {:stop, {:shutdown, :rebalancing}, state}
-    end
-  end
-
-  def handle_info(
-        :shutdown_no_connected_users,
-        %{
-          tenant_id: tenant_id,
-          check_connected_user_interval: check_connected_user_interval,
-          connected_users_bucket: connected_users_bucket
-        } = state
-      ) do
-    case update_connected_users_bucket(tenant_id, connected_users_bucket) do
-      @connected_users_bucket_shutdown ->
-        Logger.info("Tenant has no connected users, database connection will be terminated")
-        {:stop, :shutdown, state}
-
-      connected_users_bucket ->
-        connected_users_bucket =
-          send_connected_user_check_message(connected_users_bucket, check_connected_user_interval)
-
-        {:noreply, %{state | connected_users_bucket: connected_users_bucket}}
     end
   end
 
@@ -568,20 +546,11 @@ defmodule Realtime.Tenants.Connect do
   defp update_connected_users_bucket(tenant_id, connected_users_bucket) do
     connected_users_bucket
     |> then(&(&1 ++ [UsersCounter.tenant_users(tenant_id)]))
-    |> Enum.take(-11)
+    |> Enum.take(-10)
   end
 
-  defp send_connected_user_check_message(
-         @connected_users_bucket_shutdown = connected_users_bucket,
-         check_connected_user_interval
-       ) do
-    Process.send_after(self(), :shutdown_no_connected_users, check_connected_user_interval)
-    connected_users_bucket
-  end
-
-  defp send_connected_user_check_message(connected_users_bucket, check_connected_user_interval) do
+  defp schedule_connected_user_check(check_connected_user_interval) do
     Process.send_after(self(), :check_connected_users, check_connected_user_interval)
-    connected_users_bucket
   end
 
   defp send_connect_region_check_message(check_connect_region_interval) do
