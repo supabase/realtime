@@ -4,6 +4,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
 
   use Mimic
 
+  import ExUnit.CaptureLog
+
   alias Extensions.PostgresCdcRls.MessageDispatcher
   alias Extensions.PostgresCdcRls.ReplicationPoller, as: Poller
   alias Extensions.PostgresCdcRls.Replications
@@ -72,6 +74,9 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
       # Default to a publication with tables so the poller actually polls.
       # Tests that need an empty publication override this stub explicitly.
       stub(Subscriptions, :fetch_publication_tables, fn _, _ -> {:ok, %{{"public", "test"} => [1234]}} end)
+
+      stub(Replications, :synchronous_standby?, fn _ -> false end)
+      stub(Database, :orioledb?, fn _ -> false end)
 
       %{args: args, tenant: tenant}
     end
@@ -573,6 +578,66 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
       assert is_reference(:sys.get_state(pid).check_oid_ref)
     end
 
+    test "tells list_changes when commits wait for a synchronous standby", %{args: args} do
+      stub(Replications, :synchronous_standby?, fn _ -> true end)
+      report_standby()
+
+      start_link_supervised!({Poller, args})
+
+      assert_receive {:standby, true}, 1000
+    end
+
+    test "tells list_changes when there is no synchronous standby", %{args: args} do
+      report_standby()
+
+      start_link_supervised!({Poller, args})
+
+      assert_receive {:standby, false}, 1000
+    end
+
+    test "reads as without a standby and warns on OrioleDB with a synchronous standby", %{args: args} do
+      stub(Replications, :synchronous_standby?, fn _ -> true end)
+      stub(Database, :orioledb?, fn _ -> true end)
+      report_standby()
+
+      log =
+        capture_log(fn ->
+          start_link_supervised!({Poller, args})
+          assert_receive {:standby, false}, 1000
+        end)
+
+      assert log =~ "SyncStandbyUnsupported: "
+    end
+
+    test "checks the standby when it prepares the slot, not on every publication check", %{args: args} do
+      parent = self()
+
+      stub(Replications, :synchronous_standby?, fn _ ->
+        send(parent, :standby_checked)
+        false
+      end)
+
+      pid = start_link_supervised!({Poller, args})
+      assert_receive :standby_checked, 1000
+
+      send(pid, :check_oids)
+      :sys.get_state(pid)
+
+      refute_receive :standby_checked, 100
+    end
+
+    test "checks the standby again when it prepares the slot again", %{args: args} do
+      report_standby()
+
+      pid = start_link_supervised!({Poller, args})
+      assert_receive {:standby, false}, 1000
+
+      stub(Replications, :synchronous_standby?, fn _ -> true end)
+      send(pid, :retry)
+
+      assert_receive {:standby, true}, 2000
+    end
+
     test "arms the periodic :check_oids timer even when the publication is empty", %{args: args} do
       tenant_id = args["id"]
 
@@ -586,6 +651,15 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
       # Even idle (no slot), the poller must keep checking for tables to appear.
       assert is_reference(:sys.get_state(pid).check_oid_ref)
     end
+  end
+
+  defp report_standby do
+    parent = self()
+
+    stub(Replications, :list_changes, fn _, opts ->
+      send(parent, {:standby, opts[:synchronous_standby]})
+      {:ok, %Postgrex.Result{rows: [], num_rows: 0}}
+    end)
   end
 
   @columns [

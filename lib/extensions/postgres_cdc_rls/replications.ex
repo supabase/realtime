@@ -5,8 +5,6 @@ defmodule Extensions.PostgresCdcRls.Replications do
 
   import Postgrex, only: [query: 3, query: 4]
 
-  alias Realtime.FeatureFlags
-
   @spec prepare_replication(pid(), String.t()) ::
           {:ok, Postgrex.Result.t()} | {:error, Postgrex.Error.t()}
   def prepare_replication(conn, slot_name) do
@@ -87,6 +85,17 @@ defmodule Extensions.PostgresCdcRls.Replications do
   end
 
   @doc """
+  Reports whether a COMMIT can wait for a synchronous standby. A check that fails reports `false`.
+  """
+  @spec synchronous_standby?(pid()) :: boolean()
+  def synchronous_standby?(conn) do
+    case query(conn, "SELECT current_setting('synchronous_standby_names') <> ''", []) do
+      {:ok, %Postgrex.Result{rows: [[true]]}} -> true
+      _ -> false
+    end
+  end
+
+  @doc """
   Drains the slot and authorizes each change.
 
   ## Options
@@ -95,24 +104,22 @@ defmodule Extensions.PostgresCdcRls.Replications do
     * `:publication` (required, `t:String.t/0`) - the publication to decode
     * `:max_changes` (required, `t:pos_integer/0`) - most changes to take in one poll
     * `:max_record_bytes` (required, `t:pos_integer/0`) - records above this are truncated
-    * `:tenant_id` (optional, `t:String.t/0`) - resolves the `sync_standby` feature flag
+    * `:synchronous_standby` (optional, `t:boolean/0`) - whether a COMMIT can wait for a
+      synchronous standby, see `synchronous_standby?/1`. Defaults to `false`.
 
-  The `sync_standby` flag picks the SQL function: `realtime.list_changes_settled` defers a change
-  whose transaction is still in flight, which only matters where a COMMIT waits for a synchronous standby.
   """
   @spec list_changes(pid(), keyword()) :: {:ok, Postgrex.Result.t()} | {:error, Postgrex.Error.t()}
   def list_changes(conn, opts) do
     opts =
-      Keyword.validate!(opts, [:slot_name, :publication, :max_changes, :max_record_bytes, tenant_id: nil])
+      Keyword.validate!(opts, [:slot_name, :publication, :max_changes, :max_record_bytes, synchronous_standby: false])
 
     publication = Keyword.fetch!(opts, :publication)
     slot_name = Keyword.fetch!(opts, :slot_name)
     max_changes = Keyword.fetch!(opts, :max_changes)
     max_record_bytes = Keyword.fetch!(opts, :max_record_bytes)
-    tenant_id = opts[:tenant_id]
 
     function =
-      if tenant_id && FeatureFlags.enabled?("sync_standby", tenant_id),
+      if Keyword.fetch!(opts, :synchronous_standby),
         do: "realtime.list_changes_settled",
         else: "realtime.list_changes"
 

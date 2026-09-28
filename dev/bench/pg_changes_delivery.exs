@@ -148,8 +148,8 @@ exit_code =
       end)
     end
 
-    # The throwaway database has no tenant record, so the sync_standby flag cannot be resolved
-    # here. SETTLED picks the SQL function directly instead, which is what the flag would do.
+    # SETTLED picks the SQL function directly: the poller reads settled where a commit can wait
+    # for a synchronous standby.
     function =
       if System.get_env("SETTLED", "true") == "true",
         do: "realtime.list_changes_settled",

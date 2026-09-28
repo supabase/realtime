@@ -25,6 +25,15 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   When the publication is empty, `:poll` is a no-op — there are no tables to
   decode, so the slot is not advanced.
 
+  ## Synchronous standby
+
+  Where a COMMIT can wait for a synchronous standby, a change can be decoded before
+  its row is visible. The setting rarely changes, so the poller checks
+  `Replications.synchronous_standby?/1` only when it prepares the slot, and passes
+  it to `Replications.list_changes/2`. On OrioleDB a transaction that writes only
+  OrioleDB tables cannot be deferred, so there the poll reads as it does without a
+  standby and logs `SyncStandbyUnsupported`.
+
   ## Reacting to publication changes
 
   Every `@check_oids_interval` ms the poller re-fetches the publication's oids:
@@ -95,6 +104,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       poll_interval_ms: extension["poll_interval_ms"],
       poll_ref: nil,
       publication: extension["publication"],
+      synchronous_standby: false,
       retry_ref: nil,
       retry_count: 0,
       slot_name: extension["slot_name"] <> slot_name_suffix(),
@@ -152,6 +162,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
           poll_interval_ms: poll_interval_ms,
           poll_ref: poll_ref,
           publication: publication,
+          synchronous_standby: synchronous_standby,
           retry_ref: retry_ref,
           retry_count: retry_count,
           slot_name: slot_name,
@@ -173,7 +184,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         publication: publication,
         max_changes: max_changes,
         max_record_bytes: max_record_bytes,
-        tenant_id: tenant_id
+        synchronous_standby: synchronous_standby
       ]
     ]
 
@@ -323,6 +334,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     # Always fetch fresh publication information. An empty publication fails the
     # map_size guard and falls through to the idle branch in `else`.
     with {:ok, oids} when map_size(oids) > 0 <- Subscriptions.fetch_publication_tables(conn, publication),
+         synchronous_standby = Replications.synchronous_standby?(conn),
+         orioledb = Database.orioledb?(conn),
          {:ok, _} <- Replications.prepare_replication(conn, slot_name) do
       send(self(), :poll)
 
@@ -335,7 +348,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       {:noreply,
        %{
          state
-         | oids: oids,
+         | synchronous_standby: supported_standby(synchronous_standby, orioledb),
+           oids: oids,
            check_oid_ref: schedule_check_oids(),
            retry_ref: nil,
            retry_count: 0,
@@ -376,6 +390,17 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   end
 
   defp schedule_check_oids, do: Process.send_after(self(), :check_oids, @check_oids_interval)
+
+  defp supported_standby(true = _synchronous_standby, true = _orioledb) do
+    log_warning(
+      "SyncStandbyUnsupported",
+      "Commits wait for a synchronous standby, but OrioleDB transactions cannot be deferred until they are visible"
+    )
+
+    false
+  end
+
+  defp supported_standby(synchronous_standby, _orioledb), do: synchronous_standby
 
   defp record_list_changes_telemetry(time, tenant_id) do
     Realtime.Telemetry.execute(

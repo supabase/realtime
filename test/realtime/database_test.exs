@@ -444,6 +444,20 @@ defmodule Realtime.DatabaseTest do
     end
   end
 
+  describe "orioledb?/1" do
+    @tag :skip_orioledb
+    test "reports no OrioleDB without the extension", %{tenant: tenant} do
+      {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+      refute Database.orioledb?(conn)
+    end
+
+    @tag :requires_orioledb
+    test "reports OrioleDB with the extension", %{tenant: tenant} do
+      {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+      assert Database.orioledb?(conn)
+    end
+  end
+
   describe "check_replication_slot/2" do
     setup %{tenant: tenant} do
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)

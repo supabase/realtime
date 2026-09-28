@@ -12,6 +12,13 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
     %{conn: conn, tenant: tenant}
   end
 
+  describe "synchronous_standby?/1" do
+    @tag :requires_docker_backend
+    test "reports no synchronous standby when none is named", %{conn: conn} do
+      refute Replications.synchronous_standby?(conn)
+    end
+  end
+
   describe "prepare_replication/2" do
     test "creates a replication slot", %{conn: conn} do
       slot_name = "test_slot_#{System.unique_integer([:positive])}"
@@ -199,7 +206,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
                )
 
       # pg_prepared_statements is session-scoped and the "realtime_rls" pool has a
-      # single connection, tenant_id: so this query observes the same backend session that ran
+      # single connection, so this query observes the same backend session that ran
       # list_changes. It must hold exactly one named statement (nothing else on this
       # connection caches), executed once per list_changes call above.
       assert {:ok, %Postgrex.Result{rows: rows}} =
@@ -210,6 +217,32 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
                )
 
       assert [["realtime_list_changes", 2]] = rows
+    end
+
+    @tag :requires_direct_connection
+    test "reads with list_changes_settled where a commit can wait for a synchronous standby", %{conn: conn} do
+      slot_name = "test_slot_#{System.unique_integer([:positive])}"
+      {:ok, _} = Replications.prepare_replication(conn, slot_name)
+
+      for synchronous_standby <- [false, true, false, true, false] do
+        assert {:ok, _} =
+                 Replications.list_changes(conn,
+                   slot_name: slot_name,
+                   publication: @publication,
+                   max_changes: 100,
+                   max_record_bytes: 1_048_576,
+                   synchronous_standby: synchronous_standby
+                 )
+      end
+
+      assert {:ok, %Postgrex.Result{rows: rows}} =
+               Postgrex.query(
+                 conn,
+                 "SELECT name, generic_plans + custom_plans FROM pg_prepared_statements ORDER BY name",
+                 []
+               )
+
+      assert [["realtime_list_changes", 3], ["realtime_list_changes_settled", 2]] = rows
     end
 
     test "slot has changes but no subscribers: returns only the sentinel row with slot_changes_count of 1", %{
