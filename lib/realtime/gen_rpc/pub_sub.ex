@@ -222,15 +222,17 @@ defmodule Realtime.GenRpcPubSub.Worker do
 
   @impl true
   # Forward to local
-  def handle_info({:ftl, topic, message, dispatcher}, %__MODULE__{pubsub: pubsub} = state) do
+  def handle_info({:ftl, topic, message, dispatcher} = msg, %__MODULE__{pubsub: pubsub} = state) do
+    measure_presence_replication_received(topic, msg)
     RealtimeWeb.TenantBroadcaster.measure_broadcast_fanout(message)
     Phoenix.PubSub.local_broadcast(pubsub, topic, message, dispatcher)
     {:noreply, state}
   end
 
   # Forward to the rest of the region
-  def handle_info({:ftr, topic, message, dispatcher}, %__MODULE__{} = state) do
+  def handle_info({:ftr, topic, message, dispatcher} = msg, %__MODULE__{} = state) do
     %__MODULE__{pubsub: pubsub, worker: worker, my_region: my_region} = state
+    measure_presence_replication_received(topic, msg)
     RealtimeWeb.TenantBroadcaster.measure_broadcast_fanout(message)
 
     # Forward to local first
@@ -310,6 +312,17 @@ defmodule Realtime.GenRpcPubSub.Worker do
 
   @impl true
   def handle_info(_, state), do: {:noreply, state}
+
+  @presence_replication_received_event [:realtime, :presence, :replication, :received]
+
+  # Phoenix.Tracker shards gossip on "phx_presence:<shard>" topics.
+  defp measure_presence_replication_received("phx_presence:" <> _, msg) do
+    :telemetry.execute(@presence_replication_received_event, %{size: :erlang.external_size(msg)}, %{
+      implementation: "phoenix"
+    })
+  end
+
+  defp measure_presence_replication_received(_topic, _msg), do: :ok
 
   # Deliver `message` to `nodes`, excluding `origin` (which already delivered to its
   # own subscribers via Phoenix.PubSub's local dispatch). Delivers locally if this
