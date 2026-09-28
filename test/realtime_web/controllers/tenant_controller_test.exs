@@ -309,17 +309,23 @@ defmodule RealtimeWeb.TenantControllerTest do
 
       assert Connect.ready?(tenant.external_id)
 
-      # Replication Connections are launched async and can take a while,
-      # especially in CI environments.
-      assert_eventually Realtime.Tenants.ReplicationConnection.ready?(tenant.external_id)
+      # `ReplicationConnection.ready?/1` already waits for up to 5s
+      # Give the outer wait enough headroom for a couple of attempts,
+      # since it's async and can take a while, especially in CI
+      assert_eventually Realtime.Tenants.ReplicationConnection.ready?(tenant.external_id), timeout: 15_000
 
       assert Cache.get_tenant_by_external_id(tenant.external_id)
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
 
-      %{rows: [rows]} =
-        Postgrex.query!(db_conn, "SELECT slot_name FROM pg_replication_slots WHERE slot_type = 'logical'", [])
+      slot_name = Realtime.Tenants.ReplicationConnection.replication_slot_name("realtime", "messages")
 
-      assert rows > 0
+      assert_eventually {:ok, %{rows: [_row]}} =
+                          Postgrex.query(
+                            db_conn,
+                            "SELECT slot_name FROM pg_replication_slots WHERE slot_name = $1",
+                            [slot_name]
+                          )
+
       conn = delete(conn, ~p"/api/tenants/#{tenant.external_id}")
       assert response(conn, 204)
 
@@ -330,8 +336,8 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert_eventually {:ok, %{rows: []}} =
                           Postgrex.query(
                             db_conn,
-                            "SELECT slot_name FROM pg_replication_slots WHERE slot_type = 'logical'",
-                            []
+                            "SELECT slot_name FROM pg_replication_slots WHERE slot_name = $1",
+                            [slot_name]
                           )
     end
 

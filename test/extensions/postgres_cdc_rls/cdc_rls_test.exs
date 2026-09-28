@@ -97,17 +97,13 @@ defmodule Extensions.PostgresCdcRlsTest do
     end
 
     test "Replication poller toggles slot when publication tables come and go", %{tenant: tenant} do
-      # setup/0 already received the "ready" event, which fires only after the poller's init/1
-      # (and its Registry.register) has run. :sys.get_state below then blocks until the poller
-      # finishes handle_continue and has its slot prepared.
       [{poller_pid, _}] = Registry.lookup(ReplicationPoller.Registry, tenant.external_id)
 
       # Use the SubscriptionManager pub connection to drive publication state from the test —
       # the poller's own conn is owned by the poller process.
       {:ok, _manager_pid, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
 
-      %{oids: initial_oids, slot_name: slot_name} = :sys.get_state(poller_pid)
-      refute initial_oids == %{}
+      %{slot_name: slot_name} = wait_for_poller_oids(poller_pid)
 
       assert %Postgrex.Result{rows: [[1]]} =
                Postgrex.query!(conn, "SELECT count(*)::int FROM pg_replication_slots WHERE slot_name = $1", [slot_name])
@@ -136,8 +132,7 @@ defmodule Extensions.PostgresCdcRlsTest do
       [{poller_pid, _}] = Registry.lookup(ReplicationPoller.Registry, tenant.external_id)
       {:ok, _manager_pid, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
 
-      %{oids: initial_oids, slot_name: slot_name} = :sys.get_state(poller_pid)
-      refute initial_oids == %{}
+      %{slot_name: slot_name} = wait_for_poller_oids(poller_pid)
 
       assert %Postgrex.Result{rows: [[1]]} =
                Postgrex.query!(conn, "SELECT count(*)::int FROM pg_replication_slots WHERE slot_name = $1", [slot_name])
@@ -300,7 +295,7 @@ defmodule Extensions.PostgresCdcRlsTest do
       PostgresCdcRls.handle_connect(args)
       # Wait for it to start
       assert_receive %{event: "ready"}, 3000
-      {:ok, response} = PostgresCdcRls.handle_connect(args)
+      {:ok, response = {manager_pid, _}} = PostgresCdcRls.handle_connect(args)
 
       assert_receive {
         :telemetry,
@@ -319,7 +314,7 @@ defmodule Extensions.PostgresCdcRlsTest do
       assert %Postgrex.Result{num_rows: n} = Postgrex.query!(conn, "select id from realtime.subscription", [])
       assert n >= 1
 
-      Process.sleep(500)
+      :sys.get_state(manager_pid)
 
       # Insert a record
       %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
@@ -451,7 +446,7 @@ defmodule Extensions.PostgresCdcRlsTest do
       %{node: node, response: response}
     end
 
-    test "subscribe distributed mode", %{tenant: tenant, conn: conn, node: node, response: response} do
+    test "subscribe distributed mode", %{tenant: tenant, conn: conn, node: node, response: {manager_pid, _} = response} do
       %Tenant{extensions: extensions, external_id: external_id} = tenant
       postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
 
@@ -463,7 +458,7 @@ defmodule Extensions.PostgresCdcRlsTest do
       assert n >= 1
 
       # Wait for subscription to be executing
-      Process.sleep(200)
+      :sys.get_state(manager_pid)
 
       # Insert a record
       %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
@@ -609,6 +604,18 @@ defmodule Extensions.PostgresCdcRlsTest do
     RealtimeWeb.Endpoint.subscribe(Realtime.Syn.PostgresCdc.syn_topic(tenant.external_id))
 
     %{tenant: tenant, conn: conn}
+  end
+
+  # setup/0 already received the "ready" event, but that only reflects the
+  # supervisor's manager/subs_pool metadata — it doesn't guarantee the poller
+  # has finished its own :connect/:prepare continue.
+  # So poll :sys.get_state until oids show up instead of asserting on the first read.
+  defp wait_for_poller_oids(poller_pid) do
+    case_wait :sys.get_state(poller_pid) do
+      %{oids: oids} = state when map_size(oids) > 0 -> state
+    else
+      state -> flunk("ReplicationPoller oids never populated. Last state: #{inspect(state)}")
+    end
   end
 
   defp pubsub_subscribe(external_id, event \\ "*") do

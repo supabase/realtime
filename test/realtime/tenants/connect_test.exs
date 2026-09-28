@@ -19,6 +19,8 @@ defmodule Realtime.Tenants.ConnectTest do
   @slow_replication_wait [timeout: 30_000, interval: 100]
   @local_wait [timeout: 2_500, interval: 50]
 
+  @connect_errors_bucket_len 5
+
   setup do
     tenant = TestTenantDb.checkout_tenant(run_migrations: true)
 
@@ -430,6 +432,29 @@ defmodule Realtime.Tenants.ConnectTest do
       Connect.shutdown(tenant_id)
     end
 
+    test "does not shut down if a user connects on the sample that would trigger the shutdown", %{
+      tenant: %{external_id: tenant_id} = tenant
+    } do
+      {:ok, db_conn} = Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 60_000)
+      region = Tenants.region(tenant)
+      assert {pid, %{conn: ^db_conn, region: ^region}} = :syn.lookup(Connect, tenant_id)
+
+      # The bucket seeds with [1], so it takes 10 zero samples to stop
+      for _ <- 1..9 do
+        send(pid, :check_connected_users)
+        :sys.get_state(pid)
+      end
+
+      UsersCounter.add(self(), tenant_id)
+      send(pid, :check_connected_users)
+
+      refute_process_down(pid, 300)
+      assert Process.alive?(db_conn)
+      assert {^pid, %{conn: ^db_conn, region: ^region}} = :syn.lookup(Connect, tenant_id)
+
+      Connect.shutdown(tenant_id)
+    end
+
     test "connection is killed after user leaving", %{tenant: tenant} do
       external_id = tenant.external_id
 
@@ -743,13 +768,15 @@ defmodule Realtime.Tenants.ConnectTest do
     test "rate limit connect will not trigger if connection is successful", %{tenant: tenant} do
       log =
         capture_log(fn ->
-          res =
-            for _ <- 1..20 do
-              Process.sleep(500)
-              Connect.lookup_or_start_connection(tenant.external_id)
-            end
+          res = for _ <- 1..20, do: Connect.lookup_or_start_connection(tenant.external_id)
 
           refute Enum.any?(res, fn {_, res} -> res == :tenant_db_too_many_connections end)
+
+          # No real time passes between the calls above, so the counter's bucket never ages via
+          # its own timer. Tick it forward manually to fill a full window with zero errors,
+          # rather than using `Process.sleep` to let real time pass, which is slow and flaky.
+          rate_counter = Tenants.connect_errors_per_second_rate(tenant)
+          for _ <- 1..@connect_errors_bucket_len, do: RateCounterHelper.tick!(rate_counter)
         end)
 
       refute log =~ "DatabaseConnectionRateLimitReached: Too many connection attempts against the tenant database"

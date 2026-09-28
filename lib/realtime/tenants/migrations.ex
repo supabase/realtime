@@ -104,7 +104,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_260_914_120_000, Migrations.DelegateMessagesGrantsToPostgres},
     {20_260_916_120_000, Migrations.AllowPostgresToDelegateRealtimeSchemaUsage},
     {20_260_922_120_000, Migrations.RevokeRealtimeSchemaGrantOptionFromRealtimeAdmin},
-    {20_260_923_120_000, Migrations.AddListChangesSync}
+    {20_260_925_120_000, Migrations.RestoreMessagesBaseGrants},
+    {20_260_928_120_000, Migrations.AddListChangesSync}
   ]
 
   defstruct [:tenant_external_id, :settings, migrations_ran: 0]
