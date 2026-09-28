@@ -334,9 +334,9 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     # Always fetch fresh publication information. An empty publication fails the
     # map_size guard and falls through to the idle branch in `else`.
     with {:ok, oids} when map_size(oids) > 0 <- Subscriptions.fetch_publication_tables(conn, publication),
+         {:ok, _} <- Replications.prepare_replication(conn, slot_name),
          synchronous_standby = Replications.synchronous_standby?(conn),
-         orioledb = Database.orioledb?(conn),
-         {:ok, _} <- Replications.prepare_replication(conn, slot_name) do
+         orioledb = Database.orioledb?(conn) do
       send(self(), :poll)
 
       cancel_timer(check_oid_ref)
