@@ -2811,6 +2811,7 @@ defmodule Forum.MusterTest do
 
       # Suspend a shard so the gather blocks on it.
       shard_pid = Process.whereis(Forum.Supervisor.shard_name(gt_scope, 0))
+      shard_ref = Process.monitor(shard_pid)
       :ok = :sys.suspend(shard_pid)
 
       coord = Process.whereis(Forum.Supervisor.name(gt_scope))
@@ -2822,10 +2823,9 @@ defmodule Forum.MusterTest do
       # Crash arrives ~150ms in -- well under the 15s default -- proving the timeout
       # is in force.
       assert_receive {:DOWN, ^ref, :process, ^coord, reason}, 1_000
-      assert match?({:timeout, _}, reason) or match?(:killed, reason) or is_tuple(reason)
+      assert {:timeout, {GenServer, :call, [_shard, {:rebalance, _}, 150]}} = reason
 
-      # Let the suspended shard go so teardown is clean.
-      :sys.resume(shard_pid)
+      assert_receive {:DOWN, ^shard_ref, :process, ^shard_pid, :shutdown}, 1_000
     end
   end
 
