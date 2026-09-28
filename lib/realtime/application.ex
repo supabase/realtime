@@ -247,13 +247,7 @@ defmodule Realtime.Application do
     end
   end
 
-  defp metrics_pusher_children do
-    if Application.get_env(:realtime, :metrics_pusher_enabled) do
-      [Realtime.MetricsPusher]
-    else
-      []
-    end
-  end
+  defp metrics_pusher_children, do: Realtime.MetricsPusher.child_specs()
 
   defp opentelemetry_setup do
     :opentelemetry_cowboy.setup()

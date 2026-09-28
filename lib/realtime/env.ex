@@ -79,6 +79,22 @@ defmodule Realtime.Env do
   end
 
   @doc """
+  Parses comma-separated key=value pairs, e.g. "region=us-east-1,env=prod".
+  """
+  @spec get_key_value_list(binary()) :: [{binary(), binary()}]
+  def get_key_value_list(env) do
+    case System.get_env(env, "") do
+      "" ->
+        []
+
+      value ->
+        value
+        |> String.split(",")
+        |> Enum.flat_map(&parse_key_value_pair/1)
+    end
+  end
+
+  @doc """
   Can a listener still bind this port?
 
   Probes the wildcard address with the same `reuseaddr` the real listeners use, so a port left
@@ -106,5 +122,15 @@ defmodule Realtime.Env do
     {:ok, port} = :inet.port(socket)
     :ok = :gen_tcp.close(socket)
     port
+  end
+
+  defp parse_key_value_pair(pair) do
+    with [k, v] <- String.split(pair, "=", parts: 2),
+         k = String.trim(k),
+         true <- k != "" do
+      [{k, String.trim(v)}]
+    else
+      _ -> []
+    end
   end
 end
