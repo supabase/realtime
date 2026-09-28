@@ -14,6 +14,8 @@ defmodule Realtime.Tenants.Rebalancer do
     if MapSet.equal?(current_nodes_set, previous_nodes_set) do
       with %Tenant{} = tenant <- Realtime.Tenants.Cache.get_tenant_by_external_id(tenant_id),
            {:ok, _node, expected_region} <- Realtime.Nodes.get_node_for_tenant(tenant),
+           # No node in the expected region means there is nowhere closer to move the connection to
+           [_ | _] <- Realtime.Nodes.region_nodes(expected_region),
            region when is_binary(region) <- Application.get_env(:realtime, :region) do
         if region == expected_region do
           :ok
