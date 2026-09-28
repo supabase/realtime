@@ -23,6 +23,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
   @stop_after 60_000 * 10
   @statement_timeout :timer.seconds(10)
   @subs_pool_statement_timeout :timer.seconds(5)
+  @subs_pool_queue_target :timer.seconds(2)
 
   defmodule State do
     @moduledoc false
@@ -95,7 +96,8 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
            Database.connect_db(subscription_manager_settings, after_connect: after_connect(@statement_timeout)),
          {:ok, conn_pub} <-
            Database.connect_db(subscription_manager_pub_settings,
-             after_connect: after_connect(@subs_pool_statement_timeout)
+             after_connect: after_connect(@subs_pool_statement_timeout),
+             queue_target: @subs_pool_queue_target
            ),
          {:ok, oids} <- Subscriptions.fetch_publication_tables(conn, publication) do
       # The subscribers ETS tables are owned by the WorkerSupervisor, so they survive a
