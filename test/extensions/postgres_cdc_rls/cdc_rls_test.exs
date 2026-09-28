@@ -300,7 +300,7 @@ defmodule Extensions.PostgresCdcRlsTest do
       PostgresCdcRls.handle_connect(args)
       # Wait for it to start
       assert_receive %{event: "ready"}, 3000
-      {:ok, response} = PostgresCdcRls.handle_connect(args)
+      {:ok, response = {manager_pid, _}} = PostgresCdcRls.handle_connect(args)
 
       assert_receive {
         :telemetry,
@@ -319,7 +319,7 @@ defmodule Extensions.PostgresCdcRlsTest do
       assert %Postgrex.Result{num_rows: n} = Postgrex.query!(conn, "select id from realtime.subscription", [])
       assert n >= 1
 
-      Process.sleep(500)
+      :sys.get_state(manager_pid)
 
       # Insert a record
       %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
@@ -451,7 +451,7 @@ defmodule Extensions.PostgresCdcRlsTest do
       %{node: node, response: response}
     end
 
-    test "subscribe distributed mode", %{tenant: tenant, conn: conn, node: node, response: response} do
+    test "subscribe distributed mode", %{tenant: tenant, conn: conn, node: node, response: {manager_pid, _} = response} do
       %Tenant{extensions: extensions, external_id: external_id} = tenant
       postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
 
@@ -463,7 +463,7 @@ defmodule Extensions.PostgresCdcRlsTest do
       assert n >= 1
 
       # Wait for subscription to be executing
-      Process.sleep(200)
+      :sys.get_state(manager_pid)
 
       # Insert a record
       %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])

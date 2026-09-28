@@ -136,7 +136,7 @@ defmodule Realtime.MetricsPusherTest do
           assert_receive :req_called, 1000
           assert Process.alive?(pid)
           # Wait enough for the log to be captured
-          Process.sleep(100)
+          :sys.get_state(pid)
         end)
 
       assert log =~ "MetricsPusher: Failed to push"
@@ -164,7 +164,7 @@ defmodule Realtime.MetricsPusherTest do
           assert_receive :req_called, 1000
           assert Process.alive?(pid)
           # Wait enough for the log to be captured
-          Process.sleep(100)
+          :sys.get_state(pid)
         end)
 
       assert log =~ "MetricsPusher: Exception during"
