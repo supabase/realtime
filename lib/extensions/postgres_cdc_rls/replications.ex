@@ -120,7 +120,7 @@ defmodule Extensions.PostgresCdcRls.Replications do
 
     function =
       if Keyword.fetch!(opts, :synchronous_standby),
-        do: "realtime.list_changes_settled",
+        do: "realtime.list_changes_sync",
         else: "realtime.list_changes"
 
     query(

@@ -111,6 +111,116 @@ defmodule Extensions.PostgresCdcRls.SynchronousCommitDeliveryTest do
     assert_eventually authorized(conn, slot) == 1
   end
 
+  # P inserts first and its COMMIT parks behind the standby; Q inserts after it and commits
+  # locally, so Q's commit lands in front of P's while P's change sits earlier in the WAL. The
+  # read has to stop right after Q's commit: one change further and it would take P too.
+  @tag :requires_docker_backend
+  @tag :skip_orioledb
+  test "a settled commit in front of a parked one is delivered alone", %{conn: conn, tenant: tenant, slot: slot} do
+    on_exit(fn ->
+      {:ok, reset} = Database.connect(tenant, "realtime_test", :stop)
+      Postgrex.query(reset, "SELECT pg_cancel_backend(pid) FROM (#{waiting_in_syncrep()}) w", [])
+      Postgrex.query(reset, "ALTER SYSTEM RESET synchronous_standby_names", [])
+      Postgrex.query(reset, "SELECT pg_reload_conf()", [])
+    end)
+
+    {:ok, _} = Replications.prepare_replication(conn, slot)
+
+    Postgrex.query!(conn, "ALTER SYSTEM SET synchronous_standby_names = 'FIRST 1 (absent_standby)'", [])
+    Postgrex.query!(conn, "SELECT pg_reload_conf()", [])
+
+    assert_eventually %{rows: [["FIRST 1 (absent_standby)"]]} =
+                        Postgrex.query!(conn, "SHOW synchronous_standby_names", [])
+
+    {:ok, parked} = Database.connect(tenant, "realtime_parked", :stop)
+    {:ok, local} = Database.connect(tenant, "realtime_local", :stop)
+    parent = self()
+
+    p =
+      spawn(fn ->
+        Postgrex.transaction(
+          parked,
+          fn tx ->
+            %{rows: [[id]]} =
+              Postgrex.query!(tx, "INSERT INTO public.test (details) VALUES ('allowed') RETURNING id", [])
+
+            send(parent, {:p_inserted, id})
+            receive do: (:commit -> :ok)
+          end,
+          timeout: 30_000
+        )
+      end)
+
+    assert_receive {:p_inserted, p_id}, 5_000
+
+    {:ok, q_id} =
+      Postgrex.transaction(local, fn tx ->
+        Postgrex.query!(tx, "SET LOCAL synchronous_commit = local", [])
+        %{rows: [[id]]} = Postgrex.query!(tx, "INSERT INTO public.test (details) VALUES ('allowed') RETURNING id", [])
+        id
+      end)
+
+    send(p, :commit)
+    assert_eventually %{num_rows: 1} = Postgrex.query!(conn, waiting_in_syncrep(), [])
+
+    assert delivered_ids(conn, slot) == [q_id]
+    assert delivered_ids(conn, slot) == []
+
+    Postgrex.query!(conn, "SELECT pg_cancel_backend(pid) FROM (#{waiting_in_syncrep()}) w", [])
+    assert_eventually %{rows: [[2]]} = Postgrex.query!(conn, "SELECT count(*)::int FROM public.test", [])
+
+    assert delivered_ids(conn, slot) == [p_id]
+    assert delivered_ids(conn, slot) == []
+  end
+
+  # Transactions on tables outside the publication decode to nothing, so they must not count
+  # against max_changes: a published change behind them arrives in the same poll.
+  test "a change behind transactions on other tables arrives in one poll", %{conn: conn, tenant: tenant, slot: slot} do
+    Postgrex.query!(conn, "CREATE TABLE public.unpublished (id serial primary key)", [])
+    Postgrex.query!(conn, "CREATE PUBLICATION sync_commit_test_only FOR TABLE public.test", [])
+    {:ok, _} = Replications.prepare_replication(conn, slot)
+    {:ok, writer} = Database.connect(tenant, "realtime_test", :stop)
+
+    for _ <- 1..1000, do: Postgrex.query!(writer, "INSERT INTO public.unpublished DEFAULT VALUES", [])
+    Postgrex.query!(writer, "INSERT INTO public.test (details) VALUES ('allowed')", [])
+
+    assert authorized(conn, slot, publication: "sync_commit_test_only", max_changes: 100) == 1
+  end
+
+  # A non-transactional logical message is decoded as soon as it is written, tagged with the xid
+  # of the transaction that wrote it. That transaction is still open, but the message says
+  # nothing about where it starts, so it must not hold back the changes behind it.
+  test "a message from an open transaction does not hold back delivery", %{conn: conn, tenant: tenant, slot: slot} do
+    {:ok, _} = Replications.prepare_replication(conn, slot)
+    {:ok, holder} = Database.connect(tenant, "realtime_holder", :stop)
+    {:ok, writer} = Database.connect(tenant, "realtime_test", :stop)
+    parent = self()
+
+    held =
+      spawn(fn ->
+        Postgrex.transaction(
+          holder,
+          fn tx ->
+            Postgrex.query!(tx, "SELECT pg_current_xact_id()", [])
+            Postgrex.query!(tx, "SELECT pg_logical_emit_message(false, 'realtime_test', 'open')", [])
+            send(parent, :emitted)
+            receive do: (:release -> :ok)
+          end,
+          timeout: 30_000
+        )
+
+        send(parent, :committed)
+      end)
+
+    assert_receive :emitted, 5_000
+    Postgrex.query!(writer, "INSERT INTO public.test (details) VALUES ('allowed')", [])
+
+    assert authorized(conn, slot) == 1
+
+    send(held, :release)
+    assert_receive :committed, 5_000
+  end
+
   @tag :requires_docker_backend
   test "synchronous_standby?/1 follows synchronous_standby_names", %{conn: conn, tenant: tenant} do
     on_exit(fn ->
@@ -236,17 +346,25 @@ defmodule Extensions.PostgresCdcRls.SynchronousCommitDeliveryTest do
 
   # A change authorized for nobody is not returned at all - only the sentinel's consumed count
   # moves - so counting the authorized rows is what shows the loss.
-  defp authorized(conn, slot) do
+  defp authorized(conn, slot, opts \\ []), do: conn |> authorized_rows(slot, opts) |> length()
+
+  defp delivered_ids(conn, slot) do
+    conn
+    |> authorized_rows(slot, [])
+    |> Enum.map(fn [_, _, _, _, record | _] -> record |> Jason.decode!() |> Map.fetch!("id") end)
+  end
+
+  defp authorized_rows(conn, slot, opts) do
     {:ok, %Postgrex.Result{rows: rows}} =
       Replications.list_changes(conn,
         slot_name: slot,
-        publication: @publication,
-        max_changes: 1000,
+        publication: Keyword.get(opts, :publication, @publication),
+        max_changes: Keyword.get(opts, :max_changes, 1000),
         max_record_bytes: 1_048_576,
         synchronous_standby: true
       )
 
-    Enum.count(rows, fn
+    Enum.filter(rows, fn
       ["INSERT", "public", "test", _cols, _record, _old, _ts, subscription_ids, _errors, _count] ->
         subscription_ids != []
 

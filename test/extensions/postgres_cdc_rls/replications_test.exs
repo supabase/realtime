@@ -220,7 +220,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
     end
 
     @tag :requires_direct_connection
-    test "reads with list_changes_settled where a commit can wait for a synchronous standby", %{conn: conn} do
+    test "reads with list_changes_sync where a commit can wait for a synchronous standby", %{conn: conn} do
       slot_name = "test_slot_#{System.unique_integer([:positive])}"
       {:ok, _} = Replications.prepare_replication(conn, slot_name)
 
@@ -242,7 +242,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
                  []
                )
 
-      assert [["realtime_list_changes", 3], ["realtime_list_changes_settled", 2]] = rows
+      assert [["realtime_list_changes", 3], ["realtime_list_changes_sync", 2]] = rows
     end
 
     test "slot has changes but no subscribers: returns only the sentinel row with slot_changes_count of 1", %{

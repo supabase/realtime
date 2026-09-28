@@ -158,7 +158,7 @@ try do
     Postgrex.query!(conn, "SELECT pg_drop_replication_slot($1::name)", [name])
   end
 
-  Enum.each(["realtime.list_changes", "realtime.list_changes_settled"], measure)
+  Enum.each(["realtime.list_changes", "realtime.list_changes_sync"], measure)
 
   GenServer.stop(conn)
   GenServer.stop(writer)

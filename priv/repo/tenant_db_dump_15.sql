@@ -817,10 +817,10 @@ $$;
 ALTER FUNCTION realtime.list_changes(publication name, slot_name name, max_changes integer, max_record_bytes integer) OWNER TO supabase_realtime_admin;
 
 --
--- Name: list_changes_settled(name, name, integer, integer); Type: FUNCTION; Schema: realtime; Owner: supabase_realtime_admin
+-- Name: list_changes_sync(name, name, integer, integer); Type: FUNCTION; Schema: realtime; Owner: supabase_realtime_admin
 --
 
-CREATE FUNCTION realtime.list_changes_settled(publication name, slot_name name, max_changes integer, max_record_bytes integer) RETURNS TABLE(wal jsonb, is_rls_enabled boolean, subscription_ids uuid[], errors text[], slot_changes_count bigint)
+CREATE FUNCTION realtime.list_changes_sync(publication name, slot_name name, max_changes integer, max_record_bytes integer) RETURNS TABLE(wal jsonb, is_rls_enabled boolean, subscription_ids uuid[], errors text[], slot_changes_count bigint)
     LANGUAGE sql
     SET log_min_messages TO 'fatal'
     AS $$
@@ -886,7 +886,7 @@ CREATE FUNCTION realtime.list_changes_settled(publication name, slot_name name, 
 $$;
 
 
-ALTER FUNCTION realtime.list_changes_settled(publication name, slot_name name, max_changes integer, max_record_bytes integer) OWNER TO supabase_realtime_admin;
+ALTER FUNCTION realtime.list_changes_sync(publication name, slot_name name, max_changes integer, max_record_bytes integer) OWNER TO supabase_realtime_admin;
 
 --
 -- Name: quote_wal2json(regclass); Type: FUNCTION; Schema: realtime; Owner: supabase_realtime_admin
@@ -978,14 +978,14 @@ CREATE FUNCTION realtime.settled_changes(slot_name name, max_changes integer, VA
     LANGUAGE plpgsql
     AS $$
 declare
-  peek_opts text[] := opts;
+  upto pg_lsn;
+  total bigint;
   xids xid[];
-  commit_lsns pg_lsn[];
-  boundary pg_lsn;
+  starts bigint[];
   snapshot pg_snapshot;
   running_xids xid[];
   xmax_age int;
-  i int;
+  cut bigint;
 begin
   -- Each statement in a volatile function takes its own snapshot, which is what lets the
   -- check below see a writer that was still in flight when the peek ran. Under REPEATABLE
@@ -994,63 +994,69 @@ begin
     raise exception 'realtime.settled_changes requires READ COMMITTED';
   end if;
 
-  -- Commit markers carry the transaction end lsn, the only position the read below can stop
-  -- at without cutting a transaction in half. The caller does not want them in the output,
-  -- so they are forced on for the peek alone.
-  for i in 1..array_length(peek_opts, 1) by 2 loop
-    if peek_opts[i] = 'include-transaction' then peek_opts[i + 1] := 'true'; end if;
-  end loop;
+  -- The peek and the read below cover the same WAL, so the read cannot reach a commit the
+  -- check never saw.
+  upto := pg_current_wal_flush_lsn();
 
-  -- One row per transaction, in commit order, rather than per change: the whole batch would
-  -- otherwise be carried back through the pooler a second time just to locate the cut.
-  -- Keep only commit markers. Each transaction emits one, so grouping every change by xid
-  -- before filtering adds work without changing the boundary candidates.
-  select array_agg(p.xid order by p.lsn), array_agg(p.lsn order by p.lsn)
-    into xids, commit_lsns
-    from pg_logical_slot_peek_changes(slot_name, null, max_changes, variadic peek_opts) p
-    where p.data::jsonb->>'action' = 'C';
+  -- One entry per transaction, in commit order: its xid and the position of its first
+  -- change. The peek uses the caller's own options, so max_changes counts exactly what the
+  -- read counts. A non-transactional logical message is emitted as soon as it is decoded,
+  -- tagged with the xid of whatever transaction wrote it, so it does not mark where that
+  -- transaction starts.
+  select coalesce(sum(g.n), 0),
+         array_agg(g.x order by g.first) filter (where g.first is not null),
+         array_agg(g.first order by g.first) filter (where g.first is not null)
+    into total, xids, starts
+    from (
+      select p.xid as x, count(*) as n,
+             min(p.ord) filter (where not case
+               when starts_with(p.data, '{"action":"M"') then (p.data::jsonb->>'transactional')::boolean is false
+               else false
+             end) as first
+      from pg_logical_slot_peek_changes(slot_name, upto, max_changes, variadic opts)
+           with ordinality as p(lsn, xid, data, ord)
+      group by p.xid
+    ) g;
 
-  if xids is null then
+  -- Nothing for the caller, but the slot still has to move past what the peek covered.
+  if total = 0 then
+    perform pg_replication_slot_advance(slot_name, upto);
     return;
   end if;
 
-  -- Taken after the peek is materialized, so a writer that was still in flight during
-  -- decoding is guaranteed to show up here.
-  snapshot := pg_current_snapshot();
+  if xids is not null then
+    -- Taken after the peek is materialized, so a writer that was still in flight during
+    -- decoding is guaranteed to show up here.
+    snapshot := pg_current_snapshot();
 
-  -- A commit record reaches the WAL before the writer leaves the proc array, so a change can
-  -- be decoded while its row is invisible. apply_rls would resolve a policy against a row it
-  -- cannot see and authorize it for nobody, while the read consumed it regardless.
-  --
-  -- xip lists transactions running when the snapshot was taken. It does not cover a writer
-  -- whose xid sits at or beyond xmax, which never appears there, so the horizon is checked
-  -- too. age() counts backwards from the current xid and so compares correctly across
-  -- wraparound.
-  --
-  -- Materialize the active XIDs once. Repeatedly scanning pg_snapshot_xip for each commit
-  -- costs most of the boundary check on a batch with many settled transactions. Keep the
-  -- early exit so an unsettled transaction near the front does not scan the rest.
-  select coalesce(array_agg(running.x::xid), array[]::xid[])
-    into running_xids
-    from pg_snapshot_xip(snapshot) running(x);
-  xmax_age := age(pg_snapshot_xmax(snapshot)::xid);
+    -- A commit record reaches the WAL before the writer leaves the proc array, so a change
+    -- can be decoded while its row is invisible. apply_rls would resolve a policy against a
+    -- row it cannot see and authorize it for nobody, while the read consumed it regardless.
+    --
+    -- xip lists transactions running when the snapshot was taken. It does not cover a writer
+    -- whose xid sits at or beyond xmax, which never appears there, so the horizon is checked
+    -- too. age() counts backwards from the current xid and so compares correctly across
+    -- wraparound.
+    select coalesce(array_agg(running.x::xid), array[]::xid[])
+      into running_xids
+      from pg_snapshot_xip(snapshot) running(x);
+    xmax_age := age(pg_snapshot_xmax(snapshot)::xid);
 
-  for i in 1..array_length(xids, 1) loop
-    if xids[i] = any(running_xids) or age(xids[i]) <= xmax_age then
-      exit;
-    end if;
-
-    boundary := commit_lsns[i];
-  end loop;
-
-  if boundary is null then
-    return;
+    select min(u.s) into cut
+      from unnest(xids, starts) as u(x, s)
+      where u.x = any(running_xids) or age(u.x) <= xmax_age;
   end if;
 
-  -- A fixed boundary keeps a transaction that committed since the peek out of this batch,
-  -- where it would not have been checked.
-  return query
-    select p.* from pg_logical_slot_get_changes(slot_name, boundary, null, variadic opts) p;
+  -- The read stops right after the commit that brings its count to upto_nchanges, so the
+  -- count of changes in front of the first unsettled transaction stops it just before that
+  -- transaction.
+  if cut is null then
+    return query
+      select p.* from pg_logical_slot_get_changes(slot_name, upto, max_changes, variadic opts) p;
+  elsif cut > 1 then
+    return query
+      select p.* from pg_logical_slot_get_changes(slot_name, upto, (cut - 1)::int, variadic opts) p;
+  end if;
 end;
 $$;
 
@@ -1457,11 +1463,11 @@ GRANT ALL ON FUNCTION realtime.list_changes(publication name, slot_name name, ma
 
 
 --
--- Name: FUNCTION list_changes_settled(publication name, slot_name name, max_changes integer, max_record_bytes integer); Type: ACL; Schema: realtime; Owner: supabase_realtime_admin
+-- Name: FUNCTION list_changes_sync(publication name, slot_name name, max_changes integer, max_record_bytes integer); Type: ACL; Schema: realtime; Owner: supabase_realtime_admin
 --
 
-GRANT ALL ON FUNCTION realtime.list_changes_settled(publication name, slot_name name, max_changes integer, max_record_bytes integer) TO postgres;
-GRANT ALL ON FUNCTION realtime.list_changes_settled(publication name, slot_name name, max_changes integer, max_record_bytes integer) TO dashboard_user;
+GRANT ALL ON FUNCTION realtime.list_changes_sync(publication name, slot_name name, max_changes integer, max_record_bytes integer) TO postgres;
+GRANT ALL ON FUNCTION realtime.list_changes_sync(publication name, slot_name name, max_changes integer, max_record_bytes integer) TO dashboard_user;
 
 
 --

@@ -152,7 +152,7 @@ exit_code =
     # for a synchronous standby.
     function =
       if System.get_env("SETTLED", "true") == "true",
-        do: "realtime.list_changes_settled",
+        do: "realtime.list_changes_sync",
         else: "realtime.list_changes"
 
     IO.puts("using #{function}")

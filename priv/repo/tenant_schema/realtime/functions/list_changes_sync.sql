@@ -1,4 +1,4 @@
-create or replace function realtime.list_changes_settled (
+create or replace function realtime.list_changes_sync (
   publication      name,
   slot_name        name,
   max_changes      integer,
@@ -75,4 +75,4 @@ create or replace function realtime.list_changes_settled (
   WHERE NOT EXISTS (SELECT 1 FROM rls_filtered)
 $function$;
 
-alter function "realtime"."list_changes_settled"(name, name, integer, integer) owner to "supabase_realtime_admin";
+alter function "realtime"."list_changes_sync"(name, name, integer, integer) owner to "supabase_realtime_admin";
