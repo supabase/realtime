@@ -97,17 +97,22 @@ defmodule Extensions.PostgresCdcRlsTest do
     end
 
     test "Replication poller toggles slot when publication tables come and go", %{tenant: tenant} do
-      # setup/0 already received the "ready" event, which fires only after the poller's init/1
-      # (and its Registry.register) has run. :sys.get_state below then blocks until the poller
-      # finishes handle_continue and has its slot prepared.
+      # setup/0 already received the "ready" event, but that only reflects the
+      # supervisor's manager/subs_pool metadata — it doesn't guarantee the poller
+      # has finished its own :connect/:prepare continue.
+      # So poll :sys.get_state until oids show up instead of asserting on the first read.
       [{poller_pid, _}] = Registry.lookup(ReplicationPoller.Registry, tenant.external_id)
 
       # Use the SubscriptionManager pub connection to drive publication state from the test —
       # the poller's own conn is owned by the poller process.
       {:ok, _manager_pid, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
 
-      %{oids: initial_oids, slot_name: slot_name} = :sys.get_state(poller_pid)
-      refute initial_oids == %{}
+      %{slot_name: slot_name} =
+        case_wait :sys.get_state(poller_pid) do
+          %{oids: oids} = state when map_size(oids) > 0 -> state
+        else
+          state -> flunk("ReplicationPoller oids never populated. Last state: #{inspect(state)}")
+        end
 
       assert %Postgrex.Result{rows: [[1]]} =
                Postgrex.query!(conn, "SELECT count(*)::int FROM pg_replication_slots WHERE slot_name = $1", [slot_name])
@@ -136,8 +141,13 @@ defmodule Extensions.PostgresCdcRlsTest do
       [{poller_pid, _}] = Registry.lookup(ReplicationPoller.Registry, tenant.external_id)
       {:ok, _manager_pid, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
 
-      %{oids: initial_oids, slot_name: slot_name} = :sys.get_state(poller_pid)
-      refute initial_oids == %{}
+      # See the previous test for why this polls
+      %{slot_name: slot_name} =
+        case_wait :sys.get_state(poller_pid) do
+          %{oids: oids} = state when map_size(oids) > 0 -> state
+        else
+          state -> flunk("ReplicationPoller oids never populated. Last state: #{inspect(state)}")
+        end
 
       assert %Postgrex.Result{rows: [[1]]} =
                Postgrex.query!(conn, "SELECT count(*)::int FROM pg_replication_slots WHERE slot_name = $1", [slot_name])
