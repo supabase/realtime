@@ -432,6 +432,29 @@ defmodule Realtime.Tenants.ConnectTest do
       Connect.shutdown(tenant_id)
     end
 
+    test "does not shut down if a user connects on the sample that would trigger the shutdown", %{
+      tenant: %{external_id: tenant_id} = tenant
+    } do
+      {:ok, db_conn} = Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 60_000)
+      region = Tenants.region(tenant)
+      assert {pid, %{conn: ^db_conn, region: ^region}} = :syn.lookup(Connect, tenant_id)
+
+      # The bucket seeds with [1], so it takes 10 zero samples to stop
+      for _ <- 1..9 do
+        send(pid, :check_connected_users)
+        :sys.get_state(pid)
+      end
+
+      UsersCounter.add(self(), tenant_id)
+      send(pid, :check_connected_users)
+
+      refute_process_down(pid, 300)
+      assert Process.alive?(db_conn)
+      assert {^pid, %{conn: ^db_conn, region: ^region}} = :syn.lookup(Connect, tenant_id)
+
+      Connect.shutdown(tenant_id)
+    end
+
     test "connection is killed after user leaving", %{tenant: tenant} do
       external_id = tenant.external_id
 
