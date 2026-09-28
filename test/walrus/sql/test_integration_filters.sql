@@ -32,7 +32,7 @@ insert into public.notes(id, body) values (1, 'bbb');
 
 delete from public.notes;
 
-select subscription_id, filters from realtime.subscription;
+select subscription_id, filters from realtime.subscription order by id;
 
 select
     rec,
