@@ -27,7 +27,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   alias Realtime.RateCounter
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
-  alias RealtimeWeb.Channels.Payloads.Join
+  alias RealtimeWeb.Channels.Payloads
   alias RealtimeWeb.Presence
   alias RealtimeWeb.RealtimeChannel.Logging
 
@@ -38,30 +38,33 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   defguard can_write_presence?(socket) when is_private?(socket) and socket.assigns.policies.presence.write
 
   @doc """
-  Computes join-time presence assigns that must be available before authorization
-  policies are evaluated. Must be called before `RealtimeChannel`'s `maybe_assign_policies/3`.
+  Computes join-time presence assigns.
+
+  These assigns must be available before authorization policies are evaluated. 
+  Must be called before `RealtimeChannel`'s `maybe_assign_policies/3`.
   """
-  @spec join(Join.t(), Tenant.t()) :: %{presence_enabled?: boolean(), presence_key: term()}
+  @spec join(Payloads.Join.t(), Tenant.t()) :: %{presence_enabled?: boolean(), presence_key: term()}
   def join(join, tenant) do
-    presence_enabled? = Join.presence_enabled?(join) || tenant.presence_enabled
+    presence_enabled? = Payloads.Join.presence_enabled?(join) || tenant.presence_enabled
 
     %{
       presence_enabled?: presence_enabled?,
-      presence_key: Join.presence_key(join)
+      presence_key: Payloads.Join.presence_key(join)
     }
   end
 
   @doc """
-  Computes presence rate-limiting assigns. Only call this once a join has fully
-  succeeded, otherwise we unnecessarily create a RateCounter.
+  Computes presence rate-limiting assigns. 
+
+  Only call this once a join has fully succeeded, otherwise we unnecessarily create a RateCounter.
   """
   @spec join_rate_limits(Tenant.t()) :: %{
           presence_rate_counter: RateCounter.Args.t(),
           presence_client_rate_limit: %{
             :counter => 0,
-            :max_calls => non_neg_integer(),
+            :max_calls => pos_integer(),
             :reset_at => nil,
-            :window_ms => non_neg_integer()
+            :window_ms => pos_integer()
           }
         }
   def join_rate_limits(tenant) do

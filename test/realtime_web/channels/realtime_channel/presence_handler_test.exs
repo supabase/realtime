@@ -15,9 +15,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
   alias Realtime.Tenants.Connect
-  alias RealtimeWeb.Channels.Payloads.Config
-  alias RealtimeWeb.Channels.Payloads.Join
-  alias RealtimeWeb.Channels.Payloads.Presence, as: PresencePayload
+  alias RealtimeWeb.Channels.Payloads
   alias RealtimeWeb.Endpoint
   alias RealtimeWeb.RealtimeChannel.PresenceHandler
 
@@ -112,7 +110,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
     test "presence is enabled when the client requests it, even if the tenant defaults it off", %{tenant: tenant} do
       tenant = %{tenant | presence_enabled: false}
-      join = %Join{config: %Config{presence: %PresencePayload{enabled: true}}}
+      join = %Payloads.Join{config: %Payloads.Config{presence: %Payloads.Presence{enabled: true}}}
 
       assert %{presence_enabled?: true} = PresenceHandler.join(join, tenant)
     end
@@ -121,26 +119,26 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       tenant: tenant
     } do
       tenant = %{tenant | presence_enabled: true}
-      join = %Join{config: %Config{presence: %PresencePayload{enabled: false}}}
+      join = %Payloads.Join{config: %Payloads.Config{presence: %Payloads.Presence{enabled: false}}}
 
       assert %{presence_enabled?: true} = PresenceHandler.join(join, tenant)
     end
 
     test "presence is disabled when neither the client nor the tenant enable it", %{tenant: tenant} do
       tenant = %{tenant | presence_enabled: false}
-      join = %Join{config: %Config{presence: %PresencePayload{enabled: false}}}
+      join = %Payloads.Join{config: %Payloads.Config{presence: %Payloads.Presence{enabled: false}}}
 
       assert %{presence_enabled?: false} = PresenceHandler.join(join, tenant)
     end
 
     test "presence_key passes through an explicit client-provided key", %{tenant: tenant} do
-      join = %Join{config: %Config{presence: %PresencePayload{key: "my-key"}}}
+      join = %Payloads.Join{config: %Payloads.Config{presence: %Payloads.Presence{key: "my-key"}}}
 
       assert %{presence_key: "my-key"} = PresenceHandler.join(join, tenant)
     end
 
     test "presence_key generates a UUID when the client does not provide one", %{tenant: tenant} do
-      join = %Join{config: %Config{presence: %PresencePayload{key: nil}}}
+      join = %Payloads.Join{config: %Payloads.Config{presence: %Payloads.Presence{key: nil}}}
 
       assert %{presence_key: key} = PresenceHandler.join(join, tenant)
       assert {:ok, _} = UUID.info(key)
