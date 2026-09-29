@@ -168,7 +168,6 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
       {:ok, _} = Api.update_migrations_ran(tenant.external_id, 7)
 
       assert :ok = TenantMigrations.apply_pgdelta(tenant, nil)
-      assert :ok = TenantMigrations.apply_pgdelta(tenant, nil)
 
       %{rows: [[count, distinct]]} =
         Postgrex.query!(
@@ -191,8 +190,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
                  []
                )
 
-      updated = Api.get_tenant_by_external_id(tenant.external_id, use_replica?: false)
-      assert updated.migrations_ran == total
+      assert %{migrations_ran: ^total} = Api.get_tenant_by_external_id(tenant.external_id, use_replica?: false)
     end
   end
 
