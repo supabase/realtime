@@ -310,9 +310,12 @@ defmodule Realtime.MetricsPusherTest do
       assert scopes(specs) == [{MetricsPusher.Global, :global}, {MetricsPusher.Tenant, :tenant}]
     end
 
-    test "starts only the tenant pusher when only it is enabled" do
+    test "starts nothing when only the tenant pusher is enabled" do
       specs = MetricsPusher.child_specs(metrics_enabled: false, tenant_enabled: true)
-      assert scopes(specs) == [{MetricsPusher.Tenant, :tenant}]
+
+      # The tenant pusher is only started when the main pusher is also enabled,
+      # so this should return an empty list.
+      assert scopes(specs) == []
     end
   end
 

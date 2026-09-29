@@ -47,9 +47,6 @@ defmodule Realtime.MetricsPusher do
           scoped_child_spec(:tenant, __MODULE__.Tenant)
         ]
 
-      tenant_enabled ->
-        [scoped_child_spec(:tenant, __MODULE__.Tenant)]
-
       metrics_enabled ->
         [scoped_child_spec(:all, __MODULE__)]
 
@@ -61,7 +58,7 @@ defmodule Realtime.MetricsPusher do
   @spec start_link(keyword()) :: {:ok, pid()} | :ignore
   def start_link(opts) do
     scope = Keyword.get(opts, :scope, :all)
-    url = opts[:url] || get_env(scope, :url)
+    url = Keyword.get(opts, :url, get_env(scope, :url))
     name = Keyword.get(opts, :name, __MODULE__)
 
     if is_binary(url) do
@@ -76,11 +73,11 @@ defmodule Realtime.MetricsPusher do
   @impl true
   def init(opts) do
     scope = Keyword.get(opts, :scope, :all)
-    url = opts[:url] || get_env(scope, :url)
-    user = opts[:user] || get_env(scope, :user, "realtime")
-    auth = opts[:auth] || get_env(scope, :auth)
-    interval = Keyword.get(opts, :interval, get_env(scope, :interval_ms, :timer.seconds(30)))
-    timeout = Keyword.get(opts, :timeout, get_env(scope, :timeout_ms, :timer.seconds(15)))
+    url = Keyword.get(opts, :url, get_env(scope, :url))
+    user = Keyword.get(opts, :user, get_env(scope, :user, "realtime"))
+    auth = Keyword.get(opts, :auth, get_env(scope, :auth))
+    interval = Keyword.get(opts, :interval, get_env(scope, :interval_ms, to_timeout(second: 30)))
+    timeout = Keyword.get(opts, :timeout, get_env(scope, :timeout_ms, to_timeout(second: 15)))
     compress = Keyword.get(opts, :compress, get_env(scope, :compress, true))
     extra_labels = Keyword.get(opts, :extra_labels, get_env(scope, :extra_labels, []))
 
