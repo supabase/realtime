@@ -240,13 +240,13 @@ defmodule Realtime.Database do
   end
 
   @doc """
-  Reports whether the database has the OrioleDB extension. A check that fails reports `false`.
+  Reports whether the database has the OrioleDB extension.
   """
-  @spec orioledb?(pid()) :: boolean()
-  def orioledb?(conn) do
+  @spec orioledb(pid()) :: {:ok, boolean()} | {:error, any()}
+  def orioledb(conn) do
     case Postgrex.query(conn, "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'orioledb')", []) do
-      {:ok, %Postgrex.Result{rows: [[true]]}} -> true
-      _ -> false
+      {:ok, %Postgrex.Result{rows: [[orioledb]]}} -> {:ok, orioledb}
+      {:error, _} = err -> err
     end
   end
 

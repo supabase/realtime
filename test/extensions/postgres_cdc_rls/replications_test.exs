@@ -12,10 +12,19 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
     %{conn: conn, tenant: tenant}
   end
 
-  describe "synchronous_standby?/1" do
+  describe "synchronous_standby/1" do
     @tag :requires_docker_backend
     test "reports no synchronous standby when none is named", %{conn: conn} do
-      refute Replications.synchronous_standby?(conn)
+      assert {:ok, false} = Replications.synchronous_standby(conn)
+    end
+
+    test "returns the error when the check fails", %{conn: conn} do
+      Postgrex.transaction(conn, fn tx ->
+        assert {:error, _} = Postgrex.query(tx, "SELECT 1/0", [])
+
+        assert {:error, %Postgrex.Error{postgres: %{code: :in_failed_sql_transaction}}} =
+                 Replications.synchronous_standby(tx)
+      end)
     end
   end
 

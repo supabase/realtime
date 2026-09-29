@@ -222,27 +222,27 @@ defmodule Extensions.PostgresCdcRls.SynchronousCommitDeliveryTest do
   end
 
   @tag :requires_docker_backend
-  test "synchronous_standby?/1 follows synchronous_standby_names", %{conn: conn, tenant: tenant} do
+  test "synchronous_standby/1 follows synchronous_standby_names", %{conn: conn, tenant: tenant} do
     on_exit(fn ->
       {:ok, reset} = Database.connect(tenant, "realtime_test", :stop)
       Postgrex.query(reset, "ALTER SYSTEM RESET synchronous_standby_names", [])
       Postgrex.query(reset, "SELECT pg_reload_conf()", [])
     end)
 
-    refute Replications.synchronous_standby?(conn)
+    assert {:ok, false} = Replications.synchronous_standby(conn)
 
     Postgrex.query!(conn, "ALTER SYSTEM SET synchronous_standby_names = 'FIRST 1 (absent_standby)'", [])
     Postgrex.query!(conn, "SELECT pg_reload_conf()", [])
-    assert_eventually Replications.synchronous_standby?(conn)
+    assert_eventually Replications.synchronous_standby(conn) == {:ok, true}
 
     Postgrex.query!(conn, "ALTER SYSTEM RESET synchronous_standby_names", [])
     Postgrex.query!(conn, "SELECT pg_reload_conf()", [])
-    assert_eventually not Replications.synchronous_standby?(conn)
+    assert_eventually Replications.synchronous_standby(conn) == {:ok, false}
   end
 
   @tag :requires_synchronous_standby
-  test "synchronous_standby?/1 sees the standby a Multigres cluster waits for", %{conn: conn} do
-    assert Replications.synchronous_standby?(conn)
+  test "synchronous_standby/1 sees the standby a Multigres cluster waits for", %{conn: conn} do
+    assert {:ok, true} = Replications.synchronous_standby(conn)
   end
 
   # An in-flight transaction puts a row in the same invisible state a synchronous commit does,

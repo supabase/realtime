@@ -75,8 +75,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
       # Tests that need an empty publication override this stub explicitly.
       stub(Subscriptions, :fetch_publication_tables, fn _, _ -> {:ok, %{{"public", "test"} => [1234]}} end)
 
-      stub(Replications, :synchronous_standby?, fn _ -> false end)
-      stub(Database, :orioledb?, fn _ -> false end)
+      stub(Replications, :synchronous_standby, fn _ -> {:ok, false} end)
+      stub(Database, :orioledb, fn _ -> {:ok, false} end)
 
       %{args: args, tenant: tenant}
     end
@@ -579,7 +579,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
     end
 
     test "tells list_changes when commits wait for a synchronous standby", %{args: args} do
-      stub(Replications, :synchronous_standby?, fn _ -> true end)
+      stub(Replications, :synchronous_standby, fn _ -> {:ok, true} end)
       report_standby()
 
       start_link_supervised!({Poller, args})
@@ -596,8 +596,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
     end
 
     test "reads as without a standby and warns on OrioleDB with a synchronous standby", %{args: args} do
-      stub(Replications, :synchronous_standby?, fn _ -> true end)
-      stub(Database, :orioledb?, fn _ -> true end)
+      stub(Replications, :synchronous_standby, fn _ -> {:ok, true} end)
+      stub(Database, :orioledb, fn _ -> {:ok, true} end)
       report_standby()
 
       log =
@@ -612,9 +612,9 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
     test "checks the standby when it prepares the slot, not on every publication check", %{args: args} do
       parent = self()
 
-      stub(Replications, :synchronous_standby?, fn _ ->
+      stub(Replications, :synchronous_standby, fn _ ->
         send(parent, :standby_checked)
-        false
+        {:ok, false}
       end)
 
       pid = start_link_supervised!({Poller, args})
@@ -632,10 +632,42 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
       pid = start_link_supervised!({Poller, args})
       assert_receive {:standby, false}, 1000
 
-      stub(Replications, :synchronous_standby?, fn _ -> true end)
+      stub(Replications, :synchronous_standby, fn _ -> {:ok, true} end)
       send(pid, :retry)
 
       assert_receive {:standby, true}, 2000
+    end
+
+    test "retries instead of polling when the synchronous standby check fails", %{args: args} do
+      stub(Replications, :synchronous_standby, fn _ -> {:ok, true} end)
+      expect(Replications, :synchronous_standby, fn _ -> {:error, %Postgrex.Error{message: "check failed"}} end)
+      report_standby()
+
+      log =
+        capture_log(fn ->
+          start_link_supervised!({Poller, args})
+          assert_receive {:standby, true}, 2000
+        end)
+
+      refute_received {:standby, false}
+      assert log =~ "PoolingReplicationPreparationError: "
+    end
+
+    test "retries instead of polling when the OrioleDB check fails", %{args: args} do
+      stub(Replications, :synchronous_standby, fn _ -> {:ok, true} end)
+      stub(Database, :orioledb, fn _ -> {:ok, true} end)
+      expect(Database, :orioledb, fn _ -> {:error, %Postgrex.Error{message: "check failed"}} end)
+      report_standby()
+
+      log =
+        capture_log(fn ->
+          start_link_supervised!({Poller, args})
+          assert_receive {:standby, false}, 2000
+        end)
+
+      refute_received {:standby, true}
+      assert log =~ "PoolingReplicationPreparationError: "
+      assert log =~ "SyncStandbyUnsupported: "
     end
 
     test "arms the periodic :check_oids timer even when the publication is empty", %{args: args} do

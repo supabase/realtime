@@ -85,13 +85,13 @@ defmodule Extensions.PostgresCdcRls.Replications do
   end
 
   @doc """
-  Reports whether a COMMIT can wait for a synchronous standby. A check that fails reports `false`.
+  Reports whether a COMMIT can wait for a synchronous standby.
   """
-  @spec synchronous_standby?(pid()) :: boolean()
-  def synchronous_standby?(conn) do
+  @spec synchronous_standby(pid()) :: {:ok, boolean()} | {:error, Postgrex.Error.t()}
+  def synchronous_standby(conn) do
     case query(conn, "SELECT current_setting('synchronous_standby_names') <> ''", []) do
-      {:ok, %Postgrex.Result{rows: [[true]]}} -> true
-      _ -> false
+      {:ok, %Postgrex.Result{rows: [[synchronous_standby]]}} -> {:ok, synchronous_standby}
+      {:error, error} -> {:error, error}
     end
   end
 
@@ -105,7 +105,7 @@ defmodule Extensions.PostgresCdcRls.Replications do
     * `:max_changes` (required, `t:pos_integer/0`) - most changes to take in one poll
     * `:max_record_bytes` (required, `t:pos_integer/0`) - records above this are truncated
     * `:synchronous_standby` (optional, `t:boolean/0`) - whether a COMMIT can wait for a
-      synchronous standby, see `synchronous_standby?/1`. Defaults to `false`.
+      synchronous standby, see `synchronous_standby/1`. Defaults to `false`.
 
   """
   @spec list_changes(pid(), keyword()) :: {:ok, Postgrex.Result.t()} | {:error, Postgrex.Error.t()}

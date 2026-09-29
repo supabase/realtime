@@ -438,17 +438,26 @@ defmodule Realtime.DatabaseTest do
     end
   end
 
-  describe "orioledb?/1" do
+  describe "orioledb/1" do
     @tag :skip_orioledb
     test "reports no OrioleDB without the extension", %{tenant: tenant} do
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-      refute Database.orioledb?(conn)
+      assert {:ok, false} = Database.orioledb(conn)
     end
 
     @tag :requires_orioledb
     test "reports OrioleDB with the extension", %{tenant: tenant} do
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-      assert Database.orioledb?(conn)
+      assert {:ok, true} = Database.orioledb(conn)
+    end
+
+    test "returns the error when the check fails", %{tenant: tenant} do
+      {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+
+      Postgrex.transaction(conn, fn tx ->
+        assert {:error, _} = Postgrex.query(tx, "SELECT 1/0", [])
+        assert {:error, %Postgrex.Error{postgres: %{code: :in_failed_sql_transaction}}} = Database.orioledb(tx)
+      end)
     end
   end
 

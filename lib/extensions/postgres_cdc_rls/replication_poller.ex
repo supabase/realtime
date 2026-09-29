@@ -29,7 +29,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   Where a COMMIT can wait for a synchronous standby, a change can be decoded before
   its row is visible. The setting rarely changes, so the poller checks
-  `Replications.synchronous_standby?/1` only when it prepares the slot, and passes
+  `Replications.synchronous_standby/1` only when it prepares the slot, and passes
   it to `Replications.list_changes/2`. On OrioleDB a transaction that writes only
   OrioleDB tables cannot be deferred, so there the poll reads as it does without a
   standby and logs `SyncStandbyUnsupported`.
@@ -334,9 +334,9 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     # Always fetch fresh publication information. An empty publication fails the
     # map_size guard and falls through to the idle branch in `else`.
     with {:ok, oids} when map_size(oids) > 0 <- Subscriptions.fetch_publication_tables(conn, publication),
-         {:ok, _} <- Replications.prepare_replication(conn, slot_name) do
-      synchronous_standby = Replications.synchronous_standby?(conn)
-      orioledb = Database.orioledb?(conn)
+         {:ok, _} <- Replications.prepare_replication(conn, slot_name),
+         {:ok, synchronous_standby} <- Replications.synchronous_standby(conn),
+         {:ok, orioledb} <- Database.orioledb(conn) do
       send(self(), :poll)
 
       cancel_timer(check_oid_ref)
