@@ -111,7 +111,10 @@ defmodule Extensions.PostgresCdcRlsTest do
       # Drop the publication: poller should drop its slot and clear oids.
       Postgrex.query!(conn, "drop publication if exists supabase_realtime_test", [])
       send(poller_pid, :check_oids)
-      %{oids: oids_after_drop, poll_ref: poll_ref_after_drop} = :sys.get_state(poller_pid)
+      %{oids: oids_after_drop, poll_ref: poll_ref_after_drop} =
+        case_wait :sys.get_state(poller_pid) do
+          %{oids: oids} = state when map_size(oids) == 0 -> state
+        end
       assert oids_after_drop == %{}
       assert poll_ref_after_drop == nil
 
@@ -121,7 +124,7 @@ defmodule Extensions.PostgresCdcRlsTest do
       # Re-create the publication: poller should recreate the slot and repopulate oids.
       Postgrex.query!(conn, "create publication supabase_realtime_test for all tables", [])
       send(poller_pid, :check_oids)
-      %{oids: oids_after_create} = :sys.get_state(poller_pid)
+      %{oids: oids_after_create} = wait_for_poller_oids(poller_pid)
       refute oids_after_create == %{}
 
       assert %Postgrex.Result{rows: [[1]]} =
@@ -143,7 +146,10 @@ defmodule Extensions.PostgresCdcRlsTest do
       Postgrex.query!(conn, "create publication supabase_realtime_test", [])
 
       send(poller_pid, :check_oids)
-      %{oids: oids_after_empty, poll_ref: poll_ref_after_empty} = :sys.get_state(poller_pid)
+      %{oids: oids_after_empty, poll_ref: poll_ref_after_empty} =
+        case_wait :sys.get_state(poller_pid) do
+          %{oids: oids} = state when map_size(oids) == 0 -> state
+        end
       assert oids_after_empty == %{}
       assert poll_ref_after_empty == nil
 
@@ -154,7 +160,7 @@ defmodule Extensions.PostgresCdcRlsTest do
       Postgrex.query!(conn, "alter publication supabase_realtime_test add table public.test", [])
 
       send(poller_pid, :check_oids)
-      %{oids: oids_after_add} = :sys.get_state(poller_pid)
+      %{oids: oids_after_add} = wait_for_poller_oids(poller_pid)
       refute oids_after_add == %{}
 
       assert %Postgrex.Result{rows: [[1]]} =
@@ -617,7 +623,7 @@ defmodule Extensions.PostgresCdcRlsTest do
   # has finished its own :connect/:prepare continue.
   # So poll :sys.get_state until oids show up instead of asserting on the first read.
   defp wait_for_poller_oids(poller_pid) do
-    case_wait :sys.get_state(poller_pid) do
+    case_wait :sys.get_state(poller_pid), timeout: 5000 do
       %{oids: oids} = state when map_size(oids) > 0 -> state
     else
       state -> flunk("ReplicationPoller oids never populated. Last state: #{inspect(state)}")
