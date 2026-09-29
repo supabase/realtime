@@ -12,6 +12,22 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
     %{conn: conn, tenant: tenant}
   end
 
+  describe "synchronous_standby/1" do
+    @tag :requires_docker_backend
+    test "reports no synchronous standby when none is named", %{conn: conn} do
+      assert {:ok, false} = Replications.synchronous_standby(conn)
+    end
+
+    test "returns the error when the check fails", %{conn: conn} do
+      Postgrex.transaction(conn, fn tx ->
+        assert {:error, _} = Postgrex.query(tx, "SELECT 1/0", [])
+
+        assert {:error, %Postgrex.Error{postgres: %{code: :in_failed_sql_transaction}}} =
+                 Replications.synchronous_standby(tx)
+      end)
+    end
+  end
+
   describe "prepare_replication/2" do
     test "creates a replication slot", %{conn: conn} do
       slot_name = "test_slot_#{System.unique_integer([:positive])}"
@@ -88,7 +104,12 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
       {:ok, _} = Replications.prepare_replication(conn, slot_name)
 
       assert {:ok, %Postgrex.Result{rows: rows}} =
-               Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+               Replications.list_changes(conn,
+                 slot_name: slot_name,
+                 publication: @publication,
+                 max_changes: 100,
+                 max_record_bytes: 1_048_576
+               )
 
       assert [sentinel] = rows
       [nil, nil, nil, "[]", "{}", "{}", nil, nil, nil, slot_changes_count] = sentinel
@@ -114,7 +135,12 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
       Postgrex.query!(conn, "INSERT INTO public.test (details) VALUES ('hello')", [])
 
       assert {:ok, %Postgrex.Result{rows: rows}} =
-               Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+               Replications.list_changes(conn,
+                 slot_name: slot_name,
+                 publication: @publication,
+                 max_changes: 100,
+                 max_record_bytes: 1_048_576
+               )
 
       assert [row] = rows
 
@@ -154,7 +180,12 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
       Postgrex.query!(conn, "INSERT INTO public.test (details) VALUES ('hello')", [])
 
       assert {:ok, %Postgrex.Result{rows: rows}} =
-               Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+               Replications.list_changes(conn,
+                 slot_name: slot_name,
+                 publication: @publication,
+                 max_changes: 100,
+                 max_record_bytes: 1_048_576
+               )
 
       assert [sentinel] = rows
       [nil, nil, nil, "[]", "{}", "{}", nil, nil, nil, slot_changes_count] = sentinel
@@ -167,8 +198,21 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
 
       {:ok, _} = Replications.prepare_replication(conn, slot_name)
 
-      assert {:ok, _} = Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
-      assert {:ok, _} = Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+      assert {:ok, _} =
+               Replications.list_changes(conn,
+                 slot_name: slot_name,
+                 publication: @publication,
+                 max_changes: 100,
+                 max_record_bytes: 1_048_576
+               )
+
+      assert {:ok, _} =
+               Replications.list_changes(conn,
+                 slot_name: slot_name,
+                 publication: @publication,
+                 max_changes: 100,
+                 max_record_bytes: 1_048_576
+               )
 
       # pg_prepared_statements is session-scoped and the "realtime_rls" pool has a
       # single connection, so this query observes the same backend session that ran
@@ -184,6 +228,32 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
       assert [["realtime_list_changes", 2]] = rows
     end
 
+    @tag :requires_direct_connection
+    test "reads with list_changes_sync where a commit can wait for a synchronous standby", %{conn: conn} do
+      slot_name = "test_slot_#{System.unique_integer([:positive])}"
+      {:ok, _} = Replications.prepare_replication(conn, slot_name)
+
+      for synchronous_standby <- [false, true, false, true, false] do
+        assert {:ok, _} =
+                 Replications.list_changes(conn,
+                   slot_name: slot_name,
+                   publication: @publication,
+                   max_changes: 100,
+                   max_record_bytes: 1_048_576,
+                   synchronous_standby: synchronous_standby
+                 )
+      end
+
+      assert {:ok, %Postgrex.Result{rows: rows}} =
+               Postgrex.query(
+                 conn,
+                 "SELECT name, generic_plans + custom_plans FROM pg_prepared_statements ORDER BY name",
+                 []
+               )
+
+      assert [["realtime_list_changes", 3], ["realtime_list_changes_sync", 2]] = rows
+    end
+
     test "slot has changes but no subscribers: returns only the sentinel row with slot_changes_count of 1", %{
       conn: conn
     } do
@@ -194,7 +264,12 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
       Postgrex.query!(conn, "INSERT INTO public.test (details) VALUES ('hello'), ('hithere')", [])
 
       assert {:ok, %Postgrex.Result{rows: rows}} =
-               Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+               Replications.list_changes(conn,
+                 slot_name: slot_name,
+                 publication: @publication,
+                 max_changes: 100,
+                 max_record_bytes: 1_048_576
+               )
 
       assert [sentinel] = rows
       [nil, nil, nil, "[]", "{}", "{}", nil, nil, nil, slot_changes_count] = sentinel
@@ -255,7 +330,12 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
       Postgrex.query!(conn, "INSERT INTO #{qualified} VALUES ('list_changes_test')", [])
 
       try do
-        Replications.list_changes(conn, slot, pub, 100, 1_048_576)
+        Replications.list_changes(conn,
+          slot_name: slot,
+          publication: pub,
+          max_changes: 100,
+          max_record_bytes: 1_048_576
+        )
       after
         drop_replication_slot(conn, slot)
         Postgrex.query(conn, "DROP TABLE IF EXISTS #{qualified}", [])
