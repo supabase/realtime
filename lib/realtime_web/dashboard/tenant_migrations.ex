@@ -492,10 +492,6 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
         SELECT 1 FROM pg_constraint
         WHERE conrelid = 'realtime.schema_migrations'::regclass AND contype = 'p'
       ) THEN
-        DELETE FROM realtime.schema_migrations a
-        USING realtime.schema_migrations b
-        WHERE a.version = b.version AND a.ctid > b.ctid;
-
         ALTER TABLE realtime.schema_migrations ADD PRIMARY KEY (version);
       END IF;
     END

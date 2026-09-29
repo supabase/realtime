@@ -163,7 +163,6 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
       {:ok, admin_conn} = Database.connect_db(%{settings | username: "supabase_admin", pool_size: 1})
 
       Postgrex.query!(admin_conn, "ALTER TABLE realtime.schema_migrations DROP CONSTRAINT schema_migrations_pkey", [])
-      Postgrex.query!(admin_conn, "INSERT INTO realtime.schema_migrations SELECT * FROM realtime.schema_migrations", [])
 
       assert :ok = TenantMigrations.apply_pgdelta(tenant, nil)
 
