@@ -316,6 +316,9 @@ defmodule Extensions.PostgresCdcRlsTest do
 
       :sys.get_state(manager_pid)
 
+      [{poller_pid, _}] = Registry.lookup(ReplicationPoller.Registry, external_id)
+      wait_for_poller_oids(poller_pid)
+
       # Insert a record
       %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
       # Delete the record
@@ -459,6 +462,9 @@ defmodule Extensions.PostgresCdcRlsTest do
 
       # Wait for subscription to be executing
       :sys.get_state(manager_pid)
+
+      [{poller_pid, _}] = :erpc.call(node, Registry, :lookup, [ReplicationPoller.Registry, external_id])
+      wait_for_poller_oids(poller_pid)
 
       # Insert a record
       %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])

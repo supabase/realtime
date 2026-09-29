@@ -10,6 +10,7 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
   import Generators
 
   alias Extensions.PostgresCdcRls
+  alias Extensions.PostgresCdcRls.ReplicationPoller
   alias Phoenix.Socket.Message
   alias Postgrex
   alias Realtime.Database
@@ -126,6 +127,10 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
                      500
 
       {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+
+      [{poller_pid, _}] = Registry.lookup(ReplicationPoller.Registry, tenant.external_id)
+      wait_for_poller_oids(poller_pid)
+
       %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
 
       assert_receive %Message{
@@ -995,5 +1000,15 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
   defp assert_cdc_stopped(tenant) do
     PostgresCdcRls.handle_stop(tenant.external_id, 5000)
     assert_eventually PostgresCdcRls.get_manager_conn(tenant.external_id) == {:error, nil}
+  end
+
+  # The subscription reply only reflects the SubscriptionManager being ready — the
+  # ReplicationPoller creates its logical slot independently, so poll until it's done.
+  defp wait_for_poller_oids(poller_pid) do
+    case_wait :sys.get_state(poller_pid) do
+      %{oids: oids} = state when map_size(oids) > 0 -> state
+    else
+      state -> flunk("ReplicationPoller oids never populated. Last state: #{inspect(state)}")
+    end
   end
 end
