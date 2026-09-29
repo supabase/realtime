@@ -22,6 +22,7 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
       log =
         capture_log(fn ->
           WebsocketClient.connect(self(), uri(tenant, serializer), serializer, [{"x-api-key", "bad_token"}])
+          Logger.flush()
         end)
 
       assert log =~ "MalformedJWT: The token provided is not a valid JWT"
@@ -35,6 +36,8 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
             claims: %{:exp => System.system_time(:second) - 1000},
             params: %{log_level: :info}
           )
+
+          Logger.flush()
         end)
 
       assert log =~ "InvalidJWTToken: Token has expired"
@@ -165,6 +168,7 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
       {:ok, new_token} =
         generate_token(tenant, %{exp: System.system_time(:second) + 1000, role: "authenticated", sub: random_string()})
 
+      Process.sleep(1000)
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => new_token})
 
       # Send message to be ignored

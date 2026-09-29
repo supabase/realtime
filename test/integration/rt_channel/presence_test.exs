@@ -513,6 +513,7 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
           presence_read: false
         })
 
+      Process.sleep(1000)
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => new_token})
 
       assert_receive %Message{event: "phx_close", topic: ^realtime_topic}, 500
@@ -541,6 +542,7 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
           presence_read: true
         })
 
+      Process.sleep(1000)
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => new_token})
 
       refute_receive %Message{event: "phx_close", topic: ^realtime_topic}, 500
@@ -567,6 +569,7 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
           presence_read: false
         })
 
+      Process.sleep(1000)
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => new_token})
 
       expected = "You do not have permissions to read from this Channel topic: #{topic}"
