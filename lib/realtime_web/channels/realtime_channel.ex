@@ -89,12 +89,10 @@ defmodule RealtimeWeb.RealtimeChannel do
       |> assign_access_token(params)
       |> assign(:private?, Join.private?(join))
       |> assign(:policies, nil)
-      |> assign(:presence_enabled?, Join.presence_enabled?(join))
 
     with :ok <- SignalHandler.shutdown_in_progress?(),
          {:ok, tenant} <- Cache.fetch_tenant_by_external_id(tenant_id),
-         socket =
-           assign(socket, :presence_enabled?, presence_enabled?(socket.assigns.presence_enabled?, tenant)),
+         socket = assign(socket, PresenceHandler.join(join, tenant)),
          :ok <- only_private?(tenant, socket),
          :ok <- limit_max_users(tenant, transport_pid),
          :ok <- limit_joins(tenant, socket),
@@ -117,7 +115,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       replication_ready_opt_in? = Join.replication_ready?(join)
 
       is_new_api = new_api?(params)
-      presence_enabled? = socket.assigns.presence_enabled?
 
       pg_change_params = pg_change_params(is_new_api, params, channel_pid, claims, sub_topic)
 
@@ -140,11 +137,9 @@ defmodule RealtimeWeb.RealtimeChannel do
         is_new_api: is_new_api,
         pg_sub_ref: nil,
         pg_change_params: pg_change_params,
-        presence_key: Join.presence_key(join),
         self_broadcast: Join.self_broadcast?(join),
         tenant_topic: tenant_topic,
         channel_name: sub_topic,
-        presence_enabled?: presence_enabled?,
         fastlane_metadata: metadata,
         replayed_message_ids: replayed_message_ids,
         access_token_verified_at: nil,
@@ -166,10 +161,10 @@ defmodule RealtimeWeb.RealtimeChannel do
       socket =
         socket
         |> assign_counter(tenant)
-        |> assign_presence_counter(tenant)
-        |> assign_client_presence_rate_limit(tenant)
+        |> assign(PresenceHandler.join_rate_limits(tenant))
 
       # Start presence and add user if presence is enabled
+      presence_enabled? = socket.assigns.presence_enabled?
       if presence_enabled?, do: send(self(), :sync_presence)
 
       with :ok <- await_muster_join(muster_join_task, socket),
@@ -795,39 +790,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     assign(socket, :rate_counter, rate_args)
   end
 
-  defp assign_presence_counter(socket, tenant) do
-    rate_args = Tenants.presence_events_per_second_rate(tenant)
-
-    RateCounter.new(rate_args)
-
-    assign(socket, :presence_rate_counter, rate_args)
-  end
-
-  defp assign_client_presence_rate_limit(socket, tenant) do
-    config = Application.get_env(:realtime, :client_presence_rate_limit, max_calls: 5, window_ms: 30_000)
-
-    max_calls =
-      case tenant.max_client_presence_events_per_window do
-        value when is_integer(value) and value > 0 -> value
-        _ -> config[:max_calls]
-      end
-
-    window_ms =
-      case tenant.client_presence_window_ms do
-        value when is_integer(value) and value > 0 -> value
-        _ -> config[:window_ms]
-      end
-
-    client_rate_limit = %{
-      max_calls: max_calls,
-      window_ms: window_ms,
-      counter: 0,
-      reset_at: nil
-    }
-
-    assign(socket, :presence_client_rate_limit, client_rate_limit)
-  end
-
   defp access_token_throttle_ms, do: Application.fetch_env!(:realtime, :access_token_throttle_ms)
 
   defp now, do: System.monotonic_time(:millisecond)
@@ -1255,10 +1217,6 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp maybe_sync_presence(_socket, socket), do: socket
-
-  defp presence_enabled?(client_enabled?, %Tenant{presence_enabled: tenant_enabled}) do
-    client_enabled? || tenant_enabled
-  end
 
   defp can_read_presence?(%{assigns: %{policies: %Policies{presence: %{read: true}}}}), do: true
   defp can_read_presence?(_socket), do: false
