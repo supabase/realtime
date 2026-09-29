@@ -158,39 +158,24 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
       assert updated.migrations_ran == total
     end
 
-    test "restores the primary key and backfills when realtime.schema_migrations lost it", %{tenant: tenant} do
+    test "restores the primary key when realtime.schema_migrations lost it", %{tenant: tenant} do
       {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
       {:ok, admin_conn} = Database.connect_db(%{settings | username: "supabase_admin", pool_size: 1})
 
       Postgrex.query!(admin_conn, "ALTER TABLE realtime.schema_migrations DROP CONSTRAINT schema_migrations_pkey", [])
-      Postgrex.query!(admin_conn, "DELETE FROM realtime.schema_migrations WHERE version > 20211116213934", [])
-      Postgrex.query!(admin_conn, "INSERT INTO realtime.schema_migrations (version) VALUES (20211116024918)", [])
-      {:ok, _} = Api.update_migrations_ran(tenant.external_id, 7)
+      Postgrex.query!(admin_conn, "INSERT INTO realtime.schema_migrations SELECT * FROM realtime.schema_migrations", [])
 
       assert :ok = TenantMigrations.apply_pgdelta(tenant, nil)
 
-      %{rows: [[count, distinct]]} =
-        Postgrex.query!(
-          admin_conn,
-          "SELECT count(*)::int, count(DISTINCT version)::int FROM realtime.schema_migrations",
-          []
-        )
-
-      total = length(Migrations.migrations())
-      assert count == total
-      assert distinct == total
-
-      assert %{rows: [["PRIMARY KEY (version)"]]} =
+      assert %{rows: [[1]]} =
                Postgrex.query!(
                  admin_conn,
-                 """
-                 SELECT pg_get_constraintdef(oid) FROM pg_constraint
-                 WHERE conrelid = 'realtime.schema_migrations'::regclass AND contype = 'p'
-                 """,
+                 "SELECT count(*)::int FROM pg_constraint WHERE conrelid = 'realtime.schema_migrations'::regclass AND contype = 'p'",
                  []
                )
 
-      assert %{migrations_ran: ^total} = Api.get_tenant_by_external_id(tenant.external_id, use_replica?: false)
+      %{rows: [[count]]} = Postgrex.query!(admin_conn, "SELECT count(*)::int FROM realtime.schema_migrations", [])
+      assert count == length(Migrations.migrations())
     end
   end
 

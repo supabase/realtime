@@ -474,9 +474,8 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   defp insert_versions(conn, versions) do
     insert = """
     INSERT INTO realtime.schema_migrations (version, inserted_at)
-    SELECT v.version, NOW()
-    FROM unnest($1::bigint[]) AS v(version)
-    WHERE NOT EXISTS (SELECT 1 FROM realtime.schema_migrations sm WHERE sm.version = v.version)
+    SELECT unnest($1::bigint[]), NOW()
+    ON CONFLICT (version) DO NOTHING
     """
 
     with {:ok, _} <- restore_schema_migrations_pkey(conn),
