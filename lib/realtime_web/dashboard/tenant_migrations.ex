@@ -474,14 +474,36 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   defp insert_versions(conn, versions) do
     insert = """
     INSERT INTO realtime.schema_migrations (version, inserted_at)
-    SELECT unnest($1::bigint[]), NOW()
-    ON CONFLICT (version) DO NOTHING
+    SELECT v.version, NOW()
+    FROM unnest($1::bigint[]) AS v(version)
+    WHERE NOT EXISTS (SELECT 1 FROM realtime.schema_migrations sm WHERE sm.version = v.version)
     """
 
-    case Postgrex.query(conn, insert, [versions], timeout: @query_timeout) do
-      {:ok, _} -> :ok
-      {:error, _} = err -> err
+    with {:ok, _} <- restore_schema_migrations_pkey(conn),
+         {:ok, _} <- Postgrex.query(conn, insert, [versions], timeout: @query_timeout) do
+      :ok
     end
+  end
+
+  defp restore_schema_migrations_pkey(conn) do
+    restore = """
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'realtime.schema_migrations'::regclass AND contype = 'p'
+      ) THEN
+        DELETE FROM realtime.schema_migrations a
+        USING realtime.schema_migrations b
+        WHERE a.version = b.version AND a.ctid > b.ctid;
+
+        ALTER TABLE realtime.schema_migrations ADD PRIMARY KEY (version);
+      END IF;
+    END
+    $$
+    """
+
+    Postgrex.query(conn, restore, [], timeout: @query_timeout)
   end
 
   defp fetch_schema_migrations(conn) do
