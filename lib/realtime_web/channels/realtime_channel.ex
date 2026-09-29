@@ -819,6 +819,9 @@ defmodule RealtimeWeb.RealtimeChannel do
     assign(socket, :access_token, tenant_token)
   end
 
+  # Only place cached policies get re-evaluated (access_token refresh) or the socket gets
+  # disconnected (JWT expiry). Keep client JWT expiry short: see
+  # https://supabase.com/docs/guides/realtime/authorization#updating-rls-policies
   defp confirm_token(%{assigns: assigns}) do
     %{jwt_secret: jwt_secret, access_token: access_token} = assigns
 
@@ -1058,6 +1061,9 @@ defmodule RealtimeWeb.RealtimeChannel do
     assign(socket, :authorization_context, authorization_context)
   end
 
+  # Result is cached in assigns.policies for the JWT's or socket's life time (whichever comes first).
+  # We recommend short-lived JWTs to force re-evaluation.
+  # See https://supabase.com/docs/guides/realtime/authorization#updating-rls-policies
   defp maybe_assign_policies(topic, db_conn, %{assigns: %{private?: true}} = socket)
        when not is_nil(topic) do
     authorization_context = socket.assigns.authorization_context

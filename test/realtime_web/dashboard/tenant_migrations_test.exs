@@ -157,6 +157,25 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
       updated = Api.get_tenant_by_external_id(tenant.external_id, use_replica?: false)
       assert updated.migrations_ran == total
     end
+
+    test "restores the primary key when realtime.schema_migrations lost it", %{tenant: tenant} do
+      {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
+      {:ok, admin_conn} = Database.connect_db(%{settings | username: "supabase_admin", pool_size: 1})
+
+      Postgrex.query!(admin_conn, "ALTER TABLE realtime.schema_migrations DROP CONSTRAINT schema_migrations_pkey", [])
+
+      assert :ok = TenantMigrations.apply_pgdelta(tenant, nil)
+
+      assert %{rows: [[1]]} =
+               Postgrex.query!(
+                 admin_conn,
+                 "SELECT count(*)::int FROM pg_constraint WHERE conrelid = 'realtime.schema_migrations'::regclass AND contype = 'p'",
+                 []
+               )
+
+      %{rows: [[count]]} = Postgrex.query!(admin_conn, "SELECT count(*)::int FROM realtime.schema_migrations", [])
+      assert count == length(Migrations.migrations())
+    end
   end
 
   describe "profile" do

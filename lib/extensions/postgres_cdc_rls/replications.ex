@@ -84,7 +84,45 @@ defmodule Extensions.PostgresCdcRls.Replications do
     end
   end
 
-  def list_changes(conn, slot_name, publication, max_changes, max_record_bytes) do
+  @doc """
+  Reports whether a COMMIT can wait for a synchronous standby.
+  """
+  @spec synchronous_standby(pid()) :: {:ok, boolean()} | {:error, Postgrex.Error.t()}
+  def synchronous_standby(conn) do
+    case query(conn, "SELECT current_setting('synchronous_standby_names') <> ''", []) do
+      {:ok, %Postgrex.Result{rows: [[synchronous_standby]]}} -> {:ok, synchronous_standby}
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  @doc """
+  Drains the slot and authorizes each change.
+
+  ## Options
+
+    * `:slot_name` (required, `t:String.t/0`) - the replication slot to drain
+    * `:publication` (required, `t:String.t/0`) - the publication to decode
+    * `:max_changes` (required, `t:pos_integer/0`) - most changes to take in one poll
+    * `:max_record_bytes` (required, `t:pos_integer/0`) - records above this are truncated
+    * `:synchronous_standby` (optional, `t:boolean/0`) - whether a COMMIT can wait for a
+      synchronous standby, see `synchronous_standby/1`. Defaults to `false`.
+
+  """
+  @spec list_changes(pid(), keyword()) :: {:ok, Postgrex.Result.t()} | {:error, Postgrex.Error.t()}
+  def list_changes(conn, opts) do
+    opts =
+      Keyword.validate!(opts, [:slot_name, :publication, :max_changes, :max_record_bytes, synchronous_standby: false])
+
+    publication = Keyword.fetch!(opts, :publication)
+    slot_name = Keyword.fetch!(opts, :slot_name)
+    max_changes = Keyword.fetch!(opts, :max_changes)
+    max_record_bytes = Keyword.fetch!(opts, :max_record_bytes)
+
+    function =
+      if Keyword.fetch!(opts, :synchronous_standby),
+        do: "realtime.list_changes_sync",
+        else: "realtime.list_changes"
+
     query(
       conn,
       """
@@ -98,15 +136,10 @@ defmodule Extensions.PostgresCdcRls.Replications do
              subscription_ids,
              errors,
              slot_changes_count
-      FROM realtime.list_changes($1, $2, $3, $4)
+      FROM #{function}($1, $2, $3, $4)
       """,
-      [
-        publication,
-        slot_name,
-        max_changes,
-        max_record_bytes
-      ],
-      cache_statement: "realtime_list_changes"
+      [publication, slot_name, max_changes, max_record_bytes],
+      cache_statement: String.replace(function, ".", "_")
     )
   end
 end

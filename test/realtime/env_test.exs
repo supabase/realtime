@@ -136,6 +136,47 @@ defmodule Realtime.EnvTest do
     end
   end
 
+  describe "get_key_value_list/1" do
+    test "returns an empty list when env is unset", %{env: env} do
+      assert Env.get_key_value_list(env) == []
+    end
+
+    test "returns an empty list when env is empty", %{env: env} do
+      System.put_env(env, "")
+      assert Env.get_key_value_list(env) == []
+    end
+
+    test "parses a single pair", %{env: env} do
+      System.put_env(env, "region=us-east-1")
+      assert Env.get_key_value_list(env) == [{"region", "us-east-1"}]
+    end
+
+    test "parses comma-separated pairs in order", %{env: env} do
+      System.put_env(env, "service=realtime,cluster=main")
+      assert Env.get_key_value_list(env) == [{"service", "realtime"}, {"cluster", "main"}]
+    end
+
+    test "keeps equals signs in values", %{env: env} do
+      System.put_env(env, "query=a=b")
+      assert Env.get_key_value_list(env) == [{"query", "a=b"}]
+    end
+
+    test "skips segments without an equals sign instead of raising", %{env: env} do
+      System.put_env(env, "region")
+      assert Env.get_key_value_list(env) == []
+    end
+
+    test "skips empty segments from trailing or double commas", %{env: env} do
+      System.put_env(env, "region=us-east-1,,cluster=main,")
+      assert Env.get_key_value_list(env) == [{"region", "us-east-1"}, {"cluster", "main"}]
+    end
+
+    test "trims whitespace around keys and values", %{env: env} do
+      System.put_env(env, " region = us-east-1 , cluster=main")
+      assert Env.get_key_value_list(env) == [{"region", "us-east-1"}, {"cluster", "main"}]
+    end
+  end
+
   describe "get_list/2" do
     test "returns the default when env is unset", %{env: env} do
       assert Env.get_list(env, ["a", "b"]) == ["a", "b"]
