@@ -12,7 +12,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   * Tracking and Untracking - via `handle/3`, this will add, update, or remove the client's 
               presence state from the topic.
 
-  All presence tracking usings `RealtimeWeb.Presence`, which is Realtime's instantiation of 
+  All presence tracking uses `RealtimeWeb.Presence`, which is Realtime's instantiation of 
   `Phoenix.Presence`.
   """
   use Realtime.Logs
