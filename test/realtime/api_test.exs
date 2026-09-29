@@ -11,6 +11,7 @@ defmodule Realtime.ApiTest do
   alias Realtime.Api.Tenant
   alias Realtime.Crypto
   alias Realtime.Env
+  alias Realtime.FeatureFlags
   alias Realtime.GenCounter
   alias Realtime.GenRpc
   alias Realtime.Nodes
@@ -19,6 +20,7 @@ defmodule Realtime.ApiTest do
   alias Extensions.PostgresCdcRls
 
   @db_conf Application.compile_env(:realtime, Realtime.Repo)
+  @gcm_flag "gcm_encryption_backfill"
 
   defp create_tenants(_) do
     tenant1 = tenant_fixture(%{max_concurrent_users: 10_000_000})
@@ -131,6 +133,52 @@ defmodule Realtime.ApiTest do
     test "invalid data returns error changeset" do
       reject(&Realtime.Tenants.Cache.global_cache_update/1)
       assert {:error, %Ecto.Changeset{}} = Api.create_tenant(%{external_id: nil, jwt_secret: nil, name: nil})
+    end
+  end
+
+  describe "GCM rollout on upsert" do
+    test "stays on the legacy cipher while the rollout flag is off" do
+      stub(FeatureFlags, :enabled?, fn @gcm_flag, _tenant_id -> false end)
+
+      tenant = tenant_fixture()
+
+      refute Crypto.gcm?(tenant.jwt_secret)
+      assert Enum.all?(tenant.extensions, &Crypto.legacy_settings?(&1.settings, encrypted_settings_keys()))
+      assert is_nil(tenant.gcm_migrated_at)
+    end
+
+    test "writes GCM and stamps gcm_migrated_at once the flag covers the tenant" do
+      stub(FeatureFlags, :enabled?, fn @gcm_flag, _tenant_id -> true end)
+
+      tenant = tenant_fixture()
+
+      assert Crypto.gcm?(tenant.jwt_secret)
+      refute Enum.any?(tenant.extensions, &Crypto.legacy_settings?(&1.settings, encrypted_settings_keys()))
+      assert %DateTime{} = tenant.gcm_migrated_at
+    end
+
+    test "leaves gcm_migrated_at null when the upsert only carries part of the secrets" do
+      stub(FeatureFlags, :enabled?, fn @gcm_flag, _tenant_id -> false end)
+      tenant = tenant_fixture()
+
+      stub(FeatureFlags, :enabled?, fn @gcm_flag, _tenant_id -> true end)
+      assert {:ok, updated} = Api.update_tenant_by_external_id(tenant.external_id, %{jwt_secret: "rotated"})
+
+      assert Crypto.gcm?(updated.jwt_secret)
+      assert Enum.all?(updated.extensions, &Crypto.legacy_settings?(&1.settings, encrypted_settings_keys()))
+      assert is_nil(updated.gcm_migrated_at)
+    end
+
+    test "clears gcm_migrated_at when the rollout is switched back off, so the backfill picks the tenant up again" do
+      stub(FeatureFlags, :enabled?, fn @gcm_flag, _tenant_id -> true end)
+      tenant = tenant_fixture()
+      assert %DateTime{} = tenant.gcm_migrated_at
+
+      stub(FeatureFlags, :enabled?, fn @gcm_flag, _tenant_id -> false end)
+      assert {:ok, updated} = Api.update_tenant_by_external_id(tenant.external_id, %{jwt_secret: "rotated"})
+
+      refute Crypto.gcm?(updated.jwt_secret)
+      assert is_nil(updated.gcm_migrated_at)
     end
   end
 
