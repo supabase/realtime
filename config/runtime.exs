@@ -105,11 +105,19 @@ metrics_cleaner_schedule_timer_in_ms = Env.get_integer("METRICS_CLEANER_SCHEDULE
 metrics_pusher_auth = System.get_env("METRICS_PUSHER_AUTH")
 metrics_pusher_compress = Env.get_boolean("METRICS_PUSHER_COMPRESS", true)
 metrics_pusher_enabled = Env.get_boolean("METRICS_PUSHER_ENABLED", false)
-metrics_pusher_extra_labels = System.get_env("METRICS_PUSHER_EXTRA_LABELS", "")
+metrics_pusher_extra_labels = Env.get_key_value_list("METRICS_PUSHER_EXTRA_LABELS")
 metrics_pusher_interval_ms = Env.get_integer("METRICS_PUSHER_INTERVAL_MS", to_timeout(second: 30))
 metrics_pusher_timeout_ms = Env.get_integer("METRICS_PUSHER_TIMEOUT_MS", to_timeout(second: 15))
 metrics_pusher_url = System.get_env("METRICS_PUSHER_URL")
 metrics_pusher_user = System.get_env("METRICS_PUSHER_USER", "realtime")
+tenant_metrics_pusher_auth = System.get_env("TENANT_METRICS_PUSHER_AUTH")
+tenant_metrics_pusher_compress = Env.get_boolean("TENANT_METRICS_PUSHER_COMPRESS", true)
+tenant_metrics_pusher_enabled = Env.get_boolean("TENANT_METRICS_PUSHER_ENABLED", false)
+tenant_metrics_pusher_extra_labels = Env.get_key_value_list("TENANT_METRICS_PUSHER_EXTRA_LABELS")
+tenant_metrics_pusher_interval_ms = Env.get_integer("TENANT_METRICS_PUSHER_INTERVAL_MS", to_timeout(second: 30))
+tenant_metrics_pusher_timeout_ms = Env.get_integer("TENANT_METRICS_PUSHER_TIMEOUT_MS", to_timeout(second: 15))
+tenant_metrics_pusher_url = System.get_env("TENANT_METRICS_PUSHER_URL")
+tenant_metrics_pusher_user = System.get_env("TENANT_METRICS_PUSHER_USER", "realtime")
 metrics_rpc_timeout_in_ms = Env.get_integer("METRICS_RPC_TIMEOUT_IN_MS", to_timeout(second: 15))
 metrics_token_blocklist = Env.get_list("METRICS_TOKEN_BLOCKLIST", [])
 migration_partition_slots = Env.get_integer("MIGRATION_PARTITION_SLOTS", System.schedulers_online() * 2)
@@ -168,20 +176,6 @@ ssl_opts =
     db_ssl and is_binary(db_ssl_ca_cert) -> [cacertfile: db_ssl_ca_cert]
     db_ssl -> [verify: :verify_none]
     true -> false
-  end
-
-metrics_pusher_extra_labels =
-  case metrics_pusher_extra_labels do
-    "" ->
-      []
-
-    labels ->
-      labels
-      |> String.split(",")
-      |> Enum.map(fn pair ->
-        [k, v] = String.split(pair, "=", parts: 2)
-        {k, v}
-      end)
   end
 
 if !(db_ip_version in [nil, "ipv6", "ipv4"]),
@@ -264,7 +258,15 @@ config :realtime,
   metrics_pusher_interval_ms: metrics_pusher_interval_ms,
   metrics_pusher_timeout_ms: metrics_pusher_timeout_ms,
   metrics_pusher_compress: metrics_pusher_compress,
-  metrics_pusher_extra_labels: metrics_pusher_extra_labels
+  metrics_pusher_extra_labels: metrics_pusher_extra_labels,
+  tenant_metrics_pusher_enabled: tenant_metrics_pusher_enabled,
+  tenant_metrics_pusher_url: tenant_metrics_pusher_url,
+  tenant_metrics_pusher_user: tenant_metrics_pusher_user,
+  tenant_metrics_pusher_auth: tenant_metrics_pusher_auth,
+  tenant_metrics_pusher_interval_ms: tenant_metrics_pusher_interval_ms,
+  tenant_metrics_pusher_timeout_ms: tenant_metrics_pusher_timeout_ms,
+  tenant_metrics_pusher_compress: tenant_metrics_pusher_compress,
+  tenant_metrics_pusher_extra_labels: tenant_metrics_pusher_extra_labels
 
 if config_env() != :test && run_janitor do
   config :realtime,
