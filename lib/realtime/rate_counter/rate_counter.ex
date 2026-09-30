@@ -119,6 +119,14 @@ defmodule Realtime.RateCounter do
     end
   end
 
+  @doc """
+  Gets the state of the RateCounter without starting it.
+
+  Returns `{:error, :not_found}` if the RateCounter is not running.
+  """
+  @spec find(term()) :: {:ok, t} | {:error, :not_found}
+  def find(id), do: do_get(id)
+
   defp do_get(id) do
     case Cachex.get(@cache, id) do
       {:ok, nil} -> {:error, :not_found}
