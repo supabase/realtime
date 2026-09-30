@@ -118,6 +118,9 @@ defmodule Realtime.Api.Tenant do
 
   def encrypt_jwt_secret(changeset), do: changeset
 
+  def decrypt_jwt_secret(nil), do: nil
+  def decrypt_jwt_secret(jwt_secret), do: Crypto.decrypt!(jwt_secret)
+
   @doc false
   def gcm_migrated_at_changeset(tenant, attrs) do
     tenant

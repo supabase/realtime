@@ -13,7 +13,6 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   alias Realtime.Api.Message
   alias Realtime.Api.Tenant
-  alias Realtime.Crypto
   alias Realtime.FeatureFlags
   alias Realtime.GenCounter
   alias Realtime.Helpers
@@ -300,9 +299,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
-  def handle_info(:update_rate_counter, socket) do
-    count(socket)
-
+  def handle_info(:check_rate_counter, socket) do
     {:ok, rate_counter} = RateCounter.get(socket.assigns.rate_counter)
 
     if rate_counter.limit.triggered do
@@ -425,6 +422,11 @@ defmodule RealtimeWeb.RealtimeChannel do
         msg =
           "Failed to generate JWT signer for key ID (kid) #{inspect(kid)}, check your JWT secret or JWKS configuration"
 
+        log_error(socket, "JwtSignerError", msg)
+        shutdown_response(socket, msg)
+
+      {:error, :error_generating_signer} ->
+        msg = "Failed to generate JWT signer, check your JWT secret or JWKS configuration"
         log_error(socket, "JwtSignerError", msg)
         shutdown_response(socket, msg)
 
@@ -646,6 +648,11 @@ defmodule RealtimeWeb.RealtimeChannel do
         log_error(socket, "JwtSignerError", msg)
         shutdown_response(socket, msg)
 
+      {:error, :error_generating_signer} ->
+        msg = "Failed to generate JWT signer, check your JWT secret or JWKS configuration"
+        log_error(socket, "JwtSignerError", msg)
+        shutdown_response(socket, msg)
+
       {:error, error} ->
         shutdown_response(socket, inspect(error))
     end
@@ -804,7 +811,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     jwt_jwks = Map.get(assigns, :jwt_jwks)
 
-    with jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
+    with jwt_secret_dec <- Tenant.decrypt_jwt_secret(jwt_secret),
          {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
            ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec, jwt_jwks),
          exp_diff when exp_diff > 0 <- exp - Joken.current_time() do
