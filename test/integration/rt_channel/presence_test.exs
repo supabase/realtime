@@ -513,6 +513,10 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
           presence_read: false
         })
 
+      # The access_token refresh logic enforces a 1-second sliding window throttle.
+      # Because `handle_in("access_token")` does not return a reply to the client,
+      # we have no state to poll to verify the token was processed. We must sleep
+      # to guarantee the throttle window has passed before verifying new permissions.
       Process.sleep(1000)
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => new_token})
 
@@ -542,6 +546,10 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
           presence_read: true
         })
 
+      # The access_token refresh logic enforces a 1-second sliding window throttle.
+      # Because `handle_in("access_token")` does not return a reply to the client,
+      # we have no state to poll to verify the token was processed. We must sleep
+      # to guarantee the throttle window has passed before verifying new permissions.
       Process.sleep(1000)
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => new_token})
 
@@ -569,6 +577,10 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
           presence_read: false
         })
 
+      # The access_token refresh logic enforces a 1-second sliding window throttle.
+      # Because `handle_in("access_token")` does not return a reply to the client,
+      # we have no state to poll to verify the token was processed. We must sleep
+      # to guarantee the throttle window has passed before verifying new permissions.
       Process.sleep(1000)
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => new_token})
 

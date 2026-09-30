@@ -22,6 +22,9 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
       log =
         capture_log(fn ->
           WebsocketClient.connect(self(), uri(tenant, serializer), serializer, [{"x-api-key", "bad_token"}])
+          # The Cowboy worker process logs websocket failures (e.g. malformed JWTs)
+          # asynchronously. We must explicitly flush the Logger to guarantee the
+          # message is processed before `capture_log` finishes and removes the interceptor.
           Logger.flush()
         end)
 
@@ -37,6 +40,9 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
             params: %{log_level: :info}
           )
 
+          # The Cowboy worker process logs websocket failures (e.g. malformed JWTs)
+          # asynchronously. We must explicitly flush the Logger to guarantee the
+          # message is processed before `capture_log` finishes and removes the interceptor.
           Logger.flush()
         end)
 
@@ -168,6 +174,10 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
       {:ok, new_token} =
         generate_token(tenant, %{exp: System.system_time(:second) + 1000, role: "authenticated", sub: random_string()})
 
+      # The access_token refresh logic enforces a 1-second sliding window throttle.
+      # Because `handle_in("access_token")` does not return a reply to the client,
+      # we have no state to poll to verify the token was processed. We must sleep
+      # to guarantee the throttle window has passed before verifying new permissions.
       Process.sleep(1000)
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => new_token})
 
