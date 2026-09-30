@@ -392,5 +392,22 @@ defmodule Realtime.RateCounterTest do
     end
   end
 
+  describe "find/1" do
+    test "gets the state of a running rate counter" do
+      args = %Args{id: {:domain, :metric, Ecto.UUID.generate()}}
+      {:ok, _} = RateCounter.new(args)
+
+      assert {:ok, %RateCounter{id: id}} = RateCounter.find(args.id)
+      assert id == args.id
+    end
+
+    test "does not start a rate counter" do
+      id = {:domain, :metric, Ecto.UUID.generate()}
+
+      assert RateCounter.find(id) == {:error, :not_found}
+      assert RateCounter.find(id) == {:error, :not_found}
+    end
+  end
+
   def handle_telemetry(event, measures, metadata, pid: pid), do: send(pid, {event, measures, metadata})
 end

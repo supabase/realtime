@@ -25,8 +25,11 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
   @broadcast "broadcast"
 
   @doc """
-  This dispatch function caches encoded messages if fastlane is used
-  It also sends  an :update_rate_counter to the subscriber and it can conditionally log
+  This dispatch function caches encoded messages if fastlane is used and it can conditionally log.
+
+  Non presence messages delivered through fastlane are counted in bulk against the tenant's events
+  rate counter. Channel processes are only messaged (`:check_rate_counter`) when that counter has
+  triggered its limit, so they can shut down, or when it is not running, so they can restart it.
 
   fastlane_pid is the actual socket transport pid
   """
@@ -40,8 +43,11 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
   # Broadcast messages are tagged with their tenant_id by RealtimeWeb.TenantBroadcaster so the
   # receiving node can attribute the fan-out before delivery. Strip the tag here so every
   # downstream clause (and the client) only ever sees the underlying struct.
-  def dispatch(subscribers, from, {:tb, _tenant_id, msg}),
+  def dispatch(subscribers, from, {:tb, _tenant_id, %Broadcast{event: @presence_diff} = msg}),
     do: dispatch(subscribers, from, msg)
+
+  def dispatch(subscribers, from, {:tb, tenant_id, msg}),
+    do: do_dispatch(subscribers, from, msg, tenant_id)
 
   def dispatch(subscribers, from, %Broadcast{event: @presence_diff} = msg) do
     {_cache, count} =
@@ -70,7 +76,7 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
         {cache, count} ->
           maybe_log(log_level, join_topic, msg, tenant_id)
 
-          cache = do_dispatch(msg, fastlane_pid, serializer, join_topic, cache, tenant_id, log_level)
+          cache = fastlane_dispatch(msg, fastlane_pid, serializer, join_topic, cache, tenant_id, log_level)
           {cache, count + 1}
 
         {pid, _}, {cache, count} ->
@@ -84,33 +90,39 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
     :ok
   end
 
-  def dispatch(subscribers, from, msg) do
+  def dispatch(subscribers, from, msg), do: do_dispatch(subscribers, from, msg, tenant_id(subscribers))
+
+  defp do_dispatch(subscribers, from, msg, tenant_id) do
     message_id = message_id(msg)
     broadcast? = broadcast?(msg)
+    check_rate_counter? = check_rate_counter?(tenant_id)
 
-    _ =
-      Enum.reduce(subscribers, %{}, fn
-        {pid, _}, cache when pid == from ->
-          cache
+    {_cache, count} =
+      Enum.reduce(subscribers, {%{}, 0}, fn
+        {pid, _}, acc when pid == from ->
+          acc
 
         {pid,
          {:rc_fastlane, fastlane_pid, serializer, join_topic, log_level, tenant_id, replayed_message_ids,
           _presence_read?, broadcast_read?}},
-        cache ->
+        {cache, count} = acc ->
           if (broadcast? and broadcast_read? != true) or already_replayed?(message_id, replayed_message_ids) do
-            cache
+            acc
           else
-            send(pid, :update_rate_counter)
+            if check_rate_counter?, do: send(pid, :check_rate_counter)
 
             maybe_log(log_level, join_topic, msg, tenant_id)
 
-            do_dispatch(msg, fastlane_pid, serializer, join_topic, cache, tenant_id, log_level)
+            cache = fastlane_dispatch(msg, fastlane_pid, serializer, join_topic, cache, tenant_id, log_level)
+            {cache, count + 1}
           end
 
-        {pid, _}, cache ->
+        {pid, _}, acc ->
           send(pid, msg)
-          cache
+          acc
       end)
+
+    increment_events_counter(tenant_id, count)
 
     :ok
   end
@@ -131,7 +143,7 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
 
   defp maybe_log(_level, _join_topic, _msg, _tenant_id), do: :ok
 
-  defp do_dispatch(msg, fastlane_pid, serializer, join_topic, cache, tenant_id, log_level) do
+  defp fastlane_dispatch(msg, fastlane_pid, serializer, join_topic, cache, tenant_id, log_level) do
     case cache do
       %{{^serializer, ^join_topic} => {:ok, encoded_msg}} ->
         send(fastlane_pid, encoded_msg)
@@ -171,6 +183,24 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
 
   defp tenant_id([{_pid, {:rc_fastlane, _, _, _, _, tenant_id, _, _, _}} | _]), do: tenant_id
   defp tenant_id(_), do: nil
+
+  defp check_rate_counter?(tenant_id) when is_binary(tenant_id) do
+    case tenant_id |> Realtime.Tenants.events_per_second_key() |> Realtime.RateCounter.find() do
+      {:ok, %{limit: %{triggered: true}}} -> true
+      {:ok, _} -> false
+      {:error, :not_found} -> true
+    end
+  end
+
+  defp check_rate_counter?(_tenant_id), do: false
+
+  defp increment_events_counter(tenant_id, count) when is_binary(tenant_id) and count > 0 do
+    tenant_id
+    |> Realtime.Tenants.events_per_second_key()
+    |> Realtime.GenCounter.add(count)
+  end
+
+  defp increment_events_counter(_tenant_id, _count), do: :ok
 
   defp increment_presence_counter(tenant_id, "presence_diff", count) when is_binary(tenant_id) do
     tenant_id

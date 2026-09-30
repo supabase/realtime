@@ -237,6 +237,8 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
     end
 
     test "returns 422 when JSON payload exceeds size limit", %{conn: conn, tenant: tenant} do
+      # Drop deliveries counted by previous tests sharing this tenant
+      Realtime.GenCounter.reset(Tenants.events_per_second_key(tenant))
       request_events_key = Tenants.requests_per_second_key(tenant)
 
       expect(GenCounter, :add, fn ^request_events_key -> :ok end)
@@ -254,7 +256,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       assert Jason.decode!(conn.resp_body)["errors"]["payload"] == ["Payload size exceeds tenant limit"]
 
       {:ok, rate_counter} = RateCounterHelper.tick!(Tenants.events_per_second_rate(tenant))
-      assert rate_counter.avg == 0.0
+      assert [0 | _] = rate_counter.bucket
     end
 
     test "returns 401 when JWT is expired", %{conn: conn, tenant: tenant} do
@@ -357,6 +359,8 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
     end
 
     test "returns 422 when binary payload exceeds size limit", %{conn: conn, tenant: tenant} do
+      # Drop deliveries counted by previous tests sharing this tenant
+      Realtime.GenCounter.reset(Tenants.events_per_second_key(tenant))
       request_events_key = Tenants.requests_per_second_key(tenant)
 
       expect(GenCounter, :add, fn ^request_events_key -> :ok end)
@@ -374,7 +378,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       assert Jason.decode!(conn.resp_body)["errors"]["payload"] == ["Payload size exceeds tenant limit"]
 
       {:ok, rate_counter} = RateCounterHelper.tick!(Tenants.events_per_second_rate(tenant))
-      assert rate_counter.avg == 0.0
+      assert [0 | _] = rate_counter.bucket
     end
 
     test "returns 401 when JWT is expired for binary", %{conn: conn, tenant: tenant} do

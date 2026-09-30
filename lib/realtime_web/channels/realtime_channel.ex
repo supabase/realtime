@@ -298,9 +298,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
-  def handle_info(:update_rate_counter, socket) do
-    count(socket)
-
+  def handle_info(:check_rate_counter, socket) do
     {:ok, rate_counter} = RateCounter.get(socket.assigns.rate_counter)
 
     if rate_counter.limit.triggered do
