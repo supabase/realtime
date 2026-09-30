@@ -1,6 +1,19 @@
 defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   @moduledoc """
-  Handles the Presence feature from Realtime
+  Handles the Presence feature for Realtime.
+
+  This module provides functions for all client facing entry points into 
+  Realtime's Presence feature. These entry points include:
+
+  * Joining - When a channel joins, at this point it may or may not be part of
+              a presence topic depending on its join config.
+  * Syncing - using the `sync/1` function. This will send the full state of the 
+              presence topic back to the client socket, assuming they have access to it.
+  * Tracking and Untracking - via `handle/3`, this will add, update, or remove the client's 
+              presence state from the topic.
+
+  All presence tracking uses `RealtimeWeb.Presence`, which is Realtime's instantiation of 
+  `Phoenix.Presence`.
   """
   use Realtime.Logs
 
@@ -9,10 +22,12 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
 
   alias Phoenix.Socket
   alias Phoenix.Tracker.Shard
+  alias Realtime.Api.Tenant
   alias Realtime.GenCounter
   alias Realtime.RateCounter
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
+  alias RealtimeWeb.Channels.Payloads
   alias RealtimeWeb.Presence
   alias RealtimeWeb.RealtimeChannel.Logging
 
@@ -23,7 +38,54 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   defguard can_write_presence?(socket) when is_private?(socket) and socket.assigns.policies.presence.write
 
   @doc """
-  Sends presence state to connected clients
+  Computes join-time presence assigns.
+
+  These assigns must be available before authorization policies are evaluated. 
+  Must be called before `RealtimeChannel`'s `maybe_assign_policies/3`.
+  """
+  @spec join(Payloads.Join.t(), Tenant.t()) :: %{presence_enabled?: boolean(), presence_key: term()}
+  def join(join, tenant) do
+    presence_enabled? = Payloads.Join.presence_enabled?(join) || tenant.presence_enabled
+
+    %{
+      presence_enabled?: presence_enabled?,
+      presence_key: Payloads.Join.presence_key(join)
+    }
+  end
+
+  @doc """
+  Computes presence rate-limiting assigns. 
+
+  Only call this once a join has fully succeeded, otherwise we unnecessarily create a RateCounter.
+  """
+  @spec join_rate_limits(Tenant.t()) :: %{
+          presence_rate_counter: RateCounter.Args.t(),
+          presence_client_rate_limit: %{
+            :counter => 0,
+            :max_calls => pos_integer(),
+            :reset_at => nil,
+            :window_ms => pos_integer()
+          }
+        }
+  def join_rate_limits(tenant) do
+    config = Application.get_env(:realtime, :client_presence_rate_limit, max_calls: 5, window_ms: 30_000)
+    rate_counter = Tenants.presence_events_per_second_rate(tenant)
+
+    RateCounter.new(rate_counter)
+
+    %{
+      presence_rate_counter: rate_counter,
+      presence_client_rate_limit: %{
+        max_calls: positive_integer_or(tenant.max_client_presence_events_per_window, config[:max_calls]),
+        window_ms: positive_integer_or(tenant.client_presence_window_ms, config[:window_ms]),
+        counter: 0,
+        reset_at: nil
+      }
+    }
+  end
+
+  @doc """
+  Sends presence state to a connected client
   """
   @spec sync(Socket.t()) :: :ok | {:error, :rate_limit_exceeded}
   def sync(%{assigns: %{presence_enabled?: false}}), do: :ok
@@ -242,4 +304,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   end
 
   defp validate_payload_size(tenant, payload), do: Tenants.validate_payload_size(tenant, payload)
+
+  defp positive_integer_or(value, _default) when is_integer(value) and value > 0, do: value
+  defp positive_integer_or(_value, default), do: default
 end

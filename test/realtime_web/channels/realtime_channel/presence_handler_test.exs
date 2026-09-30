@@ -15,6 +15,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
   alias Realtime.Tenants.Connect
+  alias RealtimeWeb.Channels.Payloads
   alias RealtimeWeb.Endpoint
   alias RealtimeWeb.RealtimeChannel.PresenceHandler
 
@@ -101,6 +102,80 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       policies = %Policies{presence: %PresencePolicies{write: false}}
       socket = socket_fixture(tenant, random_string(), random_string(), policies: policies, private?: false)
       refute TestCanWritePresence.check(socket)
+    end
+  end
+
+  describe "join/2" do
+    @describetag without_db: true
+
+    test "presence is enabled when the client requests it, even if the tenant defaults it off", %{tenant: tenant} do
+      tenant = %{tenant | presence_enabled: false}
+      join = %Payloads.Join{config: %Payloads.Config{presence: %Payloads.Presence{enabled: true}}}
+
+      assert %{presence_enabled?: true} = PresenceHandler.join(join, tenant)
+    end
+
+    test "presence is enabled when the tenant defaults it on, even if the client does not request it", %{
+      tenant: tenant
+    } do
+      tenant = %{tenant | presence_enabled: true}
+      join = %Payloads.Join{config: %Payloads.Config{presence: %Payloads.Presence{enabled: false}}}
+
+      assert %{presence_enabled?: true} = PresenceHandler.join(join, tenant)
+    end
+
+    test "presence is disabled when neither the client nor the tenant enable it", %{tenant: tenant} do
+      tenant = %{tenant | presence_enabled: false}
+      join = %Payloads.Join{config: %Payloads.Config{presence: %Payloads.Presence{enabled: false}}}
+
+      assert %{presence_enabled?: false} = PresenceHandler.join(join, tenant)
+    end
+
+    test "presence_key passes through an explicit client-provided key", %{tenant: tenant} do
+      join = %Payloads.Join{config: %Payloads.Config{presence: %Payloads.Presence{key: "my-key"}}}
+
+      assert %{presence_key: "my-key"} = PresenceHandler.join(join, tenant)
+    end
+
+    test "presence_key generates a UUID when the client does not provide one", %{tenant: tenant} do
+      join = %Payloads.Join{config: %Payloads.Config{presence: %Payloads.Presence{key: nil}}}
+
+      assert %{presence_key: key} = PresenceHandler.join(join, tenant)
+      assert {:ok, _} = UUID.info(key)
+    end
+  end
+
+  describe "join_rate_limits/1" do
+    @describetag without_db: true
+
+    test "presence_rate_counter matches the tenant's presence rate", %{tenant: tenant} do
+      expected = Tenants.presence_events_per_second_rate(tenant)
+
+      assert %{presence_rate_counter: ^expected} = PresenceHandler.join_rate_limits(tenant)
+    end
+
+    test "presence_client_rate_limit falls back to env config when the tenant has no override", %{tenant: tenant} do
+      config = Application.get_env(:realtime, :client_presence_rate_limit)
+
+      assert %{presence_client_rate_limit: %{max_calls: max_calls, window_ms: window_ms, counter: 0, reset_at: nil}} =
+               PresenceHandler.join_rate_limits(tenant)
+
+      assert max_calls == config[:max_calls]
+      assert window_ms == config[:window_ms]
+    end
+
+    test "presence_client_rate_limit uses the tenant's max_client_presence_events_per_window override", %{
+      tenant: tenant
+    } do
+      tenant = %{tenant | max_client_presence_events_per_window: 3}
+
+      assert %{presence_client_rate_limit: %{max_calls: 3}} = PresenceHandler.join_rate_limits(tenant)
+    end
+
+    test "presence_client_rate_limit uses the tenant's client_presence_window_ms override", %{tenant: tenant} do
+      tenant = %{tenant | client_presence_window_ms: 5_000}
+
+      assert %{presence_client_rate_limit: %{window_ms: 5_000}} = PresenceHandler.join_rate_limits(tenant)
     end
   end
 
