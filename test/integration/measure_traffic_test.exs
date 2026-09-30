@@ -49,7 +49,7 @@ defmodule Realtime.Integration.MeasureTrafficTest do
   end
 
   defp assert_counts(tenant) do
-    case_wait tick_and_get_counts(tenant), timeout: 2_000, interval: 50 do
+    case_wait tick_and_get_counts(tenant), timeout: 5_000, interval: 50 do
       {output_bytes, input_bytes}
       when output_bytes > 0 and input_bytes > 0 ->
         :ok

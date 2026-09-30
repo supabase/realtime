@@ -1,5 +1,5 @@
 defmodule Realtime.Tenants.AuthorizationTest do
-  use RealtimeWeb.ConnCase, async: true
+  use RealtimeWeb.ConnCase, async: false
   use Mimic
 
   setup :set_mimic_from_context

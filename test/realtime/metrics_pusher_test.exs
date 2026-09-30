@@ -128,6 +128,7 @@ defmodule Realtime.MetricsPusherTest do
           assert Process.alive?(pid)
           # Wait enough for the log to be captured
           :sys.get_state(pid)
+          Logger.flush()
         end)
 
       assert log =~ "MetricsPusher: Failed to push"

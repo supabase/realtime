@@ -162,6 +162,7 @@ defmodule Realtime.LogFilterTest do
     {:ok, _live_stream_response} = :gen_tcp.recv(socket, 0, 1000)
 
     :gen_tcp.close(socket)
+    Process.sleep(100)
     Logger.flush()
   end
 

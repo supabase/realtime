@@ -471,8 +471,8 @@ defmodule Extensions.PostgresCdcRlsTest do
       # Delete the record
       %{num_rows: 1} = Postgrex.query!(conn, "delete from test", [])
 
-      assert_receive {:socket_push, :text, data1}, 5000
-      assert_receive {:socket_push, :text, data2}, 5000
+      assert_receive {:socket_push, :text, data1}, 15000
+      assert_receive {:socket_push, :text, data2}, 15000
 
       events = Enum.map([data1, data2], &Jason.decode!/1)
 

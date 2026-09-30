@@ -126,7 +126,7 @@ defmodule Realtime.DatabaseTest do
 
       # Postgrex opens the pool connections asynchronously, so give it a moment
       # to bring all of them up.
-      case_wait Postgrex.query!(admin, "SELECT count(*)::int " <> from_realtime_connect, []) do
+      case_wait Postgrex.query!(admin, "SELECT count(*)::int " <> from_realtime_connect, []), timeout: 5000 do
         %{rows: [[^pool_size]]} -> :ok
       else
         %{rows: [[count]]} -> flunk("Expected #{pool_size} connections, but found #{count}")

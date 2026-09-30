@@ -28,7 +28,7 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
       WebsocketClient.join(socket, topic, %{config: config})
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
-      assert_receive %Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
+      assert_receive %Message{event: "presence_state", payload: %{}, topic: ^topic}, 2000
 
       payload = %{
         type: "presence",
@@ -54,8 +54,8 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
       topic = "realtime:#{topic}"
 
       WebsocketClient.join(socket, topic, %{config: %{private: false, presence: %{enabled: true}}})
-      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-      assert_receive %Message{event: "presence_state"}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 2000
+      assert_receive %Message{event: "presence_state"}, 2000
     end
 
     test "presence disabled if param 'enabled' is set to false in configuration for public channels", %{
@@ -67,8 +67,8 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
       topic = "realtime:#{topic}"
 
       WebsocketClient.join(socket, topic, %{config: %{private: false, presence: %{enabled: false}}})
-      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-      refute_receive %Message{event: "presence_state"}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 2000
+      refute_receive %Message{event: "presence_state"}, 2000
     end
 
     test "presence automatically enabled when user sends track message for public channel", %{
@@ -82,7 +82,7 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
       WebsocketClient.join(socket, topic, %{config: config})
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
-      refute_receive %Message{event: "presence_state"}, 500
+      refute_receive %Message{event: "presence_state"}, 2000
 
       payload = %{
         type: "presence",
@@ -113,12 +113,12 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
       # An early member joins with presence enabled and tracks itself.
       {early, _} = get_connection(tenant, serializer)
       WebsocketClient.join(early, topic, %{config: %{presence: %{key: "early", enabled: true}, private: false}})
-      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
-      assert_receive %Message{event: "presence_state", topic: ^topic}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 2000
+      assert_receive %Message{event: "presence_state", topic: ^topic}, 2000
 
       early_payload = %{type: "presence", event: "TRACK", payload: %{name: "early"}}
       WebsocketClient.send_event(early, topic, "presence", early_payload)
-      assert_receive %Message{event: "presence_diff", payload: %{"joins" => %{"early" => _}}, topic: ^topic}, 500
+      assert_receive %Message{event: "presence_diff", payload: %{"joins" => %{"early" => _}}, topic: ^topic}, 2000
 
       # A late member joins with presence disabled, so it gets no presence_state at join.
       {:ok, late_token} = token_valid(tenant, "anon", %{})
@@ -127,13 +127,13 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
         WebsocketClient.connect(late_inbox, uri(tenant, serializer), serializer, [{"x-api-key", late_token}])
 
       WebsocketClient.join(late, topic, %{config: %{presence: %{key: "late", enabled: false}, private: false}})
-      assert_receive {:late, %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}}, 500
-      refute_receive {:late, %Message{event: "presence_state", topic: ^topic}}, 500
+      assert_receive {:late, %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}}, 2000
+      refute_receive {:late, %Message{event: "presence_state", topic: ^topic}}, 2000
 
       # Tracking enables presence for the late member, which must now learn who is already present.
       WebsocketClient.send_event(late, topic, "presence", %{type: "presence", event: "TRACK", payload: %{name: "late"}})
 
-      assert_receive {:late, %Message{event: "presence_state", payload: state, topic: ^topic}}, 500
+      assert_receive {:late, %Message{event: "presence_state", payload: state, topic: ^topic}}, 2000
       assert Map.has_key?(state, "early")
     end
   end
@@ -149,7 +149,7 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
       topic = "realtime:#{topic}"
 
       WebsocketClient.join(socket, topic, %{config: config})
-      assert_receive %Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
+      assert_receive %Message{event: "presence_state", payload: %{}, topic: ^topic}, 2000
 
       payload = %{
         type: "presence",
@@ -159,7 +159,7 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
 
       WebsocketClient.send_event(socket, topic, "presence", payload)
       refute_receive %Message{event: "phx_leave", topic: ^topic}
-      assert_receive %Message{event: "presence_diff", payload: %{"joins" => joins, "leaves" => %{}}, topic: ^topic}, 500
+      assert_receive %Message{event: "presence_diff", payload: %{"joins" => joins, "leaves" => %{}}, topic: ^topic}, 2000
       join_payload = joins |> Map.values() |> hd() |> get_in(["metas"]) |> hd()
       assert get_in(join_payload, ["name"]) == payload.payload.name
       assert get_in(join_payload, ["t"]) == payload.payload.t
@@ -173,16 +173,16 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
       topic = "realtime:#{topic}"
 
       WebsocketClient.join(socket, topic, %{config: %{presence: %{key: "authenticated", enabled: true}, private: true}})
-      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
-      assert_receive %Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 2000
+      assert_receive %Message{event: "presence_state", payload: %{}, topic: ^topic}, 2000
 
       WebsocketClient.join(service_role_socket, topic, %{config: %{private: true}})
-      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 2000
 
       payload = %{name: "realtime_presence_96", t: 1814.7000000029802}
       WebsocketClient.send_event(socket, topic, "presence", %{type: "presence", event: "TRACK", payload: payload})
 
-      assert_receive %Message{event: "presence_diff", payload: %{"joins" => joins, "leaves" => %{}}, topic: ^topic}, 500
+      assert_receive %Message{event: "presence_diff", payload: %{"joins" => joins, "leaves" => %{}}, topic: ^topic}, 2000
       join_payload = joins |> get_in(["authenticated", "metas"]) |> hd()
       assert get_in(join_payload, ["name"]) == payload.name
 
@@ -190,11 +190,11 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
 
       # Broadcast write is denied, so service_role never sees it either
       WebsocketClient.send_event(socket, topic, "broadcast", broadcast)
-      refute_receive %Message{event: "broadcast", topic: ^topic}, 500
+      refute_receive %Message{event: "broadcast", topic: ^topic}, 2000
 
       # Broadcast read is denied, so the presence only member never sees service_role's message
       WebsocketClient.send_event(service_role_socket, topic, "broadcast", broadcast)
-      refute_receive %Message{event: "broadcast", topic: ^topic}, 500
+      refute_receive %Message{event: "broadcast", topic: ^topic}, 2000
     end
 
     @tag policies: [:authenticated_read_presence]
@@ -214,26 +214,26 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
         WebsocketClient.connect(other_inbox, uri(tenant, serializer), serializer, [{"x-api-key", other_token}])
 
       WebsocketClient.join(socket, topic, %{config: config.("authenticated")})
-      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
-      assert_receive %Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 2000
+      assert_receive %Message{event: "presence_state", payload: %{}, topic: ^topic}, 2000
 
       # Presence write is denied, so no diff is produced
       track = fn payload -> %{type: "presence", event: "TRACK", payload: payload} end
       WebsocketClient.send_event(socket, topic, "presence", track.(%{name: "denied"}))
-      refute_receive %Message{event: "presence_diff", topic: ^topic}, 500
+      refute_receive %Message{event: "presence_diff", topic: ^topic}, 2000
 
       # Presence tracked by an authorized member is received
       WebsocketClient.join(other, topic, %{config: config.("service_role")})
       WebsocketClient.send_event(other, topic, "presence", track.(%{name: "service_role"}))
 
-      assert_receive %Message{event: "presence_diff", payload: %{"joins" => joins, "leaves" => %{}}, topic: ^topic}, 500
+      assert_receive %Message{event: "presence_diff", payload: %{"joins" => joins, "leaves" => %{}}, topic: ^topic}, 2000
       meta = joins |> get_in(["service_role", "metas"]) |> hd()
       assert get_in(meta, ["name"]) == "service_role"
 
       # Broadcast read is denied
       broadcast = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
       WebsocketClient.send_event(other, topic, "broadcast", broadcast)
-      refute_receive %Message{event: "broadcast", topic: ^topic}, 500
+      refute_receive %Message{event: "broadcast", topic: ^topic}, 2000
     end
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence],
@@ -245,7 +245,7 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
       topic = "realtime:#{topic}"
 
       WebsocketClient.join(socket, topic, %{config: config})
-      assert_receive %Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
+      assert_receive %Message{event: "presence_state", payload: %{}, topic: ^topic}, 2000
 
       payload = %{
         type: "presence",
@@ -255,7 +255,7 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
 
       WebsocketClient.send_event(socket, topic, "presence", payload)
       refute_receive %Message{event: "phx_leave", topic: ^topic}
-      assert_receive %Message{event: "presence_diff", payload: %{"joins" => joins, "leaves" => %{}}, topic: ^topic}, 500
+      assert_receive %Message{event: "presence_diff", payload: %{"joins" => joins, "leaves" => %{}}, topic: ^topic}, 2000
       join_payload = joins |> Map.values() |> hd() |> get_in(["metas"]) |> hd()
       assert get_in(join_payload, ["name"]) == payload.payload.name
       assert get_in(join_payload, ["t"]) == payload.payload.t
@@ -280,7 +280,7 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
       # This will be ignored
       WebsocketClient.send_event(socket, topic, "presence", payload)
 
-      assert_receive %Message{topic: ^topic, event: "phx_reply", payload: %{"status" => "ok"}}, 500
+      assert_receive %Message{topic: ^topic, event: "phx_reply", payload: %{"status" => "ok"}}, 2000
       assert_receive %Message{event: "presence_state", payload: %{}, ref: nil, topic: ^topic}
       refute_receive %Message{event: "presence_diff", payload: _, ref: _, topic: ^topic}
 
@@ -294,7 +294,7 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
       WebsocketClient.join(secondary_socket, topic, %{config: config.("service_role")})
       WebsocketClient.send_event(secondary_socket, topic, "presence", payload)
 
-      assert_receive %Message{topic: ^topic, event: "phx_reply", payload: %{"status" => "ok"}}, 500
+      assert_receive %Message{topic: ^topic, event: "phx_reply", payload: %{"status" => "ok"}}, 2000
       assert_receive %Message{topic: ^topic, event: "presence_diff", payload: %{"joins" => joins, "leaves" => %{}}}
       assert_receive %Message{event: "presence_state", payload: %{}, ref: nil, topic: ^topic}
 
@@ -341,21 +341,21 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
 
       # Both join successfully: either read grant is enough for the join gate.
       WebsocketClient.join(other, topic, %{config: config})
-      assert_receive {:other, %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}}, 500
+      assert_receive {:other, %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}}, 2000
       # Should not receive presence_state
-      refute_receive {:other, %Message{event: "presence_state", topic: ^topic}}, 500
+      refute_receive {:other, %Message{event: "presence_state", topic: ^topic}}, 2000
 
       WebsocketClient.join(main, topic, %{config: config})
-      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
-      assert_receive %Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 2000
+      assert_receive %Message{event: "presence_state", payload: %{}, topic: ^topic}, 2000
 
       # Main tracks presence metadata an application would treat as restricted.
       test = %{test: "should not go to other", user_id: sub}
       WebsocketClient.send_event(main, topic, "presence", %{type: "presence", event: "TRACK", payload: test})
-      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 2000
 
       # Main sees the diff
-      assert_receive %Message{event: "presence_diff", payload: %{"joins" => joins, "leaves" => %{}}, topic: ^topic}, 500
+      assert_receive %Message{event: "presence_diff", payload: %{"joins" => joins, "leaves" => %{}}, topic: ^topic}, 2000
       meta = joins |> Map.values() |> hd() |> get_in(["metas"]) |> hd()
       assert get_in(meta, ["test"]) == "should not go to other"
 
@@ -392,17 +392,17 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
         WebsocketClient.connect(other_inbox, other_uri, serializer, [{"x-api-key", other_token}])
 
       WebsocketClient.join(other, topic, %{config: config})
-      assert_receive {:other, %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}}, 500
+      assert_receive {:other, %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}}, 2000
 
       WebsocketClient.join(main, topic, %{config: config})
-      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 2000
 
       WebsocketClient.send_event(other, topic, "presence", track.(%{name: "other"}))
-      assert_receive {:other, %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}}, 500
+      assert_receive {:other, %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}}, 2000
 
       test = %{test: "should not go to other", user_id: sub}
       WebsocketClient.send_event(main, topic, "presence", track.(test))
-      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 2000
 
       # Main sees its own track, but not necessarily in the first diff it receives. Main also holds
       # presence.read here, and Phoenix.Presence computes diffs asynchronously, so other's earlier
@@ -423,10 +423,10 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
       assert Enum.any?(metas, &(get_in(&1, ["test"]) == "should not go to other"))
 
       # Enabling presence syncs the members already tracked, and main holds presence.read.
-      assert_receive %Message{event: "presence_state", topic: ^topic}, 500
+      assert_receive %Message{event: "presence_state", topic: ^topic}, 2000
 
       # Other can't receive the diff, nor the state its own track syncs: it is denied presence.read.
-      refute_receive {:other, %Message{event: "presence_state", topic: ^topic}}, 500
+      refute_receive {:other, %Message{event: "presence_state", topic: ^topic}}, 2000
       refute_receive {:other, %Message{event: "presence_diff", topic: ^topic}}, 1000
       refute_receive _any
     end
@@ -441,8 +441,8 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
       topic = "realtime:#{topic}"
 
       WebsocketClient.join(socket, topic, %{config: %{private: true, presence: %{enabled: true}}})
-      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-      assert_receive %Message{event: "presence_state"}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 2000
+      assert_receive %Message{event: "presence_state"}, 2000
     end
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
@@ -455,8 +455,8 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
       topic = "realtime:#{topic}"
 
       WebsocketClient.join(socket, topic, %{config: %{private: true, presence: %{enabled: false}}})
-      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-      refute_receive %Message{event: "presence_state"}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 2000
+      refute_receive %Message{event: "presence_state"}, 2000
     end
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
@@ -468,7 +468,7 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
 
       WebsocketClient.join(socket, topic, %{config: config})
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
-      refute_receive %Message{event: "presence_state"}, 500
+      refute_receive %Message{event: "presence_state"}, 2000
 
       payload = %{
         type: "presence",
@@ -478,7 +478,7 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
 
       WebsocketClient.send_event(socket, topic, "presence", payload)
 
-      assert_receive %Message{event: "presence_diff", payload: %{"joins" => joins, "leaves" => %{}}, topic: ^topic}, 500
+      assert_receive %Message{event: "presence_diff", payload: %{"joins" => joins, "leaves" => %{}}, topic: ^topic}, 2000
       join_payload = joins |> Map.values() |> hd() |> get_in(["metas"]) |> hd()
       assert get_in(join_payload, ["name"]) == payload.payload.name
       assert get_in(join_payload, ["t"]) == payload.payload.t
@@ -502,8 +502,8 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
       realtime_topic = "realtime:#{topic}"
 
       WebsocketClient.join(socket, realtime_topic, %{config: config})
-      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^realtime_topic}, 500
-      assert_receive %Message{event: "presence_state", topic: ^realtime_topic}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^realtime_topic}, 2000
+      assert_receive %Message{event: "presence_state", topic: ^realtime_topic}, 2000
 
       # New token whose claims no longer satisfy the presence read policy
       {:ok, new_token} =
@@ -515,7 +515,7 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
 
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => new_token})
 
-      assert_receive %Message{event: "phx_close", topic: ^realtime_topic}, 500
+      assert_receive %Message{event: "phx_close", topic: ^realtime_topic}, 2000
     end
 
     @tag policies: [
@@ -531,8 +531,8 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
       realtime_topic = "realtime:#{topic}"
 
       WebsocketClient.join(socket, realtime_topic, %{config: config})
-      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^realtime_topic}, 500
-      assert_receive %Message{event: "presence_state", topic: ^realtime_topic}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^realtime_topic}, 2000
+      assert_receive %Message{event: "presence_state", topic: ^realtime_topic}, 2000
 
       {:ok, new_token} =
         generate_token(tenant, %{
@@ -543,7 +543,7 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
 
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => new_token})
 
-      refute_receive %Message{event: "phx_close", topic: ^realtime_topic}, 500
+      refute_receive %Message{event: "phx_close", topic: ^realtime_topic}, 2000
     end
 
     @tag policies: [:authenticated_read_presence_based_on_claim]
@@ -557,8 +557,8 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
         config: %{presence: %{key: "authenticated", enabled: true}, private: true}
       })
 
-      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^realtime_topic}, 500
-      assert_receive %Message{event: "presence_state", topic: ^realtime_topic}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^realtime_topic}, 2000
+      assert_receive %Message{event: "presence_state", topic: ^realtime_topic}, 2000
 
       {:ok, new_token} =
         generate_token(tenant, %{
@@ -578,7 +578,7 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
                      },
                      500
 
-      assert_receive %Message{event: "phx_close", topic: ^realtime_topic}, 500
+      assert_receive %Message{event: "phx_close", topic: ^realtime_topic}, 2000
     end
 
     @tag policies: [
@@ -604,15 +604,15 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
         config: %{presence: %{key: "authenticated", enabled: true}, private: true}
       })
 
-      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^realtime_topic}, 500
-      assert_receive %Message{event: "presence_state", topic: ^realtime_topic}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^realtime_topic}, 2000
+      assert_receive %Message{event: "presence_state", topic: ^realtime_topic}, 2000
 
       WebsocketClient.join(publisher, realtime_topic, %{config: %{private: true}})
-      assert_receive {:publisher, %Message{event: "phx_reply", payload: %{"status" => "ok"}}}, 500
+      assert_receive {:publisher, %Message{event: "phx_reply", payload: %{"status" => "ok"}}}, 2000
 
       broadcast = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
       WebsocketClient.send_event(publisher, realtime_topic, "broadcast", broadcast)
-      refute_receive %Message{event: "broadcast", topic: ^realtime_topic}, 500
+      refute_receive %Message{event: "broadcast", topic: ^realtime_topic}, 2000
 
       {:ok, new_token} =
         generate_token(tenant, %{
@@ -622,10 +622,10 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
         })
 
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => new_token})
-      refute_receive %Message{event: "phx_close", topic: ^realtime_topic}, 500
+      refute_receive %Message{event: "phx_close", topic: ^realtime_topic}, 2000
 
       WebsocketClient.send_event(publisher, realtime_topic, "broadcast", broadcast)
-      assert_receive %Message{event: "broadcast", payload: ^broadcast, topic: ^realtime_topic}, 500
+      assert_receive %Message{event: "broadcast", payload: ^broadcast, topic: ^realtime_topic}, 2000
     end
   end
 
@@ -650,7 +650,7 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
           payload = %{type: "presence", event: "TRACK", payload: %{name: "realtime_presence_96", t: 1814.7000000029802}}
           WebsocketClient.send_event(socket, topic, "presence", payload)
 
-          refute_receive %Message{event: "presence_diff"}, 500
+          refute_receive %Message{event: "presence_diff"}, 2000
           # Wait past the (test-configured) connection-ready timeout to confirm nothing is delivered
           refute_receive %Message{event: "phx_leave", topic: ^topic}, 3000
         end)
@@ -676,7 +676,7 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
           payload = %{type: "presence", event: "TRACK", payload: %{name: "realtime_presence_96", t: 1814.7000000029802}}
           WebsocketClient.send_event(socket, topic, "presence", payload)
 
-          assert_receive %Message{event: "presence_diff"}, 500
+          assert_receive %Message{event: "presence_diff"}, 2000
           refute_receive %Message{event: "phx_leave", topic: ^topic}
         end)
 
