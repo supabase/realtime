@@ -625,7 +625,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       key = random_string()
       socket = socket_fixture(tenant, topic, key, private?: true)
 
-      stub(Connect, :lookup_or_start_connection, fn _ -> {:error, :rpc_error, :timeout} end)
+      expect(Connect, :lookup_or_start_connection, fn _ -> {:error, :rpc_error, :timeout} end)
 
       assert {:error, :rpc_error, :timeout} = PresenceHandler.handle(%{"event" => "track"}, socket)
     end
