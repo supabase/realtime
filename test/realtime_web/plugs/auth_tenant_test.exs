@@ -144,4 +144,42 @@ defmodule RealtimeWeb.AuthTenantTest do
       assert log =~ "key-id-1"
     end
   end
+
+  describe "with a tenant that only has a JWKS" do
+    setup %{conn: conn} do
+      jwks = %{"keys" => [%{"kty" => "RSA", "kid" => "some_other_kid"}]}
+      tenant = tenant_fixture(%{jwt_secret: nil, jwt_jwks: jwks})
+      now = System.system_time(:second)
+      token = generate_jwt_token("another secret", %{role: "test", iat: now, exp: now + 100_000})
+
+      %{conn: conn |> assign(:tenant, tenant) |> put_req_header("authorization", "Bearer " <> token)}
+    end
+
+    test "returns 401 for an HS256 token it has no secret to verify", %{conn: conn} do
+      conn = AuthTenant.call(conn, %{})
+      assert conn.status == 401
+      assert conn.halted
+    end
+  end
+
+  describe "with a tenant that only has a JWKS matching the token kid" do
+    setup %{conn: conn} do
+      secret = "jwks-only-tenant-secret"
+      jwks = %{"keys" => [%{"kty" => "oct", "kid" => "oct-key-1", "k" => Base.url_encode64(secret, padding: false)}]}
+      tenant = tenant_fixture(%{jwt_secret: nil, jwt_jwks: jwks})
+
+      now = System.system_time(:second)
+      signer = Joken.Signer.create("HS256", secret, %{"kid" => "oct-key-1"})
+      token = Joken.generate_and_sign!(%{}, %{"role" => "test", "iat" => now, "exp" => now + 100_000}, signer)
+
+      %{conn: conn |> assign(:tenant, tenant) |> put_req_header("authorization", "Bearer " <> token), token: token}
+    end
+
+    test "authorizes the request", %{conn: conn, token: token} do
+      conn = AuthTenant.call(conn, %{})
+      refute conn.halted
+      assert conn.assigns.jwt == token
+      assert conn.assigns.role == "test"
+    end
+  end
 end

@@ -6,7 +6,6 @@ defmodule RealtimeWeb.AuthTenant do
   import Phoenix.Controller, only: [json: 2]
 
   alias Realtime.Api.Tenant
-  alias Realtime.Crypto
 
   alias RealtimeWeb.ChannelsAuthorization
 
@@ -19,7 +18,7 @@ defmodule RealtimeWeb.AuthTenant do
 
     with %Tenant{jwt_secret: jwt_secret, jwt_jwks: jwt_jwks} <- tenant,
          token when is_binary(token) <- access_token(conn),
-         jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
+         jwt_secret_dec <- Tenant.decrypt_jwt_secret(jwt_secret),
          {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec, jwt_jwks) do
       conn
       |> assign(:claims, claims)

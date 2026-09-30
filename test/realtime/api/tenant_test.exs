@@ -35,6 +35,16 @@ defmodule Realtime.Api.TenantTest do
     end
   end
 
+  describe "decrypt_jwt_secret/1" do
+    test "returns nil for a tenant without a jwt_secret" do
+      assert Tenant.decrypt_jwt_secret(nil) == nil
+    end
+
+    test "decrypts an encrypted jwt_secret" do
+      assert "my-secret" |> Crypto.encrypt!() |> Tenant.decrypt_jwt_secret() == "my-secret"
+    end
+  end
+
   describe "gcm_migrated_at_changeset/2" do
     test "casts gcm_migrated_at and ignores every other field" do
       now = DateTime.utc_now() |> DateTime.truncate(:second)
