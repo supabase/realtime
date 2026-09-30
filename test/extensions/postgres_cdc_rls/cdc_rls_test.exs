@@ -111,10 +111,12 @@ defmodule Extensions.PostgresCdcRlsTest do
       # Drop the publication: poller should drop its slot and clear oids.
       Postgrex.query!(conn, "drop publication if exists supabase_realtime_test", [])
       send(poller_pid, :check_oids)
+
       %{oids: oids_after_drop, poll_ref: poll_ref_after_drop} =
         case_wait :sys.get_state(poller_pid) do
           %{oids: oids} = state when map_size(oids) == 0 -> state
         end
+
       assert oids_after_drop == %{}
       assert poll_ref_after_drop == nil
 
@@ -146,10 +148,12 @@ defmodule Extensions.PostgresCdcRlsTest do
       Postgrex.query!(conn, "create publication supabase_realtime_test", [])
 
       send(poller_pid, :check_oids)
+
       %{oids: oids_after_empty, poll_ref: poll_ref_after_empty} =
         case_wait :sys.get_state(poller_pid) do
           %{oids: oids} = state when map_size(oids) == 0 -> state
         end
+
       assert oids_after_empty == %{}
       assert poll_ref_after_empty == nil
 
