@@ -75,6 +75,24 @@ defmodule Realtime.Tenants.MigrationsTest do
       assert_eventually Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total
     end
 
+    test "creates realtime types even when same-named types exist in other schemas" do
+      tenant = %{TestTenantDb.checkout_tenant() | migrations_ran: 1}
+      total = Enum.count(Migrations.migrations())
+      type_names = ~w(equality_op user_defined_filter action wal_rls wal_column)
+
+      # Every table has a same-named row type in pg_type
+      {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+      for name <- type_names, do: Postgrex.query!(conn, "CREATE TABLE public.#{name} (id int)", [])
+
+      assert Migrations.run_migrations(tenant) == :ok
+      assert_eventually Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total
+
+      for name <- type_names do
+        assert %{rows: [[true]]} =
+                 Postgrex.query!(conn, "SELECT to_regtype($1) IS NOT NULL", ["realtime.#{name}"])
+      end
+    end
+
     test "reconciles migrations_ran instead of reloading the dump when the database is already migrated" do
       tenant = TestTenantDb.checkout_tenant()
       total = Enum.count(Migrations.migrations())
