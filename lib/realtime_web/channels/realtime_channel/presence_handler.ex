@@ -115,8 +115,28 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     end
   end
 
+  @doc """
+  Handles client events related to Presence. 
+
+  Presence events include:
+
+  * track - used to store or update a client's state in the presence topic.
+  * untrack - used to leave, and remove state from the presence topic.
+
+  This function will apply rate limits and authorization to ensure that 
+  the client has access to the topic, and if so the event will be passed on 
+  to the presence system.
+
+  When successful, returns `{:ok, socket, :resync | :no_resync}`.
+
+  The third element of the tuple can be used to determine whether the client
+  should get a full update of the current presence sync. At this point that is 
+  only set if a track call caused presence to flip from disabled to enabled for 
+  the channel.
+
+  """
   @spec handle(map(), Socket.t()) ::
-          {:ok, Socket.t()}
+          {:ok, Socket.t(), :resync | :no_resync}
           | {:error,
              :invalid_payload
              | :rls_policy_error
@@ -142,7 +162,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     end
   end
 
-  def handle(_, socket), do: {:ok, socket}
+  def handle(_, socket), do: {:ok, socket, :no_resync}
 
   defp handle_presence_event("track", payload, socket) when not is_private?(socket) do
     track(socket, payload)
@@ -197,7 +217,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   defp handle_presence_event("untrack", _, socket) do
     %{assigns: %{presence_key: presence_key, tenant_topic: tenant_topic}} = socket
     :ok = Presence.untrack(self(), tenant_topic, presence_key)
-    {:ok, assign(socket, :presence_track_payload, nil)}
+    {:ok, assign(socket, :presence_track_payload, nil), :no_resync}
   end
 
   defp handle_presence_event(event, _, _) do
@@ -233,22 +253,29 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
          _ <- RealtimeWeb.TenantBroadcaster.collect_payload_size(socket.assigns.tenant, payload, :presence),
          :ok <- limit_presence_event(socket),
          {:ok, _} <- Presence.track(self(), tenant_topic, presence_key, payload) do
+      resync =
+        if socket.assigns.presence_enabled? do
+          :no_resync
+        else
+          :resync
+        end
+
       socket =
         socket
         |> assign(:presence_enabled?, true)
         |> assign(:presence_track_payload, payload)
 
-      {:ok, socket}
+      {:ok, socket, resync}
     else
       {:error, :no_payload_change} ->
         # no-op if payload hasn't changed
-        {:ok, socket}
+        {:ok, socket, :no_resync}
 
       {:error, {:already_tracked, pid, _, _}} ->
         case Presence.update(pid, tenant_topic, presence_key, payload) do
           {:ok, _} ->
             socket = assign(socket, :presence_track_payload, payload)
-            {:ok, socket}
+            {:ok, socket, :no_resync}
 
           {:error, _} ->
             {:error, :unable_to_track_presence}

@@ -476,8 +476,10 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_in("presence", payload, socket) do
-    with {:ok, new_socket} <- PresenceHandler.handle(payload, socket) do
-      {:reply, :ok, maybe_sync_presence(socket, new_socket)}
+    with {:ok, socket, sync_needed} <- PresenceHandler.handle(payload, socket) do
+      if sync_needed == :resync, do: send(self(), :sync_presence)
+
+      {:reply, :ok, socket}
     else
       {:error, :client_rate_limit_exceeded} ->
         log_error(socket, "ClientPresenceRateLimitReached", :client_rate_limit_exceeded)
@@ -1186,16 +1188,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     payload = %{"payload" => message.payload, "event" => message.event, "type" => "broadcast", "meta" => meta}
     push(socket, "broadcast", payload)
   end
-
-  # A track message can be what enables presence for this socket: it never got the join-time
-  # presence_state and would only see diffs from here on. Sync now, or the members tracked
-  # before this point stay invisible to this client.
-  defp maybe_sync_presence(%{assigns: %{presence_enabled?: false}}, %{assigns: %{presence_enabled?: true}} = socket) do
-    send(self(), :sync_presence)
-    socket
-  end
-
-  defp maybe_sync_presence(_socket, socket), do: socket
 
   defp can_read_presence?(%{assigns: %{policies: %Policies{presence: %{read: true}}}}), do: true
   defp can_read_presence?(_socket), do: false

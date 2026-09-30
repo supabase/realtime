@@ -218,14 +218,14 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
       socket = socket_fixture(tenant, topic, key, policies: policies)
 
-      assert {:ok, socket} = PresenceHandler.handle(%{"event" => "track"}, socket)
+      assert {:ok, socket, _} = PresenceHandler.handle(%{"event" => "track"}, socket)
 
       topic = socket.assigns.tenant_topic
       assert_receive %Broadcast{topic: ^topic, event: "presence_diff", payload: %{joins: joins, leaves: %{}}}
       assert Map.has_key?(joins, key)
 
       payload = %{"event" => "track", "payload" => %{"content" => random_string()}}
-      assert {:ok, _socket} = PresenceHandler.handle(payload, socket)
+      assert {:ok, _socket, _} = PresenceHandler.handle(payload, socket)
 
       assert_receive %Broadcast{topic: ^topic, event: "presence_diff", payload: %{joins: joins, leaves: %{}}}
       assert Map.has_key?(joins, key)
@@ -245,7 +245,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
       socket = socket_fixture(tenant, topic, key, policies: policies)
 
-      assert {:ok, socket} = PresenceHandler.handle(%{"event" => "track", "payload" => %{"a" => "b"}}, socket)
+      assert {:ok, socket, _} = PresenceHandler.handle(%{"event" => "track", "payload" => %{"a" => "b"}}, socket)
 
       assert_receive {:telemetry, [:realtime, :tenants, :payload, :size], %{size: 18},
                       %{tenant: ^external_id, message_type: :presence}}
@@ -254,7 +254,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       assert_receive %Broadcast{topic: ^topic, event: "presence_diff", payload: %{joins: joins, leaves: %{}}}
       assert Map.has_key?(joins, key)
 
-      assert {:ok, _socket} =
+      assert {:ok, _socket, _} =
                PresenceHandler.handle(%{"event" => "track", "payload" => %{"a" => "b"}}, socket)
 
       refute_receive _
@@ -267,7 +267,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
       socket = socket_fixture(tenant, topic, key, policies: policies)
 
-      assert {:ok, socket} = PresenceHandler.handle(%{"event" => "track", "payload" => %{"a" => "b"}}, socket)
+      assert {:ok, socket, _} = PresenceHandler.handle(%{"event" => "track", "payload" => %{"a" => "b"}}, socket)
       assert socket.assigns.presence_track_payload == %{"a" => "b"}
 
       assert_receive {:telemetry, [:realtime, :tenants, :payload, :size], %{size: 18},
@@ -277,13 +277,13 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       assert_receive %Broadcast{topic: ^topic, event: "presence_diff", payload: %{joins: joins, leaves: %{}}}
       assert %{^key => %{metas: [%{:phx_ref => _, "a" => "b"}]}} = joins
 
-      assert {:ok, socket} = PresenceHandler.handle(%{"event" => "untrack"}, socket)
+      assert {:ok, socket, _} = PresenceHandler.handle(%{"event" => "untrack"}, socket)
       assert socket.assigns.presence_track_payload == nil
 
       assert_receive %Broadcast{topic: ^topic, event: "presence_diff", payload: %{joins: %{}, leaves: leaves}}
       assert %{^key => %{metas: [%{:phx_ref => _, "a" => "b"}]}} = leaves
 
-      assert {:ok, socket} = PresenceHandler.handle(%{"event" => "track", "payload" => %{"a" => "b"}}, socket)
+      assert {:ok, socket, _} = PresenceHandler.handle(%{"event" => "track", "payload" => %{"a" => "b"}}, socket)
 
       assert socket.assigns.presence_track_payload == %{"a" => "b"}
 
@@ -302,7 +302,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       policies = %Policies{presence: %PresencePolicies{read: false, write: false}}
       socket = socket_fixture(tenant, topic, key, policies: policies, private?: false)
 
-      assert {:ok, _socket} = PresenceHandler.handle(%{"event" => "track"}, socket)
+      assert {:ok, _socket, _} = PresenceHandler.handle(%{"event" => "track"}, socket)
 
       topic = socket.assigns.tenant_topic
       assert_receive %Broadcast{topic: ^topic, event: "presence_diff", payload: %{joins: joins, leaves: %{}}}
@@ -317,13 +317,13 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
       socket = socket_fixture(tenant, topic, key, policies: policies)
 
-      assert {:ok, socket} = PresenceHandler.handle(%{"event" => "track"}, socket)
+      assert {:ok, socket, _} = PresenceHandler.handle(%{"event" => "track"}, socket)
 
       topic = socket.assigns.tenant_topic
       assert_receive %Broadcast{topic: ^topic, event: "presence_diff", payload: %{joins: joins, leaves: %{}}}
       assert Map.has_key?(joins, key)
 
-      assert {:ok, _socket} = PresenceHandler.handle(%{"event" => "untrack"}, socket)
+      assert {:ok, _socket, _} = PresenceHandler.handle(%{"event" => "untrack"}, socket)
       assert_receive %Broadcast{topic: ^topic, event: "presence_diff", payload: %{joins: %{}, leaves: leaves}}
       assert Map.has_key?(leaves, key)
     end
@@ -343,7 +343,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
       for _ <- 1..300, reduce: socket do
         socket ->
-          assert {:ok, socket} =
+          assert {:ok, socket, _} =
                    PresenceHandler.handle(
                      %{"event" => "track", "payload" => %{"metadata" => random_string()}},
                      socket
@@ -362,7 +362,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       key = random_string()
       socket = socket_fixture(tenant, topic, key)
 
-      assert {:ok, socket} =
+      assert {:ok, socket, _} =
                PresenceHandler.handle(
                  %{"event" => "track", "payload" => %{"metadata" => random_string()}},
                  socket
@@ -433,7 +433,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
       for _ <- 1..300, reduce: socket do
         socket ->
-          assert {:ok, socket} =
+          assert {:ok, socket, _} =
                    PresenceHandler.handle(
                      %{"event" => "track", "payload" => %{"metadata" => random_string()}},
                      socket
@@ -469,7 +469,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
       socket = socket_fixture(tenant, topic, key, policies: policies, private?: false, enabled?: false)
 
-      assert {:ok, _socket} = PresenceHandler.handle(%{"event" => "untrack"}, socket)
+      assert {:ok, _socket, _} = PresenceHandler.handle(%{"event" => "untrack"}, socket)
       topic = socket.assigns.tenant_topic
       refute_receive %Broadcast{topic: ^topic, event: "presence_diff"}
     end
@@ -482,7 +482,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
       socket = socket_fixture(tenant, topic, key, policies: policies, private?: false, enabled?: false)
 
-      assert {:ok, _socket} = PresenceHandler.handle(%{"event" => "untrack"}, socket)
+      assert {:ok, _socket, _} = PresenceHandler.handle(%{"event" => "untrack"}, socket)
       topic = socket.assigns.tenant_topic
       refute_receive %Broadcast{topic: ^topic, event: "presence_diff"}
     end
@@ -497,7 +497,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
       refute socket.assigns.presence_enabled?
 
-      assert {:ok, updated_socket} = PresenceHandler.handle(%{"event" => "track"}, socket)
+      assert {:ok, updated_socket, :resync} = PresenceHandler.handle(%{"event" => "track"}, socket)
 
       assert updated_socket.assigns.presence_enabled?
       topic = socket.assigns.tenant_topic
@@ -515,12 +515,22 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
       refute socket.assigns.presence_enabled?
 
-      assert {:ok, updated_socket} = PresenceHandler.handle(%{"event" => "track"}, socket)
+      assert {:ok, updated_socket, :resync} = PresenceHandler.handle(%{"event" => "track"}, socket)
 
       assert updated_socket.assigns.presence_enabled?
       topic = socket.assigns.tenant_topic
       assert_receive %Broadcast{topic: ^topic, event: "presence_diff", payload: %{joins: joins, leaves: %{}}}
       assert Map.has_key?(joins, key)
+    end
+
+    test "track reports no sync needed when presence is already enabled", %{tenant: tenant, topic: topic} do
+      key = random_string()
+      policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
+      socket = socket_fixture(tenant, topic, key, policies: policies, private?: false, enabled?: true)
+
+      assert socket.assigns.presence_enabled?
+
+      assert {:ok, _updated_socket, :no_resync} = PresenceHandler.handle(%{"event" => "track"}, socket)
     end
 
     test "socket with presence disabled will not enable presence on untrack message", %{
@@ -533,7 +543,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
       refute socket.assigns.presence_enabled?
 
-      assert {:ok, updated_socket} = PresenceHandler.handle(%{"event" => "untrack"}, socket)
+      assert {:ok, updated_socket, _} = PresenceHandler.handle(%{"event" => "untrack"}, socket)
 
       refute updated_socket.assigns.presence_enabled?
       topic = socket.assigns.tenant_topic
@@ -626,7 +636,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
       reject(&Connect.lookup_or_start_connection/1)
 
-      assert {:ok, _socket} = PresenceHandler.handle(%{"event" => "untrack"}, socket)
+      assert {:ok, _socket, _} = PresenceHandler.handle(%{"event" => "untrack"}, socket)
     end
 
     test "track succeeds on a private channel with an already-resolved write policy even when Connect would fail",
@@ -637,7 +647,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
       reject(&Connect.lookup_or_start_connection/1)
 
-      assert {:ok, _socket} = PresenceHandler.handle(%{"event" => "track", "payload" => %{"a" => "b"}}, socket)
+      assert {:ok, _socket, _} = PresenceHandler.handle(%{"event" => "track", "payload" => %{"a" => "b"}}, socket)
     end
   end
 
@@ -725,7 +735,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       # Make 9 calls (under limit of 10)
       socket =
         Enum.reduce(1..9, socket, fn _, acc_socket ->
-          {:ok, updated_socket} =
+          {:ok, updated_socket, _} =
             PresenceHandler.handle(%{"event" => "track", "payload" => %{"call" => random_string()}}, acc_socket)
 
           updated_socket
@@ -734,7 +744,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       assert %{counter: 9, max_calls: 10, window_ms: 60000, reset_at: _} = socket.assigns.presence_client_rate_limit
 
       # 10th call should still work
-      assert {:ok, socket} =
+      assert {:ok, socket, _} =
                PresenceHandler.handle(%{"event" => "track", "payload" => %{"call" => random_string()}}, socket)
 
       assert %{counter: 10, max_calls: 10, window_ms: 60000, reset_at: _} = socket.assigns.presence_client_rate_limit
@@ -747,7 +757,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       # Make 10 calls (at limit)
       socket =
         Enum.reduce(1..10, socket, fn _, acc_socket ->
-          {:ok, updated_socket} =
+          {:ok, updated_socket, _} =
             PresenceHandler.handle(%{"event" => "track", "payload" => %{"call" => random_string()}}, acc_socket)
 
           updated_socket
@@ -767,7 +777,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
       socket1 =
         Enum.reduce(1..10, socket1, fn _, acc_socket ->
-          {:ok, updated_socket} =
+          {:ok, updated_socket, _} =
             PresenceHandler.handle(%{"event" => "track", "payload" => %{"call" => random_string()}}, acc_socket)
 
           updated_socket
@@ -777,7 +787,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
                PresenceHandler.handle(%{"event" => "track", "payload" => %{"call" => random_string()}}, socket1)
 
       # socket2 should still work (independent limit)
-      assert {:ok, _socket} =
+      assert {:ok, _socket, _} =
                PresenceHandler.handle(%{"event" => "track", "payload" => %{"call" => random_string()}}, socket2)
     end
 
@@ -793,7 +803,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
       socket =
         Enum.reduce(1..3, socket, fn _, acc_socket ->
-          {:ok, updated_socket} =
+          {:ok, updated_socket, _} =
             PresenceHandler.handle(%{"event" => "track", "payload" => %{"call" => random_string()}}, acc_socket)
 
           updated_socket
@@ -842,7 +852,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
       socket =
         Enum.reduce(1..3, socket, fn _, acc_socket ->
-          {:ok, updated_socket} =
+          {:ok, updated_socket, _} =
             PresenceHandler.handle(%{"event" => "track", "payload" => %{"call" => random_string()}}, acc_socket)
 
           updated_socket
@@ -853,7 +863,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
       Process.sleep(101)
 
-      assert {:ok, _socket} =
+      assert {:ok, _socket, _} =
                PresenceHandler.handle(%{"event" => "track", "payload" => %{"call" => random_string()}}, socket)
     end
 
@@ -874,7 +884,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       # Make 3 calls (at limit)
       socket =
         Enum.reduce(1..3, socket, fn _, acc_socket ->
-          {:ok, updated_socket} =
+          {:ok, updated_socket, _} =
             PresenceHandler.handle(%{"event" => "track", "payload" => %{"call" => random_string()}}, acc_socket)
 
           updated_socket
@@ -888,7 +898,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       Process.sleep(101)
 
       # Should be able to call again after window reset
-      assert {:ok, _socket} =
+      assert {:ok, _socket, _} =
                PresenceHandler.handle(%{"event" => "track", "payload" => %{"call" => random_string()}}, socket)
     end
   end
