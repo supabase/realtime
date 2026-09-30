@@ -5,6 +5,8 @@ defmodule RealtimeWeb.RealtimeChannel do
   use RealtimeWeb, :channel
   use RealtimeWeb.RealtimeChannel.Logging
 
+  require RealtimeWeb.RealtimeChannel.PresenceHandler
+
   alias DBConnection.Backoff
 
   alias Forum.Muster
@@ -448,7 +450,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   # authorized for presence.read (authorized on-demand when presence was auto-enabled via track),
   # otherwise drop it.
   def handle_info({:authorize_presence_diff, %Phoenix.Socket.Broadcast{} = msg}, socket) do
-    if can_read_presence?(socket), do: push(socket, "presence_diff", msg.payload)
+    if PresenceHandler.can_read_presence?(socket), do: push(socket, "presence_diff", msg.payload)
     {:noreply, socket}
   end
 
@@ -1188,9 +1190,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     payload = %{"payload" => message.payload, "event" => message.event, "type" => "broadcast", "meta" => meta}
     push(socket, "broadcast", payload)
   end
-
-  defp can_read_presence?(%{assigns: %{policies: %Policies{presence: %{read: true}}}}), do: true
-  defp can_read_presence?(_socket), do: false
 
   defp max_heap_size, do: :persistent_term.get({RealtimeWeb.UserSocket, :websocket_max_heap_size})
 
