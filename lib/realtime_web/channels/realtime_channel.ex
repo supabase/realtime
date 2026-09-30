@@ -475,11 +475,8 @@ defmodule RealtimeWeb.RealtimeChannel do
     BroadcastHandler.handle(payload, socket)
   end
 
-  def handle_in("presence", payload, %{assigns: %{private?: true}} = socket) do
-    %{tenant: tenant_id} = socket.assigns
-
-    with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
-         {:ok, new_socket} <- PresenceHandler.handle(payload, db_conn, socket) do
+  def handle_in("presence", payload, socket) do
+    with {:ok, new_socket} <- PresenceHandler.handle(payload, socket) do
       {:reply, :ok, maybe_sync_presence(socket, new_socket)}
     else
       {:error, :client_rate_limit_exceeded} ->
@@ -499,30 +496,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, :rpc_error, error} ->
         log_error(socket, "UnableToHandlePresence", error)
         {:reply, :error, socket}
-
-      {:error, error} ->
-        log_error(socket, "UnableToHandlePresence", error)
-        {:reply, :error, socket}
-    end
-  end
-
-  def handle_in("presence", payload, %{assigns: %{private?: false}} = socket) do
-    with {:ok, new_socket} <- PresenceHandler.handle(payload, nil, socket) do
-      {:reply, :ok, maybe_sync_presence(socket, new_socket)}
-    else
-      {:error, :client_rate_limit_exceeded} ->
-        log_error(socket, "ClientPresenceRateLimitReached", :client_rate_limit_exceeded)
-        shutdown_response(socket, "Client presence rate limit exceeded")
-
-      {:error, :rate_limit_exceeded} ->
-        shutdown_response(socket, "Too many presence messages per second")
-
-      {:error, :payload_size_exceeded} ->
-        shutdown_response(socket, "Track message size exceeded")
-
-      {:error, :invalid_payload} ->
-        log_error(socket, "InvalidPresencePayload", :invalid_payload)
-        {:reply, {:error, %{reason: "Presence track payload must be a map"}}, socket}
 
       {:error, error} ->
         log_error(socket, "UnableToHandlePresence", error)
