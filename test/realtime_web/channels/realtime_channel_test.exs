@@ -1948,12 +1948,93 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       log =
         capture_log(fn ->
-          assert {:error, _} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, api_key))
+          assert {:error, {:error, :error_generating_signer}} =
+                   connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, api_key))
 
           Process.sleep(300)
         end)
 
       assert log =~ "ErrorConnectingToWebsocket"
+    end
+  end
+
+  describe "tenant that only has JWKS" do
+    @oct_kid "oct-key-1"
+    @oct_secret "jwks-only-tenant-secret"
+
+    setup %{tenant: tenant} do
+      jwks = %{"keys" => [%{"kty" => "oct", "kid" => @oct_kid, "k" => Base.url_encode64(@oct_secret, padding: false)}]}
+
+      {:ok, tenant} =
+        Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{jwt_secret: nil, jwt_jwks: jwks})
+
+      Realtime.Tenants.Cache.update_cache(tenant)
+
+      %{tenant: tenant}
+    end
+
+    test "connects, joins and refreshes its access_token with JWKS-signed tokens", %{tenant: tenant} do
+      assert tenant.jwt_secret == nil
+
+      {:ok, %Socket{} = socket} =
+        connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, oct_token("connect")))
+
+      %Socket{channel_pid: channel_pid} = socket = subscribe_and_join!(socket, "realtime:test", %{})
+
+      new_token = oct_token("refresh")
+      push(socket, "access_token", %{"access_token" => new_token})
+      assert Server.socket(channel_pid).assigns.access_token == new_token
+
+      # The periodic re-confirmation also verifies against the JWKS alone
+      send(channel_pid, :confirm_token)
+      assert Server.socket(channel_pid).assigns.access_token == new_token
+      assert Process.alive?(channel_pid)
+    end
+
+    test "shuts down with JwtSignerError when refreshed with an HS256 token without kid", %{tenant: tenant} do
+      {:ok, %Socket{} = socket} =
+        connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, oct_token("connect")))
+
+      %Socket{channel_pid: channel_pid} = socket = subscribe_and_join!(socket, "realtime:test", %{})
+
+      log =
+        capture_log(fn ->
+          push(socket, "access_token", %{"access_token" => Generators.generate_jwt_token("another secret")})
+          assert_process_down(channel_pid)
+        end)
+
+      assert log =~ "JwtSignerError"
+
+      assert_receive %Socket.Message{
+        event: "system",
+        payload: %{message: "Failed to generate JWT signer, check your JWT secret or JWKS configuration"}
+      }
+    end
+
+    test "shuts down with JwtSignerError when re-confirmation cannot generate a signer", %{tenant: tenant} do
+      {:ok, %Socket{} = socket} =
+        connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, oct_token("connect")))
+
+      %Socket{channel_pid: channel_pid} = subscribe_and_join!(socket, "realtime:test", %{})
+
+      log =
+        capture_log(fn ->
+          expect(RealtimeWeb.ChannelsAuthorization, :authorize_conn, fn _, _, _ ->
+            {:error, :error_generating_signer}
+          end)
+
+          allow(RealtimeWeb.ChannelsAuthorization, self(), channel_pid)
+
+          send(channel_pid, :confirm_token)
+          assert_process_down(channel_pid)
+        end)
+
+      assert log =~ "JwtSignerError"
+
+      assert_receive %Socket.Message{
+        event: "system",
+        payload: %{message: "Failed to generate JWT signer, check your JWT secret or JWKS configuration"}
+      }
     end
   end
 
@@ -2067,6 +2148,12 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     RealtimeWeb.ChannelsAuthorization
     |> Mimic.calls(:authorize_conn, 3)
     |> Enum.map(fn [token | _] -> token end)
+  end
+
+  defp oct_token(sub) do
+    signer = Joken.Signer.create("HS256", @oct_secret, %{"kid" => @oct_kid})
+    claims = %{"role" => "authenticated", "sub" => sub, "exp" => System.system_time(:second) + 10_000}
+    Joken.generate_and_sign!(%{}, claims, signer)
   end
 
   # The throttle only treats a token as a new refresh if it differs from the current and held ones,
