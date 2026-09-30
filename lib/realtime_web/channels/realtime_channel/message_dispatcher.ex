@@ -50,38 +50,40 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
     do: do_dispatch(subscribers, from, msg, tenant_id)
 
   def dispatch(subscribers, from, %Broadcast{event: @presence_diff} = msg) do
-    {_cache, count} =
+    {_encoded_cache, count} =
       Enum.reduce(subscribers, {%{}, 0}, fn
-        {pid, _}, {cache, count} when pid == from ->
-          {cache, count}
+        {pid, _}, {encoded_cache, count} when pid == from ->
+          {encoded_cache, count}
 
         # Subscriber is denied presence.read: withhold the presence_diff. Mirrors the
         # can_read_presence?/1 gate on the presence_state push.
         {_pid,
          {:rc_fastlane, _fastlane_pid, _serializer, _join_topic, _log_level, _tenant_id, _replayed, false, _bcast}},
-        {cache, count} ->
-          {cache, count}
+        {encoded_cache, count} ->
+          {encoded_cache, count}
 
         # presence.read not yet authorized (presence was not enabled at join): route to the channel
         # process so it can consult presence.read at delivery time. Wrapped in a
         # tuple so it is handled by RealtimeChannel.handle_info rather than intercepted and pushed by
         # Phoenix.Channel.Server's built-in %Broadcast{} handling.
         {pid, {:rc_fastlane, _fastlane_pid, _serializer, _join_topic, _log_level, _tenant_id, _replayed, nil, _bcast}},
-        {cache, count} ->
+        {encoded_cache, count} ->
           send(pid, {:authorize_presence_diff, msg})
-          {cache, count}
+          {encoded_cache, count}
 
         {_pid,
          {:rc_fastlane, fastlane_pid, serializer, join_topic, log_level, tenant_id, _replayed_message_ids, true, _bcast}},
-        {cache, count} ->
+        {encoded_cache, count} ->
           maybe_log(log_level, join_topic, msg, tenant_id)
 
-          cache = fastlane_dispatch(msg, fastlane_pid, serializer, join_topic, cache, tenant_id, log_level)
-          {cache, count + 1}
+          encoded_cache =
+            fastlane_dispatch(msg, fastlane_pid, serializer, join_topic, encoded_cache, tenant_id, log_level)
 
-        {pid, _}, {cache, count} ->
+          {encoded_cache, count + 1}
+
+        {pid, _}, {encoded_cache, count} ->
           send(pid, msg)
-          {cache, count}
+          {encoded_cache, count}
       end)
 
     tenant_id = tenant_id(subscribers)
@@ -97,7 +99,7 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
     broadcast? = broadcast?(msg)
     check_rate_counter? = check_rate_counter?(tenant_id)
 
-    {_cache, count} =
+    {_encoded_cache, count} =
       Enum.reduce(subscribers, {%{}, 0}, fn
         {pid, _}, acc when pid == from ->
           acc
@@ -105,7 +107,7 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
         {pid,
          {:rc_fastlane, fastlane_pid, serializer, join_topic, log_level, tenant_id, replayed_message_ids,
           _presence_read?, broadcast_read?}},
-        {cache, count} = acc ->
+        {encoded_cache, count} = acc ->
           if (broadcast? and broadcast_read? != true) or already_replayed?(message_id, replayed_message_ids) do
             acc
           else
@@ -113,8 +115,10 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
 
             maybe_log(log_level, join_topic, msg, tenant_id)
 
-            cache = fastlane_dispatch(msg, fastlane_pid, serializer, join_topic, cache, tenant_id, log_level)
-            {cache, count + 1}
+            encoded_cache =
+              fastlane_dispatch(msg, fastlane_pid, serializer, join_topic, encoded_cache, tenant_id, log_level)
+
+            {encoded_cache, count + 1}
           end
 
         {pid, _}, acc ->
@@ -143,15 +147,15 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
 
   defp maybe_log(_level, _join_topic, _msg, _tenant_id), do: :ok
 
-  defp fastlane_dispatch(msg, fastlane_pid, serializer, join_topic, cache, tenant_id, log_level) do
-    case cache do
+  defp fastlane_dispatch(msg, fastlane_pid, serializer, join_topic, encoded_cache, tenant_id, log_level) do
+    case encoded_cache do
       %{{^serializer, ^join_topic} => {:ok, encoded_msg}} ->
         send(fastlane_pid, encoded_msg)
-        cache
+        encoded_cache
 
       %{{^serializer, ^join_topic} => {:error, _reason}} ->
         # We do nothing at this stage. It has been already logged depending on the log level
-        cache
+        encoded_cache
 
       %{} ->
         # Use the original topic that was joined without the external_id
@@ -168,7 +172,7 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
               {:error, reason}
           end
 
-        Map.put(cache, {serializer, join_topic}, result)
+        Map.put(encoded_cache, {serializer, join_topic}, result)
     end
   end
 
