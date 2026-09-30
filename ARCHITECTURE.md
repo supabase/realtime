@@ -33,6 +33,7 @@ Clients talk to Realtime over a single WebSocket that multiplexes many channels.
 - The **token** is the `x-api-key` header, falling back to the `apikey` param. It's a JWT verified against the tenant's `jwt_secret` / `jwt_jwks`.
 
 The process owning the WebSocket is the transport pid. It shows up everywhere below: it's the unit counted for `max_concurrent_users`, the member registered into [Muster](forum/README.md), and the pid that ultimately receives the encoded WebSocket frame.
+A transport pid is counted as a concurrent connection (`Realtime.UsersCounter`) only after its first successful channel join, and only once however many channels it joins. It stays counted until the socket closes. A socket that never joins a channel is never counted, which is also why these connections don't count toward Realtime Peak Connections.
 Channel topics look like `realtime:<sub_topic>` and are all handled by `RealtimeWeb.RealtimeChannel`. One socket can hold many of them (`max_channels_per_client`, default 100).
 
 ### 2. What a channel carries

@@ -1006,6 +1006,32 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
   end
 
+  describe "concurrent connection counting" do
+    test "a connected socket is not counted until it joins a channel", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      refute Realtime.UsersCounter.already_counted?(socket.transport_pid, tenant.external_id)
+      assert Realtime.UsersCounter.tenant_users(tenant.external_id, node()) == 0
+
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
+
+      assert Realtime.UsersCounter.already_counted?(socket.transport_pid, tenant.external_id)
+      assert Realtime.UsersCounter.tenant_users(tenant.external_id, node()) == 1
+    end
+
+    test "a socket that joins multiple channels is counted once", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test1", %{})
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test2", %{})
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test3", %{})
+
+      assert Realtime.UsersCounter.tenant_users(tenant.external_id, node()) == 1
+    end
+  end
+
   describe "maximum number of connected clients per tenant" do
     test "not reached", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
