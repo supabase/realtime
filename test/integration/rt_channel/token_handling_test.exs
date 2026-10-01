@@ -1,6 +1,6 @@
 defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
   use RealtimeWeb.ConnCase,
-    async: false,
+    async: true,
     parameterize: [%{serializer: Phoenix.Socket.V1.JSONSerializer}, %{serializer: RealtimeWeb.Socket.V2Serializer}]
 
   import ExUnit.CaptureLog
@@ -377,6 +377,7 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
         generate_token(tenant, %{:exp => System.system_time(:second) + 1, role: "authenticated"})
 
       # token expires in between joins so it needs to be handled by the channel and not the socket
+      Process.sleep(1000)
       realtime_topic = "realtime:#{topic}"
 
       log =

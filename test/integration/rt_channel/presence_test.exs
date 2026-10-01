@@ -1,6 +1,6 @@
 defmodule Realtime.Integration.RtChannel.PresenceTest do
   use RealtimeWeb.ConnCase,
-    async: false,
+    async: true,
     parameterize: [
       %{serializer: Phoenix.Socket.V1.JSONSerializer},
       %{serializer: RealtimeWeb.Socket.V2Serializer}
