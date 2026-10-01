@@ -9,24 +9,40 @@ defmodule RealtimeWeb.Presence.Metrics do
   one of the `strip_*` functions.
   """
   alias Phoenix.Socket.Broadcast
+  alias Realtime.FeatureFlags
 
   @envelope_key :_rt
   @presence_diff "presence_diff"
+  @feature_flag "presence_latency_metric"
 
   @doc """
-  Stamps a payload with the current timestamp and node.
+  Stamps a payload with the current timestamp and node when the track is sampled.
 
-  This can be used for timing metrics later in the lifecycle.
+  Sampling is decided per call: the `presence_latency_metric` feature flag must be on for the
+  tenant and the call must fall under `PRESENCE_LATENCY_SAMPLE_RATE`. Unsampled calls, and
+  anything that is not a map, are returned untouched.
   """
-  @spec stamp(term()) :: term()
-  def stamp(payload) when is_map(payload) do
-    Map.put(payload, @envelope_key, %{
-      ts: System.system_time(:millisecond),
-      node: Realtime.Nodes.short_node_id_from_name(node())
-    })
+  @spec stamp(term(), String.t()) :: term()
+  def stamp(payload, tenant_id) when is_map(payload) do
+    if sample?(tenant_id) do
+      Map.put(payload, @envelope_key, %{
+        ts: System.system_time(:millisecond),
+        node: Realtime.Nodes.short_node_id_from_name(node())
+      })
+    else
+      payload
+    end
   end
 
-  def stamp(v), do: v
+  def stamp(v, _tenant_id), do: v
+
+  @doc false
+  @spec sample?(String.t(), float()) :: boolean()
+  def sample?(tenant_id, rate \\ sample_rate()) do
+    rate > 0 and FeatureFlags.enabled?(@feature_flag, tenant_id) and :rand.uniform() < rate
+  end
+
+  defp sample_rate, do: Application.get_env(:realtime, :presence_latency_sample_rate, 0.0)
 
   @doc """
   Strips the envelope from every join and leave meta in a `presence_diff` broadcast.

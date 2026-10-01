@@ -1,13 +1,21 @@
 defmodule RealtimeWeb.Presence.MetricsTest do
   use ExUnit.Case, async: true
+  use Mimic
+
+  setup :set_mimic_from_context
 
   alias Phoenix.Socket.Broadcast
+  alias Realtime.FeatureFlags
   alias RealtimeWeb.Presence.Metrics
 
-  describe "stamp/1" do
-    test "adds an envelope with the current time in ms and this node's short id" do
+  @tenant "tenant-123"
+
+  describe "stamp/2" do
+    test "adds an envelope with the current time in ms and this node's short id when sampled" do
+      stub(FeatureFlags, :enabled?, fn "presence_latency_metric", @tenant -> true end)
+
       before = System.system_time(:millisecond)
-      stamped = Metrics.stamp(%{"name" => "alice"})
+      stamped = Metrics.stamp(%{"name" => "alice"}, @tenant)
       after_ = System.system_time(:millisecond)
 
       assert %{_rt: %{ts: ts, node: node}} = stamped
@@ -16,14 +24,44 @@ defmodule RealtimeWeb.Presence.MetricsTest do
     end
 
     test "leaves the user payload untouched" do
+      stub(FeatureFlags, :enabled?, fn _, _ -> true end)
       payload = %{"name" => "alice", "nested" => %{"a" => 1}}
 
-      assert Map.delete(Metrics.stamp(payload), :_rt) == payload
+      assert Map.delete(Metrics.stamp(payload, @tenant), :_rt) == payload
+    end
+
+    test "returns the payload untouched when the feature flag is off for the tenant" do
+      stub(FeatureFlags, :enabled?, fn "presence_latency_metric", @tenant -> false end)
+      payload = %{"name" => "alice"}
+
+      assert Metrics.stamp(payload, @tenant) == payload
     end
 
     test "passes a non-map payload through for validation to reject" do
-      assert Metrics.stamp("not a map") == "not a map"
-      assert Metrics.stamp(nil) == nil
+      reject(&FeatureFlags.enabled?/2)
+
+      assert Metrics.stamp("not a map", @tenant) == "not a map"
+      assert Metrics.stamp(nil, @tenant) == nil
+    end
+  end
+
+  describe "sample?/2" do
+    test "never samples at rate 0, without consulting the feature flag" do
+      reject(&FeatureFlags.enabled?/2)
+
+      refute Enum.any?(1..100, fn _ -> Metrics.sample?(@tenant, 0.0) end)
+    end
+
+    test "always samples at rate 1 when the flag is on" do
+      stub(FeatureFlags, :enabled?, fn "presence_latency_metric", @tenant -> true end)
+
+      assert Enum.all?(1..100, fn _ -> Metrics.sample?(@tenant, 1.0) end)
+    end
+
+    test "never samples when the flag is off, whatever the rate" do
+      stub(FeatureFlags, :enabled?, fn "presence_latency_metric", @tenant -> false end)
+
+      refute Enum.any?(1..100, fn _ -> Metrics.sample?(@tenant, 1.0) end)
     end
   end
 
