@@ -159,10 +159,9 @@ defmodule RealtimeWeb.RealtimeChannel do
           assigns
         end
 
-      socket =
-        socket
-        |> assign_counter(tenant)
-        |> assign(PresenceHandler.join_rate_limits(tenant))
+      tenant |> Tenants.events_per_second_rate() |> RateCounter.new()
+
+      socket = assign(socket, PresenceHandler.join_rate_limits(tenant))
 
       # Start presence and add user if presence is enabled
       presence_enabled? = socket.assigns.presence_enabled?
@@ -299,14 +298,12 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
-  def handle_info(:check_rate_counter, socket) do
-    {:ok, rate_counter} = RateCounter.get(rate_counter_args(socket))
-
-    if rate_counter.limit.triggered do
-      message = "Too many messages per second"
-      shutdown_response(socket, message)
+  def handle_info(:check_rate_counter, %{assigns: %{tenant: tenant_id}} = socket) do
+    with %Tenant{} = tenant <- Cache.get_tenant_by_external_id(tenant_id),
+         {:ok, %{limit: %{triggered: true}}} <- RateCounter.get(Tenants.events_per_second_rate(tenant)) do
+      shutdown_response(socket, "Too many messages per second")
     else
-      {:noreply, socket}
+      _ -> {:noreply, socket}
     end
   end
 
@@ -767,27 +764,11 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp assign_counter(socket, tenant) do
-    rate_args = Tenants.events_per_second_rate(tenant)
-
-    RateCounter.new(rate_args)
-    assign(socket, :rate_counter, rate_args)
-  end
-
   defp access_token_throttle_ms, do: Application.fetch_env!(:realtime, :access_token_throttle_ms)
 
   defp now, do: System.monotonic_time(:millisecond)
 
-  defp count(%{assigns: %{rate_counter: counter}}), do: GenCounter.add(counter.id)
-
-  # A limit change restarts the RateCounter and whichever caller gets it first starts it again with its own args,
-  # so build them from the cached tenant instead of reusing the ones assigned at join
-  defp rate_counter_args(%{assigns: %{tenant: tenant_id, rate_counter: rate_counter}}) do
-    case Cache.get_tenant_by_external_id(tenant_id) do
-      %Tenant{} = tenant -> Tenants.events_per_second_rate(tenant)
-      nil -> rate_counter
-    end
-  end
+  defp count(%{assigns: %{tenant: tenant_id}}), do: GenCounter.add(Tenants.events_per_second_key(tenant_id))
 
   defp assign_access_token(%{assigns: %{tenant_token: tenant_token}} = socket, params) do
     access_token = Map.get(params, "access_token") || Map.get(params, "user_token")

@@ -13,6 +13,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Connect
   alias Realtime.RateCounter
+  alias Realtime.Tenants
   alias RealtimeWeb.UserSocket
 
   setup do
@@ -1040,7 +1041,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
       assert {:ok, _, %Socket{} = socket} = subscribe_and_join(socket, "realtime:test", %{})
-      %{rate_counter: %{id: rate_counter_id}} = socket.assigns
+      rate_counter_id = Tenants.events_per_second_key(tenant)
 
       {:ok, _} = Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{max_events_per_second: 1_000})
 
@@ -1054,7 +1055,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       Realtime.GenCounter.add(rate_counter_id, 100)
 
       assert {:ok, %RateCounter{limit: %{value: 1_000, triggered: false}}} =
-               RateCounterHelper.tick!(socket.assigns.rate_counter)
+               RateCounterHelper.tick!(Tenants.events_per_second_rate(tenant.external_id, 1_000))
 
       send(socket.channel_pid, :check_rate_counter)
       :sys.get_state(socket.channel_pid)
