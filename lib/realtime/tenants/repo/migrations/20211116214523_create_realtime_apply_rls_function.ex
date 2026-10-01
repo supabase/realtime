@@ -7,7 +7,7 @@ defmodule Realtime.Tenants.Migrations.CreateRealtimeApplyRlsFunction do
     execute("""
     DO $$
     BEGIN
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'action') THEN
+        IF to_regtype('realtime.action') IS NULL THEN
             CREATE TYPE realtime.action AS ENUM (
               'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'ERROR'
             );
@@ -18,7 +18,7 @@ defmodule Realtime.Tenants.Migrations.CreateRealtimeApplyRlsFunction do
     execute("""
     DO $$
     BEGIN
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'wal_rls') THEN
+        IF to_regtype('realtime.wal_rls') IS NULL THEN
             CREATE TYPE realtime.wal_rls AS (
               wal jsonb,
               is_rls_enabled boolean,

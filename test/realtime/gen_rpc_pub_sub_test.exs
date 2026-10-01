@@ -117,6 +117,8 @@ defmodule Realtime.GenRpcPubSubTest do
 
   @topic "gen-rpc-pub-sub-test-topic"
 
+  @presence_event [:realtime, :presence, :replication, :received]
+
   describe "regional broadcasting" do
     setup do
       previous_region = Application.get_env(:realtime, :region)
@@ -246,6 +248,60 @@ defmodule Realtime.GenRpcPubSubTest do
       assert_receive {:fanout, ^ap_y, %{local_tenant_users: 0}, %{tenant: ^tenant_id, hit: false}}, 1000
 
       refute_receive _any
+
+      presence_topic = "phx_presence:gen_rpc_pub_sub_test"
+      presence_message = {:pub, :heartbeat, {:gen_rpc_pub_sub_test, 1}, :empty, %{}}
+      size = :erlang.external_size(Worker.forward_to_local(presence_topic, presence_message, Phoenix.PubSub))
+
+      refs =
+        for node <- [us, ap_x, ap_y],
+            do: :erpc.call(node, :telemetry_test, :attach_event_handlers, [self(), [@presence_event]])
+
+      Phoenix.PubSub.broadcast(Realtime.PubSub, presence_topic, presence_message)
+
+      for ref <- refs do
+        assert_receive {@presence_event, ^ref, %{size: ^size}, %{implementation: "phoenix"}}, 5000
+      end
+
+      refute_receive {@presence_event, _, %{size: ^size}, _}
+    end
+  end
+
+  describe "presence traffic telemetry" do
+    setup do
+      topic = "phx_presence:gen_rpc_pub_sub_test_#{System.unique_integer([:positive])}"
+      message = {:pub, :heartbeat, {:gen_rpc_pub_sub_test, 1}, :empty, %{}}
+      ref = :telemetry_test.attach_event_handlers(self(), [@presence_event])
+      %{topic: topic, message: message, ref: ref}
+    end
+
+    test "the receiving worker emits the envelope's external size for presence topics", %{
+      topic: topic,
+      message: message,
+      ref: ref
+    } do
+      ftl = Worker.forward_to_local(topic, message, Phoenix.PubSub)
+      ftr = Worker.forward_to_region(topic, message, Phoenix.PubSub)
+      size = :erlang.external_size(ftl)
+      assert :erlang.external_size(ftr) == size
+
+      route_to_worker(node(), ftl)
+      assert_receive {@presence_event, ^ref, %{size: ^size}, %{implementation: "phoenix"}}, 1000
+
+      route_to_worker(node(), ftr)
+      assert_receive {@presence_event, ^ref, %{size: ^size}, %{implementation: "phoenix"}}, 1000
+    end
+
+    test "the receiving worker emits nothing for non-presence topics", %{message: message, ref: ref} do
+      ftl = Worker.forward_to_local(@topic, message, Phoenix.PubSub)
+      ftr = Worker.forward_to_region(@topic, message, Phoenix.PubSub)
+
+      size = :erlang.external_size(ftl)
+
+      route_to_worker(node(), ftl)
+      route_to_worker(node(), ftr)
+
+      refute_receive {@presence_event, ^ref, %{size: ^size}, _}
     end
   end
 

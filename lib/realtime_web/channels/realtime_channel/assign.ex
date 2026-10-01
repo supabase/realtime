@@ -38,7 +38,7 @@ defmodule RealtimeWeb.RealtimeChannel.Assigns do
           pg_change_params: map(),
           postgres_extension: map(),
           claims: map(),
-          jwt_secret: String.t(),
+          jwt_secret: String.t() | nil,
           jwt_jwks: map(),
           tenant_token: String.t(),
           access_token: String.t(),

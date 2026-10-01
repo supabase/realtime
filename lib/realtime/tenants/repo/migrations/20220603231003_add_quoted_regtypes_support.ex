@@ -9,7 +9,7 @@ defmodule Realtime.Tenants.Migrations.AddQuotedRegtypesSupport do
     execute("""
     DO $$
     BEGIN
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'wal_column') THEN
+        IF to_regtype('realtime.wal_column') IS NULL THEN
             CREATE TYPE realtime.wal_column AS (
                 name text,
                 type_name text,

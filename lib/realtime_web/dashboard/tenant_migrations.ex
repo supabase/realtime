@@ -478,10 +478,27 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     ON CONFLICT (version) DO NOTHING
     """
 
-    case Postgrex.query(conn, insert, [versions], timeout: @query_timeout) do
-      {:ok, _} -> :ok
-      {:error, _} = err -> err
+    with {:ok, _} <- restore_schema_migrations_pkey(conn),
+         {:ok, _} <- Postgrex.query(conn, insert, [versions], timeout: @query_timeout) do
+      :ok
     end
+  end
+
+  defp restore_schema_migrations_pkey(conn) do
+    restore = """
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'realtime.schema_migrations'::regclass AND contype = 'p'
+      ) THEN
+        ALTER TABLE realtime.schema_migrations ADD PRIMARY KEY (version);
+      END IF;
+    END
+    $$
+    """
+
+    Postgrex.query(conn, restore, [], timeout: @query_timeout)
   end
 
   defp fetch_schema_migrations(conn) do

@@ -48,7 +48,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       end
 
       {:ok, %{avg: avg, bucket: buckets}} = RateCounterHelper.tick!(Tenants.events_per_second_rate(tenant))
-      assert Enum.sum(buckets) == 100
+      # 100 sent by the socket + 100 delivered to the test process subscribed via fastlane
+      assert Enum.sum(buckets) == 200
       assert avg > 0
     end
 
@@ -85,7 +86,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       end
 
       {:ok, %{avg: avg, bucket: buckets}} = RateCounterHelper.tick!(Tenants.events_per_second_rate(tenant))
-      assert Enum.sum(buckets) == 100
+      # 100 sent by the socket + 100 delivered to the test process subscribed via fastlane
+      assert Enum.sum(buckets) == 200
       assert avg > 0.0
     end
 
@@ -271,7 +273,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       end
 
       {:ok, %{avg: avg, bucket: buckets}} = RateCounterHelper.tick!(Tenants.events_per_second_rate(tenant))
-      assert Enum.sum(buckets) == 100
+      # 100 sent by the socket + 100 delivered to the test process subscribed via fastlane
+      assert Enum.sum(buckets) == 200
       assert avg > 0.0
     end
 
@@ -292,7 +295,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       end
 
       {:ok, %{avg: avg, bucket: buckets}} = RateCounterHelper.tick!(Tenants.events_per_second_rate(tenant))
-      assert Enum.sum(buckets) == 100
+      # 100 sent by the socket + 100 delivered to the test process subscribed via fastlane
+      assert Enum.sum(buckets) == 200
       assert avg > 0.0
     end
 

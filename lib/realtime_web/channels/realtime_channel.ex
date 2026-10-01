@@ -5,13 +5,14 @@ defmodule RealtimeWeb.RealtimeChannel do
   use RealtimeWeb, :channel
   use RealtimeWeb.RealtimeChannel.Logging
 
+  require RealtimeWeb.RealtimeChannel.PresenceHandler
+
   alias DBConnection.Backoff
 
   alias Forum.Muster
 
   alias Realtime.Api.Message
   alias Realtime.Api.Tenant
-  alias Realtime.Crypto
   alias Realtime.FeatureFlags
   alias Realtime.GenCounter
   alias Realtime.Helpers
@@ -89,12 +90,10 @@ defmodule RealtimeWeb.RealtimeChannel do
       |> assign_access_token(params)
       |> assign(:private?, Join.private?(join))
       |> assign(:policies, nil)
-      |> assign(:presence_enabled?, Join.presence_enabled?(join))
 
     with :ok <- SignalHandler.shutdown_in_progress?(),
          {:ok, tenant} <- Cache.fetch_tenant_by_external_id(tenant_id),
-         socket =
-           assign(socket, :presence_enabled?, presence_enabled?(socket.assigns.presence_enabled?, tenant)),
+         socket = assign(socket, PresenceHandler.join(join, tenant)),
          :ok <- only_private?(tenant, socket),
          :ok <- limit_max_users(tenant, transport_pid),
          :ok <- limit_joins(tenant, socket),
@@ -117,7 +116,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       replication_ready_opt_in? = Join.replication_ready?(join)
 
       is_new_api = new_api?(params)
-      presence_enabled? = socket.assigns.presence_enabled?
 
       pg_change_params = pg_change_params(is_new_api, params, channel_pid, claims, sub_topic)
 
@@ -140,11 +138,9 @@ defmodule RealtimeWeb.RealtimeChannel do
         is_new_api: is_new_api,
         pg_sub_ref: nil,
         pg_change_params: pg_change_params,
-        presence_key: Join.presence_key(join),
         self_broadcast: Join.self_broadcast?(join),
         tenant_topic: tenant_topic,
         channel_name: sub_topic,
-        presence_enabled?: presence_enabled?,
         fastlane_metadata: metadata,
         replayed_message_ids: replayed_message_ids,
         access_token_verified_at: nil,
@@ -166,10 +162,10 @@ defmodule RealtimeWeb.RealtimeChannel do
       socket =
         socket
         |> assign_counter(tenant)
-        |> assign_presence_counter(tenant)
-        |> assign_client_presence_rate_limit(tenant)
+        |> assign(PresenceHandler.join_rate_limits(tenant))
 
       # Start presence and add user if presence is enabled
+      presence_enabled? = socket.assigns.presence_enabled?
       if presence_enabled?, do: send(self(), :sync_presence)
 
       with :ok <- await_muster_join(muster_join_task, socket),
@@ -303,9 +299,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
-  def handle_info(:update_rate_counter, socket) do
-    count(socket)
-
+  def handle_info(:check_rate_counter, socket) do
     {:ok, rate_counter} = RateCounter.get(socket.assigns.rate_counter)
 
     if rate_counter.limit.triggered do
@@ -431,6 +425,11 @@ defmodule RealtimeWeb.RealtimeChannel do
         log_error(socket, "JwtSignerError", msg)
         shutdown_response(socket, msg)
 
+      {:error, :error_generating_signer} ->
+        msg = "Failed to generate JWT signer, check your JWT secret or JWKS configuration"
+        log_error(socket, "JwtSignerError", msg)
+        shutdown_response(socket, msg)
+
       {:error, error} ->
         shutdown_response(socket, Realtime.Logs.to_log(error))
     end
@@ -453,7 +452,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   # authorized for presence.read (authorized on-demand when presence was auto-enabled via track),
   # otherwise drop it.
   def handle_info({:authorize_presence_diff, %Phoenix.Socket.Broadcast{} = msg}, socket) do
-    if can_read_presence?(socket), do: push(socket, "presence_diff", msg.payload)
+    if PresenceHandler.can_read_presence?(socket), do: push(socket, "presence_diff", msg.payload)
     {:noreply, socket}
   end
 
@@ -496,12 +495,11 @@ defmodule RealtimeWeb.RealtimeChannel do
     BroadcastHandler.handle(payload, socket)
   end
 
-  def handle_in("presence", payload, %{assigns: %{private?: true}} = socket) do
-    %{tenant: tenant_id} = socket.assigns
+  def handle_in("presence", payload, socket) do
+    with {:ok, socket, sync_needed} <- PresenceHandler.handle(payload, socket) do
+      if sync_needed == :resync, do: send(self(), :sync_presence)
 
-    with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
-         {:ok, new_socket} <- PresenceHandler.handle(payload, db_conn, socket) do
-      {:reply, :ok, maybe_sync_presence(socket, new_socket)}
+      {:reply, :ok, socket}
     else
       {:error, :client_rate_limit_exceeded} ->
         log_error(socket, "ClientPresenceRateLimitReached", :client_rate_limit_exceeded)
@@ -520,30 +518,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, :rpc_error, error} ->
         log_error(socket, "UnableToHandlePresence", error)
         {:reply, :error, socket}
-
-      {:error, error} ->
-        log_error(socket, "UnableToHandlePresence", error)
-        {:reply, :error, socket}
-    end
-  end
-
-  def handle_in("presence", payload, %{assigns: %{private?: false}} = socket) do
-    with {:ok, new_socket} <- PresenceHandler.handle(payload, nil, socket) do
-      {:reply, :ok, maybe_sync_presence(socket, new_socket)}
-    else
-      {:error, :client_rate_limit_exceeded} ->
-        log_error(socket, "ClientPresenceRateLimitReached", :client_rate_limit_exceeded)
-        shutdown_response(socket, "Client presence rate limit exceeded")
-
-      {:error, :rate_limit_exceeded} ->
-        shutdown_response(socket, "Too many presence messages per second")
-
-      {:error, :payload_size_exceeded} ->
-        shutdown_response(socket, "Track message size exceeded")
-
-      {:error, :invalid_payload} ->
-        log_error(socket, "InvalidPresencePayload", :invalid_payload)
-        {:reply, {:error, %{reason: "Presence track payload must be a map"}}, socket}
 
       {:error, error} ->
         log_error(socket, "UnableToHandlePresence", error)
@@ -690,6 +664,11 @@ defmodule RealtimeWeb.RealtimeChannel do
         log_error(socket, "JwtSignerError", msg)
         shutdown_response(socket, msg)
 
+      {:error, :error_generating_signer} ->
+        msg = "Failed to generate JWT signer, check your JWT secret or JWKS configuration"
+        log_error(socket, "JwtSignerError", msg)
+        shutdown_response(socket, msg)
+
       {:error, error} ->
         shutdown_response(socket, inspect(error))
     end
@@ -811,39 +790,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     assign(socket, :rate_counter, rate_args)
   end
 
-  defp assign_presence_counter(socket, tenant) do
-    rate_args = Tenants.presence_events_per_second_rate(tenant)
-
-    RateCounter.new(rate_args)
-
-    assign(socket, :presence_rate_counter, rate_args)
-  end
-
-  defp assign_client_presence_rate_limit(socket, tenant) do
-    config = Application.get_env(:realtime, :client_presence_rate_limit, max_calls: 5, window_ms: 30_000)
-
-    max_calls =
-      case tenant.max_client_presence_events_per_window do
-        value when is_integer(value) and value > 0 -> value
-        _ -> config[:max_calls]
-      end
-
-    window_ms =
-      case tenant.client_presence_window_ms do
-        value when is_integer(value) and value > 0 -> value
-        _ -> config[:window_ms]
-      end
-
-    client_rate_limit = %{
-      max_calls: max_calls,
-      window_ms: window_ms,
-      counter: 0,
-      reset_at: nil
-    }
-
-    assign(socket, :presence_client_rate_limit, client_rate_limit)
-  end
-
   defp access_token_throttle_ms, do: Application.fetch_env!(:realtime, :access_token_throttle_ms)
 
   defp now, do: System.monotonic_time(:millisecond)
@@ -873,12 +819,15 @@ defmodule RealtimeWeb.RealtimeChannel do
     assign(socket, :access_token, tenant_token)
   end
 
+  # Only place cached policies get re-evaluated (access_token refresh) or the socket gets
+  # disconnected (JWT expiry). Keep client JWT expiry short: see
+  # https://supabase.com/docs/guides/realtime/authorization#updating-rls-policies
   defp confirm_token(%{assigns: assigns}) do
     %{jwt_secret: jwt_secret, access_token: access_token} = assigns
 
     jwt_jwks = Map.get(assigns, :jwt_jwks)
 
-    with jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
+    with jwt_secret_dec <- Tenant.decrypt_jwt_secret(jwt_secret),
          {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
            ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec, jwt_jwks),
          exp_diff when exp_diff > 0 <- exp - Joken.current_time() do
@@ -1112,6 +1061,9 @@ defmodule RealtimeWeb.RealtimeChannel do
     assign(socket, :authorization_context, authorization_context)
   end
 
+  # Result is cached in assigns.policies for the JWT's or socket's life time (whichever comes first).
+  # We recommend short-lived JWTs to force re-evaluation.
+  # See https://supabase.com/docs/guides/realtime/authorization#updating-rls-policies
   defp maybe_assign_policies(topic, db_conn, %{assigns: %{private?: true}} = socket)
        when not is_nil(topic) do
     authorization_context = socket.assigns.authorization_context
@@ -1261,23 +1213,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     payload = %{"payload" => message.payload, "event" => message.event, "type" => "broadcast", "meta" => meta}
     push(socket, "broadcast", payload)
   end
-
-  # A track message can be what enables presence for this socket: it never got the join-time
-  # presence_state and would only see diffs from here on. Sync now, or the members tracked
-  # before this point stay invisible to this client.
-  defp maybe_sync_presence(%{assigns: %{presence_enabled?: false}}, %{assigns: %{presence_enabled?: true}} = socket) do
-    send(self(), :sync_presence)
-    socket
-  end
-
-  defp maybe_sync_presence(_socket, socket), do: socket
-
-  defp presence_enabled?(client_enabled?, %Tenant{presence_enabled: tenant_enabled}) do
-    client_enabled? || tenant_enabled
-  end
-
-  defp can_read_presence?(%{assigns: %{policies: %Policies{presence: %{read: true}}}}), do: true
-  defp can_read_presence?(_socket), do: false
 
   defp max_heap_size, do: :persistent_term.get({RealtimeWeb.UserSocket, :websocket_max_heap_size})
 

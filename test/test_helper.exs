@@ -57,11 +57,17 @@ requires_supautils_policy_grants = if !has_supautils_realtime_grants, do: :requi
 requires_no_supautils_policy_grants = if has_supautils_realtime_grants, do: :requires_no_supautils_policy_grants
 
 skip_orioledb = if orioledb?, do: :skip_orioledb
+requires_orioledb = if !orioledb?, do: :requires_orioledb
 
 # Only the docker backend can drop and recreate a tenant database mid-run.
 requires_docker_backend = if backend != TestTenantDb.Backend.Docker, do: :requires_docker_backend
 
 requires_direct_connection = if !direct_connection?, do: :requires_direct_connection
+
+%{rows: [[synchronous_standby?]]} =
+  Postgrex.query!(pg_conn, "SELECT current_setting('synchronous_standby_names', true) <> ''")
+
+requires_synchronous_standby = if !synchronous_standby?, do: :requires_synchronous_standby
 
 exclude =
   Enum.reject(
@@ -72,8 +78,10 @@ exclude =
       requires_supautils_policy_grants,
       requires_no_supautils_policy_grants,
       skip_orioledb,
+      requires_orioledb,
       requires_docker_backend,
-      requires_direct_connection
+      requires_direct_connection,
+      requires_synchronous_standby
     ],
     &is_nil/1
   )
