@@ -9,7 +9,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
               a presence topic depending on its join config.
   * Syncing - using the `sync/1` function. This will send the full state of the 
               presence topic back to the client socket, assuming they have access to it.
-  * Tracking and Untracking - via `handle/3`, this will add, update, or remove the client's 
+  * Tracking and Untracking - via `handle/2`, this will add, update, or remove the client's 
               presence state from the topic.
 
   All presence tracking uses `RealtimeWeb.Presence`, which is Realtime's instantiation of 
@@ -26,6 +26,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   alias Realtime.GenCounter
   alias Realtime.RateCounter
   alias Realtime.Tenants
+  alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Authorization
   alias RealtimeWeb.Channels.Payloads
   alias RealtimeWeb.Presence
@@ -114,8 +115,28 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     end
   end
 
-  @spec handle(map(), pid() | nil, Socket.t()) ::
-          {:ok, Socket.t()}
+  @doc """
+  Handles client events related to Presence. 
+
+  Presence events include:
+
+  * track - used to store or update a client's state in the presence topic.
+  * untrack - used to leave, and remove state from the presence topic.
+
+  This function will apply rate limits and authorization to ensure that 
+  the client has access to the topic, and if so the event will be passed on 
+  to the presence system.
+
+  When successful, returns `{:ok, socket, :resync | :no_resync}`.
+
+  The third element of the tuple can be used to determine whether the client
+  should get a full update of the current presence sync. At this point that is 
+  only set if a track call caused presence to flip from disabled to enabled for 
+  the channel.
+
+  """
+  @spec handle(map(), Socket.t()) ::
+          {:ok, Socket.t(), :resync | :no_resync}
           | {:error,
              :invalid_payload
              | :rls_policy_error
@@ -127,40 +148,36 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
              | :rate_limit_exceeded
              | :client_rate_limit_exceeded
              | :unable_to_track_presence
-             | :payload_size_exceeded}
-  def handle(%{"event" => event} = payload, db_conn, socket) do
+             | :payload_size_exceeded
+             | :connect_rate_limit_reached
+             | :tenant_db_too_many_connections}
+          | {:error, :rpc_error, term()}
+  def handle(%{"event" => event} = payload, socket) do
     event = String.downcase(event, :ascii)
 
     with {:ok, socket} <- limit_client_presence_event(socket) do
-      handle_presence_event(event, payload, db_conn, socket)
+      handle_presence_event(event, payload, socket)
     else
       {:error, :client_rate_limit_exceeded} = error -> error
     end
   end
 
-  def handle(_, _, socket), do: {:ok, socket}
+  def handle(_, socket), do: {:ok, socket, :no_resync}
 
-  defp handle_presence_event("track", payload, _, socket) when not is_private?(socket) do
+  defp handle_presence_event("track", payload, socket) when not is_private?(socket) do
     track(socket, payload)
   end
 
-  defp handle_presence_event("track", payload, db_conn, socket)
+  defp handle_presence_event("track", payload, socket)
        when is_private?(socket) and is_nil(socket.assigns.policies.presence.write) do
-    %{assigns: %{authorization_context: authorization_context, policies: policies}} = socket
+    %{assigns: %{authorization_context: authorization_context, policies: policies, tenant: tenant_id}} = socket
 
     # presence is being enabled by this track. Authorize presence.read now if it wasn't evaluated at
     # join (the join skips it when presence was disabled, leaving read nil) so the channel can gate
     # presence_diff for this socket, then authorize presence.write.
-    with {:ok, policies} <- maybe_authorize_presence_read(policies, db_conn, authorization_context),
-         {:ok, policies} <-
-           Authorization.get_write_authorizations(
-             policies,
-             db_conn,
-             authorization_context,
-             :presence
-           ) do
+    with {:ok, policies} <- authorize(tenant_id, policies, authorization_context) do
       socket = assign(socket, :policies, policies)
-      handle_presence_event("track", payload, db_conn, socket)
+      handle_presence_event("track", payload, socket)
     else
       {:error, :rls_policy_error, error} ->
         log_error("RlsPolicyError", error)
@@ -180,29 +197,50 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
       {:error, :increase_connection_pool} ->
         {:error, :increase_connection_pool}
 
+      {:error, :rpc_error, error} ->
+        {:error, :rpc_error, error}
+
       {:error, error} ->
         log_error("UnableToSetPolicies", error)
         {:error, :unable_to_set_policies}
     end
   end
 
-  defp handle_presence_event("track", payload, _, socket) when can_write_presence?(socket) do
+  defp handle_presence_event("track", payload, socket) when can_write_presence?(socket) do
     track(socket, payload)
   end
 
-  defp handle_presence_event("track", _, _, socket) when not can_write_presence?(socket) do
+  defp handle_presence_event("track", _, socket) when not can_write_presence?(socket) do
     {:error, :unauthorized}
   end
 
-  defp handle_presence_event("untrack", _, _, socket) do
+  defp handle_presence_event("untrack", _, socket) do
     %{assigns: %{presence_key: presence_key, tenant_topic: tenant_topic}} = socket
     :ok = Presence.untrack(self(), tenant_topic, presence_key)
-    {:ok, assign(socket, :presence_track_payload, nil)}
+    {:ok, assign(socket, :presence_track_payload, nil), :no_resync}
   end
 
-  defp handle_presence_event(event, _, _, _) do
+  defp handle_presence_event(event, _, _) do
     log_error("UnknownPresenceEvent", event)
     {:error, :unknown_presence_event}
+  end
+
+  # Check whether a client is authorized to read and write to a private presence topic.
+  #
+  # This will be called when a client hasn't previously been authorized to ensure it has access.
+  # We get the DB connection here, at the smallest scope, so we only need to get the connection
+  # if we haven't previously done the authorization. handle_presence_event/3 checks this before
+  # calling authorize/3.
+  defp authorize(tenant_id, policies, authorization_context) do
+    with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
+         {:ok, policies} <- maybe_authorize_presence_read(policies, db_conn, authorization_context) do
+      Authorization.get_write_authorizations(
+        policies,
+        db_conn,
+        authorization_context,
+        :presence
+      )
+    end
   end
 
   defp track(socket, payload) do
@@ -215,22 +253,29 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
          _ <- RealtimeWeb.TenantBroadcaster.collect_payload_size(socket.assigns.tenant, payload, :presence),
          :ok <- limit_presence_event(socket),
          {:ok, _} <- Presence.track(self(), tenant_topic, presence_key, payload) do
+      resync =
+        if socket.assigns.presence_enabled? do
+          :no_resync
+        else
+          :resync
+        end
+
       socket =
         socket
         |> assign(:presence_enabled?, true)
         |> assign(:presence_track_payload, payload)
 
-      {:ok, socket}
+      {:ok, socket, resync}
     else
       {:error, :no_payload_change} ->
         # no-op if payload hasn't changed
-        {:ok, socket}
+        {:ok, socket, :no_resync}
 
       {:error, {:already_tracked, pid, _, _}} ->
         case Presence.update(pid, tenant_topic, presence_key, payload) do
           {:ok, _} ->
             socket = assign(socket, :presence_track_payload, payload)
-            {:ok, socket}
+            {:ok, socket, :no_resync}
 
           {:error, _} ->
             {:error, :unable_to_track_presence}
