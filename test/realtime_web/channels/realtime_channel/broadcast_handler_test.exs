@@ -784,8 +784,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         sub: claims.sub
       })
 
-    rate_counter = Tenants.events_per_second_rate(tenant)
-
     tenant_topic = "realtime:#{topic}"
     self_broadcast = true
 
@@ -796,7 +794,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         self_broadcast: self_broadcast,
         policies: policies,
         authorization_context: authorization_context,
-        rate_counter: rate_counter,
         private?: private?,
         tenant: tenant.external_id
       }
