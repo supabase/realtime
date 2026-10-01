@@ -230,8 +230,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
     socket
   end
 
-  defp increment_rate_counter(%{assigns: %{rate_counter: counter}} = socket) do
-    GenCounter.add(counter.id)
+  defp increment_rate_counter(%{assigns: %{tenant: tenant_id}} = socket) do
+    GenCounter.add(Tenants.events_per_second_key(tenant_id))
     socket
   end
 
