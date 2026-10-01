@@ -51,6 +51,22 @@
     </div>
 
     <div
+      :if={Ecto.Changeset.get_field(@changeset, :enable_presence)}
+      class="flex flex-wrap items-center gap-2 mt-3 text-sm"
+    >
+      <span class="text-xs uppercase font-semibold text-gray-500 dark:text-neutral-400">Presence key</span>
+      <.slim_input
+        field={f[:presence_key]}
+        placeholder="random per connection"
+        aria_label="Presence key"
+        class="w-56 font-mono"
+      />
+      <span class="text-xs text-gray-400 dark:text-neutral-500">
+        share a key across tabs to appear as one member with several metas
+      </span>
+    </div>
+
+    <div
       :if={Ecto.Changeset.get_field(@changeset, :enable_db_changes)}
       class="flex flex-wrap items-center gap-2 mt-3 text-sm"
     >
@@ -220,6 +236,20 @@
           Ecto.Changeset.get_field(@changeset, :log_level) == level
         }>
           <%= level %>
+        </option>
+      </select>
+
+      <span class="text-xs uppercase font-semibold text-gray-500 dark:text-neutral-400 ml-2">Protocol</span>
+      <select
+        id="conn_form_vsn"
+        name="connection[vsn]"
+        aria-label="Wire protocol version"
+        class="text-xs rounded-md border-gray-300 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100 py-1"
+      >
+        <option :for={vsn <- protocol_versions()} value={vsn} selected={
+          Ecto.Changeset.get_field(@changeset, :vsn) == vsn
+        }>
+          <%= vsn %>
         </option>
       </select>
 

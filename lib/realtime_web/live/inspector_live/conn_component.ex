@@ -1,7 +1,8 @@
 defmodule RealtimeWeb.InspectorLive.ConnComponent do
   use RealtimeWeb, :live_component
 
-  @url_params ~w(host project channel token schema table event filter select enable_presence enable_db_changes private_channel log_level)
+  @url_params ~w(host project channel token schema table event filter select enable_presence presence_key enable_db_changes private_channel log_level vsn)
+  @protocol_versions ~w(2.0.0 1.0.0)
 
   defmodule Connection do
     use Ecto.Schema
@@ -9,6 +10,7 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
 
     schema "f" do
       field(:log_level, :string, default: "error")
+      field(:vsn, :string, default: "2.0.0")
       field(:token, :string)
       field(:host, :string)
       field(:project, :string)
@@ -21,16 +23,30 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
       field(:bearer, :string)
       field(:enable_broadcast, :boolean, default: true)
       field(:enable_presence, :boolean, default: false)
+      field(:presence_key, :string)
       field(:enable_db_changes, :boolean, default: false)
       field(:private_channel, :boolean, default: false)
     end
 
-    @text_fields [:log_level, :token, :host, :project, :channel, :schema, :table, :filter, :select, :bearer]
+    @text_fields [
+      :log_level,
+      :token,
+      :host,
+      :project,
+      :channel,
+      :schema,
+      :table,
+      :filter,
+      :select,
+      :bearer,
+      :presence_key
+    ]
 
     def changeset(form, params \\ %{}) do
       form
       |> cast(params, [
         :log_level,
+        :vsn,
         :token,
         :host,
         :project,
@@ -43,6 +59,7 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
         :bearer,
         :enable_broadcast,
         :enable_presence,
+        :presence_key,
         :enable_db_changes,
         :private_channel
       ])
@@ -52,6 +69,7 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
       |> clean_host()
       |> expand_project_ref()
       |> validate_required([:channel])
+      |> validate_inclusion(:vsn, ~w(2.0.0 1.0.0))
     end
 
     # Each column name is trimmed on its own: `id, title` would otherwise ask for " title".
@@ -450,6 +468,9 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
   defp expired?(exp) when is_integer(exp), do: exp < System.system_time(:second)
   defp expired?(_), do: false
 
+  @doc false
+  def protocol_versions, do: @protocol_versions
+
   defp url_params(changeset) do
     changeset
     |> Ecto.Changeset.apply_changes()
@@ -461,7 +482,7 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
   defp connect_params(%Connection{} = connection) do
     connection
     |> Map.take(
-      ~w(channel token host log_level schema table event filter bearer enable_presence enable_db_changes private_channel)a
+      ~w(channel token host log_level vsn schema table event filter bearer enable_presence presence_key enable_db_changes private_channel)a
     )
     |> Map.new(fn {key, value} -> {Atom.to_string(key), value} end)
     # A string is rejected by the server, so the comma separated URL form never reaches the wire.

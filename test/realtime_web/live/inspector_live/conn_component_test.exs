@@ -372,4 +372,94 @@ defmodule RealtimeWeb.InspectorLive.ConnComponentTest do
       })
     end
   end
+
+  describe "presence key" do
+    test "is only offered once presence is on", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/")
+
+      refute has_element?(view, "#conn_form_presence_key")
+
+      view |> form("#conn_form", connection: %{enable_presence: "true"}) |> render_change()
+
+      assert has_element?(view, "#conn_form_presence_key")
+    end
+
+    test "travels in the URL and reaches the client trimmed", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/")
+
+      # The field only exists once presence is on, same as for a real user.
+      view |> form("#conn_form", connection: %{enable_presence: "true"}) |> render_change()
+      assert_patch(view)
+
+      view
+      |> form("#conn_form", connection: %{channel: "room_a", enable_presence: "true", presence_key: "  alice "})
+      |> render_change()
+
+      assert assert_patch(view) =~ "presence_key=alice"
+
+      view
+      |> form("#conn_form",
+        connection: %{
+          channel: "room_a",
+          token: "a-token",
+          host: "https://x.supabase.co",
+          enable_presence: "true",
+          presence_key: "  alice "
+        }
+      )
+      |> render_submit()
+
+      assert_push_event(view, "connect", %{"connection" => %{"presence_key" => "alice"}})
+    end
+
+    test "a link carrying a key fills the field", %{conn: conn} do
+      {:ok, view, _html} =
+        live(conn, ~p"/?host=https://x.supabase.co&channel=room_a&enable_presence=true&presence_key=alice")
+
+      assert view |> element("#conn_form_presence_key") |> render() =~ "alice"
+    end
+  end
+
+  describe "wire protocol version" do
+    test "defaults to 2.0.0 and reaches the client", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/")
+
+      view
+      |> form("#conn_form", connection: %{channel: "room_a", token: "a-token", host: "https://x.supabase.co"})
+      |> render_submit()
+
+      assert_push_event(view, "connect", %{"connection" => %{"vsn" => "2.0.0"}})
+    end
+
+    test "a chosen version travels in the URL and to the client", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/")
+
+      view
+      |> form("#conn_form", connection: %{channel: "room_a", host: "https://x.supabase.co", vsn: "1.0.0"})
+      |> render_change()
+
+      assert assert_patch(view) =~ "vsn=1.0.0"
+
+      view
+      |> form("#conn_form",
+        connection: %{channel: "room_a", token: "a-token", host: "https://x.supabase.co", vsn: "1.0.0"}
+      )
+      |> render_submit()
+
+      assert_push_event(view, "connect", %{"connection" => %{"vsn" => "1.0.0"}})
+    end
+
+    test "a link carrying a version selects it", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/?host=https://x.supabase.co&channel=room_a&vsn=1.0.0")
+
+      assert view |> element("#conn_form_vsn option[selected]") |> render() =~ "1.0.0"
+    end
+
+    # The select only offers supported versions, so an unsupported one can only arrive via a link.
+    test "a link carrying an unsupported version is flagged", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/?host=https://x.supabase.co&channel=room_a&vsn=3.0.0")
+
+      assert render(view) =~ "vsn is invalid"
+    end
+  end
 end
