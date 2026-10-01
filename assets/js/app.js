@@ -160,7 +160,6 @@ Hooks.payload = {
       presence_key,
       enable_db_changes,
       private_channel,
-      vsn,
     } = connection;
 
     if (this.channel) this.channel.unsubscribe();
@@ -171,7 +170,6 @@ Hooks.payload = {
 
     this.realtimeSocket = new RealtimeClient(endpoint.toString(), {
       params: { apikey: token, log_level },
-      ...(vsn ? { vsn } : {}),
       heartbeatCallback: (status, latency) =>
         this.pushEvent("transport_status", { status, latency_ms: latency ?? null }),
       logger: (kind, msg, data) => {

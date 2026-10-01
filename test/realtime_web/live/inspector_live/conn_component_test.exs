@@ -419,47 +419,4 @@ defmodule RealtimeWeb.InspectorLive.ConnComponentTest do
       assert view |> element("#conn_form_presence_key") |> render() =~ "alice"
     end
   end
-
-  describe "wire protocol version" do
-    test "defaults to 2.0.0 and reaches the client", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/")
-
-      view
-      |> form("#conn_form", connection: %{channel: "room_a", token: "a-token", host: "https://x.supabase.co"})
-      |> render_submit()
-
-      assert_push_event(view, "connect", %{"connection" => %{"vsn" => "2.0.0"}})
-    end
-
-    test "a chosen version travels in the URL and to the client", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/")
-
-      view
-      |> form("#conn_form", connection: %{channel: "room_a", host: "https://x.supabase.co", vsn: "1.0.0"})
-      |> render_change()
-
-      assert assert_patch(view) =~ "vsn=1.0.0"
-
-      view
-      |> form("#conn_form",
-        connection: %{channel: "room_a", token: "a-token", host: "https://x.supabase.co", vsn: "1.0.0"}
-      )
-      |> render_submit()
-
-      assert_push_event(view, "connect", %{"connection" => %{"vsn" => "1.0.0"}})
-    end
-
-    test "a link carrying a version selects it", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/?host=https://x.supabase.co&channel=room_a&vsn=1.0.0")
-
-      assert view |> element("#conn_form_vsn option[selected]") |> render() =~ "1.0.0"
-    end
-
-    # The select only offers supported versions, so an unsupported one can only arrive via a link.
-    test "a link carrying an unsupported version is flagged", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/?host=https://x.supabase.co&channel=room_a&vsn=3.0.0")
-
-      assert render(view) =~ "vsn is invalid"
-    end
-  end
 end

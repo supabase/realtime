@@ -239,20 +239,6 @@
         </option>
       </select>
 
-      <span class="text-xs uppercase font-semibold text-gray-500 dark:text-neutral-400 ml-2">Protocol</span>
-      <select
-        id="conn_form_vsn"
-        name="connection[vsn]"
-        aria-label="Wire protocol version"
-        class="text-xs rounded-md border-gray-300 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100 py-1"
-      >
-        <option :for={vsn <- protocol_versions()} value={vsn} selected={
-          Ecto.Changeset.get_field(@changeset, :vsn) == vsn
-        }>
-          <%= vsn %>
-        </option>
-      </select>
-
       <p
         :if={stale_connection?(@changeset, @connected_snapshot)}
         class="text-xs text-warning-700 dark:text-warning-300"
