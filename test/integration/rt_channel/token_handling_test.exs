@@ -1,6 +1,6 @@
 defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
   use RealtimeWeb.ConnCase,
-    async: true,
+    async: false,
     parameterize: [%{serializer: Phoenix.Socket.V1.JSONSerializer}, %{serializer: RealtimeWeb.Socket.V2Serializer}]
 
   import ExUnit.CaptureLog
@@ -22,10 +22,6 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
       log =
         capture_log(fn ->
           WebsocketClient.connect(self(), uri(tenant, serializer), serializer, [{"x-api-key", "bad_token"}])
-          # The Cowboy worker process logs websocket failures (e.g. malformed JWTs)
-          # asynchronously. We must explicitly flush the Logger to guarantee the
-          # message is processed before `capture_log` finishes and removes the interceptor.
-          Logger.flush()
         end)
 
       assert log =~ "MalformedJWT: The token provided is not a valid JWT"
@@ -40,10 +36,6 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
             params: %{log_level: :info}
           )
 
-          # The Cowboy worker process logs websocket failures (e.g. malformed JWTs)
-          # asynchronously. We must explicitly flush the Logger to guarantee the
-          # message is processed before `capture_log` finishes and removes the interceptor.
-          Logger.flush()
         end)
 
       assert log =~ "InvalidJWTToken: Token has expired"
@@ -174,11 +166,6 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
       {:ok, new_token} =
         generate_token(tenant, %{exp: System.system_time(:second) + 1000, role: "authenticated", sub: random_string()})
 
-      # The access_token refresh logic enforces a 1-second sliding window throttle.
-      # Because `handle_in("access_token")` does not return a reply to the client,
-      # we have no state to poll to verify the token was processed. We must sleep
-      # to guarantee the throttle window has passed before verifying new permissions.
-      Process.sleep(1000)
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => new_token})
 
       # Send message to be ignored
@@ -390,7 +377,6 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
         generate_token(tenant, %{:exp => System.system_time(:second) + 1, role: "authenticated"})
 
       # token expires in between joins so it needs to be handled by the channel and not the socket
-      Process.sleep(1000)
       realtime_topic = "realtime:#{topic}"
 
       log =
