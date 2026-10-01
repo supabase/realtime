@@ -128,6 +128,8 @@ postgres_cdc_scope_shards = Env.get_integer("POSTGRES_CDC_SCOPE_SHARDS", 5)
 presence_broadcast_period_in_ms = Env.get_integer("PRESENCE_BROADCAST_PERIOD_IN_MS", 1_500)
 presence_permdown_period_in_ms = Env.get_integer("PRESENCE_PERMDOWN_PERIOD_IN_MS", 1_200_000)
 presence_pool_size = Env.get_integer("PRESENCE_POOL_SIZE", 10)
+presence_latency_sample_rate = Env.get_float("PRESENCE_LATENCY_SAMPLE_RATE", if(config_env() == :test, do: 1.0, else: 0.0))
+
 prom_poll_rate = Env.get_integer("PROM_POLL_RATE", 5000)
 realtime_ip_version = System.get_env("REALTIME_IP_VERSION")
 rebalance_check_interval_in_ms = Env.get_integer("REBALANCE_CHECK_INTERVAL_IN_MS", to_timeout(minute: 10))
@@ -238,6 +240,7 @@ config :realtime,
   presence_pool_size: presence_pool_size,
   presence_broadcast_period: presence_broadcast_period_in_ms,
   presence_permdown_period: presence_permdown_period_in_ms,
+  presence_latency_sample_rate: presence_latency_sample_rate,
   users_scope_shards: users_scope_shards,
   muster_scope_shards: muster_scope_shards,
   muster_drain_opts: [timeout_ms: muster_drain_timeout_ms, settle_ms: muster_drain_settle_ms],

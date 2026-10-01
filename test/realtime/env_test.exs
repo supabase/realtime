@@ -9,6 +9,34 @@ defmodule Realtime.EnvTest do
     %{env: env}
   end
 
+  describe "get_float/2" do
+    test "returns the default when env is unset", %{env: env} do
+      assert Env.get_float(env, 0.5) == 0.5
+    end
+
+    test "returns nil when env is unset and no default is provided", %{env: env} do
+      assert Env.get_float(env) == nil
+    end
+
+    test "parses float and integer env values", %{env: env} do
+      System.put_env(env, "0.01")
+      assert Env.get_float(env, 0.0) == 0.01
+
+      System.put_env(env, "1")
+      assert Env.get_float(env, 0.0) == 1.0
+    end
+
+    test "raises on invalid float env values", %{env: env} do
+      System.put_env(env, "lots")
+
+      assert_raise ArgumentError, ~r/expected a Float/, fn -> Env.get_float(env, 0.0) end
+    end
+
+    test "raises when the default is not a float or nil", %{env: env} do
+      assert_raise ArgumentError, ~r/expected either Float or empty/, fn -> Env.get_float(env, 1) end
+    end
+  end
+
   describe "get_integer/2" do
     test "returns the default when env is unset", %{env: env} do
       assert Env.get_integer(env, 10) == 10
