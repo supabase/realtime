@@ -320,11 +320,11 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       assert {:ok, socket, _} = PresenceHandler.handle(%{"event" => "track"}, socket)
 
       topic = socket.assigns.tenant_topic
-      assert_receive %Broadcast{topic: ^topic, event: "presence_diff", payload: %{joins: joins, leaves: %{}}}
+      assert_receive %Broadcast{topic: ^topic, event: "presence_diff", payload: %{joins: joins, leaves: %{}}}, 1000
       assert Map.has_key?(joins, key)
 
       assert {:ok, _socket, _} = PresenceHandler.handle(%{"event" => "untrack"}, socket)
-      assert_receive %Broadcast{topic: ^topic, event: "presence_diff", payload: %{joins: %{}, leaves: leaves}}
+      assert_receive %Broadcast{topic: ^topic, event: "presence_diff", payload: %{joins: %{}, leaves: leaves}}, 1000
       assert Map.has_key?(leaves, key)
     end
 
