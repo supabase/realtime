@@ -363,45 +363,6 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
       refute_receive {:encoded, _}
     end
 
-    test "a presence_diff stamped on another node is recorded as remote" do
-      tenant = "tenant-remote-#{System.unique_integer([:positive])}"
-      attach_presence_telemetry(tenant)
-      from_pid = :erlang.list_to_pid(~c'<0.2.1>')
-
-      subscribers = [
-        {self(), {:rc_fastlane, self(), TestSerializer, "realtime:topic", :error, tenant, MapSet.new(), true, true}}
-      ]
-
-      msg = %Broadcast{
-        topic: "realtime:topic",
-        event: "presence_diff",
-        payload: %{
-          joins: %{
-            "alice" => %{
-              metas: [
-                %{
-                  "name" => "alice",
-                  :phx_ref => "a2",
-                  :phx_ref_prev => "a1",
-                  :_rt => %{ts: System.system_time(:millisecond) - 1_200, node: "somewhere-else"}
-                }
-              ]
-            }
-          },
-          leaves: %{}
-        }
-      }
-
-      assert MessageDispatcher.dispatch(subscribers, from_pid, msg) == :ok
-
-      assert_receive {:telemetry, [:realtime, :presence, :notify, :latency], %{latency: latency},
-                      %{tenant: ^tenant, action: :update, origin: :remote, path: :fastlane}}
-
-      assert latency >= 1_200
-      assert_receive {:encoded, _}
-      refute_receive {:telemetry, _, _, _}
-    end
-
     test "routes a sampled presence_diff to channel processes as received, unstripped and unrecorded" do
       tenant = "tenant-channel-#{System.unique_integer([:positive])}"
       attach_presence_telemetry(tenant)

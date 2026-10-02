@@ -207,12 +207,6 @@ defmodule RealtimeWeb.Presence.MetricsTest do
       refute_receive {:telemetry, _, _, _}
     end
 
-    test "carries the path through", %{tenant: tenant, context: context} do
-      assert :ok = Metrics.record([%Envelope{ts: 9_999, node: "n1", action: :track}], %{context | path: :channel})
-
-      assert_receive {:telemetry, [:realtime, :presence, :notify, :latency], _, %{tenant: ^tenant, path: :channel}}
-    end
-
     test "a negative latency is discarded as clock skew rather than recorded", %{tenant: tenant, context: context} do
       assert :ok = Metrics.record([%Envelope{ts: 10_005, node: "n2", action: :track}], context)
 

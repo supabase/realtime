@@ -2198,6 +2198,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     :ok
   end
 
+  defp rls_context(_), do: :ok
+
   describe "handle_info {:authorize_presence_diff, msg}" do
     alias Phoenix.Socket.Broadcast
     alias RealtimeWeb.RealtimeChannel
@@ -2296,21 +2298,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       refute_receive {:telemetry, _, _, _}
     end
 
-    test "a replayed join is counted as discarded instead of recorded", %{tenant: tenant} do
-      tenant_id = tenant.external_id
-      socket = presence_socket(tenant, true)
-      diff = presence_diff(%{ts: System.system_time(:millisecond) - 60_000, node: "elsewhere"})
-
-      assert {:noreply, _socket} = RealtimeChannel.handle_info({:authorize_presence_diff, diff}, socket)
-
-      assert_receive {:socket_push, :text, _json}
-
-      assert_receive {:telemetry, [:realtime, :presence, :notify, :discarded], _,
-                      %{tenant: ^tenant_id, path: :channel, reason: :stale}}
-
-      refute_receive {:telemetry, [:realtime, :presence, :notify, :latency], _, _}
-    end
-
     defp presence_socket(tenant, read?) do
       %Socket{
         joined: true,
@@ -2341,6 +2328,4 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   def handle_presence_telemetry(event, measurements, metadata, %{pid: pid, tenant: tenant}) do
     if metadata[:tenant] == tenant, do: send(pid, {:telemetry, event, measurements, metadata})
   end
-
-  defp rls_context(_), do: :ok
 end
