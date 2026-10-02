@@ -2198,5 +2198,149 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     :ok
   end
 
+  describe "handle_info {:authorize_presence_diff, msg}" do
+    alias Phoenix.Socket.Broadcast
+    alias RealtimeWeb.RealtimeChannel
+
+    setup %{tenant: tenant} do
+      id = {__MODULE__, tenant.external_id}
+
+      :telemetry.attach_many(
+        id,
+        [[:realtime, :presence, :notify, :latency], [:realtime, :presence, :notify, :discarded]],
+        &__MODULE__.handle_presence_telemetry/4,
+        %{pid: self(), tenant: tenant.external_id}
+      )
+
+      on_exit(fn -> :telemetry.detach(id) end)
+      :ok
+    end
+
+    test "pushes the diff stripped and records it over the channel path when presence.read is granted", %{
+      tenant: tenant
+    } do
+      tenant_id = tenant.external_id
+      socket = presence_socket(tenant, true)
+      diff = presence_diff(%{ts: System.system_time(:millisecond) - 5, node: "elsewhere"})
+
+      assert {:noreply, _socket} = RealtimeChannel.handle_info({:authorize_presence_diff, diff}, socket)
+
+      assert_receive {:socket_push, :text, json}
+
+      assert %{"event" => "presence_diff", "payload" => %{"joins" => %{"alice" => %{"metas" => [meta]}}}} =
+               Jason.decode!(json)
+
+      assert meta["name"] == "alice"
+      refute Map.has_key?(meta, "_rt")
+
+      assert_receive {:telemetry, [:realtime, :presence, :notify, :latency], %{latency: latency},
+                      %{tenant: ^tenant_id, path: :channel, origin: :remote, action: :track}}
+
+      assert latency >= 5
+      refute_receive {:telemetry, _, _, _}
+    end
+
+    test "drops the diff and records nothing when presence.read is denied", %{tenant: tenant} do
+      socket = presence_socket(tenant, false)
+      diff = presence_diff(%{ts: System.system_time(:millisecond), node: "elsewhere"})
+
+      assert {:noreply, _socket} = RealtimeChannel.handle_info({:authorize_presence_diff, diff}, socket)
+
+      refute_receive {:socket_push, _, _}
+      refute_receive {:telemetry, _, _, _}
+    end
+
+    test "pushes an unsampled diff and records nothing", %{tenant: tenant} do
+      socket = presence_socket(tenant, true)
+      diff = presence_diff_with(%{"alice" => %{metas: [%{"name" => "alice", :phx_ref => "a1"}]}})
+
+      assert {:noreply, _socket} = RealtimeChannel.handle_info({:authorize_presence_diff, diff}, socket)
+
+      assert_receive {:socket_push, :text, json}
+      assert %{"event" => "presence_diff", "payload" => %{"joins" => %{"alice" => _}}} = Jason.decode!(json)
+      refute_receive {:telemetry, _, _, _}
+    end
+
+    test "records one observation per stamped join, telling local from remote and track from update", %{
+      tenant: tenant
+    } do
+      tenant_id = tenant.external_id
+      socket = presence_socket(tenant, true)
+      now = System.system_time(:millisecond)
+      local_node = Realtime.Nodes.short_node_id_from_name(node())
+
+      diff =
+        presence_diff_with(%{
+          "alice" => %{metas: [%{"name" => "alice", :phx_ref => "a1", :_rt => %{ts: now - 2, node: local_node}}]},
+          "bob" => %{
+            metas: [
+              %{"name" => "bob", :phx_ref => "b2", :phx_ref_prev => "b1", :_rt => %{ts: now - 800, node: "other"}}
+            ]
+          }
+        })
+
+      assert {:noreply, _socket} = RealtimeChannel.handle_info({:authorize_presence_diff, diff}, socket)
+
+      assert_receive {:socket_push, :text, json}
+      refute json |> IO.iodata_to_binary() |> String.contains?("_rt")
+
+      events =
+        for _ <- 1..2 do
+          assert_receive {:telemetry, [:realtime, :presence, :notify, :latency], _,
+                          %{tenant: ^tenant_id, path: :channel} = metadata}
+
+          {metadata.action, metadata.origin}
+        end
+
+      assert Enum.sort(events) == [{:track, :local}, {:update, :remote}]
+      refute_receive {:telemetry, _, _, _}
+    end
+
+    test "a replayed join is counted as discarded instead of recorded", %{tenant: tenant} do
+      tenant_id = tenant.external_id
+      socket = presence_socket(tenant, true)
+      diff = presence_diff(%{ts: System.system_time(:millisecond) - 60_000, node: "elsewhere"})
+
+      assert {:noreply, _socket} = RealtimeChannel.handle_info({:authorize_presence_diff, diff}, socket)
+
+      assert_receive {:socket_push, :text, _json}
+
+      assert_receive {:telemetry, [:realtime, :presence, :notify, :discarded], _,
+                      %{tenant: ^tenant_id, path: :channel, reason: :stale}}
+
+      refute_receive {:telemetry, [:realtime, :presence, :notify, :latency], _, _}
+    end
+
+    defp presence_socket(tenant, read?) do
+      %Socket{
+        joined: true,
+        topic: "realtime:room",
+        transport_pid: self(),
+        serializer: Phoenix.Socket.V1.JSONSerializer,
+        assigns: %{
+          private?: true,
+          tenant: tenant.external_id,
+          presence_enabled?: true,
+          policies: %Authorization.Policies{
+            presence: %Authorization.Policies.PresencePolicies{read: read?, write: true}
+          }
+        }
+      }
+    end
+
+    # A sampled diff as the dispatcher hands it over: the envelope is still on the meta.
+    defp presence_diff(stamp) do
+      presence_diff_with(%{"alice" => %{metas: [%{"name" => "alice", :phx_ref => "a1", :_rt => stamp}]}})
+    end
+
+    defp presence_diff_with(joins) do
+      %Broadcast{topic: "realtime:room", event: "presence_diff", payload: %{joins: joins, leaves: %{}}}
+    end
+  end
+
+  def handle_presence_telemetry(event, measurements, metadata, %{pid: pid, tenant: tenant}) do
+    if metadata[:tenant] == tenant, do: send(pid, {:telemetry, event, measurements, metadata})
+  end
+
   defp rls_context(_), do: :ok
 end

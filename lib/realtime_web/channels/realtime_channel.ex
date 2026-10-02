@@ -451,10 +451,21 @@ defmodule RealtimeWeb.RealtimeChannel do
   # then) is routed here by the dispatcher instead of fastlaned. Deliver it only if this socket is
   # authorized for presence.read (authorized on-demand when presence was auto-enabled via track),
   # otherwise drop it.
-  def handle_info({:authorize_presence_diff, %Phoenix.Socket.Broadcast{} = msg}, socket) do
-    if PresenceHandler.can_read_presence?(socket), do: push(socket, "presence_diff", msg.payload)
+  def handle_info({:authorize_presence_diff, %Phoenix.Socket.Broadcast{} = msg}, %{assigns: %{tenant: tenant_id}} = socket) when PresenceHandler.can_read_presence?(socket) do
+    context = RealtimeWeb.Presence.Metrics.context(tenant_id, :channel)
+    {msg, envelopes} = RealtimeWeb.Presence.Metrics.strip_diff(msg)
+
+    push(socket, "presence_diff", msg.payload)
+
+    RealtimeWeb.Presence.Metrics.record(envelopes, context)
+    
     {:noreply, socket}
   end
+
+  def handle_info({:authorize_presence_diff, _msg}, socket) do
+    {:noreply, socket}
+  end
+
 
   def handle_info(_, socket), do: {:noreply, socket}
 
