@@ -582,6 +582,61 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
       refute_receive _any
     end
 
+    test "dispatches json UserBroadcast to the V2 longpoll serializer" do
+      topic = "realtime:topic"
+
+      metadata =
+        MessageDispatcher.fastlane_metadata(self(), Phoenix.Socket.V2.JSONSerializer, topic, :error, "tenant123")
+
+      msg = %UserBroadcast{
+        topic: "tenant123:topic",
+        user_event: "updated",
+        user_payload_encoding: :json,
+        user_payload: Jason.encode!(%{id: 1}),
+        metadata: %{"id" => "message-id"}
+      }
+
+      assert :ok = MessageDispatcher.dispatch([{self(), metadata}], :none, msg)
+
+      assert_receive {:socket_push, :text, frame}
+
+      assert Jason.decode!(IO.iodata_to_binary(frame)) == [
+               nil,
+               nil,
+               topic,
+               "broadcast",
+               %{
+                 "event" => "updated",
+                 "payload" => %{"id" => 1},
+                 "type" => "broadcast",
+                 "meta" => %{"id" => "message-id"}
+               }
+             ]
+    end
+
+    test "a V2 longpoll subscriber does not interrupt binary UserBroadcast delivery to WebSocket subscribers" do
+      topic = "realtime:topic"
+      payload = <<0, 1, 255>>
+
+      subscribers =
+        Enum.map([Phoenix.Socket.V2.JSONSerializer, V2Serializer], fn serializer ->
+          {self(), MessageDispatcher.fastlane_metadata(self(), serializer, topic, :error, "tenant123")}
+        end)
+
+      msg = %UserBroadcast{
+        topic: "tenant123:topic",
+        user_event: "updated",
+        user_payload_encoding: :binary,
+        user_payload: payload
+      }
+
+      assert :ok = MessageDispatcher.dispatch(subscribers, :none, msg)
+
+      assert_receive {:socket_push, :binary, frame}
+      assert frame == <<4, byte_size(topic), 7, 0, 0, topic::binary, "updated", payload::binary>>
+      refute_receive {:socket_push, :text, _}
+    end
+
     test "dispatches json UserBroadcast to V1 & V2 Serializers" do
       parent = self()
 

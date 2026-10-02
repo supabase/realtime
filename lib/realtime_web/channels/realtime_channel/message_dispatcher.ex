@@ -176,8 +176,9 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
     end
   end
 
-  # We have to convert because V1 does not know how to process UserBroadcast
-  defp fastlane!(Phoenix.Socket.V1.JSONSerializer = serializer, %UserBroadcast{} = msg) do
+  # Phoenix's JSON serializers do not know how to process UserBroadcast.
+  defp fastlane!(serializer, %UserBroadcast{} = msg)
+       when serializer in [Phoenix.Socket.V1.JSONSerializer, Phoenix.Socket.V2.JSONSerializer] do
     with {:ok, msg} <- UserBroadcast.convert_to_json_broadcast(msg) do
       {:ok, serializer.fastlane!(msg)}
     end
