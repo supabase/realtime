@@ -859,6 +859,43 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
                Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
     end
 
+    test "create subscribes only to the named table, not to tables that match it as a LIKE pattern", %{
+      conn: conn,
+      tenant: tenant
+    } do
+      on_exit(fn ->
+        {:ok, db_settings} = Database.from_tenant(tenant, "realtime_rls")
+
+        {:ok, cleanup_conn} =
+          db_settings |> Map.from_struct() |> Keyword.new() |> Postgrex.start_link()
+
+        Postgrex.query!(cleanup_conn, "DROP TABLE IF EXISTS public.item_1, public.items1, public.\"it%\"", [])
+      end)
+
+      # `_` and `%` are LIKE wildcards: `item_1` also matches `items1`, and `it%` matches both.
+      for table <- [~s|item_1|, ~s|items1|, ~s|"it%"|] do
+        Postgrex.query!(conn, "CREATE TABLE IF NOT EXISTS public.#{table} (id int)", [])
+        Postgrex.query!(conn, "GRANT ALL ON public.#{table} TO anon", [])
+      end
+
+      for table <- ["item_1", "it%"] do
+        {:ok, subscription_params} =
+          Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => table})
+
+        subscription_list = [
+          %{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}
+        ]
+
+        assert {:ok, [%Postgrex.Result{num_rows: 1}]} =
+                 Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+      end
+
+      assert %Postgrex.Result{rows: rows} =
+               Postgrex.query!(conn, "select entity::text from realtime.subscription order by 1", [])
+
+      assert rows == [[~s|"it%"|], ["item_1"]]
+    end
+
     test "user gets an error when Realtime is not enabled for the publication", %{conn: conn} do
       {:ok, subscription_params} =
         Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test"})
