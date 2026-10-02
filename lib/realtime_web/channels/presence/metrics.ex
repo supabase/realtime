@@ -7,6 +7,9 @@ defmodule RealtimeWeb.Presence.Metrics do
   replication and is read back where the resulting `presence_diff` is handed to subscribers. It is
   never meant to reach a client, so every path that publishes metas should strip the envelope using 
   one of the `strip_*` functions.
+
+  This module also includes an `Envelope` struct that's returned by `strip_diffs`. This struct has
+  the action resolved to `:track` or `:update` based on the contents of the meta.
   """
   alias Phoenix.Socket.Broadcast
   alias Realtime.FeatureFlags
@@ -14,6 +17,27 @@ defmodule RealtimeWeb.Presence.Metrics do
   @envelope_key :_rt
   @presence_diff "presence_diff"
   @feature_flag "presence_latency_metric"
+
+  defmodule Envelope do
+    @phx_update_key :phx_ref_prev
+
+    @type t :: %__MODULE__{ts: non_neg_integer(), node: String.t() | nil, action: :track | :update}
+
+    defstruct [:ts, :node, :action]
+
+    def new(stamp, meta) do
+      %__MODULE__{
+        ts: Map.get(stamp, :ts, 0),
+        node: Map.get(stamp, :node),
+        action:
+          if Map.has_key?(meta, @phx_update_key) do
+            :update
+          else
+            :track
+          end
+      }
+    end
+  end
 
   @doc """
   Stamps a payload with the current timestamp and node when the track is sampled.
@@ -45,21 +69,25 @@ defmodule RealtimeWeb.Presence.Metrics do
   defp sample_rate, do: Application.get_env(:realtime, :presence_latency_sample_rate, 0.0)
 
   @doc """
-  Strips the envelope from every join and leave meta in a `presence_diff` broadcast.
+  Strips and returns the envelope from every join and leave meta in a `presence_diff` broadcast.
+
+  Returns {msg, envelopes}, where msg has all the tracking timestamps removed and envelopes is 
+  a list of all the timestamps extracted out of the meta's and resolved into `RealtimeWeb.Presence.Metrics.Envelope`
+  structs.
 
   Any other broadcast is returned untouched.
   """
-  @spec strip_diff(Broadcast.t()) :: Broadcast.t()
+  @spec strip_diff(Broadcast.t()) :: {Broadcast.t(), [Envelope.t()]}
   def strip_diff(%Broadcast{event: @presence_diff, payload: payload} = msg) do
-    payload =
-      payload
-      |> Map.replace_lazy(:joins, &strip_entries/1)
-      |> Map.replace_lazy(:leaves, &strip_entries/1)
+    {join_envelopes, payload} = Map.get_and_update(payload, :joins, &get_and_strip_envelopes/1)
+    {_leave_envelopes, payload} = Map.get_and_update(payload, :leaves, &get_and_strip_envelopes/1)
 
-    %{msg | payload: payload}
+    join_envelopes = join_envelopes || []
+
+    {%{msg | payload: payload}, join_envelopes}
   end
 
-  def strip_diff(msg), do: msg
+  def strip_diff(msg), do: {msg, []}
 
   @doc """
   Strips the envelope from every meta in a grouped presence list.
@@ -67,11 +95,39 @@ defmodule RealtimeWeb.Presence.Metrics do
   This is the shape pushed to a client as `presence_state`.
   """
   @spec strip_state(map()) :: map()
-  def strip_state(presences) when is_map(presences), do: strip_entries(presences)
+  def strip_state(presences) when is_map(presences) do
+    {_envelopes, striped_presences} = get_and_strip_envelopes(presences)
 
-  defp strip_entries(entries) do
-    Map.new(entries, fn {key, entry} -> {key, Map.update(entry, :metas, [], &strip_metas/1)} end)
+    striped_presences
   end
 
-  defp strip_metas(metas), do: Enum.map(metas, &Map.delete(&1, @envelope_key))
+  # Takes the grouped presences shape, `%{key => %{metas: [meta, ...]}}`, as found under a diff's
+  # :joins / :leaves and in presence_state. Returns {envelopes, entries} with every meta stripped.
+  defp get_and_strip_envelopes(nil), do: :pop
+
+  defp get_and_strip_envelopes(entries) do
+    Enum.flat_map_reduce(entries, %{}, fn
+      {key, value}, acc ->
+        case Map.fetch(value, :metas) do
+          :error ->
+            {[], Map.put(acc, key, value)}
+
+          {:ok, metas} ->
+            {new_metas, envelopes} = extract_envelopes(metas)
+            {envelopes, Map.put(acc, key, Map.put(value, :metas, new_metas))}
+        end
+    end)
+  end
+
+  # Takes one key's metas, `[%{"user" => ..., :phx_ref => ..., :_rt => %{ts, node}}, ...]`, and
+  # returns {metas, envelopes}: the metas in order without :_rt, plus an Envelope per stamped one.
+  defp extract_envelopes(metas) do
+    Enum.map_reduce(metas, [], fn
+      meta, envelopes ->
+        case Map.pop(meta, @envelope_key) do
+          {nil, meta} -> {meta, envelopes}
+          {stamp, meta} -> {meta, [Envelope.new(stamp, meta) | envelopes]}
+        end
+    end)
+  end
 end
