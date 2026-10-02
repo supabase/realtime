@@ -372,4 +372,51 @@ defmodule RealtimeWeb.InspectorLive.ConnComponentTest do
       })
     end
   end
+
+  describe "presence key" do
+    test "is only offered once presence is on", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/")
+
+      refute has_element?(view, "#conn_form_presence_key")
+
+      view |> form("#conn_form", connection: %{enable_presence: "true"}) |> render_change()
+
+      assert has_element?(view, "#conn_form_presence_key")
+    end
+
+    test "travels in the URL and reaches the client trimmed", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/")
+
+      # The field only exists once presence is on, same as for a real user.
+      view |> form("#conn_form", connection: %{enable_presence: "true"}) |> render_change()
+      assert_patch(view)
+
+      view
+      |> form("#conn_form", connection: %{channel: "room_a", enable_presence: "true", presence_key: "  alice "})
+      |> render_change()
+
+      assert assert_patch(view) =~ "presence_key=alice"
+
+      view
+      |> form("#conn_form",
+        connection: %{
+          channel: "room_a",
+          token: "a-token",
+          host: "https://x.supabase.co",
+          enable_presence: "true",
+          presence_key: "  alice "
+        }
+      )
+      |> render_submit()
+
+      assert_push_event(view, "connect", %{"connection" => %{"presence_key" => "alice"}})
+    end
+
+    test "a link carrying a key fills the field", %{conn: conn} do
+      {:ok, view, _html} =
+        live(conn, ~p"/?host=https://x.supabase.co&channel=room_a&enable_presence=true&presence_key=alice")
+
+      assert view |> element("#conn_form_presence_key") |> render() =~ "alice"
+    end
+  end
 end
