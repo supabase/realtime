@@ -17,6 +17,19 @@ defmodule RealtimeWeb.Presence.Metrics do
   @envelope_key :_rt
   @presence_diff "presence_diff"
   @feature_flag "presence_latency_metric"
+  @latency_event [:realtime, :presence, :notify, :latency]
+  @discarded_event [:realtime, :presence, :notify, :discarded]
+  # Phoenix.Tracker's down detection window (broadcast_period × max_silent_periods × 2). A join
+  # older than this cannot be a live delivery; it is a replay from transfer_ack or netsplit recovery.
+  @stale_after_ms 30_000
+
+  @type context :: %{
+          tenant: String.t() | nil,
+          path: :fastlane | :channel,
+          implementation: atom(),
+          now: integer(),
+          node: String.t()
+        }
 
   defmodule Envelope do
     @phx_update_key :phx_ref_prev
@@ -88,6 +101,54 @@ defmodule RealtimeWeb.Presence.Metrics do
   end
 
   def strip_diff(msg), do: {msg, []}
+
+  @doc """
+  Builds the context `record/2` measures against, once per dispatched diff.
+
+  Fixes `now` and this node's id so every subscriber of the same diff is measured against the
+  same instant.
+  """
+  @spec context(String.t() | nil, :fastlane | :channel) :: context()
+  def context(tenant_id, path) do
+    %{
+      tenant: tenant_id,
+      path: path,
+      implementation: :phoenix,
+      now: System.system_time(:millisecond),
+      node: Realtime.Nodes.short_node_id_from_name(node())
+    }
+  end
+
+  @doc """
+  Records one latency observation per envelope, for one notified subscriber.
+
+  A negative latency (clock skew between nodes) or one past the stale bound (a replayed join) is
+  counted as discarded instead of recorded.
+  """
+  @spec record([Envelope.t()], context()) :: :ok
+  def record([], _context), do: :ok
+
+  def record(envelopes, context) do
+    Enum.each(envelopes, &record_one(&1, context))
+  end
+
+  defp record_one(%Envelope{ts: ts, node: node, action: action}, context) do
+    latency = context.now - ts
+
+    metadata = %{
+      tenant: context.tenant,
+      action: action,
+      origin: if(node == context.node, do: :local, else: :remote),
+      path: context.path,
+      implementation: context.implementation
+    }
+
+    cond do
+      latency < 0 -> :telemetry.execute(@discarded_event, %{count: 1}, Map.put(metadata, :reason, :negative))
+      latency > @stale_after_ms -> :telemetry.execute(@discarded_event, %{count: 1}, Map.put(metadata, :reason, :stale))
+      true -> :telemetry.execute(@latency_event, %{latency: latency}, metadata)
+    end
+  end
 
   @doc """
   Strips the envelope from every meta in a grouped presence list.
