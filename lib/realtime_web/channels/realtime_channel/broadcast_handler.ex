@@ -65,7 +65,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
 
         cond do
           ack_broadcast && match?({:error, :payload_size_exceeded}, res) ->
-            {:reply, {:error, :payload_size_exceeded}, socket}
+            {:reply, {:error, %{error: :payload_size_exceeded}}, socket}
 
           ack_broadcast && match?({:ok, _}, res) ->
             {:reply, res, socket}
@@ -78,30 +78,32 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
         end
 
       {:ok, policies} ->
-        {:noreply, assign(socket, :policies, policies)}
+        socket
+        |> assign(:policies, policies)
+        |> maybe_reply_error(:unauthorized)
 
       {:error, :rls_policy_error, error} ->
         log_error("RlsPolicyError", error)
-        {:noreply, socket}
+        maybe_reply_error(socket, :rls_policy_error)
 
       {:error, :query_canceled, error} ->
         log_error("QueryCanceled", error)
-        {:noreply, socket}
+        maybe_reply_error(socket, :query_canceled)
 
       {:error, :missing_partition} ->
         log_error("MissingPartition", "Realtime was unable to find the expected messages partition")
-        {:noreply, socket}
+        maybe_reply_error(socket, :missing_partition)
 
       {:error, :tenant_database_unavailable} ->
         log_error("UnableToConnectToProject", "Realtime was unable to connect to the project database")
-        {:noreply, socket}
+        maybe_reply_error(socket, :tenant_database_unavailable)
 
       {:error, :increase_connection_pool} ->
-        {:noreply, socket}
+        maybe_reply_error(socket, :increase_connection_pool)
 
       {:error, error} ->
         log_error("UnableToSetPolicies", error)
-        {:noreply, socket}
+        maybe_reply_error(socket, :unknown_error)
     end
   end
 
@@ -125,7 +127,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
 
     cond do
       ack_broadcast && match?({:error, :payload_size_exceeded}, res) ->
-        {:reply, {:error, :payload_size_exceeded}, socket}
+        {:reply, {:error, %{error: :payload_size_exceeded}}, socket}
 
       ack_broadcast ->
         {:reply, :ok, socket}
@@ -134,6 +136,16 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
         {:noreply, socket}
     end
   end
+
+  @doc """
+  Replies with the error `code` when the channel acknowledges broadcasts.
+  """
+  @spec maybe_reply_error(Socket.t(), atom()) ::
+          {:reply, {:error, %{error: atom()}}, Socket.t()} | {:noreply, Socket.t()}
+  def maybe_reply_error(%{assigns: %{ack_broadcast: true}} = socket, code),
+    do: {:reply, {:error, %{error: code}}, socket}
+
+  def maybe_reply_error(socket, _code), do: {:noreply, socket}
 
   defp send_message(tenant_id, self_broadcast, tenant_topic, payload) do
     broadcast = build_broadcast(tenant_topic, payload)
