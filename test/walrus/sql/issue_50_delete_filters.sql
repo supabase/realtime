@@ -23,7 +23,7 @@ from
 
     ) f(id, column_name, op, value);
 
-select subscription_id, filters from realtime.subscription;
+select subscription_id, filters from realtime.subscription order by id;
 
 ----------------------------------------------------------------------------------------
 -- When Replica Identity is Not Full, only filters referencing the pkey are respected --
