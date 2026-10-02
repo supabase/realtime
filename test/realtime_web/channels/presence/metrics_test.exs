@@ -31,6 +31,18 @@ defmodule RealtimeWeb.Presence.MetricsTest do
       assert Map.delete(Metrics.stamp(payload, @tenant), :_rt) == payload
     end
 
+    test "a user's own \"_rt\" field is neither overwritten by the stamp nor removed by the strip" do
+      stub(FeatureFlags, :enabled?, fn _, _ -> true end)
+
+      # User keys arrive as strings from JSON; the envelope key is an atom, so they never collide.
+      stamped = Metrics.stamp(%{"name" => "alice", "_rt" => "mine"}, @tenant)
+      assert %{"_rt" => "mine", :_rt => %{ts: _, node: _}} = stamped
+
+      diff = %Broadcast{event: "presence_diff", payload: %{joins: %{"alice" => %{metas: [stamped]}}, leaves: %{}}}
+      assert {%Broadcast{payload: %{joins: %{"alice" => %{metas: [meta]}}}}, [_envelope]} = Metrics.strip_diff(diff)
+      assert meta == %{"name" => "alice", "_rt" => "mine"}
+    end
+
     test "returns the payload untouched when the feature flag is off for the tenant" do
       stub(FeatureFlags, :enabled?, fn "presence_latency_metric", @tenant -> false end)
       payload = %{"name" => "alice"}
