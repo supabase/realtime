@@ -87,9 +87,7 @@ defmodule TestTenantDb do
   @doc "Return a port for a pooled tenant DB that can be used"
   def checkout() do
     case acquire_tenant_db() do
-      {:ok, port, checkin} ->
-        # Automatically checkin at the end of the test
-        ExUnit.Callbacks.on_exit(fn -> checkin.() end)
+      {:ok, port} ->
         {:ok, port}
 
       :error ->
@@ -163,8 +161,8 @@ defmodule TestTenantDb do
 
   # Acquire a tenant database for one test — a pooled supabase/postgres
   # container, or (in external mode) one of the pre-configured external DBs.
-  # Either way it's a real pool checkout, released via the returned checkin
-  # function once the caller is done.
+  # Either way it's a real pool checkout, released once the test's on_exit
+  # callbacks have run.
   #
   # A worker whose database fails the probe is discarded rather than handed on:
   # its resource is destroyed and the worker killed, which makes poolboy start a
@@ -179,13 +177,13 @@ defmodule TestTenantDb do
   end
 
   defp acquire_tenant_db(attempts, failures) do
-    case checkout_worker() do
+    case hold_worker() do
       {:ok, worker} ->
         port = Backend.current().worker_port(worker)
 
         case probe(port) do
           :ok ->
-            {:ok, port, fn -> :poolboy.checkin(TestTenantDb.Pool, worker) end}
+            {:ok, port}
 
           {:error, reason} ->
             acquire_tenant_db(attempts - 1, [discard_worker(worker, port, reason) | failures])
@@ -193,6 +191,36 @@ defmodule TestTenantDb do
 
       :full ->
         no_free_worker(failures)
+    end
+  end
+
+  defp hold_worker do
+    caller = self()
+
+    {holder, ref} =
+      spawn_monitor(fn ->
+        case checkout_worker() do
+          {:ok, worker} ->
+            send(caller, {:checked_out, self(), worker})
+            receive do: (:release -> :ok)
+
+          :full ->
+            exit(:full)
+        end
+      end)
+
+    ExUnit.Callbacks.on_exit(fn -> send(holder, :release) end)
+
+    receive do
+      {:checked_out, ^holder, worker} ->
+        Process.demonitor(ref, [:flush])
+        {:ok, worker}
+
+      {:DOWN, ^ref, :process, ^holder, :full} ->
+        :full
+
+      {:DOWN, ^ref, :process, ^holder, reason} ->
+        exit(reason)
     end
   end
 
@@ -269,7 +297,7 @@ defmodule TestTenantDb do
   end
 
   defp do_checkout_tenant(opts, mode) do
-    with {:ok, port, checkin} <- acquire_tenant_db() do
+    with {:ok, port} <- acquire_tenant_db() do
       tenant = repo_run(mode, fn -> Generators.tenant_fixture(%{port: port, migrations_ran: 0}) end)
 
       run_migrations? = Keyword.get(opts, :run_migrations, false)
@@ -300,8 +328,6 @@ defmodule TestTenantDb do
           if mode == :unboxed do
             repo_run(:unboxed, fn -> Realtime.Api.delete_tenant_by_external_id(tenant.external_id) end)
           end
-
-          checkin.()
         end)
 
         if run_migrations? do
