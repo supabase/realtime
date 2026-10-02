@@ -35,6 +35,7 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
             claims: %{:exp => System.system_time(:second) - 1000},
             params: %{log_level: :info}
           )
+
         end)
 
       assert log =~ "InvalidJWTToken: Token has expired"

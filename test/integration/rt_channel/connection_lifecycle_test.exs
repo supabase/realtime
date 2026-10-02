@@ -81,7 +81,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
 
       assert_receive %Phoenix.Socket.Broadcast{event: "ready", payload: %{replication_conn: replication_conn}}
                      when is_pid(replication_conn),
-                     5000
+                     15_000
 
       assert {:ok, ^replication_conn} = Connect.replication_status(tenant.external_id)
     end

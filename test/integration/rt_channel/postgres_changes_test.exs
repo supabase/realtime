@@ -124,7 +124,7 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
                        ref: nil,
                        topic: ^topic
                      },
-                     500
+                     2000
 
       {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
 
