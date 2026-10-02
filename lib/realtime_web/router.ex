@@ -49,7 +49,7 @@ defmodule RealtimeWeb.Router do
   end
 
   pipeline :metrics do
-    plug(:check_auth, [:metrics_jwt_secret, :metrics_blocklist])
+    plug(:check_auth_metrics)
   end
 
   pipeline :openapi do
@@ -163,6 +163,43 @@ defmodule RealtimeWeb.Router do
         |> send_resp(403, "")
         |> halt()
     end
+  end
+
+  # Metrics-specific auth that supports both METRICS_JWT_SECRET and METRICS_JWT_JWKS
+  defp check_auth_metrics(conn, _opts) do
+    secrets = Application.fetch_env!(:realtime, :metrics_jwt_secret) |> List.wrap()
+    jwks = Application.get_env(:realtime, :metrics_jwt_jwks)
+    blocklist = Application.get_env(:realtime, :metrics_blocklist, [])
+
+    with ["Bearer " <> token] <- get_req_header(conn, "authorization"),
+         token <- Regex.replace(~r/\s|\n/, URI.decode(token), ""),
+         false <- token in blocklist,
+         {:ok, _claims} <- authorize_any_metrics(token, secrets, jwks) do
+      conn
+    else
+      _ ->
+        conn
+        |> send_resp(403, "")
+        |> halt()
+    end
+  end
+
+  defp authorize_any_metrics(token, [], jwks) do
+    # No secrets configured, try JWKS only
+    if jwks do
+      authorize(token, nil, jwks)
+    else
+      {:error, :unauthorized}
+    end
+  end
+
+  defp authorize_any_metrics(token, secrets, jwks) do
+    Enum.find_value(secrets, {:error, :unauthorized}, fn secret ->
+      case authorize(token, secret, jwks) do
+        {:ok, claims} -> {:ok, claims}
+        _ -> nil
+      end
+    end)
   end
 
   defp authorize_any(token, secrets) do
