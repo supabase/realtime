@@ -42,7 +42,9 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
       }
     } = socket
 
-    case run_authorization_check(policies || %Policies{}, db_conn, authorization_context) do
+    persist_intent = persist_intent(payload) and FeatureFlags.enabled?("broadcast_persistence", tenant_id)
+
+    case run_authorization_check(policies || %Policies{}, db_conn, authorization_context, persist_intent) do
       {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}} = policies} ->
         socket =
           socket
@@ -57,7 +59,15 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
             :ok ->
               send_message(tenant_id, self_broadcast, tenant_topic, payload)
               # TODO: hard limits and buffering based on ack
-              maybe_persist(policies, db_conn, tenant_id, authorization_context.topic, payload, ack_broadcast)
+              maybe_persist(
+                policies,
+                persist_intent,
+                db_conn,
+                tenant_id,
+                authorization_context.topic,
+                payload,
+                ack_broadcast
+              )
 
             {:error, error} ->
               {:error, error}
@@ -176,17 +186,17 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
     %Phoenix.Socket.Broadcast{topic: topic, event: @event_type, payload: payload}
   end
 
-  @spec maybe_persist(Policies.t(), pid(), String.t(), String.t(), payload, ack_broadcast :: boolean()) ::
-          :ok | :skip | {:ok, map()}
-  defp maybe_persist(
-         %Policies{broadcast: %BroadcastPolicies{persist: true}},
-         db_conn,
-         tenant_id,
-         topic,
-         payload,
-         ack_broadcast
-       ) do
-    if FeatureFlags.enabled?("broadcast_persistence", tenant_id) do
+  @spec maybe_persist(
+          Policies.t(),
+          persist_intent :: boolean(),
+          pid(),
+          String.t(),
+          String.t(),
+          payload,
+          ack_broadcast :: boolean()
+        ) :: :ok | {:ok, map()}
+  defp maybe_persist(policies, persist_intent, db_conn, tenant_id, topic, payload, ack_broadcast) do
+    if persist?(policies, persist_intent) do
       if ack_broadcast do
         persist(db_conn, tenant_id, topic, payload)
       else
@@ -197,11 +207,9 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
         :ok
       end
     else
-      :skip
+      :ok
     end
   end
-
-  defp maybe_persist(_policies, _db_conn, _tenant_id, _topic, _payload, _ack_broadcast), do: :ok
 
   defp persist(db_conn, tenant_id, topic, payload) do
     with {:ok, event, event_payload} <- convert_to_persistable_fields(payload),
@@ -235,27 +243,40 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
     socket
   end
 
-  defp run_authorization_check(
-         %Policies{broadcast: %BroadcastPolicies{write: nil}} = policies,
-         db_conn,
-         authorization_context
-       ) do
-    with {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}} = policies} <-
-           Authorization.get_write_authorizations(policies, db_conn, authorization_context, :broadcast) do
-      maybe_check_persistence(policies, db_conn, authorization_context)
-    end
+  @doc false
+  # Which write policies still need a probe.
+  #
+  # `write` and `persist` are cached per socket and tri-state: `nil` means not checked yet. Intent
+  # is per message and never cached, so a message that does not ask to persist never probes the
+  # `persistence` policy, and a message that does ask probes it once and reuses the answer.
+  @spec extensions_to_probe(Policies.t(), persist_intent :: boolean()) :: [Authorization.extension()]
+  def extensions_to_probe(%Policies{broadcast: %BroadcastPolicies{write: write, persist: persist}}, persist_intent) do
+    [
+      if(is_nil(write), do: :broadcast),
+      if(persist_intent and is_nil(persist), do: :persistence)
+    ]
+    |> Enum.reject(&is_nil/1)
   end
 
-  defp run_authorization_check(socket, _db_conn, _authorization_context) do
-    {:ok, socket}
-  end
+  @doc false
+  # Whether this message should be written, given per-message intent and the cached policy answer.
+  @spec persist?(Policies.t(), persist_intent :: boolean()) :: boolean()
+  def persist?(%Policies{broadcast: %BroadcastPolicies{persist: true}}, true), do: true
+  def persist?(_policies, _persist_intent), do: false
 
-  # The persist policy needs its own probe, so only pay for it when the flag is on.
-  defp maybe_check_persistence(policies, db_conn, authorization_context) do
-    if FeatureFlags.enabled?("broadcast_persistence", authorization_context.tenant_id) do
-      Authorization.get_write_authorizations(policies, db_conn, authorization_context, :persistence)
-    else
-      {:ok, policies}
+  @doc false
+  # Per-message persistence intent, read from the frame metadata rather than the payload. The map
+  # form of a broadcast is forwarded to subscribers as-is, so a control key there would leak.
+  @spec persist_intent(payload) :: boolean()
+  def persist_intent({_event, _encoding, _payload, metadata}) when is_map(metadata),
+    do: metadata["persist"] == true
+
+  def persist_intent(_payload), do: false
+
+  defp run_authorization_check(policies, db_conn, authorization_context, persist_intent) do
+    case extensions_to_probe(policies, persist_intent) do
+      [] -> {:ok, policies}
+      extensions -> Authorization.get_write_authorizations(policies, db_conn, authorization_context, extensions)
     end
   end
 end

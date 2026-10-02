@@ -115,8 +115,11 @@ defmodule Realtime.Tenants.Authorization do
   Runs validations based on RLS policies to return policies for write policies
 
   Automatically uses RPC if the database connection is not in the same node
+
+  Accepts a single extension or a list of them. A list is probed in one transaction, which pays the
+  connection setup and `set_conn_config` once instead of once per extension.
   """
-  @spec get_write_authorizations(Policies.t(), pid(), t(), extension()) ::
+  @spec get_write_authorizations(Policies.t(), pid(), t(), extension() | [extension()]) ::
           {:ok, Policies.t()}
           | {:error, :rls_policy_error, Postgrex.Error.t()}
           | {:error, :query_canceled, Postgrex.Error.t()}
@@ -125,12 +128,16 @@ defmodule Realtime.Tenants.Authorization do
           | {:error, :tenant_database_unavailable}
           | {:error, any()}
   def get_write_authorizations(policies, db_conn, authorization_context, extension)
-      when extension in [:broadcast, :presence, :persistence] and node() == node(db_conn) do
+      when is_atom(extension),
+      do: get_write_authorizations(policies, db_conn, authorization_context, [extension])
+
+  def get_write_authorizations(policies, db_conn, authorization_context, extensions)
+      when is_list(extensions) and node() == node(db_conn) do
     rate_counter = rate_counter(authorization_context.tenant_id)
 
     if rate_counter.limit.triggered == false do
       db_conn
-      |> get_write_policies_for_connection(authorization_context, policies, extension)
+      |> get_write_policies_for_connection(authorization_context, policies, extensions)
       |> handle_policies_result(rate_counter)
     else
       {:error, :increase_connection_pool}
@@ -138,8 +145,8 @@ defmodule Realtime.Tenants.Authorization do
   end
 
   # Remote call
-  def get_write_authorizations(policies, db_conn, authorization_context, extension)
-      when extension in [:broadcast, :presence, :persistence] do
+  def get_write_authorizations(policies, db_conn, authorization_context, extensions)
+      when is_list(extensions) do
     rate_counter = rate_counter(authorization_context.tenant_id)
 
     if rate_counter.limit.triggered == false do
@@ -147,7 +154,7 @@ defmodule Realtime.Tenants.Authorization do
              node(db_conn),
              __MODULE__,
              :get_write_authorizations,
-             [policies, db_conn, authorization_context, extension],
+             [policies, db_conn, authorization_context, extensions],
              tenant_id: authorization_context.tenant_id,
              key: authorization_context.tenant_id
            ) do
@@ -281,7 +288,7 @@ defmodule Realtime.Tenants.Authorization do
     )
   end
 
-  defp get_write_policies_for_connection(conn, authorization_context, policies, extension) do
+  defp get_write_policies_for_connection(conn, authorization_context, policies, extensions) do
     tenant_id = authorization_context.tenant_id
     opts = [telemetry: [:realtime, :tenants, :write_authorization_check], tenant_id: tenant_id]
     metadata = [project: tenant_id, external_id: tenant_id]
@@ -291,7 +298,17 @@ defmodule Realtime.Tenants.Authorization do
       fn transaction_conn ->
         set_conn_config(transaction_conn, authorization_context)
 
-        with {:ok, policies} <- check_write_policy(transaction_conn, authorization_context, extension, policies) do
+        # Each extension gets its own savepoint insert, so a denial rolls back only that probe and
+        # the remaining extensions still get an answer.
+        result =
+          Enum.reduce_while(extensions, {:ok, policies}, fn extension, {:ok, acc} ->
+            case check_write_policy(transaction_conn, authorization_context, extension, acc) do
+              {:ok, policies} -> {:cont, {:ok, policies}}
+              {:error, reason} -> {:halt, {:error, reason}}
+            end
+          end)
+
+        with {:ok, policies} <- result do
           Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
           policies
         else

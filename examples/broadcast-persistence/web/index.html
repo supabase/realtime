@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Realtime Coding Harness Demo</title>
+    <link rel="stylesheet" href="./app.css" />
+  </head>
+  <body class="min-h-screen bg-neutral-950 p-8 text-[15px] text-neutral-100 antialiased">
+    <header class="mx-auto mb-6 flex max-w-5xl flex-wrap items-start justify-between gap-6">
+      <div>
+        <h1 class="mb-1 text-2xl font-semibold">Realtime Coding Harness Demo</h1>
+        <p class="max-w-[64ch] text-neutral-400">
+          A human and an agent share one channel. Every message is delivered. Which ones get
+          written to your Postgres table is a separate decision, made per message and enforced by
+          your own RLS policy. Reconnect and the session replays exactly what was kept.
+        </p>
+      </div>
+      <div
+        class="flex items-center gap-2 rounded-full border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm whitespace-nowrap"
+      >
+        <span
+          id="status-dot"
+          class="size-2.5 rounded-full bg-neutral-500 data-[state=connecting]:bg-amber-400 data-[state=error]:bg-red-400 data-[state=open]:bg-emerald-400"
+          data-state="closed"
+        ></span>
+        <span id="status-text">Not connected</span>
+      </div>
+    </header>
+
+    <div class="mx-auto mb-4 flex max-w-5xl justify-end">
+      <button
+        id="restart"
+        class="rounded-md border border-neutral-800 bg-neutral-800 px-3 py-1.5 text-sm hover:border-neutral-600"
+      >
+        Restart demo
+      </button>
+    </div>
+
+    <main class="mx-auto grid max-w-5xl grid-cols-1 gap-4">
+      <!-- The product decision, front and centre. -->
+      <section class="rounded-lg border border-neutral-800 bg-neutral-900 p-5">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2 class="text-base font-semibold">Retention</h2>
+            <p class="mt-1 text-sm text-neutral-400">What this session writes to your database.</p>
+          </div>
+          <label
+            class="flex items-center gap-3 rounded-md border border-neutral-800 bg-neutral-950 px-4 py-2.5"
+          >
+            <input id="keep-agent" type="checkbox" class="size-4 accent-emerald-400" />
+            <span class="text-sm font-medium">Keep the agent's replies too</span>
+          </label>
+        </div>
+        <p id="keep-agent-note" class="mt-3 text-sm text-neutral-400"></p>
+      </section>
+
+      <!-- The session itself. -->
+      <section class="flex flex-col rounded-lg border border-neutral-800 bg-neutral-900 p-5">
+          <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <h2 class="text-base font-semibold">Session</h2>
+            <div class="flex items-center gap-2">
+              <span class="text-sm text-neutral-400">You and the agent</span>
+              <button
+                id="connect"
+                class="rounded-md bg-emerald-400 px-3 py-1.5 text-sm font-semibold text-emerald-950 hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Join
+              </button>
+              <button
+                id="disconnect"
+                disabled
+                class="rounded-md border border-neutral-800 bg-neutral-800 px-3 py-1.5 text-sm hover:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Leave
+              </button>
+            </div>
+          </div>
+
+          <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <p class="text-sm text-neutral-400">
+              Send a prompt and the agent answers on the same channel, the way a harness would.
+            </p>
+            <div class="flex items-center gap-2">
+              <span id="db-count" class="text-sm text-neutral-400">No rows yet.</span>
+              <button
+                id="rejoin"
+                disabled
+                class="rounded-md border border-neutral-800 bg-neutral-800 px-3 py-1.5 text-sm hover:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Reconnect and replay
+              </button>
+              <button
+                id="clear"
+                class="rounded-md border border-neutral-800 bg-neutral-800 px-3 py-1.5 text-sm hover:border-neutral-600"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+          <ol
+            id="chat"
+            class="mb-3 h-80 grow overflow-y-auto rounded-md border border-neutral-800 bg-neutral-950 p-2"
+          >
+            <li class="p-4 text-center text-neutral-500">Join to start the session.</li>
+          </ol>
+
+          <div class="flex items-center gap-2">
+            <input
+              id="text"
+              type="text"
+              value="refactor the auth module"
+              class="min-w-0 flex-1 rounded-md border border-neutral-800 bg-neutral-950 px-2.5 py-2 text-[15px] text-neutral-100 focus:border-emerald-400 focus:outline-none"
+            />
+            <button
+              id="send"
+              disabled
+              class="rounded-md bg-emerald-400 px-3.5 py-2 font-semibold text-emerald-950 hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Send
+            </button>
+          </div>
+          <div class="mt-2 flex flex-wrap items-center gap-4">
+            <label class="flex items-center gap-2 text-sm text-neutral-400">
+              <input id="persist" type="checkbox" checked class="size-4 accent-emerald-400" />
+              <span>Ask to save this message</span>
+            </label>
+            <label class="flex items-center gap-2 text-sm text-neutral-400">
+              <input
+                id="replay"
+                type="checkbox"
+                checked
+                class="size-4 accent-emerald-400 disabled:opacity-50"
+              />
+              <span>Replay history on join</span>
+            </label>
+            <label class="flex items-center gap-2 text-sm text-neutral-400">
+              <span>Limit</span>
+              <input
+                id="replay-limit"
+                type="number"
+                value="25"
+                min="1"
+                max="25"
+                class="w-16 rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-sm text-neutral-100 focus:border-emerald-400 focus:outline-none disabled:opacity-50"
+              />
+            </label>
+          </div>
+          <p
+            id="send-result"
+            class="mt-2 text-sm text-neutral-400 data-[state=error]:text-red-400 data-[state=ok]:text-emerald-400"
+          ></p>
+      </section>
+
+      <!-- Everything an engineer will ask for, below the product story. -->
+      <div class="mt-6 mb-1">
+        <h2 class="text-base font-semibold">Under the hood</h2>
+        <p class="mt-1 text-sm text-neutral-400">The policy, the permissions, and the calls.</p>
+      </div>
+
+      <section class="rounded-lg border border-neutral-800 bg-neutral-900 p-5">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <h3 class="text-sm font-semibold">Permissions right now</h3>
+          <div class="flex items-center gap-2 text-sm">
+            <span class="text-neutral-400">for <span id="check-topic" class="font-mono"></span>:</span>
+            <span
+              id="check-read"
+              class="rounded px-2 py-0.5 font-mono text-xs text-neutral-400 data-[state=allowed]:bg-emerald-400/15 data-[state=allowed]:text-emerald-400 data-[state=denied]:bg-red-400/15 data-[state=denied]:text-red-400"
+              >join ?</span
+            >
+            <span
+              id="check-broadcast"
+              class="rounded px-2 py-0.5 font-mono text-xs text-neutral-400 data-[state=allowed]:bg-emerald-400/15 data-[state=allowed]:text-emerald-400 data-[state=denied]:bg-red-400/15 data-[state=denied]:text-red-400"
+              >send ?</span
+            >
+            <span
+              id="check-human-store"
+              class="rounded px-2 py-0.5 font-mono text-xs text-neutral-400 data-[state=allowed]:bg-emerald-400/15 data-[state=allowed]:text-emerald-400 data-[state=denied]:bg-red-400/15 data-[state=denied]:text-red-400"
+              >store you ?</span
+            >
+            <span
+              id="check-persistence"
+              class="rounded px-2 py-0.5 font-mono text-xs text-neutral-400 data-[state=allowed]:bg-emerald-400/15 data-[state=allowed]:text-emerald-400 data-[state=denied]:bg-red-400/15 data-[state=denied]:text-red-400"
+              >store agent ?</span
+            >
+          </div>
+        </div>
+        <p class="mt-2 text-sm text-neutral-400">
+          Probed the way Realtime does it: set the session config, then try a rolled-back insert as
+          <code class="font-mono">authenticated</code>. Sending and storing are answered separately,
+          which is why one can be allowed while the other is refused.
+        </p>
+        <table class="mt-3 w-full border-collapse font-mono text-xs">
+          <thead>
+            <tr class="text-left text-neutral-400">
+              <th class="border-b border-neutral-800 px-2 py-1 font-medium">policy</th>
+              <th class="border-b border-neutral-800 px-2 py-1 font-medium">command</th>
+              <th class="border-b border-neutral-800 px-2 py-1 font-medium">extension</th>
+            </tr>
+          </thead>
+          <tbody id="policies-rows"></tbody>
+        </table>
+        <p class="mt-3 text-sm text-amber-400">
+          A channel checks policies once and caches the answer. Changing retention rejoins both
+          sides for you.
+        </p>
+      </section>
+
+      <section class="rounded-lg border border-neutral-800 bg-neutral-900 p-5">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 class="text-sm font-semibold">The policy in force</h3>
+            <p class="mt-1 text-sm text-neutral-400">
+              The retention checkbox writes this. Edit it and run your own.
+            </p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button
+              id="policies-reset"
+              class="rounded-md border border-neutral-800 bg-neutral-800 px-3 py-1.5 text-sm hover:border-neutral-600"
+            >
+              Reset
+            </button>
+            <button
+              id="policies-drop"
+              class="rounded-md border border-neutral-800 bg-neutral-800 px-3 py-1.5 text-sm hover:border-neutral-600"
+            >
+              Drop
+            </button>
+            <button
+              id="policies-apply"
+              class="rounded-md bg-emerald-400 px-3 py-1.5 text-sm font-semibold text-emerald-950 hover:bg-emerald-300"
+            >
+              Run SQL
+            </button>
+          </div>
+        </div>
+
+        <!-- A textarea cannot be highlighted, so the highlighted copy sits behind a transparent
+             one. Both need identical font, padding, and line height. -->
+        <div
+          class="relative mt-3 h-[26rem] overflow-hidden rounded-md border border-neutral-800 bg-neutral-950 focus-within:border-emerald-400 [&_pre]:m-0 [&_pre]:h-full [&_pre]:overflow-auto [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-xs [&_pre]:leading-relaxed"
+        >
+          <div id="policies-highlight" class="pointer-events-none absolute inset-0"></div>
+          <textarea
+            id="policies-sql"
+            wrap="off"
+            spellcheck="false"
+            class="absolute inset-0 size-full resize-none overflow-auto bg-transparent p-3 font-mono text-xs leading-relaxed text-transparent caret-emerald-400 outline-none selection:bg-emerald-400/30"
+          ></textarea>
+        </div>
+        <p
+          id="policies-result"
+          class="mt-2 text-sm text-neutral-400 data-[state=error]:text-red-400 data-[state=ok]:text-emerald-400"
+        ></p>
+      </section>
+
+      <section class="rounded-lg border border-neutral-800 bg-neutral-900 p-5">
+          <h3 class="text-sm font-semibold">The send</h3>
+          <p class="mt-1 mb-3 text-sm text-neutral-400">
+            <code class="font-mono">persist</code> travels as frame metadata, not inside your
+            payload, so subscribers never see it. With <code class="font-mono">ack: true</code> the
+            server writes the row before replying and returns its id.
+          </p>
+          <div
+            id="send-code"
+            class="overflow-hidden rounded-md border border-neutral-800 [&_pre]:m-0 [&_pre]:overflow-x-auto [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-xs [&_pre]:leading-relaxed"
+          ></div>
+      </section>
+
+      <section class="rounded-lg border border-neutral-800 bg-neutral-900 p-5">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 class="text-sm font-semibold">The read</h3>
+            <p class="mt-1 text-sm text-neutral-400">
+              Stored broadcasts are ordinary rows, so anything that reads Postgres can read them.
+            </p>
+          </div>
+          <div class="flex items-end gap-2">
+            <label class="text-xs tracking-wide text-neutral-400 uppercase">
+              Topic
+              <input
+                id="topic"
+                type="text"
+                value="persisted:session-1"
+                spellcheck="false"
+                class="mt-1 block w-56 rounded-md border border-neutral-800 bg-neutral-950 px-2.5 py-2 text-sm text-neutral-100 normal-case focus:border-emerald-400 focus:outline-none disabled:opacity-50"
+              />
+            </label>
+            <button
+              id="refresh"
+              class="rounded-md border border-neutral-800 bg-neutral-800 px-3 py-2 text-sm hover:border-neutral-600"
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+        <p id="topic-warning" hidden class="mt-2 text-sm text-amber-400">
+          Nobody is a member of this topic, so it cannot be joined.
+        </p>
+
+        <div
+          id="sql"
+          class="mt-3 overflow-hidden rounded-md border border-neutral-800 [&_pre]:m-0 [&_pre]:overflow-x-auto [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-xs [&_pre]:leading-relaxed"
+        ></div>
+
+        <table class="mt-3 w-full table-fixed border-collapse font-mono text-xs">
+          <thead>
+            <tr class="text-left text-neutral-400">
+              <th class="w-32 border-b border-neutral-800 px-2 py-1 font-medium">inserted_at</th>
+              <th class="w-20 border-b border-neutral-800 px-2 py-1 font-medium">author</th>
+              <th class="border-b border-neutral-800 px-2 py-1 font-medium">message</th>
+              <th class="w-28 border-b border-neutral-800 px-2 py-1 font-medium">id</th>
+            </tr>
+          </thead>
+          <tbody id="db-rows"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
