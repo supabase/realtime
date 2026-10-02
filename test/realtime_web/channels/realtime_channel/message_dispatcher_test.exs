@@ -315,6 +315,152 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
       refute_receive _any
     end
 
+    test "records one latency observation per fastlane subscriber of a sampled presence_diff" do
+      tenant = "tenant-sampled-#{System.unique_integer([:positive])}"
+      attach_presence_telemetry(tenant)
+      from_pid = :erlang.list_to_pid(~c'<0.2.1>')
+      local_node = Realtime.Nodes.short_node_id_from_name(node())
+
+      subscribers = [
+        # the tracking client itself: skipped by the dispatcher
+        {from_pid, {:rc_fastlane, self(), TestSerializer, "realtime:topic", :error, tenant, MapSet.new(), true, true}},
+        # denied presence.read: withheld, so not notified and not measured
+        {self(), {:rc_fastlane, self(), TestSerializer, "realtime:topic", :error, tenant, MapSet.new(), false, true}},
+        # two subscribers that receive the frame
+        {self(), {:rc_fastlane, self(), TestSerializer, "realtime:topic", :error, tenant, MapSet.new(), true, true}},
+        {self(), {:rc_fastlane, self(), TestSerializer, "realtime:topic", :error, tenant, MapSet.new(), true, true}}
+      ]
+
+      stamped_at = System.system_time(:millisecond) - 7
+
+      msg = %Broadcast{
+        topic: "realtime:topic",
+        event: "presence_diff",
+        payload: %{
+          joins: %{
+            "alice" => %{metas: [%{"name" => "alice", :phx_ref => "a1", :_rt => %{ts: stamped_at, node: local_node}}]}
+          },
+          leaves: %{}
+        }
+      }
+
+      assert MessageDispatcher.dispatch(subscribers, from_pid, msg) == :ok
+
+      # Delivered frames carry no envelope.
+      assert_receive {:encoded, %Broadcast{event: "presence_diff", payload: %{joins: joins}}}
+      assert_receive {:encoded, %Broadcast{event: "presence_diff", payload: %{joins: ^joins}}}
+      assert %{"alice" => %{metas: [%{"name" => "alice", :phx_ref => "a1"}]}} == joins
+
+      # One observation per notified subscriber, measured on this node, over the fastlane.
+      for _ <- 1..2 do
+        assert_receive {:telemetry, [:realtime, :presence, :notify, :latency], %{latency: latency},
+                        %{tenant: ^tenant, action: :track, origin: :local, path: :fastlane, implementation: :phoenix}}
+
+        assert latency >= 7
+      end
+
+      refute_receive {:telemetry, _, _, _}
+      refute_receive {:encoded, _}
+    end
+
+    test "routes a sampled presence_diff to channel processes as received, unstripped and unrecorded" do
+      tenant = "tenant-channel-#{System.unique_integer([:positive])}"
+      attach_presence_telemetry(tenant)
+      from_pid = :erlang.list_to_pid(~c'<0.2.1>')
+
+      # presence.read not evaluated yet: the channel process decides, so it strips and records itself.
+      subscribers = [
+        {self(), {:rc_fastlane, self(), TestSerializer, "realtime:topic", :error, tenant, MapSet.new(), nil, true}}
+      ]
+
+      msg = %Broadcast{
+        topic: "realtime:topic",
+        event: "presence_diff",
+        payload: %{
+          joins: %{
+            "alice" => %{
+              metas: [
+                %{"name" => "alice", :phx_ref => "a1", :_rt => %{ts: System.system_time(:millisecond), node: "n1"}}
+              ]
+            }
+          },
+          leaves: %{}
+        }
+      }
+
+      assert MessageDispatcher.dispatch(subscribers, from_pid, msg) == :ok
+
+      assert_receive {:authorize_presence_diff, ^msg}
+
+      refute_receive {:telemetry, _, _, _}
+      refute_receive {:encoded, _}
+    end
+
+    test "records every envelope of a multi-join diff for every fastlane subscriber" do
+      tenant = "tenant-multi-#{System.unique_integer([:positive])}"
+      attach_presence_telemetry(tenant)
+      from_pid = :erlang.list_to_pid(~c'<0.2.1>')
+      now = System.system_time(:millisecond)
+      local_node = Realtime.Nodes.short_node_id_from_name(node())
+
+      subscribers = [
+        {self(), {:rc_fastlane, self(), TestSerializer, "realtime:topic", :error, tenant, MapSet.new(), true, true}},
+        {self(), {:rc_fastlane, self(), TestSerializer, "realtime:topic", :error, tenant, MapSet.new(), true, true}}
+      ]
+
+      # Two tracks collapsed into one diff, as a remote heartbeat delta would carry them.
+      msg = %Broadcast{
+        topic: "realtime:topic",
+        event: "presence_diff",
+        payload: %{
+          joins: %{
+            "alice" => %{metas: [%{"name" => "alice", :phx_ref => "a1", :_rt => %{ts: now - 10, node: local_node}}]},
+            "bob" => %{
+              metas: [
+                %{"name" => "bob", :phx_ref => "b2", :phx_ref_prev => "b1", :_rt => %{ts: now - 900, node: "other"}}
+              ]
+            }
+          },
+          leaves: %{}
+        }
+      }
+
+      assert MessageDispatcher.dispatch(subscribers, from_pid, msg) == :ok
+
+      events =
+        for _ <- 1..4 do
+          assert_receive {:telemetry, [:realtime, :presence, :notify, :latency], _, %{tenant: ^tenant} = metadata}
+          {metadata.action, metadata.origin}
+        end
+
+      assert Enum.sort(events) == [{:track, :local}, {:track, :local}, {:update, :remote}, {:update, :remote}]
+
+      refute_receive {:telemetry, _, _, _}
+      assert_receive {:encoded, _}
+      assert_receive {:encoded, _}
+    end
+
+    test "an unsampled presence_diff records nothing" do
+      tenant = "tenant-unsampled-#{System.unique_integer([:positive])}"
+      attach_presence_telemetry(tenant)
+      from_pid = :erlang.list_to_pid(~c'<0.2.1>')
+
+      subscribers = [
+        {self(), {:rc_fastlane, self(), TestSerializer, "realtime:topic", :error, tenant, MapSet.new(), true, true}}
+      ]
+
+      msg = %Broadcast{
+        topic: "realtime:topic",
+        event: "presence_diff",
+        payload: %{joins: %{"alice" => %{metas: [%{"name" => "alice", :phx_ref => "a1"}]}}, leaves: %{}}
+      }
+
+      assert MessageDispatcher.dispatch(subscribers, from_pid, msg) == :ok
+
+      assert_receive {:encoded, ^msg}
+      refute_receive {:telemetry, _, _, _}
+    end
+
     test "does not dispatch messages to fastlane subscribers if they already replayed it" do
       parent = self()
 
@@ -898,5 +1044,22 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
 
       loop.(loop)
     end)
+  end
+
+  defp attach_presence_telemetry(tenant) do
+    id = {__MODULE__, tenant}
+
+    :telemetry.attach_many(
+      id,
+      [[:realtime, :presence, :notify, :latency], [:realtime, :presence, :notify, :discarded]],
+      &__MODULE__.handle_presence_telemetry/4,
+      %{pid: self(), tenant: tenant}
+    )
+
+    on_exit(fn -> :telemetry.detach(id) end)
+  end
+
+  def handle_presence_telemetry(event, measurements, metadata, %{pid: pid, tenant: tenant}) do
+    if metadata[:tenant] == tenant, do: send(pid, {:telemetry, event, measurements, metadata})
   end
 end

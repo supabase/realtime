@@ -49,7 +49,12 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
   def dispatch(subscribers, from, {:tb, tenant_id, msg}),
     do: do_dispatch(subscribers, from, msg, tenant_id)
 
-  def dispatch(subscribers, from, %Broadcast{event: @presence_diff} = msg) do
+  def dispatch(subscribers, from, %Broadcast{event: @presence_diff} = original_msg) do
+    {msg, envelopes} = RealtimeWeb.Presence.Metrics.strip_diff(original_msg)
+
+    tenant_id = tenant_id(subscribers)
+    fastlane_metrics_context = RealtimeWeb.Presence.Metrics.context(tenant_id, :fastlane)
+
     {_encoded_cache, count} =
       Enum.reduce(subscribers, {%{}, 0}, fn
         {pid, _}, {encoded_cache, count} when pid == from ->
@@ -68,7 +73,7 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
         # Phoenix.Channel.Server's built-in %Broadcast{} handling.
         {pid, {:rc_fastlane, _fastlane_pid, _serializer, _join_topic, _log_level, _tenant_id, _replayed, nil, _bcast}},
         {encoded_cache, count} ->
-          send(pid, {:authorize_presence_diff, msg})
+          send(pid, {:authorize_presence_diff, original_msg})
           {encoded_cache, count}
 
         {_pid,
@@ -79,6 +84,8 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
           encoded_cache =
             fastlane_dispatch(msg, fastlane_pid, serializer, join_topic, encoded_cache, tenant_id, log_level)
 
+          RealtimeWeb.Presence.Metrics.record(envelopes, fastlane_metrics_context)
+
           {encoded_cache, count + 1}
 
         {pid, _}, {encoded_cache, count} ->
@@ -86,7 +93,6 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
           {encoded_cache, count}
       end)
 
-    tenant_id = tenant_id(subscribers)
     increment_presence_counter(tenant_id, msg.event, count)
 
     :ok
