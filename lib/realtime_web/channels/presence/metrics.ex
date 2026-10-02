@@ -32,6 +32,11 @@ defmodule RealtimeWeb.Presence.Metrics do
         }
 
   defmodule Envelope do
+    @moduledoc """
+    Provides a struct for repesenting a resolved metrics envelope.
+
+    This includes an :action value that identifies whether the action was a track or an update.
+    """
     @phx_update_key :phx_ref_prev
 
     @type t :: %__MODULE__{ts: non_neg_integer(), node: String.t() | nil, action: :track | :update}
