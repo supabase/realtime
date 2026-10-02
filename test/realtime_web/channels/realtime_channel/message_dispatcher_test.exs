@@ -123,6 +123,27 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
       refute_receive _any
     end
 
+    test "dispatches UserBroadcast safely to Phoenix.Socket.V2.JSONSerializer without crashing" do
+      subscribers = [
+        {self(),
+         {:rc_fastlane, self(), Phoenix.Socket.V2.JSONSerializer, "realtime:topic", :info, "tenant123", MapSet.new(), true, true}}
+      ]
+
+      msg = %UserBroadcast{
+        topic: "realtime:topic",
+        user_event: "hello",
+        user_payload: "{}",
+        user_payload_encoding: :json,
+        metadata: nil
+      }
+
+      capture_log(fn ->
+        assert MessageDispatcher.dispatch(subscribers, :some_sender_pid, {:tb, "tenant123", msg}) == :ok
+      end)
+      
+      assert_receive {:socket_push, :text, _data}
+    end
+
     test "does not dispatch broadcast messages to subscribers denied broadcast.read" do
       parent = self()
 

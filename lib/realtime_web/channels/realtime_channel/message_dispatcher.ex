@@ -183,6 +183,12 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
     end
   end
 
+  defp fastlane!(Phoenix.Socket.V2.JSONSerializer = serializer, %UserBroadcast{} = msg) do
+    with {:ok, msg} <- UserBroadcast.convert_to_json_broadcast(msg) do
+      {:ok, serializer.fastlane!(msg)}
+    end
+  end
+
   defp fastlane!(serializer, msg), do: {:ok, serializer.fastlane!(msg)}
 
   defp tenant_id([{_pid, {:rc_fastlane, _, _, _, _, tenant_id, _, _, _}} | _]), do: tenant_id
