@@ -786,11 +786,21 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp limit_max_users(tenant, transport_pid) do
+    total = UsersCounter.tenant_users(tenant.external_id)
+
     if !UsersCounter.already_counted?(transport_pid, tenant.external_id) and
-         UsersCounter.tenant_users(tenant.external_id) >= tenant.max_concurrent_users do
+         total >= tenant.max_concurrent_users do
+      # Transport not yet counted (shouldn't happen with connect-time counting,
+      # but kept as a safety net) and limit is reached
       {:error, :too_many_connections}
     else
-      :ok
+      if total > tenant.max_concurrent_users do
+        # Transport is already counted but total has exceeded the limit
+        # (e.g. limit was lowered after connections were established)
+        {:error, :too_many_connections}
+      else
+        :ok
+      end
     end
   end
 

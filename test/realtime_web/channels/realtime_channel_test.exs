@@ -336,7 +336,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                })
 
       assert Process.alive?(socket.transport_pid)
-      refute Realtime.UsersCounter.already_counted?(socket.transport_pid, tenant.external_id)
+      # Transport is counted at connect time (Socket.init), independent of join outcome
+      assert Realtime.UsersCounter.already_counted?(socket.transport_pid, tenant.external_id)
     end
 
     test "wait does not start a connect attempt once the timeout has passed", %{tenant: tenant} do
@@ -1192,15 +1193,17 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   end
 
   describe "concurrent connection counting" do
-    test "a connected socket is not counted until it joins a channel", %{tenant: tenant} do
+    test "a connected socket is counted at connect time", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
-      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
 
-      refute Realtime.UsersCounter.already_counted?(socket.transport_pid, tenant.external_id)
-      assert Realtime.UsersCounter.tenant_users(tenant.external_id, node()) == 0
+      # Transport is now counted at connect time (Socket.init), not at join time
+      assert Realtime.UsersCounter.already_counted?(socket.transport_pid, tenant.external_id)
+      assert Realtime.UsersCounter.tenant_users(tenant.external_id, node()) == 1
 
       assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
 
+      # Still counted after join (idempotent)
       assert Realtime.UsersCounter.already_counted?(socket.transport_pid, tenant.external_id)
       assert Realtime.UsersCounter.tenant_users(tenant.external_id, node()) == 1
     end
