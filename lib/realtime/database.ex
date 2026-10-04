@@ -420,19 +420,24 @@ defmodule Realtime.Database do
   """
   @spec replication_slot_teardown(Tenant.t()) :: :ok
   def replication_slot_teardown(tenant) do
-    {:ok, conn} = connect(tenant, "realtime_replication_slot_teardown")
+    case connect(tenant, "realtime_replication_slot_teardown") do
+      {:ok, conn} ->
+        query =
+          "select slot_name from pg_replication_slots where slot_name like '%realtime%'"
 
-    query =
-      "select slot_name from pg_replication_slots where slot_name like '%realtime%'"
+        with {:ok, %{rows: rows}} <- Postgrex.query(conn, query, []) do
+          rows
+          |> List.flatten()
+          |> Enum.reject(&is_nil/1)
+          |> Enum.each(&replication_slot_teardown(conn, &1))
+        end
 
-    with {:ok, %{rows: rows}} <- Postgrex.query(conn, query, []) do
-      rows
-      |> List.flatten()
-      |> Enum.reject(&is_nil/1)
-      |> Enum.each(&replication_slot_teardown(conn, &1))
+        GenServer.stop(conn)
+
+      {:error, _reason} ->
+        :ok
     end
 
-    GenServer.stop(conn)
     :ok
   end
 
@@ -441,8 +446,14 @@ defmodule Realtime.Database do
   """
   @spec replication_slot_teardown(pid() | Tenant.t(), String.t()) :: :ok
   def replication_slot_teardown(%Tenant{} = tenant, slot_name) do
-    {:ok, conn} = connect(tenant, "realtime_replication_slot_teardown")
-    replication_slot_teardown(conn, slot_name)
+    case connect(tenant, "realtime_replication_slot_teardown") do
+      {:ok, conn} ->
+        replication_slot_teardown(conn, slot_name)
+
+      {:error, _reason} ->
+        :ok
+    end
+
     :ok
   end
 
