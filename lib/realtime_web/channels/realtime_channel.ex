@@ -748,10 +748,20 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   defp await_muster_join(task, socket) do
     case Task.yield(task, @muster_join_await_ms) || Task.shutdown(task, :brutal_kill) do
-      {:ok, :ok} -> :ok
-      {:ok, {:error, reason}} -> log_error(socket, "MusterJoinError", inspect(reason))
-      {:exit, reason} -> log_error(socket, "MusterJoinError", inspect(reason))
-      nil -> log_error(socket, "MusterJoinError", "timed out after #{@muster_join_await_ms}ms")
+      {:ok, :ok} ->
+        :ok
+
+      {:ok, {:error, reason}} ->
+        log_error(socket, "MusterJoinError", inspect(reason))
+        :ok
+
+      {:exit, reason} ->
+        log_error(socket, "MusterJoinError", inspect(reason))
+        :ok
+
+      nil ->
+        log_error(socket, "MusterJoinError", "timed out after #{@muster_join_await_ms}ms")
+        :ok
     end
   end
 
