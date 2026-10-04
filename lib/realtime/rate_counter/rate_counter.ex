@@ -224,7 +224,8 @@ defmodule Realtime.RateCounter do
     state = %{state | bucket: bucket, sum: sum, avg: avg}
 
     state = maybe_trigger_limit(state)
-    tick(state.tick)
+    tick_ref = tick(state.tick)
+    state = %{state | tick_ref: tick_ref}
 
     Cachex.put!(@cache, state.id, state)
 
