@@ -27,13 +27,12 @@ defmodule Realtime.GenCounter do
   @doc "Reset counter to 0 and return previous value"
   @spec reset(term) :: integer
   def reset(term) do
-    # We might lose some updates between lookup and the update
     case :ets.lookup(@table, term) do
       [{^term, 0}] ->
         0
 
       [{^term, previous}] ->
-        :ets.update_element(@table, term, {2, 0}, {term, 0})
+        :ets.update_counter(@table, term, {2, -previous, 0, 0})
         previous
 
       [] ->
