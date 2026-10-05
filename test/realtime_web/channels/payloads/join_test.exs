@@ -78,6 +78,27 @@ defmodule RealtimeWeb.Channels.Payloads.JoinTest do
              } = Join.validate(config)
     end
 
+    for key <- [["a", "b"], [%{"a" => 1}]] do
+      test "presence key cannot be a list: #{inspect(key)}" do
+        config = %{"config" => %{"presence" => %{"enabled" => true, "key" => unquote(Macro.escape(key))}}}
+
+        assert {
+                 :error,
+                 :invalid_join_payload,
+                 %{config: %{presence: %{key: ["unable to parse, expected a string"]}}}
+               } = Join.validate(config)
+      end
+    end
+
+    for key <- ["a", 123, 1.5, true] do
+      test "presence key #{inspect(key)} is accepted" do
+        config = %{"config" => %{"presence" => %{"enabled" => true, "key" => unquote(key)}}}
+
+        assert {:ok, join} = Join.validate(config)
+        assert Join.presence_key(join) == unquote(key)
+      end
+    end
+
     test "presence_key falls back to a generated key when the key is not a string or number" do
       # The channel proceeds even when the join payload is invalid, so presence_key/1 must never
       # hand a non-string key to Phoenix.Presence regardless of what the client sent.
