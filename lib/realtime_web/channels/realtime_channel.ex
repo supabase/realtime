@@ -692,8 +692,10 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def limit_channels(tenant, %{transport_pid: pid} = socket) do
-    key = Tenants.channels_per_client_key(tenant)
-    count = Registry.count_match(Realtime.Registry, key, pid)
+    # Keyed per transport so that counting a socket's channels and cleaning up after a
+    # channel exits only touch that socket's entries, not every channel of the tenant.
+    key = {Tenants.channels_per_client_key(tenant), pid}
+    count = length(Registry.lookup(Realtime.Registry, key))
 
     cond do
       count >= tenant.max_channels_per_client ->
