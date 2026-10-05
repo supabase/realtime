@@ -308,7 +308,7 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
           refute_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 3000
         end)
 
-      assert log =~ "UnableToHandleBroadcast"
+      assert log =~ "UnableToConnectToProject"
     end
   end
 

@@ -96,14 +96,14 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
 
       {:error, :tenant_database_unavailable} ->
         log_error("UnableToConnectToProject", "Realtime was unable to connect to the project database")
-        maybe_reply_error(socket, :tenant_database_unavailable)
+        maybe_reply_error(socket, :unable_to_connect_to_project)
 
       {:error, :increase_connection_pool} ->
         maybe_reply_error(socket, :increase_connection_pool)
 
       {:error, error} ->
         log_error("UnableToSetPolicies", error)
-        maybe_reply_error(socket, :unknown_error)
+        maybe_reply_error(socket, :unable_to_set_policies)
     end
   end
 

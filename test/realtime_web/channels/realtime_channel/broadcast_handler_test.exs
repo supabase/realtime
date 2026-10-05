@@ -438,7 +438,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       assert log =~ "MissingPartition"
     end
 
-    test "tenant database unavailable during write authorization replies with tenant_database_unavailable",
+    test "tenant database unavailable during write authorization replies with unable_to_connect_to_project",
          %{topic: topic, tenant: tenant, db_conn: db_conn} do
       socket = socket_fixture(tenant, topic)
 
@@ -446,14 +446,14 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       log =
         capture_log(fn ->
-          {:reply, {:error, %{error: :tenant_database_unavailable}}, _socket} =
+          {:reply, {:error, %{error: :unable_to_connect_to_project}}, _socket} =
             BroadcastHandler.handle(%{}, db_conn, socket)
         end)
 
       assert log =~ "UnableToConnectToProject"
     end
 
-    test "unexpected error during write authorization replies with unknown_error",
+    test "unexpected error during write authorization replies with unable_to_set_policies",
          %{topic: topic, tenant: tenant, db_conn: db_conn} do
       socket = socket_fixture(tenant, topic)
 
@@ -461,7 +461,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       log =
         capture_log(fn ->
-          {:reply, {:error, %{error: :unknown_error}}, _socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+          {:reply, {:error, %{error: :unable_to_set_policies}}, _socket} = BroadcastHandler.handle(%{}, db_conn, socket)
         end)
 
       assert log =~ "UnableToSetPolicies"

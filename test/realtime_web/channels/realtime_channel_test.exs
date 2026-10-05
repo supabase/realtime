@@ -669,7 +669,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
           allow(Connect, self(), channel_pid)
 
           ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{"hello" => "world"}})
-          assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{error: :unknown_error}}, 500
+          assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{error: :unable_to_handle_broadcast}}, 500
         end)
 
       assert log =~ "UnableToHandleBroadcast: :timeout"
@@ -688,7 +688,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
           allow(Connect, self(), channel_pid)
 
           ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{"hello" => "world"}})
-          assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{error: :unknown_error}}, 500
+          assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{error: :unable_to_handle_broadcast}}, 500
         end)
 
       assert log =~ "UnableToHandleBroadcast: :something_unexpected"
@@ -708,11 +708,15 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
           ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{"hello" => "world"}})
 
-          assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{error: :connect_rate_limit_reached}},
+          assert_receive %Socket.Reply{
+                           ref: ^ref,
+                           status: :error,
+                           payload: %{error: :database_connection_rate_limit_reached}
+                         },
                          500
         end)
 
-      assert log =~ "UnableToHandleBroadcast: :connect_rate_limit_reached"
+      assert log =~ "DatabaseConnectionRateLimitReached: :connect_rate_limit_reached"
     end
 
     test "private broadcast with ack but Connect was initializing", %{tenant: tenant} do
@@ -728,10 +732,12 @@ defmodule RealtimeWeb.RealtimeChannelTest do
           allow(Connect, self(), channel_pid)
 
           ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{"hello" => "world"}})
-          assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{error: :initializing}}, 500
+
+          assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{error: :initializing_project_connection}},
+                         500
         end)
 
-      assert log =~ "UnableToHandleBroadcast: :initializing"
+      assert log =~ "InitializingProjectConnection: :initializing"
     end
 
     test "private broadcast with ack but Connect was initializing the database connection", %{tenant: tenant} do
@@ -747,10 +753,12 @@ defmodule RealtimeWeb.RealtimeChannelTest do
           allow(Connect, self(), channel_pid)
 
           ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{"hello" => "world"}})
-          assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{error: :initializing}}, 500
+
+          assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{error: :initializing_project_connection}},
+                         500
         end)
 
-      assert log =~ "UnableToHandleBroadcast: :tenant_database_connection_initializing"
+      assert log =~ "InitializingProjectConnection: :tenant_database_connection_initializing"
     end
 
     test "private broadcast with ack but Connect had too many connections", %{tenant: tenant} do
@@ -767,11 +775,11 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
           ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{"hello" => "world"}})
 
-          assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{error: :tenant_db_too_many_connections}},
+          assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{error: :database_lack_of_connections}},
                          500
         end)
 
-      assert log =~ "UnableToHandleBroadcast: :tenant_db_too_many_connections"
+      assert log =~ "DatabaseLackOfConnections: :tenant_db_too_many_connections"
     end
 
     test "private broadcast with ack but Connect had the tenant database unavailable", %{tenant: tenant} do
@@ -787,10 +795,10 @@ defmodule RealtimeWeb.RealtimeChannelTest do
           allow(Connect, self(), channel_pid)
 
           ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{"hello" => "world"}})
-          assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{error: :tenant_database_unavailable}}, 500
+          assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{error: :unable_to_connect_to_project}}, 500
         end)
 
-      assert log =~ "UnableToHandleBroadcast: :tenant_database_unavailable"
+      assert log =~ "UnableToConnectToProject: :tenant_database_unavailable"
     end
   end
 
