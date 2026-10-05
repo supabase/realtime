@@ -58,7 +58,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:noreply, socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+          {:reply, {:error, %{error: :unauthorized}}, socket} = BroadcastHandler.handle(%{}, db_conn, socket)
           socket
       end
 
@@ -123,7 +123,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:noreply, socket} = BroadcastHandler.handle(%{"a" => "b"}, db_conn, socket)
+          {:reply, {:error, %{error: :unauthorized}}, socket} = BroadcastHandler.handle(%{"a" => "b"}, db_conn, socket)
           socket
       end
 
@@ -162,7 +162,9 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:noreply, socket} = BroadcastHandler.handle(%{"a" => "b"}, db_conn, socket)
+          {:reply, {:error, %{error: :rls_policy_error}}, socket} =
+            BroadcastHandler.handle(%{"a" => "b"}, db_conn, socket)
+
           socket
       end
 
@@ -174,7 +176,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:noreply, socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+          {:reply, {:error, %{error: :unauthorized}}, socket} = BroadcastHandler.handle(%{}, db_conn, socket)
           socket
       end
 
@@ -225,7 +227,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:noreply, socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+          {:reply, {:error, %{error: :unauthorized}}, socket} = BroadcastHandler.handle(%{}, db_conn, socket)
           socket
       end
 
@@ -382,7 +384,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       log =
         capture_log(fn ->
-          {:noreply, _socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+          {:reply, {:error, %{error: :increase_connection_pool}}, _socket} =
+            BroadcastHandler.handle(%{}, db_conn, socket)
         end)
 
       refute log =~ "UnableToSetPolicies"
@@ -394,7 +397,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       log =
         capture_log(fn ->
-          {:noreply, _socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+          {:reply, {:error, %{error: :rls_policy_error}}, _socket} = BroadcastHandler.handle(%{}, db_conn, socket)
 
           {:ok, %{avg: avg}} = RateCounterHelper.tick!(Tenants.events_per_second_rate(tenant))
           assert avg == 0.0
@@ -403,6 +406,94 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         end)
 
       assert log =~ "RlsPolicyError"
+    end
+
+    test "query canceled during write authorization replies with query_canceled",
+         %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      socket = socket_fixture(tenant, topic)
+
+      stub(Authorization, :get_write_authorizations, fn _, _, _, _ ->
+        {:error, :query_canceled, %Postgrex.Error{postgres: %{code: :query_canceled}}}
+      end)
+
+      log =
+        capture_log(fn ->
+          {:reply, {:error, %{error: :query_canceled}}, _socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+        end)
+
+      assert log =~ "QueryCanceled"
+    end
+
+    test "missing partition during write authorization replies with missing_partition",
+         %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      socket = socket_fixture(tenant, topic)
+
+      stub(Authorization, :get_write_authorizations, fn _, _, _, _ -> {:error, :missing_partition} end)
+
+      log =
+        capture_log(fn ->
+          {:reply, {:error, %{error: :missing_partition}}, _socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+        end)
+
+      assert log =~ "MissingPartition"
+    end
+
+    test "tenant database unavailable during write authorization replies with unable_to_connect_to_project",
+         %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      socket = socket_fixture(tenant, topic)
+
+      stub(Authorization, :get_write_authorizations, fn _, _, _, _ -> {:error, :tenant_database_unavailable} end)
+
+      log =
+        capture_log(fn ->
+          {:reply, {:error, %{error: :unable_to_connect_to_project}}, _socket} =
+            BroadcastHandler.handle(%{}, db_conn, socket)
+        end)
+
+      assert log =~ "UnableToConnectToProject"
+    end
+
+    test "unexpected error during write authorization replies with unable_to_set_policies",
+         %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      socket = socket_fixture(tenant, topic)
+
+      stub(Authorization, :get_write_authorizations, fn _, _, _, _ -> {:error, :something_unexpected} end)
+
+      log =
+        capture_log(fn ->
+          {:reply, {:error, %{error: :unable_to_set_policies}}, _socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+        end)
+
+      assert log =~ "UnableToSetPolicies"
+    end
+
+    test "with write false policy and no ack, user does not get a reply", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket =
+        socket_fixture(tenant, topic,
+          policies: %Policies{broadcast: %BroadcastPolicies{write: false}},
+          ack_broadcast: false
+        )
+
+      assert {:noreply, _socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+
+      refute_receive _, 100
+    end
+
+    test "failing write authorization with no ack does not reply", %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      socket = socket_fixture(tenant, topic, ack_broadcast: false)
+
+      stub(Authorization, :get_write_authorizations, fn _, _, _, _ -> {:error, :something_unexpected} end)
+
+      log =
+        capture_log(fn ->
+          assert {:noreply, _socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+        end)
+
+      assert log =~ "UnableToSetPolicies"
     end
 
     test "handle payload size excedding limits in private channels", %{topic: topic, tenant: tenant, db_conn: db_conn} do
@@ -446,7 +537,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           ack_broadcast: true
         )
 
-      assert {:reply, {:error, :payload_size_exceeded}, _} =
+      assert {:reply, {:error, %{error: :payload_size_exceeded}}, _} =
                BroadcastHandler.handle(
                  %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 1)},
                  db_conn,
@@ -463,7 +554,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     } do
       socket = socket_fixture(tenant, topic, ack_broadcast: true, private?: false)
 
-      assert {:reply, {:error, :payload_size_exceeded}, _} =
+      assert {:reply, {:error, %{error: :payload_size_exceeded}}, _} =
                BroadcastHandler.handle(
                  %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 1)},
                  db_conn,
@@ -700,7 +791,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     } do
       socket = socket_fixture(tenant, topic, policies: %Policies{broadcast: %BroadcastPolicies{write: false}})
 
-      assert {:noreply, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+      assert {:reply, {:error, %{error: :unauthorized}}, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
 
       assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
@@ -784,8 +875,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         sub: claims.sub
       })
 
-    rate_counter = Tenants.events_per_second_rate(tenant)
-
     tenant_topic = "realtime:#{topic}"
     self_broadcast = true
 
@@ -796,7 +885,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         self_broadcast: self_broadcast,
         policies: policies,
         authorization_context: authorization_context,
-        rate_counter: rate_counter,
         private?: private?,
         tenant: tenant.external_id
       }
