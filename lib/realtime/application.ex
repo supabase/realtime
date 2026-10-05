@@ -166,6 +166,12 @@ defmodule Realtime.Application do
           id: Realtime.LogThrottle
         ),
         Realtime.Tenants.Cache,
+        Supervisor.child_spec(
+          {Cachex,
+           name: Realtime.Tenants.Authorization.RlsBypassCache,
+           expiration: Cachex.Spec.expiration(default: Application.get_env(:realtime, :tenant_cache_expiration))},
+          id: Realtime.Tenants.Authorization.RlsBypassCache
+        ),
         Realtime.FeatureFlags.Cache,
         Realtime.RateCounter.DynamicSupervisor,
         Realtime.Latency,

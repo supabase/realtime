@@ -208,6 +208,146 @@ defmodule Realtime.Tenants.AuthorizationTest do
     end
   end
 
+  describe "roles that bypass RLS" do
+    setup %{tenant: tenant} do
+      on_exit(fn -> :telemetry.detach({__MODULE__, self()}) end)
+
+      :telemetry.attach(
+        {__MODULE__, self()},
+        [:realtime, :tenants, :write_authorization_check],
+        fn _event, _measurements, %{tenant: tenant_id}, pid -> send(pid, {:write_authorization_check, tenant_id}) end,
+        self()
+      )
+
+      %{tenant_id: tenant.external_id}
+    end
+
+    @tag role: "authenticated", policies: []
+    test "a BYPASSRLS role that can insert into realtime.messages is granted without the probe", context do
+      role = create_role!(context.tenant, "BYPASSRLS", grant_insert?: true)
+      authorization_context = %{context.authorization_context | role: role}
+
+      for extension <- [:broadcast, :presence, :persistence] do
+        assert {:ok, policies} =
+                 Authorization.get_write_authorizations(%Policies{}, context.db_conn, authorization_context, extension)
+
+        assert policies == update_write(%Policies{}, extension)
+      end
+
+      tenant_id = context.tenant_id
+      refute_received {:write_authorization_check, ^tenant_id}
+    end
+
+    @tag role: "authenticated", policies: []
+    test "service_role is granted without the probe", context do
+      authorization_context = %{context.authorization_context | role: "service_role"}
+
+      assert {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}} =
+               Authorization.get_write_authorizations(%Policies{}, context.db_conn, authorization_context, :broadcast)
+
+      tenant_id = context.tenant_id
+      refute_received {:write_authorization_check, ^tenant_id}
+    end
+
+    @tag role: "authenticated", policies: []
+    test "a BYPASSRLS role without INSERT on realtime.messages still runs the probe", context do
+      role = create_role!(context.tenant, "BYPASSRLS", grant_insert?: false)
+      authorization_context = %{context.authorization_context | role: role}
+
+      assert {:ok, %Policies{broadcast: %BroadcastPolicies{write: false}}} =
+               Authorization.get_write_authorizations(%Policies{}, context.db_conn, authorization_context, :broadcast)
+
+      tenant_id = context.tenant_id
+      assert_received {:write_authorization_check, ^tenant_id}
+    end
+
+    @tag role: "authenticated", policies: [:authenticated_write_broadcast]
+    test "a role subject to RLS still runs the probe and follows the policies", context do
+      tenant_id = context.tenant_id
+
+      assert {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}} =
+               Authorization.get_write_authorizations(
+                 %Policies{},
+                 context.db_conn,
+                 context.authorization_context,
+                 :broadcast
+               )
+
+      assert_received {:write_authorization_check, ^tenant_id}
+
+      assert {:ok, %Policies{presence: %PresencePolicies{write: false}}} =
+               Authorization.get_write_authorizations(
+                 %Policies{},
+                 context.db_conn,
+                 context.authorization_context,
+                 :presence
+               )
+
+      assert_received {:write_authorization_check, ^tenant_id}
+    end
+
+    @tag role: "authenticated", policies: []
+    test "a role that does not exist is not granted", context do
+      authorization_context = %{context.authorization_context | role: "role_#{random_string()}"}
+
+      assert {:error, :rls_policy_error, %Postgrex.Error{}} =
+               Authorization.get_write_authorizations(%Policies{}, context.db_conn, authorization_context, :broadcast)
+    end
+
+    @tag role: "authenticated", policies: []
+    test "a revoked BYPASSRLS is picked up once the cached answer expires", context do
+      role = create_role!(context.tenant, "BYPASSRLS", grant_insert?: true)
+      authorization_context = %{context.authorization_context | role: role}
+
+      assert {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}} =
+               Authorization.get_write_authorizations(%Policies{}, context.db_conn, authorization_context, :broadcast)
+
+      query!(context.tenant, "ALTER ROLE #{role} NOBYPASSRLS")
+
+      # Still cached
+      assert {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}} =
+               Authorization.get_write_authorizations(%Policies{}, context.db_conn, authorization_context, :broadcast)
+
+      Cachex.del(Authorization.RlsBypassCache, {context.tenant_id, role})
+
+      assert {:ok, %Policies{broadcast: %BroadcastPolicies{write: false}}} =
+               Authorization.get_write_authorizations(%Policies{}, context.db_conn, authorization_context, :broadcast)
+
+      tenant_id = context.tenant_id
+      assert_received {:write_authorization_check, ^tenant_id}
+    end
+
+    @tag role: "anon", policies: []
+    test "a cached BYPASSRLS role is granted while the authorization breaker is open", context do
+      update_db_pool_size(context.tenant, 5)
+      role = create_role!(context.tenant, "BYPASSRLS", grant_insert?: true)
+      bypass_context = %{context.authorization_context | role: role}
+
+      assert {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}} =
+               Authorization.get_write_authorizations(%Policies{}, context.db_conn, bypass_context, :broadcast)
+
+      pid = spawn(fn -> :ok end)
+
+      capture_log(fn ->
+        for _ <- 1..6 do
+          {:error, :increase_connection_pool} =
+            Authorization.get_write_authorizations(%Policies{}, pid, context.authorization_context, :broadcast)
+        end
+
+        rate_counter = Realtime.Tenants.authorization_errors_per_second_rate(context.tenant)
+        RateCounterHelper.tick!(rate_counter)
+      end)
+
+      reject(&Database.transaction/4)
+
+      assert {:error, :increase_connection_pool} =
+               Authorization.get_write_authorizations(%Policies{}, pid, context.authorization_context, :broadcast)
+
+      assert {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}} =
+               Authorization.get_write_authorizations(%Policies{}, pid, bypass_context, :broadcast)
+    end
+  end
+
   describe "database error" do
     @tag role: "authenticated",
          policies: [
@@ -470,6 +610,36 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
       assert_receive {:telemetry_event, [:realtime, :tenants, :write_authorization_check], %{latency: _},
                       %{tenant: ^external_id}}
+    end
+  end
+
+  defp update_write(policies, :persistence), do: Policies.update_policies(policies, :broadcast, :persist, true)
+  defp update_write(policies, extension), do: Policies.update_policies(policies, extension, :write, true)
+
+  defp create_role!(tenant, attributes, grant_insert?: grant_insert?) do
+    role = "rls_bypass_#{random_string()}"
+    query!(tenant, "CREATE ROLE #{role} NOLOGIN #{attributes}")
+
+    if grant_insert? do
+      query!(tenant, "GRANT USAGE ON SCHEMA realtime TO #{role}")
+      query!(tenant, "GRANT INSERT ON realtime.messages TO #{role}")
+    end
+
+    on_exit(fn ->
+      query!(tenant, "DROP OWNED BY #{role}")
+      query!(tenant, "DROP ROLE #{role}")
+    end)
+
+    role
+  end
+
+  defp query!(tenant, statement) do
+    {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+
+    try do
+      Postgrex.query!(conn, statement, [])
+    after
+      GenServer.stop(conn)
     end
   end
 

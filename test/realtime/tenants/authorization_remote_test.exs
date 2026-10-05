@@ -160,6 +160,25 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
     end
   end
 
+  describe "roles that bypass RLS" do
+    @tag role: "service_role", policies: []
+    test "service_role is granted and the answer is cached on the calling node", context do
+      assert {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}} =
+               Authorization.get_write_authorizations(
+                 %Policies{},
+                 context.db_conn,
+                 context.authorization_context,
+                 :broadcast
+               )
+
+      # No database is reached once the answer is cached
+      db_conn = :erpc.call(context.node, :erlang, :self, [])
+
+      assert {:ok, %Policies{presence: %PresencePolicies{write: true}}} =
+               Authorization.get_write_authorizations(%Policies{}, db_conn, context.authorization_context, :presence)
+    end
+  end
+
   describe "database error" do
     @tag role: "authenticated",
          policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence],

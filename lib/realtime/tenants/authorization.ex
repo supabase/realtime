@@ -33,6 +33,8 @@ defmodule Realtime.Tenants.Authorization do
 
   @type extension :: :broadcast | :presence | :persistence
 
+  @rls_bypass_cache __MODULE__.RlsBypassCache
+
   @doc """
   Builds a new authorization struct which will be used to retain the information required to check Policies.
 
@@ -128,12 +130,17 @@ defmodule Realtime.Tenants.Authorization do
       when extension in [:broadcast, :presence, :persistence] and node() == node(db_conn) do
     rate_counter = rate_counter(authorization_context.tenant_id)
 
-    if rate_counter.limit.triggered == false do
-      db_conn
-      |> get_write_policies_for_connection(authorization_context, policies, extension)
-      |> handle_policies_result(rate_counter)
-    else
-      {:error, :increase_connection_pool}
+    cond do
+      role_bypasses_rls?(db_conn, authorization_context, rate_counter) ->
+        {:ok, update_write_policy(policies, extension, true)}
+
+      rate_counter.limit.triggered == false ->
+        db_conn
+        |> get_write_policies_for_connection(authorization_context, policies, extension)
+        |> handle_policies_result(rate_counter)
+
+      true ->
+        {:error, :increase_connection_pool}
     end
   end
 
@@ -142,27 +149,32 @@ defmodule Realtime.Tenants.Authorization do
       when extension in [:broadcast, :presence, :persistence] do
     rate_counter = rate_counter(authorization_context.tenant_id)
 
-    if rate_counter.limit.triggered == false do
-      case GenRpc.call(
-             node(db_conn),
-             __MODULE__,
-             :get_write_authorizations,
-             [policies, db_conn, authorization_context, extension],
-             tenant_id: authorization_context.tenant_id,
-             key: authorization_context.tenant_id
-           ) do
-        {:error, :increase_connection_pool} = error ->
-          GenCounter.add(rate_counter.id)
-          error
+    cond do
+      role_bypasses_rls?(db_conn, authorization_context, rate_counter) ->
+        {:ok, update_write_policy(policies, extension, true)}
 
-        {:error, :rpc_error, reason} ->
-          {:error, reason}
+      rate_counter.limit.triggered == false ->
+        case GenRpc.call(
+               node(db_conn),
+               __MODULE__,
+               :get_write_authorizations,
+               [policies, db_conn, authorization_context, extension],
+               tenant_id: authorization_context.tenant_id,
+               key: authorization_context.tenant_id
+             ) do
+          {:error, :increase_connection_pool} = error ->
+            GenCounter.add(rate_counter.id)
+            error
 
-        response ->
-          response
-      end
-    else
-      {:error, :increase_connection_pool}
+          {:error, :rpc_error, reason} ->
+            {:error, reason}
+
+          response ->
+            response
+        end
+
+      true ->
+        {:error, :increase_connection_pool}
     end
   end
 
@@ -349,6 +361,58 @@ defmodule Realtime.Tenants.Authorization do
 
   defp update_write_policy(policies, extension, value),
     do: Policies.update_policies(policies, extension, :write, value)
+
+  # A superuser, or a BYPASSRLS role that can insert into realtime.messages, always passes the write
+  # probe because RLS is never evaluated for it, so such roles skip the probe transaction and the
+  # authorization error breaker. The answer comes from the tenant database and is cached per tenant
+  # and role on each node with the tenant cache expiration, so a revoked BYPASSRLS takes effect within
+  # that window. No lookup is made while the breaker is open, and a lookup that could not reach the
+  # database is not cached: the regular RLS check runs instead.
+  defp role_bypasses_rls?(db_conn, %__MODULE__{tenant_id: tenant_id, role: role}, rate_counter)
+       when is_binary(role) do
+    key = {tenant_id, role}
+
+    result =
+      if rate_counter.limit.triggered,
+        do: Cachex.get(@rls_bypass_cache, key),
+        else: Cachex.fetch(@rls_bypass_cache, key, fn _key -> fetch_role_bypasses_rls(db_conn, tenant_id, role) end)
+
+    match?({_, true}, result)
+  end
+
+  defp role_bypasses_rls?(_db_conn, _authorization_context, _rate_counter), do: false
+
+  @role_bypasses_rls_query """
+  SELECT rolsuper OR (rolbypassrls AND has_table_privilege('realtime.messages', 'INSERT'))
+  FROM pg_roles WHERE rolname = current_user
+  """
+
+  defp fetch_role_bypasses_rls(db_conn, tenant_id, role) do
+    metadata = [project: tenant_id, external_id: tenant_id]
+
+    # Switch to the role the same way the write probe does, so a role that cannot be assumed fails here too
+    result =
+      Database.transaction(
+        db_conn,
+        fn transaction_conn ->
+          with {:ok, _} <- Postgrex.query(transaction_conn, "SELECT set_config('role', $1, true)", [role]),
+               {:ok, %Postgrex.Result{rows: [[bypass?]]}} <-
+                 Postgrex.query(transaction_conn, @role_bypasses_rls_query, []) do
+            bypass?
+          else
+            {:error, reason} -> DBConnection.rollback(transaction_conn, reason)
+          end
+        end,
+        [tenant_id: tenant_id],
+        metadata
+      )
+
+    case result do
+      {:ok, bypass?} when is_boolean(bypass?) -> {:commit, bypass?}
+      {:error, %Postgrex.Error{}} -> {:commit, false}
+      _ -> {:ignore, false}
+    end
+  end
 
   defp rate_counter(tenant_id) do
     %Tenant{} = tenant = Realtime.Tenants.Cache.get_tenant_by_external_id(tenant_id)
