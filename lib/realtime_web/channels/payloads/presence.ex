@@ -13,6 +13,17 @@ defmodule RealtimeWeb.Channels.Payloads.Presence do
   end
 
   def changeset(presence, attrs) do
-    cast(presence, attrs, [:enabled, :key], message: &Join.error_message/2)
+    presence
+    |> cast(attrs, [:enabled, :key], message: &Join.error_message/2)
+    |> validate_key()
+  end
+
+  # key is cast as :any so a string or numeric key is accepted, but a non-scalar key (map, list)
+  # must be rejected here: it would otherwise crash Phoenix.Presence, which expects a string key.
+  defp validate_key(changeset) do
+    case get_change(changeset, :key) do
+      key when is_nil(key) or is_binary(key) or is_number(key) -> changeset
+      _ -> add_error(changeset, :key, "unable to parse, expected a string")
+    end
   end
 end

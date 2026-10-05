@@ -38,8 +38,12 @@ defmodule RealtimeWeb.Channels.Payloads.Join do
   def presence_enabled?(%__MODULE__{config: %Config{presence: %Presence{enabled: enabled}}}), do: enabled
   def presence_enabled?(_), do: false
 
-  def presence_key(%__MODULE__{config: %Config{presence: %Presence{key: key}}}) when key in [nil, ""], do: UUID.uuid1()
-  def presence_key(%__MODULE__{config: %Config{presence: %Presence{key: key}}}), do: key
+  def presence_key(%__MODULE__{config: %Config{presence: %Presence{key: key}}}) when is_binary(key) and key != "",
+    do: key
+
+  def presence_key(%__MODULE__{config: %Config{presence: %Presence{key: key}}}) when is_number(key), do: key
+  # Anything else (missing, blank, or a non-scalar key that slipped through) gets a generated key.
+  # A non-string key would otherwise crash Phoenix.Presence when it calls to_string/1 on it.
   def presence_key(_), do: UUID.uuid1()
 
   def ack_broadcast?(%__MODULE__{config: %Config{broadcast: %Broadcast{ack: ack}}}), do: ack

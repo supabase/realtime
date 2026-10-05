@@ -68,6 +68,29 @@ defmodule RealtimeWeb.Channels.Payloads.JoinTest do
       assert key == 123
     end
 
+    test "presence key cannot be a map" do
+      config = %{"config" => %{"presence" => %{"enabled" => true, "key" => %{"a" => 1}}}}
+
+      assert {
+               :error,
+               :invalid_join_payload,
+               %{config: %{presence: %{key: ["unable to parse, expected a string"]}}}
+             } = Join.validate(config)
+    end
+
+    test "presence_key falls back to a generated key when the key is not a string or number" do
+      # The channel proceeds even when the join payload is invalid, so presence_key/1 must never
+      # hand a non-string key to Phoenix.Presence regardless of what the client sent.
+      join =
+        %{"config" => %{"presence" => %{"enabled" => true, "key" => %{"a" => 1}}}}
+        |> then(&Join.changeset(%Join{}, &1))
+        |> Ecto.Changeset.apply_changes()
+
+      key = Join.presence_key(join)
+      assert is_binary(key)
+      assert key != ""
+    end
+
     test "invalid replay" do
       config = %{"config" => %{"broadcast" => %{"replay" => 123}}}
 
