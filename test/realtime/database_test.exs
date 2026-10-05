@@ -300,6 +300,74 @@ defmodule Realtime.DatabaseTest do
     end
   end
 
+  describe "query/5" do
+    setup %{tenant: tenant} do
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+      %{db_conn: db_conn}
+    end
+
+    test "runs the query", %{db_conn: db_conn} do
+      assert {:ok, %Postgrex.Result{rows: [[2]]}} = Database.query(db_conn, "SELECT $1::int + 1", [1])
+      refute_receive {[:realtime, :database, :transaction], _, _}
+    end
+
+    test "returns Postgres errors without logging", %{db_conn: db_conn} do
+      log =
+        capture_log(fn ->
+          assert {:error, %Postgrex.Error{postgres: %{code: :division_by_zero}}} =
+                   Database.query(db_conn, "SELECT 1/0", [])
+        end)
+
+      refute log =~ "ErrorExecutingQuery"
+    end
+
+    test "with telemetry event defined, emits telemetry event with tenant_id", %{db_conn: db_conn} do
+      event = [:realtime, :database, :transaction]
+      tenant_id = random_string()
+
+      assert {:ok, _} =
+               Database.query(db_conn, "SELECT pg_sleep(0.1)", [], telemetry: event, tenant_id: tenant_id)
+
+      assert_receive {^event, %{latency: latency}, %{tenant: ^tenant_id}}
+      assert latency >= 100
+    end
+
+    test "with telemetry event defined, emits telemetry event without tenant_id", %{db_conn: db_conn} do
+      event = [:realtime, :database, :transaction]
+
+      assert {:ok, _} = Database.query(db_conn, "SELECT 1", [], telemetry: event)
+      assert_receive {^event, %{latency: _}, %{tenant: nil}}
+    end
+
+    test "passes the remaining opts to Postgrex", %{db_conn: db_conn} do
+      assert {:error, %Postgrex.Error{postgres: %{code: :query_canceled}}} =
+               Database.query(db_conn, "SELECT pg_sleep(1)", [],
+                 telemetry: [:realtime, :database, :transaction],
+                 tenant_id: "123",
+                 timeout: 50
+               )
+    end
+
+    test "handles raised exceptions as an error", %{db_conn: db_conn} do
+      log =
+        capture_log(fn ->
+          assert {:error, %DBConnection.EncodeError{}} =
+                   Database.query(db_conn, "SELECT $1::int", ["not an int"], [], external_id: "123", project: "123")
+        end)
+
+      assert log =~ "project=123 external_id=123 [error] ErrorExecutingQuery"
+    end
+
+    test "handles exits as an error" do
+      log =
+        capture_log(fn ->
+          assert {:error, {:exit, _}} = Database.query(:no_such_pool, "SELECT 1", [])
+        end)
+
+      assert log =~ "ErrorExecutingQuery"
+    end
+  end
+
   describe "pool_size_by_application_name/2" do
     @describetag without_db: true
     test "returns the number of connections per application name" do

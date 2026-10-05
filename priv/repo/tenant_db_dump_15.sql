@@ -511,6 +511,63 @@ $$;
 ALTER FUNCTION realtime.apply_rls(wal jsonb, max_record_bytes integer) OWNER TO supabase_realtime_admin;
 
 --
+-- Name: authorize(text, text, text, text, text, text[], text[]); Type: FUNCTION; Schema: realtime; Owner: supabase_realtime_admin
+--
+
+CREATE FUNCTION realtime.authorize(role_name text, topic_name text, claims text, sub text, headers text, read_extensions text[], write_extensions text[], OUT read_allowed boolean[], OUT write_allowed boolean[]) RETURNS record
+    LANGUAGE plpgsql
+    AS $$
+declare
+  probe_ids uuid[];
+  ext text;
+  allowed boolean;
+begin
+  -- The RAISE at the end of this block rolls back everything in it.
+  begin
+    probe_ids := array(select gen_random_uuid() from unnest(read_extensions));
+
+    insert into realtime.messages (id, topic, extension, inserted_at, updated_at)
+    select p.id, topic_name, p.extension, now() at time zone 'utc', now() at time zone 'utc'
+    from unnest(probe_ids, read_extensions) as p(id, extension);
+
+    perform set_config('role', role_name, true),
+            set_config('realtime.topic', topic_name, true),
+            set_config('request.jwt.claims', claims, true),
+            set_config('request.jwt.claim.sub', sub, true),
+            set_config('request.jwt.claim.role', role_name, true),
+            set_config('request.headers', headers, true);
+
+    read_allowed := array(
+      select exists(select 1 from realtime.messages m where m.id = p.id)
+      from unnest(probe_ids) with ordinality as p(id, n)
+      order by p.n);
+
+    write_allowed := '{}';
+
+    foreach ext in array write_extensions loop
+      begin
+        insert into realtime.messages (topic, extension, inserted_at, updated_at)
+        values (topic_name, ext, now() at time zone 'utc', now() at time zone 'utc');
+
+        allowed := true;
+      exception when insufficient_privilege then
+        allowed := false;
+      end;
+
+      write_allowed := write_allowed || allowed;
+    end loop;
+
+    raise sqlstate 'RTA01';
+  exception when sqlstate 'RTA01' then
+    null;
+  end;
+end;
+$$;
+
+
+ALTER FUNCTION realtime.authorize(role_name text, topic_name text, claims text, sub text, headers text, read_extensions text[], write_extensions text[], OUT read_allowed boolean[], OUT write_allowed boolean[]) OWNER TO supabase_realtime_admin;
+
+--
 -- Name: broadcast_changes(text, text, text, text, text, record, record, text); Type: FUNCTION; Schema: realtime; Owner: supabase_realtime_admin
 --
 
@@ -1392,6 +1449,14 @@ GRANT ALL ON FUNCTION realtime.apply_rls(wal jsonb, max_record_bytes integer) TO
 
 
 --
+-- Name: FUNCTION authorize(role_name text, topic_name text, claims text, sub text, headers text, read_extensions text[], write_extensions text[], OUT read_allowed boolean[], OUT write_allowed boolean[]); Type: ACL; Schema: realtime; Owner: supabase_realtime_admin
+--
+
+GRANT ALL ON FUNCTION realtime.authorize(role_name text, topic_name text, claims text, sub text, headers text, read_extensions text[], write_extensions text[], OUT read_allowed boolean[], OUT write_allowed boolean[]) TO postgres;
+GRANT ALL ON FUNCTION realtime.authorize(role_name text, topic_name text, claims text, sub text, headers text, read_extensions text[], write_extensions text[], OUT read_allowed boolean[], OUT write_allowed boolean[]) TO dashboard_user;
+
+
+--
 -- Name: FUNCTION broadcast_changes(topic_name text, event_name text, operation text, table_name text, table_schema text, new record, old record, level text); Type: ACL; Schema: realtime; Owner: supabase_realtime_admin
 --
 
@@ -1696,3 +1761,4 @@ INSERT INTO realtime."schema_migrations" (version) VALUES (20260916120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260922120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260925120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260928120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20261002120000);

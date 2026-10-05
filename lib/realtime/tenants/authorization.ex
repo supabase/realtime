@@ -9,12 +9,15 @@ defmodule Realtime.Tenants.Authorization do
 
   Check more information at Realtime.Tenants.Authorization.Policies
   """
+  use Realtime.Logs
+
   import Ecto.Query
 
   alias DBConnection.ConnectionError
   alias Realtime.Api.Message
   alias Realtime.Api.Tenant
   alias Realtime.Database
+  alias Realtime.FeatureFlags
   alias Realtime.GenCounter
   alias Realtime.GenRpc
   alias Realtime.Tenants.Repo
@@ -205,6 +208,127 @@ defmodule Realtime.Tenants.Authorization do
     end
   end
 
+  @all_extensions [:broadcast, :presence]
+
+  defp get_read_policies_for_connection(conn, authorization_context, policies, caller_opts) do
+    extensions = extensions_to_check(caller_opts)
+
+    check_with_fallback(
+      authorization_context,
+      fn -> read_policies_with_function(conn, authorization_context, policies, extensions) end,
+      fn -> read_policies_with_transaction(conn, authorization_context, policies, extensions) end
+    )
+  end
+
+  defp get_write_policies_for_connection(conn, authorization_context, policies, extension) do
+    check_with_fallback(
+      authorization_context,
+      fn -> write_policies_with_function(conn, authorization_context, policies, extension) end,
+      fn -> write_policies_with_transaction(conn, authorization_context, policies, extension) end
+    )
+  end
+
+  defp extensions_to_check(opts) do
+    if Keyword.get(opts, :presence_enabled?, true),
+      do: @all_extensions,
+      else: [:broadcast]
+  end
+
+  # With the flag on, policies are checked by realtime.authorize in a single round trip. If calling
+  # the function itself fails, such as it not existing yet on a database still being migrated, the
+  # check is redone in a transaction. Any other error is returned as is.
+  defp check_with_fallback(authorization_context, function_check, transaction_check) do
+    %__MODULE__{tenant_id: tenant_id} = authorization_context
+
+    if FeatureFlags.enabled?("use_authorize_function", tenant_id) do
+      case function_check.() do
+        {:error, reason} = error ->
+          if fallback?(reason) do
+            log_warning("AuthorizeFunctionFallback", reason, project: tenant_id, external_id: tenant_id)
+            transaction_check.()
+          else
+            error
+          end
+
+        result ->
+          result
+      end
+    else
+      transaction_check.()
+    end
+  end
+
+  # Only failures of the function itself fall back
+  defp fallback?(%Postgrex.Error{postgres: %{code: :undefined_function, message: "function realtime.authorize(" <> _}}),
+    do: true
+
+  defp fallback?({:unexpected_result, _}), do: true
+  defp fallback?(_), do: false
+
+  @authorize_query "SELECT read_allowed, write_allowed FROM realtime.authorize($1, $2, $3, $4, $5, $6, $7)"
+
+  defp read_policies_with_function(conn, authorization_context, policies, extensions) do
+    telemetry = [:realtime, :tenants, :read_authorization_check]
+
+    # Extensions that are not checked are left unevaluated (nil) so callers can tell "denied"
+    # (false) apart from "not checked yet" (nil).
+    case authorize(conn, authorization_context, extensions, [], telemetry) do
+      {:ok, {read_allowed, []}} when length(read_allowed) == length(extensions) ->
+        {:ok,
+         extensions
+         |> Enum.zip(read_allowed)
+         |> Enum.reduce(policies, fn {extension, allowed}, acc ->
+           Policies.update_policies(acc, extension, :read, allowed)
+         end)}
+
+      {:ok, unexpected} ->
+        {:error, {:unexpected_result, unexpected}}
+
+      error ->
+        error
+    end
+  end
+
+  defp write_policies_with_function(conn, authorization_context, policies, extension) do
+    telemetry = [:realtime, :tenants, :write_authorization_check]
+
+    case authorize(conn, authorization_context, [], [extension], telemetry) do
+      {:ok, {[], [allowed]}} -> {:ok, update_write_policy(policies, extension, allowed)}
+      {:ok, unexpected} -> {:error, {:unexpected_result, unexpected}}
+      error -> error
+    end
+  end
+
+  defp authorize(conn, authorization_context, read_extensions, write_extensions, telemetry) do
+    %__MODULE__{
+      tenant_id: tenant_id,
+      topic: topic,
+      headers: headers,
+      claims: claims,
+      role: role,
+      sub: sub
+    } = authorization_context
+
+    params = [
+      role,
+      topic,
+      Jason.encode!(claims),
+      sub,
+      headers |> Map.new() |> Jason.encode!(),
+      Enum.map(read_extensions, &Atom.to_string/1),
+      Enum.map(write_extensions, &Atom.to_string/1)
+    ]
+
+    opts = [telemetry: telemetry, tenant_id: tenant_id, cache_statement: "realtime_authorize"]
+    metadata = [project: tenant_id, external_id: tenant_id, tenant_id: tenant_id]
+
+    case Database.query(conn, @authorize_query, params, opts, metadata) do
+      {:ok, %Postgrex.Result{rows: [[read_allowed, write_allowed]]}} -> {:ok, {read_allowed, write_allowed}}
+      {:ok, result} -> {:error, {:unexpected_result, result}}
+      {:error, _} = error -> error
+    end
+  end
+
   @doc """
   Sets the current connection configuration with the following config values:
   * role: The role of the user
@@ -242,11 +366,10 @@ defmodule Realtime.Tenants.Authorization do
     )
   end
 
-  defp get_read_policies_for_connection(conn, authorization_context, policies, caller_opts) do
+  defp read_policies_with_transaction(conn, authorization_context, policies, extensions) do
     tenant_id = authorization_context.tenant_id
     opts = [telemetry: [:realtime, :tenants, :read_authorization_check], tenant_id: tenant_id]
     metadata = [project: tenant_id, external_id: tenant_id, tenant_id: tenant_id]
-    extensions = extensions_to_check(caller_opts)
 
     Database.transaction(
       conn,
@@ -281,7 +404,7 @@ defmodule Realtime.Tenants.Authorization do
     )
   end
 
-  defp get_write_policies_for_connection(conn, authorization_context, policies, extension) do
+  defp write_policies_with_transaction(conn, authorization_context, policies, extension) do
     tenant_id = authorization_context.tenant_id
     opts = [telemetry: [:realtime, :tenants, :write_authorization_check], tenant_id: tenant_id]
     metadata = [project: tenant_id, external_id: tenant_id]
@@ -301,14 +424,6 @@ defmodule Realtime.Tenants.Authorization do
       opts,
       metadata
     )
-  end
-
-  @all_extensions [:broadcast, :presence]
-
-  defp extensions_to_check(opts) do
-    if Keyword.get(opts, :presence_enabled?, true),
-      do: @all_extensions,
-      else: [:broadcast]
   end
 
   defp check_read_policies(conn, messages_by_extension, policies) do
