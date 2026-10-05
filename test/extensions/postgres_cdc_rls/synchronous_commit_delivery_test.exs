@@ -98,7 +98,7 @@ defmodule Extensions.PostgresCdcRls.SynchronousCommitDeliveryTest do
     {:ok, writer} = Database.connect(tenant, "realtime_test", :stop)
     spawn(fn -> Postgrex.query(writer, "INSERT INTO public.test (details) VALUES ('allowed')", [], timeout: 30_000) end)
 
-    assert_eventually %{num_rows: 1} = Postgrex.query!(conn, waiting_in_syncrep(), [])
+    assert_eventually %{num_rows: 1} = Postgrex.query!(conn, waiting_in_syncrep(), []), timeout: 5000
 
     # The commit record is already on disk and decodable, but no snapshot can see the row.
     assert %{rows: [[0]]} = Postgrex.query!(conn, "SELECT count(*)::int FROM public.test", [])
@@ -161,7 +161,7 @@ defmodule Extensions.PostgresCdcRls.SynchronousCommitDeliveryTest do
       end)
 
     send(p, :commit)
-    assert_eventually %{num_rows: 1} = Postgrex.query!(conn, waiting_in_syncrep(), [])
+    assert_eventually %{num_rows: 1} = Postgrex.query!(conn, waiting_in_syncrep(), []), timeout: 5000
 
     assert delivered_ids(conn, slot) == [q_id]
     assert delivered_ids(conn, slot) == []

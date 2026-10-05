@@ -104,6 +104,12 @@ export async function setup(): Promise<{ userId: string; testUser: { email: stri
               FOR INSERT TO authenticated WITH CHECK (realtime.topic() like 'topic:%');
           END IF;
         END $$`);
+    await runSql("policy 'authenticated receive on read-only topic'", sql`DO $$ BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'authenticated receive on read-only topic' AND tablename = 'messages' AND schemaname = 'realtime') THEN
+            CREATE POLICY "authenticated receive on read-only topic" ON "realtime"."messages" AS PERMISSIVE
+              FOR SELECT TO authenticated USING (realtime.topic() like 'read-only:%');
+          END IF;
+        END $$`);
     await runSql("policy 'allow authenticated users all access'", sql`DO $$ BEGIN
           IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'allow authenticated users all access' AND tablename = 'pg_changes' AND schemaname = 'public') THEN
             CREATE POLICY "allow authenticated users all access" ON "public"."pg_changes" AS PERMISSIVE
