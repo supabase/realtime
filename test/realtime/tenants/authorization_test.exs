@@ -185,7 +185,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
         end)
 
       assert log =~ "IncreaseConnectionPool: Too many database timeouts"
-      # capture_log sees every process, including the other parameterized run of this test.
+
       own_line =
         "external_id=#{context.tenant.external_id} [critical] IncreaseConnectionPool: Too many database timeouts"
 
@@ -216,7 +216,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
         end)
 
       assert log =~ "IncreaseConnectionPool: Too many database timeouts"
-      # capture_log sees every process, including the other parameterized run of this test.
+
       own_line =
         "external_id=#{context.tenant.external_id} [critical] IncreaseConnectionPool: Too many database timeouts"
 
@@ -330,17 +330,13 @@ defmodule Realtime.Tenants.AuthorizationTest do
   end
 
   describe "database error classification" do
-    @tag role: "anon", policies: []
+    # Setting a role that does not exist fails with invalid_parameter_value
+    @tag role: "super_admin", policies: []
     test "invalid_parameter_value Postgrex error is classified as rls_policy_error", context do
-      stub_database_error(
-        {:error,
-         %Postgrex.Error{postgres: %{code: :invalid_parameter_value, message: "role \"super_admin\" does not exist"}}}
-      )
-
-      assert {:error, :rls_policy_error, %Postgrex.Error{}} =
+      assert {:error, :rls_policy_error, %Postgrex.Error{postgres: %{code: :invalid_parameter_value}}} =
                Authorization.get_read_authorizations(%Policies{}, context.db_conn, context.authorization_context)
 
-      assert {:error, :rls_policy_error, %Postgrex.Error{}} =
+      assert {:error, :rls_policy_error, %Postgrex.Error{postgres: %{code: :invalid_parameter_value}}} =
                Authorization.get_write_authorizations(
                  %Policies{},
                  context.db_conn,
@@ -349,37 +345,41 @@ defmodule Realtime.Tenants.AuthorizationTest do
                )
     end
 
-    @tag role: "anon", policies: []
+    @tag role: "authenticated",
+         policies: [
+           :authenticated_read_broadcast_and_presence,
+           :authenticated_write_broadcast_and_presence,
+           :slow_read,
+           :slow_write
+         ]
     test "query_canceled is classified as query_canceled", context do
-      query_canceled = %Postgrex.Error{
-        postgres: %{code: :query_canceled, message: "canceling statement due to user request"}
-      }
-
-      stub_database_error({:error, query_canceled})
+      # A single-connection pool, so the timeout applies to the connection the checks run on.
+      {:ok, db_conn} = Database.connect(context.tenant, "realtime_test")
+      Postgrex.query!(db_conn, "SET statement_timeout = '100ms'", [])
 
       assert {:error, :query_canceled, %Postgrex.Error{}} =
-               Authorization.get_read_authorizations(%Policies{}, context.db_conn, context.authorization_context)
+               Authorization.get_read_authorizations(%Policies{}, db_conn, context.authorization_context)
 
       assert {:error, :query_canceled, %Postgrex.Error{}} =
                Authorization.get_write_authorizations(
                  %Policies{},
-                 context.db_conn,
+                 db_conn,
                  context.authorization_context,
                  :broadcast
                )
     end
 
-    @tag role: "anon", policies: []
+    @tag role: "authenticated",
+         policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
     test "check_violation on messages is classified as missing_partition", context do
-      check_violation = %Postgrex.Error{
-        postgres: %{
-          code: :check_violation,
-          table: "messages",
-          message: "no partition of relation \"messages\" found for row"
-        }
-      }
+      %{rows: partitions} =
+        Postgrex.query!(
+          context.db_conn,
+          "SELECT inhrelid::regclass::text FROM pg_inherits WHERE inhparent = 'realtime.messages'::regclass",
+          []
+        )
 
-      stub_database_error({:error, check_violation})
+      for [partition] <- partitions, do: Postgrex.query!(context.db_conn, "DROP TABLE #{partition}", [])
 
       assert {:error, :missing_partition} =
                Authorization.get_read_authorizations(%Policies{}, context.db_conn, context.authorization_context)
@@ -456,23 +456,11 @@ defmodule Realtime.Tenants.AuthorizationTest do
          ]
 
     test "sends telemetry event", context do
-      # Unique per test: the parameterized runs of this test attach at the same time.
-      handler_id = {__MODULE__, make_ref()}
-      on_exit(fn -> :telemetry.detach(handler_id) end)
-
-      events = [
-        [:realtime, :tenants, :write_authorization_check],
-        [:realtime, :tenants, :read_authorization_check]
-      ]
-
-      :telemetry.attach_many(
-        handler_id,
-        events,
-        fn event, measurements, metadata, _config ->
-          send(self(), {:telemetry_event, event, measurements, metadata})
-        end,
-        %{}
-      )
+      ref =
+        :telemetry_test.attach_event_handlers(self(), [
+          [:realtime, :tenants, :write_authorization_check],
+          [:realtime, :tenants, :read_authorization_check]
+        ])
 
       {:ok, _} = Authorization.get_read_authorizations(%Policies{}, context.db_conn, context.authorization_context)
 
@@ -486,11 +474,9 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
       external_id = context.authorization_context.tenant_id
 
-      assert_receive {:telemetry_event, [:realtime, :tenants, :read_authorization_check], %{latency: _},
-                      %{tenant: ^external_id}}
+      assert_receive {[:realtime, :tenants, :read_authorization_check], ^ref, %{latency: _}, %{tenant: ^external_id}}
 
-      assert_receive {:telemetry_event, [:realtime, :tenants, :write_authorization_check], %{latency: _},
-                      %{tenant: ^external_id}}
+      assert_receive {[:realtime, :tenants, :write_authorization_check], ^ref, %{latency: _}, %{tenant: ^external_id}}
     end
   end
 

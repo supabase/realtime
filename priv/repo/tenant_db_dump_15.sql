@@ -522,6 +522,11 @@ declare
   ext text;
   allowed boolean;
 begin
+  -- The probe inserts are rolled back, but they still give the transaction an xid, so it ends
+  -- in a commit. Nothing durable was written, so skip waiting on the WAL flush and sync standbys.
+  -- Set outside the block below, whose rollback would undo it.
+  perform set_config('synchronous_commit', 'off', true);
+
   -- The RAISE at the end of this block rolls back everything in it.
   begin
     probe_ids := array(select gen_random_uuid() from unnest(read_extensions));

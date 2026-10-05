@@ -265,7 +265,18 @@ defmodule Realtime.Tenants.Authorization do
   defp fallback?({:unexpected_result, _}), do: true
   defp fallback?(_), do: false
 
-  @authorize_query "SELECT read_allowed, write_allowed FROM realtime.authorize($1, $2, $3, $4, $5, $6, $7)"
+  @authorize_query """
+  SELECT read_allowed, write_allowed
+  FROM realtime.authorize(
+    role_name => $1,
+    topic_name => $2,
+    claims => $3,
+    sub => $4,
+    headers => $5,
+    read_extensions => $6,
+    write_extensions => $7
+  )
+  """
 
   defp read_policies_with_function(conn, authorization_context, policies, extensions) do
     telemetry = [:realtime, :tenants, :read_authorization_check]

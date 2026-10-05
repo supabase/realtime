@@ -72,21 +72,40 @@ defmodule Realtime.Tenants.AuthorizationFunctionTest do
     end
   end
 
+  describe "realtime.authorize" do
+    # The probe inserts give the transaction an xid even though they are rolled back, so without
+    # this every check would wait on a WAL flush and on sync standbys before returning.
+    test "commits without waiting on the WAL flush", context do
+      {:ok, db_conn} = Database.connect(context.tenant, "realtime_test")
+      %{rows: [[default]]} = Postgrex.query!(db_conn, "SELECT current_setting('synchronous_commit')", [])
+
+      {:ok, setting} =
+        Postgrex.transaction(db_conn, fn conn ->
+          Postgrex.query!(
+            conn,
+            """
+            SELECT realtime.authorize('authenticated', 'topic', '{}', 'sub', '{}', '{broadcast}', '{broadcast}')
+            """,
+            []
+          )
+
+          %{rows: [[setting]]} = Postgrex.query!(conn, "SELECT current_setting('synchronous_commit')", [])
+          setting
+        end)
+
+      assert setting == "off"
+
+      # Only for the transaction that ran the check
+      assert %{rows: [[^default]]} = Postgrex.query!(db_conn, "SELECT current_setting('synchronous_commit')", [])
+    end
+  end
+
   describe "fallback to a transaction" do
     test "when realtime.authorize does not exist yet", context do
       use_authorize_function(true, 3)
 
       # Connect hands out the connection before the tenant migrations finish.
-      fail_function_with(
-        %Postgrex.Error{
-          postgres: %{
-            code: :undefined_function,
-            message:
-              "function realtime.authorize(unknown, unknown, unknown, unknown, unknown, unknown, unknown) does not exist"
-          }
-        },
-        3
-      )
+      Postgrex.query!(context.db_conn, "DROP FUNCTION realtime.authorize", [])
 
       log =
         capture_log(fn -> assert {:ok, @all_allowed} = check_all(context.db_conn, context.authorization_context) end)
@@ -96,7 +115,20 @@ defmodule Realtime.Tenants.AuthorizationFunctionTest do
 
     test "when realtime.authorize returns an unexpected result", context do
       use_authorize_function(true, 3)
-      expect(Database, :query, 3, fn _, _, _, _, _ -> {:ok, %Postgrex.Result{rows: [], num_rows: 0}} end)
+
+      # A result per extension is expected, but none come back.
+      Postgrex.query!(
+        context.db_conn,
+        """
+        CREATE OR REPLACE FUNCTION realtime.authorize(
+          role_name text, topic_name text, claims text, sub text, headers text,
+          read_extensions text[], write_extensions text[],
+          OUT read_allowed boolean[], OUT write_allowed boolean[]
+        )
+        RETURNS record LANGUAGE sql AS $$ SELECT '{}'::boolean[], '{}'::boolean[] $$
+        """,
+        []
+      )
 
       log =
         capture_log(fn -> assert {:ok, @all_allowed} = check_all(context.db_conn, context.authorization_context) end)
@@ -130,11 +162,24 @@ defmodule Realtime.Tenants.AuthorizationFunctionTest do
     test "when a policy calls a function that does not exist", context do
       use_authorize_function(true)
 
-      fail_function_with(%Postgrex.Error{
-        postgres: %{code: :undefined_function, message: "function auth.missing() does not exist"}
-      })
+      # plpgsql bodies are only resolved when run, so the missing function is only noticed by the check.
+      # Restrictive, so it is evaluated on top of the permissive policy that grants the read.
+      Postgrex.query!(
+        context.db_conn,
+        "CREATE OR REPLACE FUNCTION public.calls_missing_function() RETURNS boolean LANGUAGE plpgsql AS $$ BEGIN RETURN public.missing_function(); END $$",
+        []
+      )
 
-      assert {:error, :rls_policy_error, %Postgrex.Error{}} =
+      Postgrex.query!(
+        context.db_conn,
+        """
+        CREATE POLICY "calls_missing_function" ON realtime.messages AS RESTRICTIVE FOR SELECT
+        TO authenticated USING ( (SELECT public.calls_missing_function()) )
+        """,
+        []
+      )
+
+      assert  {:error, :rls_policy_error, %Postgrex.Error{code: :undefined_function, message: "function public.missing_function() does not exist"}} =
                Authorization.get_read_authorizations(%Policies{}, context.db_conn, context.authorization_context)
     end
 
@@ -169,34 +214,40 @@ defmodule Realtime.Tenants.AuthorizationFunctionTest do
 
     test "when the database process is gone", context do
       use_authorize_function(true)
-      fail_function_with({:exit, :noproc})
+      {pid, ref} = spawn_monitor(fn -> :ok end)
+      assert_receive {:DOWN, ^ref, :process, ^pid, _}
 
       assert {:error, :increase_connection_pool} =
                Authorization.get_write_authorizations(
                  %Policies{},
-                 context.db_conn,
+                 pid,
                  context.authorization_context,
                  :broadcast
                )
     end
 
+    @tag policies: [:authenticated_read_broadcast_and_presence, :slow_read]
     test "when the query is canceled", context do
       use_authorize_function(true)
-
-      fail_function_with(%Postgrex.Error{
-        postgres: %{code: :query_canceled, message: "canceling statement due to statement timeout"}
-      })
+      # A single-connection pool, so the timeout applies to the connection the check runs on.
+      {:ok, db_conn} = Database.connect(context.tenant, "realtime_test")
+      Postgrex.query!(db_conn, "SET statement_timeout = '100ms'", [])
 
       assert {:error, :query_canceled, %Postgrex.Error{}} =
-               Authorization.get_read_authorizations(%Policies{}, context.db_conn, context.authorization_context)
+               Authorization.get_read_authorizations(%Policies{}, db_conn, context.authorization_context)
     end
 
     test "when the messages partition is missing", context do
       use_authorize_function(true)
 
-      fail_function_with(%Postgrex.Error{
-        postgres: %{code: :check_violation, table: "messages", message: "no partition of relation \"messages\""}
-      })
+      %{rows: partitions} =
+        Postgrex.query!(
+          context.db_conn,
+          "SELECT inhrelid::regclass::text FROM pg_inherits WHERE inhparent = 'realtime.messages'::regclass",
+          []
+        )
+
+      for [partition] <- partitions, do: Postgrex.query!(context.db_conn, "DROP TABLE #{partition}", [])
 
       assert {:error, :missing_partition} =
                Authorization.get_write_authorizations(
