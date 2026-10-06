@@ -1,0 +1,45 @@
+name: Bump DB images
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    name: Bump ${{ matrix.engine }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [pg15, pg17, orioledb17, multigres]
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Bump image
+        env:
+          ENGINE: ${{ matrix.engine }}
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/bump_db_images.sh "$ENGINE" > "$RUNNER_TEMP/changes.md"
+
+      - name: Generate token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.GH_APP_MANAGER_ID }}
+          private-key: ${{ secrets.GH_APP_MANAGER_PRIVATE_KEY }}
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          commit-message: "chore(ci): bump ${{ matrix.engine }} image"
+          title: "chore(ci): bump ${{ matrix.engine }} image"
+          body-path: ${{ runner.temp }}/changes.md
+          branch: gha/bump-db-images-${{ matrix.engine }}
+          base: ${{ github.event.repository.default_branch }}
+          delete-branch: true
