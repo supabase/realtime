@@ -34,7 +34,7 @@ select clear_wal();
 
 insert into public.notes(id, body) values (1, 'bbb');
 delete from public.notes;
-select subscription_id, filters from realtime.subscription;
+select subscription_id, filters from realtime.subscription order by id;
            subscription_id            |              filters              
 --------------------------------------+-----------------------------------
  f4539ebe-c779-5788-bbc1-2421ffaa8954 | {"(body,in,\"{aaa,bbb,ccc}\",f)"}

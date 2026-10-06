@@ -67,7 +67,7 @@ jobs:
             postgres_image: supabase/postgres:17.6.1.166
             coverage: true
           - postgres: orioledb17
-            postgres_image: supabase/postgres:17.9.0.019-orioledb
+            postgres_image: supabase/postgres:17.11.0.004-orioledb
           # The realtime DB is independent of the tenant databases, so it stays on a plain
           # Postgres image and only the tenant DBs run a cluster.
           - postgres: multigres

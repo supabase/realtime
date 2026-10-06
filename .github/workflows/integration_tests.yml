@@ -52,7 +52,7 @@ jobs:
           - postgres: pg17
             postgres_image: supabase/postgres:17.6.1.166
           - postgres: orioledb17
-            postgres_image: supabase/postgres:17.9.0.019-orioledb
+            postgres_image: supabase/postgres:17.11.0.004-orioledb
           - postgres: multigres
             postgres_image: ghcr.io/multigres/multigres-cluster-supabase:sha-d96b2f9
 

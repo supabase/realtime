@@ -34,7 +34,7 @@ The image is resolved from `TENANT_DUMP_IMAGES` in `mise.toml`. With no `--major
 `POSTGRES_IMAGE` overrides the lot, which is how you reach an image with no committed dump:
 
 ```bash
-POSTGRES_IMAGE=supabase/postgres:17.9.0.019-orioledb mise run walrus --migrations
+POSTGRES_IMAGE=supabase/postgres:17.11.0.004-orioledb mise run walrus --migrations
 ```
 
 `test/walrus/run.sh` takes the same arguments and works on its own; the only thing the mise task adds is resolving `POSTGRES_IMAGE`, which the script otherwise leaves to the default in `compose.walrus-db.yml`.
