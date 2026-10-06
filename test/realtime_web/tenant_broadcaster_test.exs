@@ -381,6 +381,83 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
     end
   end
 
+  describe "record_ingress/3" do
+    @ingress_event [:realtime, :broadcast, :ingress]
+
+    @transports [:ws, :http_single, :http_batch]
+
+    # The classification spec: every reason and the result it must be counted as.
+    # Changing a row here is the test-side half of answering an open question on REAL-1121.
+    @classification [
+      none: :ok,
+      rate_limited: :client_error,
+      payload_too_large: :client_error,
+      invalid_payload: :client_error,
+      unauthorized: :client_error,
+      tenant_suspended: :client_error,
+      rls_policy_error: :tenant_error,
+      query_canceled: :tenant_error,
+      tenant_database_unavailable: :tenant_error,
+      tenant_db_too_many_connections: :tenant_error,
+      tenant_initializing: :tenant_error,
+      connect_rate_limit_reached: :tenant_error,
+      missing_partition: :server_error,
+      increase_connection_pool: :tenant_error,
+      rpc_error: :server_error,
+      unknown: :server_error
+    ]
+
+    setup do
+      ref = :telemetry_test.attach_event_handlers(self(), [@ingress_event])
+      %{ref: ref}
+    end
+
+    test "emits a count of 1 by default", %{ref: ref} do
+      assert :ok = TenantBroadcaster.record_ingress(:ws, :none)
+
+      assert_receive {@ingress_event, ^ref, %{count: 1}, metadata}
+      assert metadata == %{transport: :ws, result: :ok, reason: :none}
+    end
+
+    test "emits the given count", %{ref: ref} do
+      assert :ok = TenantBroadcaster.record_ingress(:http_batch, :none, 25)
+
+      assert_receive {@ingress_event, ^ref, %{count: 25}, %{transport: :http_batch, result: :ok, reason: :none}}
+    end
+
+    test "accepts every transport", %{ref: ref} do
+      for transport <- @transports do
+        assert :ok = TenantBroadcaster.record_ingress(transport, :none)
+        assert_receive {@ingress_event, ^ref, %{count: 1}, %{transport: ^transport}}
+      end
+    end
+
+    for {reason, result} <- @classification do
+      test "classifies #{inspect(reason)} as #{inspect(result)}", %{ref: ref} do
+        reason = unquote(reason)
+        result = unquote(result)
+
+        assert :ok = TenantBroadcaster.record_ingress(:http_single, reason)
+        assert_receive {@ingress_event, ^ref, %{count: 1}, metadata}
+        assert metadata == %{transport: :http_single, result: result, reason: reason}
+      end
+    end
+
+    test "raises on an unknown transport", %{ref: ref} do
+      assert_raise FunctionClauseError, fn -> TenantBroadcaster.record_ingress(:carrier_pigeon, :none) end
+
+      refute_receive {@ingress_event, ^ref, _, _}
+    end
+
+    test "raises on an unknown reason instead of counting it as a server error", %{ref: ref} do
+      for reason <- [:rls_policy_eror, "RLS policy error", {:error, :boom}, %RuntimeError{message: "boom"}] do
+        assert_raise FunctionClauseError, fn -> TenantBroadcaster.record_ingress(:ws, reason) end
+      end
+
+      refute_receive {@ingress_event, ^ref, _, _}
+    end
+  end
+
   def handle_telemetry(event, measures, metadata, %{pid: pid, tenant: tenant}) do
     if metadata[:tenant] == tenant do
       send(pid, {:telemetry, event, measures, metadata})

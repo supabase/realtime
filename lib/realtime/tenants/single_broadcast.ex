@@ -12,7 +12,9 @@ defmodule Realtime.Tenants.SingleBroadcast do
   """
   use Ecto.Schema
   use Realtime.Logs
+
   import Ecto.Changeset
+  import RealtimeWeb.TenantBroadcaster, only: [record_ingress: 2, connect_error_reason: 1]
 
   alias Realtime.Api.Tenant
   alias Realtime.FeatureFlags
@@ -69,6 +71,7 @@ defmodule Realtime.Tenants.SingleBroadcast do
   def broadcast(auth_params, tenant, topic, event, payload, content_type, opts \\ [])
 
   def broadcast(_auth_params, %Tenant{suspend: true}, _topic, _event, _payload, _content_type, _opts) do
+    record_ingress(:http_single, :tenant_suspended)
     {:error, :forbidden, "Tenant is suspended"}
   end
 
@@ -93,11 +96,17 @@ defmodule Realtime.Tenants.SingleBroadcast do
         )
       else
         send_message_and_count(tenant, events_per_second_rate, topic, event, payload, content_type, _public? = true)
+        record_ingress(:http_single, :none)
         :ok
       end
     else
-      %Ecto.Changeset{valid?: false} = changeset -> {:error, changeset}
-      error -> error
+      %Ecto.Changeset{valid?: false} = changeset ->
+        record_ingress(:http_single, :invalid_payload)
+        {:error, changeset}
+
+      {:error, :too_many_requests, _} = error ->
+        record_ingress(:http_single, :rate_limited)
+        error
     end
   end
 
@@ -186,50 +195,64 @@ defmodule Realtime.Tenants.SingleBroadcast do
          {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}} = policies} <-
            permissions_for_message(db_conn, auth_params, topic, persist?) do
       send_message_and_count(tenant, rate_counter, topic, event, payload, content_type, false)
+      record_ingress(:http_single, :none)
       if persist?, do: maybe_persist(policies.broadcast, db_conn, tenant, topic, event, payload)
       :ok
     else
       {:ok, %Policies{}} ->
+        record_ingress(:http_single, :unauthorized)
         {:error, :forbidden, "Unauthorized"}
 
       {:error, :rls_policy_error, error} ->
         log_error("RlsPolicyError", error)
+        record_ingress(:http_single, :rls_policy_error)
         {:error, :unprocessable_entity, "RLS policy error"}
 
       {:error, :query_canceled, error} ->
         log_error("QueryCanceled", error)
+        record_ingress(:http_single, :query_canceled)
         {:error, :unprocessable_entity, "Query canceled"}
 
-      {:error, :rpc_error, error} ->
+      {:error, :rpc_error, error} = connect_error ->
         log_error("RpcError", error)
+        record_ingress(:http_single, connect_error_reason(connect_error))
         {:error, :internal_server_error, "RPC error"}
 
       {:error, :missing_partition} ->
         log_error("MissingPartition", "Realtime was unable to find the expected messages partition")
+        record_ingress(:http_single, :missing_partition)
         {:error, :unprocessable_entity, "Missing messages partition"}
 
       {:error, :increase_connection_pool} ->
+        record_ingress(:http_single, :increase_connection_pool)
         {:error, :too_many_requests, "Connection pool exhausted"}
 
-      {:error, :tenant_database_unavailable} ->
+      {:error, :tenant_database_unavailable} = error ->
         log_error("UnableToConnectToProject", "Realtime was unable to connect to the project database")
+        record_ingress(:http_single, connect_error_reason(error))
         {:error, :unprocessable_entity, "Tenant database unavailable"}
 
-      {:error, :initializing} ->
+      {:error, :initializing} = error ->
+        record_ingress(:http_single, connect_error_reason(error))
         {:error, :unprocessable_entity, "Tenant database initializing"}
 
-      {:error, :tenant_database_connection_initializing} ->
+      {:error, :tenant_database_connection_initializing} = error ->
+        record_ingress(:http_single, connect_error_reason(error))
         {:error, :unprocessable_entity, "Tenant database connection initializing"}
 
-      {:error, :tenant_db_too_many_connections} ->
+      {:error, :tenant_db_too_many_connections} = error ->
         log_error("DatabaseLackOfConnections", "Database can't accept more connections, Realtime won't connect")
+        record_ingress(:http_single, connect_error_reason(error))
         {:error, :unprocessable_entity, "Tenant database has too many connections"}
 
-      {:error, :connect_rate_limit_reached} ->
+      {:error, :connect_rate_limit_reached} = error ->
+        record_ingress(:http_single, connect_error_reason(error))
         {:error, :unprocessable_entity, "Connect rate limit reached"}
 
-      {:error, error} ->
+      # connect_error_reason/1 still recognises some Connect errors here (e.g. :tenant_suspended), else :unknown
+      {:error, error} = unexpected_error ->
         log_error("UnableToSetPolicies", error)
+        record_ingress(:http_single, connect_error_reason(unexpected_error))
         {:error, :internal_server_error, "Unable to authorize broadcast"}
     end
   end

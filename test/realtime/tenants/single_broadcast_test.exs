@@ -5,6 +5,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
   setup :set_mimic_from_context
 
   import Ecto.Query, only: [from: 2]
+  import ExUnit.CaptureLog
 
   alias Realtime.FeatureFlags
   alias Realtime.Api.Message
@@ -396,6 +397,150 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
     end
   end
 
+  describe "ingress telemetry" do
+    setup %{tenant: tenant} do
+      attach_ingress_handler()
+
+      events_per_second_rate = Tenants.events_per_second_rate(tenant)
+
+      RateCounter
+      |> stub(:new, fn _ -> {:ok, nil} end)
+      |> stub(:get, fn ^events_per_second_rate -> {:ok, %RateCounter{avg: 0}} end)
+
+      stub(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _, _ -> :ok end)
+
+      %{auth_params: auth_params_fixture(tenant)}
+    end
+
+    test "public broadcast that is sent records :none", %{tenant: tenant} do
+      assert :ok = SingleBroadcast.broadcast(%Authorization{}, tenant, random_string(), "event", %{"a" => "b"}, :json)
+
+      assert_ingress(:none, :ok)
+    end
+
+    test "private broadcast that is sent records :none", %{tenant: tenant, auth_params: auth_params} do
+      stub(Connect, :lookup_or_start_connection, fn _ -> {:ok, self()} end)
+
+      stub(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
+        {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
+      end)
+
+      assert :ok =
+               SingleBroadcast.broadcast(auth_params, tenant, random_string(), "event", %{"a" => "b"}, :json,
+                 private: true
+               )
+
+      assert_ingress(:none, :ok)
+    end
+
+    test "suspended tenant records :tenant_suspended", %{tenant: tenant} do
+      tenant = %{tenant | suspend: true}
+
+      assert {:error, :forbidden, _} =
+               SingleBroadcast.broadcast(%Authorization{}, tenant, random_string(), "event", %{"a" => "b"}, :json)
+
+      assert_ingress(:tenant_suspended, :client_error)
+    end
+
+    test "invalid message records :invalid_payload", %{tenant: tenant} do
+      assert {:error, %Ecto.Changeset{}} =
+               SingleBroadcast.broadcast(%Authorization{}, tenant, "", "event", %{"a" => "b"}, :json)
+
+      assert_ingress(:invalid_payload, :client_error)
+    end
+
+    # Payload size is checked inside the changeset here, so it shares :invalid_payload. If you split it out
+    # into :payload_too_large (the optional refinement in the Step 5 comment), update this test.
+    test "payload over the limit records :invalid_payload", %{tenant: tenant} do
+      payload = %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 1)}
+
+      assert {:error, %Ecto.Changeset{}} =
+               SingleBroadcast.broadcast(%Authorization{}, tenant, random_string(), "event", payload, :json)
+
+      assert_ingress(:invalid_payload, :client_error)
+    end
+
+    test "rate limited broadcast records :rate_limited", %{tenant: tenant} do
+      events_per_second_rate = Tenants.events_per_second_rate(tenant)
+
+      stub(RateCounter, :get, fn ^events_per_second_rate ->
+        {:ok, %RateCounter{avg: tenant.max_events_per_second + 1}}
+      end)
+
+      assert {:error, :too_many_requests, _} =
+               SingleBroadcast.broadcast(%Authorization{}, tenant, random_string(), "event", %{"a" => "b"}, :json)
+
+      assert_ingress(:rate_limited, :client_error)
+    end
+
+    test "private broadcast denied by policies records :unauthorized", %{tenant: tenant, auth_params: auth_params} do
+      stub(Connect, :lookup_or_start_connection, fn _ -> {:ok, self()} end)
+
+      stub(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
+        {:ok, %Policies{broadcast: %BroadcastPolicies{write: false}}}
+      end)
+
+      assert {:error, :forbidden, "Unauthorized"} =
+               SingleBroadcast.broadcast(auth_params, tenant, random_string(), "event", %{"a" => "b"}, :json,
+                 private: true
+               )
+
+      assert_ingress(:unauthorized, :client_error)
+    end
+
+    # Errors from Connect.lookup_or_start_connection/2, mapped by TenantBroadcaster.connect_error_reason/1
+    for {connect_error, reason, result} <- [
+          {{:error, :rpc_error, :timeout}, :rpc_error, :server_error},
+          {{:error, :tenant_database_unavailable}, :tenant_database_unavailable, :tenant_error},
+          {{:error, :tenant_db_too_many_connections}, :tenant_db_too_many_connections, :tenant_error},
+          {{:error, :connect_rate_limit_reached}, :connect_rate_limit_reached, :tenant_error},
+          {{:error, :initializing}, :tenant_initializing, :tenant_error},
+          {{:error, :tenant_database_connection_initializing}, :tenant_initializing, :tenant_error},
+          {{:error, :tenant_suspended}, :tenant_suspended, :client_error},
+          {{:error, :something_unexpected}, :unknown, :server_error}
+        ] do
+      test "private broadcast when Connect returns #{inspect(connect_error)} records #{inspect(reason)}",
+           %{tenant: tenant, auth_params: auth_params} do
+        connect_error = unquote(Macro.escape(connect_error))
+        stub(Connect, :lookup_or_start_connection, fn _ -> connect_error end)
+
+        capture_log(fn ->
+          assert {:error, _status, _message} =
+                   SingleBroadcast.broadcast(auth_params, tenant, random_string(), "event", %{"a" => "b"}, :json,
+                     private: true
+                   )
+        end)
+
+        assert_ingress(unquote(reason), unquote(result))
+      end
+    end
+
+    # Errors from the write authorization check. These don't come from Connect, so SingleBroadcast maps them itself.
+    for {auth_error, reason, result} <- [
+          {{:error, :rls_policy_error, "policy raised"}, :rls_policy_error, :tenant_error},
+          {{:error, :query_canceled, "canceling statement due to statement timeout"}, :query_canceled, :tenant_error},
+          {{:error, :missing_partition}, :missing_partition, :server_error},
+          {{:error, :increase_connection_pool}, :increase_connection_pool, :tenant_error},
+          {{:error, :something_unexpected}, :unknown, :server_error}
+        ] do
+      test "private broadcast when write authorization returns #{inspect(auth_error)} records #{inspect(reason)}",
+           %{tenant: tenant, auth_params: auth_params} do
+        auth_error = unquote(Macro.escape(auth_error))
+        stub(Connect, :lookup_or_start_connection, fn _ -> {:ok, self()} end)
+        stub(Authorization, :get_write_authorizations, fn _, _, :broadcast -> auth_error end)
+
+        capture_log(fn ->
+          assert {:error, _status, _message} =
+                   SingleBroadcast.broadcast(auth_params, tenant, random_string(), "event", %{"a" => "b"}, :json,
+                     private: true
+                   )
+        end)
+
+        assert_ingress(unquote(reason), unquote(result))
+      end
+    end
+  end
+
   describe "message persistence" do
     setup %{tenant: tenant} do
       stub(FeatureFlags, :enabled?, fn
@@ -610,4 +755,40 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
   end
 
   defp messages_for(topic), do: from(m in Message, where: m.topic == ^topic)
+
+  defp auth_params_fixture(tenant) do
+    sub = random_string()
+    role = "authenticated"
+
+    Authorization.build_authorization_params(%{
+      tenant_id: tenant.external_id,
+      headers: [{"header-1", "value-1"}],
+      claims: %{"sub" => sub, "role" => role, "exp" => Joken.current_time() + 1_000},
+      role: role,
+      sub: sub
+    })
+  end
+
+  # This module runs async and the ingress event has no tenant tag, so a plain handler would also
+  # see broadcasts from other tests. SingleBroadcast.broadcast/7 runs in the test process, and telemetry
+  # handlers run in the emitting process, so only forward events emitted by this test.
+  defp attach_ingress_handler do
+    handler_id = {__MODULE__, make_ref()}
+    :telemetry.attach(handler_id, [:realtime, :broadcast, :ingress], &__MODULE__.forward_own_ingress/4, self())
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+  end
+
+  def forward_own_ingress(_event, measurements, metadata, test_pid) do
+    if self() == test_pid, do: send(test_pid, {:ingress, measurements, metadata})
+  end
+
+  # Exactly one ingress event per request
+  defp assert_ingress(reason, result) do
+    assert_receive {:ingress, %{count: 1}, metadata},
+                   Application.fetch_env!(:ex_unit, :assert_receive_timeout),
+                   "expected to receive ingress event with reason #{inspect(reason)} and result #{inspect(result)}"
+
+    assert metadata == %{transport: :http_single, result: result, reason: reason}
+    refute_receive {:ingress, _, _}
+  end
 end

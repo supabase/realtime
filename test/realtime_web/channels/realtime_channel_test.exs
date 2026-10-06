@@ -804,6 +804,50 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
   end
 
+  describe "broadcast ingress telemetry" do
+    @describetag policies: [:authenticated_all_topic_read, :authenticated_all_topic_insert]
+
+    test "private broadcast that is sent records :none exactly once", %{tenant: tenant} do
+      %{socket: socket, channel_pid: channel_pid} = join_private_channel(tenant)
+      attach_ingress_handler(channel_pid)
+
+      push(socket, "broadcast", %{"event" => "my_event", "payload" => %{"hello" => "world"}})
+      :sys.get_state(channel_pid)
+
+      # Recorded by BroadcastHandler. handle_in must not record a second event on success.
+      assert_ingress(:none, :ok)
+    end
+
+    for {connect_error, reason, result} <- [
+          {{:error, :rpc_error, :timeout}, :rpc_error, :server_error},
+          {{:error, :tenant_database_unavailable}, :tenant_database_unavailable, :tenant_error},
+          {{:error, :tenant_db_too_many_connections}, :tenant_db_too_many_connections, :tenant_error},
+          {{:error, :connect_rate_limit_reached}, :connect_rate_limit_reached, :tenant_error},
+          {{:error, :initializing}, :tenant_initializing, :tenant_error},
+          {{:error, :tenant_database_connection_initializing}, :tenant_initializing, :tenant_error},
+          {{:error, :tenant_suspended}, :tenant_suspended, :client_error},
+          {{:error, :something_unexpected}, :unknown, :server_error}
+        ] do
+      test "private broadcast when Connect returns #{inspect(connect_error)} records #{inspect(reason)}",
+           %{tenant: tenant} do
+        connect_error = unquote(Macro.escape(connect_error))
+        %{socket: socket, channel_pid: channel_pid} = join_private_channel(tenant)
+        attach_ingress_handler(channel_pid)
+
+        capture_log(fn ->
+          expect(Connect, :lookup_or_start_connection, fn _ -> connect_error end)
+          allow(Connect, self(), channel_pid)
+
+          push(socket, "broadcast", %{"event" => "my_event", "payload" => %{"hello" => "world"}})
+          :sys.get_state(channel_pid)
+        end)
+
+        assert_ingress(unquote(reason), unquote(result))
+        assert Process.alive?(channel_pid)
+      end
+    end
+  end
+
   describe "presence" do
     test "presence state event is counted", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
@@ -2415,4 +2459,39 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   end
 
   defp rls_context(_), do: :ok
+
+  defp join_private_channel(tenant) do
+    jwt = Generators.generate_jwt_token(tenant)
+    {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+    %Socket{channel_pid: channel_pid} =
+      socket = subscribe_and_join!(socket, "realtime:test", %{"config" => %{"private" => true}})
+
+    %{socket: socket, channel_pid: channel_pid}
+  end
+
+  # This module runs async and the ingress event has no tenant tag, so a plain handler would also
+  # see broadcasts from other tests. handle_in/3 runs in the channel process, and telemetry handlers
+  # run in the emitting process, so only forward events emitted by this test's channel.
+  defp attach_ingress_handler(channel_pid) do
+    handler_id = {__MODULE__, make_ref()}
+    config = %{test_pid: self(), channel_pid: channel_pid}
+    :telemetry.attach(handler_id, [:realtime, :broadcast, :ingress], &__MODULE__.forward_channel_ingress/4, config)
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+  end
+
+  def forward_channel_ingress(_event, measurements, metadata, %{test_pid: test_pid, channel_pid: channel_pid}) do
+    if self() == channel_pid, do: send(test_pid, {:ingress, measurements, metadata})
+  end
+
+  # Exactly one ingress event per broadcast attempt
+  defp assert_ingress(reason, result) do
+    # assert_receive/3 is (pattern, timeout, failure_message), so the message needs an explicit timeout
+    assert_receive {:ingress, %{count: 1}, metadata},
+                   Application.fetch_env!(:ex_unit, :assert_receive_timeout),
+                   "expected to receive ingress event with reason #{inspect(reason)} and result #{inspect(result)}"
+
+    assert metadata == %{transport: :ws, result: result, reason: reason}
+    refute_receive {:ingress, _, _}
+  end
 end

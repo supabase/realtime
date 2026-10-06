@@ -8,6 +8,50 @@ defmodule RealtimeWeb.TenantBroadcaster do
 
   @type message_type :: :broadcast | :presence | :postgres_changes
 
+  @type transport :: :ws | :http_single | :http_batch
+  @type result :: :ok | :client_error | :tenant_error | :server_error
+  @type reason ::
+          :none
+          | :rate_limited
+          | :payload_too_large
+          | :invalid_payload
+          | :unauthorized
+          | :rls_policy_error
+          | :query_canceled
+          | :tenant_database_unavailable
+          | :tenant_db_too_many_connections
+          | :missing_partition
+          | :increase_connection_pool
+          | :connect_rate_limit_reached
+          | :tenant_initializing
+          | :rpc_error
+          | :tenant_suspended
+          | :unknown
+
+  @transports [:ws, :http_single, :http_batch]
+
+  @classification %{
+    none: :ok,
+    rate_limited: :client_error,
+    payload_too_large: :client_error,
+    invalid_payload: :client_error,
+    unauthorized: :client_error,
+    tenant_suspended: :client_error,
+    rls_policy_error: :tenant_error,
+    query_canceled: :tenant_error,
+    tenant_database_unavailable: :tenant_error,
+    tenant_db_too_many_connections: :tenant_error,
+    tenant_initializing: :tenant_error,
+    connect_rate_limit_reached: :tenant_error,
+    # The tenant's own pool timed out on checkout, or its authorization error rate limit tripped
+    increase_connection_pool: :tenant_error,
+    missing_partition: :server_error,
+    rpc_error: :server_error,
+    unknown: :server_error
+  }
+
+  @reasons Map.keys(@classification)
+
   @spec pubsub_direct_broadcast(
           node :: node(),
           tenant_id :: String.t(),
@@ -96,6 +140,61 @@ defmodule RealtimeWeb.TenantBroadcaster do
   end
 
   def measure_broadcast_fanout(_message), do: :ok
+
+  @ingress_event [:realtime, :broadcast, :ingress]
+
+  @doc """
+  Counts a broadcast attempt for the Broadcast error-rate SLO.
+
+  Call it once per attempt, at the point where Realtime accepts or rejects the broadcast.
+  For several messages with the same outcome, call it once and pass the number of messages as `count`.
+  It emits the `[:realtime, :broadcast, :ingress]` telemetry event, which shows up in Prometheus as
+  `realtime_broadcast_ingress_total`.
+
+  Callers pass a reason. This function maps the reason to a result:
+
+    * `:ok`: the broadcast went out (reason `:none`)
+    * `:client_error`: the caller caused the failure, such as hitting a rate limit
+    * `:tenant_error`: the tenant's database caused the failure
+    * `:server_error`: Realtime caused the failure
+
+  An unknown transport or reason raises `FunctionClauseError`. That way a typo fails in tests and
+  never counts against the error budget.
+  """
+  @spec record_ingress(transport :: transport, reason :: reason, count :: pos_integer) :: :ok
+  def record_ingress(transport, reason, count \\ 1)
+      when transport in @transports and reason in @reasons and is_integer(count) and count > 0 do
+    result = Map.fetch!(@classification, reason)
+
+    :telemetry.execute(
+      @ingress_event,
+      %{count: count},
+      %{transport: transport, result: result, reason: reason}
+    )
+
+    :ok
+  end
+
+  @doc """
+  Maps an error from `Realtime.Tenants.Connect.lookup_or_start_connection/2` to an ingress reason.
+
+  Use it when a private broadcast fails because Realtime can't get a connection to the tenant's
+  database. Pass the result to `record_ingress/3`. Errors this function doesn't know become `:unknown`.
+  """
+  @spec connect_error_reason({:error, :rpc_error, term()} | {:error, term()}) :: reason
+  def connect_error_reason(connect_error) do
+    case connect_error do
+      {:error, :rpc_error, _} -> :rpc_error
+      {:error, :tenant_database_unavailable} -> :tenant_database_unavailable
+      {:error, :tenant_db_too_many_connections} -> :tenant_db_too_many_connections
+      {:error, :connect_rate_limit_reached} -> :connect_rate_limit_reached
+      {:error, :initializing} -> :tenant_initializing
+      {:error, :tenant_database_connection_initializing} -> :tenant_initializing
+      # Returned when Connect starts the connection on another node and the tenant is suspended
+      {:error, :tenant_suspended} -> :tenant_suspended
+      _ -> :unknown
+    end
+  end
 
   @payload_size_event [:realtime, :tenants, :payload, :size]
 
