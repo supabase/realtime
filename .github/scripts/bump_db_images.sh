@@ -26,7 +26,6 @@ case "${1:-}" in
     ;;
   multigres)
     entry=multigres
-    field=tenant_db_image
     revision=$(multigres_revision)
     latest="ghcr.io/multigres/multigres-cluster-supabase:sha-${revision:0:7}"
     ;;
@@ -36,9 +35,7 @@ case "${1:-}" in
     ;;
 esac
 
-current=$(entry="$entry" field="${field:-postgres_image}" yq -e \
-  '.jobs.tests.strategy.matrix.include[] | select(.postgres == strenv(entry)) | .[strenv(field)]' \
-  .github/workflows/tests.yml)
+current=$(jq -er --arg entry "$entry" '.[$entry]' .github/db-images.json)
 
 if [ "$current" != "$latest" ]; then
   # shellcheck disable=SC2016
