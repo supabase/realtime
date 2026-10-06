@@ -21,6 +21,8 @@ on:
       - "Dockerfile"
       - "run.sh"
       - ".github/workflows/tests.yml"
+      - ".github/db-images.json"
+      - ".github/scripts/db_images.sh"
 
   push:
     branches:
@@ -43,8 +45,6 @@ jobs:
     name: Tests (${{ matrix.postgres }} - Partition ${{ matrix.partition }})
     runs-on: blacksmith-8vcpu-ubuntu-2404
     env:
-      POSTGRES_IMAGE: ${{ matrix.postgres_image }}
-      TENANT_DB_IMAGE: ${{ matrix.tenant_db_image }}
       # A cluster serves one database, so a port each, and max_cases is one fewer: some tests
       # hold a second database while holding the first, and checkout blocks until one frees up.
       USE_EXTERNAL_TENANT_DB: ${{ matrix.postgres == 'multigres' }}
@@ -54,28 +54,25 @@ jobs:
       fail-fast: false
       matrix:
         partition: [1, 2, 3, 4]
+        # pg15 tests before supautils.policy_grants added all necessary grants
         postgres: [pg14, pg15, pg15_latest, pg17, orioledb17, multigres]
         include:
-          - postgres: pg14
-            postgres_image: supabase/postgres:14.1.0.82
-          # test before supautils.policy_grants added all necessary grants
-          - postgres: pg15
-            postgres_image: supabase/postgres:15.1.0.1
-          - postgres: pg15_latest
-            postgres_image: supabase/postgres:15.14.1.167
           - postgres: pg17
-            postgres_image: supabase/postgres:17.6.1.166
             coverage: true
-          - postgres: orioledb17
-            postgres_image: supabase/postgres:17.11.0.004-orioledb
           # The realtime DB is independent of the tenant databases, so it stays on a plain
           # Postgres image and only the tenant DBs run a cluster.
           - postgres: multigres
-            postgres_image: supabase/postgres:17.6.1.166
-            tenant_db_image: ghcr.io/multigres/multigres-cluster-supabase:sha-d96b2f9
+            postgres_image: pg17
+            tenant_db_image: multigres
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Resolve DB images
+        run: >-
+          .github/scripts/db_images.sh
+          POSTGRES_IMAGE=${{ matrix.postgres_image || matrix.postgres }}
+          TENANT_DB_IMAGE=${{ matrix.tenant_db_image }}
+          >> "$GITHUB_ENV"
       - name: Setup elixir
         id: beam
         uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1.24.0

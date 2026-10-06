@@ -16,6 +16,8 @@ on:
       - "compose.tests.yml"
       - "dev/**"
       - ".github/workflows/integration_tests.yml"
+      - ".github/db-images.json"
+      - ".github/scripts/db_images.sh"
 
   push:
     branches:
@@ -35,29 +37,16 @@ jobs:
   tests:
     name: Tests (${{ matrix.postgres }})
     runs-on: blacksmith-8vcpu-ubuntu-2404
-    env:
-      POSTGRES_IMAGE: ${{ matrix.postgres_image }}
     strategy:
       fail-fast: false
       matrix:
+        # pg15 tests before supautils.policy_grants added all necessary grants
         postgres: [pg14, pg15, pg15_latest, pg17, orioledb17, multigres]
-        include:
-          - postgres: pg14
-            postgres_image: supabase/postgres:14.1.0.82
-          # test before supautils.policy_grants added all necessary grants
-          - postgres: pg15
-            postgres_image: supabase/postgres:15.1.0.1
-          - postgres: pg15_latest
-            postgres_image: supabase/postgres:15.14.1.167
-          - postgres: pg17
-            postgres_image: supabase/postgres:17.6.1.166
-          - postgres: orioledb17
-            postgres_image: supabase/postgres:17.11.0.004-orioledb
-          - postgres: multigres
-            postgres_image: ghcr.io/multigres/multigres-cluster-supabase:sha-d96b2f9
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Resolve DB images
+        run: .github/scripts/db_images.sh POSTGRES_IMAGE=${{ matrix.postgres }} >> "$GITHUB_ENV"
       - name: Cache Docker images
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         id: docker-cache
