@@ -15,7 +15,7 @@ TENANT = "{% if env.TENANT %}{{ env.TENANT }}{% else %}{% set dir = config_root 
 # The Postgres majors that get a committed tenant dump (priv/repo/tenant_db_dump_<major>.sql), and
 # the image each one is generated from — both `tenant-dumps` and the workflow that runs it read
 # this list. Keep the images in step with the ones the test workflows run against.
-TENANT_DUMP_IMAGES = "15=supabase/postgres:15.14.1.167 17=supabase/postgres:17.11.0.004"
+TENANT_DUMP_IMAGES = "15=supabase/postgres:15.19.0.004 17=supabase/postgres:17.11.0.004"
 REGION = "us-east-1"
 API_JWT_SECRET = "dev"
 DB_ENC_KEY = "1234567890123456"
