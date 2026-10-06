@@ -340,11 +340,11 @@ defmodule Realtime.DatabaseTest do
     end
 
     test "passes the remaining opts to Postgrex", %{db_conn: db_conn} do
-      assert {:error, %Postgrex.Error{postgres: %{code: :query_canceled}}} =
-               Database.query(db_conn, "SELECT pg_sleep(1)", [],
+      assert {:ok, %Postgrex.Result{rows: [{1, 2}]}} =
+               Database.query(db_conn, "SELECT 1, 2", [],
                  telemetry: [:realtime, :database, :transaction],
                  tenant_id: "123",
-                 timeout: 50
+                 decode_mapper: &List.to_tuple/1
                )
     end
 
