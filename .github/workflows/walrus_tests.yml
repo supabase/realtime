@@ -51,7 +51,7 @@ jobs:
             mode: migrations
           # OrioleDB we only run migrations at the moment
           - postgres: orioledb17
-            postgres_image: supabase/postgres:17.11.0.002-orioledb
+            postgres_image: supabase/postgres:17.11.0.004-orioledb
             mode: migrations
     env:
       POSTGRES_IMAGE: ${{ matrix.postgres_image }}
