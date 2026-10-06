@@ -56,11 +56,17 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
             # Broadcast first to prioritize throughput.
             :ok ->
               send_message(tenant_id, self_broadcast, tenant_topic, payload)
+              # Persistence happens after the broadcast and is out of scope for this SLI, so a
+              # persist failure must not turn this into an error. Therefore, record the ingress
+              # reason as :none, and do it before the persist attempt.
+              TenantBroadcaster.record_ingress(:ws, :none)
               # TODO: hard limits and buffering based on ack
               maybe_persist(policies, db_conn, tenant_id, authorization_context.topic, payload, ack_broadcast)
 
-            {:error, error} ->
-              {:error, error}
+            # The only error `validate_payload_size` returns is :payload_size_exceeded
+            {:error, :payload_size_exceeded} = error ->
+              TenantBroadcaster.record_ingress(:ws, :payload_too_large)
+              error
           end
 
         cond do
@@ -78,31 +84,40 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
         end
 
       {:ok, policies} ->
+        # Write denied by the tenant's RLS policies.
+        TenantBroadcaster.record_ingress(:ws, :unauthorized)
+
         socket
         |> assign(:policies, policies)
         |> maybe_reply_error(:unauthorized)
 
       {:error, :rls_policy_error, error} ->
         log_error("RlsPolicyError", error)
+        TenantBroadcaster.record_ingress(:ws, :rls_policy_error)
         maybe_reply_error(socket, :rls_policy_error)
 
       {:error, :query_canceled, error} ->
         log_error("QueryCanceled", error)
+        TenantBroadcaster.record_ingress(:ws, :query_canceled)
         maybe_reply_error(socket, :query_canceled)
 
       {:error, :missing_partition} ->
         log_error("MissingPartition", "Realtime was unable to find the expected messages partition")
+        TenantBroadcaster.record_ingress(:ws, :missing_partition)
         maybe_reply_error(socket, :missing_partition)
 
       {:error, :tenant_database_unavailable} ->
         log_error("UnableToConnectToProject", "Realtime was unable to connect to the project database")
+        TenantBroadcaster.record_ingress(:ws, :tenant_database_unavailable)
         maybe_reply_error(socket, :unable_to_connect_to_project)
 
       {:error, :increase_connection_pool} ->
+        TenantBroadcaster.record_ingress(:ws, :increase_connection_pool)
         maybe_reply_error(socket, :increase_connection_pool)
 
       {:error, error} ->
         log_error("UnableToSetPolicies", error)
+        TenantBroadcaster.record_ingress(:ws, :unknown)
         maybe_reply_error(socket, :unable_to_set_policies)
     end
   end
@@ -121,8 +136,14 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
 
     res =
       case Tenants.validate_payload_size(tenant_id, payload) do
-        :ok -> send_message(tenant_id, self_broadcast, tenant_topic, payload)
-        error -> error
+        :ok ->
+          send_message(tenant_id, self_broadcast, tenant_topic, payload)
+          TenantBroadcaster.record_ingress(:ws, :none)
+          :ok
+
+        {:error, :payload_size_exceeded} = error ->
+          TenantBroadcaster.record_ingress(:ws, :payload_too_large)
+          error
       end
 
     cond do

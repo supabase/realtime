@@ -34,6 +34,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias RealtimeWeb.RealtimeChannel.MessageDispatcher
   alias RealtimeWeb.RealtimeChannel.PresenceHandler
   alias RealtimeWeb.RealtimeChannel.Tracker
+  alias RealtimeWeb.TenantBroadcaster
 
   # A JWT `exp` can be arbitrarily far in the future and `Process.send_after/3` rejects delays past
   # Erlang's maximum supported time value, so the re-confirmation timer is capped at this interval.
@@ -462,28 +463,34 @@ defmodule RealtimeWeb.RealtimeChannel do
     with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id) do
       BroadcastHandler.handle(payload, db_conn, socket)
     else
-      {:error, :rpc_error, error} ->
+      {:error, :rpc_error, error} = connect_error ->
         log_error(socket, "UnableToHandleBroadcast", error)
+        TenantBroadcaster.record_ingress(:ws, TenantBroadcaster.connect_error_reason(connect_error))
         BroadcastHandler.maybe_reply_error(socket, :unable_to_handle_broadcast)
 
-      {:error, :tenant_database_unavailable} ->
+      {:error, :tenant_database_unavailable} = connect_error ->
         log_error(socket, "UnableToConnectToProject", :tenant_database_unavailable)
+        TenantBroadcaster.record_ingress(:ws, TenantBroadcaster.connect_error_reason(connect_error))
         BroadcastHandler.maybe_reply_error(socket, :unable_to_connect_to_project)
 
-      {:error, :tenant_db_too_many_connections} ->
+      {:error, :tenant_db_too_many_connections} = connect_error ->
         log_error(socket, "DatabaseLackOfConnections", :tenant_db_too_many_connections)
+        TenantBroadcaster.record_ingress(:ws, TenantBroadcaster.connect_error_reason(connect_error))
         BroadcastHandler.maybe_reply_error(socket, :database_lack_of_connections)
 
-      {:error, :connect_rate_limit_reached} ->
+      {:error, :connect_rate_limit_reached} = connect_error ->
         log_error(socket, "DatabaseConnectionRateLimitReached", :connect_rate_limit_reached)
+        TenantBroadcaster.record_ingress(:ws, TenantBroadcaster.connect_error_reason(connect_error))
         BroadcastHandler.maybe_reply_error(socket, :database_connection_rate_limit_reached)
 
-      {:error, reason} when reason in [:initializing, :tenant_database_connection_initializing] ->
+      {:error, reason} = connect_error when reason in [:initializing, :tenant_database_connection_initializing] ->
         log_error(socket, "InitializingProjectConnection", reason)
+        TenantBroadcaster.record_ingress(:ws, TenantBroadcaster.connect_error_reason(connect_error))
         BroadcastHandler.maybe_reply_error(socket, :initializing_project_connection)
 
-      {:error, error} ->
+      {:error, error} = connect_error ->
         log_error(socket, "UnableToHandleBroadcast", error)
+        TenantBroadcaster.record_ingress(:ws, TenantBroadcaster.connect_error_reason(connect_error))
         BroadcastHandler.maybe_reply_error(socket, :unable_to_handle_broadcast)
     end
   end

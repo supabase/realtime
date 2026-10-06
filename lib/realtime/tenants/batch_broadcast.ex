@@ -4,6 +4,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
   """
   use Ecto.Schema
   import Ecto.Changeset
+  import RealtimeWeb.TenantBroadcaster, only: [record_ingress: 2, record_ingress: 3, connect_error_reason: 1]
 
   alias Realtime.Api.Tenant
   alias Realtime.GenCounter
@@ -49,6 +50,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
   end
 
   def broadcast(_auth_params, %Tenant{suspend: true}, _messages, _super_user) do
+    record_ingress(:http_batch, :tenant_suspended)
     {:error, :forbidden, "Tenant is suspended"}
   end
 
@@ -63,11 +65,15 @@ defmodule Realtime.Tenants.BatchBroadcast do
         |> Enum.group_by(fn event -> Map.get(event, :private, false) end)
 
       # Handle events for public channel
-      events
-      |> Map.get(false, [])
-      |> Enum.each(fn message ->
-        send_message_and_count(tenant, events_per_second_rate, message, true)
-      end)
+      public_events = Map.get(events, false, [])
+
+      if not Enum.empty?(public_events) do
+        Enum.each(public_events, fn message ->
+          send_message_and_count(tenant, events_per_second_rate, message, true)
+        end)
+
+        record_ingress(:http_batch, :none, length(public_events))
+      end
 
       # Handle events for private channel
       events
@@ -76,21 +82,49 @@ defmodule Realtime.Tenants.BatchBroadcast do
       |> Enum.each(fn {topic, events} ->
         if super_user do
           Enum.each(events, fn message -> send_message_and_count(tenant, events_per_second_rate, message, false) end)
+          record_ingress(:http_batch, :none, length(events))
         else
           case permissions_for_message(tenant, auth_params, topic) do
             %Policies{broadcast: %BroadcastPolicies{write: true}} ->
               Enum.each(events, fn message -> send_message_and_count(tenant, events_per_second_rate, message, false) end)
 
-            _ ->
-              nil
+              record_ingress(:http_batch, :none, length(events))
+
+            # write not true
+            %Policies{} ->
+              record_ingress(:http_batch, :unauthorized, length(events))
+
+            # no auth params or no matching policy
+            nil ->
+              record_ingress(:http_batch, :unauthorized, length(events))
+
+            {:error, :rls_policy_error, _} ->
+              record_ingress(:http_batch, :rls_policy_error, length(events))
+
+            {:error, :query_canceled, _} ->
+              record_ingress(:http_batch, :query_canceled, length(events))
+
+            {:error, :missing_partition} ->
+              record_ingress(:http_batch, :missing_partition, length(events))
+
+            {:error, :increase_connection_pool} ->
+              record_ingress(:http_batch, :increase_connection_pool, length(events))
+
+            error ->
+              record_ingress(:http_batch, connect_error_reason(error), length(events))
           end
         end
       end)
 
       :ok
     else
-      %Ecto.Changeset{valid?: false} = changeset -> {:error, changeset}
-      error -> error
+      %Ecto.Changeset{valid?: false} = changeset ->
+        # Just record 1 rejected request, because the changeset is invalid and we don't have a trusted message count.
+        record_ingress(:http_batch, :invalid_payload, 1)
+        {:error, changeset}
+
+      {:error, :too_many_requests, _} = error ->
+        error
     end
   end
 
@@ -167,15 +201,19 @@ defmodule Realtime.Tenants.BatchBroadcast do
     end
   end
 
+  # Records :rate_limited itself because only this function has the parsed message count. The `with`/`else`
+  # in broadcast/4 only passes the error through, so don't record it there too, or it's counted twice.
   defp check_rate_limit(events_per_second_rate, %Tenant{} = tenant, total_messages_to_broadcast) do
     %{max_events_per_second: max_events_per_second} = tenant
     {:ok, %{avg: events_per_second}} = RateCounter.get(events_per_second_rate)
 
     cond do
       events_per_second > max_events_per_second ->
+        record_ingress(:http_batch, :rate_limited, total_messages_to_broadcast)
         {:error, :too_many_requests, "You have exceeded your rate limit"}
 
       total_messages_to_broadcast + events_per_second > max_events_per_second ->
+        record_ingress(:http_batch, :rate_limited, total_messages_to_broadcast)
         {:error, :too_many_requests, "Too many messages to broadcast, please reduce the batch size"}
 
       true ->

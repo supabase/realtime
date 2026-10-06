@@ -565,6 +565,147 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     end
   end
 
+  describe "ingress telemetry" do
+    setup :attach_ingress_handler
+
+    test "private broadcast that is sent records :none",
+         %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      socket = socket_fixture(tenant, topic, policies: %Policies{broadcast: %BroadcastPolicies{write: true}})
+
+      assert {:reply, :ok, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+
+      assert_ingress(:none, :ok)
+    end
+
+    test "private broadcast without ack records :none",
+         %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      socket =
+        socket_fixture(tenant, topic,
+          policies: %Policies{broadcast: %BroadcastPolicies{write: true}},
+          ack_broadcast: false
+        )
+
+      assert {:noreply, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+
+      assert_ingress(:none, :ok)
+    end
+
+    test "records one event per broadcast", %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      socket = socket_fixture(tenant, topic, policies: %Policies{broadcast: %BroadcastPolicies{write: true}})
+
+      for _ <- 1..3, reduce: socket do
+        socket ->
+          {:reply, :ok, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+          socket
+      end
+
+      for _ <- 1..3, do: assert_receive({:ingress, %{count: 1}, %{reason: :none}})
+      refute_receive {:ingress, _, _}
+    end
+
+    test "private broadcast denied by cached policies records :unauthorized",
+         %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      socket = socket_fixture(tenant, topic, policies: %Policies{broadcast: %BroadcastPolicies{write: false}})
+
+      assert {:reply, {:error, %{error: _code}}, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+
+      assert_ingress(:unauthorized, :client_error)
+    end
+
+    test "private broadcast denied by RLS records :unauthorized",
+         %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      # No RLS policies are created, so the write authorization check denies the broadcast
+      socket = socket_fixture(tenant, topic)
+
+      assert {:reply, {:error, %{error: _code}}, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+
+      assert_ingress(:unauthorized, :client_error)
+    end
+
+    test "private broadcast over the payload limit records :payload_too_large",
+         %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      socket = socket_fixture(tenant, topic, policies: %Policies{broadcast: %BroadcastPolicies{write: true}})
+      payload = %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 1)}
+
+      assert {:reply, {:error, %{error: :payload_size_exceeded}}, _socket} =
+               BroadcastHandler.handle(payload, db_conn, socket)
+
+      assert_ingress(:payload_too_large, :client_error)
+    end
+
+    @tag policies: [:broken_write_presence]
+    test "private broadcast with a failing RLS policy records :rls_policy_error",
+         %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      socket = socket_fixture(tenant, topic)
+
+      capture_log(fn ->
+        assert {:reply, {:error, %{error: _code}}, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+      end)
+
+      assert_ingress(:rls_policy_error, :tenant_error)
+    end
+
+    for {error, reason, result} <- [
+          {{:error, :query_canceled, "canceling statement due to statement timeout"}, :query_canceled, :tenant_error},
+          {{:error, :missing_partition}, :missing_partition, :server_error},
+          {{:error, :tenant_database_unavailable}, :tenant_database_unavailable, :tenant_error},
+          {{:error, :increase_connection_pool}, :increase_connection_pool, :tenant_error},
+          {{:error, :something_unexpected}, :unknown, :server_error}
+        ] do
+      test "write authorization returning #{inspect(error)} records #{inspect(reason)}",
+           %{topic: topic, tenant: tenant, db_conn: db_conn} do
+        error = unquote(Macro.escape(error))
+        stub(Authorization, :get_write_authorizations, fn _, _, _, _ -> error end)
+        socket = socket_fixture(tenant, topic)
+
+        capture_log(fn ->
+          assert {:reply, {:error, %{error: _code}}, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+        end)
+
+        assert_ingress(unquote(reason), unquote(result))
+      end
+    end
+
+    test "persistence failure still records :none", %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      stub(FeatureFlags, :enabled?, fn
+        "broadcast_persistence", _tenant_id -> true
+        flag, tenant_id -> call_original(FeatureFlags, :enabled?, [flag, tenant_id])
+      end)
+
+      expect(Repo, :insert, fn _conn, _changeset, _module -> {:error, :boom} end)
+
+      socket =
+        socket_fixture(tenant, topic,
+          ack_broadcast: true,
+          policies: %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}}
+        )
+
+      capture_log(fn ->
+        assert {:reply, :ok, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+      end)
+
+      assert_ingress(:none, :ok)
+    end
+
+    test "public broadcast that is sent records :none", %{topic: topic, tenant: tenant} do
+      socket = socket_fixture(tenant, topic, private?: false, policies: nil)
+
+      assert {:reply, :ok, _socket} = BroadcastHandler.handle(@payload, nil, socket)
+
+      assert_ingress(:none, :ok)
+    end
+
+    test "public broadcast over the payload limit records :payload_too_large", %{topic: topic, tenant: tenant} do
+      socket = socket_fixture(tenant, topic, private?: false, policies: nil)
+      payload = %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 1)}
+
+      assert {:reply, {:error, %{error: :payload_size_exceeded}}, _socket} =
+               BroadcastHandler.handle(payload, nil, socket)
+
+      assert_ingress(:payload_too_large, :client_error)
+    end
+  end
+
   describe "broadcast persistence" do
     setup do
       stub(FeatureFlags, :enabled?, fn
@@ -898,4 +1039,25 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
   end
 
   defp messages_for(topic), do: from(m in Message, where: m.topic == ^topic)
+
+  # This module runs async and the ingress event has no tenant tag, so a plain handler would also
+  # see broadcasts from other tests. BroadcastHandler.handle/3 runs in the test process, and telemetry
+  # handlers run in the emitting process, so only forward events emitted by this test.
+  defp attach_ingress_handler(_context) do
+    handler_id = {__MODULE__, make_ref()}
+    :telemetry.attach(handler_id, [:realtime, :broadcast, :ingress], &__MODULE__.forward_own_ingress/4, self())
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+    :ok
+  end
+
+  def forward_own_ingress(_event, measurements, metadata, test_pid) do
+    if self() == test_pid, do: send(test_pid, {:ingress, measurements, metadata})
+  end
+
+  # Exactly one ingress event per broadcast attempt
+  defp assert_ingress(reason, result) do
+    assert_receive {:ingress, %{count: 1}, metadata}
+    assert metadata == %{transport: :ws, result: result, reason: reason}
+    refute_receive {:ingress, _, _}
+  end
 end

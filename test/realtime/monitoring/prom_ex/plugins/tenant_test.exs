@@ -360,6 +360,47 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       assert_eventually metric_value(metric, hit: false) >= metric_value + 1
     end
 
+    test "global broadcast ingress sums the count measurement" do
+      metric = "realtime_broadcast_ingress_total"
+      tags = [transport: :http_batch, result: :ok, reason: :none]
+      metric_value = metric_value(metric, tags) || 0
+
+      :telemetry.execute([:realtime, :broadcast, :ingress], %{count: 3}, Map.new(tags))
+
+      # A `counter` would only add 1 per event; `sum` adds the measurement
+      assert_eventually metric_value(metric, tags) == metric_value + 3
+    end
+
+    test "global broadcast ingress tracks each transport, result and reason separately" do
+      metric = "realtime_broadcast_ingress_total"
+      ok_tags = [transport: :ws, result: :ok, reason: :none]
+      error_tags = [transport: :http_single, result: :client_error, reason: :rate_limited]
+      ok_value = metric_value(metric, ok_tags) || 0
+      error_value = metric_value(metric, error_tags) || 0
+
+      :telemetry.execute([:realtime, :broadcast, :ingress], %{count: 1}, Map.new(ok_tags))
+      :telemetry.execute([:realtime, :broadcast, :ingress], %{count: 1}, Map.new(ok_tags))
+      :telemetry.execute([:realtime, :broadcast, :ingress], %{count: 1}, Map.new(error_tags))
+
+      assert_eventually metric_value(metric, ok_tags) == ok_value + 2
+      assert metric_value(metric, error_tags) == error_value + 1
+    end
+
+    test "global broadcast ingress drops the tenant from metadata", %{tenant: %{external_id: external_id}} do
+      metric = "realtime_broadcast_ingress_total"
+      tags = [transport: :ws, result: :server_error, reason: :unknown]
+      metric_value = metric_value(metric, tags) || 0
+
+      :telemetry.execute(
+        [:realtime, :broadcast, :ingress],
+        %{count: 1},
+        tags |> Map.new() |> Map.put(:tenant, external_id)
+      )
+
+      assert_eventually metric_value(metric, tags) == metric_value + 1
+      refute metric_value(metric, tenant: external_id)
+    end
+
     test "channel input bytes", context do
       external_id = context.tenant.external_id
 

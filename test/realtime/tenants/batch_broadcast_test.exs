@@ -5,6 +5,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
   setup :set_mimic_from_context
 
   import Ecto.Query, only: [from: 2]
+  import ExUnit.CaptureLog
 
   alias Realtime.FeatureFlags
   alias Realtime.Api.Message
@@ -497,6 +498,193 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
     end
   end
 
+  describe "ingress telemetry" do
+    setup %{tenant: tenant} do
+      attach_ingress_handler()
+
+      events_per_second_rate = Tenants.events_per_second_rate(tenant)
+
+      RateCounter
+      |> stub(:new, fn _ -> {:ok, nil} end)
+      |> stub(:get, fn ^events_per_second_rate -> {:ok, %RateCounter{avg: 0}} end)
+
+      stub(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _, _ -> :ok end)
+      stub(Connect, :lookup_or_start_connection, fn _ -> {:ok, self()} end)
+      stub(Authorization, :build_authorization_params, fn params -> params end)
+
+      %{auth_params: auth_params_fixture(tenant)}
+    end
+
+    test "public messages record :none once with the number of public messages", %{tenant: tenant} do
+      assert :ok = BatchBroadcast.broadcast(nil, tenant, batch(public: 3), false)
+
+      assert_ingress_events([{:none, :ok, 3}])
+    end
+
+    test "super user private messages record :none once per topic", %{tenant: tenant} do
+      [topic_a, topic_b] = [random_string(), random_string()]
+      messages = batch(private: [{topic_a, 2}, {topic_b, 1}])
+
+      assert :ok = BatchBroadcast.broadcast(nil, tenant, messages, true)
+
+      assert_ingress_events([{:none, :ok, 2}, {:none, :ok, 1}])
+    end
+
+    test "authorized private messages record :none once per topic", %{tenant: tenant, auth_params: auth_params} do
+      stub(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
+        {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
+      end)
+
+      assert :ok = BatchBroadcast.broadcast(auth_params, tenant, batch(private: [{random_string(), 2}]), false)
+
+      assert_ingress_events([{:none, :ok, 2}])
+    end
+
+    test "private messages denied by policies record :unauthorized", %{tenant: tenant, auth_params: auth_params} do
+      stub(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
+        {:ok, %Policies{broadcast: %BroadcastPolicies{write: false}}}
+      end)
+
+      assert :ok = BatchBroadcast.broadcast(auth_params, tenant, batch(private: [{random_string(), 2}]), false)
+
+      assert_ingress_events([{:unauthorized, :client_error, 2}])
+    end
+
+    test "private messages with no matching policy record :unauthorized", %{tenant: tenant, auth_params: auth_params} do
+      stub(Authorization, :get_write_authorizations, fn _, _, :broadcast -> {:error, :not_found} end)
+
+      assert :ok = BatchBroadcast.broadcast(auth_params, tenant, batch(private: [{random_string(), 1}]), false)
+
+      assert_ingress_events([{:unauthorized, :client_error, 1}])
+    end
+
+    test "private messages without auth params record :unauthorized", %{tenant: tenant} do
+      assert :ok = BatchBroadcast.broadcast(nil, tenant, batch(private: [{random_string(), 2}]), false)
+
+      assert_ingress_events([{:unauthorized, :client_error, 2}])
+    end
+
+    test "mixed batch records one event per group and the counts add up to the batch size",
+         %{tenant: tenant, auth_params: auth_params} do
+      [allowed, denied] = [random_string(), random_string()]
+
+      stub(Authorization, :get_write_authorizations, fn _, %{topic: topic}, :broadcast ->
+        {:ok, %Policies{broadcast: %BroadcastPolicies{write: topic == allowed}}}
+      end)
+
+      messages = batch(public: 2, private: [{allowed, 2}, {denied, 1}])
+
+      assert :ok = BatchBroadcast.broadcast(auth_params, tenant, messages, false)
+
+      events = assert_ingress_events([{:none, :ok, 2}, {:none, :ok, 2}, {:unauthorized, :client_error, 1}])
+      assert events |> Enum.map(fn {_reason, _result, count} -> count end) |> Enum.sum() == 5
+    end
+
+    # Errors from Connect.lookup_or_start_connection/2, mapped by TenantBroadcaster.connect_error_reason/1
+    for {connect_error, reason, result} <- [
+          {{:error, :rpc_error, :timeout}, :rpc_error, :server_error},
+          {{:error, :tenant_database_unavailable}, :tenant_database_unavailable, :tenant_error},
+          {{:error, :tenant_db_too_many_connections}, :tenant_db_too_many_connections, :tenant_error},
+          {{:error, :connect_rate_limit_reached}, :connect_rate_limit_reached, :tenant_error},
+          {{:error, :initializing}, :tenant_initializing, :tenant_error},
+          {{:error, :tenant_database_connection_initializing}, :tenant_initializing, :tenant_error},
+          {{:error, :tenant_suspended}, :tenant_suspended, :client_error},
+          {{:error, :something_unexpected}, :unknown, :server_error}
+        ] do
+      test "private messages when Connect returns #{inspect(connect_error)} record #{inspect(reason)}",
+           %{tenant: tenant, auth_params: auth_params} do
+        connect_error = unquote(Macro.escape(connect_error))
+        stub(Connect, :lookup_or_start_connection, fn _ -> connect_error end)
+
+        capture_log(fn ->
+          assert :ok = BatchBroadcast.broadcast(auth_params, tenant, batch(private: [{random_string(), 2}]), false)
+        end)
+
+        assert_ingress_events([{unquote(reason), unquote(result), 2}])
+      end
+    end
+
+    # Errors from the write authorization check. These don't come from Connect, so BatchBroadcast maps them itself.
+    for {auth_error, reason, result} <- [
+          {{:error, :rls_policy_error, "policy raised"}, :rls_policy_error, :tenant_error},
+          {{:error, :query_canceled, "canceling statement due to statement timeout"}, :query_canceled, :tenant_error},
+          {{:error, :missing_partition}, :missing_partition, :server_error},
+          {{:error, :increase_connection_pool}, :increase_connection_pool, :tenant_error},
+          {{:error, :something_unexpected}, :unknown, :server_error}
+        ] do
+      test "private messages when write authorization returns #{inspect(auth_error)} record #{inspect(reason)}",
+           %{tenant: tenant, auth_params: auth_params} do
+        auth_error = unquote(Macro.escape(auth_error))
+        stub(Authorization, :get_write_authorizations, fn _, _, :broadcast -> auth_error end)
+
+        capture_log(fn ->
+          assert :ok = BatchBroadcast.broadcast(auth_params, tenant, batch(private: [{random_string(), 2}]), false)
+        end)
+
+        assert_ingress_events([{unquote(reason), unquote(result), 2}])
+      end
+    end
+
+    # The request is rejected before its messages are parsed, so there's no trusted message count. It counts as one.
+    test "suspended tenant records :tenant_suspended once", %{tenant: tenant} do
+      tenant = %{tenant | suspend: true}
+
+      assert {:error, :forbidden, _} = BatchBroadcast.broadcast(nil, tenant, batch(public: 3), false)
+
+      assert_ingress_events([{:tenant_suspended, :client_error, 1}])
+    end
+
+    # Same as above: an invalid changeset has no trusted message count.
+    test "invalid batch records :invalid_payload once", %{tenant: tenant} do
+      messages = %{messages: [%{payload: %{"data" => "test"}, event: "event1"}, %{topic: random_string()}]}
+
+      assert {:error, %Ecto.Changeset{}} = BatchBroadcast.broadcast(nil, tenant, messages, false)
+
+      assert_ingress_events([{:invalid_payload, :client_error, 1}])
+    end
+
+    test "payload over the limit records :invalid_payload once", %{tenant: tenant} do
+      payload = %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 1)}
+      messages = %{messages: [%{topic: random_string(), payload: payload, event: "event1"}]}
+
+      assert {:error, %Ecto.Changeset{}} = BatchBroadcast.broadcast(nil, tenant, messages, false)
+
+      assert_ingress_events([{:invalid_payload, :client_error, 1}])
+    end
+
+    test "rate limited batch records :rate_limited with the number of messages", %{tenant: tenant} do
+      events_per_second_rate = Tenants.events_per_second_rate(tenant)
+
+      stub(RateCounter, :get, fn ^events_per_second_rate ->
+        {:ok, %RateCounter{avg: tenant.max_events_per_second + 1}}
+      end)
+
+      assert {:error, :too_many_requests, _} = BatchBroadcast.broadcast(nil, tenant, batch(public: 3), false)
+
+      assert_ingress_events([{:rate_limited, :client_error, 3}])
+    end
+
+    # BroadcastController passes Phoenix params straight through, and those have string keys
+    test "rate limited batch with string keys records :rate_limited with the number of messages", %{tenant: tenant} do
+      events_per_second_rate = Tenants.events_per_second_rate(tenant)
+
+      stub(RateCounter, :get, fn ^events_per_second_rate ->
+        {:ok, %RateCounter{avg: tenant.max_events_per_second + 1}}
+      end)
+
+      messages = %{
+        "messages" =>
+          for i <- 1..3 do
+            %{"topic" => random_string(), "payload" => %{"data" => "public #{i}"}, "event" => "event"}
+          end
+      }
+
+      assert {:error, :too_many_requests, _} = BatchBroadcast.broadcast(nil, tenant, messages, false)
+
+      assert_ingress_events([{:rate_limited, :client_error, 3}])
+    end
+  end
+
   describe "message persistence" do
     setup %{tenant: tenant} do
       stub(FeatureFlags, :enabled?, fn
@@ -595,4 +783,67 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
   end
 
   defp messages_for(topic), do: from(m in Message, where: m.topic == ^topic)
+
+  # Builds a batch with `public: n` public messages and `private: [{topic, n}, ...]` private messages
+  defp batch(opts) do
+    public =
+      for i <- 1..Keyword.get(opts, :public, 0)//1 do
+        %{topic: random_string(), payload: %{"data" => "public #{i}"}, event: "event"}
+      end
+
+    private =
+      for {topic, count} <- Keyword.get(opts, :private, []), i <- 1..count//1 do
+        %{topic: topic, payload: %{"data" => "private #{i}"}, event: "event", private: true}
+      end
+
+    %{messages: public ++ private}
+  end
+
+  defp auth_params_fixture(tenant) do
+    sub = random_string()
+    role = "authenticated"
+
+    %{
+      tenant_id: tenant.external_id,
+      headers: [{"header-1", "value-1"}],
+      claims: %{"sub" => sub, "role" => role, "exp" => Joken.current_time() + 1_000},
+      role: role,
+      sub: sub
+    }
+  end
+
+  # This module runs async and the ingress event has no tenant tag, so a plain handler would also
+  # see broadcasts from other tests. BatchBroadcast.broadcast/4 runs in the test process, and telemetry
+  # handlers run in the emitting process, so only forward events emitted by this test.
+  defp attach_ingress_handler do
+    handler_id = {__MODULE__, make_ref()}
+    :telemetry.attach(handler_id, [:realtime, :broadcast, :ingress], &__MODULE__.forward_own_ingress/4, self())
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+  end
+
+  def forward_own_ingress(_event, measurements, metadata, test_pid) do
+    if self() == test_pid, do: send(test_pid, {:ingress, measurements, metadata})
+  end
+
+  # A batch emits one event per group, so compare every event received as an unordered list of
+  # {reason, result, count}. Telemetry handlers run synchronously in this process, so all events are
+  # already in the mailbox when broadcast/4 returns.
+  defp assert_ingress_events(expected) do
+    received = receive_ingress_events([])
+
+    assert Enum.all?(received, fn {transport, _reason, _result, _count} -> transport == :http_batch end)
+
+    received = Enum.map(received, fn {_transport, reason, result, count} -> {reason, result, count} end)
+    assert Enum.sort(received) == Enum.sort(expected)
+    received
+  end
+
+  defp receive_ingress_events(acc) do
+    receive do
+      {:ingress, %{count: count}, %{transport: transport, reason: reason, result: result}} ->
+        receive_ingress_events([{transport, reason, result, count} | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
+  end
 end

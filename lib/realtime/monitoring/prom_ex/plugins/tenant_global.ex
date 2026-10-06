@@ -47,7 +47,8 @@ defmodule Realtime.PromEx.Plugins.TenantGlobal do
     [
       channel_global_events(),
       payload_global_size_metrics(),
-      broadcast_fanout_global_metrics()
+      broadcast_fanout_global_metrics(),
+      broadcast_ingress_global_metrics()
     ]
   end
 
@@ -61,6 +62,21 @@ defmodule Realtime.PromEx.Plugins.TenantGlobal do
           description:
             "Cross-cluster broadcast deliveries to this node across all tenants, split by whether the node held a connection for the tenant. hit=false means the send could have been avoided.",
           tags: [:hit]
+        )
+      ]
+    )
+  end
+
+  defp broadcast_ingress_global_metrics do
+    Event.build(
+      :realtime_global_broadcast_ingress_metrics,
+      [
+        sum(
+          [:realtime, :broadcast, :ingress, :total],
+          event_name: [:realtime, :broadcast, :ingress],
+          measurement: :count,
+          description: "Broadcast attempts received by this node across all tenants, by transport, result and reason",
+          tags: [:transport, :result, :reason]
         )
       ]
     )
