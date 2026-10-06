@@ -117,12 +117,20 @@ defmodule Realtime.Tenants.Janitor do
   defp perform_maintenance_task(tenant_external_id) do
     Logger.metadata(project: tenant_external_id, external_id: tenant_external_id)
     Logger.info("Janitor starting realtime.messages cleanup")
-    :ets.delete(@table_name, tenant_external_id)
 
     with :ok <- MaintenanceTask.run(tenant_external_id) do
+      :ets.delete(@table_name, tenant_external_id)
       Logger.info("Janitor finished")
 
       :ok
+    else
+      nil ->
+        # A deleted tenant has no database left to maintain.
+        :ets.delete(@table_name, tenant_external_id)
+        nil
+
+      error ->
+        error
     end
   end
 end

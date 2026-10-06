@@ -7,7 +7,7 @@ defmodule Realtime.Tenants.Janitor.MaintenanceTask do
 
   """
 
-  @spec run(String.t()) :: :ok | {:error, any}
+  @spec run(String.t()) :: :ok | {:error, any} | nil
   def run(tenant_external_id) do
     with %Realtime.Api.Tenant{} = tenant <- Realtime.Tenants.Cache.get_tenant_by_external_id(tenant_external_id),
          {:ok, conn} <- Realtime.Database.connect(tenant, "realtime_janitor"),

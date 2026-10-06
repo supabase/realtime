@@ -1,6 +1,7 @@
 defmodule Realtime.Tenants.JanitorTest do
   # async: false due to the fact that we're checking ets tables that can be modified by other tests
   use Realtime.DataCase, async: false
+  use Mimic
 
   import ExUnit.CaptureLog
 
@@ -9,6 +10,8 @@ defmodule Realtime.Tenants.JanitorTest do
   alias Realtime.Tenants.Janitor
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Repo
+
+  setup :set_mimic_from_context
 
   setup do
     :ets.delete_all_objects(Connect)
@@ -131,6 +134,57 @@ defmodule Realtime.Tenants.JanitorTest do
     assert :ets.tab2list(Connect) == []
   end
 
+  test "retries maintenance for a disconnected tenant after a transient connection failure", %{tenants: tenants} do
+    [tenant | _] = tenants
+    old_message = message_fixture(tenant, %{inserted_at: NaiveDateTime.add(NaiveDateTime.utc_now(), -5, :day)})
+    {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+
+    Enum.each(tenants, fn tenant ->
+      Connect.shutdown(tenant.external_id)
+      assert_eventually is_nil(Connect.whereis(tenant.external_id))
+      :ets.delete(Connect, tenant.external_id)
+    end)
+
+    :ets.insert(Connect, {tenant.external_id})
+    Application.put_env(:realtime, :janitor_schedule_timer, 60_000)
+    test_pid = self()
+
+    stub(Database, :connect, fn tenant, application_name ->
+      Mimic.call_original(Database, :connect, [tenant, application_name])
+    end)
+
+    expect(Database, :connect, fn _tenant, "realtime_janitor" ->
+      send(test_pid, {:connection_failed, self()})
+      {:error, :nxdomain}
+    end)
+
+    janitor = start_supervised!(Janitor)
+    send(janitor, :delete_old_messages)
+    assert_receive {:connection_failed, task_pid}, 5_000
+    ref = Process.monitor(task_pid)
+    assert_receive {:DOWN, ^ref, :process, ^task_pid, _}, 5_000
+    assert_eventually :sys.get_state(janitor).tasks == %{}
+
+    assert :ets.member(Connect, tenant.external_id)
+    assert MapSet.member?(remaining_messages([conn]), old_message)
+
+    send(janitor, :delete_old_messages)
+    assert_eventually not MapSet.member?(remaining_messages([conn]), old_message), timeout: 5_000
+    assert_eventually not :ets.member(Connect, tenant.external_id)
+    assert_eventually :sys.get_state(janitor).tasks == %{}
+    GenServer.stop(conn)
+  end
+
+  test "removes a deleted tenant from the maintenance work list" do
+    tenant_id = UUID.uuid4()
+    :ets.insert(Connect, {tenant_id})
+
+    janitor = start_supervised!(Janitor)
+
+    assert_eventually not :ets.member(Connect, tenant_id), timeout: 5_000
+    assert_eventually :sys.get_state(janitor).tasks == %{}
+  end
+
   test "logs error if fails to connect to tenant" do
     extensions = [
       %{
@@ -163,7 +217,7 @@ defmodule Realtime.Tenants.JanitorTest do
            end) =~ "JanitorFailedToDeleteOldMessages"
 
     assert_eventually :sys.get_state(janitor).tasks == %{}
-    assert :ets.tab2list(Connect) == []
+    assert :ets.tab2list(Connect) == [{tenant.external_id}]
   end
 
   defp verify_partitions(conn) do
