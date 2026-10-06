@@ -22,4 +22,4 @@ Regenerate tenant schema whenever tenant migrations changes, see `mise.toml`.
 
 Follow the repository [security policy](https://github.com/supabase/realtime/security/policy).
 
-- Do not open Pull Requests to fix security issues, doing so creates unnecessary risks for all users.
+- Do not open Pull Requests to fix security issues, disclosing security issues publicly creates unnecessary risks for all users.
