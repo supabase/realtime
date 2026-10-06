@@ -38,8 +38,13 @@ defmodule RealtimeWeb.Channels.Payloads.Join do
   def presence_enabled?(%__MODULE__{config: %Config{presence: %Presence{enabled: enabled}}}), do: enabled
   def presence_enabled?(_), do: false
 
-  def presence_key(%__MODULE__{config: %Config{presence: %Presence{key: key}}}) when key in [nil, ""], do: UUID.uuid1()
-  def presence_key(%__MODULE__{config: %Config{presence: %Presence{key: key}}}), do: key
+  def presence_key(%__MODULE__{config: %Config{presence: %Presence{key: key}}}) do
+    case Presence.normalize_key(key) do
+      {:ok, key} when key != "" -> key
+      _ -> UUID.uuid1()
+    end
+  end
+
   def presence_key(_), do: UUID.uuid1()
 
   def ack_broadcast?(%__MODULE__{config: %Config{broadcast: %Broadcast{ack: ack}}}), do: ack

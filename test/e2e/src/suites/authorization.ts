@@ -38,5 +38,24 @@ export const authorization: SuiteDescriptor = {
         await stopClient(supabase);
       }
     });
+
+    await sleep(RATE_LIMIT_PAUSE_MS);
+    await test("user using private channel without write permissions gets an error on acknowledged broadcast", async () => {
+      const supabase = await authedClient();
+      try {
+        const topic = "read-only:" + crypto.randomUUID();
+        const channel = supabase.channel(topic, { config: { private: true, broadcast: { ack: true } } });
+        const subscribeMs = await openChannel(channel);
+
+        const sentAt = performance.now();
+        const result = await channel.send({ type: "broadcast", event: crypto.randomUUID(), payload: { message: crypto.randomUUID() } });
+        const rejectMs = performance.now() - sentAt;
+
+        assert.strictEqual(result, "error", `Expected the broadcast to be rejected but send() resolved: ${result}`);
+        return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "rejection", value: rejectMs, unit: "ms" }];
+      } finally {
+        await stopClient(supabase);
+      }
+    });
   },
 };

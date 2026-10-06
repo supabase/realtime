@@ -157,6 +157,7 @@ Hooks.payload = {
       select,
       bearer,
       enable_presence,
+      presence_key,
       enable_db_changes,
       private_channel,
     } = connection;
@@ -180,7 +181,11 @@ Hooks.payload = {
     if (bearer) this.realtimeSocket.setAuth(bearer);
 
     this.channel = this.realtimeSocket.channel(channelName, {
-      config: { broadcast: { self: true }, private: !!private_channel },
+      config: {
+        broadcast: { self: true },
+        private: !!private_channel,
+        ...(presence_key ? { presence: { key: presence_key } } : {}),
+      },
     });
 
     this.channel.on("system", {}, (payload) => {
@@ -201,8 +206,10 @@ Hooks.payload = {
         this.pushEvent("presence_synced", { count: Object.keys(this.channel.presenceState()).length });
       });
 
+      // realtime-js reports these as "sync", "join" and "leave"; the prefix keeps them from being
+      // read as channel lifecycle verbs and tells them apart from the raw frames they came from.
       this.channel.on("presence", { event: "*" }, (payload) => {
-        logEvent(this, "presence", payload.event ?? "presence", payload);
+        logEvent(this, "presence", `presence_${payload.event ?? "event"}`, payload);
       });
     }
 
@@ -249,18 +256,31 @@ Hooks.payload = {
       }
 
       this.everJoined = true;
-      this.pushEvent("channel_status", { status: "joined", host, reason: null });
+      this.pushEvent("channel_status", { status: "joined", host, reason: null, presence: !!enable_presence });
       localStorage.setItem("token", token);
       localStorage.setItem("bearer", bearer ?? "");
-
-      if (enable_presence) {
-        await this.channel.track({ name: "user_" + Math.floor(Math.random() * 100), t: performance.now() });
-      }
     });
   },
 
   sendRealtime(event, payload) {
     this.channel.send({ type: "broadcast", event, payload });
+  },
+
+  async track(payload) {
+    if (!this.channel) return logEvent(this, "error", "track", { message: "not connected" });
+    const status = await this.channel.track(payload);
+    logEvent(this, "presence", "track", { status, payload });
+  },
+
+  async untrack() {
+    if (!this.channel) return logEvent(this, "error", "untrack", { message: "not connected" });
+    const status = await this.channel.untrack();
+    logEvent(this, "presence", "untrack", { status });
+  },
+
+  logPresenceState() {
+    if (!this.channel) return logEvent(this, "error", "presenceState", { message: "not connected" });
+    logEvent(this, "presence", "presenceState", this.channel.presenceState());
   },
 
   disconnectRealtime() {
@@ -281,6 +301,9 @@ Hooks.payload = {
 
     this.handleEvent("connect", ({ connection }) => this.initRealtime(connection));
     this.handleEvent("send_message", ({ message }) => this.sendRealtime(message.event, message.payload));
+    this.handleEvent("track", ({ payload }) => this.track(payload));
+    this.handleEvent("untrack", () => this.untrack());
+    this.handleEvent("presence_state", () => this.logPresenceState());
     this.handleEvent("disconnect", () => this.disconnectRealtime());
     this.handleEvent("clear_local_storage", () => this.clearLocalStorage());
   },

@@ -123,4 +123,68 @@ defmodule RealtimeWeb.InspectorLive.IndexTest do
       assert_push_event(view, "send_message", %{"message" => %{"event" => "greet", "payload" => %{"hello" => "world"}}})
     end
   end
+
+  describe "presence controls" do
+    test "render with a fixed default payload rather than a random name", %{conn: conn} do
+      {:ok, _view, html} = live(conn, ~p"/")
+
+      assert html =~ "presence_form"
+      assert html =~ ~s({&quot;name&quot;:&quot;inspector&quot;})
+    end
+
+    test "track decodes the payload before pushing it to the client", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/")
+
+      view
+      |> form("#presence_form", presence: %{payload: ~s({"name":"alice","mood":"curious"})})
+      |> render_submit()
+
+      assert_push_event(view, "track", %{"payload" => %{"name" => "alice", "mood" => "curious"}})
+    end
+
+    test "track rejects invalid JSON and non-object payloads instead of sending them", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/")
+
+      html = view |> form("#presence_form", presence: %{payload: "nope"}) |> render_submit()
+      assert html =~ "invalid JSON"
+      refute_push_event(view, "track", %{})
+
+      html = view |> form("#presence_form", presence: %{payload: "[1,2]"}) |> render_submit()
+      assert html =~ "must be a JSON object"
+      refute_push_event(view, "track", %{})
+    end
+
+    test "untrack and state are forwarded to the client", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/")
+
+      view |> element("#presence_form button", "Untrack") |> render_click()
+      assert_push_event(view, "untrack", %{})
+
+      view |> element("#presence_form button", "State") |> render_click()
+      assert_push_event(view, "presence_state", %{})
+    end
+
+    test "joining with presence enabled tracks whatever is typed in the payload field", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/")
+
+      view
+      |> form("#presence_form", presence: %{payload: ~s({"name":"typed-not-submitted"})})
+      |> render_change()
+
+      render_hook(view, "channel_status", %{"status" => "joined", "host" => "example.supabase.co", "presence" => true})
+
+      assert_push_event(view, "track", %{"payload" => %{"name" => "typed-not-submitted"}})
+    end
+
+    test "joining without presence, or with an invalid payload, does not track", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/")
+
+      render_hook(view, "channel_status", %{"status" => "joined", "host" => "example.supabase.co", "presence" => false})
+      refute_push_event(view, "track", %{})
+
+      view |> form("#presence_form", presence: %{payload: "nope"}) |> render_change()
+      render_hook(view, "channel_status", %{"status" => "joined", "host" => "example.supabase.co", "presence" => true})
+      refute_push_event(view, "track", %{})
+    end
+  end
 end

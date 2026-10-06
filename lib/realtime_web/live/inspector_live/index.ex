@@ -27,14 +27,40 @@ defmodule RealtimeWeb.InspectorLive.Index do
     end
   end
 
+  defmodule Presence do
+    use Ecto.Schema
+    import Ecto.Changeset
+
+    schema "f" do
+      field(:payload, :string)
+    end
+
+    def changeset(form, params \\ %{}) do
+      form
+      |> cast(params, [:payload])
+      |> validate_required([:payload])
+      |> validate_change(:payload, fn :payload, payload ->
+        case Jason.decode(payload) do
+          {:ok, %{}} -> []
+          {:ok, _} -> [payload: "must be a JSON object"]
+          {:error, %Jason.DecodeError{} = error} -> [payload: "invalid JSON: #{Exception.message(error)}"]
+        end
+      end)
+    end
+  end
+
+  @default_presence_payload ~s({"name":"inspector"})
+
   @impl true
   def mount(_params, _session, socket) do
     changeset = Message.changeset(%Message{event: "test", payload: ~s({"some":"data"})})
+    presence_changeset = Presence.changeset(%Presence{payload: @default_presence_payload})
 
     socket =
       socket
       |> assign(active_nav: :inspector)
       |> assign(changeset: changeset)
+      |> assign(presence_changeset: presence_changeset)
       |> assign(page_title: "Inspector - Supabase Realtime")
       |> assign(health: health_idle())
 
@@ -62,6 +88,35 @@ defmodule RealtimeWeb.InspectorLive.Index do
       {:error, changeset} ->
         {:noreply, assign(socket, :changeset, changeset)}
     end
+  end
+
+  def handle_event("track", %{"presence" => presence_params}, socket) do
+    case Ecto.Changeset.apply_action(Presence.changeset(%Presence{}, presence_params), :validate) do
+      {:ok, presence} ->
+        socket =
+          socket
+          |> assign(:presence_changeset, Presence.changeset(%Presence{}, presence_params))
+          |> push_event("track", %{"payload" => Jason.decode!(presence.payload)})
+
+        {:noreply, socket}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :presence_changeset, changeset)}
+    end
+  end
+
+  # Kept in sync as typed so that the auto-track on join uses what is in the field, not what was
+  # last submitted.
+  def handle_event("validate_presence", %{"presence" => presence_params}, socket) do
+    {:noreply, assign(socket, :presence_changeset, Presence.changeset(%Presence{}, presence_params))}
+  end
+
+  def handle_event("untrack", _params, socket) do
+    {:noreply, push_event(socket, "untrack", %{})}
+  end
+
+  def handle_event("presence_state", _params, socket) do
+    {:noreply, push_event(socket, "presence_state", %{})}
   end
 
   def handle_event("transport_status", %{"status" => status} = params, socket) do
@@ -97,6 +152,7 @@ defmodule RealtimeWeb.InspectorLive.Index do
             %{c | status: :joined, joined_at: DateTime.utc_now(), host: params["host"], reason: nil}
           end)
           |> update_health(:broadcast, fn _ -> %{status: :active} end)
+          |> maybe_auto_track(params["presence"])
 
         "retrying" ->
           socket
@@ -138,6 +194,17 @@ defmodule RealtimeWeb.InspectorLive.Index do
   def handle_event("postgres_error", %{"reason" => reason}, socket) do
     {:noreply, update_health(socket, :postgres, &%{&1 | status: :error, reason: reason})}
   end
+
+  # The presence toggle means "track as soon as the channel is joined", using whatever payload is in
+  # the presence form at that moment. The payload is only pushed when it is valid JSON.
+  defp maybe_auto_track(socket, true) do
+    case Ecto.Changeset.apply_action(socket.assigns.presence_changeset, :validate) do
+      {:ok, presence} -> push_event(socket, "track", %{"payload" => Jason.decode!(presence.payload)})
+      {:error, _changeset} -> socket
+    end
+  end
+
+  defp maybe_auto_track(socket, _), do: socket
 
   defp drop_subscriptions(socket) do
     socket
