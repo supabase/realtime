@@ -67,7 +67,7 @@ defmodule RealtimeWeb.Presence.Metrics do
   @spec stamp(term(), String.t()) :: term()
   def stamp(payload, tenant_id) when is_map(payload) do
     if sample?(tenant_id) do
-      Map.put(payload, @envelope_key, %{
+      Map.put_new(payload, @envelope_key, %{
         ts: System.system_time(:millisecond),
         node: Realtime.Nodes.short_node_id_from_name(node())
       })
