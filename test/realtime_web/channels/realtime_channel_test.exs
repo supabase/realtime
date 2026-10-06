@@ -1048,7 +1048,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert Process.alive?(channel_pid)
     end
 
-    for {name, key} <- [map: %{"a" => 1}, list_of_maps: [%{"a" => 1}], list: [1,2, 3]] do
+    for {name, key} <- [map: %{"a" => 1}, list_of_maps: [%{"a" => 1}], list: [1, 2, 3]] do
       test "presence key that is a #{name} falls back to a generated key", %{tenant: tenant} do
         jwt = Generators.generate_jwt_token(tenant)
         {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
