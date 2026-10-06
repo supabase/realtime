@@ -346,19 +346,27 @@ defmodule Realtime.Tenants.AuthorizationTest do
     end
 
     @tag role: "authenticated",
-         policies: [
-           :authenticated_read_broadcast_and_presence,
-           :authenticated_write_broadcast_and_presence,
-           :slow_read,
-           :slow_write
-         ]
-    test "query_canceled is classified as query_canceled", context do
+         policies: [:authenticated_read_broadcast_and_presence, :slow_read]
+    test "query_canceled on read is classified as query_canceled", context do
       # A single-connection pool, so the timeout applies to the connection the checks run on.
       {:ok, db_conn} = Database.connect(context.tenant, "realtime_test")
       Postgrex.query!(db_conn, "SET statement_timeout = '100ms'", [])
 
       assert {:error, :query_canceled, %Postgrex.Error{}} =
                Authorization.get_read_authorizations(%Policies{}, db_conn, context.authorization_context)
+    end
+
+    # Multigres enforces statement_timeout itself and, after cancelling, moves the transaction to a
+    # fresh backend without its savepoints. The write check inserts with mode: :savepoint, so its
+    # ROLLBACK TO SAVEPOINT fails with invalid_savepoint_specification instead of returning
+    # query_canceled. Reproduced with psql on multigres sha-d96b2f9 and sha-0909268.
+    @tag :requires_direct_connection
+    @tag role: "authenticated",
+         policies: [:authenticated_write_broadcast_and_presence, :slow_write]
+    test "query_canceled on write is classified as query_canceled", context do
+      # A single-connection pool, so the timeout applies to the connection the checks run on.
+      {:ok, db_conn} = Database.connect(context.tenant, "realtime_test")
+      Postgrex.query!(db_conn, "SET statement_timeout = '100ms'", [])
 
       assert {:error, :query_canceled, %Postgrex.Error{}} =
                Authorization.get_write_authorizations(
