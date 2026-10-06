@@ -267,6 +267,41 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       assert :ok = BatchBroadcast.broadcast(auth_params, tenant, messages, false)
     end
 
+    test "broadcasts private messages for a role that bypasses RLS without the write probe", %{tenant: tenant} do
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+      topic = random_string()
+      role = "service_role"
+      tenant_id = tenant.external_id
+      test_pid = self()
+
+      :telemetry.attach(
+        {__MODULE__, test_pid},
+        [:realtime, :tenants, :write_authorization_check],
+        fn _event, _measurements, %{tenant: tenant}, _config ->
+          send(test_pid, {:write_authorization_check, tenant})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach({__MODULE__, test_pid}) end)
+
+      auth_params = %{
+        tenant_id: tenant_id,
+        headers: [{"header-1", "value-1"}],
+        claims: %{"role" => role, "exp" => Joken.current_time() + 1_000},
+        role: role
+      }
+
+      messages = %{messages: [%{topic: topic, payload: %{"data" => "test"}, event: "event1", private: true}]}
+
+      expect(Connect, :lookup_or_start_connection, fn ^tenant_id -> {:ok, db_conn} end)
+      expect(TenantBroadcaster, :pubsub_broadcast, fn _, _, %Phoenix.Socket.Broadcast{topic: ^topic}, _, _ -> :ok end)
+
+      assert :ok = BatchBroadcast.broadcast(auth_params, tenant, messages, false)
+
+      refute_received {:write_authorization_check, ^tenant_id}
+    end
+
     test "handles missing auth params for private messages", %{tenant: tenant} do
       events_per_second_rate = Tenants.events_per_second_rate(tenant)
 
