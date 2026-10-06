@@ -179,7 +179,8 @@ defmodule Realtime.Tenants.AuthorizationFunctionTest do
         []
       )
 
-      assert  {:error, :rls_policy_error, %Postgrex.Error{code: :undefined_function, message: "function public.missing_function() does not exist"}} =
+      assert {:error, :rls_policy_error,
+              %Postgrex.Error{code: :undefined_function, message: "function public.missing_function() does not exist"}} =
                Authorization.get_read_authorizations(%Policies{}, context.db_conn, context.authorization_context)
     end
 
