@@ -1047,6 +1047,44 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert log =~ "UnableToHandlePresence: :timeout"
       assert Process.alive?(channel_pid)
     end
+
+    for {name, key} <- [map: %{"a" => 1}, list_of_maps: [%{"a" => 1}], list: [1,2, 3]] do
+      test "presence key that is a #{name} falls back to a generated key", %{tenant: tenant} do
+        jwt = Generators.generate_jwt_token(tenant)
+        {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+        config = %{"config" => %{"presence" => %{"enabled" => true, "key" => unquote(Macro.escape(key))}}}
+
+        {{:ok, _, %Socket{} = socket}, _log} = with_log(fn -> subscribe_and_join(socket, "realtime:test", config) end)
+
+        assert_receive %Socket.Message{topic: "realtime:test", event: "presence_state"}, 500
+
+        ref = push(socket, "presence", %{"type" => "presence", "event" => "TRACK", "payload" => %{"user" => "a"}})
+        assert_receive %Socket.Reply{ref: ^ref, status: :ok}, 500
+
+        # Phoenix.Presence builds this diff by calling to_string/1 on the key; an untrackable key crashes the shard instead
+        assert_receive %Socket.Message{topic: "realtime:test", event: "presence_diff", payload: %{joins: joins}}, 500
+        assert [key] = Map.keys(joins)
+        assert {:ok, _} = UUID.info(key)
+      end
+    end
+
+    for {key, expected} <- [{true, "true"}, {123, "123"}] do
+      test "presence key #{inspect(key)} is tracked as #{inspect(expected)}", %{tenant: tenant} do
+        jwt = Generators.generate_jwt_token(tenant)
+        {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+        config = %{"config" => %{"presence" => %{"enabled" => true, "key" => unquote(key)}}}
+        assert {:ok, _, %Socket{} = socket} = subscribe_and_join(socket, "realtime:test", config)
+        assert_receive %Socket.Message{topic: "realtime:test", event: "presence_state"}, 500
+
+        ref = push(socket, "presence", %{"type" => "presence", "event" => "TRACK", "payload" => %{"user" => "a"}})
+        assert_receive %Socket.Reply{ref: ^ref, status: :ok}, 500
+
+        assert_receive %Socket.Message{topic: "realtime:test", event: "presence_diff", payload: %{joins: joins}}, 500
+        assert Map.keys(joins) == [unquote(expected)]
+      end
+    end
   end
 
   describe "unexpected errors" do
