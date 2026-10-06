@@ -1,6 +1,6 @@
 services:
   realtime_db:
-    image: ${POSTGRES_IMAGE:-supabase/postgres:17.6.1.166}
+    image: ${POSTGRES_IMAGE:-supabase/postgres:17.11.0.004}
     ports:
       - "${DB_PORT:-5432}:5432"
     volumes:
