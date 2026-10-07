@@ -9,7 +9,7 @@ defmodule Realtime.PromEx.Plugins.PresenceTest do
   defmodule MetricsTest do
     use PromEx, otp_app: :realtime_test_presence
     @impl true
-    def plugins, do: [Presence]
+    def plugins, do: [{Presence, poll_rate: 5_000}]
   end
 
   setup_all do
@@ -75,6 +75,56 @@ defmodule Realtime.PromEx.Plugins.PresenceTest do
 
       assert metric_value(@discarded, tags) == discarded_before + 1
       assert (metric_value(@latency <> "_count", latency_tags) || 0) == count_before
+    end
+  end
+
+  describe "usage metrics" do
+    alias Realtime.Tenants
+    alias Realtime.Test.PresenceUsageTracker, as: Tracker
+
+    @buckets [5, 10, 25, 50, 100, 200, 500, :infinity]
+
+    setup do
+      start_supervised!({Tracker, pool_size: 1})
+      :ok
+    end
+
+    test "scans the given tracker and records tenant count, topic count, and every bucket" do
+      {:ok, _ref} = Tracker.track(self(), Tenants.tenant_topic("tenant1", "room"), "key1", %{})
+      {:ok, _ref} = Tracker.track(self(), Tenants.tenant_topic("tenant2", "room"), "key1", %{})
+
+      Presence.execute_usage_metrics(Tracker)
+
+      assert metric_value("realtime_presence_usage_tenants", []) == 2
+      assert metric_value("realtime_presence_usage_topics", []) == 2
+
+      for bucket <- @buckets do
+        expected = if bucket == 5, do: 2, else: 0
+        assert metric_value("realtime_presence_usage_topics_by_bucket", bucket: bucket) == expected
+      end
+    end
+
+    test "re-scanning overwrites stale values, including buckets dropping back to zero" do
+      topic = Tenants.tenant_topic("tenant1", "room")
+      {:ok, _ref} = Tracker.track(self(), topic, "key1", %{})
+      Presence.execute_usage_metrics(Tracker)
+
+      assert metric_value("realtime_presence_usage_tenants", []) == 1
+      assert metric_value("realtime_presence_usage_topics_by_bucket", bucket: 5) == 1
+
+      :ok = Tracker.untrack(self(), topic, "key1")
+      Presence.execute_usage_metrics(Tracker)
+
+      assert metric_value("realtime_presence_usage_tenants", []) == 0
+      assert metric_value("realtime_presence_usage_topics_by_bucket", bucket: 5) == 0
+    end
+
+    test "records a scan duration observation" do
+      count_before = metric_value("realtime_presence_usage_scan_duration_milliseconds_count", []) || 0
+
+      Presence.execute_usage_metrics(Tracker)
+
+      assert metric_value("realtime_presence_usage_scan_duration_milliseconds_count", []) == count_before + 1
     end
   end
 
