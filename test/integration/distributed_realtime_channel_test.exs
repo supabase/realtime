@@ -150,9 +150,6 @@ defmodule Realtime.Integration.DistributedRealtimeChannelTest do
     end
   end
 
-  # Actually as of today (2026-09-14) this doesn't yet go through Muster, as the flag
-  # isn't yet turned on by default. As we want to roll out Muster further I'm still
-  # keeping the gate here.
   # Broadcasts route through Muster's region ring, so wait for the local and
   # peer node to both consider it :ready and agree on the same ring view before
   # sending anything cross-node.

@@ -5,7 +5,6 @@ defmodule Realtime.GenRpcPubSub do
 
   @behaviour Phoenix.PubSub.Adapter
   alias Forum.Muster
-  alias Realtime.FeatureFlags
   alias Realtime.GenRpc
   alias Realtime.GenRpcPubSub.RegionRings
   alias Realtime.GenRpcPubSub.Worker
@@ -49,19 +48,16 @@ defmodule Realtime.GenRpcPubSub do
 
   @impl true
   def broadcast(adapter_name, topic, {:tb, tenant_id, _inner} = message, dispatcher) do
-    if FeatureFlags.enabled?("use_muster_broadcast", tenant_id) do
-      muster_broadcast(adapter_name, topic, tenant_id, message, dispatcher)
-    else
-      flood_all(adapter_name, topic, message, dispatcher)
-    end
+    muster_broadcast(adapter_name, topic, tenant_id, message, dispatcher)
   end
 
   def broadcast(adapter_name, topic, message, dispatcher) do
     flood_all(adapter_name, topic, message, dispatcher)
   end
 
-  # Original behavior: fan a broadcast out to every other node in the region (:ftl)
-  # plus one representative per other region (:ftr, which re-floods its own region).
+  # Untagged broadcasts (no tenant to route by): fan out to every other node in the
+  # region (:ftl) plus one representative per other region (:ftr, which re-floods its
+  # own region).
   defp flood_all(adapter_name, topic, message, dispatcher) do
     worker = worker_name(adapter_name, self())
     my_region = Nodes.region()
@@ -75,16 +71,13 @@ defmodule Realtime.GenRpcPubSub do
     :ok
   end
 
-  # Feature-flagged (`use_muster_broadcast`): ask Muster which nodes actually hold
-  # the tenant and deliver only to those, instead of flooding whole regions. This
-  # applies both within the origin's own region (via the local Muster scope) and
-  # across regions (via a locally-reconstructed copy of each remote region's ring;
-  # see `RegionRings`).
+  # Ask Muster which nodes actually hold the tenant and deliver only to those,
+  # instead of flooding whole regions. This applies both within the origin's own
+  # region (via the local Muster scope) and across regions (via a
+  # locally-reconstructed copy of each remote region's ring; see `RegionRings`).
   #
   # NOTE: correctness relies on the tenant's connections being registered in Muster
-  # (the separate `use_muster_channel_join` flag). Enable this flag only for tenants
-  # that already have that one on, otherwise `Muster.targets/3` legitimately returns
-  # an empty set and remote deliveries are dropped.
+  # (done on channel join, see `RealtimeChannel`).
   defp muster_broadcast(adapter_name, topic, tenant_id, message, dispatcher) do
     worker = worker_name(adapter_name, self())
     my_region = Nodes.region()
@@ -249,7 +242,7 @@ defmodule Realtime.GenRpcPubSub.Worker do
     {:noreply, state}
   end
 
-  # Routed broadcast (feature flag `use_muster_broadcast`): the origin named us as the
+  # Routed broadcast: the origin named us as the
   # router for `tenant_id`. Deliver only to the nodes Muster says hold the tenant.
   def handle_info(
         {:route, tenant_id, topic, message, dispatcher, origin, view_hash},
@@ -278,7 +271,7 @@ defmodule Realtime.GenRpcPubSub.Worker do
     {:noreply, state}
   end
 
-  # Cross-region routed broadcast (feature flag `use_muster_broadcast`): a node in
+  # Cross-region routed broadcast: a node in
   # another region computed us as the expected router for `tenant_id` in *our*
   # region and tagged the message with the view_hash it derived from the expected
   # region's membership.

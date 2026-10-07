@@ -13,7 +13,6 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   alias Realtime.Api.Message
   alias Realtime.Api.Tenant
-  alias Realtime.FeatureFlags
   alias Realtime.GenCounter
   alias Realtime.Helpers
   alias Realtime.PostgresCdc
@@ -748,20 +747,18 @@ defmodule RealtimeWeb.RealtimeChannel do
   # task always returns a plain term instead of exiting abnormally, so its
   # link to this process can never propagate a crash back to the channel.
   defp maybe_start_muster_join(tenant_id, transport_pid) do
-    if FeatureFlags.enabled?("use_muster_channel_join", tenant_id) do
-      scope = Application.get_env(:realtime, :muster_scope)
+    scope = Application.get_env(:realtime, :muster_scope)
 
-      unless Muster.local_member?(scope, tenant_id, transport_pid) do
-        Task.async(fn ->
-          try do
-            Muster.join(scope, tenant_id, transport_pid)
-          rescue
-            e -> {:error, Exception.message(e)}
-          catch
-            :exit, reason -> {:error, reason}
-          end
-        end)
-      end
+    unless Muster.local_member?(scope, tenant_id, transport_pid) do
+      Task.async(fn ->
+        try do
+          Muster.join(scope, tenant_id, transport_pid)
+        rescue
+          e -> {:error, Exception.message(e)}
+        catch
+          :exit, reason -> {:error, reason}
+        end
+      end)
     end
   end
 

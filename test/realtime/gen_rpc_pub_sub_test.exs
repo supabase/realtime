@@ -7,7 +7,6 @@ defmodule Realtime.GenRpcPubSubTest do
   use TestHelpers
 
   alias Forum.Muster
-  alias Realtime.FeatureFlags
   alias Realtime.GenRpcPubSub.RegionRings
   alias Realtime.GenRpcPubSub.Worker
   alias RealtimeWeb.RealtimeChannel.MessageDispatcher
@@ -61,14 +60,8 @@ defmodule Realtime.GenRpcPubSubTest do
                   end)
                 end
 
-                # Register a long-lived local member for the tenant so this node reports hit=true.
                 def region_node_counts do
                   Map.new(["us-east-1", "ap-southeast-2"], &{&1, length(Realtime.Nodes.region_nodes(&1))})
-                end
-
-                def add_user(tenant_id) do
-                  pid = spawn(fn -> Process.sleep(:infinity) end)
-                  :ok = Realtime.UsersCounter.add(pid, tenant_id)
                 end
 
                 # Relay the fan-out telemetry emitted on this (receiving) node back to the test process.
@@ -128,7 +121,7 @@ defmodule Realtime.GenRpcPubSubTest do
       :ok
     end
 
-    test "broadcasts fan out across regions and each receiving node emits fan-out telemetry" do
+    test "untagged broadcasts fan out across regions" do
       # start 1 node in us-east-1 to test my region broadcasting
       # start 2 nodes in ap-southeast-2 to test other region broadcasting
 
@@ -216,39 +209,6 @@ defmodule Realtime.GenRpcPubSubTest do
       refute_receive {:fanout, _, _, _}
       refute_receive _any
 
-      # Tagged broadcast: fans out via :ftl (us_node, same region) and :ftr (ap nodes, other region),
-      # and each receiving node emits the fan-out telemetry. Register a connection on us_node so it
-      # reports hit=true while the ap nodes report hit=false.
-      tenant_id = "fanout-#{System.unique_integer([:positive])}"
-      :ok = :erpc.call(us, Subscriber, :add_user, [tenant_id])
-
-      tagged_message = %Phoenix.Socket.Broadcast{topic: @topic, event: "an event", payload: %{"a" => "b"}}
-
-      Phoenix.PubSub.broadcast(
-        Realtime.PubSub,
-        @topic,
-        {:tb, tenant_id, tagged_message},
-        RealtimeWeb.RealtimeChannel.MessageDispatcher
-      )
-
-      # The tag is stripped before delivery: subscribers only ever see the underlying struct
-      assert_receive ^tagged_message
-      assert_receive {:relay, ^us, ^tagged_message}, 5000
-      assert_receive {:relay, ^ap_x, ^tagged_message}, 1000
-      assert_receive {:relay, ^ap_y, ^tagged_message}, 1000
-
-      # us_node holds a connection for the tenant (:ftl path) -> hit=true
-      assert_receive {:fanout, ^us, %{local_tenant_users: us_count}, %{tenant: ^tenant_id, hit: true}}, 5000
-
-      assert us_count >= 1
-
-      # ap nodes hold no connection for the tenant (:ftr path + its re-forwarded :ftl) -> hit=false
-      assert_receive {:fanout, ^ap_x, %{local_tenant_users: 0}, %{tenant: ^tenant_id, hit: false}}, 1000
-
-      assert_receive {:fanout, ^ap_y, %{local_tenant_users: 0}, %{tenant: ^tenant_id, hit: false}}, 1000
-
-      refute_receive _any
-
       presence_topic = "phx_presence:gen_rpc_pub_sub_test"
       presence_message = {:pub, :heartbeat, {:gen_rpc_pub_sub_test, 1}, :empty, %{}}
       size = :erlang.external_size(Worker.forward_to_local(presence_topic, presence_message, Phoenix.PubSub))
@@ -305,7 +265,7 @@ defmodule Realtime.GenRpcPubSubTest do
     end
   end
 
-  describe "muster-routed broadcasting (use_muster_broadcast)" do
+  describe "muster-routed broadcasting" do
     setup do
       previous_region = Application.get_env(:realtime, :region)
       Application.put_env(:realtime, :region, "us-east-1")
@@ -327,7 +287,6 @@ defmodule Realtime.GenRpcPubSubTest do
       :ok = Muster.join(scope, tenant_id, member)
       assert Muster.targets(scope, tenant_id, Muster.view_hash(scope)) == {:ok, [node()]}
 
-      enable_broadcast_flag!(tenant_id)
       RealtimeWeb.Endpoint.subscribe(topic)
 
       message = %Phoenix.Socket.Broadcast{topic: topic, event: "an event", payload: %{"a" => "b"}}
@@ -355,8 +314,6 @@ defmodule Realtime.GenRpcPubSubTest do
 
         # Only the holder joins the tenant's Muster group.
         _pid = :erpc.call(holder_node, Subscriber, :muster_join, [scope, tenant_id])
-
-        enable_broadcast_flag!(tenant_id)
 
         topic = "muster-prune-#{label}-#{System.unique_integer([:positive])}"
         RealtimeWeb.Endpoint.subscribe(topic)
@@ -439,8 +396,6 @@ defmodule Realtime.GenRpcPubSubTest do
 
       # Only the holder joins the tenant's ap Muster group.
       _pid = :erpc.call(ap_holder, Subscriber, :muster_join, [ap_scope, tenant_id])
-
-      enable_broadcast_flag!(tenant_id)
 
       topic = "muster-xregion-#{System.unique_integer([:positive])}"
       subscribe_region_relays(ap_holder, ap_bystander, topic)
@@ -563,21 +518,5 @@ defmodule Realtime.GenRpcPubSubTest do
     assert_receive {:subscribed, ^holder_node}, 5000
     assert_receive {:subscribed, ^bystander_node}, 5000
     :ok
-  end
-
-  # Enable `use_muster_broadcast` for the tenant without touching the DB: seed both
-  # the flag cache (so the flag exists) and the tenant cache (with an override), then
-  # tear them down so nothing leaks into other async tests via the shared caches.
-  defp enable_broadcast_flag!(tenant_id) do
-    flag = %Realtime.Api.FeatureFlag{name: "use_muster_broadcast", enabled: true, rollout_percentage: 100}
-    {:ok, true} = FeatureFlags.Cache.update_cache(flag)
-
-    tenant = %Realtime.Api.Tenant{external_id: tenant_id, feature_flags: %{"use_muster_broadcast" => true}}
-    {:ok, true} = Realtime.Tenants.Cache.update_cache(tenant)
-
-    on_exit(fn ->
-      FeatureFlags.Cache.invalidate_cache("use_muster_broadcast")
-      Realtime.Tenants.Cache.invalidate_tenant_cache(tenant_id)
-    end)
   end
 end
