@@ -1,0 +1,1197 @@
+{
+  "components": {
+    "responses": {},
+    "schemas": {
+      "BroadcastSingleBinaryParams": {
+        "description": "Binary payload - raw binary data",
+        "format": "binary",
+        "title": "BroadcastSingleBinaryParams",
+        "type": "string"
+      },
+      "BroadcastSingleJsonParams": {
+        "description": "JSON payload - any valid JSON object",
+        "example": {
+          "text": "hello world",
+          "user": "alice"
+        },
+        "title": "BroadcastSingleJsonParams",
+        "type": "object"
+      },
+      "EmptyResponse": {
+        "default": "",
+        "title": "EmptyResponse",
+        "type": "string"
+      },
+      "ErrorResponse": {
+        "properties": {
+          "error": {
+            "default": "error message",
+            "type": "string"
+          }
+        },
+        "title": "ErrorResponse",
+        "type": "object"
+      },
+      "NotFoundResponse": {
+        "properties": {
+          "error": {
+            "default": "not found",
+            "type": "string"
+          }
+        },
+        "title": "NotFoundResponse",
+        "type": "object"
+      },
+      "TenantBatchParams": {
+        "properties": {
+          "messages": {
+            "items": {
+              "properties": {
+                "event": {
+                  "description": "Name of the event being broadcast",
+                  "type": "string"
+                },
+                "payload": {
+                  "type": "object"
+                },
+                "private": {
+                  "type": "boolean"
+                },
+                "topic": {
+                  "description": "Note: libraries will prepend the channel name with 'realtime:' so if you use this endpoint directly you'll need to also prepend 'realtime:' so it's captured by clients properly",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "title": "TenantBatchParams",
+        "type": "object"
+      },
+      "TenantHealthResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TenantHealthResponseValue"
+          }
+        },
+        "title": "TenantHealthResponse",
+        "type": "object"
+      },
+      "TenantHealthResponseValue": {
+        "example": {
+          "connected_cluster": 10,
+          "db_connected": true,
+          "healthy": true,
+          "replication_connected": true
+        },
+        "properties": {
+          "connected_cluster": {
+            "description": "The count of currently connected clients for a tenant on the Realtime cluster",
+            "type": "integer"
+          },
+          "db_connected": {
+            "description": "Indicates if Realtime has an active connection to the tenant database",
+            "type": "boolean"
+          },
+          "healthy": {
+            "description": "Tenant is healthy or not",
+            "type": "boolean"
+          },
+          "replication_connected": {
+            "description": "Indicates if Realtime has an active replication connection for broadcast changes",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "healthy",
+          "db_connected",
+          "replication_connected",
+          "connected_cluster"
+        ],
+        "title": "TenantHealthResponseValue",
+        "type": "object"
+      },
+      "TenantParams": {
+        "example": {
+          "tenant": {
+            "extensions": [
+              {
+                "settings": {
+                  "db_host": "db_host",
+                  "db_name": "postgres",
+                  "db_password": "password",
+                  "db_port": "5432",
+                  "db_user": "postgres",
+                  "poll_interval_ms": 100,
+                  "poll_max_changes": 100,
+                  "poll_max_record_bytes": 1048576,
+                  "publication": "supabase_realtime",
+                  "region": "us-west-1",
+                  "slot_name": "supabase_realtime_replication_slot"
+                },
+                "tenant_external_id": "tenant-1",
+                "type": "postgres_cdc_rls"
+              }
+            ],
+            "external_id": "tenant-1",
+            "jwt_secret": "4a218613-b539-4c52-adaa-64b14b25ee88",
+            "max_bytes_per_second": 1000,
+            "max_channels_per_client": 100,
+            "max_concurrent_users": 1000,
+            "max_events_per_second": 1000,
+            "max_joins_per_second": 1000,
+            "name": "First Tenant",
+            "postgres_cdc_default": "postgres_cdc_rls"
+          }
+        },
+        "properties": {
+          "tenant": {
+            "properties": {
+              "client_presence_window_ms": {
+                "description": "Client presence rate limit window in milliseconds (overrides environment default when set)",
+                "nullable": true,
+                "type": "number"
+              },
+              "extensions": {
+                "items": {
+                  "properties": {
+                    "settings": {
+                      "description": "Extension database configuration",
+                      "type": "object"
+                    },
+                    "tenant_external_id": {
+                      "description": "Tenant external ID",
+                      "type": "string"
+                    },
+                    "type": {
+                      "description": "Postgres CDC extension type",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "settings",
+                    "tenant_external_id"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "external_id": {
+                "description": "External ID",
+                "type": "string"
+              },
+              "jwt_jwks": {
+                "description": "JWKS for verifying JWTs",
+                "properties": {
+                  "keys": {
+                    "description": "Set of JWKs",
+                    "items": {
+                      "description": "JWK",
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "type": "object"
+              },
+              "jwt_secret": {
+                "description": "JWT secret",
+                "type": "string"
+              },
+              "max_bytes_per_second": {
+                "description": "Maximum bytes per second",
+                "type": "number"
+              },
+              "max_channels_per_client": {
+                "description": "Maximum channels per WebSocket connection",
+                "type": "number"
+              },
+              "max_client_presence_events_per_window": {
+                "description": "Maximum client presence events (overrides environment default when set)",
+                "nullable": true,
+                "type": "number"
+              },
+              "max_concurrent_users": {
+                "description": "Maximum connected concurrent clients",
+                "type": "number"
+              },
+              "max_events_per_second": {
+                "description": "Maximum events, or messages, per second",
+                "type": "number"
+              },
+              "max_joins_per_second": {
+                "description": "Maximum channel joins per second",
+                "type": "number"
+              },
+              "max_payload_size_in_kb": {
+                "description": "Maximum payload size in KB",
+                "type": "number"
+              },
+              "max_presence_events_per_second": {
+                "description": "Maximum presence events per second",
+                "type": "number"
+              },
+              "name": {
+                "description": "Tenant name",
+                "type": "string"
+              },
+              "postgres_cdc_default": {
+                "description": "Default Postgres CDC extension",
+                "type": "string"
+              },
+              "presence_enabled": {
+                "description": "When true, presence is enabled for clients that do not explicitly opt in",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "external_id",
+              "jwt_secret"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "tenant"
+        ],
+        "title": "TenantParams",
+        "type": "object"
+      },
+      "TenantResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TenantResponseValue"
+          }
+        },
+        "title": "TenantResponse",
+        "type": "object"
+      },
+      "TenantResponseList": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/TenantResponseValue"
+            },
+            "type": "array"
+          }
+        },
+        "title": "TenantResponseList",
+        "type": "object"
+      },
+      "TenantResponseValue": {
+        "example": {
+          "extensions": [
+            {
+              "inserted_at": "2023-01-01T00:00:00Z",
+              "settings": {
+                "db_host": "db_host",
+                "db_name": "postgres",
+                "db_password": "password",
+                "db_port": "5432",
+                "db_user": "postgres",
+                "poll_interval_ms": 100,
+                "poll_max_changes": 100,
+                "poll_max_record_bytes": 1048576,
+                "publication": "supabase_realtime",
+                "region": "us-west-1",
+                "slot_name": "supabase_realtime_replication_slot"
+              },
+              "tenant_external_id": "tenant-1",
+              "type": "postgres_cdc_rls",
+              "updated_at": "2023-01-01T00:00:00Z"
+            }
+          ],
+          "external_id": "tenant-1",
+          "id": "d4448862-666f-4af2-9966-78298e8af6bf",
+          "inserted_at": "2023-01-01T00:00:00Z",
+          "max_channels_per_client": 100,
+          "max_concurrent_users": 1000,
+          "max_events_per_second": 100,
+          "max_joins_per_second": 100,
+          "name": "First Tenant"
+        },
+        "properties": {
+          "client_presence_window_ms": {
+            "description": "Client presence rate limit window in milliseconds (overrides environment default when set)",
+            "nullable": true,
+            "type": "number"
+          },
+          "extensions": {
+            "items": {
+              "properties": {
+                "inserted_at": {
+                  "description": "Insert timestamp",
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "settings": {
+                  "description": "Extension database configuration",
+                  "type": "object"
+                },
+                "tenant_external_id": {
+                  "description": "Tenant external ID",
+                  "type": "string"
+                },
+                "type": {
+                  "description": "Postgres CDC extension type",
+                  "type": "string"
+                },
+                "updated_at": {
+                  "description": "Update timestamp",
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "settings",
+                "tenant_external_id"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "external_id": {
+            "description": "External ID",
+            "type": "string"
+          },
+          "id": {
+            "description": "UUID",
+            "type": "string"
+          },
+          "inserted_at": {
+            "description": "Insert timestamp",
+            "format": "date-time",
+            "type": "string"
+          },
+          "jwt_jwks": {
+            "description": "JWKS for verifying JWTs",
+            "properties": {
+              "keys": {
+                "description": "Set of JWKs",
+                "items": {
+                  "description": "JWK",
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "max_channels_per_client": {
+            "description": "Maximum channels per connected client",
+            "type": "number"
+          },
+          "max_client_presence_events_per_window": {
+            "description": "Maximum client presence events (overrides environment default when set)",
+            "nullable": true,
+            "type": "number"
+          },
+          "max_concurrent_users": {
+            "description": "Maximum connected concurrent clients",
+            "type": "number"
+          },
+          "max_events_per_second": {
+            "description": "Maximum number of events, or messages, that all connected clients are permitted to send",
+            "type": "number"
+          },
+          "max_joins_per_second": {
+            "description": "Maximum number of channel joins permitted for all connected clients",
+            "type": "number"
+          },
+          "name": {
+            "description": "Tenant name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "external_id",
+          "jwt_secret"
+        ],
+        "title": "TenantResponseValue",
+        "type": "object"
+      },
+      "TooManyRequestsResponse": {
+        "properties": {
+          "error": {
+            "properties": {
+              "messages": {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "title": "TooManyRequestsResponse",
+        "type": "object"
+      },
+      "UnauthorizedResponse": {
+        "properties": {
+          "error": {
+            "default": "unauthorized",
+            "type": "string"
+          }
+        },
+        "title": "UnauthorizedResponse",
+        "type": "object"
+      },
+      "UnprocessableEntityResponse": {
+        "properties": {
+          "error": {
+            "properties": {
+              "messages": {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "title": "UnprocessableEntityResponse",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "authorization": {
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "title": "realtime",
+    "version": "2.107.5"
+  },
+  "openapi": "3.0.0",
+  "paths": {
+    "/api/broadcast": {
+      "post": {
+        "callbacks": {},
+        "operationId": "RealtimeWeb.BroadcastController.broadcast",
+        "parameters": [
+          {
+            "description": "",
+            "example": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY",
+            "in": "header",
+            "name": "Authorization",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenantBatchParams"
+              }
+            }
+          },
+          "description": "Tenant Batch Params",
+          "required": false
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmptyResponse"
+                }
+              }
+            },
+            "description": "Empty Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmptyResponse"
+                }
+              }
+            },
+            "description": "Empty Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnprocessableEntityResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TooManyRequestsResponse"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          }
+        },
+        "summary": "Broadcasts a batch of messages",
+        "tags": []
+      }
+    },
+    "/api/broadcast/{topic}/events/{event}": {
+      "post": {
+        "callbacks": {},
+        "operationId": "RealtimeWeb.BroadcastSingleController.broadcast",
+        "parameters": [
+          {
+            "description": "",
+            "example": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY",
+            "in": "header",
+            "name": "Authorization",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "",
+            "example": "room:123",
+            "in": "path",
+            "name": "topic",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Event name for the broadcast",
+            "example": "message",
+            "in": "path",
+            "name": "event",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Whether this is a private broadcast (requires RLS authorization). Defaults to false.",
+            "example": false,
+            "in": "query",
+            "name": "private",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "text": "hello world",
+                "user": "alice"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/BroadcastSingleJsonParams"
+              }
+            },
+            "application/octet-stream": {
+              "schema": {
+                "$ref": "#/components/schemas/BroadcastSingleBinaryParams"
+              }
+            }
+          },
+          "description": "Broadcast message payload. Supports both JSON and binary formats.",
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmptyResponse"
+                }
+              }
+            },
+            "description": "Empty Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmptyResponse"
+                }
+              }
+            },
+            "description": "Empty Response"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmptyResponse"
+                }
+              }
+            },
+            "description": "Empty Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnprocessableEntityResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TooManyRequestsResponse"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          }
+        },
+        "summary": "Broadcasts a single message",
+        "tags": []
+      }
+    },
+    "/api/tenants": {
+      "get": {
+        "callbacks": {},
+        "operationId": "RealtimeWeb.TenantController.index",
+        "parameters": [
+          {
+            "description": "",
+            "example": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY",
+            "in": "header",
+            "name": "Authorization",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantResponseList"
+                }
+              }
+            },
+            "description": "Tenant List Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmptyResponse"
+                }
+              }
+            },
+            "description": "Empty Response"
+          }
+        },
+        "summary": "List tenants",
+        "tags": []
+      },
+      "post": {
+        "callbacks": {},
+        "operationId": "RealtimeWeb.TenantController.create",
+        "parameters": [
+          {
+            "description": "",
+            "example": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY",
+            "in": "header",
+            "name": "Authorization",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenantParams"
+              }
+            }
+          },
+          "description": "Tenant Params",
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantResponse"
+                }
+              }
+            },
+            "description": "Tenant Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmptyResponse"
+                }
+              }
+            },
+            "description": "Empty Response"
+          }
+        },
+        "summary": "Create or update tenant",
+        "tags": []
+      }
+    },
+    "/api/tenants/{tenant_id}": {
+      "delete": {
+        "callbacks": {},
+        "operationId": "RealtimeWeb.TenantController.delete",
+        "parameters": [
+          {
+            "description": "",
+            "example": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY",
+            "in": "header",
+            "name": "Authorization",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmptyResponse"
+                }
+              }
+            },
+            "description": "Empty Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Delete tenant",
+        "tags": []
+      },
+      "get": {
+        "callbacks": {},
+        "operationId": "RealtimeWeb.TenantController.show",
+        "parameters": [
+          {
+            "description": "",
+            "example": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY",
+            "in": "header",
+            "name": "Authorization",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantResponse"
+                }
+              }
+            },
+            "description": "Tenant Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmptyResponse"
+                }
+              }
+            },
+            "description": "Empty Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Fetch tenant",
+        "tags": []
+      },
+      "patch": {
+        "callbacks": {},
+        "operationId": "RealtimeWeb.TenantController.update (2)",
+        "parameters": [
+          {
+            "description": "",
+            "example": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY",
+            "in": "header",
+            "name": "Authorization",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenantParams"
+              }
+            }
+          },
+          "description": "Tenant Params",
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantResponse"
+                }
+              }
+            },
+            "description": "Tenant Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmptyResponse"
+                }
+              }
+            },
+            "description": "Empty Response"
+          }
+        },
+        "summary": "Create or update tenant",
+        "tags": []
+      },
+      "put": {
+        "callbacks": {},
+        "operationId": "RealtimeWeb.TenantController.update",
+        "parameters": [
+          {
+            "description": "",
+            "example": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY",
+            "in": "header",
+            "name": "Authorization",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenantParams"
+              }
+            }
+          },
+          "description": "Tenant Params",
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantResponse"
+                }
+              }
+            },
+            "description": "Tenant Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmptyResponse"
+                }
+              }
+            },
+            "description": "Empty Response"
+          }
+        },
+        "summary": "Create or update tenant",
+        "tags": []
+      }
+    },
+    "/api/tenants/{tenant_id}/health": {
+      "get": {
+        "callbacks": {},
+        "operationId": "RealtimeWeb.TenantController.health",
+        "parameters": [
+          {
+            "description": "",
+            "example": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY",
+            "in": "header",
+            "name": "Authorization",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantHealthResponse"
+                }
+              }
+            },
+            "description": "Tenant Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmptyResponse"
+                }
+              }
+            },
+            "description": "Empty Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Tenant health",
+        "tags": []
+      }
+    },
+    "/api/tenants/{tenant_id}/reload": {
+      "post": {
+        "callbacks": {},
+        "operationId": "RealtimeWeb.TenantController.reload",
+        "parameters": [
+          {
+            "description": "",
+            "example": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY",
+            "in": "header",
+            "name": "Authorization",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmptyResponse"
+                }
+              }
+            },
+            "description": "Empty Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmptyResponse"
+                }
+              }
+            },
+            "description": "Empty Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Reload tenant",
+        "tags": []
+      }
+    },
+    "/api/tenants/{tenant_id}/shutdown": {
+      "post": {
+        "callbacks": {},
+        "operationId": "RealtimeWeb.TenantController.shutdown",
+        "parameters": [
+          {
+            "description": "",
+            "example": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY",
+            "in": "header",
+            "name": "Authorization",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmptyResponse"
+                }
+              }
+            },
+            "description": "Empty Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmptyResponse"
+                }
+              }
+            },
+            "description": "Empty Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Shutdowns the Connect module for a tenant",
+        "tags": []
+      }
+    }
+  },
+  "security": [],
+  "servers": [
+    {
+      "url": "http://{tenant}.localhost:4000/",
+      "variables": {
+        "tenant": {
+          "default": "tenant"
+        }
+      }
+    }
+  ],
+  "tags": []
+}
