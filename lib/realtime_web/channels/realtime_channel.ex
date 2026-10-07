@@ -33,7 +33,6 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias RealtimeWeb.RealtimeChannel.BroadcastHandler
   alias RealtimeWeb.RealtimeChannel.MessageDispatcher
   alias RealtimeWeb.RealtimeChannel.PresenceHandler
-  alias RealtimeWeb.RealtimeChannel.Tracker
 
   # A JWT `exp` can be arbitrarily far in the future and `Process.send_after/3` rejects delays past
   # Erlang's maximum supported time value, so the re-confirmation timer is capped at this interval.
@@ -48,11 +47,6 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @impl true
   def join("realtime:", _params, socket) do
-    # `terminate/2` untracks every channel process, including one whose join was rejected, so
-    # this clause has to track too. Otherwise the socket's other channels are untracked in its
-    # place and the Tracker reaps a transport that still has channels open.
-    Tracker.track(socket.transport_pid)
-
     socket
     |> log_error("TopicNameRequired", "You must provide a topic name")
     |> join_error()
@@ -68,7 +62,6 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     Process.flag(:max_heap_size, max_heap_size())
     Process.flag(:fullsweep_after, @fullsweep_after)
-    Tracker.track(socket.transport_pid)
     Logger.metadata(external_id: tenant_id, project: tenant_id)
     Logger.put_process_level(self(), log_level)
 
@@ -686,10 +679,9 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   @impl true
-  def terminate(reason, %{transport_pid: transport_pid}) do
+  def terminate(reason, _socket) do
     Logger.debug("Channel terminated with reason: #{inspect(reason)}")
     :telemetry.execute([:prom_ex, :plugin, :realtime, :disconnected], %{})
-    Tracker.untrack(transport_pid)
     :ok
   end
 
