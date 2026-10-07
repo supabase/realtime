@@ -20,6 +20,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   @type payload :: map | {String.t(), :json | :binary, binary, map()}
 
   @event_type "broadcast"
+
   @spec handle(payload, Socket.t()) :: {:reply, :ok, Socket.t()} | {:noreply, Socket.t()}
   def handle(payload, %{assigns: %{private?: false}} = socket), do: handle(payload, nil, socket)
 
@@ -31,7 +32,52 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   """
   @spec handle(payload, pid() | nil, Socket.t()) ::
           {:reply, :ok | {:ok, map()} | {:error, any()}, Socket.t()} | {:noreply, Socket.t()}
-  def handle(payload, db_conn, %{assigns: %{private?: true}} = socket) do
+  def handle(payload, db_conn, %{assigns: %{private?: true, tenant: tenant_id}} = socket) do
+    with {:ok, persist} <- payload |> persist_option() |> Messages.parse_persist() do
+      persist = if FeatureFlags.enabled?("broadcast_persistence", tenant_id), do: persist
+      handle_authorized(socket, payload, db_conn, persist)
+    else
+      {:error, :invalid_ttl} ->
+        log_error(
+          "InvalidPersistTtl",
+          "persist ttl must be a positive integer of seconds from 1 to #{Messages.max_ttl_seconds()}"
+        )
+
+        maybe_reply_error(socket, :invalid_persist_ttl)
+    end
+  end
+
+  def handle(payload, _db_conn, %{assigns: %{private?: false}} = socket) do
+    %{
+      assigns: %{
+        tenant_topic: tenant_topic,
+        self_broadcast: self_broadcast,
+        ack_broadcast: ack_broadcast,
+        tenant: tenant_id
+      }
+    } = socket
+
+    socket = increment_rate_counter(socket)
+
+    res =
+      case Tenants.validate_payload_size(tenant_id, payload) do
+        :ok -> send_message(tenant_id, self_broadcast, tenant_topic, payload)
+        error -> error
+      end
+
+    cond do
+      ack_broadcast && match?({:error, :payload_size_exceeded}, res) ->
+        {:reply, {:error, %{error: :payload_size_exceeded}}, socket}
+
+      ack_broadcast ->
+        {:reply, :ok, socket}
+
+      true ->
+        {:noreply, socket}
+    end
+  end
+
+  defp handle_authorized(socket, payload, db_conn, persist) do
     %{
       assigns: %{
         self_broadcast: self_broadcast,
@@ -42,7 +88,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
       }
     } = socket
 
-    case run_authorization_check(policies || %Policies{}, db_conn, authorization_context) do
+    case run_authorization_check(policies || %Policies{}, db_conn, authorization_context, persist) do
       {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}} = policies} ->
         socket =
           socket
@@ -57,7 +103,15 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
             :ok ->
               send_message(tenant_id, self_broadcast, tenant_topic, payload)
               # TODO: hard limits and buffering based on ack
-              maybe_persist(policies, db_conn, tenant_id, authorization_context.topic, payload, ack_broadcast)
+              maybe_persist(
+                policies: policies,
+                db_conn: db_conn,
+                tenant_id: tenant_id,
+                topic: authorization_context.topic,
+                payload: payload,
+                ack_broadcast: ack_broadcast,
+                persist: persist
+              )
 
             {:error, error} ->
               {:error, error}
@@ -104,36 +158,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
       {:error, error} ->
         log_error("UnableToSetPolicies", error)
         maybe_reply_error(socket, :unable_to_set_policies)
-    end
-  end
-
-  def handle(payload, _db_conn, %{assigns: %{private?: false}} = socket) do
-    %{
-      assigns: %{
-        tenant_topic: tenant_topic,
-        self_broadcast: self_broadcast,
-        ack_broadcast: ack_broadcast,
-        tenant: tenant_id
-      }
-    } = socket
-
-    socket = increment_rate_counter(socket)
-
-    res =
-      case Tenants.validate_payload_size(tenant_id, payload) do
-        :ok -> send_message(tenant_id, self_broadcast, tenant_topic, payload)
-        error -> error
-      end
-
-    cond do
-      ack_broadcast && match?({:error, :payload_size_exceeded}, res) ->
-        {:reply, {:error, %{error: :payload_size_exceeded}}, socket}
-
-      ack_broadcast ->
-        {:reply, :ok, socket}
-
-      true ->
-        {:noreply, socket}
     end
   end
 
@@ -188,36 +212,46 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
     %Phoenix.Socket.Broadcast{topic: topic, event: @event_type, payload: payload}
   end
 
-  @spec maybe_persist(Policies.t(), pid(), String.t(), String.t(), payload, ack_broadcast :: boolean()) ::
-          :ok | :skip | {:ok, map()}
-  defp maybe_persist(
-         %Policies{broadcast: %BroadcastPolicies{persist: true}},
-         db_conn,
-         tenant_id,
-         topic,
-         payload,
-         ack_broadcast
-       ) do
-    if FeatureFlags.enabled?("broadcast_persistence", tenant_id) do
-      if ack_broadcast do
-        persist(db_conn, tenant_id, topic, payload)
+  # Saves the message when the policy allows it and the sender asked for it.
+  #
+  # ## Options
+  #
+  #   * `:policies` - the cached policy answer for this socket
+  #   * `:db_conn` - the tenant database connection
+  #   * `:tenant_id` - the tenant the message belongs to
+  #   * `:topic` - the channel topic, used as the row's topic
+  #   * `:payload` - the broadcast frame
+  #   * `:ack_broadcast` - saves before replying when true, in a task when false
+  #   * `:persist` - what the sender asked for, or `nil` to not save it
+  #
+  # All are required.
+  @spec maybe_persist(keyword()) :: :ok | {:ok, map()}
+  defp maybe_persist(opts) do
+    policies = Keyword.fetch!(opts, :policies)
+
+    if persist?(policies, Keyword.fetch!(opts, :persist)) do
+      if Keyword.fetch!(opts, :ack_broadcast) do
+        persist(opts)
       else
-        Task.Supervisor.start_child(Realtime.TaskSupervisor, fn ->
-          persist(db_conn, tenant_id, topic, payload)
-        end)
+        Task.Supervisor.start_child(Realtime.TaskSupervisor, fn -> persist(opts) end)
 
         :ok
       end
     else
-      :skip
+      :ok
     end
   end
 
-  defp maybe_persist(_policies, _db_conn, _tenant_id, _topic, _payload, _ack_broadcast), do: :ok
+  defp persist(opts) do
+    db_conn = Keyword.fetch!(opts, :db_conn)
+    tenant_id = Keyword.fetch!(opts, :tenant_id)
+    topic = Keyword.fetch!(opts, :topic)
+    payload = Keyword.fetch!(opts, :payload)
 
-  defp persist(db_conn, tenant_id, topic, payload) do
+    expires_at = opts |> Keyword.fetch!(:persist) |> Map.fetch!(:ttl) |> Messages.expires_at()
+
     with {:ok, event, event_payload} <- convert_to_persistable_fields(payload),
-         {:ok, id} <- Messages.persist(db_conn, tenant_id, topic, event, event_payload) do
+         {:ok, id} <- Messages.persist(db_conn, tenant_id, topic, event, event_payload, expires_at) do
       {:ok, %{id: id}}
     else
       error ->
@@ -247,27 +281,38 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
     socket
   end
 
-  defp run_authorization_check(
-         %Policies{broadcast: %BroadcastPolicies{write: nil}} = policies,
-         db_conn,
-         authorization_context
-       ) do
-    with {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}} = policies} <-
-           Authorization.get_write_authorizations(policies, db_conn, authorization_context, :broadcast) do
-      maybe_check_persistence(policies, db_conn, authorization_context)
-    end
+  @doc false
+  # Which write policies still need a probe.
+  #
+  # `write` and `persist` are cached per socket and tri-state: `nil` means not checked yet. Intent
+  # is per message and never cached, so a message that does not ask to persist never probes the
+  # `persistence` policy, and a message that does ask probes it once and reuses the answer.
+  @spec extensions_to_probe(Policies.t(), Messages.persist()) :: [Authorization.extension()]
+  def extensions_to_probe(%Policies{broadcast: %BroadcastPolicies{write: write, persist: allowed}}, persist) do
+    [
+      if(is_nil(write), do: :broadcast),
+      if(not is_nil(persist) and is_nil(allowed), do: :persistence)
+    ]
+    |> Enum.reject(&is_nil/1)
   end
 
-  defp run_authorization_check(socket, _db_conn, _authorization_context) do
-    {:ok, socket}
-  end
+  @doc false
+  # Whether this message should be saved, given what the sender asked for and the cached policy answer.
+  @spec persist?(Policies.t(), Messages.persist()) :: boolean()
+  def persist?(%Policies{broadcast: %BroadcastPolicies{persist: true}}, persist) when is_map(persist), do: true
+  def persist?(_policies, _persist), do: false
 
-  # The persist policy needs its own probe, so only pay for it when the flag is on.
-  defp maybe_check_persistence(policies, db_conn, authorization_context) do
-    if FeatureFlags.enabled?("broadcast_persistence", authorization_context.tenant_id) do
-      Authorization.get_write_authorizations(policies, db_conn, authorization_context, :persistence)
-    else
-      {:ok, policies}
+  @doc false
+  # What the sender asked for, read from the frame metadata rather than the payload. The map form of
+  # a broadcast is forwarded to subscribers as-is, so a control key there would leak.
+  @spec persist_option(payload) :: term()
+  def persist_option({_event, _encoding, _payload, metadata}) when is_map(metadata), do: metadata["persist"]
+  def persist_option(_payload), do: nil
+
+  defp run_authorization_check(policies, db_conn, authorization_context, persist) do
+    case extensions_to_probe(policies, persist) do
+      [] -> {:ok, policies}
+      extensions -> Authorization.get_write_authorizations(policies, db_conn, authorization_context, extensions)
     end
   end
 end

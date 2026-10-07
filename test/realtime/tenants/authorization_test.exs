@@ -115,6 +115,134 @@ defmodule Realtime.Tenants.AuthorizationTest do
              } == policies
     end
 
+    @tag role: "authenticated",
+         sub: "11111111-1111-1111-1111-111111111111",
+         policies: [:authenticated_write_broadcast, :authenticated_write_persistence_via_jwt]
+    test "a persistence policy can authorize from auth.jwt()", context do
+      {:ok, policies} =
+        Authorization.get_write_authorizations(
+          %Policies{},
+          context.db_conn,
+          context.authorization_context,
+          :persistence
+        )
+
+      assert %Policies{broadcast: %BroadcastPolicies{persist: true}} = policies
+    end
+
+    @tag role: "authenticated",
+         sub: "11111111-1111-1111-1111-111111111111",
+         policies: [:authenticated_write_broadcast, :authenticated_write_persistence_via_jwt]
+    test "that policy denies a different sub", context do
+      # Same policy, a token for somebody else. `auth.jwt()` has to read the live claims for this
+      # to come back denied.
+      other =
+        Authorization.build_authorization_params(%{
+          tenant_id: context.authorization_context.tenant_id,
+          topic: context.topic,
+          headers: [{"header-1", "value-1"}],
+          claims: %{sub: "22222222-2222-2222-2222-222222222222", role: "authenticated"},
+          role: "authenticated",
+          sub: "22222222-2222-2222-2222-222222222222"
+        })
+
+      {:ok, policies} =
+        Authorization.get_write_authorizations(%Policies{}, context.db_conn, other, :persistence)
+
+      assert %Policies{broadcast: %BroadcastPolicies{persist: false}} = policies
+    end
+
+    @tag role: "anon", policies: [:anon_write_persistence]
+    test "a to anon policy authorizes persistence for the anon role", context do
+      {:ok, policies} =
+        Authorization.get_write_authorizations(
+          %Policies{},
+          context.db_conn,
+          context.authorization_context,
+          :persistence
+        )
+
+      assert %Policies{broadcast: %BroadcastPolicies{persist: true}} = policies
+    end
+
+    @tag role: "authenticated", policies: [:anon_write_persistence]
+    test "a to anon policy does not authorize an authenticated user", context do
+      {:ok, policies} =
+        Authorization.get_write_authorizations(
+          %Policies{},
+          context.db_conn,
+          context.authorization_context,
+          :persistence
+        )
+
+      assert %Policies{broadcast: %BroadcastPolicies{persist: false}} = policies
+    end
+
+    @tag role: "authenticated", policies: [:permanent_write_persistence]
+    test "a permanent user is authorized when is_anonymous is absent", context do
+      {:ok, policies} =
+        Authorization.get_write_authorizations(
+          %Policies{},
+          context.db_conn,
+          context.authorization_context,
+          :persistence
+        )
+
+      assert %Policies{broadcast: %BroadcastPolicies{persist: true}} = policies
+    end
+
+    @tag role: "authenticated", policies: [:permanent_write_persistence]
+    test "an anonymous user is refused by the same policy", context do
+      # Anonymous sign-in is still the `authenticated` role. Only the claim tells them apart.
+      guest =
+        Authorization.build_authorization_params(%{
+          tenant_id: context.authorization_context.tenant_id,
+          topic: context.topic,
+          headers: [{"header-1", "value-1"}],
+          claims: %{sub: context.sub, role: "authenticated", is_anonymous: true},
+          role: "authenticated",
+          sub: context.sub
+        })
+
+      {:ok, policies} =
+        Authorization.get_write_authorizations(%Policies{}, context.db_conn, guest, :persistence)
+
+      assert %Policies{broadcast: %BroadcastPolicies{persist: false}} = policies
+    end
+
+    @tag role: "authenticated", policies: [:authenticated_write_broadcast, :authenticated_write_persistence]
+    test "probes several extensions in one call", context do
+      {:ok, policies} =
+        Authorization.get_write_authorizations(
+          %Policies{},
+          context.db_conn,
+          context.authorization_context,
+          [:broadcast, :persistence]
+        )
+
+      assert %Policies{
+               broadcast: %BroadcastPolicies{read: nil, write: true, persist: true},
+               presence: %PresencePolicies{read: nil, write: nil}
+             } == policies
+    end
+
+    @tag role: "authenticated", policies: [:authenticated_write_broadcast]
+    test "a denial in a batch does not stop the remaining extensions", context do
+      {:ok, policies} =
+        Authorization.get_write_authorizations(
+          %Policies{},
+          context.db_conn,
+          context.authorization_context,
+          [:persistence, :broadcast]
+        )
+
+      # The persistence probe is denied first, and the broadcast probe after it still answers.
+      assert %Policies{
+               broadcast: %BroadcastPolicies{read: nil, write: true, persist: false},
+               presence: %PresencePolicies{read: nil, write: nil}
+             } == policies
+    end
+
     @tag role: "authenticated", policies: [:authenticated_write_broadcast]
     test "denies persistence when only the broadcast write policy exists", context do
       {:ok, policies} =
@@ -221,6 +349,38 @@ defmodule Realtime.Tenants.AuthorizationTest do
         "external_id=#{context.tenant.external_id} [critical] IncreaseConnectionPool: Too many database timeouts"
 
       assert length(String.split(log, own_line)) == 2
+    end
+  end
+
+  describe "get_write_authorizations/4 extension validation" do
+    test "an unknown extension is refused", context do
+      assert_raise ArgumentError, ~r/unknown write extensions \[:bogus\]/, fn ->
+        write_authorizations(context, [:bogus])
+      end
+    end
+
+    test "a known extension alongside an unknown one names only the unknown", context do
+      assert_raise ArgumentError, ~r/unknown write extensions \[:bogus\]/, fn ->
+        write_authorizations(context, [:broadcast, :bogus])
+      end
+    end
+
+    test "a string is not an extension", context do
+      assert_raise ArgumentError, ~r/unknown write extensions \["broadcast"\]/, fn ->
+        write_authorizations(context, ["broadcast"])
+      end
+    end
+
+    test "an empty list probes nothing, so it is refused", context do
+      assert_raise ArgumentError, ~r/expected at least one of/, fn ->
+        write_authorizations(context, [])
+      end
+    end
+
+    test "a single unknown extension matches no clause", context do
+      assert_raise FunctionClauseError, fn ->
+        write_authorizations(context, :bogus)
+      end
     end
   end
 
@@ -486,6 +646,15 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
       assert_receive {[:realtime, :tenants, :write_authorization_check], ^ref, %{latency: _}, %{tenant: ^external_id}}
     end
+  end
+
+  defp write_authorizations(context, extensions) do
+    Authorization.get_write_authorizations(
+      %Policies{},
+      context.db_conn,
+      context.authorization_context,
+      extensions
+    )
   end
 
   defp use_authorize_function(%{authorize_function: enabled?}) do

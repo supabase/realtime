@@ -8,7 +8,8 @@ create table "realtime"."messages" (
   "inserted_at"    timestamp without time zone not null,
   "id"             uuid                        not null,
   "binary_payload" bytea,
-  "skip_broadcast" boolean                     not null
+  "skip_broadcast" boolean                     not null,
+  "expires_at"     timestamp without time zone
 ) partition by range (inserted_at);
 
 alter table "realtime"."messages"

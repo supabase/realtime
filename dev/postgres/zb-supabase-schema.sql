@@ -20,6 +20,15 @@ end$$;
 grant anon, authenticated, service_role to supabase_realtime_admin;
 grant create, usage on schema public to supabase_realtime_admin;
 grant usage on schema extensions to supabase_realtime_admin;
+
+-- https://github.com/supabase/auth/blob/3b77d62d71ad810697273a518a48bb0b539be4e6/migrations/20220531120530_add_auth_jwt_function.up.sql
+create or replace function auth.jwt() returns jsonb language sql stable as $$
+  select coalesce(
+      nullif(current_setting('request.jwt.claim', true), ''),
+      nullif(current_setting('request.jwt.claims', true), '')
+  )::jsonb
+$$;
+
 grant usage on schema auth to supabase_realtime_admin;
 grant execute on all functions in schema auth to supabase_realtime_admin;
 grant usage on schema realtime to postgres, anon, authenticated, service_role;
