@@ -108,7 +108,8 @@ defmodule Realtime.Tenants.AuthorizationFunctionTest do
       Postgrex.query!(context.db_conn, "DROP FUNCTION realtime.authorize", [])
 
       # The fallback relies on a missing realtime.authorize being reported without a where
-      assert error = {:error, %Postgrex.Error{postgres: %{code: :undefined_function} = postgres}} =
+      assert error =
+               {:error, %Postgrex.Error{postgres: %{code: :undefined_function} = postgres}} =
                Postgrex.query(context.db_conn, "SELECT * FROM realtime.authorize(role_name => 'anon')", [])
 
       refute Map.has_key?(postgres, :where)
