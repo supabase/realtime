@@ -244,15 +244,21 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   end
 
   defp track(socket, payload) do
-    %{assigns: %{presence_key: presence_key, tenant_topic: tenant_topic}} = socket
+    %{assigns: %{presence_key: presence_key, tenant_topic: tenant_topic, tenant: tenant}} = socket
+
     payload = Map.get(payload, "payload", %{})
+
+    # We use a separate copy of the payload, that may be stamped for timing measurements.
+    # The separate copy is what we pass to Presence for distribution, but we want to raw payload
+    # for limit checking and storing on the socket.
+    stamped_payload = Presence.Metrics.stamp(payload, tenant)
 
     with :ok <- check_track_payload(socket.assigns, payload),
          tenant <- Tenants.Cache.get_tenant_by_external_id(socket.assigns.tenant),
          :ok <- validate_payload_size(tenant, payload),
          _ <- RealtimeWeb.TenantBroadcaster.collect_payload_size(socket.assigns.tenant, payload, :presence),
          :ok <- limit_presence_event(socket),
-         {:ok, _} <- Presence.track(self(), tenant_topic, presence_key, payload) do
+         {:ok, _} <- Presence.track(self(), tenant_topic, presence_key, stamped_payload) do
       resync =
         if socket.assigns.presence_enabled? do
           :no_resync
@@ -272,7 +278,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
         {:ok, socket, :no_resync}
 
       {:error, {:already_tracked, pid, _, _}} ->
-        case Presence.update(pid, tenant_topic, presence_key, payload) do
+        case Presence.update(pid, tenant_topic, presence_key, stamped_payload) do
           {:ok, _} ->
             socket = assign(socket, :presence_track_payload, payload)
             {:ok, socket, :no_resync}
@@ -309,6 +315,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     |> Shard.name_for_topic(topic, size)
     |> Shard.dirty_list(topic)
     |> Phoenix.Presence.group()
+    |> Presence.Metrics.strip_state()
   end
 
   defp limit_presence_event(socket) do

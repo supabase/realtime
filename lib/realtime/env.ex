@@ -23,6 +23,27 @@ defmodule Realtime.Env do
           "expected either Integer or empty (nil) as default value for env #{env}, got #{inspect(default)}"
   end
 
+  @spec get_float(binary(), float() | nil) :: float() | nil
+  def get_float(env, default \\ nil)
+
+  def get_float(env, default) when is_float(default) or is_nil(default) do
+    value = System.get_env(env)
+
+    if value do
+      case Float.parse(value) do
+        {float, ""} -> float
+        _ -> raise ArgumentError, "env #{env} expected a Float, got #{inspect(value)}"
+      end
+    else
+      default
+    end
+  end
+
+  def get_float(env, default) do
+    raise ArgumentError,
+          "expected either Float or empty (nil) as default value for env #{env}, got #{inspect(default)}"
+  end
+
   @spec get_charlist(binary(), charlist()) :: charlist()
   def get_charlist(env, default) when is_list(default) do
     value = System.get_env(env)

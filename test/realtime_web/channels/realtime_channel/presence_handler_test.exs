@@ -239,6 +239,66 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       refute_receive _
     end
 
+    test "a sampled track stores the latency envelope in the tracker meta only", %{tenant: tenant, topic: topic} do
+      expect(Realtime.FeatureFlags, :enabled?, fn "presence_latency_metric", _ -> true end)
+      key = random_string()
+      policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
+      socket = socket_fixture(tenant, topic, key, policies: policies)
+      payload = %{"a" => "b"}
+
+      assert {:ok, socket, _} = PresenceHandler.handle(%{"event" => "track", "payload" => payload}, socket)
+
+      # The raw payload is what is compared for dedup and stored on the socket.
+      assert socket.assigns.presence_track_payload == payload
+
+      # The tracker holds the stamped copy.
+      assert %{^key => %{metas: [meta]}} = RealtimeWeb.Presence.list(socket.assigns.tenant_topic)
+      assert %{"a" => "b", _rt: %{ts: ts, node: node}} = meta
+      assert is_integer(ts)
+      assert node == Realtime.Nodes.short_node_id_from_name(node())
+    end
+
+    test "re-tracking the same payload is still a no-op when sampled", %{tenant: tenant, topic: topic} do
+      expect(Realtime.FeatureFlags, :enabled?, 2, fn "presence_latency_metric", _ -> true end)
+      key = random_string()
+      policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
+      socket = socket_fixture(tenant, topic, key, policies: policies)
+      payload = %{"a" => "b"}
+
+      assert {:ok, socket, _} = PresenceHandler.handle(%{"event" => "track", "payload" => payload}, socket)
+      assert_receive %Broadcast{event: "presence_diff"}
+
+      assert {:ok, _socket, :no_resync} = PresenceHandler.handle(%{"event" => "track", "payload" => payload}, socket)
+      refute_receive %Broadcast{event: "presence_diff"}
+    end
+
+    test "a sampled update stamps the new meta", %{tenant: tenant, topic: topic} do
+      expect(Realtime.FeatureFlags, :enabled?, 2, fn "presence_latency_metric", _ -> true end)
+      key = random_string()
+      policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
+      socket = socket_fixture(tenant, topic, key, policies: policies)
+
+      assert {:ok, socket, _} = PresenceHandler.handle(%{"event" => "track", "payload" => %{"a" => "b"}}, socket)
+      assert {:ok, socket, _} = PresenceHandler.handle(%{"event" => "track", "payload" => %{"a" => "c"}}, socket)
+
+      assert socket.assigns.presence_track_payload == %{"a" => "c"}
+
+      assert %{^key => %{metas: [%{"a" => "c", _rt: %{ts: _, node: _}}]}} =
+               RealtimeWeb.Presence.list(socket.assigns.tenant_topic)
+    end
+
+    test "an unsampled track stores no envelope", %{tenant: tenant, topic: topic} do
+      expect(Realtime.FeatureFlags, :enabled?, fn "presence_latency_metric", _ -> false end)
+      key = random_string()
+      policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
+      socket = socket_fixture(tenant, topic, key, policies: policies)
+
+      assert {:ok, socket, _} = PresenceHandler.handle(%{"event" => "track", "payload" => %{"a" => "b"}}, socket)
+
+      assert %{^key => %{metas: [meta]}} = RealtimeWeb.Presence.list(socket.assigns.tenant_topic)
+      refute Map.has_key?(meta, :_rt)
+    end
+
     test "tracking the same payload does nothing", %{tenant: tenant, topic: topic} do
       external_id = tenant.external_id
       key = random_string()
@@ -672,6 +732,23 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       assert_receive {_, :text, msg}
       msg = Jason.decode!(msg)
       assert msg["event"] == "presence_state"
+    end
+
+    test "strips the latency envelope from the presence state it pushes", %{tenant: tenant, topic: topic} do
+      stub(Realtime.FeatureFlags, :enabled?, fn "presence_latency_metric", _ -> true end)
+      key = random_string()
+      policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
+      socket = socket_fixture(tenant, topic, key, policies: policies, private?: true)
+
+      assert {:ok, socket, _} = PresenceHandler.handle(%{"event" => "track", "payload" => %{"a" => "b"}}, socket)
+      assert %{^key => %{metas: [%{_rt: _}]}} = RealtimeWeb.Presence.list(socket.assigns.tenant_topic)
+
+      assert :ok = PresenceHandler.sync(socket)
+      assert_receive {_, :text, msg}
+
+      assert %{"event" => "presence_state", "payload" => %{^key => %{"metas" => [meta]}}} = Jason.decode!(msg)
+      assert meta["a"] == "b"
+      refute Map.has_key?(meta, "_rt")
     end
 
     test "ignores sync for private channels with read policy false", %{tenant: tenant, topic: topic} do
