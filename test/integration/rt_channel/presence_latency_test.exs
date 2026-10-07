@@ -20,6 +20,22 @@ defmodule Realtime.Integration.RtChannel.PresenceLatencyTest do
   @latency [:realtime, :presence, :notify, :latency]
   @discarded [:realtime, :presence, :notify, :discarded]
 
+  # String keys, nested maps and lists, mixed scalar types, and "_rt" keys of the user's own at
+  # several depths, including one shaped like the metrics envelope.
+  @nested_payload %{
+    "name" => "dave",
+    "_rt" => %{"ts" => 1, "node" => "theirs"},
+    "profile" => %{
+      "_rt" => "nested",
+      "tags" => ["admin", "beta"],
+      "address" => %{"city" => "Adelaide", "geo" => %{"lat" => -34.9, "lng" => 138.6}}
+    },
+    "cursors" => [%{"x" => 1, "y" => 2, "_rt" => nil}, %{"x" => 3, "y" => 4}],
+    "online" => true,
+    "last_seen" => nil,
+    "score" => 42
+  }
+
   setup [:checkout_tenant_and_connect, :rls_context, :set_mimic_global]
 
   setup %{tenant: tenant} do
@@ -103,6 +119,44 @@ defmodule Realtime.Integration.RtChannel.PresenceLatencyTest do
     end
 
     refute_receive {:telemetry, _, _, _}
+  end
+
+  test "a nested payload reaches every member and a late joiner intact, with only the envelope removed", %{
+    tenant: tenant,
+    topic: topic,
+    serializer: serializer
+  } do
+    tenant_id = tenant.external_id
+    topic = "realtime:#{topic}"
+    parent = self()
+    config = %{presence: %{key: "", enabled: true}, private: false}
+
+    alice = connect_client(tenant, serializer, spawn_link(fn -> forward_frames(parent, :alice) end))
+    {dave, _} = get_connection(tenant, serializer)
+
+    for socket <- [alice, dave], do: WebsocketClient.join(socket, topic, %{config: config})
+    assert_receive {:alice, %Message{event: "presence_state", topic: ^topic}}, 1_000
+    assert_receive %Message{event: "presence_state", topic: ^topic}, 1_000
+
+    WebsocketClient.send_event(dave, topic, "presence", %{type: "presence", event: "TRACK", payload: @nested_payload})
+
+    # The diff carries the payload exactly as sent, plus phx_ref, for both the fastlane and the sender.
+    assert_receive {:alice, %Message{event: "presence_diff", payload: %{"joins" => joins}, topic: ^topic}}, 1_000
+    assert_receive %Message{event: "presence_diff", payload: %{"joins" => ^joins}, topic: ^topic}, 1_000
+    assert [meta] = joins |> Map.values() |> hd() |> Map.fetch!("metas")
+    assert Map.delete(meta, "phx_ref") == @nested_payload
+
+    for _ <- 1..2 do
+      assert_receive {:telemetry, @latency, _, %{tenant: ^tenant_id, action: :track, origin: :local}}, 1_000
+    end
+
+    # A late joiner reads the stored meta back through presence_state, stripped the same way.
+    erin = connect_client(tenant, serializer, spawn_link(fn -> forward_frames(parent, :erin) end))
+    WebsocketClient.join(erin, topic, %{config: config})
+
+    assert_receive {:erin, %Message{event: "presence_state", payload: state, topic: ^topic}}, 1_000
+    assert [meta] = state |> Map.values() |> hd() |> Map.fetch!("metas")
+    assert Map.delete(meta, "phx_ref") == @nested_payload
   end
 
   defp connect_client(tenant, serializer, inbox) do
