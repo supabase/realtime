@@ -28,6 +28,7 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesFiltersTest do
     # Full replica identity so the DELETE old tuple carries `details`; otherwise a filter on a
     # non-PK column can't be evaluated on delete (the old tuple would only hold the primary key).
     Postgrex.query!(db_conn, "alter table test replica identity full", [])
+    Postgrex.query!(db_conn, "alter table test add column tags text[]", [])
 
     %{tenant: tenant}
   end
@@ -83,6 +84,10 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesFiltersTest do
 
     test "isdistinct filter matches on insert, update and delete", %{tenant: tenant} do
       assert_filter_delivers(tenant, "details=isdistinct.other", "hello")
+    end
+
+    test "filter on an array column matches on insert, update and delete", %{tenant: tenant} do
+      assert_filter_delivers(tenant, "tags=eq.{a}", ["a"], "tags")
     end
 
     test "delivers row matching all filters", %{tenant: tenant} do
@@ -232,7 +237,7 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesFiltersTest do
     end
   end
 
-  defp assert_filter_delivers(tenant, filter, value) do
+  defp assert_filter_delivers(tenant, filter, value, column \\ "details") do
     {socket, _} = get_connection(tenant, @serializer)
     topic = "realtime:any"
     config = %{postgres_changes: [%{event: "*", schema: "public", table: "test", filter: filter}]}
@@ -256,7 +261,7 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesFiltersTest do
 
     {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
 
-    %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ($1) returning id", [value])
+    %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (#{column}) values ($1) returning id", [value])
 
     assert_receive %Message{
                      event: "postgres_changes",
@@ -265,7 +270,7 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesFiltersTest do
                    },
                    500
 
-    Postgrex.query!(conn, "update test set details = $1 where id = $2", [value, id])
+    Postgrex.query!(conn, "update test set #{column} = $1 where id = $2", [value, id])
 
     assert_receive %Message{
                      event: "postgres_changes",
