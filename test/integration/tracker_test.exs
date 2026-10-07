@@ -145,4 +145,34 @@ defmodule Integration.TrackerTest do
     Process.sleep(300)
     assert Process.alive?(socket)
   end
+
+  describe "sockets that never join a channel" do
+    setup do
+      no_channel_timeout_in_ms = :persistent_term.get({RealtimeWeb.UserSocket, :no_channel_timeout_in_ms})
+      :persistent_term.put({RealtimeWeb.UserSocket, :no_channel_timeout_in_ms}, 100)
+
+      on_exit(fn ->
+        :persistent_term.put({RealtimeWeb.UserSocket, :no_channel_timeout_in_ms}, no_channel_timeout_in_ms)
+      end)
+    end
+
+    test "are closed after the no channel timeout", %{tenant: tenant} do
+      {socket, _} = get_connection(tenant)
+      assert [] = Tracker.list_pids()
+
+      assert_receive {:close_code, 1000}, 1000
+      assert_process_down(socket, 1000)
+    end
+
+    test "are kept open if they join a channel before the timeout", %{tenant: tenant} do
+      {socket, _} = get_connection(tenant)
+      topic = "realtime:#{random_string()}"
+
+      :ok = WebsocketClient.join(socket, topic, %{config: %{broadcast: %{self: true}, private: false}})
+      assert_receive %Message{topic: ^topic, event: "phx_reply", payload: %{"status" => "ok"}}, 500
+
+      refute_receive {:close_code, _}, 300
+      assert Process.alive?(socket)
+    end
+  end
 end

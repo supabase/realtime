@@ -69,6 +69,7 @@ defmodule Realtime.Application do
 
     set_persist_storage(RealtimeWeb.UserSocket, :realtime, :websocket_max_heap_size)
     set_persist_storage(RealtimeWeb.UserSocket, :realtime, :measure_traffic_interval_in_ms)
+    set_persist_storage(RealtimeWeb.UserSocket, :realtime, :no_channel_timeout_in_ms)
     set_persist_storage(RealtimeWeb.UserSocket, :realtime, :connect_error_backoff_ms)
     set_persist_storage(RealtimeWeb.RealtimeChannel, :realtime, :channel_error_backoff_ms)
 

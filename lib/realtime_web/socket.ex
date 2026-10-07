@@ -5,6 +5,7 @@ defmodule RealtimeWeb.Socket do
 
     * Sets `:max_heap_size` on the transport process during `init/1`
     * Schedules periodic traffic measurement via `handle_info/2`
+    * Closes the socket if it hasn't joined any channel after `:no_channel_timeout_in_ms`
     * Wraps `handle_in/2` with error handling for malformed WebSocket messages
   """
 
@@ -41,23 +42,10 @@ defmodule RealtimeWeb.Socket do
           :persistent_term.get({__MODULE__, :measure_traffic_interval_in_ms})
         )
 
-        result = Phoenix.Socket.__init__(state)
+        # Tracker only knows about sockets that joined a channel, so close the ones that never do
+        Process.send_after(self(), :check_no_channels, :persistent_term.get({__MODULE__, :no_channel_timeout_in_ms}))
 
-        # Register the transport in UsersCounter at connect time so bare WebSocket
-        # connections (those that never join a channel) are counted against the
-        # tenant's max_concurrent_users limit. Previously, counting only happened
-        # inside RealtimeChannel.join/3, allowing unauthenticated bare connections
-        # to bypass limits entirely.
-        with {:ok, {_inner, %{assigns: %{tenant: tenant_id}}} = _full_state} <- result do
-          Realtime.UsersCounter.add(self(), tenant_id)
-
-          # Schedule a check to kill the connection if it never joins a channel.
-          # Reuses the existing NO_CHANNEL_TIMEOUT_IN_MS config (default: 10 min).
-          no_channel_timeout = Application.get_env(:realtime, :no_channel_timeout_in_ms, 600_000)
-          Process.send_after(self(), :check_idle_no_channels, no_channel_timeout)
-        end
-
-        result
+        Phoenix.Socket.__init__(state)
       end
 
       @doc false
@@ -106,20 +94,10 @@ defmodule RealtimeWeb.Socket do
         {:ok, state}
       end
 
-      # Kill bare WebSocket connections that never joined a channel within the
-      # configured timeout. Without this, an authenticated client could hold a
-      # WebSocket open indefinitely via heartbeats without ever joining, wasting
-      # server resources while being invisible to the Tracker idle reaper.
-      def handle_info(:check_idle_no_channels, {_, %{transport_pid: transport_pid}} = state) do
-        case RealtimeWeb.RealtimeChannel.Tracker.count(transport_pid) do
-          0 ->
-            require Logger
-            Logger.warning("Closing idle WebSocket that never joined a channel")
-            {:stop, {:shutdown, :idle_no_channels}, state}
-
-          _has_channels ->
-            {:ok, state}
-        end
+      def handle_info(:check_no_channels, state) do
+        if RealtimeWeb.RealtimeChannel.Tracker.count(self()) > 0,
+          do: {:ok, state},
+          else: {:stop, {:shutdown, :no_channels}, state}
       end
 
       def handle_info(message, state), do: Phoenix.Socket.__info__(message, state)
