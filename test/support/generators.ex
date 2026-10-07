@@ -305,6 +305,26 @@ defmodule Generators do
     """
   end
 
+  # Restrictive, so it is evaluated on top of whatever permissive policy grants the read
+  def policy_query(:slow_read, _) do
+    """
+    CREATE POLICY "authenticated_slow_read"
+    ON realtime.messages AS RESTRICTIVE FOR SELECT
+    TO authenticated
+    USING ( (SELECT true FROM pg_sleep(1)) );
+    """
+  end
+
+  # Restrictive, so it is evaluated on top of whatever permissive policy grants the write
+  def policy_query(:slow_write, _) do
+    """
+    CREATE POLICY "authenticated_slow_write"
+    ON realtime.messages AS RESTRICTIVE FOR INSERT
+    TO authenticated
+    WITH CHECK ( (SELECT true FROM pg_sleep(1)) );
+    """
+  end
+
   def policy_query(:broken_write_presence, _) do
     """
     CREATE POLICY "authenticated_write_presence"

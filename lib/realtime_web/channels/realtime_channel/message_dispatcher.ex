@@ -185,11 +185,19 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
   # We have to convert because V1 does not know how to process UserBroadcast
   defp fastlane!(Phoenix.Socket.V1.JSONSerializer = serializer, %UserBroadcast{} = msg) do
     with {:ok, msg} <- UserBroadcast.convert_to_json_broadcast(msg) do
-      {:ok, serializer.fastlane!(msg)}
+      encode(serializer, msg)
     end
   end
 
-  defp fastlane!(serializer, msg), do: {:ok, serializer.fastlane!(msg)}
+  defp fastlane!(serializer, msg), do: encode(serializer, msg)
+
+  # A serializer raises on a message it can't encode (e.g. an event over its 255-byte limit).
+  # Contain it so one message is skipped instead of crashing the shared process doing the dispatch.
+  defp encode(serializer, msg) do
+    {:ok, serializer.fastlane!(msg)}
+  rescue
+    error -> {:error, error}
+  end
 
   defp tenant_id([{_pid, {:rc_fastlane, _, _, _, _, tenant_id, _, _, _}} | _]), do: tenant_id
   defp tenant_id(_), do: nil

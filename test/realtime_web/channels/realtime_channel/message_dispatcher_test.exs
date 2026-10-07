@@ -123,6 +123,31 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
       refute_receive _any
     end
 
+    test "skips a subscriber whose serializer cannot encode the message instead of crashing" do
+      parent = self()
+
+      other = spawn(fn -> receive do: (msg -> send(parent, {:other, msg})) end)
+
+      # 300 bytes is over V2Serializer's 255-byte user_event limit, so encoding it raises.
+      oversized = %UserBroadcast{
+        topic: "some:other:topic",
+        user_event: String.duplicate("e", 300),
+        user_payload: "payload",
+        user_payload_encoding: :binary
+      }
+
+      subscribers = [
+        {spawn(fn -> :ok end),
+         {:rc_fastlane, self(), V2Serializer, "realtime:binary", :warning, "tenant123", MapSet.new(), true, true}},
+        {spawn(fn -> :ok end),
+         {:rc_fastlane, other, TestSerializer, "realtime:text", :warning, "tenant123", MapSet.new(), true, true}}
+      ]
+
+      assert MessageDispatcher.dispatch(subscribers, self(), oversized) == :ok
+
+      assert_receive {:other, {:encoded, %UserBroadcast{topic: "realtime:text"}}}
+    end
+
     test "does not dispatch broadcast messages to subscribers denied broadcast.read" do
       parent = self()
 

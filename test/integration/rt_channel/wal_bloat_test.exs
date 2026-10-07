@@ -69,8 +69,6 @@ defmodule Realtime.Integration.RtChannel.WalBloatTest do
       %{topic: topic}
     end
 
-    # TODO: fix potential incompatibility on realtime.send in OrioleDB. See https://github.com/orioledb/orioledb/issues/936
-    @tag :skip_orioledb
     @tag timeout: :timer.minutes(3)
     test "track PID changes during WAL bloat creation", %{tenant: tenant, topic: topic} do
       {socket, _} = get_connection(tenant, RealtimeWeb.Socket.V2Serializer, role: "authenticated")

@@ -12,9 +12,8 @@ on:
       - "mix.exs"
       - "mix.lock"
       - "Dockerfile"
-      - "run.sh"
+      - "**.sh"
       - "mise.toml"
-      - "test/e2e/nix-build.sh"
       - ".github/workflows/**"
       - ".github/actionlint.yaml"
 
@@ -115,4 +114,4 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Run shellcheck
-        run: shellcheck run.sh test/e2e/nix-build.sh
+        run: git ls-files -z "*.sh" | xargs -0 shellcheck
