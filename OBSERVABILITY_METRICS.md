@@ -79,6 +79,9 @@ These metrics track WebSocket connections and tenant activity across the Realtim
 | `phoenix_connections_max`                       | Gauge   | The configured Ranch connection limit. When `phoenix_connections_total` approaches this the node is saturated and new connections will be queued. | Per-Node         | `/metrics`        |
 | `realtime_channel_joins`                        | Counter | Rate of channel join attempts per second per tenant.                                                                                              | **Per-Tenant**   | `/tenant-metrics` |
 | `realtime_channel_global_joins`                 | Counter | Global rate of channel join attempts per second across all tenants.                                                                               | Global Aggregate | `/metrics`        |
+| `realtime_presence_usage_tenants`               | Gauge   | Count of tenants with at least one live tracked presence member. A dirty read: departed-node members aren't filtered.                             | Global Aggregate | `/metrics`        |
+| `realtime_presence_usage_topics`                | Gauge   | Count of presence topics with at least one live tracked member, from the same periodic scan.                                                      | Global Aggregate | `/metrics`        |
+| `realtime_presence_usage_topics_by_bucket`      | Gauge   | Count of presence topics whose live member count falls in a given bucket, tagged by bucket (5, 10, 25, 50, 100, 200, 500, infinity).              | Global Aggregate | `/metrics`        |
 
 ## Event Metrics
 
@@ -119,6 +122,7 @@ These metrics measure end-to-end latency and processing performance across diffe
 | `realtime_tenants_replay_bucket`                                       | Histogram | Broadcast replay latency per tenant.                                                                             | **Per-Tenant**   | `/tenant-metrics` |
 | `realtime_presence_notify_latency_bucket`                              | Histogram | Time from a presence `track` to each other subscriber being sent the `presence_diff`, sampled; tagged by `action`, `origin` (`local`/`remote`), `path` and `implementation`. | Global Aggregate | `/metrics`        |
 | `realtime_presence_notify_discarded`                                   | Counter   | Presence latency observations dropped as `negative` (clock skew) or `stale` (replayed join), tagged by `reason`.                  | Global Aggregate | `/metrics`        |
+| `realtime_presence_usage_scan_duration_milliseconds_bucket`            | Histogram | Time taken to scan Phoenix.Tracker's replicated state for the presence usage metrics.                            | Global Aggregate | `/metrics`        |
 | `realtime_global_rpc_bucket`                                           | Histogram | Inter-node RPC call latency distribution, tagged by `success` and `mechanism`.                                   | Global Aggregate | `/metrics`        |
 | `realtime_global_rpc_count`                                            | Counter   | Total inter-node RPC calls. Divide failed by total to get error rate.                                            | Global Aggregate | `/metrics`        |
 | `realtime_tenants_read_authorization_check_bucket`                     | Histogram | RLS policy evaluation time for read operations per tenant.                                                       | **Per-Tenant**   | `/tenant-metrics` |
