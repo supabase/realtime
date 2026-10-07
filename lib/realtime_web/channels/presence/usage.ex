@@ -1,6 +1,6 @@
 defmodule RealtimeWeb.Presence.Usage do
   @moduledoc """
-  Provides a metric to measure Presence usage.
+  Provides data on Presence usage.
 
   This metric is currently tied to Phoenix.Presence internals.
   """
@@ -10,6 +10,21 @@ defmodule RealtimeWeb.Presence.Usage do
   @match_spec [{{{:"$1", :_, :_}, :_, :_}, [], [:"$1"]}]
   @select_batch_size 500
 
+  @type bucket :: pos_integer() | :infinity
+  @type t :: %{tenant_count: non_neg_integer(), topic_count: non_neg_integer(), buckets: %{bucket() => non_neg_integer()}}
+
+  @doc """
+  Gets the current usage data for Phoenix.Tracker.
+
+  This will scan the shards in Phoenix.Tracker and return usage stats.
+
+  Usage stats include:
+
+  * tenant_count: number of tenants using presence
+  * topic_count: number of topics in the presence system
+  * buckets: a map of topic sizes, i.e. number of members, bucketed in @buckets.
+  """
+  @spec scan(atom()) :: t()
   def scan(tracker) do
     {tenants, topic_map} =
       tracker
