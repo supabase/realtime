@@ -88,7 +88,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   @doc """
   Sends presence state to a connected client
   """
-  @spec sync(Socket.t()) :: :ok | {:error, :rate_limit_exceeded}
+  @spec sync(Socket.t()) :: :ok | {:error, :rate_limit_exceeded | :tenant_not_found}
   def sync(%{assigns: %{presence_enabled?: false}}), do: :ok
 
   def sync(socket) when not is_private?(socket) do
@@ -149,6 +149,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
              | :client_rate_limit_exceeded
              | :unable_to_track_presence
              | :payload_size_exceeded
+             | :tenant_not_found
              | :connect_rate_limit_reached
              | :tenant_db_too_many_connections}
           | {:error, :rpc_error, term()}
@@ -254,7 +255,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     stamped_payload = Presence.Metrics.stamp(payload, tenant)
 
     with :ok <- check_track_payload(socket.assigns, payload),
-         tenant <- Tenants.Cache.get_tenant_by_external_id(socket.assigns.tenant),
+         {:ok, tenant} <- Tenants.Cache.fetch_tenant_by_external_id(socket.assigns.tenant),
          :ok <- validate_payload_size(tenant, payload),
          _ <- RealtimeWeb.TenantBroadcaster.collect_payload_size(socket.assigns.tenant, payload, :presence),
          :ok <- limit_presence_event(socket),
@@ -287,7 +288,8 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
             {:error, :unable_to_track_presence}
         end
 
-      {:error, reason} when reason in [:invalid_payload, :rate_limit_exceeded, :payload_size_exceeded] ->
+      {:error, reason}
+      when reason in [:invalid_payload, :rate_limit_exceeded, :payload_size_exceeded, :tenant_not_found] ->
         {:error, reason}
 
       {:error, error} ->
@@ -319,15 +321,16 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   end
 
   defp limit_presence_event(socket) do
-    %{assigns: %{presence_rate_counter: presence_counter, tenant: _tenant_id}} = socket
+    %{assigns: %{presence_rate_counter: presence_counter, tenant: tenant_id}} = socket
     {:ok, rate_counter} = RateCounter.get(presence_counter)
-    tenant = Tenants.Cache.get_tenant_by_external_id(socket.assigns.tenant)
 
-    if rate_counter.avg > tenant.max_presence_events_per_second do
-      {:error, :rate_limit_exceeded}
-    else
-      GenCounter.add(presence_counter.id)
-      :ok
+    with {:ok, tenant} <- Tenants.Cache.fetch_tenant_by_external_id(tenant_id) do
+      if rate_counter.avg > tenant.max_presence_events_per_second do
+        {:error, :rate_limit_exceeded}
+      else
+        GenCounter.add(presence_counter.id)
+        :ok
+      end
     end
   end
 

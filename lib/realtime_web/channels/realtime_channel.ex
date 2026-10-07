@@ -439,6 +439,9 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       {:error, :rate_limit_exceeded} ->
         shutdown_response(socket, "Too many presence messages per second")
+
+      {:error, :tenant_not_found} ->
+        shutdown_response(socket, "Tenant with the given ID does not exist")
     end
   end
 

@@ -529,11 +529,11 @@ defmodule Realtime.Tenants do
   @doc """
   """
   @spec validate_payload_size(Tenant.t() | binary(), map() | binary() | {String.t(), :json | :binary, binary(), map()}) ::
-          :ok | {:error, :payload_size_exceeded}
+          :ok | {:error, :payload_size_exceeded | :tenant_not_found}
   def validate_payload_size(tenant_id, payload) when is_binary(tenant_id) do
-    tenant_id
-    |> Cache.get_tenant_by_external_id()
-    |> validate_payload_size(payload)
+    with {:ok, tenant} <- Cache.fetch_tenant_by_external_id(tenant_id) do
+      validate_payload_size(tenant, payload)
+    end
   end
 
   @payload_size_padding 500

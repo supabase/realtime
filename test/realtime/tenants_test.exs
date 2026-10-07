@@ -79,6 +79,16 @@ defmodule Realtime.TenantsTest do
     end
   end
 
+  describe "validate_payload_size/2" do
+    test "returns an error when the tenant no longer exists" do
+      external_id = random_string()
+      # Seed a non-tenant value so the lookup misses without the cache fallback reaching the database
+      Cachex.put(Realtime.Tenants.Cache, {:get_tenant_by_external_id, external_id}, {:error, :not_found})
+
+      assert {:error, :tenant_not_found} = Tenants.validate_payload_size(external_id, %{"a" => "b"})
+    end
+  end
+
   describe "create_messages_partitions/1" do
     test "running twice keeps the same partitions" do
       tenant = TestTenantDb.checkout_tenant(run_migrations: true)
