@@ -11,7 +11,11 @@ defmodule RealtimeWeb.Presence.Usage do
   @select_batch_size 500
 
   @type bucket :: pos_integer() | :infinity
-  @type t :: %{tenant_count: non_neg_integer(), topic_count: non_neg_integer(), buckets: %{bucket() => non_neg_integer()}}
+  @type t :: %{
+          tenant_count: non_neg_integer(),
+          topic_count: non_neg_integer(),
+          buckets: %{bucket() => non_neg_integer()}
+        }
 
   @doc """
   Gets the current usage data for Phoenix.Tracker.
