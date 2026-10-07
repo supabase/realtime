@@ -6,6 +6,7 @@
   "defaultOwner": null,
   "files": [
     "realtime/functions/apply_rls.sql",
+    "realtime/functions/authorize.sql",
     "realtime/functions/broadcast_changes.sql",
     "realtime/functions/build_prepared_statement_sql.sql",
     "realtime/functions/cast.sql",
@@ -40,6 +41,7 @@
     "realtime/types/wal_column.sql",
     "realtime/types/wal_rls.sql",
     "realtime/functions/apply_rls.sql",
+    "realtime/functions/authorize.sql",
     "realtime/functions/broadcast_changes.sql",
     "realtime/functions/build_prepared_statement_sql.sql",
     "realtime/functions/cast.sql",

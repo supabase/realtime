@@ -314,6 +314,36 @@ defmodule Realtime.Database do
       {:error, {:exit, reason}}
   end
 
+  @doc """
+  Runs a single query on a local connection, without the round trips a transaction adds.
+
+  Mirrors `transaction/4`: with a `:telemetry` event in `opts` it emits the query latency for
+  `:tenant_id`, and a raised error or an exit comes back as an error tuple. The remaining opts go
+  to `Postgrex.query/4`.
+  """
+  @spec query(DBConnection.conn(), iodata(), list(), keyword(), keyword()) ::
+          {:ok, Postgrex.Result.t()} | {:error, any()}
+  def query(db_conn, statement, params, opts \\ [], metadata \\ []) do
+    {telemetry, opts} = Keyword.pop(opts, :telemetry)
+    {tenant_id, opts} = Keyword.pop(opts, :tenant_id)
+
+    if telemetry do
+      {latency, value} = :timer.tc(Postgrex, :query, [db_conn, statement, params, opts], :millisecond)
+      Telemetry.execute(telemetry, %{latency: latency}, %{tenant: tenant_id})
+      value
+    else
+      Postgrex.query(db_conn, statement, params, opts)
+    end
+  rescue
+    e ->
+      log_error("ErrorExecutingQuery", e, metadata)
+      {:error, e}
+  catch
+    :exit, reason ->
+      log_error("ErrorExecutingQuery", reason, metadata)
+      {:error, {:exit, reason}}
+  end
+
   @spec connect_db(__MODULE__.t(), keyword()) :: {:ok, pid()} | {:error, any()}
   def connect_db(%__MODULE__{} = settings, extra_opts \\ []) do
     %__MODULE__{
