@@ -235,6 +235,18 @@ defmodule Realtime.MessagesTest do
       assert Messages.replay(conn, tenant.external_id, "test", since, 10) == {:ok, [m1, m2], MapSet.new([m1.id, m2.id])}
     end
 
+    test "replays messages sent from a session in another time zone", %{conn: conn, tenant: tenant} do
+      since = DateTime.utc_now() |> DateTime.add(-1, :minute) |> DateTime.to_unix(:millisecond)
+
+      Postgrex.transaction(conn, fn conn ->
+        Postgrex.query!(conn, "SET LOCAL TIME ZONE 'Asia/Kolkata'", [])
+        Postgrex.query!(conn, "SELECT realtime.send('{}'::jsonb, 'event', 'test', true)", [])
+      end)
+
+      assert {:ok, [%Message{event: "event", topic: "test"}], _} =
+               Messages.replay(conn, tenant.external_id, "test", since, 10)
+    end
+
     test "replay respects hard max limit of 25", %{conn: conn, tenant: tenant} do
       for _i <- 1..30 do
         message_fixture(tenant, %{

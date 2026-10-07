@@ -106,7 +106,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_260_922_120_000, Migrations.RevokeRealtimeSchemaGrantOptionFromRealtimeAdmin},
     {20_260_925_120_000, Migrations.RestoreMessagesBaseGrants},
     {20_260_928_120_000, Migrations.AddListChangesSync},
-    {20_261_002_120_000, Migrations.AddAuthorizeFunction}
+    {20_261_002_120_000, Migrations.AddAuthorizeFunction},
+    {20_261_007_130_000, Migrations.MessagesTimestampsDefaultToUtc}
   ]
 
   defstruct [:tenant_external_id, :settings, migrations_ran: 0]
