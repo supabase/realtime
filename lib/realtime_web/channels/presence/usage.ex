@@ -6,6 +6,7 @@ defmodule RealtimeWeb.Presence.Usage do
   """
 
   @buckets [5, 10, 25, 50, 100, 200, 500, :infinity]
+  @default_bucket_map Enum.reduce(@buckets, Map.new(), fn k, map -> Map.put(map, k, 0) end)
 
   @match_spec [{{{:"$1", :_, :_}, :_, :_}, [], [:"$1"]}]
   @select_batch_size 500
@@ -30,16 +31,22 @@ defmodule RealtimeWeb.Presence.Usage do
   """
   @spec scan(atom()) :: t()
   def scan(tracker) do
-    {tenants, topic_map} =
+    topic_counts =
       tracker
       |> shard_names()
       |> get_members()
-      |> merge()
+      |> Enum.frequencies()
+
+    {tenants, buckets} =
+      Enum.reduce(topic_counts, {MapSet.new(), @default_bucket_map}, fn
+        {topic, count}, {tenants, buckets} ->
+          {MapSet.put(tenants, tenant_from_topic(topic)), Map.update(buckets, bucket_for(count), 0, &(&1 + 1))}
+      end)
 
     %{
-      buckets: bucket(topic_map),
+      buckets: buckets,
       tenant_count: MapSet.size(tenants),
-      topic_count: length(Map.keys(topic_map))
+      topic_count: map_size(topic_counts)
     }
   end
 
@@ -49,24 +56,21 @@ defmodule RealtimeWeb.Presence.Usage do
     Enum.map(0..(size - 1), &Phoenix.Tracker.Shard.name_for_number(tracker, &1))
   end
 
-  defp get_members(shards), do: Enum.map(shards, &scan_shard/1)
-
-  defp scan_shard(shard) do
-    shard
-    |> :ets.select(@match_spec, @select_batch_size)
-    |> collect_topics({MapSet.new(), Map.new()})
-  end
-
-  defp collect_topics(:"$end_of_table", acc), do: acc
-
-  defp collect_topics({topics, continuation}, acc) do
-    acc =
-      Enum.reduce(topics, acc, fn topic, {tenants, topic_map} ->
-        tenant = tenant_from_topic(topic)
-        {MapSet.put(tenants, tenant), Map.update(topic_map, topic, 1, &(&1 + 1))}
-      end)
-
-    collect_topics(:ets.select(continuation), acc)
+  defp get_members(shards) do
+    Stream.flat_map(
+      shards,
+      fn
+        shard ->
+          Stream.resource(
+            fn -> :ets.select(shard, @match_spec, @select_batch_size) end,
+            fn
+              {topics, continuation} -> {topics, :ets.select(continuation)}
+              :"$end_of_table" -> {:halt, :ok}
+            end,
+            fn _ -> :ok end
+          )
+      end
+    )
   end
 
   defp tenant_from_topic(topic) do
@@ -77,30 +81,6 @@ defmodule RealtimeWeb.Presence.Usage do
     else
       prefix
     end
-  end
-
-  defp merge(shards) do
-    Enum.reduce(
-      shards,
-      fn {tenants, topics}, {acc_tenants, acc_topics} ->
-        {MapSet.union(acc_tenants, tenants), Map.merge(acc_topics, topics)}
-      end
-    )
-  end
-
-  defp bucket(topics) do
-    Enum.reduce(
-      topics,
-      new_bucket_map(),
-      fn
-        {_, count}, buckets ->
-          Map.update(buckets, bucket_for(count), 0, &(&1 + 1))
-      end
-    )
-  end
-
-  defp new_bucket_map() do
-    Enum.reduce(@buckets, Map.new(), fn k, map -> Map.put(map, k, 0) end)
   end
 
   for bucket <- @buckets do
