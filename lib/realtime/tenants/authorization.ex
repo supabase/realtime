@@ -258,9 +258,11 @@ defmodule Realtime.Tenants.Authorization do
     end
   end
 
-  # Only failures of the function itself fall back
-  defp fallback?(%Postgrex.Error{postgres: %{code: :undefined_function, message: "function realtime.authorize(" <> _}}),
-    do: true
+  # Only failures of the function itself fall back. Postgres reports where an error was raised
+  # inside a function, so an undefined_function without it is realtime.authorize missing rather
+  # than a policy calling a missing function.
+  defp fallback?(%Postgrex.Error{postgres: %{code: :undefined_function} = postgres}),
+    do: not Map.has_key?(postgres, :where)
 
   defp fallback?({:unexpected_result, _}), do: true
   defp fallback?(_), do: false
@@ -320,23 +322,26 @@ defmodule Realtime.Tenants.Authorization do
       sub: sub
     } = authorization_context
 
-    params = [
-      role,
-      topic,
-      Jason.encode!(claims),
-      sub,
-      headers |> Map.new() |> Jason.encode!(),
-      Enum.map(read_extensions, &Atom.to_string/1),
-      Enum.map(write_extensions, &Atom.to_string/1)
-    ]
-
     opts = [telemetry: telemetry, tenant_id: tenant_id, cache_statement: "realtime_authorize"]
     metadata = [project: tenant_id, external_id: tenant_id, tenant_id: tenant_id]
 
-    case Database.query(conn, @authorize_query, params, opts, metadata) do
-      {:ok, %Postgrex.Result{rows: [[read_allowed, write_allowed]]}} -> {:ok, {read_allowed, write_allowed}}
-      {:ok, result} -> {:error, {:unexpected_result, result}}
-      {:error, _} = error -> error
+    with {:ok, claims} <- Jason.encode(claims),
+         {:ok, headers} <- headers |> Map.new() |> Jason.encode() do
+      params = [
+        role,
+        topic,
+        claims,
+        sub,
+        headers,
+        Enum.map(read_extensions, &Atom.to_string/1),
+        Enum.map(write_extensions, &Atom.to_string/1)
+      ]
+
+      case Database.query(conn, @authorize_query, params, opts, metadata) do
+        {:ok, %Postgrex.Result{rows: [[read_allowed, write_allowed]]}} -> {:ok, {read_allowed, write_allowed}}
+        {:ok, result} -> {:error, {:unexpected_result, result}}
+        {:error, _} = error -> error
+      end
     end
   end
 

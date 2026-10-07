@@ -107,6 +107,12 @@ defmodule Realtime.Tenants.AuthorizationFunctionTest do
       # Connect hands out the connection before the tenant migrations finish.
       Postgrex.query!(context.db_conn, "DROP FUNCTION realtime.authorize", [])
 
+      # The fallback relies on a missing realtime.authorize being reported without a where
+      assert error = {:error, %Postgrex.Error{postgres: %{code: :undefined_function} = postgres}} =
+               Postgrex.query(context.db_conn, "SELECT * FROM realtime.authorize(role_name => 'anon')", [])
+
+      refute Map.has_key?(postgres, :where)
+
       log =
         capture_log(fn -> assert {:ok, @all_allowed} = check_all(context.db_conn, context.authorization_context) end)
 
@@ -181,7 +187,11 @@ defmodule Realtime.Tenants.AuthorizationFunctionTest do
 
       assert {:error, :rls_policy_error,
               %Postgrex.Error{
-                postgres: %{code: :undefined_function, message: "function public.missing_function() does not exist"}
+                postgres: %{
+                  code: :undefined_function,
+                  message: "function public.missing_function() does not exist",
+                  where: "PL/pgSQL function " <> _
+                }
               }} =
                Authorization.get_read_authorizations(%Policies{}, context.db_conn, context.authorization_context)
     end
@@ -192,6 +202,18 @@ defmodule Realtime.Tenants.AuthorizationFunctionTest do
 
       assert {:error, %RuntimeError{}} =
                Authorization.get_read_authorizations(%Policies{}, context.db_conn, context.authorization_context)
+    end
+
+    test "when a header is not valid UTF-8", context do
+      use_authorize_function(true, 2)
+      reject(&Database.query/5)
+      authorization_context = %{context.authorization_context | headers: [{"x-header", <<0xFF>>}]}
+
+      assert {:error, %Jason.EncodeError{}} =
+               Authorization.get_read_authorizations(%Policies{}, context.db_conn, authorization_context)
+
+      assert {:error, %Jason.EncodeError{}} =
+               Authorization.get_write_authorizations(%Policies{}, context.db_conn, authorization_context, :broadcast)
     end
 
     test "when the database connection fails", context do
