@@ -51,9 +51,14 @@ defmodule RealtimeWeb.Presence.Usage do
   end
 
   defp shard_names(tracker) do
-    [{:pool_size, size}] = :ets.lookup(tracker, :pool_size)
+    case :ets.whereis(tracker) do
+      :undefined ->
+        []
 
-    Enum.map(0..(size - 1), &Phoenix.Tracker.Shard.name_for_number(tracker, &1))
+      _tid ->
+        [{:pool_size, size}] = :ets.lookup(tracker, :pool_size)
+        Enum.map(0..(size - 1), &Phoenix.Tracker.Shard.name_for_number(tracker, &1))
+    end
   end
 
   defp get_members(shards) do

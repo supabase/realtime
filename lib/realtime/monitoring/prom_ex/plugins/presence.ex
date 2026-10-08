@@ -113,6 +113,13 @@ defmodule Realtime.PromEx.Plugins.Presence do
   `Presence.Usage.scan/1` must never crash or wedge this poller - `:telemetry_poller` permanently
   stops calling any measurement that raises, so letting that happen here would silently kill this
   metric for the life of the node, not just for one poll.
+
+  The `catch` below exists for the same reason, one level up: `Task.Supervisor.async_nolink/2`
+  itself exits (not raises) if `Realtime.TaskSupervisor` isn't registered yet, which `rescue`
+  doesn't catch. `Realtime.PromEx` normally starts after `Realtime.TaskSupervisor` in the
+  application's supervision tree, so this shouldn't fire in practice - but relying solely on
+  supervision-tree order here is exactly the kind of assumption that's easy to break without
+  noticing, so this is a second layer of defence.
   """
   def execute_usage_metrics(tracker) do
     task = Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn -> scan_and_measure(tracker) end)
@@ -127,6 +134,8 @@ defmodule Realtime.PromEx.Plugins.Presence do
       nil ->
         log_error("PresenceUsageScanTimeout", "Presence usage scan did not complete within #{@scan_timeout}ms")
     end
+  catch
+    :exit, reason -> log_error("PresenceUsageScanSetupFailed", reason)
   end
 
   defp scan_and_measure(tracker) do
