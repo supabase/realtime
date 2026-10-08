@@ -62,15 +62,32 @@ defmodule RealtimeWeb.Presence.Usage do
       fn
         shard ->
           Stream.resource(
-            fn -> :ets.select(shard, @match_spec, @select_batch_size) end,
+            fn -> handling_missing_table(fn -> :ets.select(shard, @match_spec, @select_batch_size) end) end,
             fn
-              {topics, continuation} -> {topics, :ets.select(continuation)}
-              :"$end_of_table" -> {:halt, :ok}
+              :missing_table ->
+                {:halt, :missing_table}
+
+              :"$end_of_table" ->
+                {:halt, :ok}
+
+              {topics, continuation} ->
+                case handling_missing_table(fn -> :ets.select(continuation) end) do
+                  :missing_table -> {topics, :missing_table}
+                  next -> {topics, next}
+                end
             end,
             fn _ -> :ok end
           )
       end
     )
+  end
+
+  defp handling_missing_table(f) do
+    try do
+      f.()
+    rescue
+      ArgumentError -> :missing_table
+    end
   end
 
   defp tenant_from_topic(topic) do

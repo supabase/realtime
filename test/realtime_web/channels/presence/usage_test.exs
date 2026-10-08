@@ -188,6 +188,30 @@ defmodule RealtimeWeb.Presence.UsageTest do
            }
   end
 
+  test "a shard whose ETS table doesn't exist is treated as empty, not a crash" do
+    # No real Phoenix.Presence/Tracker involved here: a bare table just carrying a :pool_size
+    # entry, with no shard table ever created behind it - the same symptom a crashed-and-not-yet-
+    # restarted shard GenServer would produce, without the timing race of actually causing one.
+    tracker = :"usage_test_missing_shard_#{System.unique_integer([:positive])}"
+    :ets.new(tracker, [:set, :public, :named_table])
+    :ets.insert(tracker, {:pool_size, 1})
+
+    assert Usage.scan(tracker) == %{
+             tenant_count: 0,
+             topic_count: 0,
+             buckets: %{
+               5 => 0,
+               10 => 0,
+               25 => 0,
+               50 => 0,
+               100 => 0,
+               200 => 0,
+               500 => 0,
+               :infinity => 0
+             }
+           }
+  end
+
   test "scanning the real RealtimeWeb.Presence returns a well-formed result" do
     assert %{tenant_count: tenant_count, topic_count: topic_count, buckets: buckets} =
              Usage.scan(Presence)
