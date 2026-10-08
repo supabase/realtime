@@ -110,6 +110,7 @@ defmodule Realtime.PromEx do
   @impl true
   def plugins do
     poll_rate = Application.get_env(:realtime, :prom_poll_rate)
+    presence_usage_poll_rate = Application.get_env(:realtime, :presence_usage_poll_rate)
 
     [
       {Plugins.Beam, poll_rate: poll_rate, metric_prefix: [:beam]},
@@ -121,7 +122,7 @@ defmodule Realtime.PromEx do
       {Distributed, poll_rate: poll_rate},
       {GenRpc, poll_rate: poll_rate},
       {Muster, poll_rate: poll_rate},
-      Presence
+      {Presence, poll_rate: presence_usage_poll_rate}
     ]
   end
 
