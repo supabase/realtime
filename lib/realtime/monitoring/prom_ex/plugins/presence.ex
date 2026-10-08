@@ -11,12 +11,17 @@ defmodule Realtime.PromEx.Plugins.Presence do
 
   alias RealtimeWeb.Presence
   use PromEx.Plugin
+  use Realtime.Logs
 
   @event_replication_received [:realtime, :presence, :replication, :received]
   @event_notify_latency [:realtime, :presence, :notify, :latency]
   @event_notify_discarded [:realtime, :presence, :notify, :discarded]
   @event_usage [:realtime, :presence, :usage]
   @event_usage_bucket [:realtime, :presence, :usage, :bucket]
+
+  # Comfortably under the 60s poll interval, so a timed-out scan is never still in flight when
+  # the next tick fires.
+  @scan_timeout to_timeout(second: 30)
 
   defmodule Notify.Buckets do
     @moduledoc false
@@ -102,9 +107,29 @@ defmodule Realtime.PromEx.Plugins.Presence do
   end
 
   @doc """
-  Emits usage metrics by scanning presence buckets
+  Emits usage metrics by scanning presence buckets.
+
+  Runs the scan in an unlinked, supervised task with a timeout: a crash or a hang in
+  `Presence.Usage.scan/1` must never crash or wedge this poller - `:telemetry_poller` permanently
+  stops calling any measurement that raises, so letting that happen here would silently kill this
+  metric for the life of the node, not just for one poll.
   """
   def execute_usage_metrics(tracker) do
+    task = Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn -> scan_and_measure(tracker) end)
+
+    case Task.yield(task, @scan_timeout) || Task.shutdown(task, :brutal_kill) do
+      {:ok, :ok} ->
+        :ok
+
+      {:exit, reason} ->
+        log_error("PresenceUsageScanCrashed", reason)
+
+      nil ->
+        log_error("PresenceUsageScanTimeout", "Presence usage scan did not complete within #{@scan_timeout}ms")
+    end
+  end
+
+  defp scan_and_measure(tracker) do
     start = System.monotonic_time()
     scan = Presence.Usage.scan(tracker)
     duration = System.convert_time_unit(System.monotonic_time() - start, :native, :millisecond)
@@ -115,5 +140,7 @@ defmodule Realtime.PromEx.Plugins.Presence do
     Enum.each(scan.buckets, fn {bucket, count} ->
       :telemetry.execute(@event_usage_bucket, %{count: count}, %{bucket: bucket})
     end)
+
+    :ok
   end
 end

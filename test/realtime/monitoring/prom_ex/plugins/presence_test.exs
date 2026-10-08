@@ -1,6 +1,8 @@
 defmodule Realtime.PromEx.Plugins.PresenceTest do
   use Realtime.DataCase, async: false
 
+  import ExUnit.CaptureLog
+
   alias Realtime.GenRpcPubSub.Worker
   alias Realtime.PromEx.Plugins.Presence
 
@@ -125,6 +127,16 @@ defmodule Realtime.PromEx.Plugins.PresenceTest do
       Presence.execute_usage_metrics(Tracker)
 
       assert metric_value("realtime_presence_usage_scan_duration_milliseconds_count", []) == count_before + 1
+    end
+
+    test "a crash in the scan is caught, logged, and does not propagate or record metrics" do
+      tracker = :"usage_test_nonexistent_tracker_#{System.unique_integer([:positive])}"
+      tenants_before = metric_value("realtime_presence_usage_tenants", []) || 0
+
+      log = capture_log(fn -> assert Presence.execute_usage_metrics(tracker) end)
+
+      assert log =~ "PresenceUsageScanCrashed"
+      assert (metric_value("realtime_presence_usage_tenants", []) || 0) == tenants_before
     end
   end
 
