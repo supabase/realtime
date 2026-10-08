@@ -11,6 +11,22 @@ defmodule RealtimeWeb.Presence.MetricsTest do
 
   @tenant "tenant-123"
 
+  # A user payload as it arrives from JSON: string keys, nested maps and lists, mixed scalar types,
+  # and "_rt" keys of the user's own at several depths, including one shaped like our envelope.
+  @nested_payload %{
+    "name" => "alice",
+    "_rt" => %{"ts" => 1, "node" => "theirs"},
+    "profile" => %{
+      "_rt" => "nested",
+      "tags" => ["admin", "beta"],
+      "address" => %{"city" => "Adelaide", "geo" => %{"lat" => -34.9, "lng" => 138.6}}
+    },
+    "cursors" => [%{"x" => 1, "y" => 2, "_rt" => nil}, %{"x" => 3, "y" => 4}],
+    "online" => true,
+    "last_seen" => nil,
+    "score" => 42
+  }
+
   describe "stamp/2" do
     test "adds an envelope with the current time in ms and this node's short id when sampled" do
       stub(FeatureFlags, :enabled?, fn "presence_latency_metric", @tenant -> true end)
@@ -41,6 +57,15 @@ defmodule RealtimeWeb.Presence.MetricsTest do
       diff = %Broadcast{event: "presence_diff", payload: %{joins: %{"alice" => %{metas: [stamped]}}, leaves: %{}}}
       assert {%Broadcast{payload: %{joins: %{"alice" => %{metas: [meta]}}}}, [_envelope]} = Metrics.strip_diff(diff)
       assert meta == %{"name" => "alice", "_rt" => "mine"}
+    end
+
+    test "adds only a top-level envelope to a nested payload, leaving every nested value untouched" do
+      stub(FeatureFlags, :enabled?, fn _, _ -> true end)
+
+      stamped = Metrics.stamp(@nested_payload, @tenant)
+
+      assert %{_rt: %{ts: _, node: _}} = stamped
+      assert Map.delete(stamped, :_rt) == @nested_payload
     end
 
     test "returns the payload untouched when the feature flag is off for the tenant" do
@@ -143,6 +168,24 @@ defmodule RealtimeWeb.Presence.MetricsTest do
                %Envelope{ts: 1, node: "n1", action: :update},
                %Envelope{ts: 2, node: "n2", action: :track}
              ]
+    end
+
+    test "strips only the top-level envelope from nested metas, keeping nested maps, lists and user \"_rt\" keys" do
+      meta = Map.merge(@nested_payload, %{:phx_ref => "a1", :_rt => %{ts: 1, node: "n1"}})
+
+      diff = %Broadcast{
+        event: "presence_diff",
+        payload: %{joins: %{"alice" => %{metas: [meta]}}, leaves: %{"alice" => %{metas: [meta]}}}
+      }
+
+      assert {stripped, [%Envelope{ts: 1, node: "n1", action: :track}]} = Metrics.strip_diff(diff)
+
+      expected = Map.put(@nested_payload, :phx_ref, "a1")
+
+      assert stripped.payload == %{
+               joins: %{"alice" => %{metas: [expected]}},
+               leaves: %{"alice" => %{metas: [expected]}}
+             }
     end
 
     test "a diff without an envelope comes back as is, with no envelopes" do
@@ -263,6 +306,12 @@ defmodule RealtimeWeb.Presence.MetricsTest do
                "alice" => %{metas: [%{"name" => "alice", :phx_ref => "a1"}]},
                "bob" => %{metas: [%{"name" => "bob", :phx_ref => "b1"}]}
              }
+    end
+
+    test "strips only the top-level envelope from nested metas" do
+      state = %{"alice" => %{metas: [Map.merge(@nested_payload, %{:phx_ref => "a1", :_rt => %{ts: 1, node: "n1"}})]}}
+
+      assert Metrics.strip_state(state) == %{"alice" => %{metas: [Map.put(@nested_payload, :phx_ref, "a1")]}}
     end
 
     test "an empty list stays empty" do

@@ -128,6 +128,7 @@ postgres_cdc_scope_shards = Env.get_integer("POSTGRES_CDC_SCOPE_SHARDS", 5)
 presence_broadcast_period_in_ms = Env.get_integer("PRESENCE_BROADCAST_PERIOD_IN_MS", 1_500)
 presence_permdown_period_in_ms = Env.get_integer("PRESENCE_PERMDOWN_PERIOD_IN_MS", 1_200_000)
 presence_pool_size = Env.get_integer("PRESENCE_POOL_SIZE", 10)
+presence_usage_poll_rate = Env.get_integer("PRESENCE_USAGE_POLL_RATE_MS", 60_000)
 
 presence_latency_sample_rate =
   Env.get_float("PRESENCE_LATENCY_SAMPLE_RATE", if(config_env() == :test, do: 1.0, else: 0.0))
@@ -428,6 +429,7 @@ if config_env() != :test do
     db_enc_write_gcm: db_enc_write_gcm,
     region: region,
     prom_poll_rate: prom_poll_rate,
+    presence_usage_poll_rate: presence_usage_poll_rate,
     slot_name_suffix: slot_name_suffix,
     max_gen_rpc_clients: max_gen_rpc_clients,
     max_gen_rpc_call_clients: max_gen_rpc_call_clients,
