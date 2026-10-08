@@ -1,6 +1,5 @@
 import assert from "assert";
-import { SQL } from "bun";
-import { DB_URL, DB_SSL } from "../context.ts";
+import { connectDb } from "../db.ts";
 import type { SuiteDescriptor } from "../runner.ts";
 import { sleep, randomTopic, waitFor, stopClient, openChannel } from "../helpers.ts";
 
@@ -38,7 +37,7 @@ export const broadcastReplay: SuiteDescriptor = {
 
     await test("replayed binary messages are delivered on join", async () => {
       const supabase = await authedClient();
-      const sql = new SQL(DB_URL, { tls: DB_SSL || undefined });
+      const sql = connectDb();
       try {
         const event = crypto.randomUUID();
         const topic = randomTopic();
@@ -68,7 +67,7 @@ export const broadcastReplay: SuiteDescriptor = {
         assert.strictEqual(receivedMeta?.replayed, true, "expected meta.replayed on replayed binary message");
         return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "replay", value: replayMs, unit: "ms" }];
       } finally {
-        await sql.close().catch(() => {});
+        await sql.end().catch(() => {});
         await stopClient(supabase);
       }
     });

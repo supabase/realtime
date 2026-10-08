@@ -1,0 +1,127 @@
+# A self-contained Supabase-shaped stack for the e2e suite, one per tenant database flavour:
+# Realtime built from this checkout, GoTrue, PostgREST and a gateway in front of them, all on a
+# tenant database running TENANT_DB_IMAGE (any entry of .github/db-images.json, Multigres
+# included). Realtime keeps its own metadata in a separate plain Postgres, as it does in
+# production. Driven by test/e2e/stack/run.sh (`mise run e2e-db`), which picks the images.
+include:
+  - ../../../compose.dbs.yml
+
+x-jwt-secret: &jwt-secret super-secret-jwt-token-with-at-least-32-characters-long
+
+services:
+  # Gives the roles GoTrue and PostgREST log in as a password. Profiled so only `compose run`
+  # triggers it, after compose.tenant-db.yml's own tenant_db_bootstrap.
+  stack_db_bootstrap:
+    profiles: ["bootstrap"]
+    image: ${TENANT_DB_IMAGE}
+    depends_on:
+      tenant_db:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: postgres
+    entrypoint:
+      - psql
+      - --host=tenant_db
+      - --port=5432
+      - --username=supabase_admin
+      - --dbname=postgres
+      - --no-psqlrc
+      - --quiet
+      - --set=ON_ERROR_STOP=1
+      - --command=alter role authenticator with password 'postgres'
+      - --command=alter role supabase_auth_admin with password 'postgres'
+
+  realtime:
+    image: realtime:e2e-local
+    build: ../../..
+    depends_on:
+      realtime_db:
+        condition: service_healthy
+      tenant_db:
+        condition: service_healthy
+    environment:
+      API_JWT_SECRET: *jwt-secret
+      APP_NAME: realtime
+      DASHBOARD_PASSWORD: realtime
+      DASHBOARD_USER: realtime
+      DB_AFTER_CONNECT_QUERY: SET search_path TO _realtime
+      DB_ENC_KEY: "1234567890123456"
+      DB_HOST: realtime_db
+      DB_PORT: "5432"
+      DB_USER: supabase_admin
+      DB_PASSWORD: postgres
+      DNS_NODES: "''"
+      ERL_AFLAGS: -kernel shell_history enabled --proto_dist inet_tcp
+      METRICS_JWT_SECRET: dev
+      NODE_NAME: realtime
+      PORT: "4000"
+      REGION: us-east-1
+      SECRET_KEY_BASE: UpNVntn3cDxHJpq99YMc1T1AQgQpc8kfYTuRgBiYa15BLrx8etQoXz3gZv1/u2oq
+      SEED_SELF_HOST: "true"
+      SELF_HOST_TENANT_NAME: realtime-dev
+      SELF_HOST_TENANT_DB_HOST: tenant_db
+      SELF_HOST_TENANT_DB_PORT: "5432"
+      SLOT_NAME_SUFFIX: e2e
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sSfL --head -o /dev/null -H 'Host: realtime-dev' http://127.0.0.1:4000/api/ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 60
+
+  auth:
+    image: supabase/gotrue:v2.196.0
+    depends_on:
+      tenant_db:
+        condition: service_healthy
+    environment:
+      API_EXTERNAL_URL: http://127.0.0.1:8000
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: "9999"
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgresql://supabase_auth_admin:postgres@tenant_db:5432/postgres
+      GOTRUE_SITE_URL: http://127.0.0.1:3000
+      GOTRUE_JWT_SECRET: *jwt-secret
+      GOTRUE_JWT_EXP: "3600"
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9999/health"]
+      interval: 3s
+      timeout: 2s
+      retries: 60
+
+  rest:
+    image: postgrest/postgrest:v16.2
+    depends_on:
+      tenant_db:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgresql://authenticator:postgres@tenant_db:5432/postgres
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: *jwt-secret
+
+  gateway:
+    image: nginx:1.29-alpine
+    depends_on:
+      realtime:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+      rest:
+        condition: service_started
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      # On a port docker picks.
+      - "8000"
+    # Checks GoTrue and PostgREST through the gateway: PostgREST's image has no shell to check
+    # itself with. Realtime has its own check.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8000/auth/v1/health && wget -q -O /dev/null http://127.0.0.1:8000/rest/v1/"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
