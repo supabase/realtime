@@ -83,11 +83,9 @@ defmodule RealtimeWeb.Presence.Usage do
   end
 
   defp handling_missing_table(f) do
-    try do
-      f.()
-    rescue
-      ArgumentError -> :missing_table
-    end
+    f.()
+  rescue
+    ArgumentError -> :missing_table
   end
 
   defp tenant_from_topic(topic) do
