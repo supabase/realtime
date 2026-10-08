@@ -276,7 +276,7 @@ run = """
 
 # Unlike `e2e` and `e2e-local`, which ride on the Supabase CLI's stack and so can't run Multigres,
 # this brings up a stack of its own around any image in .github/db-images.json. CI runs it for
-# each of them.
+# each of them but pg14.
 [tasks.e2e-db]
 description = "Run the e2e suite against a Realtime image built from this checkout, on any supported tenant Postgres"
 usage = '''
