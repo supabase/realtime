@@ -37,7 +37,7 @@ defmodule TestTenantDb.Backend.DockerTest do
     end
   end
 
-  defp image, do: Env.get_binary("POSTGRES_IMAGE", "supabase/postgres:17.6.1.166")
+  defp image, do: Env.get_binary("POSTGRES_IMAGE", "supabase/postgres:17.11.0.004")
 
   describe "container_prefix/0 and container_name/0" do
     test "the first run on a machine names containers as it always did" do

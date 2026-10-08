@@ -2,7 +2,7 @@ services:
   tenant_db:
     # Serves both images: a cluster ignores `command` and /docker-entrypoint-initdb.d,
     # and supabase/postgres ignores MULTIGRES_*.
-    image: ${TENANT_DB_IMAGE:-${POSTGRES_IMAGE:-supabase/postgres:17.6.1.166}}
+    image: ${TENANT_DB_IMAGE:-${POSTGRES_IMAGE:-supabase/postgres:17.11.0.004}}
     ports:
       - "${TENANT_DB_PORT:-5433}:5432"
     volumes:
@@ -43,7 +43,7 @@ services:
   # so it runs either way; profiled so only `compose run` triggers it.
   tenant_db_bootstrap:
     profiles: ["bootstrap"]
-    image: ${TENANT_DB_IMAGE:-${POSTGRES_IMAGE:-supabase/postgres:17.6.1.166}}
+    image: ${TENANT_DB_IMAGE:-${POSTGRES_IMAGE:-supabase/postgres:17.11.0.004}}
     depends_on:
       tenant_db:
         condition: service_healthy
