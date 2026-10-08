@@ -14,6 +14,11 @@ on:
       - "mise.toml"
       - "mise.lock"
       - "test/e2e/**"
+      - "compose.dbs.yml"
+      - "compose.realtime-db.yml"
+      - "compose.tenant-db.yml"
+      - "dev/postgres/**"
+      - ".github/db-images.json"
       - ".github/workflows/e2e_tests.yml"
 
   push:
@@ -29,7 +34,37 @@ permissions:
 
 jobs:
   e2e:
-    name: E2E Tests
+    name: E2E Tests (${{ matrix.db }})
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every tenant database the unit tests run on, see .github/db-images.json.
+        db: [pg14, pg15, pg15_latest, pg17, orioledb17, multigres]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install bun via mise
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
+        with:
+          working_directory: test/e2e
+          install_args: "bun"
+      - name: Install realtime-check dependencies
+        working-directory: test/e2e
+        run: bun install --frozen-lockfile
+
+      # What `mise run e2e-db` runs, called directly so mise doesn't install the Elixir toolchain.
+      - name: Run e2e suite against ${{ matrix.db }}
+        run: test/e2e/stack/run.sh ${{ matrix.db }} --test functional --parallel --wait-time 10
+
+      - name: Realtime logs
+        if: failure()
+        run: docker logs e2e-${{ matrix.db }}-realtime-1
+
+  # The same suite through the Supabase CLI's own stack: its Kong and API keys, rather than the
+  # stand-ins e2e-db uses.
+  e2e-supabase-cli:
+    name: E2E Tests (Supabase CLI stack)
     runs-on: blacksmith-8vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
