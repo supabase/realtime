@@ -1215,6 +1215,36 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       assert Realtime.UsersCounter.tenant_users(tenant.external_id, node()) == 1
     end
+
+    test "a socket stops being counted when it leaves its last channel", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      assert {:ok, _, %Socket{} = channel1} = subscribe_and_join(socket, "realtime:test1", %{})
+      assert {:ok, _, %Socket{} = channel2} = subscribe_and_join(socket, "realtime:test2", %{})
+      assert Realtime.UsersCounter.tenant_users(tenant.external_id, node()) == 1
+
+      # Leaving one channel keeps the socket counted while another channel is still open.
+      Process.unlink(channel1.channel_pid)
+      ref = Process.monitor(channel1.channel_pid)
+      leave(channel1)
+      assert_receive {:DOWN, ^ref, :process, _, _}
+      assert Realtime.UsersCounter.already_counted?(socket.transport_pid, tenant.external_id)
+      assert Realtime.UsersCounter.tenant_users(tenant.external_id, node()) == 1
+
+      # Leaving the last channel frees the user slot even though the transport stays open.
+      Process.unlink(channel2.channel_pid)
+      ref = Process.monitor(channel2.channel_pid)
+      leave(channel2)
+      assert_receive {:DOWN, ^ref, :process, _, _}
+      assert Process.alive?(socket.transport_pid)
+      refute Realtime.UsersCounter.already_counted?(socket.transport_pid, tenant.external_id)
+      assert Realtime.UsersCounter.tenant_users(tenant.external_id, node()) == 0
+
+      # Joining again counts the socket once more.
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test3", %{})
+      assert Realtime.UsersCounter.tenant_users(tenant.external_id, node()) == 1
+    end
   end
 
   describe "maximum number of events per second" do
