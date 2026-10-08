@@ -9,8 +9,8 @@ defmodule Realtime.Tenants.Migrations.MessagesClockTimestampDefaults do
   # clock_timestamp() is the time of each insert. Rows are inserted through the partitioned
   # parent, whose defaults apply.
   def up do
-    execute("ALTER TABLE realtime.messages ALTER COLUMN inserted_at SET DEFAULT clock_timestamp()")
-    execute("ALTER TABLE realtime.messages ALTER COLUMN updated_at SET DEFAULT clock_timestamp()")
+    execute("ALTER TABLE realtime.messages ALTER COLUMN inserted_at SET DEFAULT timezone('utc', clock_timestamp())")
+    execute("ALTER TABLE realtime.messages ALTER COLUMN updated_at SET DEFAULT timezone('utc', clock_timestamp())")
   end
 
   def down do

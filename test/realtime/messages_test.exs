@@ -220,6 +220,25 @@ defmodule Realtime.MessagesTest do
       assert updated_at == Enum.sort(updated_at, NaiveDateTime)
     end
 
+    test "replay messages sent from a session that is not in UTC", %{conn: conn, tenant: tenant} do
+      {:ok, _} =
+        Postgrex.transaction(conn, fn conn ->
+          Postgrex.query!(conn, "SET LOCAL timezone TO 'Asia/Tokyo'", [])
+
+          Postgrex.query!(
+            conn,
+            "SELECT realtime.send(jsonb_build_object('value', 1), 'event', 'test', TRUE::bool)",
+            []
+          )
+        end)
+
+      assert {:ok, [message], _ids} = Messages.replay(conn, tenant.external_id, "test", 0, 10)
+
+      now = NaiveDateTime.utc_now()
+      assert abs(NaiveDateTime.diff(message.inserted_at, now)) < 5
+      assert abs(NaiveDateTime.diff(message.updated_at, now)) < 5
+    end
+
     test "replay respects since", %{conn: conn, tenant: tenant} do
       m1 =
         message_fixture(tenant, %{
