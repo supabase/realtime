@@ -130,10 +130,12 @@ defmodule Realtime.PromEx.Plugins.PresenceTest do
     end
 
     test "a crash in the scan is caught, logged, and does not propagate or record metrics" do
-      tracker = :"usage_test_nonexistent_tracker_#{System.unique_integer([:positive])}"
+      # Not a real tracker name: Usage.scan/1 now treats an unstarted/missing tracker as empty
+      # rather than crashing, so this forces a genuine crash (:ets.whereis/1 rejects a non-atom)
+      # purely to exercise the Task-level safety net itself, regardless of what trips it.
       tenants_before = metric_value("realtime_presence_usage_tenants", []) || 0
 
-      log = capture_log(fn -> assert Presence.execute_usage_metrics(tracker) end)
+      log = capture_log(fn -> assert Presence.execute_usage_metrics("not_an_atom_tracker") end)
 
       assert log =~ "PresenceUsageScanCrashed"
       assert (metric_value("realtime_presence_usage_tenants", []) || 0) == tenants_before
