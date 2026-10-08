@@ -74,6 +74,48 @@ defmodule Realtime.MessagesTest do
       assert Messages.replay(conn, "tenant_id", "test", 0, 10) == {:ok, [], MapSet.new()}
     end
 
+    test "an expired message is not replayed", %{conn: conn, tenant: tenant} do
+      message_fixture(tenant, %{
+        "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-2, :minute),
+        "expires_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-1, :minute),
+        "event" => "gone",
+        "extension" => "broadcast",
+        "topic" => "ttl",
+        "private" => true,
+        "payload" => %{"value" => "gone"}
+      })
+
+      kept =
+        message_fixture(tenant, %{
+          "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-2, :minute),
+          "expires_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(1, :hour),
+          "event" => "kept",
+          "extension" => "broadcast",
+          "topic" => "ttl",
+          "private" => true,
+          "payload" => %{"value" => "kept"}
+        })
+
+      assert {:ok, [replayed], ids} = Messages.replay(conn, tenant.external_id, "ttl", 0, 10)
+      assert replayed.id == kept.id
+      assert ids == MapSet.new([kept.id])
+    end
+
+    test "a message with no expiry is replayed", %{conn: conn, tenant: tenant} do
+      forever =
+        message_fixture(tenant, %{
+          "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-2, :minute),
+          "event" => "forever",
+          "extension" => "broadcast",
+          "topic" => "no-ttl",
+          "private" => true,
+          "payload" => %{"value" => "forever"}
+        })
+
+      assert {:ok, [replayed], _ids} = Messages.replay(conn, tenant.external_id, "no-ttl", 0, 10)
+      assert replayed.id == forever.id
+    end
+
     test "replay respects limit", %{conn: conn, tenant: tenant} do
       external_id = tenant.external_id
 
@@ -333,6 +375,57 @@ defmodule Realtime.MessagesTest do
       {:ok, current} = Repo.all(conn, from(m in Message), Message)
 
       assert Enum.sort(current) == Enum.sort(to_keep)
+    end
+  end
+
+  describe "parse_persist/1" do
+    @max Messages.max_ttl_seconds()
+
+    test "asking to save without a ttl means the maximum" do
+      assert {:ok, %{ttl: @max}} = Messages.parse_persist(true)
+      assert {:ok, %{ttl: @max}} = Messages.parse_persist("true")
+      assert {:ok, %{ttl: @max}} = Messages.parse_persist(%{})
+      assert {:ok, %{ttl: @max}} = Messages.parse_persist(%{"ttl" => nil})
+    end
+
+    test "not asking to save means nil" do
+      assert {:ok, nil} = Messages.parse_persist(nil)
+      assert {:ok, nil} = Messages.parse_persist(false)
+      assert {:ok, nil} = Messages.parse_persist("false")
+    end
+
+    test "a whole number of seconds is taken" do
+      assert {:ok, %{ttl: 3600}} = Messages.parse_persist(%{"ttl" => 3600})
+      assert {:ok, %{ttl: 1}} = Messages.parse_persist(%{"ttl" => 1})
+    end
+
+    test "the query string sends seconds as a string" do
+      assert {:ok, %{ttl: 3600}} = Messages.parse_persist(%{"ttl" => "3600"})
+      assert {:ok, %{ttl: @max}} = Messages.parse_persist(%{"ttl" => to_string(@max)})
+    end
+
+    test "the maximum is accepted and anything past it is not" do
+      assert {:ok, %{ttl: @max}} = Messages.parse_persist(%{"ttl" => @max})
+      assert {:error, :invalid_ttl} = Messages.parse_persist(%{"ttl" => @max + 1})
+      assert {:error, :invalid_ttl} = Messages.parse_persist(%{"ttl" => to_string(@max + 1)})
+    end
+
+    test "zero, negative, and anything that is not a whole number of seconds are refused" do
+      for bad <- [0, -1, "0", "-1", "1h", "3600s", "", 3.5, :not_a_number, []] do
+        assert {:error, :invalid_ttl} = Messages.parse_persist(%{"ttl" => bad}),
+               "expected ttl #{inspect(bad)} to be refused"
+      end
+    end
+
+    test "a persist value that is neither a flag nor a map is refused" do
+      for bad <- [1, "yes", :persist, []] do
+        assert {:error, :invalid_ttl} = Messages.parse_persist(bad), "expected persist #{inspect(bad)} to be refused"
+      end
+    end
+
+    test "the parsed map keys are atoms, so nothing downstream handles string keys" do
+      assert {:ok, persist} = Messages.parse_persist(%{"ttl" => "3600"})
+      assert Map.keys(persist) == [:ttl]
     end
   end
 

@@ -38,7 +38,6 @@ defmodule Realtime.Tenants.SingleBroadcast do
     field :private, :boolean, default: false
     # "json" or "binary"
     field :content_type, :string
-    field :persist, :boolean, default: false
   end
 
   @type content_type :: :json | :binary
@@ -55,7 +54,8 @@ defmodule Realtime.Tenants.SingleBroadcast do
   - `content_type` - :json or :binary
   - `opts`
     - `:private` - Whether this is a private broadcast (requires authorization). Defaults to `false`
-    - `:persist` - Whether the message is stored in `realtime.messages`, requires `:private`. Defaults to `false`
+    - `:persist` - What the sender asked for, parsed by `Realtime.Messages.parse_persist/1`.
+                   Requires `:private` and defaults to `nil` (disabled).
   """
   @spec broadcast(
           Authorization.t(),
@@ -74,7 +74,7 @@ defmodule Realtime.Tenants.SingleBroadcast do
 
   def broadcast(auth_params, %Tenant{} = tenant, topic, event, payload, content_type, opts) do
     private = Keyword.get(opts, :private, false)
-    persist = Keyword.get(opts, :persist, false)
+    persist = Keyword.get(opts, :persist)
 
     with %Ecto.Changeset{valid?: true} <-
            validate_message(topic, event, private, payload, content_type, persist, tenant),
@@ -103,25 +103,27 @@ defmodule Realtime.Tenants.SingleBroadcast do
 
   defp validate_message(topic, event, private, payload, content_type, persist, tenant) do
     %__MODULE__{}
-    |> cast(%{topic: topic, event: event, private: private, content_type: to_string(content_type), persist: persist}, [
+    |> cast(%{topic: topic, event: event, private: private, content_type: to_string(content_type)}, [
       :topic,
       :event,
       :private,
-      :content_type,
-      :persist
+      :content_type
     ])
     |> put_change(:payload, payload)
     |> validate_required([:topic, :event, :content_type])
     |> validate_payload_present(content_type, payload)
     |> validate_inclusion(:content_type, ["json", "binary"])
     |> validate_payload_size(tenant, content_type)
-    |> validate_persist_is_private()
+    |> validate_persist_is_private(persist)
   end
 
-  defp validate_persist_is_private(changeset) do
-    case {get_field(changeset, :persist), get_field(changeset, :private)} do
-      {true, false} -> add_error(changeset, :persist, "can only be used on private channels")
-      _persist_and_private -> changeset
+  # `:persist` is not a field on this schema, only the name the caller used. The error is reported
+  # under that name so the response points at the parameter they sent.
+  defp validate_persist_is_private(changeset, persist) do
+    if not is_nil(persist) and get_field(changeset, :private) == false do
+      add_error(changeset, :persist, "can only be used on private channels")
+    else
+      changeset
     end
   end
 
@@ -180,13 +182,23 @@ defmodule Realtime.Tenants.SingleBroadcast do
   end
 
   defp handle_private_message(tenant, auth_params, topic, event, payload, content_type, rate_counter, persist) do
-    persist? = persist and FeatureFlags.enabled?("broadcast_persistence", tenant.external_id)
+    persist = if FeatureFlags.enabled?("broadcast_persistence", tenant.external_id), do: persist
 
     with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id),
          {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}} = policies} <-
-           permissions_for_message(db_conn, auth_params, topic, persist?) do
+           permissions_for_message(db_conn, auth_params, topic, persist) do
       send_message_and_count(tenant, rate_counter, topic, event, payload, content_type, false)
-      if persist?, do: maybe_persist(policies.broadcast, db_conn, tenant, topic, event, payload)
+
+      maybe_persist(
+        policies: policies,
+        db_conn: db_conn,
+        tenant_id: tenant.external_id,
+        topic: topic,
+        event: event,
+        payload: payload,
+        persist: persist
+      )
+
       :ok
     else
       {:ok, %Policies{}} ->
@@ -234,30 +246,50 @@ defmodule Realtime.Tenants.SingleBroadcast do
     end
   end
 
-  # Currently the API has no ACK so just persist the message asyncly and log in case of errors.
-  defp maybe_persist(%BroadcastPolicies{persist: true}, db_conn, tenant, topic, event, payload) do
-    Task.Supervisor.start_child(Realtime.TaskSupervisor, fn ->
-      case Messages.persist(db_conn, tenant.external_id, topic, event, payload) do
-        {:ok, _id} -> :ok
-        error -> log_error("UnableToPersistMessage", error)
-      end
-    end)
+  # Saves the message when the policy allows it and the sender asked for it.
+  #
+  # This API has no ACK, so it saves in a task and logs failures rather than reporting them.
+  #
+  # ## Options
+  #
+  #   * `:policies` - the policy answer for this request
+  #   * `:db_conn` - the tenant database connection
+  #   * `:tenant_id` - the tenant the message belongs to
+  #   * `:topic` - the channel topic, used as the row's topic
+  #   * `:event` - the event name
+  #   * `:payload` - the message payload
+  #   * `:persist` - what the sender asked for, or `nil` to not save the message
+  #
+  # All are required.
+  @spec maybe_persist(keyword()) :: :ok
+  defp maybe_persist(opts) do
+    persist = Keyword.fetch!(opts, :persist)
+
+    with %Policies{broadcast: %BroadcastPolicies{persist: true}} <- Keyword.fetch!(opts, :policies),
+         true <- is_map(persist) do
+      db_conn = Keyword.fetch!(opts, :db_conn)
+      tenant_id = Keyword.fetch!(opts, :tenant_id)
+      topic = Keyword.fetch!(opts, :topic)
+      event = Keyword.fetch!(opts, :event)
+      payload = Keyword.fetch!(opts, :payload)
+      expires_at = Messages.expires_at(persist.ttl)
+
+      Task.Supervisor.start_child(Realtime.TaskSupervisor, fn ->
+        case Messages.persist(db_conn, tenant_id, topic, event, payload, expires_at) do
+          {:ok, _id} -> :ok
+          error -> log_error("UnableToPersistMessage", error)
+        end
+      end)
+    end
 
     :ok
   end
 
-  defp maybe_persist(_broadcast_policies, _db_conn, _tenant, _topic, _event, _payload), do: :ok
-
-  defp permissions_for_message(db_conn, auth_params, topic, persist?) do
+  defp permissions_for_message(db_conn, auth_params, topic, persist) do
     auth_params = %{auth_params | topic: topic}
+    extensions = if is_nil(persist), do: [:broadcast], else: [:broadcast, :persistence]
 
-    case Authorization.get_write_authorizations(db_conn, auth_params, :broadcast) do
-      {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}} = policies} when persist? ->
-        Authorization.get_write_authorizations(policies, db_conn, auth_params, :persistence)
-
-      result ->
-        result
-    end
+    Authorization.get_write_authorizations(db_conn, auth_params, extensions)
   end
 
   defp check_rate_limit(events_per_second_rate, %Tenant{} = tenant) do

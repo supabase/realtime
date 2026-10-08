@@ -12,6 +12,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
   alias Realtime.Database
   alias Realtime.FeatureFlags
   alias Realtime.GenCounter
+  alias Realtime.Messages
   alias Realtime.RateCounter
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
@@ -116,6 +117,24 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
              >>
 
       refute_receive {:socket_push, _, _}
+    end
+
+    test "treats persist in the JSON body as payload data", %{conn: conn, tenant: tenant} do
+      stub(GenCounter, :add, fn _ -> :ok end)
+      sub_topic = random_string()
+      subscribe(Tenants.tenant_topic(tenant, sub_topic), sub_topic)
+
+      for persist <- ["application data", true, %{"ttl" => 60}] do
+        payload = %{"persist" => persist, "content" => "hello"}
+
+        response =
+          conn
+          |> put_req_header("content-type", "application/json")
+          |> post(Routes.broadcast_single_path(conn, :broadcast, sub_topic, "message"), payload)
+
+        assert response.status == 202
+        assert assert_receive_message()["payload"]["payload"] == payload
+      end
     end
 
     test "handles empty JSON payload", %{conn: conn, tenant: tenant} do
@@ -522,7 +541,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       request_events_key = Tenants.requests_per_second_key(tenant)
       expect(GenCounter, :add, fn ^request_events_key -> :ok end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
+      expect(Authorization, :get_write_authorizations, fn _, _, [:broadcast] ->
         {:error, :query_canceled,
          %Postgrex.Error{postgres: %{code: :query_canceled, message: "canceling statement due to user request"}}}
       end)
@@ -540,7 +559,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       request_events_key = Tenants.requests_per_second_key(tenant)
       expect(GenCounter, :add, fn ^request_events_key -> :ok end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast -> {:error, :missing_partition} end)
+      expect(Authorization, :get_write_authorizations, fn _, _, [:broadcast] -> {:error, :missing_partition} end)
 
       conn =
         conn
@@ -555,7 +574,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       request_events_key = Tenants.requests_per_second_key(tenant)
       expect(GenCounter, :add, fn ^request_events_key -> :ok end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast -> {:error, :increase_connection_pool} end)
+      expect(Authorization, :get_write_authorizations, fn _, _, [:broadcast] -> {:error, :increase_connection_pool} end)
 
       conn =
         conn
@@ -570,7 +589,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       request_events_key = Tenants.requests_per_second_key(tenant)
       expect(GenCounter, :add, fn ^request_events_key -> :ok end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
+      expect(Authorization, :get_write_authorizations, fn _, _, [:broadcast] ->
         {:error, :tenant_database_unavailable}
       end)
 
@@ -587,7 +606,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       request_events_key = Tenants.requests_per_second_key(tenant)
       expect(GenCounter, :add, fn ^request_events_key -> :ok end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast -> {:error, "boom"} end)
+      expect(Authorization, :get_write_authorizations, fn _, _, [:broadcast] -> {:error, "boom"} end)
 
       conn =
         conn
@@ -739,7 +758,10 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       refute_receive {:socket_push, :text, _}, 500
     end
 
-    test "does not store without persist=true", %{conn: conn, db_conn: db_conn} do
+    test "body persist=true cannot enable persistence when the query omits or disables it", %{
+      conn: conn,
+      db_conn: db_conn
+    } do
       stub(GenCounter, :add, fn _ -> :ok end)
 
       sub_topic = random_string()
@@ -751,15 +773,17 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
         %{topic: sub_topic}
       )
 
-      conn =
-        conn
-        |> put_req_header("content-type", "application/json")
-        |> post(
-          Routes.broadcast_single_path(conn, :broadcast, sub_topic, event) <> "?private=true",
-          %{"content" => "hello"}
-        )
+      for query <- ["?private=true", "?private=true&persist=false"] do
+        response =
+          conn
+          |> put_req_header("content-type", "application/json")
+          |> post(
+            Routes.broadcast_single_path(conn, :broadcast, sub_topic, event) <> query,
+            %{"content" => "hello", "persist" => true}
+          )
 
-      assert conn.status == 202
+        assert response.status == 202
+      end
 
       refute_eventually match?({:ok, [_ | _]}, Repo.all(db_conn, messages_for(sub_topic), Message))
     end
@@ -777,6 +801,120 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
 
       assert conn.status == 422
       assert Jason.decode!(conn.resp_body)["errors"]["persist"] == ["can only be used on private channels"]
+    end
+
+    test "persist[ttl] stores the message with that deadline", %{conn: conn, db_conn: db_conn} do
+      stub(GenCounter, :add, fn _ -> :ok end)
+
+      sub_topic = random_string()
+      event = random_string()
+
+      create_rls_policies(
+        db_conn,
+        [:authenticated_read_broadcast, :authenticated_write_broadcast, :authenticated_write_persistence],
+        %{topic: sub_topic}
+      )
+
+      sent_at = NaiveDateTime.utc_now()
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(
+          Routes.broadcast_single_path(conn, :broadcast, sub_topic, event) <> "?private=true&persist[ttl]=3600",
+          %{"content" => "hello", "persist" => %{"ttl" => 1}}
+        )
+
+      assert conn.status == 202
+
+      assert_eventually(
+        {:ok, [%Message{topic: ^sub_topic, expires_at: expires_at, payload: %{"persist" => %{"ttl" => 1}}}]} =
+          Repo.all(db_conn, messages_for(sub_topic), Message)
+      )
+
+      # An hour out, give or take the time the request itself took.
+      assert_in_delta NaiveDateTime.diff(expires_at, sent_at), 3600, 60
+    end
+
+    test "persist=true stores the message with the maximum retention", %{conn: conn, db_conn: db_conn} do
+      stub(GenCounter, :add, fn _ -> :ok end)
+
+      sub_topic = random_string()
+      event = random_string()
+
+      create_rls_policies(
+        db_conn,
+        [:authenticated_read_broadcast, :authenticated_write_broadcast, :authenticated_write_persistence],
+        %{topic: sub_topic}
+      )
+
+      sent_at = NaiveDateTime.utc_now()
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(
+          Routes.broadcast_single_path(conn, :broadcast, sub_topic, event) <> "?private=true&persist=true",
+          %{"content" => "hello", "persist" => false}
+        )
+
+      assert conn.status == 202
+
+      assert_eventually(
+        {:ok, [%Message{expires_at: expires_at, payload: %{"persist" => false}}]} =
+          Repo.all(db_conn, messages_for(sub_topic), Message)
+      )
+
+      assert_in_delta NaiveDateTime.diff(expires_at, sent_at), Messages.max_ttl_seconds(), 60
+    end
+
+    test "persist[ttl] also applies to binary broadcasts", %{conn: conn, db_conn: db_conn} do
+      stub(GenCounter, :add, fn _ -> :ok end)
+      sub_topic = random_string()
+      payload = <<0, 1, 2, 255>>
+
+      create_rls_policies(
+        db_conn,
+        [:authenticated_read_broadcast, :authenticated_write_broadcast, :authenticated_write_persistence],
+        %{topic: sub_topic}
+      )
+
+      sent_at = NaiveDateTime.utc_now()
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/octet-stream")
+        |> post(
+          Routes.broadcast_single_path(conn, :broadcast, sub_topic, "message") <> "?private=true&persist[ttl]=3600",
+          payload
+        )
+
+      assert conn.status == 202
+
+      assert_eventually(
+        {:ok, [%Message{binary_payload: ^payload, expires_at: expires_at}]} =
+          Repo.all(db_conn, messages_for(sub_topic), Message)
+      )
+
+      assert_in_delta NaiveDateTime.diff(expires_at, sent_at), 3600, 60
+    end
+
+    test "rejects an invalid query ttl even when the body has persist=false", %{conn: conn} do
+      stub(GenCounter, :add, fn _ -> :ok end)
+
+      for bad <- ["0", "-1", "1h", to_string(Messages.max_ttl_seconds() + 1)] do
+        conn =
+          conn
+          |> put_req_header("content-type", "application/json")
+          |> post(
+            Routes.broadcast_single_path(conn, :broadcast, random_string(), random_string()) <>
+              "?private=true&persist[ttl]=#{bad}",
+            %{"content" => "hello", "persist" => false}
+          )
+
+        assert conn.status == 422, "expected ttl #{bad} to be refused"
+        assert Jason.decode!(conn.resp_body)["message"] =~ "persist ttl must be a positive integer"
+      end
     end
   end
 

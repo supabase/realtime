@@ -221,6 +221,44 @@ defmodule Generators do
     """
   end
 
+  def policy_query(:authenticated_write_persistence_via_jwt, %{topic: name, sub: sub}) do
+    """
+    CREATE POLICY "authenticated_write_persistence_via_jwt_#{name}"
+    ON realtime.messages FOR INSERT
+    TO authenticated
+    WITH CHECK (
+      realtime.topic() = '#{name}'
+      AND realtime.messages.extension = 'persistence'
+      AND (SELECT auth.jwt() ->> 'sub') = '#{sub}'
+    );
+    """
+  end
+
+  def policy_query(:anon_write_persistence, %{topic: name}) do
+    """
+    CREATE POLICY "anon_write_persistence_#{name}"
+    ON realtime.messages FOR INSERT
+    TO anon
+    WITH CHECK (
+      realtime.topic() = '#{name}'
+      AND realtime.messages.extension = 'persistence'
+    );
+    """
+  end
+
+  def policy_query(:permanent_write_persistence, %{topic: name}) do
+    """
+    CREATE POLICY "permanent_write_persistence_#{name}"
+    ON realtime.messages FOR INSERT
+    TO authenticated
+    WITH CHECK (
+      realtime.topic() = '#{name}'
+      AND realtime.messages.extension = 'persistence'
+      AND (SELECT (auth.jwt() ->> 'is_anonymous')::boolean) IS NOT TRUE
+    );
+    """
+  end
+
   def policy_query(:authenticated_read_presence, %{topic: name}) do
     """
     CREATE POLICY "authenticated_read_presence_#{name}"
