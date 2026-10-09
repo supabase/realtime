@@ -27,7 +27,10 @@ snapshot =
     rls_enabled: true,
     rls_forced: false,
     roles: %{"authenticated" => %{bypass_rls: false, select: true, insert: true}},
-    # pg_get_expr output, read with search_path = '' so every name is qualified
+    # As pg_policy has them. cmd is the command the policy is FOR, as polcmd's letter: "r" SELECT
+    # (decides reads), "a" INSERT (writes), "*" ALL (both), "w" UPDATE and "d" DELETE (neither).
+    # qual and with_check are pg_get_expr output, read with search_path = '' so every name is
+    # qualified.
     policies: [
       %{name: "own channel", cmd: "r", permissive: true, roles: ["authenticated"],
         qual: "((realtime.topic() = ('user:'::text || auth.uid())) AND (extension = 'broadcast'::text))",
