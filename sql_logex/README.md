@@ -14,6 +14,8 @@ test in Realtime,
 [test/realtime/tenants/sql_logex_differential_test.exs](../test/realtime/tenants/sql_logex_differential_test.exs),
 which runs thousands of cases through both Postgres and this library (see "Running the tests").
 
+The best overview of what the library currently does and does not do is probably [test/sql_logex_test.exs](test/sql_logex_test.exs).
+
 ## How it works
 
 Plain data in, plain result out. No Realtime, Ecto or Postgrex dependencies; NimbleParsec is
