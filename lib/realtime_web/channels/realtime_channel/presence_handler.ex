@@ -41,7 +41,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   @doc """
   Computes join-time presence assigns.
 
-  These assigns must be available before authorization policies are evaluated. 
+  These assigns must be available before authorization policies are evaluated.
   Must be called before `RealtimeChannel`'s `maybe_assign_policies/3`.
   """
   @spec join(Payloads.Join.t(), Tenant.t()) :: %{presence_enabled?: boolean(), presence_key: term()}
@@ -86,37 +86,69 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   end
 
   @doc """
-  Sends presence state to a connected client
+  Stamps the join-latency timer on the socket, for the sync about to be queued via
+  `:sync_presence`.
+
+  Call this right where that message is sent, not at the top of join/3, so the timer excludes
+  DB connection setup, RLS auth, and message replay - none of which are presence work, and some
+  of which can run for many seconds and would otherwise swamp the signal this metric exists to
+  measure.
   """
-  @spec sync(Socket.t()) :: :ok | {:error, :rate_limit_exceeded}
-  def sync(%{assigns: %{presence_enabled?: false}}), do: :ok
+  @spec stamp_join_started_at(Socket.t()) :: Socket.t()
+  def stamp_join_started_at(socket), do: assign(socket, :presence_join_started_at, System.monotonic_time())
+
+  @doc """
+  Sends presence state to a connected client.
+
+  If the socket carries a `presence_join_started_at` timer (stamped by `stamp_join_started_at/1`
+  at join), this is the sync directly triggered by the socket's own join: it records the
+  join-latency metric and clears the timer. A later resync - triggered by a track flipping
+  presence on - finds no timer and records nothing, so it's never misattributed as join latency.
+  """
+  @spec sync(Socket.t()) :: {:ok, Socket.t()} | {:error, :rate_limit_exceeded}
+  def sync(%{assigns: %{presence_enabled?: false}} = socket), do: {:ok, socket}
 
   def sync(socket) when not is_private?(socket) do
     %{assigns: %{tenant_topic: topic}} = socket
 
     with :ok <- limit_presence_event(socket) do
-      push(socket, "presence_state", presence_dirty_list(topic))
+      socket = push_presence_state(socket, topic)
       Logging.maybe_log_info(socket, :sync_presence)
 
-      :ok
+      {:ok, socket}
     end
   end
 
-  def sync(socket) when not can_read_presence?(socket), do: :ok
+  def sync(socket) when not can_read_presence?(socket), do: {:ok, socket}
 
   def sync(socket) when can_read_presence?(socket) do
     %{tenant_topic: topic} = socket.assigns
 
     with :ok <- limit_presence_event(socket) do
-      push(socket, "presence_state", presence_dirty_list(topic))
+      socket = push_presence_state(socket, topic)
       Logging.maybe_log_info(socket, :sync_presence)
 
-      :ok
+      {:ok, socket}
     end
   end
 
+  defp push_presence_state(socket, topic) do
+    state = presence_dirty_list(topic)
+    push(socket, "presence_state", state)
+    maybe_record_join_latency(socket, state)
+  end
+
+  defp maybe_record_join_latency(%{assigns: %{presence_join_started_at: started_at}} = socket, state)
+       when not is_nil(started_at) do
+    tracker_state = if map_size(state) == 0, do: :cold, else: :warm
+    Presence.Metrics.record_join(started_at, socket.assigns.tenant, tracker_state)
+    assign(socket, :presence_join_started_at, nil)
+  end
+
+  defp maybe_record_join_latency(socket, _state), do: socket
+
   @doc """
-  Handles client events related to Presence. 
+  Handles client events related to Presence.
 
   Presence events include:
 

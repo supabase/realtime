@@ -163,9 +163,13 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       socket = assign(socket, PresenceHandler.join_rate_limits(tenant))
 
-      # Start presence and add user if presence is enabled
-      presence_enabled? = socket.assigns.presence_enabled?
-      if presence_enabled?, do: send(self(), :sync_presence)
+      socket =
+        if socket.assigns.presence_enabled? do
+          send(self(), :sync_presence)
+          PresenceHandler.stamp_join_started_at(socket)
+        else
+          socket
+        end
 
       with :ok <- await_muster_join(muster_join_task, socket),
            :ok <- start_postgres_subscribe(socket, join, tenant, pg_change_params) do
@@ -434,7 +438,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   def handle_info(:sync_presence, %{assigns: %{presence_enabled?: true}} = socket) do
     case PresenceHandler.sync(socket) do
-      :ok ->
+      {:ok, socket} ->
         {:noreply, socket}
 
       {:error, :rate_limit_exceeded} ->
