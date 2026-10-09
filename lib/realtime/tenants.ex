@@ -114,7 +114,7 @@ defmodule Realtime.Tenants do
   @doc """
   Creates the `realtime.messages` partitions for the days around today.
   """
-  @spec create_messages_partitions(pid()) :: :ok
+  @spec create_messages_partitions(pid()) :: :ok | {:error, any()}
   def create_messages_partitions(db_conn_pid) do
     Logger.info("Creating partitions for realtime.messages")
     today = Date.utc_today()
@@ -123,31 +123,39 @@ defmodule Realtime.Tenants do
 
     dates = Date.range(yesterday, future)
 
-    Enum.each(dates, fn date ->
+    Enum.reduce_while(dates, :ok, fn date, :ok ->
       partition_name = "messages_#{date |> Date.to_iso8601() |> String.replace("-", "_")}"
       start_timestamp = Date.to_string(date)
       end_timestamp = Date.to_string(Date.add(date, 1))
 
-      Database.transaction(db_conn_pid, fn conn ->
-        create = """
-        CREATE TABLE IF NOT EXISTS realtime.#{partition_name}
-        PARTITION OF realtime.messages
-        FOR VALUES FROM ('#{start_timestamp}') TO ('#{end_timestamp}');
-        """
+      result =
+        Database.transaction(db_conn_pid, fn conn ->
+          create = """
+          CREATE TABLE IF NOT EXISTS realtime.#{partition_name}
+          PARTITION OF realtime.messages
+          FOR VALUES FROM ('#{start_timestamp}') TO ('#{end_timestamp}');
+          """
 
-        alter_owner = "ALTER TABLE realtime.#{partition_name} OWNER TO supabase_realtime_admin"
+          alter_owner = "ALTER TABLE realtime.#{partition_name} OWNER TO supabase_realtime_admin"
 
-        with {:ok, _} <- Postgrex.query(conn, create, []),
-             {:ok, _} <- Postgrex.query(conn, alter_owner, []) do
-          Logger.debug("Partition #{partition_name} created")
-        else
-          {:error, %Postgrex.Error{postgres: %{code: :duplicate_table}}} -> :ok
-          {:error, error} -> log_error("PartitionCreationFailed", error)
-        end
-      end)
+          with {:ok, _} <- Postgrex.query(conn, create, []),
+               {:ok, _} <- Postgrex.query(conn, alter_owner, []) do
+            Logger.debug("Partition #{partition_name} created")
+          else
+            {:error, %Postgrex.Error{postgres: %{code: :duplicate_table}}} ->
+              :ok
+
+            {:error, error} ->
+              log_error("PartitionCreationFailed", error)
+              Postgrex.rollback(conn, error)
+          end
+        end)
+
+      case result do
+        {:ok, _} -> {:cont, :ok}
+        {:error, error} -> {:halt, {:error, error}}
+      end
     end)
-
-    :ok
   end
 
   defp replication_connected?(external_id) do
