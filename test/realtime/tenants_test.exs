@@ -94,5 +94,23 @@ defmodule Realtime.TenantsTest do
                  []
                )
     end
+
+    test "does not lock partitions that already exist" do
+      tenant = TestTenantDb.checkout_tenant(run_migrations: true)
+      {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+      {:ok, holder} = Database.connect(tenant, "realtime_test", :stop)
+
+      assert :ok = Tenants.create_messages_partitions(conn)
+
+      Postgrex.transaction(holder, fn holder_conn ->
+        # Conflicts with the ACCESS EXCLUSIVE lock taken by ALTER TABLE ... OWNER TO
+        Postgrex.query!(holder_conn, "LOCK TABLE realtime.#{today_partition()} IN ACCESS SHARE MODE", [])
+
+        task = Task.async(fn -> Tenants.create_messages_partitions(conn) end)
+        assert {:ok, :ok} = Task.yield(task, 2_000)
+      end)
+    end
   end
+
+  defp today_partition, do: "messages_#{Date.utc_today() |> Date.to_iso8601() |> String.replace("-", "_")}"
 end
