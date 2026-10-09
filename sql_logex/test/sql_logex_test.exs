@@ -30,7 +30,7 @@ defmodule SqlLogexTest do
   )::uuid
   """
 
-  @own_channel "(realtime.topic() = ('user:'::text || auth.uid()))"
+  @own_channel_rls "(realtime.topic() = ('user:'::text || auth.uid()))"
 
   # Evaluates `sql` in the session Realtime sets up for a join: the settings for a JWT with this
   # role, sub and claims, and the probe row with this topic and extension. A nil sub is a JWT
@@ -69,8 +69,8 @@ defmodule SqlLogexTest do
 
   describe "a user's own channel" do
     test "is the topic user:<their uid>" do
-      assert evaluate(@own_channel, topic: "user:#{@uid}", sub: @uid) == true
-      assert evaluate(@own_channel, topic: "user:#{@other_uid}", sub: @uid) == false
+      assert evaluate(@own_channel_rls, topic: "user:#{@uid}", sub: @uid) == true
+      assert evaluate(@own_channel_rls, topic: "user:#{@other_uid}", sub: @uid) == false
     end
 
     test "is the same in the (select auth.uid()) form" do
@@ -81,24 +81,24 @@ defmodule SqlLogexTest do
     end
 
     test "compares the uid as Postgres prints it, in lower case" do
-      assert evaluate(@own_channel, topic: "user:#{@uid}", sub: String.upcase(@uid)) == true
-      assert evaluate(@own_channel, topic: "user:#{String.upcase(@uid)}", sub: @uid) == false
+      assert evaluate(@own_channel_rls, topic: "user:#{@uid}", sub: String.upcase(@uid)) == true
+      assert evaluate(@own_channel_rls, topic: "user:#{String.upcase(@uid)}", sub: @uid) == false
     end
 
     test "is NULL without a sub, which denies" do
-      assert evaluate(@own_channel, topic: "user:", sub: nil) == nil
+      assert evaluate(@own_channel_rls, topic: "user:", sub: nil) == nil
     end
 
     test "falls back for a sub that isn't a uuid, where Postgres raises" do
-      assert evaluate(@own_channel, topic: "user:user_2abc", sub: "user_2abc") ==
+      assert evaluate(@own_channel_rls, topic: "user:user_2abc", sub: "user_2abc") ==
                {:unsupported, {:raises, :invalid_text_representation, "invalid input syntax for type uuid"}}
     end
 
     test "depends on the body of auth.uid(): supabase/auth's also reads the sub from the claims" do
       opts = [topic: "user:#{@uid}", sub: "", claims: ~s({"sub":"#{@uid}"})]
 
-      assert evaluate(@own_channel, [functions: with_auth_uid(%{source: @uid_supabase_auth})] ++ opts) == true
-      assert evaluate(@own_channel, opts) == nil
+      assert evaluate(@own_channel_rls, [functions: with_auth_uid(%{source: @uid_supabase_auth})] ++ opts) == true
+      assert evaluate(@own_channel_rls, opts) == nil
     end
   end
 
@@ -190,7 +190,7 @@ defmodule SqlLogexTest do
 
     test "a function whose definition isn't one of the known ones" do
       for changes <- [%{source: "select '#{@uid}'::uuid;"}, %{security_definer: true}] do
-        assert evaluate(@own_channel, topic: "user:#{@uid}", sub: @uid, functions: with_auth_uid(changes)) ==
+        assert evaluate(@own_channel_rls, topic: "user:#{@uid}", sub: @uid, functions: with_auth_uid(changes)) ==
                  {:unsupported, {:function, "auth.uid", :unknown_definition}}
       end
     end
