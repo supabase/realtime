@@ -96,6 +96,7 @@ defmodule Realtime.MixProject do
       {:logflare_logger_backend, "~> 0.11"},
       {:syn, "~> 3.3"},
       {:forum, path: "./forum"},
+      {:sql_logex, path: "./sql_logex"},
       {:cachex, "~> 4.0"},
       {:open_api_spex, "~> 3.16"},
       {:corsica, "~> 2.0"},
