@@ -278,6 +278,45 @@ defmodule RealtimeWeb.Presence.MetricsTest do
     end
   end
 
+  describe "record_join/3" do
+    setup do
+      tenant = "tenant-#{System.unique_integer([:positive])}"
+      attach_join_telemetry(tenant)
+      %{tenant: tenant}
+    end
+
+    test "emits latency in milliseconds, tagged with tenant, tracker state, and implementation", %{tenant: tenant} do
+      started_at = System.monotonic_time()
+      Process.sleep(10)
+
+      assert :ok = Metrics.record_join(started_at, tenant, :warm)
+
+      assert_receive {:telemetry, [:realtime, :presence, :join, :latency], %{latency: latency},
+                      %{tenant: ^tenant, state: :warm, implementation: :phoenix}}
+
+      assert latency >= 10
+    end
+
+    test "tags :cold the same way", %{tenant: tenant} do
+      assert :ok = Metrics.record_join(System.monotonic_time(), tenant, :cold)
+
+      assert_receive {:telemetry, [:realtime, :presence, :join, :latency], _, %{tenant: ^tenant, state: :cold}}
+    end
+  end
+
+  defp attach_join_telemetry(tenant) do
+    id = {__MODULE__, :join, tenant}
+
+    :telemetry.attach(
+      id,
+      [:realtime, :presence, :join, :latency],
+      &__MODULE__.handle_telemetry/4,
+      %{pid: self(), tenant: tenant}
+    )
+
+    on_exit(fn -> :telemetry.detach(id) end)
+  end
+
   defp attach_telemetry(tenant) do
     id = {__MODULE__, tenant}
 

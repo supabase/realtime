@@ -140,6 +140,41 @@ defmodule Realtime.PromEx.Plugins.PresenceTest do
     end
   end
 
+  describe "join latency" do
+    alias RealtimeWeb.Presence.Metrics
+
+    @join_latency "realtime_presence_join_latency"
+
+    test "buckets each observation by tracker state" do
+      tags = [state: "warm", implementation: "phoenix"]
+
+      le_25_before = metric_value(@join_latency <> "_bucket", tags ++ [le: "25.0"]) || 0
+      count_before = metric_value(@join_latency <> "_count", tags) || 0
+
+      # 20ms and 400ms: one lands under le="25", both count.
+      Metrics.record_join(started_at_ms_ago(20), "t", :warm)
+      Metrics.record_join(started_at_ms_ago(400), "t", :warm)
+
+      assert metric_value(@join_latency <> "_bucket", tags ++ [le: "25.0"]) == le_25_before + 1
+      assert metric_value(@join_latency <> "_count", tags) == count_before + 2
+    end
+
+    test "tags cold as a separate series from warm" do
+      warm_tags = [state: "warm", implementation: "phoenix"]
+      cold_tags = [state: "cold", implementation: "phoenix"]
+
+      warm_count_before = metric_value(@join_latency <> "_count", warm_tags) || 0
+      cold_count_before = metric_value(@join_latency <> "_count", cold_tags) || 0
+
+      Metrics.record_join(started_at_ms_ago(5), "t", :cold)
+
+      assert metric_value(@join_latency <> "_count", cold_tags) == cold_count_before + 1
+      assert (metric_value(@join_latency <> "_count", warm_tags) || 0) == warm_count_before
+    end
+
+    defp started_at_ms_ago(ms), do: System.monotonic_time() - System.convert_time_unit(ms, :millisecond, :native)
+  end
+
   defp metric_value(metric, tags \\ [implementation: "phoenix"]) do
     MetricsHelper.search(PromEx.get_metrics(MetricsTest), metric, tags)
   end
