@@ -74,6 +74,36 @@ defmodule Realtime.Api.TenantTest do
     end
   end
 
+  describe "changeset/2 external_id validation" do
+    test ~s(rejects an external_id ending in "-private") do
+      changeset = Tenant.changeset(%Tenant{}, %{external_id: "tenant-private", jwt_secret: "my-secret"})
+
+      refute changeset.valid?
+      assert {~s(must not end with "-private"), _} = changeset.errors[:external_id]
+    end
+
+    test ~s(rejects an external_id containing ":") do
+      changeset = Tenant.changeset(%Tenant{}, %{external_id: "tenant:topic", jwt_secret: "my-secret"})
+
+      refute changeset.valid?
+      assert {~s(must not contain ":"), _} = changeset.errors[:external_id]
+    end
+
+    test ~s(rejects renaming an existing tenant to an external_id ending in "-private") do
+      changeset = Tenant.changeset(%Tenant{external_id: "tenant"}, %{external_id: "tenant-private"})
+
+      refute changeset.valid?
+      assert {~s(must not end with "-private"), _} = changeset.errors[:external_id]
+    end
+
+    test ~s(rejects renaming an existing tenant to an external_id containing ":") do
+      changeset = Tenant.changeset(%Tenant{external_id: "tenant"}, %{external_id: "tenant:topic"})
+
+      refute changeset.valid?
+      assert {~s(must not contain ":"), _} = changeset.errors[:external_id]
+    end
+  end
+
   describe "maybe_set_default/3" do
     test "keeps the changeset unchanged when the property already has a value" do
       changeset = Ecto.Changeset.change(%Tenant{max_bytes_per_second: 12_345})
