@@ -347,42 +347,51 @@ defmodule Realtime.ApiTest do
       assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{name: tenant.name})
     end
 
-    test "change to max_events_per_second publishes update to respective rate counters", %{tenants: [tenant | _]} do
-      expect(RateCounter, :publish_update, fn key ->
-        assert key == Realtime.Tenants.events_per_second_key(tenant.external_id)
-      end)
+    test "change to max_events_per_second propagates affected rate counters with the cache update", %{
+      tenants: [tenant | _]
+    } do
+      expect(Realtime.Tenants.Cache, :global_cache_update, fn updated_tenant, keys ->
+        assert updated_tenant.external_id == tenant.external_id
 
-      expect(RateCounter, :publish_update, fn key ->
-        assert key == Realtime.Tenants.db_events_per_second_key(tenant.external_id)
+        assert keys == [
+                 Realtime.Tenants.events_per_second_key(tenant.external_id),
+                 Realtime.Tenants.db_events_per_second_key(tenant.external_id)
+               ]
       end)
-
-      reject(&RateCounter.publish_update/1)
 
       assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{max_events_per_second: 123})
     end
 
-    test "change to max_joins_per_second publishes update to rate counters", %{tenants: [tenant | _]} do
-      expect(RateCounter, :publish_update, fn key ->
-        assert key == Realtime.Tenants.joins_per_second_key(tenant.external_id)
-      end)
+    test "change to max_joins_per_second propagates affected rate counters with the cache update", %{
+      tenants: [tenant | _]
+    } do
+      expect(Realtime.Tenants.Cache, :global_cache_update, fn updated_tenant, keys ->
+        assert updated_tenant.external_id == tenant.external_id
 
-      reject(&RateCounter.publish_update/1)
+        assert keys == [
+                 Realtime.Tenants.joins_per_second_key(tenant.external_id)
+               ]
+      end)
 
       assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{max_joins_per_second: 123})
     end
 
-    test "change to max_presence_events_per_second publishes update to rate counters", %{tenants: [tenant | _]} do
-      expect(RateCounter, :publish_update, fn key ->
-        assert key == Realtime.Tenants.presence_events_per_second_key(tenant.external_id)
-      end)
+    test "change to max_presence_events_per_second propagates affected rate counters with the cache update", %{
+      tenants: [tenant | _]
+    } do
+      expect(Realtime.Tenants.Cache, :global_cache_update, fn updated_tenant, keys ->
+        assert updated_tenant.external_id == tenant.external_id
 
-      reject(&RateCounter.publish_update/1)
+        assert keys == [
+                 Realtime.Tenants.presence_events_per_second_key(tenant.external_id)
+               ]
+      end)
 
       assert {:ok, %Tenant{}} =
                Api.update_tenant_by_external_id(tenant.external_id, %{max_presence_events_per_second: 123})
     end
 
-    test "change to extensions publishes update to rate counters", %{tenants: [tenant | _]} do
+    test "change to extensions propagates affected rate counters with the cache update", %{tenants: [tenant | _]} do
       extensions = [
         %{
           "type" => "postgres_cdc_rls",
@@ -402,19 +411,15 @@ defmodule Realtime.ApiTest do
         }
       ]
 
-      expect(RateCounter, :publish_update, fn key ->
-        assert key == Realtime.Tenants.connect_errors_per_second_key(tenant.external_id)
-      end)
+      expect(Realtime.Tenants.Cache, :global_cache_update, fn updated_tenant, keys ->
+        assert updated_tenant.external_id == tenant.external_id
 
-      expect(RateCounter, :publish_update, fn key ->
-        assert key == Realtime.Tenants.subscription_errors_per_second_key(tenant.external_id)
+        assert keys == [
+                 Realtime.Tenants.connect_errors_per_second_key(tenant.external_id),
+                 Realtime.Tenants.subscription_errors_per_second_key(tenant.external_id),
+                 Realtime.Tenants.authorization_errors_per_second_key(tenant.external_id)
+               ]
       end)
-
-      expect(RateCounter, :publish_update, fn key ->
-        assert key == Realtime.Tenants.authorization_errors_per_second_key(tenant.external_id)
-      end)
-
-      reject(&RateCounter.publish_update/1)
 
       assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{extensions: extensions})
     end
