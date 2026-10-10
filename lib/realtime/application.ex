@@ -70,6 +70,7 @@ defmodule Realtime.Application do
     set_persist_storage(RealtimeWeb.UserSocket, :realtime, :websocket_max_heap_size)
     set_persist_storage(RealtimeWeb.UserSocket, :realtime, :measure_traffic_interval_in_ms)
     set_persist_storage(RealtimeWeb.UserSocket, :realtime, :connect_error_backoff_ms)
+    set_persist_storage(RealtimeWeb.UserSocket, :realtime, :no_channel_timeout_in_ms)
     set_persist_storage(RealtimeWeb.RealtimeChannel, :realtime, :channel_error_backoff_ms)
 
     :syn.set_event_handler(Realtime.SynHandler)
@@ -82,7 +83,6 @@ defmodule Realtime.Application do
     presence_permdown_period = Application.get_env(:realtime, :presence_permdown_period, 1_200_000)
     migration_partition_slots = Application.get_env(:realtime, :migration_partition_slots)
     connect_partition_slots = Application.get_env(:realtime, :connect_partition_slots)
-    no_channel_timeout_in_ms = Application.get_env(:realtime, :no_channel_timeout_in_ms)
     master_region = Application.get_env(:realtime, :master_region) || region
     user_scope_shards = Application.fetch_env!(:realtime, :users_scope_shards)
     user_scope_broadast_interval_in_ms = Application.get_env(:realtime, :users_scope_broadcast_interval_in_ms, 10_000)
@@ -196,7 +196,6 @@ defmodule Realtime.Application do
          name: Connect.DynamicSupervisor,
          partitions: connect_partition_slots},
         Realtime.Tenants.Reconnector,
-        {RealtimeWeb.RealtimeChannel.Tracker, check_interval_in_ms: no_channel_timeout_in_ms},
         RealtimeWeb.Endpoint,
         {RealtimeWeb.Presence,
          log_level: :info,
