@@ -86,37 +86,35 @@ defmodule RealtimeWeb.BroadcastSingleController do
     }
   )
 
-  def broadcast(
-        %{assigns: %{tenant: tenant}, body_params: %{"_binary" => binary}} = conn,
-        %{"topic" => topic, "event" => event} = params
-      ) do
-    private = parse_boolean(params["private"])
-    persist = parse_boolean(params["persist"])
-    auth_params = build_auth_params(conn, tenant)
-
-    with :ok <-
-           SingleBroadcast.broadcast(auth_params, tenant, topic, event, binary, :binary,
-             private: private,
-             persist: persist
-           ) do
-      send_resp(conn, :accepted, "")
-    end
-  end
-
   def broadcast(%{assigns: %{tenant: tenant}} = conn, %{"topic" => topic, "event" => event} = params) do
     private = parse_boolean(params["private"])
     persist = parse_boolean(params["persist"])
-    payload = conn.body_params
     auth_params = build_auth_params(conn, tenant)
 
-    with :ok <-
-           SingleBroadcast.broadcast(auth_params, tenant, topic, event, payload, :json,
+    with {:ok, payload, content_type} <- payload(conn),
+         :ok <-
+           SingleBroadcast.broadcast(auth_params, tenant, topic, event, payload, content_type,
              private: private,
              persist: persist
            ) do
       send_resp(conn, :accepted, "")
     end
   end
+
+  defp payload(conn) do
+    with [content_type | _] <- get_req_header(conn, "content-type"),
+         {:ok, "application", "octet-stream", _} <- Plug.Conn.Utils.content_type(content_type) do
+      {:ok, conn.body_params["_binary"], :binary}
+    else
+      _ -> json_payload(conn.body_params)
+    end
+  end
+
+  # Plug.Parsers.JSON wraps a body that isn't a JSON object as %{"_json" => value}
+  defp json_payload(%{"_json" => value} = body) when map_size(body) == 1 and not is_map(value),
+    do: {:error, :unprocessable_entity, "Payload must be a JSON object"}
+
+  defp json_payload(body), do: {:ok, body, :json}
 
   defp build_auth_params(conn, tenant) do
     Authorization.build_authorization_params(%{

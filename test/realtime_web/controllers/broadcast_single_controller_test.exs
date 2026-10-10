@@ -429,6 +429,33 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
 
       assert conn.status == 202
     end
+
+    test "returns 422 when the JSON body is not an object", %{conn: conn, tenant: tenant} do
+      sub_topic = "room:not-an-object"
+      subscribe(Tenants.tenant_topic(tenant, sub_topic), sub_topic)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(Routes.broadcast_single_path(conn, :broadcast, sub_topic, "message"), "[1,2,3]")
+
+      assert conn.status == 422
+      assert Jason.decode!(conn.resp_body)["message"] == "Payload must be a JSON object"
+      refute_receive {:socket_push, _, _}
+    end
+
+    test "broadcasts a JSON object with a _binary key as JSON", %{conn: conn, tenant: tenant} do
+      sub_topic = "room:binary-key"
+      subscribe(Tenants.tenant_topic(tenant, sub_topic), sub_topic)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(Routes.broadcast_single_path(conn, :broadcast, sub_topic, "message"), ~s({"_binary":"x"}))
+
+      assert conn.status == 202
+      assert %{"payload" => %{"payload" => %{"_binary" => "x"}}} = assert_receive_message()
+    end
   end
 
   describe "suspended tenant" do
