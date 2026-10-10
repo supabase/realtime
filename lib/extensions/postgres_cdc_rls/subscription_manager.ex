@@ -194,6 +194,16 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     {:noreply, %{state | oids: oids, check_oid_ref: check_oids()}}
   end
 
+  # :noconnection means the subscriber's node dropped, not that the channel
+  # exited. The process may still be subscribed. check_active_pids/0 already
+  # leaves these rows alone when the remote node cannot be reached and removes
+  # them once the node is back and the pid is actually dead. Deleting here
+  # drops the realtime.subscription row, so Postgres Changes stop for that
+  # client until it subscribes again.
+  def handle_info({:DOWN, _ref, :process, _pid, :noconnection}, state) do
+    {:noreply, state}
+  end
+
   def handle_info(
         {:DOWN, _ref, :process, pid, _reason},
         %State{
