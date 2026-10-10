@@ -6,6 +6,7 @@ defmodule Realtime.Tenants.Cache do
 
   alias Realtime.Api.Tenant
   alias Realtime.GenRpc
+  alias Realtime.RateCounter
   alias Realtime.Tenants
 
   def child_spec(_) do
@@ -53,15 +54,21 @@ defmodule Realtime.Tenants.Cache do
   @doc """
   Update the cache for a tenant
   """
-  def update_cache(tenant) do
-    Cachex.put(__MODULE__, cache_key(tenant.external_id), tenant)
+  def update_cache(tenant, rate_counter_keys \\ []) do
+    with {:ok, true} = result <- Cachex.put(__MODULE__, cache_key(tenant.external_id), tenant) do
+      Enum.each(rate_counter_keys, &RateCounter.publish_local_update/1)
+      result
+    end
   end
 
   @doc """
   Update the cache for a tenant in all nodes
   """
-  @spec global_cache_update(Realtime.Api.Tenant.t()) :: :ok
-  def global_cache_update(tenant) do
-    GenRpc.multicast(__MODULE__, :update_cache, [tenant])
+  @spec global_cache_update(Tenant.t()) :: :ok
+  def global_cache_update(tenant), do: GenRpc.multicast(__MODULE__, :update_cache, [tenant])
+
+  @spec global_cache_update(Tenant.t(), [term()]) :: :ok
+  def global_cache_update(tenant, rate_counter_keys) do
+    GenRpc.multicast(__MODULE__, :update_cache, [tenant, rate_counter_keys])
   end
 end
