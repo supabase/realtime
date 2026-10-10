@@ -1189,6 +1189,56 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       refute log =~ "ChannelRateLimitReached"
     end
+
+    test "counts channels separately for each socket", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+      {:ok, %Socket{} = other_socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      # Phoenix.ChannelTest makes the test process the transport of every socket, so give the
+      # second socket a transport of its own
+      other_transport = spawn(fn -> Process.sleep(:infinity) end)
+      on_exit(fn -> Process.exit(other_transport, :kill) end)
+      other_socket = %{other_socket | transport_pid: other_transport}
+
+      Realtime.Tenants.Cache.update_cache(%{tenant | max_channels_per_client: 2})
+
+      capture_log(fn ->
+        assert {:ok, _, _} = subscribe_and_join(socket, "realtime:test1", %{})
+        assert {:ok, _, _} = subscribe_and_join(socket, "realtime:test2", %{})
+
+        assert {:error, %{reason: "ChannelRateLimitReached: Too many channels"}} =
+                 subscribe_and_join(socket, "realtime:test3", %{})
+
+        assert {:ok, _, _} = subscribe_and_join(other_socket, "realtime:test1", %{})
+        assert {:ok, _, _} = subscribe_and_join(other_socket, "realtime:test2", %{})
+
+        assert {:error, %{reason: "ChannelRateLimitReached: Too many channels"}} =
+                 subscribe_and_join(other_socket, "realtime:test3", %{})
+      end)
+
+      key = Tenants.channels_per_client_key(tenant)
+      assert length(Registry.lookup(Realtime.Registry, {key, socket.transport_pid})) == 2
+      assert length(Registry.lookup(Realtime.Registry, {key, other_transport})) == 2
+    end
+
+    test "frees the slot of a channel that exits", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+      key = {Tenants.channels_per_client_key(tenant), socket.transport_pid}
+
+      Realtime.Tenants.Cache.update_cache(%{tenant | max_channels_per_client: 1})
+
+      {result, _log} = with_log(fn -> subscribe_and_join(socket, "realtime:test1", %{}) end)
+      assert {:ok, _, %Socket{channel_pid: channel_pid}} = result
+      assert [{^channel_pid, _}] = Registry.lookup(Realtime.Registry, key)
+
+      :ok = GenServer.stop(channel_pid)
+      wait!(Registry.lookup(Realtime.Registry, key) == [], timeout: 1_000, interval: 10)
+
+      {result, _log} = with_log(fn -> subscribe_and_join(socket, "realtime:test2", %{}) end)
+      assert {:ok, _, %Socket{}} = result
+    end
   end
 
   describe "concurrent connection counting" do
