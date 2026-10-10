@@ -516,14 +516,12 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
     end
   end
 
-  # Regression guard for REAL-981: Phoenix 1.8.3 started dropping any channel
-  # push whose join_ref didn't match the one recorded at join time
-  # (and didn't tolerate a missing one either)
-  #  We run a fork with that check reverted, these tests fail if the fork's fix regresses
-  # or Phoenix is ever bumped back to stock behavior without it.
-  # We can bump this again after REAL-984
+  # Regression guard for REAL-981: Phoenix 1.8.3 started dropping channel pushes
+  # without a join_ref, which broke SDK clients that omit it. Phoenix 1.8.12 fixed
+  # that (phoenixframework/phoenix#6800); pushes with a stale join_ref are still
+  # dropped by design.
   describe "join_ref leniency" do
-    test "presence track still gets a reply and diff with a stale or missing join_ref", %{
+    test "presence track still gets a reply and diff with a missing join_ref", %{
       tenant: tenant,
       serializer: serializer
     } do
@@ -535,12 +533,6 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
       assert_receive %Message{event: "presence_state", topic: ^topic}, 500
 
-      stale = %{type: "presence", event: "TRACK", payload: %{name: "stale-join-ref"}}
-      send_raw(socket, serializer, topic, "presence", stale, "1001", "some-other-join-ref")
-
-      assert_receive %Message{event: "phx_reply", ref: "1001", payload: %{"status" => "ok"}, topic: ^topic}, 500
-      assert_receive %Message{event: "presence_diff", topic: ^topic}, 500
-
       missing = %{type: "presence", event: "TRACK", payload: %{name: "missing-join-ref"}}
       send_raw(socket, serializer, topic, "presence", missing, "1002", nil)
 
@@ -548,7 +540,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
       assert_receive %Message{event: "presence_diff", topic: ^topic}, 500
     end
 
-    test "acknowledged broadcast still gets a reply with a stale or missing join_ref", %{
+    test "acknowledged broadcast still gets a reply with a missing join_ref", %{
       tenant: tenant,
       serializer: serializer
     } do
@@ -561,10 +553,6 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
 
       broadcast = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
 
-      send_raw(socket, serializer, topic, "broadcast", broadcast, "2001", "some-other-join-ref")
-      assert_receive %Message{event: "phx_reply", ref: "2001", payload: %{"status" => "ok"}, topic: ^topic}, 500
-      assert_receive %Message{event: "broadcast", payload: ^broadcast, topic: ^topic}, 500
-
       send_raw(socket, serializer, topic, "broadcast", broadcast, "2002", nil)
       assert_receive %Message{event: "phx_reply", ref: "2002", payload: %{"status" => "ok"}, topic: ^topic}, 500
       assert_receive %Message{event: "broadcast", payload: ^broadcast, topic: ^topic}, 500
@@ -572,7 +560,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
   end
 
   # Bypasses WebsocketClient's automatic join_ref tracking to simulate a client
-  # pushing with a stale or missing (nil) join_ref after a valid join.
+  # pushing with a missing (nil) join_ref after a valid join.
   defp send_raw(socket, serializer, topic, event, payload, ref, join_ref) do
     msg = %Message{topic: topic, event: event, payload: payload, ref: ref, join_ref: join_ref}
     {:socket_push, :text, chardata} = serializer.encode!(msg)
