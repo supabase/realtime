@@ -163,8 +163,8 @@ That's cheap on the wire per hop, but every node in every region receives every 
 
 [`Forum.Muster`](forum/README.md) (vendored in `forum/`) answers one question: *which nodes hold at least one member of a certain group?* Realtime uses `tenant_id` as the group and the client's `transport_pid` as the member.
 
-- **On join** (`RealtimeChannel.join/3`, flag `use_muster_channel_join`): the channel registers its transport pid (with `tenant_id` as the group) into the region's Muster scope.
-- **On broadcast** (`GenRpcPubSub.broadcast/4`, flag `use_muster_broadcast`): instead of flooding, ask Muster for the tenant's **router** node.
+- **On join** (`RealtimeChannel.join/3`): the channel registers its transport pid (with `tenant_id` as the group) into the region's Muster scope.
+- **On broadcast** (`GenRpcPubSub.broadcast/4`): instead of flooding, ask Muster for the tenant's **router** node.
 
 ```mermaid
 sequenceDiagram
