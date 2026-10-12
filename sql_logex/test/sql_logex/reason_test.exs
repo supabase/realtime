@@ -9,14 +9,14 @@ defmodule SqlLogex.ReasonTest do
     {{:role, "service_role"}, :role},
     {{:role, :other}, :role},
     {{:role, nil}, :role},
-    {:rls_disabled, :table},
-    {:rls_forced, :table},
-    {{:role_not_in_snapshot, "anon"}, :table},
-    {{:bypass_rls, "authenticated"}, :table},
-    {{:missing_grant, "authenticated", :select}, :table},
-    {:unmodelled_policy_role, :policy_role},
+    {:rls_disabled, :setup},
+    {:rls_forced, :setup},
+    {{:role_not_in_snapshot, "anon"}, :setup},
+    {{:bypass_rls, "authenticated"}, :setup},
+    {{:missing_grant, "authenticated", :select}, :setup},
+    {:unmodelled_policy_role, :setup},
+    {:policy_without_expression, :setup},
     {:select_policy_unsupported, :select_policy},
-    {:policy_without_expression, :no_expression},
 
     # the input
     {{:unsupported, {:raises, :invalid_text_representation, "invalid input syntax for type uuid"}}, :raises},
@@ -30,10 +30,10 @@ defmodule SqlLogex.ReasonTest do
     {{:unsupported, :jsonb_number_token}, :input},
 
     # the policy
-    {{:unsupported, {:function, "auth.email", :not_in_snapshot}}, :function_supabase},
-    {{:unsupported, {:function, "realtime.topic", :overloaded}}, :function_supabase},
-    {{:unsupported, {:function, "lower", :not_allowlisted}}, :function_builtin},
-    {{:unsupported, {:function, :other_schema, :not_allowlisted}}, :function_custom},
+    {{:unsupported, {:function, "auth.email", :not_in_snapshot}}, :function},
+    {{:unsupported, {:function, "realtime.topic", :overloaded}}, :function},
+    {{:unsupported, {:function, "lower", :not_allowlisted}}, :function},
+    {{:unsupported, {:function, :other_schema, :not_allowlisted}}, :function},
     {{:unsupported, {:operator, "~~", :text, :text}}, :operator},
     {{:unsupported, {:array_operator, "<", :any}}, :operator},
     {{:unsupported, :regex_not_literal}, :operator},
@@ -52,6 +52,9 @@ defmodule SqlLogex.ReasonTest do
     {{:unsupported, {:unbound_column, "event"}}, :column},
     {{:unsupported, {:unknown_setting, "request.jwt.claim.exp"}}, :setting},
     {{:unsupported, {:unknown_setting, :other}}, :setting},
+    {{:unsupported, {:unparsed, :exists}}, :subquery},
+    {{:unsupported, {:unparsed, :select}}, :subquery},
+    {{:unsupported, {:unparsed, :subquery}}, :subquery},
     {{:unsupported, {:unparsed, :case}}, :unparsed},
     {{:unsupported, {:unparsed, :other}}, :unparsed},
     {{:unsupported, {:unknown_node, :weird}}, :unparsed},
@@ -60,7 +63,6 @@ defmodule SqlLogex.ReasonTest do
     {{:exception, UndefinedFunctionError}, :exception},
     {:something_new, :other},
     {{:unsupported, :something_new}, :other},
-    {{:unsupported, {:function, 1, :not_allowlisted}}, :other},
     {nil, :other}
   ]
 
