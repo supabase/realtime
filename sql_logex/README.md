@@ -6,7 +6,8 @@ policies it can model, and says "ask the database" for everything else.
 Realtime authorizes a join to a private channel by running the tenant's RLS policies on
 `realtime.messages` in the tenant's database. When many clients reconnect at once, that database
 becomes the bottleneck. Many policies only compare the topic, the extension and JWT claims, and
-those can be decided here instead. Nothing in Realtime calls this library yet.
+those can be decided here instead. Realtime runs this library in shadow mode, behind a feature
+flag: its answer is compared with the database's, never used (see "In Realtime").
 
 **The rule:** every answer is either exactly what Postgres decides, or a fallback. A fallback is
 never a guess, it means the caller runs today's database check. The evidence is the differential
@@ -151,6 +152,9 @@ cd sql_logex && mix test          # the library alone, no database
 mix test test/realtime/tenants/sql_logex_differential_test.exs
 SQL_LOGEX_REPORT=1 mix test test/realtime/tenants/sql_logex_differential_test.exs   # coverage report
 mix test test/realtime/tenants/sql_logex_fixtures_test.exs
+
+# the Realtime side: loader, cache, env, shadow mode, metrics
+mix test test/realtime/tenants/sql_logex_{loader,cache,env,shadow}_test.exs test/realtime/monitoring/prom_ex/plugins/sql_logex_test.exs
 ```
 
 - **[test/sql_logex_test.exs](test/sql_logex_test.exs)** is the place to start reading: SQL in,
@@ -169,52 +173,57 @@ mix test test/realtime/tenants/sql_logex_fixtures_test.exs
   (`test/fixtures/pg15`, `pg17`) the way the parser expects. `SQL_LOGEX_WRITE_FIXTURES=1`
   rewrites them.
 
-## Integrating into Realtime's channel authorization
+## In Realtime
 
-Nothing of this exists yet; it is what the integration needs, in order.
+Shadow mode runs the library next to today's database check, behind the feature flag
+`sql_logex_shadow` (off by default, per tenant). The database's answer is always the one used.
+The library's answer is only compared with it, so shadow mode checks the library against real
+policies without risk, but saves no load.
 
-1. **Where.** At the top of `get_read_authorizations/4` and `get_write_authorizations/4` in
-   [lib/realtime/tenants/authorization.ex](../lib/realtime/tenants/authorization.ex), before the
-   rate counter and the RPC to the node that holds the tenant's database connection. A decided
-   join then costs neither the RPC nor the query.
-2. **A snapshot per tenant, per node.** Load the policies on `realtime.messages`, the definitions
-   of `auth.uid()`, `auth.role()`, `auth.jwt()` and `realtime.topic()`, the table's RLS flags and
-   the grants of `anon` and `authenticated`, with `search_path = ''`. The queries are in the
-   differential test (`@policies_query`, `@functions_query`, `@table_query`, `@roles_query`),
-   and its `load_snapshot_input/1` turns their rows into the map `SqlLogex.Snapshot.new/1`
-   takes. Build the snapshot once and cache it: it parses and resolves every policy, about
-   0.6 ms for five policies (measured locally). The loader also has to rule out what "Not done"
-   lists.
-3. **An env per join**, from the `%Authorization{}` struct, with the exact strings
-   `set_conn_config/2` and `authorize/5` send to Postgres:
+- **Where.** In [lib/realtime/tenants/authorization.ex](../lib/realtime/tenants/authorization.ex),
+  `get_read_authorizations/4` and `get_write_authorizations/4` call
+  `Realtime.Tenants.SqlLogexShadow` after the database check. That is on the node holding the
+  tenant's database connection, after the RPC to it. So the cache only ever lives on that one node.
+- **A snapshot per tenant.** `Realtime.Tenants.SqlLogexLoader` reads, in one transaction with
+  `search_path = ''`:
+  - the policies on `realtime.messages`
+  - the definitions of `auth.uid()`, `auth.role()`, `auth.jwt()` and `realtime.topic()`
+  - the table's RLS flags
+  - the grants and `BYPASSRLS` of `anon` and `authenticated`
 
-   ```elixir
-   settings = %{
-     "role" => auth.role,
-     "realtime.topic" => auth.topic,
-     "request.jwt.claims" => Jason.encode!(auth.claims),
-     "request.jwt.claim.sub" => auth.sub,
-     "request.jwt.claim.role" => auth.role,
-     "request.headers" => auth.headers |> Map.new() |> Jason.encode!()
-   }
+  It asks the pool with `queue: false`, so a busy pool means no snapshot rather than a delayed
+  real check.
+- **The cache.** `Realtime.Tenants.SqlLogexCache` keeps the snapshot in Cachex, one cache per node.
+  - It loads on the first check that needs it.
+  - It doesn't cache a failed load.
+  - Entries expire after `SQL_LOGEX_SNAPSHOT_CACHE_EXPIRATION_IN_MS` (5 minutes by default). That
+    is also how long a policy change takes to show.
+- **An env per check.** `Realtime.Tenants.SqlLogexEnv` builds it from the `%Authorization{}`
+  struct, with the exact strings `set_conn_config/2` and `authorize/5` send to Postgres.
+- **One decision per extension.** The probe row's `extension` differs, so a read is decided for
+  each extension `get_read_authorizations/4` checks (`broadcast`, and `presence` when presence is
+  enabled), and a write for the one extension asked. `SqlLogex.decide/3` takes about 11 µs for
+  the user-channel policies (measured locally).
+- **What it records.** All of this runs in a detached task, so it can't slow down or fail the real
+  check.
+  - Every decision emits `[:realtime, :tenants, :sql_logex, :shadow, :read | :write]` with an
+    outcome: `:match`, `:mismatch`, `:fallback`, or `:no_real_answer` when the database check
+    errored. Every mismatch is also logged as a warning.
+  - `:unavailable` means no snapshot could be loaded. `:exception` means deciding raised.
+  - `:timing` covers the whole shadow check, the cache lookup included.
+  - `Realtime.PromEx.Plugins.SqlLogex` turns these into per-tenant metrics.
 
-   env = SqlLogex.Env.new(settings, %{"topic" => {:text, auth.topic}, "extension" => {:text, "broadcast"}})
-   ```
-4. **One decision per extension.** The probe row's `extension` differs, so a read is decided for
-   each extension `get_read_authorizations/4` checks (`broadcast`, and `presence` when presence
-   is enabled), and a write for the one extension asked. `SqlLogex.decide/3` takes about 11 µs
-   for the user-channel policies (measured locally).
-5. **Using the answer.** `:allow` and `:deny` fill the `Policies` struct. Any `{:fallback, _}`
-   means today's check; the simplest rule is to fall back for the whole call if any extension
-   does.
-6. **Shadow mode first, then enforce.** In shadow mode the library runs next to today's check in
-   production, but the database's answer is always the one used. The two are compared, and
-   telemetry records how often the library decided, whether it agreed (logging every
-   mismatch), and how long each took. This checks the library against every tenant's real
-   policies without risk, but saves no load, since the database is still asked every time.
-   Enforce mode then uses the library's answer whenever it decided, and asks the database only
-   on a fallback. The open decisions below (the write coupling of `realtime.authorize`, a
-   missing partition) need answers before enforcing.
+**Enforce mode** is not built. It would use the library's answer whenever it decided, and ask the
+database only on a fallback:
+
+- `:allow` and `:deny` fill the `Policies` struct. The simplest rule is to fall back for the whole
+  call if any extension does.
+- The snapshot has to be ready before a burst of reconnects arrives, and a join must never wait for
+  a load. So it is loaded when the tenant's database connection starts (`Realtime.Tenants.Connect`),
+  without delaying "ready", instead of on the first join.
+- A fingerprint of everything the snapshot reads (policies, function definitions, settings) is
+  polled every few minutes, and the snapshot reloads only when the fingerprint changes.
+- The loader rules out what "Not done" lists, and the open decisions below need answers.
 
 ## Status
 
@@ -228,32 +237,34 @@ Nothing of this exists yet; it is what the integration needs, in order.
   - A user-channel policy set (`topic = 'user:' || auth.uid()`, plus a literal `~*` policy):
     800 of 816 `authenticated` joins with a uuid `sub` and an ASCII topic are decided. The rest
     have `\u0000` in a claim, which supabase/auth's `auth.uid()` reads.
+  - Postgres 14 and 15 give the same coverage, also with 0 mismatches (checked locally).
+- Shadow mode in Realtime: loader, cache, env, the comparison and its metrics (see "In Realtime").
 
 ### Not done
 
-- **Integration.** No loader, no cache, no shadow mode, no enforcement. See "Integrating into
-  Realtime's channel authorization" for what it needs.
+- **Enforce mode.** See "In Realtime" for what it needs.
+- **What shadow mode records:**
+  - It doesn't record why the library fell back, so it can't show yet which constructs cost
+    coverage.
+  - It counts a database check that raised as "no real answer", not as a mismatch. A decided
+    answer where Postgres raised should count as a mismatch, as it does in the differential test.
 - **Role membership.** Policies match roles by inherited membership. The snapshot doesn't record
-  memberships between `anon`, `authenticated` and `service_role`, so a tenant that runs
+  memberships between `anon`, `authenticated` and `service_role`. So a tenant that runs
   `GRANT anon TO authenticated` gets a wrong answer for a policy `TO anon`. The loader has to check
-  for that (`pg_has_role`) and fall back.
-- **Other things the loader has to rule out:** database- or role-level defaults
-  (`pg_db_role_setting`) for the settings the policies read or for `search_path`, revoked `EXECUTE`
-  on the inlined functions or `USAGE` on `auth`/`realtime`, and user triggers on
-  `realtime.messages`.
-- **Policy changes.** Nothing notices them yet.
+  for that (`pg_has_role`) and fall back. Shadow mode doesn't need it: such a case shows up as a
+  mismatch.
+- **Other things the loader has to rule out before enforcing:**
+  - database- or role-level defaults (`pg_db_role_setting`) for the settings the policies read or
+    for `search_path`
+  - revoked `EXECUTE` on the inlined functions, or revoked `USAGE` on `auth`/`realtime`
+  - user triggers on `realtime.messages`
+- **Policy changes.** Only the cache's expiry notices them, after up to 5 minutes.
 - No CI job runs the library's own tests yet (only the Realtime suite runs the differential test).
 
 ### Planned, or maybe
 
-- A per-tenant loader and cache that loads a tenant's snapshot once per node, not once per join,
-  with a cheap fingerprint poll (policies and function definitions) to notice changes. After a
-  deploy every node starts with a cold cache, so a burst of joins must trigger one load, not one
-  per join.
-- A shadow mode before the RPC in `get_read_authorizations`/`get_write_authorizations`, behind a
-  feature flag: the database check stays the answer, the library is compared with it, and
-  telemetry records coverage, mismatches and timing (the Scientist pattern).
-- Then an enforce mode, which uses a decided answer and falls back otherwise.
+- Enforce mode, with the snapshot loaded when the tenant's database connection starts and a
+  fingerprint poll to notice changes (see "In Realtime").
 - **Reading function bodies instead of recognising them.** Today `SqlLogex.Catalog` only inlines
   the few bodies of `auth.uid()`, `auth.role()`, `auth.jwt()` and `realtime.topic()` that
   Supabase ships, matched by exact text, because the parser can't read a raw body from `pg_proc`.
@@ -301,4 +312,9 @@ Nothing of this exists yet; it is what the integration needs, in order.
   transaction path doesn't do that. `decide(:write)` falls back where that could happen (see
   `SqlLogex.PolicySet`). Fix it in a migration, or keep it.
 - **A missing daily partition** makes today's database check fail, where this library would
-  decide. Which answer wins is decided when integrating.
+  decide. Which answer wins has to be decided before enforcing.
+- **Where enforce mode decides.** There are two options:
+  - On the node holding the tenant's database connection, where shadow mode runs. That saves the
+    query, but not the RPC.
+  - On the node the client is connected to, before the RPC. That saves both, but needs a snapshot
+    on every node with clients of that tenant.
