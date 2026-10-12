@@ -7,6 +7,11 @@ defmodule Realtime.Tenants.SqlLogexFixturesTest do
   #   POSTGRES_IMAGE=supabase/postgres:15.19.0.004 SQL_LOGEX_WRITE_FIXTURES=1 mix test test/realtime/tenants/sql_logex_fixtures_test.exs
   use Realtime.DataCase, async: true
 
+  # Skipped below 15: the capture query reads pg_database.datlocprovider, which PG15 added. The
+  # differential test checks the evaluator against PG14 itself, and pg15 and pg17 deparse the
+  # same, so a pg14 fixture would add little.
+  @moduletag :requires_pg_150000
+
   alias Realtime.Database
 
   @fixtures_dir Path.expand("../../../sql_logex/test/fixtures", __DIR__)
