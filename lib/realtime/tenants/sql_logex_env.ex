@@ -5,8 +5,9 @@ defmodule Realtime.Tenants.SqlLogexEnv do
 
   The settings map matches `Realtime.Tenants.Authorization.set_conn_config/2` byte-for-byte: the same
   `Jason.encode` on `claims` and on the header map, and the same `role` value used for both `"role"`
-  and `"request.jwt.claim.role"` (`authorization.ex:370-382`). Anything else would make a shadow-mode
-  mismatch meaningless, since it would be comparing against an input Postgres never actually saw.
+  and `"request.jwt.claim.role"` (`authorization.ex`, `set_conn_config/2`). Anything else would make a
+  shadow-mode mismatch meaningless, since it would be comparing against an input Postgres never
+  actually saw.
   """
 
   alias Realtime.Tenants.Authorization
