@@ -1598,8 +1598,9 @@ defmodule Realtime.Tenants.SqlLogexDifferentialTest do
   defp generator_scenarios do
     generators = fn names, params -> SqlLogexPolicies.generator_statements(names, params) end
 
+    # OR REPLACE: tenant databases are reused across tests, and Generators.create_rls_policies/3 leaves it behind
     broken_setup = [
-      "CREATE FUNCTION public.test_log_error() RETURNS boolean AS $$ BEGIN RAISE EXCEPTION 'test error'; END $$ LANGUAGE plpgsql"
+      "CREATE OR REPLACE FUNCTION public.test_log_error() RETURNS boolean AS $$ BEGIN RAISE EXCEPTION 'test error'; END $$ LANGUAGE plpgsql"
     ]
 
     topic_specific =
