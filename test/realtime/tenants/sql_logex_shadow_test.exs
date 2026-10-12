@@ -53,6 +53,10 @@ defmodule Realtime.Tenants.SqlLogexShadowTest do
     })
   end
 
+  # What Authorization's handle_policies_result/2 returns for any Postgrex.Error from the check.
+  defp policy_error(code, pg_code, message),
+    do: {:error, :rls_policy_error, %Postgrex.Error{postgres: %{code: code, pg_code: pg_code, message: message}}}
+
   defp attach(event) do
     ref = make_ref()
     test_pid = self()
@@ -170,6 +174,62 @@ defmodule Realtime.Tenants.SqlLogexShadowTest do
       assert decision_metadata.outcome == :no_real_answer
       assert decision_metadata.real == nil
       assert decision_metadata.reason == :none
+    end
+
+    test "Postgres raising on the policy is a real answer: decided against it is a mismatch, logged without the message" do
+      tenant_id = unique_tenant_id()
+      expect(FeatureFlags, :enabled?, fn @flag, _tenant_id -> true end)
+      expect(SqlLogexCache, :fetch, fn :fake_conn, _tenant_id -> {:ok, always_allow_snapshot()} end)
+
+      decision_ref = attach(@read_decision)
+      timing_ref = attach(@read_timing)
+      result = policy_error(:invalid_text_representation, "22P02", ~s(invalid input syntax for type uuid: "user_2abc"))
+
+      log =
+        capture_log(fn ->
+          assert :ok = SqlLogexShadow.read(:fake_conn, context(tenant_id: tenant_id), [:broadcast], result)
+          assert_receive {:telemetry, ^timing_ref, _event, _measurements, %{tenant: ^tenant_id}}, 2000
+        end)
+
+      assert_received {:telemetry, ^decision_ref, _event, _measurements, %{tenant: ^tenant_id} = decision_metadata}
+      assert decision_metadata.outcome == :mismatch
+      assert decision_metadata.real == {:error, "22P02"}
+      assert log =~ "SqlLogexShadowMismatch"
+      assert log =~ "22P02"
+      refute log =~ "user_2abc"
+    end
+
+    test "an error that isn't from evaluating the policy stays :no_real_answer" do
+      tenant_id = unique_tenant_id()
+      expect(FeatureFlags, :enabled?, fn @flag, _tenant_id -> true end)
+      expect(SqlLogexCache, :fetch, fn :fake_conn, _tenant_id -> {:ok, always_allow_snapshot()} end)
+
+      decision_ref = attach(@read_decision)
+      timing_ref = attach(@read_timing)
+      result = policy_error(:admin_shutdown, "57P01", "terminating connection due to administrator command")
+
+      assert :ok = SqlLogexShadow.read(:fake_conn, context(tenant_id: tenant_id), [:broadcast], result)
+      assert_receive {:telemetry, ^timing_ref, _event, _measurements, %{tenant: ^tenant_id}}, 2000
+      assert_received {:telemetry, ^decision_ref, _event, _measurements, %{tenant: ^tenant_id} = decision_metadata}
+      assert decision_metadata.outcome == :no_real_answer
+      assert decision_metadata.real == nil
+    end
+
+    test "a fallback against Postgres raising on the policy stays a fallback" do
+      tenant_id = unique_tenant_id()
+      expect(FeatureFlags, :enabled?, fn @flag, _tenant_id -> true end)
+      expect(SqlLogexCache, :fetch, fn :fake_conn, _tenant_id -> {:ok, always_allow_snapshot()} end)
+
+      decision_ref = attach(@read_decision)
+      timing_ref = attach(@read_timing)
+      ctx = context(tenant_id: tenant_id, role: "service_role", claims: %{"role" => "service_role"})
+      result = policy_error(:invalid_text_representation, "22P02", "invalid input syntax for type uuid")
+
+      assert :ok = SqlLogexShadow.read(:fake_conn, ctx, [:broadcast], result)
+      assert_receive {:telemetry, ^timing_ref, _event, _measurements, %{tenant: ^tenant_id}}, 2000
+      assert_received {:telemetry, ^decision_ref, _event, _measurements, %{tenant: ^tenant_id} = decision_metadata}
+      assert decision_metadata.outcome == :fallback
+      assert decision_metadata.real == {:error, "22P02"}
     end
 
     test "snapshot unavailable: records :unavailable, still emits timing, never raises" do
