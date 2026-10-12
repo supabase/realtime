@@ -14,6 +14,7 @@ on:
       - "native/**"
       - "dev/**"
       - "mix.exs"
+      - "sql_logex/**"
       - "compose.dbs.yml"
       - "compose.realtime-db.yml"
       - "compose.tenant-db.yml"
