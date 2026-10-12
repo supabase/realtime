@@ -25,8 +25,10 @@ defmodule SqlLogex.PolicySet do
     * the result is unsupported (`{:unsupported, reason}`)
     * anything raises (`{:exception, exception_module}`)
 
-  Fallback reasons never contain policy text, names from the tenant's schemas (policies, roles,
-  functions, types, settings) or input values, so they can be logged and used as metric tags.
+  Fallback reasons never contain policy text, policy or role names, names from the tenant's own
+  schemas (functions, types, settings) or input values, so they can be logged and used as metric
+  tags. Names in `auth` and `realtime`, and settings starting with `request.` or `realtime.`, are
+  kept: those are Supabase's namespaces, even for a function a tenant created there.
 
   ## Which policies, which expressions
 

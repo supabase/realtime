@@ -70,10 +70,12 @@ Steps 1 and 2 run once per snapshot, so a decision is only step 3 and 4.
 Where Postgres raises for an input (a `sub` that isn't a uuid, claims with `\u0000`, ...), the
 reason is `{:unsupported, {:raises, sqlstate, detail}}`: a fallback, and the database raises too.
 
-Fallback reasons never contain policy text, names from the tenant's schemas or input values, so
-they can be logged. A function or type outside `pg_catalog`, `auth` and `realtime` is
-`:other_schema`, a policy's unparsed part is only its first keyword (or `:subquery`), and policy
-names aren't in any reason.
+Fallback reasons never contain policy text, policy or role names, names from the tenant's own
+schemas or input values, so they can be logged. A function or type outside `pg_catalog`, `auth`
+and `realtime` is `:other_schema`, and a policy's unparsed part is only its first keyword (or
+`:subquery`). Names in `auth` and `realtime`, and setting names starting with `request.` or
+`realtime.`, are kept on purpose: those are Supabase's namespaces, even for a function a tenant
+created there.
 
 ## What it supports
 
