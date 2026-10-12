@@ -72,8 +72,8 @@ reason is `{:unsupported, {:raises, sqlstate, detail}}`: a fallback, and the dat
 
 Fallback reasons never contain policy text, names from the tenant's schemas or input values, so
 they can be logged. A function or type outside `pg_catalog`, `auth` and `realtime` is
-`:other_schema`, a policy's unparsed part is only its first keyword, and policy names aren't in
-any reason.
+`:other_schema`, a policy's unparsed part is only its first keyword (or `:subquery`), and policy
+names aren't in any reason.
 
 ## What it supports
 
@@ -215,7 +215,7 @@ policies without risk, but saves no load.
     outcome: `:match`, `:mismatch`, `:fallback`, or `:no_real_answer` when the database check
     errored. Every mismatch is also logged as a warning.
   - The same metadata has a `reason` tag: for a `:fallback`, the category of why it fell back
-    (`SqlLogex.Reason.category/1`, a small fixed set like `:role`, `:function_custom` or
+    (`SqlLogex.Reason.category/1`, a small fixed set like `:role`, `:function` or
     `:operator`), `:none` for the other outcomes. So the metrics show which kinds of constructs
     cost coverage.
   - `:unavailable` means no snapshot could be loaded. `:exception` means deciding raised.

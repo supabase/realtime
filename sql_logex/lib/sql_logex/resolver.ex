@@ -16,7 +16,8 @@ defmodule SqlLogex.Resolver do
   it was, not which.
 
     * `{:unparsed, keyword}`: the parser couldn't read this part. `keyword` is `:case`, `:exists`,
-      `:select`, `:array`, `:row` or `:not` if the text starts with it, else `:other`
+      `:select`, `:array`, `:row` or `:not` if the text starts with it, else `:subquery` if it
+      contains a `SELECT` (`topic IN ( SELECT ...)`), else `:other`
     * `{:operator, op, left_type, right_type}`, `{:cast, from_type, to_type}`, `{:nullif, left_type,
       right_type}`: no binding for these types. A type is its name if it is unqualified (a
       `pg_catalog` one) or in `auth` or `realtime`, else `:other_schema`
@@ -209,8 +210,9 @@ defmodule SqlLogex.Resolver do
 
   # Reasons are logged, so they must not carry what the tenant wrote. These keep the kind of thing.
 
-  # The words Postgres prints at the start of what the parser can't read. Anything else, including
-  # quoted identifiers, is `:other`.
+  # The words Postgres prints at the start of what the parser can't read. Anything else is
+  # `:subquery` if it has a SELECT in it, like `topic IN ( SELECT ...)`, and otherwise `:other`,
+  # quoted identifiers included.
   @unparsed_keywords %{
     "case" => :case,
     "exists" => :exists,
@@ -221,9 +223,11 @@ defmodule SqlLogex.Resolver do
   }
 
   defp unparsed_keyword(raw) do
-    case Regex.run(~r/\A[\s(]*([a-z]+)\b/i, raw) do
-      [_, word] -> Map.get(@unparsed_keywords, String.downcase(word), :other)
-      nil -> :other
+    with [_, word] <- Regex.run(~r/\A[\s(]*([a-z]+)\b/i, raw),
+         {:ok, keyword} <- Map.fetch(@unparsed_keywords, String.downcase(word)) do
+      keyword
+    else
+      _ -> if Regex.match?(~r/\bselect\b/i, raw), do: :subquery, else: :other
     end
   end
 
