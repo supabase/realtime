@@ -65,6 +65,14 @@ defmodule SqlLogex.ResolverTest do
       end
     end
 
+    test "unparsed text with a SELECT further in is a subquery" do
+      # How Postgres 17 prints `topic IN (SELECT l.topic FROM public.lookup l)` with search_path = ''
+      assert resolve({:unsupported, "(topic IN ( SELECT l.topic\n   FROM public.lookup l))"}) ==
+               unsupported({:unparsed, :subquery})
+
+      assert resolve({:unsupported, "(topic ~~ 'selected%'::text)"}) == unsupported({:unparsed, :other})
+    end
+
     test "an unknown node is unsupported rather than a crash, with its tag only" do
       assert resolve({:weird, 1}) == unsupported({:unknown_node, :weird})
       assert resolve({:weird, "customer text", {:nested, 2}}) == unsupported({:unknown_node, :weird})
