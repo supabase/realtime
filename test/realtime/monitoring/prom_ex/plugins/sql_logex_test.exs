@@ -9,6 +9,7 @@ defmodule Realtime.PromEx.Plugins.SqlLogexTest do
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
+  alias Realtime.Tenants.Authorization.Policies.PresencePolicies
   alias Realtime.Tenants.SqlLogexCache
   alias Realtime.Tenants.SqlLogexShadow
 
@@ -58,11 +59,33 @@ defmodule Realtime.PromEx.Plugins.SqlLogexTest do
 
     assert_eventually metric_value("realtime_tenants_sql_logex_shadow_read_decisions_total",
                         tenant: tenant_id,
-                        outcome: "match"
+                        outcome: "match",
+                        extension: "broadcast"
                       ) == 1
 
     assert_eventually metric_value("realtime_tenants_sql_logex_shadow_read_shadow_duration_count", tenant: tenant_id) ==
                         1
+  end
+
+  test "broadcast and presence decisions are counted as separate series" do
+    tenant_id = random_string()
+    expect(FeatureFlags, :enabled?, fn "sql_logex_shadow", ^tenant_id -> true end)
+    expect(SqlLogexCache, :fetch, fn :fake_conn, ^tenant_id -> {:ok, always_allow_snapshot()} end)
+
+    result = {:ok, %Policies{broadcast: %BroadcastPolicies{read: true}, presence: %PresencePolicies{read: false}}}
+    assert :ok = SqlLogexShadow.read(:fake_conn, context(tenant_id), [:broadcast, :presence], result)
+
+    assert_eventually metric_value("realtime_tenants_sql_logex_shadow_read_decisions_total",
+                        tenant: tenant_id,
+                        outcome: "match",
+                        extension: "broadcast"
+                      ) == 1
+
+    assert_eventually metric_value("realtime_tenants_sql_logex_shadow_read_decisions_total",
+                        tenant: tenant_id,
+                        outcome: "mismatch",
+                        extension: "presence"
+                      ) == 1
   end
 
   test "counts an unavailable snapshot" do

@@ -5,8 +5,8 @@ defmodule Realtime.PromEx.Plugins.SqlLogex do
   flag — expect these to read as zero/absent until it's enabled for a tenant.
 
   `decisions_total` (counter): how often a decision matched, mismatched, fell back, or had no real
-  answer to compare against (`outcome` tag). `shadow_duration` (distribution): what deciding locally
-  would have cost. Compare it against the existing
+  answer to compare against (`outcome` and `extension` tags). `shadow_duration` (distribution): what
+  deciding locally would have cost. Compare it against the existing
   `realtime_tenants_read_authorization_check`/`write_authorization_check` distributions for what the
   real check actually costs, rather than duplicating that measurement here — note those are
   millisecond-bucketed (DB round trips) while this one is microsecond-bucketed: a decision on a warm
@@ -35,8 +35,8 @@ defmodule Realtime.PromEx.Plugins.SqlLogex do
           counter(
             event ++ [:decisions, :total],
             event_name: event,
-            description: "Count of sql_logex shadow #{operation} decisions, by outcome.",
-            tags: [:tenant, :outcome]
+            description: "Count of sql_logex shadow #{operation} decisions, by outcome and extension.",
+            tags: [:tenant, :outcome, :extension]
           ),
           counter(
             event ++ [:unavailable, :total],
@@ -50,7 +50,7 @@ defmodule Realtime.PromEx.Plugins.SqlLogex do
             description:
               "Count of sql_logex shadow #{operation} checks that raised. Should stay at zero; everything " <>
                 "upstream of this is supposed to return a tagged result instead of raising.",
-            tags: [:tenant]
+            tags: [:tenant, :extension]
           ),
           distribution(
             event ++ [:shadow_duration],
