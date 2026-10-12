@@ -34,6 +34,8 @@
 # Mix artifacts
 /_build/
 /deps/
+/sql_logex/_build/
+/sql_logex/deps/
 *.ez
 
 # Generated on crash by the VM
