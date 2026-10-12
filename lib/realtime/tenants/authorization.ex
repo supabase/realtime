@@ -22,6 +22,7 @@ defmodule Realtime.Tenants.Authorization do
   alias Realtime.GenRpc
   alias Realtime.Tenants.Repo
   alias Realtime.Tenants.Authorization.Policies
+  alias Realtime.Tenants.SqlLogexShadow
 
   defstruct [:tenant_id, :topic, :headers, :jwt, :claims, :role, :sub]
 
@@ -78,9 +79,14 @@ defmodule Realtime.Tenants.Authorization do
     rate_counter = rate_counter(authorization_context.tenant_id)
 
     if rate_counter.limit.triggered == false do
-      db_conn
-      |> get_read_policies_for_connection(authorization_context, policies, opts)
-      |> handle_policies_result(rate_counter)
+      result =
+        db_conn
+        |> get_read_policies_for_connection(authorization_context, policies, opts)
+        |> handle_policies_result(rate_counter)
+
+      SqlLogexShadow.read(db_conn, authorization_context, extensions_to_check(opts), result)
+
+      result
     else
       {:error, :increase_connection_pool}
     end
@@ -132,9 +138,14 @@ defmodule Realtime.Tenants.Authorization do
     rate_counter = rate_counter(authorization_context.tenant_id)
 
     if rate_counter.limit.triggered == false do
-      db_conn
-      |> get_write_policies_for_connection(authorization_context, policies, extension)
-      |> handle_policies_result(rate_counter)
+      result =
+        db_conn
+        |> get_write_policies_for_connection(authorization_context, policies, extension)
+        |> handle_policies_result(rate_counter)
+
+      SqlLogexShadow.write(db_conn, authorization_context, [extension], result)
+
+      result
     else
       {:error, :increase_connection_pool}
     end

@@ -292,9 +292,14 @@ defmodule Realtime.Tenants.AuthorizationFunctionTest do
     end
   end
 
-  # Each Authorization check looks the flag up once
+  # Each Authorization check looks up "use_authorize_function" once, and (since
+  # Realtime.Tenants.SqlLogexShadow's hook) "sql_logex_shadow" once as well — always off here, it's
+  # not what this file tests.
   defp use_authorize_function(enabled?, checks \\ 1) do
-    expect(FeatureFlags, :enabled?, checks, fn "use_authorize_function", _tenant_id -> enabled? end)
+    expect(FeatureFlags, :enabled?, checks * 2, fn
+      "use_authorize_function", _tenant_id -> enabled?
+      "sql_logex_shadow", _tenant_id -> false
+    end)
   end
 
   defp fail_function_with(error, checks \\ 1),
