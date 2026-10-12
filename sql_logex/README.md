@@ -252,7 +252,7 @@ database only on a fallback:
   everything in "What it supports".
 - Measured against Postgres 17 (`supabase/postgres:17.11`) by the differential test, 0 mismatches:
   - Level 1, expressions: 4018 cases, 2714 decided, 1304 fall back.
-  - Level 2, `decide/3` vs `realtime.authorize`: 4308 cases, 3048 decided, 1260 fall back.
+  - Level 2, `decide/3` vs `realtime.authorize`: 4308 cases, 2872 decided, 1436 fall back.
   - A user-channel policy set (`topic = 'user:' || auth.uid()`, plus a literal `~*` policy):
     800 of 816 `authenticated` joins with a uuid `sub` and an ASCII topic are decided. The rest
     have `\u0000` in a claim, which supabase/auth's `auth.uid()` reads.
