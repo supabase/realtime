@@ -461,7 +461,7 @@ defmodule SqlLogex.ValueTest do
 
     test "does not fold non-ASCII letters" do
       assert Value.current_setting(%{"café.x" => "v"}, "café.x") == t("v")
-      assert Value.current_setting(%{"café.x" => "v"}, "CAFÉ.X") == {:unsupported, {:unknown_setting, "CAFÉ.X"}}
+      assert Value.current_setting(%{"café.x" => "v"}, "CAFÉ.X") == {:unsupported, {:unknown_setting, :other}}
     end
 
     test "a setting reset with set_config(name, NULL) is the empty string, never NULL" do
@@ -473,15 +473,17 @@ defmodule SqlLogex.ValueTest do
       assert Value.current_setting(@settings, "request.jwt.claim.sub") == t("")
     end
 
-    test "an unknown name is unsupported and keeps the name as given" do
-      assert Value.current_setting(@settings, "app.unknown") == {:unsupported, {:unknown_setting, "app.unknown"}}
-      assert Value.current_setting(@settings, "App.Unknown") == {:unsupported, {:unknown_setting, "App.Unknown"}}
+    test "an unknown name is unsupported, named only if it is one of the supabase prefixes" do
+      assert Value.current_setting(@settings, "app.unknown") == {:unsupported, {:unknown_setting, :other}}
+      assert Value.current_setting(@settings, "App.Unknown") == {:unsupported, {:unknown_setting, :other}}
+      assert Value.current_setting(@settings, "") == {:unsupported, {:unknown_setting, :other}}
+      assert Value.current_setting(%{}, "role") == {:unsupported, {:unknown_setting, :other}}
 
       assert Value.current_setting(@settings, "realtime.topic ") ==
                {:unsupported, {:unknown_setting, "realtime.topic "}}
 
-      assert Value.current_setting(@settings, "") == {:unsupported, {:unknown_setting, ""}}
-      assert Value.current_setting(%{}, "role") == {:unsupported, {:unknown_setting, "role"}}
+      assert Value.current_setting(@settings, "request.jwt.claim.exp") ==
+               {:unsupported, {:unknown_setting, "request.jwt.claim.exp"}}
     end
 
     test "is strict in the name" do
