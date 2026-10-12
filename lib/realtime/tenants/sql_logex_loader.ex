@@ -5,9 +5,8 @@ defmodule Realtime.Tenants.SqlLogexLoader do
 
   The queries and row-shaping here are the ones proven against real Postgres by
   `test/realtime/tenants/sql_logex_differential_test.exs`: this module is that test's loader, moved
-  out of test code so production code (eventually the shadow-mode hook in
-  `Realtime.Tenants.Authorization`) and the differential test both run the same logic instead of two
-  copies drifting apart.
+  out of test code so production code (`Realtime.Tenants.SqlLogexShadow`) and the differential test
+  both run the same logic instead of two copies drifting apart.
   """
 
   alias Realtime.Database
@@ -45,13 +44,19 @@ defmodule Realtime.Tenants.SqlLogexLoader do
 
   `db_conn` is whatever connection the caller already has for the tenant (the same one
   `Realtime.Tenants.Authorization` uses for the real check) — this module has no opinion on how it
-  was obtained.
+  was obtained. `queue: false`: this is shadow-only work riding on the tenant's connection pool,
+  which can be as small as one connection (`Database.pool_size_by_application_name/2`,
+  `"realtime_connect" -> settings["db_pool"] || 1`) — the same pool the real check needs. Rather than
+  queue for a connection and risk delaying real traffic, a tenant with no connection free right now is
+  just another unavailable snapshot.
   """
   @spec load(DBConnection.conn(), String.t()) :: {:ok, Snapshot.t()} | {:error, term()}
   def load(db_conn, tenant_id) do
     telemetry = [:realtime, :tenants, :sql_logex_snapshot_load]
+    opts = [queue: false, telemetry: telemetry, tenant_id: tenant_id]
+    metadata = [project: tenant_id, external_id: tenant_id, tenant_id: tenant_id]
 
-    case Database.transaction(db_conn, &read/1, telemetry: telemetry, tenant_id: tenant_id) do
+    case Database.transaction(db_conn, &read/1, opts, metadata) do
       {:ok, input} -> {:ok, Snapshot.new(input)}
       {:error, _} = error -> error
     end
