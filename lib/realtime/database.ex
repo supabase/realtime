@@ -306,13 +306,27 @@ defmodule Realtime.Database do
     end
   rescue
     e ->
-      log_error("ErrorExecutingTransaction", e, metadata)
+      log_transaction_error(e, opts, metadata)
       {:error, e}
   catch
     :exit, reason ->
       log_error("ErrorExecutingTransaction", reason, metadata)
       {:error, {:exit, reason}}
   end
+
+  # A connection-unavailable error is the expected cost of passing queue: false, not a bug: the
+  # caller explicitly chose not to wait for one. Worth a lower-severity log (it's exactly the
+  # breadcrumb to find when something's quietly using the fallback too often), but not :error,
+  # which this isn't for a caller who opted into it.
+  defp log_transaction_error(%DBConnection.ConnectionError{} = e, opts, metadata) do
+    if Keyword.get(opts, :queue) == false do
+      log_warning("ErrorExecutingTransaction", e, metadata)
+    else
+      log_error("ErrorExecutingTransaction", e, metadata)
+    end
+  end
+
+  defp log_transaction_error(e, _opts, metadata), do: log_error("ErrorExecutingTransaction", e, metadata)
 
   @doc """
   Runs a single query on a local connection, without the round trips a transaction adds.
