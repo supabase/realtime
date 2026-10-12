@@ -261,8 +261,9 @@ defmodule SqlLogex.PolicySetTest do
       %{name: "the lobby topic", topic: "public:lobby", sub: @uid, expect: @deny},
       %{name: "the lobby topic in upper case", topic: "PUBLIC:LOBBY", sub: @uid, expect: @deny},
       %{name: "the lobby topic inside another one", topic: "xpublic:lobbyy", sub: @uid, expect: @deny},
-      # The send policies have no regex, so a non-ASCII topic is just a topic that isn't the user's
-      %{name: "a non-ASCII topic", topic: "public:lobby:é", sub: @uid, expect: @deny},
+      # The send policies have no regex, but the lobby SELECT policy does, and a write might evaluate
+      # it: a fallback, as for a read
+      %{name: "a non-ASCII topic", topic: "public:lobby:é", sub: @uid, expect: @regex_non_ascii},
       %{name: "an empty topic", topic: "", sub: @uid, expect: @deny},
       %{name: "sub in upper case", topic: "user:#{@uid}", sub: String.upcase(@uid), expect: @allow},
       %{name: "braced sub", topic: "user:#{@uid}", sub: "{#{@uid}}", expect: @allow},
@@ -798,13 +799,16 @@ defmodule SqlLogex.PolicySetTest do
       assert write_with(policies, functions) == @allow
     end
 
-    test "a SELECT policy that raises for this input but is modelled doesn't count", %{functions: functions} do
-      # Measured against Postgres 17: with no probe row to evaluate it for, a write-only call of
-      # realtime.authorize doesn't raise for a policy like this
-      raising = "((auth.uid())::text = 'x'::text)"
+    test "a SELECT policy that raises for this input is a fallback", %{functions: functions} do
+      # Against Postgres 17 a write-only call of realtime.authorize didn't raise for a policy like
+      # this, with no probe row to evaluate it for. Against a Multigres cluster it did.
+      raising = "((realtime.topic() = 'x'::text) AND ((( SELECT auth.uid() AS uid))::text = 'x'::text))"
       policies = [insert_policy(), policy("select", qual: raising)]
 
-      assert write_with(policies, functions, sub: "user_2abc") == @allow
+      assert write_with(policies, functions, sub: "user_2abc") ==
+               {:fallback,
+                {:unsupported, {:raises, :invalid_text_representation, "invalid input syntax for type uuid"}}}
+
       assert write_with(policies, functions) == @allow
     end
 
