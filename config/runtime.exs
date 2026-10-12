@@ -503,6 +503,14 @@ if config_env() == :prod do
     Realtime.Repo.Replica.NorthVirginia => System.get_env("DB_HOST_REPLICA_IAD", db_host),
     Realtime.Repo.Replica.Oregon => System.get_env("DB_HOST_REPLICA_SJC", db_host),
     Realtime.Repo.Replica.SanJose => System.get_env("DB_HOST_REPLICA_SJC", db_host),
+    Realtime.Repo.Replica.Ohio => System.get_env("DB_HOST_REPLICA_CMH", db_host),
+    Realtime.Repo.Replica.Ireland => System.get_env("DB_HOST_REPLICA_DUB", db_host),
+    Realtime.Repo.Replica.Frankfurt => System.get_env("DB_HOST_REPLICA_FRA", db_host),
+    Realtime.Repo.Replica.Stockholm => System.get_env("DB_HOST_REPLICA_ARN", db_host),
+    Realtime.Repo.Replica.SaoPaulo => System.get_env("DB_HOST_REPLICA_GRU", db_host),
+    Realtime.Repo.Replica.Tokyo => System.get_env("DB_HOST_REPLICA_NRT", db_host),
+    Realtime.Repo.Replica.Seoul => System.get_env("DB_HOST_REPLICA_ICN", db_host),
+    Realtime.Repo.Replica.Mumbai => System.get_env("DB_HOST_REPLICA_BOM", db_host),
     Realtime.Repo.Replica.Local => db_host
   }
 
