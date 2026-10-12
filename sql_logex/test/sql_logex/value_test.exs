@@ -140,7 +140,7 @@ defmodule SqlLogex.ValueTest do
   describe "uuid_in/1 accepted forms" do
     test "the canonical form in either case, and mixed" do
       assert Value.uuid_in(t(@uuid_text)) == u()
-      assert Value.uuid_in(t(String.upcase(@uuid_text))) == u()
+      assert @uuid_text |> String.upcase() |> t() |> Value.uuid_in() == u()
       assert Value.uuid_in(t("A0eeBC99-9c0B-4eF8-bB6d-6bB9bD380a11")) == u()
     end
 

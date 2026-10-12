@@ -1036,10 +1036,10 @@ defmodule Realtime.Tenants.SqlLogexDifferentialTest do
     from_jason =
       for value <- values,
           sql <- [
-            "auth.jwt() ->> 'x' = #{lit(String.replace(claim_text(value), <<0>>, ""))}",
+            "auth.jwt() ->> 'x' = #{claim_literal(value)}",
             "auth.jwt() ->> 'x' = 'v'",
             "auth.jwt() ->> 'x' IS NULL",
-            "current_setting('request.jwt.claims', true)::jsonb ->> 'x' = #{lit(String.replace(claim_text(value), <<0>>, ""))}",
+            "current_setting('request.jwt.claims', true)::jsonb ->> 'x' = #{claim_literal(value)}",
             "(select auth.jwt() ->> 'x') = 'v'",
             "(auth.jwt() ->> 'x')::boolean",
             "coalesce((auth.jwt() ->> 'x')::boolean, false)"
@@ -1459,6 +1459,9 @@ defmodule Realtime.Tenants.SqlLogexDifferentialTest do
   defp claim_text(nil), do: "null"
   defp claim_text(value) when is_boolean(value) or is_number(value), do: to_string(value)
   defp claim_text(value), do: Jason.encode!(value)
+
+  # A SQL literal can't hold NUL, so it's dropped
+  defp claim_literal(value), do: value |> claim_text() |> String.replace(<<0>>, "") |> lit()
 
   ## Level 2 scenarios
 
