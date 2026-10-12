@@ -9,9 +9,10 @@ defmodule Realtime.Tenants.SqlLogexShadow do
   ...]`):
 
     * the bare event, one per extension decided: metadata carries `outcome` (`:match`, `:mismatch`,
-      `:fallback` or `:no_real_answer`) and `real`, the boolean (or `nil`) the real check produced for
-      that extension. A `:mismatch` also logs a warning immediately. `:exception` is the same, for the
-      rare case deciding itself raises.
+      `:fallback` or `:no_real_answer`), `real`, the boolean (or `nil`) the real check produced for
+      that extension, and `reason`: for a `:fallback`, the bounded category of why
+      (`SqlLogex.Reason.category/1`), `:none` for every other outcome. A `:mismatch` also logs a warning
+      immediately. `:exception` is the same, for the rare case deciding itself raises.
     * `:unavailable`, when the tenant's snapshot couldn't be loaded at all.
     * `:timing`, once per call: `shadow_duration`, the whole shadow pipeline (cache fetch included), in
       native time units. Compare against the real check's own cost via the existing
@@ -97,7 +98,7 @@ defmodule Realtime.Tenants.SqlLogexShadow do
           {:error, reason} -> {:fallback, reason}
         end
 
-      outcome_metadata = Map.merge(metadata, %{outcome: tag(outcome), real: real})
+      outcome_metadata = Map.merge(metadata, %{outcome: tag(outcome), real: real, reason: reason(outcome)})
       Telemetry.execute(check.event, %{}, outcome_metadata)
 
       case outcome do
@@ -137,6 +138,9 @@ defmodule Realtime.Tenants.SqlLogexShadow do
   defp tag({:mismatch, _, _}), do: :mismatch
   defp tag({:fallback, _}), do: :fallback
   defp tag({:no_real_answer, _}), do: :no_real_answer
+
+  defp reason({:fallback, reason}), do: SqlLogex.Reason.category(reason)
+  defp reason(_outcome), do: :none
 
   # Mirrors Realtime.Tenants.Authorization's own update_write_policy/3 mapping, as a getter.
   defp real_read({:ok, %Policies{broadcast: %{read: v}}}, :broadcast), do: v
