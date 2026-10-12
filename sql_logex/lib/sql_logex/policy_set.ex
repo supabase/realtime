@@ -20,7 +20,8 @@ defmodule SqlLogex.PolicySet do
       `service_role` (`:unmodelled_policy_role`). Policies match by inherited role membership,
       which isn't modelled
     * for a write, a `SELECT` or `ALL` policy that might apply to the role has no `USING`
-      expression, or one that isn't fully modelled: `:select_policy_unsupported`. See below
+      expression, or one that isn't fully modelled: `:select_policy_unsupported`. Or it is
+      unsupported for this input, raising included: `{:unsupported, reason}`. See below
     * an applicable policy lacks the expression to evaluate (`:policy_without_expression`)
     * the result is unsupported (`{:unsupported, reason}`)
     * anything raises (`{:exception, exception_module}`)
@@ -49,7 +50,9 @@ defmodule SqlLogex.PolicySet do
   `SELECT` (42501), when a `SELECT` policy reads `realtime.messages` itself (42P17), and when a
   `SELECT` policy has a constant that raises, like `1 / 0` (22012), whatever the `INSERT` policies
   say. A `SELECT` policy that only raises when it is evaluated for a row, like the cast of a sub
-  that isn't a uuid, did not fail a write-only call, as there is no row to evaluate it for.
+  that isn't a uuid, did not fail a write-only call there, as there is no row to evaluate it for.
+  Against a Multigres cluster it did, for `realtime.topic() = 't1' AND (SELECT auth.uid())::text =
+  '...'`: whether the plan evaluates it anyway depends on more than the policy.
 
   So a write falls back where the function raises, even though only `INSERT` matters for
   the decision. This is conservative: it is not what the transaction path
@@ -58,10 +61,11 @@ defmodule SqlLogex.PolicySet do
   where Postgres would decide. A write falls back with `{:missing_grant, role, :select}` if the
   role lacks `SELECT`, and with `:select_policy_unsupported` if a `SELECT` or `ALL` policy
   that might apply has no `USING` or has one with an unsupported node anywhere in it
-  (`SqlLogex.IR.supported?/1`). That is decided from the tree alone: the policy is not evaluated,
-  and what the planner folds isn't modelled, so an expression we can't read is one that might
-  fail. A policy that might apply is one for `public`, for the role, or for a role we don't
-  model, as those apply by membership.
+  (`SqlLogex.IR.supported?/1`). That is decided from the tree alone: what the planner folds isn't
+  modelled, so an expression we can't read is one that might fail. A policy we can read is then
+  evaluated with the write's row, and falls back with `{:unsupported, reason}` if that is
+  unsupported, raising included, as the plan might evaluate it. A policy that might apply is one
+  for `public`, for the role, or for a role we don't model, as those apply by membership.
 
   ## Combining
 
@@ -103,7 +107,7 @@ defmodule SqlLogex.PolicySet do
          :ok <- check_snapshot(snapshot, role, operation),
          policies = Enum.filter(snapshot.policies, &(&1.cmd in commands(operation))),
          :ok <- check_policy_roles(policies),
-         :ok <- check_select_policies(snapshot, role, operation),
+         :ok <- check_select_policies(snapshot, env, role, operation),
          {permissive, restrictive} = policies |> Enum.filter(&applies_to?(&1, role)) |> Enum.split_with(& &1.permissive),
          {:ok, permissive} <- expressions(permissive, operation),
          {:ok, restrictive} <- expressions(restrictive, operation) do
@@ -156,18 +160,29 @@ defmodule SqlLogex.PolicySet do
     do: applies_to?(policy, role) or roles -- @modelled_roles != []
 
   # The read statement of realtime.authorize, planned by every write. See the moduledoc.
-  defp check_select_policies(_snapshot, _role, :read), do: :ok
+  defp check_select_policies(_snapshot, _env, _role, :read), do: :ok
 
-  defp check_select_policies(snapshot, role, :write) do
+  defp check_select_policies(snapshot, env, role, :write) do
     snapshot.policies
     |> Enum.filter(&(&1.cmd in commands(:read) and may_apply_to?(&1, role)))
-    |> Enum.find_value(:ok, fn policy ->
-      if modelled?(policy.using), do: nil, else: {:fallback, :select_policy_unsupported}
-    end)
+    |> Enum.find_value(:ok, &select_policy_fallback(&1.using, env))
   end
 
-  defp modelled?({ir, _type}), do: IR.supported?(ir)
-  defp modelled?(nil), do: false
+  # A SELECT policy we can't read might fail the statement. One we can read is evaluated with the
+  # write's row: whether the plan evaluates it for a write-only call isn't modelled, so one that is
+  # unsupported for this input, raising included, is a fallback too.
+  defp select_policy_fallback(nil, _env), do: {:fallback, :select_policy_unsupported}
+
+  defp select_policy_fallback({ir, type}, env) do
+    if IR.supported?(ir) do
+      case Eval.eval(boolean(ir, type), env) do
+        {:unsupported, reason} -> {:fallback, {:unsupported, reason}}
+        _result -> nil
+      end
+    else
+      {:fallback, :select_policy_unsupported}
+    end
+  end
 
   # The IR to evaluate for each policy, or a fallback for the first one that has none.
   defp expressions(policies, operation), do: expressions(policies, operation, [])
