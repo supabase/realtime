@@ -9,20 +9,24 @@ defmodule SqlLogex.PolicySet do
 
   These are the things this library doesn't model, checked first, in this order:
 
-    * the role (`env.settings["role"]`) is not `anon` or `authenticated`: `{:role, role}`
+    * the role (`env.settings["role"]`) is not `anon` or `authenticated`: `{:role, role}`, with
+      `:other` for a role that isn't `service_role`, `postgres` or `supabase_admin`
     * RLS is off (`:rls_disabled`) or forced (`:rls_forced`), or the role isn't in the snapshot
       (`{:role_not_in_snapshot, role}`)
     * the role bypasses RLS (`{:bypass_rls, role}`) or lacks a privilege the operation needs
       (`{:missing_grant, role, :select | :insert}`): `select` for a read, `insert` and `select`
       for a write (see below)
     * a policy of the right command names a role other than `public`, `anon`, `authenticated` or
-      `service_role` (`{:unmodelled_policy_role, policy, role}`). Policies match by inherited role
-      membership, which isn't modelled
+      `service_role` (`:unmodelled_policy_role`). Policies match by inherited role membership,
+      which isn't modelled
     * for a write, a `SELECT` or `ALL` policy that might apply to the role has no `USING`
-      expression, or one that isn't fully modelled: `{:select_policy_unsupported, name}`. See below
-    * an applicable policy lacks the expression to evaluate (`{:policy_without_expression, name}`)
+      expression, or one that isn't fully modelled: `:select_policy_unsupported`. See below
+    * an applicable policy lacks the expression to evaluate (`:policy_without_expression`)
     * the result is unsupported (`{:unsupported, reason}`)
-    * anything raises (`{:exception, message}`)
+    * anything raises (`{:exception, exception_module}`)
+
+  Fallback reasons never contain policy text, names from the tenant's schemas (policies, roles,
+  functions, types, settings) or input values, so they can be logged and used as metric tags.
 
   ## Which policies, which expressions
 
@@ -50,7 +54,7 @@ defmodule SqlLogex.PolicySet do
   (`write_policies_with_transaction` and `check_write_policy` in
   `lib/realtime/tenants/authorization.ex`) does, which only inserts, so there a fallback may come
   where Postgres would decide. A write falls back with `{:missing_grant, role, :select}` if the
-  role lacks `SELECT`, and with `{:select_policy_unsupported, name}` if a `SELECT` or `ALL` policy
+  role lacks `SELECT`, and with `:select_policy_unsupported` if a `SELECT` or `ALL` policy
   that might apply has no `USING` or has one with an unsupported node anywhere in it
   (`SqlLogex.IR.supported?/1`). That is decided from the tree alone: the policy is not evaluated,
   and what the planner folds isn't modelled, so an expression we can't read is one that might
@@ -79,12 +83,15 @@ defmodule SqlLogex.PolicySet do
 
   @modelled_roles ["public", "anon", "authenticated", "service_role"]
 
+  # The roles that may show up in a reason, other names are the tenant's.
+  @known_roles ["service_role", "postgres", "supabase_admin", nil]
+
   @doc "Decides for the role in `env`, see the module documentation."
   @spec decide(Snapshot.t(), Env.t(), :read | :write) :: decision
   def decide(snapshot, env, operation) when operation in [:read, :write] do
     run(snapshot, env, operation)
   rescue
-    exception -> {:fallback, {:exception, Exception.message(exception)}}
+    exception -> {:fallback, {:exception, exception.__struct__}}
   end
 
   defp run(%Snapshot{} = snapshot, %Env{} = env, operation) do
@@ -106,7 +113,8 @@ defmodule SqlLogex.PolicySet do
   defp commands(:write), do: ["a", "*"]
 
   defp check_role(role) when role in ["anon", "authenticated"], do: :ok
-  defp check_role(role), do: {:fallback, {:role, role}}
+  defp check_role(role) when role in @known_roles, do: {:fallback, {:role, role}}
+  defp check_role(_role), do: {:fallback, {:role, :other}}
 
   # The privileges an operation needs. A write needs `select` too, see the moduledoc.
   defp grants(:read), do: [:select]
@@ -134,7 +142,7 @@ defmodule SqlLogex.PolicySet do
     Enum.find_value(policies, :ok, fn policy ->
       case policy.roles -- @modelled_roles do
         [] -> nil
-        [role | _] -> {:fallback, {:unmodelled_policy_role, policy.name, role}}
+        [_ | _] -> {:fallback, :unmodelled_policy_role}
       end
     end)
   end
@@ -152,7 +160,7 @@ defmodule SqlLogex.PolicySet do
     snapshot.policies
     |> Enum.filter(&(&1.cmd in commands(:read) and may_apply_to?(&1, role)))
     |> Enum.find_value(:ok, fn policy ->
-      if modelled?(policy.using), do: nil, else: {:fallback, {:select_policy_unsupported, policy.name}}
+      if modelled?(policy.using), do: nil, else: {:fallback, :select_policy_unsupported}
     end)
   end
 
@@ -166,7 +174,7 @@ defmodule SqlLogex.PolicySet do
 
   defp expressions([policy | rest], operation, irs) do
     case expression(policy, operation) do
-      nil -> {:fallback, {:policy_without_expression, policy.name}}
+      nil -> {:fallback, :policy_without_expression}
       {ir, type} -> expressions(rest, operation, [boolean(ir, type) | irs])
     end
   end

@@ -43,9 +43,8 @@ defmodule SqlLogex.PolicySetTest do
                  {:unsupported, {:raises, :invalid_text_representation, "invalid input syntax for type json"}}}
   @regex_non_ascii {:fallback, {:unsupported, :regex_non_ascii}}
 
-  # The qual of generator_slow_read and the check of generator_slow_write, which the parser leaves as raw text
-  @slow_subselect "( SELECT true\n   FROM pg_sleep((1)::double precision) pg_sleep(pg_sleep))"
-  @slow_unsupported {:fallback, {:unsupported, {:unparsed, @slow_subselect}}}
+  # The qual of generator_slow_read and the check of generator_slow_write, a subselect the parser leaves as raw text
+  @slow_unsupported {:fallback, {:unsupported, {:unparsed, :select}}}
 
   setup_all do
     catalogs =
@@ -374,13 +373,22 @@ defmodule SqlLogex.PolicySetTest do
       assert SqlLogex.decide(snapshot, env(topic: "user:#{@uid}", sub: @uid), :read) == @allow
     end
 
-    for role <- ["service_role", "postgres", "supabase_admin", "authenticator", "", "ANON"] do
+    # The reason names a role only if it is a Supabase one, the others are the tenant's to name.
+    for {role, named} <- [
+          {"service_role", "service_role"},
+          {"postgres", "postgres"},
+          {"supabase_admin", "supabase_admin"},
+          {"authenticator", :other},
+          {"team_member", :other},
+          {"", :other},
+          {"ANON", :other}
+        ] do
       test "the role #{inspect(role)} is not modelled", %{catalog: catalog, policies: policies} do
         snapshot = snapshot(policies, catalog.functions)
         env = env(topic: "user:#{@uid}", sub: @uid, role: unquote(role))
 
-        assert SqlLogex.decide(snapshot, env, :read) == {:fallback, {:role, unquote(role)}}
-        assert SqlLogex.decide(snapshot, env, :write) == {:fallback, {:role, unquote(role)}}
+        assert SqlLogex.decide(snapshot, env, :read) == {:fallback, {:role, unquote(named)}}
+        assert SqlLogex.decide(snapshot, env, :write) == {:fallback, {:role, unquote(named)}}
       end
     end
 
@@ -445,10 +453,9 @@ defmodule SqlLogex.PolicySetTest do
       env = env(topic: "user:#{@uid}", sub: @uid)
 
       for {cmd, read, write} <- [
-            {"r", {:fallback, {:unmodelled_policy_role, "for_team", "team_member"}}, @allow},
-            {"a", @allow, {:fallback, {:unmodelled_policy_role, "for_team", "team_member"}}},
-            {"*", {:fallback, {:unmodelled_policy_role, "for_team", "team_member"}},
-             {:fallback, {:unmodelled_policy_role, "for_team", "team_member"}}},
+            {"r", {:fallback, :unmodelled_policy_role}, @allow},
+            {"a", @allow, {:fallback, :unmodelled_policy_role}},
+            {"*", {:fallback, :unmodelled_policy_role}, {:fallback, :unmodelled_policy_role}},
             # not decided here at all
             {"w", @allow, @allow},
             {"d", @allow, @allow}
@@ -463,8 +470,7 @@ defmodule SqlLogex.PolicySetTest do
       snapshot =
         snapshot(policies ++ [policy("p", roles: ["authenticated", "team_member"])], catalog.functions)
 
-      assert SqlLogex.decide(snapshot, env(topic: "t", sub: @uid), :read) ==
-               {:fallback, {:unmodelled_policy_role, "p", "team_member"}}
+      assert SqlLogex.decide(snapshot, env(topic: "t", sub: @uid), :read) == {:fallback, :unmodelled_policy_role}
     end
 
     test "policies for public, anon, authenticated and service_role are fine", %{catalog: catalog, policies: policies} do
@@ -484,20 +490,20 @@ defmodule SqlLogex.PolicySetTest do
       env = env(topic: "user:#{@uid}", sub: @uid)
 
       assert SqlLogex.decide(snapshot(policies ++ [read], catalog.functions), env, :read) ==
-               {:fallback, {:policy_without_expression, "no_using"}}
+               {:fallback, :policy_without_expression}
 
       assert SqlLogex.decide(snapshot(policies ++ [write], catalog.functions), env, :write) ==
-               {:fallback, {:policy_without_expression, "no_check"}}
+               {:fallback, :policy_without_expression}
 
       assert SqlLogex.decide(snapshot(policies ++ [all], catalog.functions), env, :read) ==
-               {:fallback, {:policy_without_expression, "no_expression"}}
+               {:fallback, :policy_without_expression}
 
       # A write also needs the USING of the SELECT and ALL policies, see the PolicySet moduledoc
       assert SqlLogex.decide(snapshot(policies ++ [all], catalog.functions), env, :write) ==
-               {:fallback, {:select_policy_unsupported, "no_expression"}}
+               {:fallback, :select_policy_unsupported}
 
       assert SqlLogex.decide(snapshot(policies ++ [read], catalog.functions), env, :write) ==
-               {:fallback, {:select_policy_unsupported, "no_using"}}
+               {:fallback, :select_policy_unsupported}
 
       # a policy that doesn't apply doesn't matter
       assert SqlLogex.decide(snapshot(policies ++ [write], catalog.functions), env, :read) == @allow
@@ -521,11 +527,13 @@ defmodule SqlLogex.PolicySetTest do
 
       snapshot = %Snapshot{snapshot([], catalog.functions) | policies: [broken]}
 
-      assert {:fallback, {:exception, message}} = SqlLogex.decide(snapshot, env(topic: "t"), :read)
-      assert message =~ "no_such_primitive"
+      # the module, not the message, which names the function and may hold input
+      assert SqlLogex.decide(snapshot, env(topic: "t"), :read) == {:fallback, {:exception, UndefinedFunctionError}}
 
-      assert {:fallback, {:exception, _}} =
+      assert {:fallback, {:exception, module}} =
                SqlLogex.decide(%Snapshot{snapshot | policies: :oops}, env(topic: "t"), :read)
+
+      assert is_atom(module)
 
       assert {:fallback, {:exception, _}} = SqlLogex.decide(snapshot([], []), :not_an_env, :read)
     end
@@ -716,7 +724,7 @@ defmodule SqlLogex.PolicySetTest do
     test "a SELECT policy with an unsupported expression is a fallback", %{functions: functions} do
       policies = [insert_policy(), policy("select_email", qual: @unsupported_select)]
 
-      assert write_with(policies, functions) == {:fallback, {:select_policy_unsupported, "select_email"}}
+      assert write_with(policies, functions) == {:fallback, :select_policy_unsupported}
       # even though the INSERT policy decides on its own
       assert write_with([insert_policy()], functions) == @allow
     end
@@ -731,21 +739,21 @@ defmodule SqlLogex.PolicySetTest do
             "(private = true)"
           ] do
         policies = [insert_policy(), policy("select", qual: qual)]
-        assert write_with(policies, functions) == {:fallback, {:select_policy_unsupported, "select"}}, qual
+        assert write_with(policies, functions) == {:fallback, :select_policy_unsupported}, qual
       end
     end
 
     test "a SELECT policy without a USING expression is a fallback", %{functions: functions} do
       policies = [insert_policy(), policy("select", qual: nil)]
-      assert write_with(policies, functions) == {:fallback, {:select_policy_unsupported, "select"}}
+      assert write_with(policies, functions) == {:fallback, :select_policy_unsupported}
     end
 
     test "an ALL policy counts for its USING, even if the write uses its WITH CHECK", %{functions: functions} do
       policies = [policy("all", cmd: "*", qual: @unsupported_select, with_check: @topic_x)]
-      assert write_with(policies, functions) == {:fallback, {:select_policy_unsupported, "all"}}
+      assert write_with(policies, functions) == {:fallback, :select_policy_unsupported}
 
       policies = [policy("all", cmd: "*", qual: nil, with_check: @topic_x)]
-      assert write_with(policies, functions) == {:fallback, {:select_policy_unsupported, "all"}}
+      assert write_with(policies, functions) == {:fallback, :select_policy_unsupported}
 
       policies = [policy("all", cmd: "*", qual: @topic_x, with_check: @topic_x)]
       assert write_with(policies, functions) == @allow
@@ -753,18 +761,7 @@ defmodule SqlLogex.PolicySetTest do
 
     test "restrictive SELECT policies count too, even when they would not be evaluated", %{functions: functions} do
       policies = [insert_policy(), policy("restrictive", permissive: false, qual: @unsupported_select)]
-      assert write_with(policies, functions) == {:fallback, {:select_policy_unsupported, "restrictive"}}
-    end
-
-    test "the first one is named", %{functions: functions} do
-      policies = [
-        insert_policy(),
-        policy("a_fine", qual: @topic_x),
-        policy("b_first", qual: @unsupported_select),
-        policy("c_second", qual: nil)
-      ]
-
-      assert write_with(policies, functions) == {:fallback, {:select_policy_unsupported, "b_first"}}
+      assert write_with(policies, functions) == {:fallback, :select_policy_unsupported}
     end
 
     test "only the policies that might apply to the role count", %{functions: functions} do
@@ -775,17 +772,16 @@ defmodule SqlLogex.PolicySetTest do
 
       assert write_with(policies, functions) == @allow
 
-      assert write_with(policies, functions, role: "anon") ==
-               {:fallback, {:select_policy_unsupported, "for_anon"}}
+      assert write_with(policies, functions, role: "anon") == {:fallback, :select_policy_unsupported}
 
       # public applies to everyone
       policies = [insert_policy(), policy("for_public", roles: ["public"], qual: @unsupported_select)]
-      assert write_with(policies, functions) == {:fallback, {:select_policy_unsupported, "for_public"}}
+      assert write_with(policies, functions) == {:fallback, :select_policy_unsupported}
     end
 
     test "a policy for a role that isn't modelled might apply, by membership", %{functions: functions} do
       policies = [insert_policy(), policy("for_team", roles: ["team_member"], qual: @unsupported_select)]
-      assert write_with(policies, functions) == {:fallback, {:select_policy_unsupported, "for_team"}}
+      assert write_with(policies, functions) == {:fallback, :select_policy_unsupported}
 
       # one we can read can't fail the statement by being there
       policies = [insert_policy(), policy("for_team", roles: ["team_member"], qual: @topic_x)]
@@ -1073,7 +1069,7 @@ defmodule SqlLogex.PolicySetTest do
 
     test "a broken permissive policy decides nothing, whatever the others say", %{catalogs: catalogs} do
       broken = "generator_broken_read_presence"
-      unsupported = {:fallback, {:unsupported, {:function, "public.test_log_error", :not_allowlisted}}}
+      unsupported = {:fallback, {:unsupported, {:function, :other_schema, :not_allowlisted}}}
 
       for policies <- [
             &named(&1, [broken, "generator_authenticated_all_topic_read"]),

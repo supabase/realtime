@@ -11,22 +11,29 @@ defmodule SqlLogex.Resolver do
   that has an unsupported operand is unsupported with the operand's reason, except where the
   evaluator treats operands individually: the children of `AND`, `OR` and `NOT` stay where they are.
 
-  Reasons are one of:
+  Reasons are one of the following. None of them holds policy text or a name from the tenant's
+  schemas, since callers log them: `keyword`, `:other_schema` and the like say what kind of thing
+  it was, not which.
 
-    * `{:unparsed, raw}`: the parser couldn't read this part
+    * `{:unparsed, keyword}`: the parser couldn't read this part. `keyword` is `:case`, `:exists`,
+      `:select`, `:array`, `:row` or `:not` if the text starts with it, else `:other`
     * `{:operator, op, left_type, right_type}`, `{:cast, from_type, to_type}`, `{:nullif, left_type,
-      right_type}`: no binding for these types
+      right_type}`: no binding for these types. A type is its name if it is unqualified (a
+      `pg_catalog` one) or in `auth` or `realtime`, else `:other_schema`
     * `{:array_operator, op, quantifier}`, `:array_not_constructor`, `{:array_types, lhs_type,
       element_types}`
     * `{:not_boolean, type}`: something else where a boolean is required
     * `{:coalesce_types, types}`: arguments of different types
-    * `{:function, "schema.name", why}`: `why` is `:not_allowlisted`, `:not_in_snapshot`,
-      `:overloaded` (more than one definition of the name) or `:unknown_definition`
+    * `{:function, name, why}`: `name` is `"schema.name"` for `auth` and `realtime`, the bare name
+      for a built-in and `:other_schema` for anything else. `why` is `:not_allowlisted`,
+      `:not_in_snapshot`, `:overloaded` (more than one definition of the name) or
+      `:unknown_definition`
     * `{:column, name}`: a column other than `topic` and `extension`, since the other columns of
       the row aren't modelled yet
-    * `:untyped_string_literal`, `{:number_literal, raw}`, `:untyped_null`: constants Postgres
-      prints without a type, which it only does where we don't model the type
-    * `{:unknown_node, node}`: not a node of `SqlLogex.AST`
+    * `:untyped_string_literal`, `:number_literal`, `:untyped_null`: constants Postgres prints
+      without a type, which it only does where we don't model the type
+    * `{:unknown_node, tag}`: not a node of `SqlLogex.AST`, `tag` being the first element of the
+      tuple or `:other`
 
   ## Notes on the bindings
 
@@ -82,12 +89,12 @@ defmodule SqlLogex.Resolver do
 
   ## Nodes
 
-  defp res({:unsupported, raw}, _fns), do: unsupported({:unparsed, raw})
+  defp res({:unsupported, raw}, _fns), do: unsupported({:unparsed, unparsed_keyword(raw)})
 
   # Constants and columns
   defp res({:const, :bool, value}, _fns), do: {{:lit, value}, :bool}
   defp res({:const, :string, _}, _fns), do: unsupported(:untyped_string_literal)
-  defp res({:const, :number, raw}, _fns), do: unsupported({:number_literal, raw})
+  defp res({:const, :number, _raw}, _fns), do: unsupported(:number_literal)
   defp res({:const, :null}, _fns), do: unsupported(:untyped_null)
   defp res({:column, name}, _fns) when name in ["topic", "extension"], do: {{:column, name}, :text}
   defp res({:column, name}, _fns), do: unsupported({:column, name})
@@ -99,14 +106,14 @@ defmodule SqlLogex.Resolver do
       "uuid" -> literal(Value.uuid_in({:text, string}), :uuid)
       "jsonb" -> literal(Jsonb.parse({:text, string}), :jsonb)
       "boolean" -> literal(Value.bool_in({:text, string}), :bool)
-      _ -> unsupported({:cast, :string_literal, type})
+      _ -> unsupported({:cast, :string_literal, known_name(type)})
     end
   end
 
   defp res({:cast, {:const, :null}, type}, _fns) do
     case Map.fetch(@cast_types, type) do
       {:ok, resolved_type} -> {{:lit, nil}, resolved_type}
-      :error -> unsupported({:cast, :null, type})
+      :error -> unsupported({:cast, :null, known_name(type)})
     end
   end
 
@@ -162,7 +169,7 @@ defmodule SqlLogex.Resolver do
     do: {{:setting, name}, :text}
 
   defp res({:func, schema, name, _args}, _fns),
-    do: unsupported({:function, Enum.join(Enum.reject([schema, name], &is_nil/1), "."), :not_allowlisted})
+    do: unsupported({:function, known_name(Enum.join(Enum.reject([schema, name], &is_nil/1), ".")), :not_allowlisted})
 
   # COALESCE, NULLIF and sublinks. An unsupported COALESCE argument makes the node unsupported
   # wherever it is, see `SqlLogex.Value.coalesce/1`. Postgres gave all arguments one type.
@@ -189,7 +196,7 @@ defmodule SqlLogex.Resolver do
 
   defp res({:sublink, expr, _alias}, fns), do: res(expr, fns)
 
-  defp res(other, _fns), do: unsupported({:unknown_node, other})
+  defp res(other, _fns), do: unsupported({:unknown_node, node_tag(other)})
 
   ## Pieces
 
@@ -198,7 +205,38 @@ defmodule SqlLogex.Resolver do
   defp cast(ir, :text, "uuid"), do: {call(Value, :uuid_in, [ir]), :uuid}
   defp cast(ir, :text, "jsonb"), do: {call(Jsonb, :parse, [ir]), :jsonb}
   defp cast(ir, :text, "boolean"), do: {call(Value, :bool_in, [ir]), :bool}
-  defp cast(_ir, from, type), do: unsupported({:cast, from, type})
+  defp cast(_ir, from, type), do: unsupported({:cast, from, known_name(type)})
+
+  # Reasons are logged, so they must not carry what the tenant wrote. These keep the kind of thing.
+
+  # The words Postgres prints at the start of what the parser can't read. Anything else, including
+  # quoted identifiers, is `:other`.
+  @unparsed_keywords %{
+    "case" => :case,
+    "exists" => :exists,
+    "select" => :select,
+    "array" => :array,
+    "row" => :row,
+    "not" => :not
+  }
+
+  defp unparsed_keyword(raw) do
+    case Regex.run(~r/\A[\s(]*([a-z]+)\b/i, raw) do
+      [_, word] -> Map.get(@unparsed_keywords, String.downcase(word), :other)
+      nil -> :other
+    end
+  end
+
+  defp node_tag(node) when is_tuple(node) and tuple_size(node) > 0 and is_atom(elem(node, 0)), do: elem(node, 0)
+  defp node_tag(_node), do: :other
+
+  # Policies are deparsed with `search_path = ''`, so a name outside `pg_catalog` has its schema in
+  # front. The ones in `auth` and `realtime` are Supabase's, the rest are the tenant's.
+  defp known_name(name) do
+    if not String.contains?(name, ".") or String.starts_with?(name, ["auth.", "realtime."]),
+      do: name,
+      else: :other_schema
+  end
 
   defp literal({:unsupported, _} = unsupported, _type), do: {unsupported, :unknown}
   defp literal(value, type), do: {{:lit, value}, type}

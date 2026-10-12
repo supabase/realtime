@@ -77,8 +77,10 @@ defmodule SqlLogex.Eval do
 
   defp each(irs, env), do: Enum.map(irs, &ev(&1, env))
 
-  # Anything but a boolean, NULL or unsupported can't be a child of AND or OR.
+  # Anything but a boolean, NULL or unsupported can't be a child of AND or OR. The reason holds the
+  # type, not the value, which can come from a JWT.
   defp classify(value) when is_boolean(value) or is_nil(value), do: value
   defp classify({:unsupported, _} = unsupported), do: unsupported
-  defp classify(other), do: {:unsupported, {:not_boolean, other}}
+  defp classify({type, _value}) when type in [:text, :uuid, :jsonb], do: {:unsupported, {:not_boolean, type}}
+  defp classify(_other), do: {:unsupported, {:not_boolean, :unknown}}
 end
