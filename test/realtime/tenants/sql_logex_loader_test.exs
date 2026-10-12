@@ -4,11 +4,24 @@ defmodule Realtime.Tenants.SqlLogexLoaderTest do
   # against thousands of decisions; this covers the loader itself in isolation.
   use RealtimeWeb.ConnCase, async: true
 
+  import ExUnit.CaptureLog
+
   alias Realtime.Database
   alias Realtime.Tenants.SqlLogexLoader
   alias SqlLogex.IR
 
   setup [:checkout_tenant_and_connect]
+
+  # What load/2 logged with the code, for this tenant only: capture_log sees every process's logs and
+  # this file is async, so another test's load can log the same code at the same time.
+  defp capture_loader_log(db_conn, tenant) do
+    log = capture_log(fn -> assert {:ok, _snapshot} = SqlLogexLoader.load(db_conn, tenant.external_id) end)
+
+    log
+    |> String.split("\n")
+    |> Enum.filter(&(&1 =~ "SqlLogexUnsupportedPolicies" and &1 =~ "external_id=#{tenant.external_id}"))
+    |> Enum.join("\n")
+  end
 
   describe "load/2" do
     test "builds a snapshot with the table's RLS flags, policies and recognised functions", %{
@@ -56,6 +69,50 @@ defmodule Realtime.Tenants.SqlLogexLoaderTest do
 
       by_role = Enum.find(snapshot.policies, &(&1.name == "by role"))
       {{:unsupported, {:function, "auth.role", :unknown_definition}}, :unknown} = by_role.using
+    end
+
+    test "logs what the policies can't model once, without policy names or SQL", %{db_conn: db_conn, tenant: tenant} do
+      Postgrex.query!(db_conn, "CREATE TABLE public.distinct_table_name (distinct_column_name text)", [])
+
+      Postgrex.query!(
+        db_conn,
+        "CREATE FUNCTION public.distinct_function_name() RETURNS text LANGUAGE sql AS $$ select 'x' $$",
+        []
+      )
+
+      Postgrex.query!(
+        db_conn,
+        """
+        CREATE POLICY "distinct policy name one" ON realtime.messages FOR SELECT TO authenticated
+        USING (EXISTS (select 1 from public.distinct_table_name where distinct_column_name = 'distinct literal'))
+        """,
+        []
+      )
+
+      Postgrex.query!(
+        db_conn,
+        """
+        CREATE POLICY "distinct policy name two" ON realtime.messages FOR INSERT TO authenticated
+        WITH CHECK (public.distinct_function_name() = 'distinct literal')
+        """,
+        []
+      )
+
+      log = capture_loader_log(db_conn, tenant)
+
+      assert log =~ "SqlLogexUnsupportedPolicies"
+      assert log =~ "unparsed: :exists"
+      assert log =~ "{:function, :other_schema, :not_allowlisted}"
+      assert log =~ "cmd: \"r\""
+      assert log =~ "cmd: \"a\""
+      assert log =~ "permissive: true"
+      refute log =~ "distinct"
+    end
+
+    test "logs nothing about unsupported policies when every policy is modelled", %{db_conn: db_conn, tenant: tenant} do
+      Enum.each(SqlLogexPolicies.user_channel_policies(:plain), &Postgrex.query!(db_conn, &1, []))
+
+      assert capture_loader_log(db_conn, tenant) == ""
     end
 
     test "returns an error, not a crash, when realtime.messages hasn't been migrated" do

@@ -9,6 +9,8 @@ defmodule Realtime.Tenants.SqlLogexLoader do
   both run the same logic instead of two copies drifting apart.
   """
 
+  require Logger
+
   alias Realtime.Database
   alias SqlLogex.Snapshot
 
@@ -49,6 +51,11 @@ defmodule Realtime.Tenants.SqlLogexLoader do
   `"realtime_connect" -> settings["db_pool"] || 1`) — the same pool the real check needs. Rather than
   queue for a connection and risk delaying real traffic, a tenant with no connection free right now is
   just another unavailable snapshot.
+
+  If some policies have parts sql_logex can't model, logs them once at `info`
+  (`SqlLogexUnsupportedPolicies`, see `SqlLogex.Snapshot.unsupported/1`). That is once per load, so
+  once per cache TTL and only for tenants with the shadow flag on, and it shows which constructs to
+  support next. It holds no policy names or SQL, by construction.
   """
   @spec load(DBConnection.conn(), String.t()) :: {:ok, Snapshot.t()} | {:error, term()}
   def load(db_conn, tenant_id) do
@@ -57,8 +64,24 @@ defmodule Realtime.Tenants.SqlLogexLoader do
     metadata = [project: tenant_id, external_id: tenant_id, tenant_id: tenant_id]
 
     case Database.transaction(db_conn, &read/1, opts, metadata) do
-      {:ok, input} -> {:ok, Snapshot.new(input)}
-      {:error, _} = error -> error
+      {:ok, input} ->
+        snapshot = Snapshot.new(input)
+        log_unsupported(snapshot, metadata)
+        {:ok, snapshot}
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  defp log_unsupported(snapshot, metadata) do
+    case Snapshot.unsupported(snapshot) do
+      [] ->
+        :ok
+
+      unsupported ->
+        code = "SqlLogexUnsupportedPolicies"
+        Logger.info("#{code}: #{inspect(unsupported)}", [error_code: code] ++ metadata)
     end
   end
 

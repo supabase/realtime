@@ -221,6 +221,11 @@ policies without risk, but saves no load.
   - `:unavailable` means no snapshot could be loaded. `:exception` means deciding raised.
   - `:timing` covers the whole shadow check, the cache lookup included.
   - `Realtime.PromEx.Plugins.SqlLogex` turns these into per-tenant metrics.
+- **What can't be modelled.** Each time a snapshot loads, if some policies have parts the library
+  can't model, `SqlLogexUnsupportedPolicies` is logged once at `info`. It lists, per policy, its
+  command, whether it is permissive and the reasons (`SqlLogex.Snapshot.unsupported/1`), with no
+  policy names or SQL. That is once per tenant per cache expiry, and it shows which constructs to
+  support next.
 
 **Enforce mode** is not built. It would use the library's answer whenever it decided, and ask the
 database only on a fallback:
