@@ -103,4 +103,67 @@ defmodule SqlLogex.SnapshotTest do
                snapshot.policies
     end
   end
+
+  describe "unsupported/1" do
+    defp policy(name, cmd, qual, opts \\ []) do
+      %{
+        name: name,
+        cmd: cmd,
+        permissive: Keyword.get(opts, :permissive, true),
+        roles: ["public"],
+        qual: qual,
+        with_check: Keyword.get(opts, :with_check)
+      }
+    end
+
+    test "is empty when every policy is modelled" do
+      snapshot =
+        Snapshot.new(
+          attrs([
+            policy("p", "r", "(realtime.topic() = 'x'::text)"),
+            policy("q", "a", nil, with_check: "(extension = 'broadcast'::text)")
+          ])
+        )
+
+      assert Snapshot.unsupported(snapshot) == []
+      assert Snapshot.unsupported(Snapshot.new(attrs([]))) == []
+    end
+
+    test "lists the cmd, permissive and reasons of the policies that aren't, without their names" do
+      snapshot =
+        Snapshot.new(
+          attrs([
+            policy("modelled", "r", "(realtime.topic() = 'x'::text)"),
+            policy("secret_name", "r", "((realtime.topic() = 'x'::text) AND (lower(extension) = 'y'::text))"),
+            policy("other", "a", nil, with_check: "CASE WHEN x THEN y END", permissive: false),
+            policy("custom", "*", "(public.my_fn() = 'x'::text)", with_check: "(auth.email() = 'a'::text)")
+          ])
+        )
+
+      assert Snapshot.unsupported(snapshot) == [
+               %{cmd: "r", permissive: true, reasons: [{:function, "lower", :not_allowlisted}]},
+               %{cmd: "a", permissive: false, reasons: [{:unparsed, :case}]},
+               %{
+                 cmd: "*",
+                 permissive: true,
+                 reasons: [{:function, :other_schema, :not_allowlisted}, {:function, "auth.email", :not_in_snapshot}]
+               }
+             ]
+
+      refute inspect(Snapshot.unsupported(snapshot)) =~ "secret_name"
+    end
+
+    test "has each reason of a policy once, over using and with_check" do
+      snapshot =
+        Snapshot.new(
+          attrs([
+            policy("p", "*", "((lower(extension) = 'x'::text) OR (lower(extension) = 'y'::text))",
+              with_check: "(lower(extension) = 'z'::text)"
+            )
+          ])
+        )
+
+      assert [%{reasons: [{:function, "lower", :not_allowlisted}]}] = Snapshot.unsupported(snapshot)
+    end
+  end
 end
