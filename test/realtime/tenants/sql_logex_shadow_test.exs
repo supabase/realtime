@@ -102,6 +102,32 @@ defmodule Realtime.Tenants.SqlLogexShadowTest do
       assert_received {:telemetry, ^decision_ref, _event, _measurements, %{tenant: ^tenant_id} = decision_metadata}
       assert decision_metadata.outcome == :match
       assert decision_metadata.real == true
+      assert decision_metadata.reason == :none
+      refute log =~ "SqlLogexShadowMismatch"
+    end
+
+    test "fallback: records outcome: :fallback with the reason's category, nothing is logged" do
+      tenant_id = unique_tenant_id()
+      expect(FeatureFlags, :enabled?, fn @flag, _tenant_id -> true end)
+      expect(SqlLogexCache, :fetch, fn :fake_conn, _tenant_id -> {:ok, always_allow_snapshot()} end)
+
+      decision_ref = attach(@read_decision)
+      timing_ref = attach(@read_timing)
+
+      # service_role isn't one of the roles sql_logex models: {:fallback, {:role, "service_role"}}
+      ctx = context(tenant_id: tenant_id, role: "service_role", claims: %{"role" => "service_role"})
+      result = {:ok, %Policies{broadcast: %BroadcastPolicies{read: true}}}
+
+      log =
+        capture_log(fn ->
+          assert :ok = SqlLogexShadow.read(:fake_conn, ctx, [:broadcast], result)
+          assert_receive {:telemetry, ^timing_ref, _event, _measurements, %{tenant: ^tenant_id}}, 2000
+        end)
+
+      assert_received {:telemetry, ^decision_ref, _event, _measurements, %{tenant: ^tenant_id} = decision_metadata}
+      assert decision_metadata.outcome == :fallback
+      assert decision_metadata.reason == :role
+      assert decision_metadata.real == true
       refute log =~ "SqlLogexShadowMismatch"
     end
 
@@ -125,6 +151,7 @@ defmodule Realtime.Tenants.SqlLogexShadowTest do
 
       assert_received {:telemetry, ^decision_ref, _event, _measurements, %{tenant: ^tenant_id} = decision_metadata}
       assert decision_metadata.outcome == :mismatch
+      assert decision_metadata.reason == :none
       assert log =~ "SqlLogexShadowMismatch"
     end
 
@@ -142,6 +169,7 @@ defmodule Realtime.Tenants.SqlLogexShadowTest do
       assert_received {:telemetry, ^decision_ref, _event, _measurements, %{tenant: ^tenant_id} = decision_metadata}
       assert decision_metadata.outcome == :no_real_answer
       assert decision_metadata.real == nil
+      assert decision_metadata.reason == :none
     end
 
     test "snapshot unavailable: records :unavailable, still emits timing, never raises" do

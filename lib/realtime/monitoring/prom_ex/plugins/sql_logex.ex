@@ -5,7 +5,8 @@ defmodule Realtime.PromEx.Plugins.SqlLogex do
   flag — expect these to read as zero/absent until it's enabled for a tenant.
 
   `decisions_total` (counter): how often a decision matched, mismatched, fell back, or had no real
-  answer to compare against (`outcome` and `extension` tags). `shadow_duration` (distribution): what
+  answer to compare against (`outcome` and `extension` tags). The `reason` tag is the bounded category
+  of a fallback (`SqlLogex.Reason.category/1`), `none` for every other outcome. `shadow_duration` (distribution): what
   deciding locally would have cost. Compare it against the existing
   `realtime_tenants_read_authorization_check`/`write_authorization_check` distributions for what the
   real check actually costs, rather than duplicating that measurement here — note those are
@@ -35,8 +36,9 @@ defmodule Realtime.PromEx.Plugins.SqlLogex do
           counter(
             event ++ [:decisions, :total],
             event_name: event,
-            description: "Count of sql_logex shadow #{operation} decisions, by outcome and extension.",
-            tags: [:tenant, :outcome, :extension]
+            description:
+              "Count of sql_logex shadow #{operation} decisions, by outcome, extension and (for a fallback) reason category.",
+            tags: [:tenant, :outcome, :extension, :reason]
           ),
           counter(
             event ++ [:unavailable, :total],
