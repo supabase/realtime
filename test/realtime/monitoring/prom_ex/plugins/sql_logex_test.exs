@@ -60,11 +60,30 @@ defmodule Realtime.PromEx.Plugins.SqlLogexTest do
     assert_eventually metric_value("realtime_tenants_sql_logex_shadow_read_decisions_total",
                         tenant: tenant_id,
                         outcome: "match",
-                        extension: "broadcast"
+                        extension: "broadcast",
+                        reason: "none"
                       ) == 1
 
     assert_eventually metric_value("realtime_tenants_sql_logex_shadow_read_shadow_duration_count", tenant: tenant_id) ==
                         1
+  end
+
+  test "tags a fallback with the category of its reason" do
+    tenant_id = random_string()
+    expect(FeatureFlags, :enabled?, fn "sql_logex_shadow", ^tenant_id -> true end)
+    expect(SqlLogexCache, :fetch, fn :fake_conn, ^tenant_id -> {:ok, always_allow_snapshot()} end)
+
+    # service_role isn't a role sql_logex models, so it falls back with {:role, "service_role"}
+    ctx = %{context(tenant_id) | role: "service_role", claims: %{"role" => "service_role"}}
+    result = {:ok, %Policies{broadcast: %BroadcastPolicies{read: true}}}
+    assert :ok = SqlLogexShadow.read(:fake_conn, ctx, [:broadcast], result)
+
+    assert_eventually metric_value("realtime_tenants_sql_logex_shadow_read_decisions_total",
+                        tenant: tenant_id,
+                        outcome: "fallback",
+                        extension: "broadcast",
+                        reason: "role"
+                      ) == 1
   end
 
   test "broadcast and presence decisions are counted as separate series" do

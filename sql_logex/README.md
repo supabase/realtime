@@ -214,6 +214,10 @@ policies without risk, but saves no load.
   - Every decision emits `[:realtime, :tenants, :sql_logex, :shadow, :read | :write]` with an
     outcome: `:match`, `:mismatch`, `:fallback`, or `:no_real_answer` when the database check
     errored. Every mismatch is also logged as a warning.
+  - The same metadata has a `reason` tag: for a `:fallback`, the category of why it fell back
+    (`SqlLogex.Reason.category/1`, a small fixed set like `:role`, `:function_custom` or
+    `:operator`), `:none` for the other outcomes. So the metrics show which kinds of constructs
+    cost coverage.
   - `:unavailable` means no snapshot could be loaded. `:exception` means deciding raised.
   - `:timing` covers the whole shadow check, the cache lookup included.
   - `Realtime.PromEx.Plugins.SqlLogex` turns these into per-tenant metrics.
@@ -248,11 +252,9 @@ database only on a fallback:
 ### Not done
 
 - **Enforce mode.** See "In Realtime" for what it needs.
-- **What shadow mode records:**
-  - It doesn't record why the library fell back, so it can't show yet which constructs cost
-    coverage.
-  - It counts a database check that raised as "no real answer", not as a mismatch. A decided
-    answer where Postgres raised should count as a mismatch, as it does in the differential test.
+- **What shadow mode records.** It counts a database check that raised as "no real answer", not
+  as a mismatch. A decided answer where Postgres raised should count as a mismatch, as it does in
+  the differential test.
 - **Role membership.** Policies match roles by inherited membership. The snapshot doesn't record
   memberships between `anon`, `authenticated` and `service_role`. So a tenant that runs
   `GRANT anon TO authenticated` gets a wrong answer for a policy `TO anon`. The loader has to check
