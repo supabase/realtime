@@ -126,7 +126,7 @@ defmodule SqlLogex.SnapshotTest do
         )
 
       assert Snapshot.unsupported(snapshot) == []
-      assert Snapshot.unsupported(Snapshot.new(attrs([]))) == []
+      assert [] |> attrs() |> Snapshot.new() |> Snapshot.unsupported() == []
     end
 
     test "lists the cmd, permissive and reasons of the policies that aren't, without their names" do

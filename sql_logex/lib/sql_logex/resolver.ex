@@ -169,8 +169,10 @@ defmodule SqlLogex.Resolver do
   defp res({:func, nil, "current_setting", [{:cast, {:const, :string, name}, "text"}, {:const, :bool, true}]}, _fns),
     do: {{:setting, name}, :text}
 
-  defp res({:func, schema, name, _args}, _fns),
-    do: unsupported({:function, known_name(Enum.join(Enum.reject([schema, name], &is_nil/1), ".")), :not_allowlisted})
+  defp res({:func, schema, name, _args}, _fns) do
+    name = [schema, name] |> Enum.reject(&is_nil/1) |> Enum.join(".") |> known_name()
+    unsupported({:function, name, :not_allowlisted})
+  end
 
   # COALESCE, NULLIF and sublinks. An unsupported COALESCE argument makes the node unsupported
   # wherever it is, see `SqlLogex.Value.coalesce/1`. Postgres gave all arguments one type.
