@@ -137,9 +137,12 @@ defmodule SqlLogex.Value do
     case Map.fetch(settings, ascii_downcase(name)) do
       {:ok, nil} -> {:text, ""}
       {:ok, value} when is_binary(value) -> {:text, value}
-      :error -> {:unsupported, {:unknown_setting, name}}
+      :error -> {:unsupported, {:unknown_setting, known_setting(name)}}
     end
   end
+
+  # The name is the tenant's choice unless it is one Supabase sets, and the reason gets logged.
+  defp known_setting(name), do: if(String.starts_with?(name, ["request.", "realtime."]), do: name, else: :other)
 
   ## Null tests
 

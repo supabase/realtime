@@ -660,7 +660,7 @@ defmodule Realtime.Tenants.SqlLogexDifferentialTest do
       decision when decision in [:allow, :deny] ->
         {:value, decision == :allow}
 
-      {:fallback, {:exception, _message} = reason} ->
+      {:fallback, {:exception, _module} = reason} ->
         {:crash, reason}
 
       {:fallback, reason} ->
@@ -2029,7 +2029,6 @@ defmodule Realtime.Tenants.SqlLogexDifferentialTest do
 
   defp reason_key({:unsupported, reason}), do: reason_key(reason)
   defp reason_key({:raises, state, _detail}), do: "raises #{state}"
-  defp reason_key({:unparsed, raw}), do: "unparsed #{inspect(String.slice(raw, 0, 60))}"
   defp reason_key(reason), do: inspect(reason, limit: 6, printable_limit: 60)
 
   defp user_channel_section([]), do: ""

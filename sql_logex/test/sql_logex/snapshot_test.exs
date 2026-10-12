@@ -78,7 +78,7 @@ defmodule SqlLogex.SnapshotTest do
           ])
         )
 
-      assert [%Policy{using: {{:unsupported, {:unparsed, "CASE WHEN x THEN y END"}}, :unknown}}] = snapshot.policies
+      assert [%Policy{using: {{:unsupported, {:unparsed, :case}}, :unknown}}] = snapshot.policies
     end
 
     test "functions are optional, and without them calls are unsupported" do

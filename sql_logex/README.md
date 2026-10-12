@@ -70,6 +70,11 @@ Steps 1 and 2 run once per snapshot, so a decision is only step 3 and 4.
 Where Postgres raises for an input (a `sub` that isn't a uuid, claims with `\u0000`, ...), the
 reason is `{:unsupported, {:raises, sqlstate, detail}}`: a fallback, and the database raises too.
 
+Fallback reasons never contain policy text, names from the tenant's schemas or input values, so
+they can be logged. A function or type outside `pg_catalog`, `auth` and `realtime` is
+`:other_schema`, a policy's unparsed part is only its first keyword, and policy names aren't in
+any reason.
+
 ## What it supports
 
 Anything not listed here is a fallback.

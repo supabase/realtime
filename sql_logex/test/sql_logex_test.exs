@@ -180,7 +180,7 @@ defmodule SqlLogexTest do
       # Postgres raises division_by_zero: the planner folds the constant 1 / 0 before COALESCE
       # would stop at realtime.topic(). Here 1 / 0 is unsupported because numbers aren't modelled
       # at all (hence the reason); what the test shows is that COALESCE doesn't skip it.
-      assert {:unsupported, {:number_literal, "1"}} =
+      assert {:unsupported, :number_literal} =
                evaluate("(COALESCE(realtime.topic(), ((1 / 0))::text) = 'x'::text)", topic: "x")
     end
 
@@ -200,7 +200,7 @@ defmodule SqlLogexTest do
       sql = "(" <> Enum.map_join(1..200, " OR ", &"(realtime.topic() = 'room:#{&1}'::text)") <> ")"
 
       assert byte_size(sql) > 4096
-      assert evaluate(sql, topic: "room:1") == {:unsupported, {:unparsed, sql}}
+      assert evaluate(sql, topic: "room:1") == {:unsupported, {:unparsed, :other}}
     end
   end
 end

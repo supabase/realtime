@@ -37,16 +37,40 @@ defmodule SqlLogex.ResolverTest do
 
     test "untyped strings, numbers and NULL are unsupported" do
       assert resolve({:const, :string, "x"}) == unsupported(:untyped_string_literal)
-      assert resolve({:const, :number, "1"}) == unsupported({:number_literal, "1"})
+      assert resolve({:const, :number, "1"}) == unsupported(:number_literal)
       assert resolve({:const, :null}) == unsupported(:untyped_null)
     end
 
-    test "text the parser couldn't read is unsupported, with the raw text" do
-      assert resolve({:unsupported, "CASE WHEN x END"}) == unsupported({:unparsed, "CASE WHEN x END"})
+    test "text the parser couldn't read is unsupported, with its first keyword and nothing else" do
+      assert resolve({:unsupported, "CASE WHEN x END"}) == unsupported({:unparsed, :case})
     end
 
-    test "an unknown node is unsupported rather than a crash" do
-      assert resolve({:weird, 1}) == unsupported({:unknown_node, {:weird, 1}})
+    test "the keyword of unparsed text is the first word, ignoring case, parentheses and whitespace" do
+      for {raw, keyword} <- [
+            {"CASE\n WHEN a THEN b END", :case},
+            {"(EXISTS ( SELECT 1\n   FROM t))", :exists},
+            {"( SELECT count(*) AS count\n   FROM t)", :select},
+            {"ARRAY[1, 2]", :array},
+            {"ROW(a, b)", :row},
+            {"NOT a", :not},
+            {"exists (x)", :exists},
+            {"((extension = 'x'::text) IS TRUE)", :other},
+            {"CASEY WHEN", :other},
+            {"case_x", :other},
+            {~s("case" = 1), :other},
+            {"m.topic", :other},
+            {"", :other}
+          ] do
+        assert resolve({:unsupported, raw}) == unsupported({:unparsed, keyword}), inspect(raw)
+      end
+    end
+
+    test "an unknown node is unsupported rather than a crash, with its tag only" do
+      assert resolve({:weird, 1}) == unsupported({:unknown_node, :weird})
+      assert resolve({:weird, "customer text", {:nested, 2}}) == unsupported({:unknown_node, :weird})
+      assert resolve({"weird"}) == unsupported({:unknown_node, :other})
+      assert resolve({}) == unsupported({:unknown_node, :other})
+      assert resolve(:weird) == unsupported({:unknown_node, :other})
     end
   end
 
@@ -83,13 +107,13 @@ defmodule SqlLogex.ResolverTest do
     end
 
     test "an unsupported child keeps its own reason" do
-      assert resolve({:bool_expr, :and, [{:unsupported, "x"}, {:const, :bool, true}]}) ==
-               {{:and, [{:unsupported, {:unparsed, "x"}}, {:lit, true}]}, :bool}
+      assert resolve({:bool_expr, :and, [{:unsupported, "CASE x"}, {:const, :bool, true}]}) ==
+               {{:and, [{:unsupported, {:unparsed, :case}}, {:lit, true}]}, :bool}
     end
 
     test "NOT binds a boolean" do
       assert resolve({:not, {:const, :bool, true}}) == {{:not, {:lit, true}}, :bool}
-      assert resolve({:not, {:unsupported, "x"}}) == {{:not, {:unsupported, {:unparsed, "x"}}}, :bool}
+      assert resolve({:not, {:unsupported, "CASE x"}}) == {{:not, {:unsupported, {:unparsed, :case}}}, :bool}
     end
 
     test "NOT of a non-boolean is NOT of an unsupported" do
@@ -161,10 +185,11 @@ defmodule SqlLogex.ResolverTest do
     end
 
     test "an operand that is unsupported makes the operator unsupported with that reason" do
-      assert resolve({:op, "=", {:unsupported, "x"}, text("a")}) == unsupported({:unparsed, "x"})
+      assert resolve({:op, "=", {:unsupported, "CASE x"}, text("a")}) == unsupported({:unparsed, :case})
       assert resolve({:op, "=", topic(), {:column, "private"}}) == unsupported({:column, "private"})
 
-      assert resolve({:op, "=", {:unsupported, "x"}, {:unsupported, "y"}}) == unsupported({:unparsed, "x"})
+      assert resolve({:op, "=", {:unsupported, "CASE x"}, {:unsupported, "EXISTS y"}}) ==
+               unsupported({:unparsed, :case})
     end
   end
 
@@ -217,21 +242,21 @@ defmodule SqlLogex.ResolverTest do
     end
 
     test "an unsupported left side or element makes it unsupported with that reason" do
-      assert resolve({:scalar_array_op, "=", :any, {:unsupported, "x"}, array([text("a")])}) ==
-               unsupported({:unparsed, "x"})
+      assert resolve({:scalar_array_op, "=", :any, {:unsupported, "CASE x"}, array([text("a")])}) ==
+               unsupported({:unparsed, :case})
 
-      assert resolve({:scalar_array_op, "=", :any, extension(), array([text("a"), {:unsupported, "y"}])}) ==
-               unsupported({:unparsed, "y"})
+      assert resolve({:scalar_array_op, "=", :any, extension(), array([text("a"), {:unsupported, "EXISTS y"}])}) ==
+               unsupported({:unparsed, :exists})
 
-      assert resolve({:scalar_array_op, "<>", :all, extension(), array([{:unsupported, "y"}])}) ==
-               unsupported({:unparsed, "y"})
+      assert resolve({:scalar_array_op, "<>", :all, extension(), array([{:unsupported, "EXISTS y"}])}) ==
+               unsupported({:unparsed, :exists})
     end
 
     test "an array that isn't a constructor is unsupported" do
       assert resolve({:scalar_array_op, "=", :any, extension(), {:cast, {:const, :string, "{a}"}, "text[]"}}) ==
                unsupported(:array_not_constructor)
 
-      assert resolve({:scalar_array_op, "=", :any, extension(), {:unsupported, "x"}}) ==
+      assert resolve({:scalar_array_op, "=", :any, extension(), {:unsupported, "CASE x"}}) ==
                unsupported(:array_not_constructor)
 
       assert resolve({:array, [text("a")]}) == unsupported(:array_not_constructor)
@@ -288,6 +313,16 @@ defmodule SqlLogex.ResolverTest do
       end
     end
 
+    test "to a type of the tenant's is unsupported without its name" do
+      for type <- ["public.status", ~s(public."My Type"), "other.status[]"] do
+        assert resolve({:cast, {:const, :string, "x"}, type}) == unsupported({:cast, :string_literal, :other_schema})
+        assert resolve(null(type)) == unsupported({:cast, :null, :other_schema})
+        assert resolve({:cast, topic(), type}) == unsupported({:cast, :text, :other_schema})
+      end
+
+      assert resolve({:cast, topic(), "auth.aal_level"}) == unsupported({:cast, :text, "auth.aal_level"})
+    end
+
     test "NULL cast to the four types is a typed NULL literal" do
       assert resolve(null("text")) == {{:lit, nil}, :text}
       assert resolve(null("uuid")) == {{:lit, nil}, :uuid}
@@ -335,7 +370,7 @@ defmodule SqlLogex.ResolverTest do
     end
 
     test "an unsupported operand makes the cast unsupported with that reason" do
-      assert resolve({:cast, {:unsupported, "x"}, "text"}) == unsupported({:unparsed, "x"})
+      assert resolve({:cast, {:unsupported, "CASE x"}, "text"}) == unsupported({:unparsed, :case})
       assert resolve({:cast, {:column, "private"}, "boolean"}) == unsupported({:column, "private"})
     end
   end
@@ -373,12 +408,12 @@ defmodule SqlLogex.ResolverTest do
 
     test "a call with arguments, or another schema, is not allowlisted" do
       assert resolve({:func, "auth", "uid", [text("x")]}) == unsupported({:function, "auth.uid", :not_allowlisted})
-      assert resolve({:func, "public", "uid", []}) == unsupported({:function, "public.uid", :not_allowlisted})
+      assert resolve({:func, "public", "uid", []}) == unsupported({:function, :other_schema, :not_allowlisted})
       assert resolve({:func, nil, "now", []}) == unsupported({:function, "now", :not_allowlisted})
       assert resolve({:func, nil, "uid", []}) == unsupported({:function, "uid", :not_allowlisted})
 
       assert resolve({:func, "public", "test_log_error", []}) ==
-               unsupported({:function, "public.test_log_error", :not_allowlisted})
+               unsupported({:function, :other_schema, :not_allowlisted})
     end
   end
 
@@ -407,7 +442,7 @@ defmodule SqlLogex.ResolverTest do
 
     test "in another schema it is not allowlisted" do
       assert resolve({:func, "public", "current_setting", [text("role"), {:const, :bool, true}]}) ==
-               unsupported({:function, "public.current_setting", :not_allowlisted})
+               unsupported({:function, :other_schema, :not_allowlisted})
     end
   end
 
@@ -426,12 +461,13 @@ defmodule SqlLogex.ResolverTest do
     end
 
     test "an unsupported argument makes it unsupported, wherever it is" do
-      assert resolve({:coalesce, [topic(), {:unsupported, "x"}]}) == unsupported({:unparsed, "x"})
-      assert resolve({:coalesce, [{:unsupported, "x"}, {:const, :bool, false}]}) == unsupported({:unparsed, "x"})
+      assert resolve({:coalesce, [topic(), {:unsupported, "CASE x"}]}) == unsupported({:unparsed, :case})
+      assert resolve({:coalesce, [{:unsupported, "CASE x"}, {:const, :bool, false}]}) == unsupported({:unparsed, :case})
     end
 
     test "with several unsupported arguments is unsupported, with the first reason" do
-      assert resolve({:coalesce, [{:unsupported, "x"}, {:unsupported, "y"}]}) == unsupported({:unparsed, "x"})
+      assert resolve({:coalesce, [{:unsupported, "CASE x"}, {:unsupported, "EXISTS y"}]}) ==
+               unsupported({:unparsed, :case})
     end
 
     test "an argument Postgres folds and raises on makes the comparison unsupported, even after a value" do
@@ -455,7 +491,7 @@ defmodule SqlLogex.ResolverTest do
     end
 
     test "with an unsupported argument is unsupported with that reason" do
-      assert resolve({:nullif, topic(), {:unsupported, "x"}}) == unsupported({:unparsed, "x"})
+      assert resolve({:nullif, topic(), {:unsupported, "CASE x"}}) == unsupported({:unparsed, :case})
     end
   end
 
@@ -464,7 +500,7 @@ defmodule SqlLogex.ResolverTest do
       assert resolve({:sublink, uid(), "uid"}) == resolve(uid())
 
       assert resolve({:sublink, {:func, "public", "f", []}, nil}) ==
-               unsupported({:function, "public.f", :not_allowlisted})
+               unsupported({:function, :other_schema, :not_allowlisted})
     end
   end
 

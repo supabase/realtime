@@ -35,7 +35,7 @@ defmodule SqlLogex.EvalTest do
     end
 
     test "a setting that isn't in the env is unsupported" do
-      assert eval({:setting, "app.x"}) == {:unsupported, {:unknown_setting, "app.x"}}
+      assert eval({:setting, "app.x"}) == {:unsupported, {:unknown_setting, :other}}
     end
 
     test "a column is read from the row, an unbound one is unsupported" do
@@ -186,8 +186,16 @@ defmodule SqlLogex.EvalTest do
 
   describe "children that aren't booleans" do
     test "are unsupported rather than a crash" do
-      assert {:unsupported, {:not_boolean, {:text, "a"}}} = eval({:and, [{:lit, {:text, "a"}}, {:lit, true}]})
-      assert {:unsupported, {:not_boolean, {:text, "a"}}} = eval({:or, [{:lit, false}, {:lit, {:text, "a"}}]})
+      assert {:unsupported, {:not_boolean, :text}} = eval({:and, [{:lit, {:text, "a"}}, {:lit, true}]})
+      assert {:unsupported, {:not_boolean, :text}} = eval({:or, [{:lit, false}, {:lit, {:text, "a"}}]})
+    end
+
+    test "are reported by type, not by value" do
+      uuid = {:uuid, <<0::128>>}
+
+      assert eval({:and, [{:lit, uuid}]}) == {:unsupported, {:not_boolean, :uuid}}
+      assert eval({:and, [{:lit, {:jsonb, %{"secret" => "x"}}}]}) == {:unsupported, {:not_boolean, :jsonb}}
+      assert eval({:and, [{:array, [{:lit, true}]}]}) == {:unsupported, {:not_boolean, :unknown}}
     end
   end
 end
