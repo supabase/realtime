@@ -27,6 +27,7 @@ defmodule Realtime.Tenants.SqlLogexDifferentialTest do
   use Realtime.DataCase, async: true
 
   alias Realtime.Database
+  alias Realtime.Tenants.SqlLogexLoader
   alias SqlLogex.Eval
   alias SqlLogex.Parser
   alias SqlLogex.Resolver
@@ -41,32 +42,6 @@ defmodule Realtime.Tenants.SqlLogexDifferentialTest do
   @extensions ["broadcast", "presence"]
 
   @headers ~s({"x-client-info":"supabase-js/2.0"})
-
-  @functions_query """
-  select n.nspname, p.proname, l.lanname, p.provolatile::text, p.prosecdef, p.proconfig,
-         p.prorettype::regtype::text, p.prosrc
-  from pg_proc p
-  join pg_namespace n on n.oid = p.pronamespace
-  join pg_language l on l.oid = p.prolang
-  where p.pronargs = 0 and (n.nspname, p.proname) in (('auth', 'uid'), ('auth', 'jwt'), ('auth', 'role'), ('realtime', 'topic'))
-  order by n.nspname, p.proname
-  """
-
-  @policies_query """
-  select polname, polcmd::text, polpermissive,
-         array(select case when r = 0 then 'public' else r::regrole::text end from unnest(polroles) r),
-         pg_get_expr(polqual, polrelid), pg_get_expr(polwithcheck, polrelid)
-  from pg_policy where polrelid = 'realtime.messages'::regclass order by polname
-  """
-
-  @table_query "select relrowsecurity, relforcerowsecurity from pg_class where oid = 'realtime.messages'::regclass"
-
-  @roles_query """
-  select r.rolname, r.rolbypassrls,
-         has_table_privilege(r.rolname, 'realtime.messages', 'SELECT'),
-         has_table_privilege(r.rolname, 'realtime.messages', 'INSERT')
-  from pg_roles r where r.rolname in ('anon', 'authenticated')
-  """
 
   # As in Realtime.Tenants.Authorization
   @authorize_query """
@@ -411,58 +386,7 @@ defmodule Realtime.Tenants.SqlLogexDifferentialTest do
     )
   end
 
-  ## Loading from Postgres, as the loader will do in Realtime
-
-  # The deparsed text qualifies functions and operators by the session's search_path, so it is
-  # pinned to nothing while reading what sql_logex gets, and put back after
-  defp with_empty_search_path(conn, fun) do
-    %{rows: [[search_path]]} = Postgrex.query!(conn, "SELECT current_setting('search_path')", [])
-    Postgrex.query!(conn, "SET LOCAL search_path = ''", [])
-    value = fun.()
-    Postgrex.query!(conn, "SELECT set_config('search_path', $1, true)", [search_path])
-    value
-  end
-
-  defp load_functions_in_transaction(conn) do
-    with_empty_search_path(conn, fn ->
-      %{rows: functions} = Postgrex.query!(conn, @functions_query, [])
-
-      for [schema, name, language, volatility, security_definer, config, return_type, source] <- functions do
-        %{
-          schema: schema,
-          name: name,
-          language: language,
-          volatility: volatility,
-          security_definer: security_definer,
-          config: config,
-          return_type: return_type,
-          source: source
-        }
-      end
-    end)
-  end
-
-  defp load_snapshot_input(conn) do
-    with_empty_search_path(conn, fn ->
-      %{rows: [[rls_enabled, rls_forced]]} = Postgrex.query!(conn, @table_query, [])
-      %{rows: roles} = Postgrex.query!(conn, @roles_query, [])
-      %{rows: policies} = Postgrex.query!(conn, @policies_query, [])
-
-      %{
-        rls_enabled: rls_enabled,
-        rls_forced: rls_forced,
-        roles:
-          Map.new(roles, fn [name, bypass_rls, select, insert] ->
-            {name, %{bypass_rls: bypass_rls, select: select, insert: insert}}
-          end),
-        policies:
-          for [name, cmd, permissive, roles, qual, with_check] <- policies do
-            %{name: name, cmd: cmd, permissive: permissive, roles: roles, qual: qual, with_check: with_check}
-          end,
-        functions: load_functions_in_transaction(conn)
-      }
-    end)
-  end
+  ## Loading from Postgres, via the production loader (Realtime.Tenants.SqlLogexLoader)
 
   # The functions of the database the cases run against. The legacy bodies are the ones of the
   # supabase/postgres image, supabase/auth's are what production projects run.
@@ -470,7 +394,7 @@ defmodule Realtime.Tenants.SqlLogexDifferentialTest do
     {:error, functions} =
       Postgrex.transaction(db_conn, fn conn ->
         prepare_functions!(conn, flavor)
-        Postgrex.rollback(conn, load_functions_in_transaction(conn))
+        Postgrex.rollback(conn, SqlLogexLoader.read_functions(conn))
       end)
 
     functions
@@ -654,7 +578,7 @@ defmodule Realtime.Tenants.SqlLogexDifferentialTest do
         Enum.each(scenario.setup, &run!(conn, &1, scenario.name))
         drop_policies!(conn, scenario.name)
         Enum.each(scenario.policies, &run!(conn, &1, scenario.name))
-        snapshot_input = load_snapshot_input(conn)
+        snapshot_input = SqlLogexLoader.read(conn)
         Postgrex.rollback(conn, {snapshot_input, authorize_outcomes(conn, scenario.env, scenario.extensions)})
       end)
 
