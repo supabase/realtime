@@ -77,4 +77,23 @@ defmodule SqlLogex.IR do
 
   def supported?({:apply, _module, _function, args}) when is_list(args), do: Enum.all?(args, &supported?/1)
   def supported?(_other), do: false
+
+  @doc """
+  The reason of every `{:unsupported, reason}` node in `ir`, without duplicates, in the order they
+  first appear. `[]` if `supported?/1` is true, except that a node that isn't one of `t/0` has no
+  reason to give.
+  """
+  @spec unsupported_reasons(t) :: [term()]
+  def unsupported_reasons(ir), do: ir |> collect_reasons() |> Enum.uniq()
+
+  defp collect_reasons({:unsupported, reason}), do: [reason]
+  defp collect_reasons({:not, child}), do: collect_reasons(child)
+
+  defp collect_reasons({node, children}) when node in [:array, :and, :or, :coalesce] and is_list(children),
+    do: Enum.flat_map(children, &collect_reasons/1)
+
+  defp collect_reasons({:apply, _module, _function, args}) when is_list(args),
+    do: Enum.flat_map(args, &collect_reasons/1)
+
+  defp collect_reasons(_leaf_or_other), do: []
 end

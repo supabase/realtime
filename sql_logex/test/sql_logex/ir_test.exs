@@ -66,6 +66,53 @@ defmodule SqlLogex.IRTest do
     end
   end
 
+  describe "unsupported_reasons/1" do
+    test "a supported tree has none" do
+      assert IR.unsupported_reasons(@supported) == []
+      assert IR.unsupported_reasons({:setting, "realtime.topic"}) == []
+      assert IR.unsupported_reasons({:and, [@supported, {:not, @supported}]}) == []
+      assert IR.unsupported_reasons({:apply, Value, :is_null, []}) == []
+    end
+
+    test "an unsupported node is its reason" do
+      assert IR.unsupported_reasons(@unsupported) == [:boom]
+      assert IR.unsupported_reasons({:unsupported, {:operator, "~", :text, :int}}) == [{:operator, "~", :text, :int}]
+    end
+
+    test "finds the reasons anywhere in the tree" do
+      for wrap <- [
+            fn node -> {:and, [@supported, node]} end,
+            fn node -> {:or, [node, @supported]} end,
+            fn node -> {:not, node} end,
+            fn node -> {:coalesce, [@supported, node]} end,
+            fn node -> {:array, [node]} end,
+            fn node -> {:apply, Value, :text_eq, [@supported, node]} end
+          ] do
+        assert IR.unsupported_reasons(wrap.(@unsupported)) == [:boom]
+        assert IR.unsupported_reasons(wrap.(wrap.(@unsupported))) == [:boom]
+      end
+    end
+
+    test "collects every reason, once each, in the order they first appear" do
+      ir =
+        {:and,
+         [
+           {:unsupported, :a},
+           {:or, [{:unsupported, :b}, {:unsupported, :a}]},
+           {:apply, Value, :text_eq, [{:unsupported, {:c, 1}}, {:not, {:unsupported, :b}}]},
+           {:unsupported, {:c, 2}}
+         ]}
+
+      assert IR.unsupported_reasons(ir) == [:a, :b, {:c, 1}, {:c, 2}]
+    end
+
+    test "something that isn't a node of the IR has no reasons" do
+      assert IR.unsupported_reasons(:oops) == []
+      assert IR.unsupported_reasons(nil) == []
+      assert IR.unsupported_reasons({:and, :not_a_list}) == []
+    end
+  end
+
   describe "supported?/1 on what the resolver builds" do
     setup do
       {catalog, _binding} = Code.eval_file(Path.expand("../fixtures/pg17/catalog.exs", __DIR__))

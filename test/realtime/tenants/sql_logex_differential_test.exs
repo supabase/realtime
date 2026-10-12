@@ -30,6 +30,7 @@ defmodule Realtime.Tenants.SqlLogexDifferentialTest do
   alias Realtime.Tenants.SqlLogexLoader
   alias SqlLogex.Eval
   alias SqlLogex.Parser
+  alias SqlLogex.Reason
   alias SqlLogex.Resolver
   alias SqlLogex.Snapshot
 
@@ -309,8 +310,15 @@ defmodule Realtime.Tenants.SqlLogexDifferentialTest do
   end
 
   # What a case has to show. The evaluator may match or fall back, never differ and never crash. And what
-  # the unit tests of sql_logex expect of a decision has to be consistent with Postgres.
-  defp failure?(result), do: result.class in [:mismatch, :crash] or table_verdict(result) == :disagrees
+  # the unit tests of sql_logex expect of a decision has to be consistent with Postgres. Every reason it
+  # falls back with has a category, so a new reason can't be added without one.
+  defp failure?(result),
+    do: result.class in [:mismatch, :crash] or table_verdict(result) == :disagrees or uncategorised?(result)
+
+  # Level 1 evaluates, so its reasons aren't wrapped in `{:unsupported, _}` like the ones of a decision
+  defp uncategorised?(%{ex: {:unsupported, reason}, level: 1}), do: Reason.category({:unsupported, reason}) == :other
+  defp uncategorised?(%{ex: {:unsupported, reason}}), do: Reason.category(reason) == :other
+  defp uncategorised?(_result), do: false
 
   defp format_failure(result) do
     table =
