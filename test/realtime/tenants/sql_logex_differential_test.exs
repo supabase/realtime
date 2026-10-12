@@ -278,7 +278,8 @@ defmodule Realtime.Tenants.SqlLogexDifferentialTest do
   end
 
   test "level 2, what the snapshot has to rule out", %{db_conn: db_conn, collector: collector} do
-    finish(collector, Enum.flat_map(snapshot_scenarios(), &run_scenario(db_conn, &1)))
+    %{rows: [[version_num]]} = Postgrex.query!(db_conn, "SELECT current_setting('server_version_num')::int", [])
+    finish(collector, Enum.flat_map(snapshot_scenarios(version_num), &run_scenario(db_conn, &1)))
   end
 
   # See select_dependent_scenarios/0
@@ -1832,7 +1833,7 @@ defmodule Realtime.Tenants.SqlLogexDifferentialTest do
 
   # Everything the evaluator doesn't model has to be a fallback, not an answer. The setups change
   # the database in the transaction of the scenario, and are rolled back with it.
-  defp snapshot_scenarios do
+  defp snapshot_scenarios(server_version_num) do
     policies = [
       policy_sql("a", "FOR SELECT TO authenticated, anon USING (realtime.topic() = 'x')"),
       policy_sql("b", "FOR INSERT TO authenticated, anon WITH CHECK (realtime.topic() = 'x')")
@@ -1856,14 +1857,24 @@ defmodule Realtime.Tenants.SqlLogexDifferentialTest do
        [
          "CREATE ROLE sql_logex_team NOLOGIN",
          policy_sql("team", "FOR ALL TO sql_logex_team USING (true) WITH CHECK (true)")
-       ]},
-      {"a policy for a role authenticated is a member of, without inheritance",
-       [
-         "CREATE ROLE sql_logex_team NOLOGIN",
-         "GRANT sql_logex_team TO authenticated WITH INHERIT FALSE",
-         policy_sql("team", "FOR ALL TO sql_logex_team USING (true) WITH CHECK (true)")
        ]}
     ]
+
+    # GRANT ... WITH INHERIT is PG16 syntax
+    setups =
+      if server_version_num >= 160_000 do
+        setups ++
+          [
+            {"a policy for a role authenticated is a member of, without inheritance",
+             [
+               "CREATE ROLE sql_logex_team NOLOGIN",
+               "GRANT sql_logex_team TO authenticated WITH INHERIT FALSE",
+               policy_sql("team", "FOR ALL TO sql_logex_team USING (true) WITH CHECK (true)")
+             ]}
+          ]
+      else
+        setups
+      end
 
     for {label, setup} <- setups, role <- ["authenticated", "anon", "service_role"], topic <- ["x", "y"] do
       {extra_policies, setup} = Enum.split_with(setup, &String.starts_with?(&1, "CREATE POLICY"))
