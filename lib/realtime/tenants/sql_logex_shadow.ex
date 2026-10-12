@@ -9,10 +9,16 @@ defmodule Realtime.Tenants.SqlLogexShadow do
   ...]`):
 
     * the bare event, one per extension decided: metadata carries `outcome` (`:match`, `:mismatch`,
-      `:fallback` or `:no_real_answer`), `real`, the boolean (or `nil`) the real check produced for
-      that extension, and `reason`: for a `:fallback`, the bounded category of why
+      `:fallback` or `:no_real_answer`), `real`, what the real check produced for that extension, and
+      `reason`: for a `:fallback`, the bounded category of why
       (`SqlLogex.Reason.category/1`), `:none` for every other outcome. A `:mismatch` also logs a warning
       immediately. `:exception` is the same, for the rare case deciding itself raises.
+
+      `real` is a boolean, or `{:error, sqlstate}` when Postgres raised evaluating the policies for
+      this input, like a sub that isn't a uuid. That is Postgres's answer too, so a decided
+      `:allow`/`:deny` against it is a `:mismatch`. `real` is `nil`, and the outcome
+      `:no_real_answer`, only when the check couldn't run: no connection, a timeout, a missing
+      partition, or any other error.
     * `:unavailable`, when the tenant's snapshot couldn't be loaded at all.
     * `:timing`, once per call: `shadow_duration`, the whole shadow pipeline (cache fetch included), in
       native time units. Compare against the real check's own cost via the existing
@@ -102,7 +108,7 @@ defmodule Realtime.Tenants.SqlLogexShadow do
       Telemetry.execute(check.event, %{}, outcome_metadata)
 
       case outcome do
-        {:mismatch, sql_logex, real_bool} ->
+        {:mismatch, sql_logex, _real} ->
           # topic/role/operation so a mismatch can be checked against the tenant's current policies by
           # hand — a stale cached snapshot (up to the cache TTL old) looks identical to a real bug
           # otherwise.
@@ -114,7 +120,7 @@ defmodule Realtime.Tenants.SqlLogexShadow do
               topic: check.authorization_context.topic,
               role: check.authorization_context.role,
               sql_logex: sql_logex,
-              real: real_bool
+              real: real
             },
             project: tenant_id,
             external_id: tenant_id
@@ -132,7 +138,7 @@ defmodule Realtime.Tenants.SqlLogexShadow do
   defp classify(:allow, true), do: :match
   defp classify(:deny, false), do: :match
   defp classify(decision, nil), do: {:no_real_answer, decision}
-  defp classify(decision, real_bool), do: {:mismatch, decision, real_bool}
+  defp classify(decision, real), do: {:mismatch, decision, real}
 
   defp tag(:match), do: :match
   defp tag({:mismatch, _, _}), do: :mismatch
@@ -145,10 +151,29 @@ defmodule Realtime.Tenants.SqlLogexShadow do
   # Mirrors Realtime.Tenants.Authorization's own update_write_policy/3 mapping, as a getter.
   defp real_read({:ok, %Policies{broadcast: %{read: v}}}, :broadcast), do: v
   defp real_read({:ok, %Policies{presence: %{read: v}}}, :presence), do: v
+  defp real_read({:error, :rls_policy_error, error}, _extension), do: policy_error(error)
   defp real_read(_result, _extension), do: nil
 
   defp real_write({:ok, %Policies{broadcast: %{write: v}}}, :broadcast), do: v
   defp real_write({:ok, %Policies{presence: %{write: v}}}, :presence), do: v
   defp real_write({:ok, %Policies{broadcast: %{persist: v}}}, :persistence), do: v
+  defp real_write({:error, :rls_policy_error, error}, _extension), do: policy_error(error)
   defp real_write(_result, _extension), do: nil
+
+  # :rls_policy_error is Authorization's catch-all for any Postgrex.Error. These SQLSTATE classes are
+  # the ones evaluating the policies for this input raises:
+  #
+  #   22  data exception: a sub that isn't a uuid, invalid json
+  #   42  syntax error or access rule violation: a revoked EXECUTE
+  #   P0  PL/pgSQL error: a RAISE in a function or trigger
+  #
+  # See https://www.postgresql.org/docs/current/errcodes-appendix.html. Only the code, never the
+  # message, which can hold the input.
+  @policy_error_classes ["22", "42", "P0"]
+
+  defp policy_error(%Postgrex.Error{postgres: %{pg_code: <<class::binary-size(2), _::binary>> = code}})
+       when class in @policy_error_classes,
+       do: {:error, code}
+
+  defp policy_error(_error), do: nil
 end
