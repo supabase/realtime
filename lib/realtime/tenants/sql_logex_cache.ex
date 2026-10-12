@@ -34,7 +34,8 @@ defmodule Realtime.Tenants.SqlLogexCache do
 
   `db_conn` is whatever connection the caller already has for the tenant; this module has no opinion
   on how it was obtained. A load failure isn't cached, so a transient database error doesn't make
-  every join for that tenant fall back for a full TTL.
+  every join for that tenant fall back for a full TTL. `{:error, _}` can also come from Cachex itself
+  (cache not running, the fallback crashing), not just a bad load — handled the same way either way.
   """
   @spec fetch(DBConnection.conn(), String.t()) :: {:ok, Snapshot.t()} | {:error, term()}
   def fetch(db_conn, tenant_id) do
@@ -47,6 +48,7 @@ defmodule Realtime.Tenants.SqlLogexCache do
       {:commit, value} -> {:ok, value}
       {:ok, value} -> {:ok, value}
       {:ignore, error} -> error
+      {:error, _} = error -> error
     end
   end
 
