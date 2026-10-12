@@ -49,23 +49,29 @@ defmodule Realtime.Tenants.SqlLogexLoaderTest do
     end
 
     test "falls back for a function whose definition isn't a known one", %{db_conn: db_conn, tenant: tenant} do
-      Postgrex.query!(db_conn, SqlLogexPolicies.auth_jwt_statement(), [])
+      # Rolled back: tenant databases are reused across tests, and later ones need the image's auth.role()
+      {:error, result} =
+        Postgrex.transaction(db_conn, fn conn ->
+          Postgrex.query!(conn, SqlLogexPolicies.auth_jwt_statement(), [])
 
-      Postgrex.query!(
-        db_conn,
-        "CREATE OR REPLACE FUNCTION auth.role() RETURNS text LANGUAGE sql AS $$ select null $$",
-        []
-      )
+          Postgrex.query!(
+            conn,
+            "CREATE OR REPLACE FUNCTION auth.role() RETURNS text LANGUAGE sql AS $$ select null $$",
+            []
+          )
 
-      Enum.each(SqlLogexPolicies.user_channel_policies(), &Postgrex.query!(db_conn, &1, []))
+          Enum.each(SqlLogexPolicies.user_channel_policies(), &Postgrex.query!(conn, &1, []))
 
-      Postgrex.query!(
-        db_conn,
-        "CREATE POLICY \"by role\" ON realtime.messages FOR SELECT USING (auth.role() = 'x')",
-        []
-      )
+          Postgrex.query!(
+            conn,
+            "CREATE POLICY \"by role\" ON realtime.messages FOR SELECT USING (auth.role() = 'x')",
+            []
+          )
 
-      assert {:ok, snapshot} = SqlLogexLoader.load(db_conn, tenant.external_id)
+          Postgrex.rollback(conn, SqlLogexLoader.load(conn, tenant.external_id))
+        end)
+
+      assert {:ok, snapshot} = result
 
       by_role = Enum.find(snapshot.policies, &(&1.name == "by role"))
       {{:unsupported, {:function, "auth.role", :unknown_definition}}, :unknown} = by_role.using
