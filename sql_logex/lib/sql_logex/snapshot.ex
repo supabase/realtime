@@ -43,6 +43,7 @@ defmodule SqlLogex.Snapshot do
   Every expression is parsed and resolved once, here, so deciding is only evaluation.
   """
 
+  alias SqlLogex.IR
   alias SqlLogex.Parser
   alias SqlLogex.Policy
   alias SqlLogex.Resolver
@@ -79,6 +80,23 @@ defmodule SqlLogex.Snapshot do
           }
         end)
     }
+  end
+
+  @doc """
+  The parts of the policies that aren't modelled: for each policy with an unsupported node in its
+  `using` or `with_check`, its `cmd`, whether it is `permissive` and the reasons
+  (`SqlLogex.IR.unsupported_reasons/1`). Policies without any are left out. There is no policy
+  name in it, so like the reasons it can be logged.
+  """
+  @spec unsupported(t) :: [%{cmd: String.t(), permissive: boolean(), reasons: [term()]}]
+  def unsupported(%__MODULE__{policies: policies}) do
+    for policy <- policies, reasons = reasons(policy), reasons != [] do
+      %{cmd: policy.cmd, permissive: policy.permissive, reasons: reasons}
+    end
+  end
+
+  defp reasons(%Policy{using: using, with_check: with_check}) do
+    for {ir, _type} <- [using, with_check], reason <- IR.unsupported_reasons(ir), uniq: true, do: reason
   end
 
   defp expression(nil, _functions), do: nil
