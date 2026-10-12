@@ -172,6 +172,7 @@ defmodule Realtime.Application do
           id: Realtime.LogThrottle
         ),
         Realtime.Tenants.Cache,
+        Realtime.Tenants.SqlLogexCache,
         Realtime.FeatureFlags.Cache,
         Realtime.RateCounter.DynamicSupervisor,
         Realtime.Latency,
