@@ -25,7 +25,15 @@ defmodule Realtime.Repo.Replica do
     "eu-west-2" => Realtime.Repo.Replica.London,
     "us-east-1" => Realtime.Repo.Replica.NorthVirginia,
     "us-west-2" => Realtime.Repo.Replica.Oregon,
-    "us-west-1" => Realtime.Repo.Replica.SanJose
+    "us-west-1" => Realtime.Repo.Replica.SanJose,
+    "us-east-2" => Realtime.Repo.Replica.Ohio,
+    "eu-west-1" => Realtime.Repo.Replica.Ireland,
+    "eu-central-1" => Realtime.Repo.Replica.Frankfurt,
+    "eu-north-1" => Realtime.Repo.Replica.Stockholm,
+    "sa-east-1" => Realtime.Repo.Replica.SaoPaulo,
+    "ap-northeast-1" => Realtime.Repo.Replica.Tokyo,
+    "ap-northeast-2" => Realtime.Repo.Replica.Seoul,
+    "ap-south-1" => Realtime.Repo.Replica.Mumbai
   }
 
   for replica_module <- Enum.uniq(Map.values(@replicas_fly) ++ Map.values(@replicas_aws)) do
