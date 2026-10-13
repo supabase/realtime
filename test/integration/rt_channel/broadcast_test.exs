@@ -1033,6 +1033,30 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
                      },
                      1000
     end
+
+    test "broadcast event when function 'send' is called with a payload that isn't an object", %{
+      tenant: tenant,
+      topic: topic,
+      db_conn: db_conn,
+      serializer: serializer
+    } do
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      full_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, full_topic, %{config: %{broadcast: %{self: true}, private: false}})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
+      assert ReplicationConnection.ready?(tenant.external_id)
+
+      Postgrex.query!(db_conn, "SELECT realtime.send('[1, 2, 3]'::jsonb, 'event', $1, FALSE)", [topic])
+
+      assert_receive %Message{
+                       event: "broadcast",
+                       payload: %{"event" => "event", "payload" => [1, 2, 3], "type" => "broadcast"},
+                       topic: ^full_topic
+                     },
+                     1000
+    end
   end
 
   defp attach_fanout_telemetry(_context) do
