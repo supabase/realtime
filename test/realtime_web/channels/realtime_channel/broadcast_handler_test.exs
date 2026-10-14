@@ -563,6 +563,64 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       refute_receive {:socket_push, :text, _}, 120
     end
+
+    test "an oversized payload in a private channel still counts toward the tenant's rate", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket = socket_fixture(tenant, topic, policies: %Policies{broadcast: %BroadcastPolicies{write: true}})
+      payload = %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 1)}
+
+      for _ <- 1..3, reduce: socket do
+        socket ->
+          {:reply, {:error, %{error: :payload_size_exceeded}}, socket} =
+            BroadcastHandler.handle(payload, db_conn, socket)
+
+          socket
+      end
+
+      # Authorization passed, so the attempt counts even though nothing was sent
+      {:ok, %{bucket: buckets}} = RateCounterHelper.tick!(Tenants.events_per_second_rate(tenant))
+      assert Enum.sum(buckets) == 3
+    end
+
+    test "an oversized payload in a public channel still counts toward the tenant's rate", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket = socket_fixture(tenant, topic, private?: false, policies: nil)
+      payload = %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 1)}
+
+      for _ <- 1..3, reduce: socket do
+        socket ->
+          {:reply, {:error, %{error: :payload_size_exceeded}}, socket} =
+            BroadcastHandler.handle(payload, db_conn, socket)
+
+          socket
+      end
+
+      {:ok, %{bucket: buckets}} = RateCounterHelper.tick!(Tenants.events_per_second_rate(tenant))
+      assert Enum.sum(buckets) == 3
+    end
+
+    test "a denied write is kept on the returned socket so the next broadcast skips the check", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket = socket_fixture(tenant, topic)
+
+      for ack <- [true, false] do
+        socket = %{socket | assigns: Map.put(socket.assigns, :ack_broadcast, ack)}
+
+        result = BroadcastHandler.handle(@payload, db_conn, socket)
+        socket = elem(result, tuple_size(result) - 1)
+
+        assert %Policies{broadcast: %BroadcastPolicies{write: false}} = socket.assigns.policies
+      end
+    end
   end
 
   describe "broadcast persistence" do
