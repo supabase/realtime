@@ -149,6 +149,51 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManagerTest do
       assert %Postgrex.Result{rows: [[^baseline]]} =
                Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
     end
+
+    test "a disconnected subscriber node does not delete a live subscription", %{
+      pid: pid,
+      args: args,
+      publication: publication
+    } do
+      {:ok, ^pid, conn} = PostgresCdcRls.get_manager_conn(args["id"])
+      {uuid, bin_uuid, pg_change_params} = pg_change_params()
+
+      subscriber =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      %Postgrex.Result{rows: [[baseline]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+
+      assert {:ok, [%Postgrex.Result{command: :insert}]} =
+               Subscriptions.create(conn, publication, [pg_change_params], pid, subscriber)
+
+      :sys.get_state(pid)
+
+      [{^subscriber, ^uuid, ref, node}] = :ets.lookup(args["subscribers_pids_table"], subscriber)
+      assert [{^bin_uuid, ^node}] = :ets.lookup(args["subscribers_nodes_table"], bin_uuid)
+
+      # The VM delivers this when the subscriber's node connection drops. The
+      # process is still alive; only the monitor fired.
+      send(pid, {:DOWN, ref, :process, subscriber, :noconnection})
+      :sys.get_state(pid)
+
+      assert [{^subscriber, ^uuid, ^ref, ^node}] = :ets.lookup(args["subscribers_pids_table"], subscriber)
+      assert [{^bin_uuid, ^node}] = :ets.lookup(args["subscribers_nodes_table"], bin_uuid)
+
+      send(pid, :check_delete_queue)
+      :sys.get_state(pid)
+
+      %Postgrex.Result{rows: [[after_disconnect]]} =
+        Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+
+      assert after_disconnect > baseline
+      assert Process.alive?(subscriber)
+
+      send(subscriber, :stop)
+    end
   end
 
   describe "warm restart (re-adopt)" do
