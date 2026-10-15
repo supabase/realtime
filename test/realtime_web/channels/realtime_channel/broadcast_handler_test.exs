@@ -605,20 +605,23 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       assert Enum.sum(buckets) == 3
     end
 
-    test "a denied write is kept on the returned socket so the next broadcast skips the check", %{
+    test "a denied write without ack is cached, so the next broadcast skips the check", %{
       topic: topic,
       tenant: tenant,
       db_conn: db_conn
     } do
-      socket = socket_fixture(tenant, topic)
+      socket = socket_fixture(tenant, topic, ack_broadcast: false)
 
-      for ack <- [true, false] do
-        socket = %{socket | assigns: Map.put(socket.assigns, :ack_broadcast, ack)}
+      # Only the first broadcast may query the database. Mimic raises on a second call, so this fails
+      # if the deny's policies are not carried on the returned socket.
+      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context, extension ->
+        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context, extension])
+      end)
 
-        result = BroadcastHandler.handle(@payload, db_conn, socket)
-        socket = elem(result, tuple_size(result) - 1)
-
-        assert %Policies{broadcast: %BroadcastPolicies{write: false}} = socket.assigns.policies
+      for _ <- 1..3, reduce: socket do
+        socket ->
+          {:noreply, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+          socket
       end
     end
   end
