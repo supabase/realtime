@@ -44,15 +44,17 @@ defmodule Extensions.PostgresCdcRls.MessageDispatcher do
   end
 
   defp broadcast_message(cache, fastlane_pid, msg, serializer) do
+    cache_key = {serializer, msg}
+
     case cache do
-      %{^msg => encoded_msg} ->
+      %{^cache_key => encoded_msg} ->
         send(fastlane_pid, encoded_msg)
         cache
 
       %{} ->
         encoded_msg = serializer.fastlane!(msg)
         send(fastlane_pid, encoded_msg)
-        Map.put(cache, msg, encoded_msg)
+        Map.put(cache, cache_key, encoded_msg)
     end
   end
 end
