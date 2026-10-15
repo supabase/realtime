@@ -393,10 +393,13 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
           "filter" => "details=like.hel%"
         })
 
-      params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
+      id = UUID.uuid1()
+      params_list = [%{claims: %{"role" => "anon"}, id: id, subscription_params: subscription_params}]
 
       assert {:ok, [%Postgrex.Result{}]} =
                Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+
+      assert_received {:subscribed, {_, ^id}}
 
       assert %Postgrex.Result{rows: [[[{"details", "like", "hel%", false}]]]} =
                Postgrex.query!(conn, "select filters from realtime.subscription", [])
@@ -470,6 +473,39 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
               {:subscription_insert_failed,
                "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [event: *, schema: public, table: test, filters: [{\"subject\", \"eq\", \"hey\", false}], select: nil]. Exception: ERROR P0001 (raise_exception) invalid column for filter subject"}} =
                Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+
+      %Postgrex.Result{rows: [[0]]} =
+        Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+    end
+
+    test "a later failure does not record subscriptions the rollback removed", %{conn: conn} do
+      {:ok, kept} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "test",
+          "filter" => "details=like.hel%"
+        })
+
+      {:ok, rejected} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "test",
+          "filter" => "subject=eq.hey"
+        })
+
+      kept_id = UUID.uuid1()
+
+      subscription_list = [
+        %{claims: %{"role" => "anon"}, id: kept_id, subscription_params: kept},
+        %{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: rejected}
+      ]
+
+      assert {:error, {:subscription_insert_failed, _}} =
+               Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+
+      # The insert of the first subscription is rolled back with the transaction, so the
+      # manager must not be told it is subscribed.
+      refute_received {:subscribed, {_, ^kept_id}}
 
       %Postgrex.Result{rows: [[0]]} =
         Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
