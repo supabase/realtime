@@ -170,8 +170,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
           max_changes: max_changes,
           conn: conn,
           tenant_id: tenant_id,
-          subscribers_nodes_table: subscribers_nodes_table,
-          rate_counter_args: rate_counter_args
+          subscribers_nodes_table: subscribers_nodes_table
         } = state
       ) do
     cancel_timer(poll_ref)
@@ -191,7 +190,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     {time, list_changes} = :timer.tc(Replications, :list_changes, args)
     record_list_changes_telemetry(time, tenant_id)
 
-    case handle_list_changes_result(list_changes, subscribers_nodes_table, tenant_id, rate_counter_args) do
+    case handle_list_changes_result(list_changes, subscribers_nodes_table, tenant_id, rate_counter_args(state)) do
       {:ok, {processed_count, slot_changes_count}} ->
         backoff = Backoff.reset(backoff)
 
@@ -401,6 +400,15 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   end
 
   defp supported_standby(synchronous_standby, _orioledb), do: synchronous_standby
+
+  # A limit change restarts the RateCounter and the poller is what starts it again, so build its args from the
+  # cached tenant instead of reusing the ones from init
+  defp rate_counter_args(%{tenant_id: tenant_id, rate_counter_args: rate_counter_args}) do
+    case Tenants.Cache.get_tenant_by_external_id(tenant_id) do
+      %Realtime.Api.Tenant{} = tenant -> Tenants.db_events_per_second_rate(tenant)
+      nil -> rate_counter_args
+    end
+  end
 
   defp record_list_changes_telemetry(time, tenant_id) do
     Realtime.Telemetry.execute(
