@@ -72,7 +72,15 @@ for repo <- [
       Realtime.Repo.Replica.London,
       Realtime.Repo.Replica.NorthVirginia,
       Realtime.Repo.Replica.Oregon,
-      Realtime.Repo.Replica.SanJose
+      Realtime.Repo.Replica.SanJose,
+      Realtime.Repo.Replica.Ohio,
+      Realtime.Repo.Replica.Ireland,
+      Realtime.Repo.Replica.Frankfurt,
+      Realtime.Repo.Replica.Stockholm,
+      Realtime.Repo.Replica.SaoPaulo,
+      Realtime.Repo.Replica.Tokyo,
+      Realtime.Repo.Replica.Seoul,
+      Realtime.Repo.Replica.Mumbai
     ] do
   config :realtime, repo,
     username: "supabase_admin",
