@@ -13,12 +13,20 @@ defmodule Realtime.Nodes do
   def get_node_for_tenant(nil), do: {:error, :tenant_not_found}
 
   def get_node_for_tenant(%Tenant{} = tenant) do
-    with region <- Tenants.region(tenant),
-         tenant_region <- platform_region_translator(region),
+    with tenant_region <- launch_region(tenant),
          node <- launch_node(tenant_region, node(), tenant.external_id) do
       {:ok, node, tenant_region}
     end
   end
+
+  @doc """
+  The region the Postgres connection for a tenant should run in
+
+  The tenant's region translated to the closest Realtime region.
+  Unlike `get_node_for_tenant/1` this doesn't pick a node.
+  """
+  @spec launch_region(Tenant.t()) :: binary() | nil
+  def launch_region(%Tenant{} = tenant), do: tenant |> Tenants.region() |> platform_region_translator()
 
   @doc """
   Translates a region from a platform to the closest Supabase tenant region.

@@ -13,8 +13,9 @@ defmodule Realtime.Tenants.Rebalancer do
     # If they are equal it means that the cluster is relatively stable
     # We can check now if this Connect process is in the correct region
     if MapSet.equal?(current_nodes_set, previous_nodes_set) do
-      with %Tenant{} = tenant <- Realtime.Tenants.Cache.get_tenant_by_external_id(tenant_id),
-           {:ok, _node, expected_region} <- Nodes.get_node_for_tenant(tenant) do
+      with %Tenant{} = tenant <- Realtime.Tenants.Cache.get_tenant_by_external_id(tenant_id) do
+        expected_region = Nodes.launch_region(tenant)
+
         # Either we are already in the right region, or there are no nodes in the expected region
         # for us to rebalance to
         if Nodes.region() == expected_region or expected_region |> Nodes.region_nodes() |> Enum.empty?() do
