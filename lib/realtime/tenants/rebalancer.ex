@@ -4,6 +4,7 @@ defmodule Realtime.Tenants.Rebalancer do
   """
 
   alias Realtime.Api.Tenant
+  alias Realtime.Nodes
 
   @spec check(MapSet.t(node), MapSet.t(node), binary) :: :ok | {:error, :wrong_region}
   def check(previous_nodes_set, current_nodes_set, tenant_id)
@@ -13,10 +14,10 @@ defmodule Realtime.Tenants.Rebalancer do
     # We can check now if this Connect process is in the correct region
     if MapSet.equal?(current_nodes_set, previous_nodes_set) do
       with %Tenant{} = tenant <- Realtime.Tenants.Cache.get_tenant_by_external_id(tenant_id),
-           {:ok, _node, expected_region} <- Realtime.Nodes.get_node_for_tenant(tenant),
-           # No node in the expected region means there is nowhere closer to move the connection to
-           [_ | _] <- Realtime.Nodes.region_nodes(expected_region) do
-        if Realtime.Nodes.region() == expected_region do
+           {:ok, _node, expected_region} <- Nodes.get_node_for_tenant(tenant) do
+        # Either we are already in the right region, or there are no nodes in the expected region
+        # for us to rebalance to
+        if Nodes.region() == expected_region or expected_region |> Nodes.region_nodes() |> Enum.empty?() do
           :ok
         else
           {:error, :wrong_region}
