@@ -11,6 +11,9 @@ defmodule Realtime.MetricsPusher do
   This lets global and tenant metrics go to different endpoints (central vs. regional).
   See `child_specs/1` for how the scopes are chosen from config.
 
+  Every push adds a `scope=global` or `scope=tenant` label, so the two metric sets can be
+  told apart downstream even when one pusher sends both.
+
   Only starts if the scope's `url` is configured.
   Pushes metrics every 30 seconds (configurable) to the configured URL endpoint.
   """
@@ -160,6 +163,7 @@ defmodule Realtime.MetricsPusher do
 
   defp push_metrics(label, get_metrics_fn, req_options) do
     metrics = get_metrics_fn.()
+    req_options = Keyword.update!(req_options, :params, &(&1 ++ [{:extra_label, "scope=#{label}"}]))
 
     case send_metrics(req_options, metrics) do
       :ok ->
