@@ -6,6 +6,8 @@ defmodule Realtime.Tenants.RebalancerTest do
 
   use Mimic
 
+  import ExUnit.CaptureLog
+
   setup :set_mimic_from_context
 
   setup do
@@ -20,7 +22,7 @@ defmodule Realtime.Tenants.RebalancerTest do
       external_id = tenant.external_id
 
       # Don't even try to look for the region
-      reject(&Nodes.get_node_for_tenant/1)
+      reject(&Nodes.launch_region/1)
 
       assert Rebalancer.check(MapSet.new([node()]), MapSet.new([node(), :other_node]), external_id) == :ok
     end
@@ -29,8 +31,8 @@ defmodule Realtime.Tenants.RebalancerTest do
       external_id = tenant.external_id
       current_region = Nodes.region()
 
-      expect(Nodes, :get_node_for_tenant, fn ^tenant -> {:ok, :some_node, current_region} end)
-      reject(&Nodes.get_node_for_tenant/1)
+      expect(Nodes, :launch_region, fn ^tenant -> current_region end)
+      reject(&Nodes.launch_region/1)
 
       assert Rebalancer.check(MapSet.new([node(), :some_node]), MapSet.new([node(), :some_node]), external_id) == :ok
     end
@@ -38,8 +40,8 @@ defmodule Realtime.Tenants.RebalancerTest do
     test "same node set different region set returns :ok", %{tenant: tenant} do
       external_id = tenant.external_id
 
-      expect(Nodes, :get_node_for_tenant, fn ^tenant -> {:ok, :some_node, "ap-southeast-1"} end)
-      reject(&Nodes.get_node_for_tenant/1)
+      expect(Nodes, :launch_region, fn ^tenant -> "ap-southeast-1" end)
+      reject(&Nodes.launch_region/1)
       expect(Nodes, :region_nodes, fn "ap-southeast-1" -> [:some_node] end)
 
       assert Rebalancer.check(MapSet.new([node(), :some_node]), MapSet.new([node(), :some_node]), external_id) ==
@@ -50,13 +52,24 @@ defmodule Realtime.Tenants.RebalancerTest do
       external_id = tenant.external_id
       [%{settings: settings} = extension] = tenant.extensions
 
-      # us-west-2 translates to us-west-1, a region no node in this cluster belongs to, like a single-node
-      # self-hosted Realtime left on the default "local" region serving its seeded us-east-1 tenant
+      # No node in this cluster belongs to us-west-2, like a single-node self-hosted Realtime left on the
+      # default "local" region serving its seeded us-east-1 tenant
       tenant = %{tenant | extensions: [%{extension | settings: Map.put(settings, "region", "us-west-2")}]}
       Realtime.Tenants.Cache.update_cache(tenant)
 
-      assert Nodes.region_nodes("us-west-1") == []
-      assert Rebalancer.check(MapSet.new([node()]), MapSet.new([node()]), external_id) == :ok
+      assert Nodes.launch_region(tenant) == "us-west-2"
+      assert Nodes.region_nodes("us-west-2") == []
+
+      # Tag this test's log lines, async tests may log the same warning concurrently
+      Logger.metadata(external_id: external_id)
+
+      log =
+        capture_log([format: "$metadata$message\n", metadata: [:external_id]], fn ->
+          assert Rebalancer.check(MapSet.new([node()]), MapSet.new([node()]), external_id) == :ok
+        end)
+
+      # The check only needs the region, picking a node would warn on every check
+      refute log =~ "external_id=#{external_id} Zero region nodes for"
     end
   end
 end
