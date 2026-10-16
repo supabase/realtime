@@ -258,34 +258,34 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
          :ok <- validate_payload_size(tenant, payload),
          _ <- RealtimeWeb.TenantBroadcaster.collect_payload_size(socket.assigns.tenant, payload, :presence),
          :ok <- limit_presence_event(socket),
-         {:ok, _} <- Presence.track(self(), tenant_topic, presence_key, stamped_payload) do
-      resync =
-        if socket.assigns.presence_enabled? do
-          :no_resync
-        else
-          :resync
-        end
+         {action, {:ok, _}} <- track_or_update(tenant_topic, presence_key, stamped_payload) do
+      case action do
+        :track ->
+          resync =
+            if socket.assigns.presence_enabled? do
+              :no_resync
+            else
+              :resync
+            end
 
-      socket =
-        socket
-        |> assign(:presence_enabled?, true)
-        |> assign(:presence_track_payload, payload)
+          socket =
+            socket
+            |> assign(:presence_enabled?, true)
+            |> assign(:presence_track_payload, payload)
 
-      {:ok, socket, resync}
+          {:ok, socket, resync}
+
+        :update ->
+          {:ok, assign(socket, :presence_track_payload, payload), :no_resync}
+      end
     else
       {:error, :no_payload_change} ->
         # no-op if payload hasn't changed
         {:ok, socket, :no_resync}
 
-      {:error, {:already_tracked, pid, _, _}} ->
-        case Presence.update(pid, tenant_topic, presence_key, stamped_payload) do
-          {:ok, _} ->
-            socket = assign(socket, :presence_track_payload, payload)
-            {:ok, socket, :no_resync}
-
-          {:error, _} ->
-            {:error, :unable_to_track_presence}
-        end
+      {_action, {:error, error}} ->
+        log_error("UnableToTrackPresence", error)
+        {:error, :unable_to_track_presence}
 
       {:error, reason} when reason in [:invalid_payload, :rate_limit_exceeded, :payload_size_exceeded] ->
         {:error, reason}
@@ -294,6 +294,17 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
         log_error("UnableToTrackPresence", error)
         {:error, :unable_to_track_presence}
     end
+  end
+
+  # Tracks the client, or updates its existing presence if it is already tracked. Both are
+  # GenServer calls on the presence shard, measured together as the cost of the client's request.
+  defp track_or_update(tenant_topic, presence_key, payload) do
+    Presence.Metrics.measure_tracker_call(fn ->
+      case Presence.track(self(), tenant_topic, presence_key, payload) do
+        {:error, {:already_tracked, pid, _, _}} -> {:update, Presence.update(pid, tenant_topic, presence_key, payload)}
+        result -> {:track, result}
+      end
+    end)
   end
 
   # presence.read is left unevaluated (nil) at join when presence is disabled. Authorize it now that
