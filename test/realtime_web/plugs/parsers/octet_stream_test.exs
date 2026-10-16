@@ -42,7 +42,7 @@ defmodule RealtimeWeb.Plugs.Parsers.OctetStreamTest do
       assert {:next, ^conn} = OctetStream.parse(conn, "application", "x-www-form-urlencoded", %{}, opts)
     end
 
-    test "parses application/octet-stream body into %{\"_binary\" => body}" do
+    test "puts the application/octet-stream body in conn.private" do
       body = <<1, 2, 3, 4, 5>>
 
       conn =
@@ -51,7 +51,7 @@ defmodule RealtimeWeb.Plugs.Parsers.OctetStreamTest do
 
       opts = OctetStream.init([])
 
-      assert {:ok, %{"_binary" => ^body}, %Plug.Conn{}} =
+      assert {:ok, %{}, %Plug.Conn{private: %{realtime_binary_body: ^body}}} =
                OctetStream.parse(conn, "application", "octet-stream", %{}, opts)
     end
 
@@ -62,7 +62,7 @@ defmodule RealtimeWeb.Plugs.Parsers.OctetStreamTest do
 
       opts = OctetStream.init([])
 
-      assert {:ok, %{"_binary" => <<>>}, %Plug.Conn{}} =
+      assert {:ok, %{}, %Plug.Conn{private: %{realtime_binary_body: <<>>}}} =
                OctetStream.parse(conn, "application", "octet-stream", %{}, opts)
     end
 
@@ -112,7 +112,7 @@ defmodule RealtimeWeb.Plugs.Parsers.OctetStreamTest do
 
       opts = OctetStream.init([])
 
-      assert {:ok, %{"_binary" => ^body}, %Plug.Conn{}} =
+      assert {:ok, %{}, %Plug.Conn{private: %{realtime_binary_body: ^body}}} =
                OctetStream.parse(
                  conn,
                  "application",

@@ -101,14 +101,8 @@ defmodule RealtimeWeb.BroadcastSingleController do
     end
   end
 
-  defp payload(conn) do
-    with [content_type | _] <- get_req_header(conn, "content-type"),
-         {:ok, "application", "octet-stream", _} <- Plug.Conn.Utils.content_type(content_type) do
-      {:ok, conn.body_params["_binary"], :binary}
-    else
-      _ -> json_payload(conn.body_params)
-    end
-  end
+  defp payload(%{private: %{realtime_binary_body: body}}), do: {:ok, body, :binary}
+  defp payload(conn), do: json_payload(conn.body_params)
 
   # Plug.Parsers.JSON wraps a body that isn't a JSON object as %{"_json" => value}
   defp json_payload(%{"_json" => value} = body) when map_size(body) == 1 and not is_map(value),
