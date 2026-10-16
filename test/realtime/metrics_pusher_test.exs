@@ -182,7 +182,7 @@ defmodule Realtime.MetricsPusherTest do
       assert_receive {:req_called, query_string}, 1000
       assert_receive {:req_called, _}, 1000
 
-      decoded_params = query_string |> String.split("&") |> Enum.map(&URI.decode_www_form/1)
+      decoded_params = decode_params(query_string)
       assert "extra_label=region=us-east-1" in decoded_params
       assert "extra_label=env=prod" in decoded_params
     end
@@ -221,22 +221,53 @@ defmodule Realtime.MetricsPusherTest do
   @tenant_metric ~r/realtime_channel_input_bytes/
 
   describe "scope" do
+    test "labels each push with the scope of its metrics" do
+      emit_tenant_metric()
+      parent = self()
+
+      Req.Test.expect(MetricsPusher, 2, fn conn ->
+        send(parent, {:req_called, decode_params(conn.query_string), Req.Test.raw_body(conn)})
+        Req.Test.text(conn, "")
+      end)
+
+      {:ok, _pid} =
+        start_and_allow_pusher(
+          url: "http://localhost:8428/api/v1/import/prometheus",
+          compress: false,
+          extra_labels: [{"service", "realtime"}]
+        )
+
+      bodies =
+        for _ <- 1..2, into: %{} do
+          assert_receive {:req_called, params, body}, 1000
+          assert "extra_label=service=realtime" in params
+          [scope] = for "extra_label=scope=" <> scope <- params, do: scope
+          {scope, body}
+        end
+
+      assert bodies["global"] =~ @global_metric
+      refute bodies["global"] =~ @tenant_metric
+      assert bodies["tenant"] =~ @tenant_metric
+      refute bodies["tenant"] =~ @global_metric
+    end
+
     test ":global pushes only global metrics" do
       emit_tenant_metric()
       parent = self()
 
       Req.Test.expect(MetricsPusher, 1, fn conn ->
-        send(parent, {:req_called, Req.Test.raw_body(conn)})
+        send(parent, {:req_called, Req.Test.raw_body(conn), decode_params(conn.query_string)})
         Req.Test.text(conn, "")
       end)
 
       {:ok, _pid} =
         start_and_allow_pusher(scope: :global, url: "http://localhost:8428/api/v1/import/prometheus", compress: false)
 
-      assert_receive {:req_called, body}, 1000
+      assert_receive {:req_called, body, params}, 1000
       assert body =~ @global_metric
       refute body =~ @tenant_metric
-      refute_receive {:req_called, _}, 100
+      assert "extra_label=scope=global" in params
+      refute_receive {:req_called, _, _}, 100
     end
 
     test ":tenant pushes only tenant metrics" do
@@ -244,17 +275,18 @@ defmodule Realtime.MetricsPusherTest do
       parent = self()
 
       Req.Test.expect(MetricsPusher, 1, fn conn ->
-        send(parent, {:req_called, Req.Test.raw_body(conn)})
+        send(parent, {:req_called, Req.Test.raw_body(conn), decode_params(conn.query_string)})
         Req.Test.text(conn, "")
       end)
 
       {:ok, _pid} =
         start_and_allow_pusher(scope: :tenant, url: "http://localhost:8429/api/v1/import/prometheus", compress: false)
 
-      assert_receive {:req_called, body}, 1000
+      assert_receive {:req_called, body, params}, 1000
       assert body =~ @tenant_metric
       refute body =~ @global_metric
-      refute_receive {:req_called, _}, 100
+      assert "extra_label=scope=tenant" in params
+      refute_receive {:req_called, _, _}, 100
     end
 
     test "global and tenant pushers run side by side, each sending to its own URL" do
@@ -331,6 +363,10 @@ defmodule Realtime.MetricsPusherTest do
 
   defp scopes(child_specs) do
     Enum.map(child_specs, fn %{id: id, start: {_, _, [opts]}} -> {id, opts[:scope]} end)
+  end
+
+  defp decode_params(query_string) do
+    query_string |> String.split("&") |> Enum.map(&URI.decode_www_form/1)
   end
 
   defp emit_tenant_metric do
