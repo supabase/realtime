@@ -12,6 +12,14 @@ defmodule Realtime.UsersCounter do
     :ok = Census.join(:users, tenant_id, pid)
   end
 
+  @doc """
+  Removes a transport pid from the `:users` scope for a tenant once it has no channels open, so it stops counting towards `max_concurrent_users`.
+  """
+  @spec remove(pid(), String.t()) :: :ok
+  def remove(pid, tenant_id) when is_pid(pid) and is_binary(tenant_id) do
+    :ok = Census.leave(:users, tenant_id, pid)
+  end
+
   @doc "Return true if pid is already counted for tenant_id"
   @spec already_counted?(pid(), String.t()) :: boolean()
   def already_counted?(pid, tenant_id), do: Census.local_member?(:users, tenant_id, pid)

@@ -686,10 +686,17 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   @impl true
-  def terminate(reason, %{transport_pid: transport_pid}) do
+  def terminate(reason, %{transport_pid: transport_pid, assigns: %{tenant: tenant_id}}) do
     Logger.debug("Channel terminated with reason: #{inspect(reason)}")
     :telemetry.execute([:prom_ex, :plugin, :realtime, :disconnected], %{})
-    Tracker.untrack(transport_pid)
+
+    # The transport is counted as a connected user while it has a channel open. Leave the census
+    # with the last channel so a socket that stays open without channels frees its user slot now,
+    # instead of when Tracker kills the idle transport.
+    if Tracker.untrack(transport_pid) <= 0 do
+      UsersCounter.remove(transport_pid, tenant_id)
+    end
+
     :ok
   end
 
