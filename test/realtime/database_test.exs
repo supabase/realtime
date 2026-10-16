@@ -232,15 +232,35 @@ defmodule Realtime.DatabaseTest do
                      Database.transaction(
                        db_conn,
                        fn conn -> Postgrex.query!(conn, "SELECT pg_sleep(11)", []) end,
-                       [timeout: 15000],
+                       [timeout: 15_000],
                        external_id: "123",
                        project: "123"
                      )
                    end)
-                   |> Task.await(20000)
+                   |> Task.await(20_000)
         end)
 
       assert log =~ "project=123 external_id=123 [error] ErrorExecutingTransaction"
+    end
+
+    @tag db_pool: 1
+    test "queue: false connection errors log at warning, not error", %{db_conn: db_conn} do
+      TestHelpers.hold_connections!(db_conn)
+
+      log =
+        capture_log(fn ->
+          assert {:error, %DBConnection.ConnectionError{}} =
+                   Database.transaction(
+                     db_conn,
+                     fn conn -> Postgrex.query!(conn, "SELECT 1", []) end,
+                     [queue: false],
+                     external_id: "123",
+                     project: "123"
+                   )
+        end)
+
+      assert log =~ "project=123 external_id=123 [warning] ErrorExecutingTransaction"
+      refute log =~ "[error] ErrorExecutingTransaction"
     end
 
     test "handles exit signals in transactions", %{db_conn: db_conn} do
