@@ -171,9 +171,8 @@ declare
     working_role regrole;
     working_selected_columns text[];
     claimed_role regrole;
-    claims jsonb;
 
-    subscription_id uuid;
+    sub realtime.subscription;
     subscription_has_access bool;
     visible_to_subscription_ids uuid[] = '{}';
 
@@ -191,8 +190,8 @@ declare
     role_record record;
     -- Loop record for iterating unique selected_columns within a role (inner loop)
     cols_record record;
-    -- Subscription ids visible at the role level (before fanning out by selected_columns)
-    visible_role_sub_ids uuid[] = '{}';
+    -- Subscriptions visible at the role level (before fanning out by selected_columns)
+    visible_role_subs realtime.subscription[] = '{}';
 
 begin
     perform set_config('role', null, true);
@@ -327,13 +326,12 @@ begin
                 execute realtime.build_prepared_statement_sql('walrus_rls_stmt', entity_, columns);
             end if;
 
-            -- Collect all visible subscription IDs for this role (filter check + RLS check)
-            visible_role_sub_ids = '{}';
+            -- Collect all visible subscriptions for this role (filter check + RLS check)
+            visible_role_subs = '{}';
 
-            for subscription_id, claims in (
+            for sub in (
                     select
-                        subs.subscription_id,
-                        subs.claims
+                        subs.*
                     from
                         unnest(subscriptions) subs
                     where
@@ -349,14 +347,14 @@ begin
             ) loop
 
                 if not is_rls_enabled or action = 'DELETE' then
-                    visible_role_sub_ids = visible_role_sub_ids || subscription_id;
+                    visible_role_subs = visible_role_subs || sub;
                 else
                     -- Check if RLS allows the role to see the record
                     perform
                         -- Trim leading and trailing quotes from working_role because set_config
                         -- doesn't recognize the role as valid if they are included
                         set_config('role', trim(both '"' from working_role::text), true),
-                        set_config('request.jwt.claims', claims::text, true);
+                        set_config('request.jwt.claims', sub.claims::text, true);
 
                     execute 'execute walrus_rls_stmt' into subscription_has_access;
 
@@ -373,7 +371,7 @@ begin
                     perform set_config('role', null, true);
 
                     if subscription_has_access then
-                        visible_role_sub_ids = visible_role_sub_ids || subscription_id;
+                        visible_role_subs = visible_role_subs || sub;
                     end if;
                 end if;
             end loop;
@@ -478,14 +476,12 @@ begin
                     else '{}'::jsonb
                 end;
 
-                -- Filter visible_role_sub_ids to those matching the current selected_columns group
+                -- Visible subscriptions of the current selected_columns group
                 visible_to_subscription_ids = coalesce(
                     (
                         select array_agg(s.subscription_id)
-                        from unnest(subscriptions) s
-                        where s.claims_role = working_role
-                          and (s.selected_columns is not distinct from working_selected_columns)
-                          and s.subscription_id = any(visible_role_sub_ids)
+                        from unnest(visible_role_subs) s
+                        where s.selected_columns is not distinct from working_selected_columns
                     ),
                     '{}'::uuid[]
                 );
@@ -1779,3 +1775,4 @@ INSERT INTO realtime."schema_migrations" (version) VALUES (20260928120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261002120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261008120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261009120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20261010120000);
