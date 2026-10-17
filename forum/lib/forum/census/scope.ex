@@ -212,8 +212,12 @@ defmodule Forum.Census.Scope do
   # Do nothing and wait for the DOWN message from monitor
   def handle_info({:nodedown, _node}, state), do: {:noreply, state}
 
-  # A remote peer has disconnected/crashed
-  # We forget about it and remove its member counts
+  # A remote scope process has disconnected or crashed.
+  #
+  # Counts are stored per node, not per peer pid. A restart registers the new
+  # scope process and publishes its counts before this monitor fires, so drop
+  # the node only when no peer from it remains. Otherwise the replacement's
+  # counts would be deleted until the next broadcast interval.
   def handle_info({:DOWN, ref, :process, peer, reason}, %State{} = state) do
     Logger.info(
       "Forum[#{node()}|#{state.scope}] Scope process is DOWN on node #{node(peer)}: #{inspect(reason)}"
@@ -224,8 +228,13 @@ defmodule Forum.Census.Scope do
         {:noreply, state}
 
       {^ref, new_peers} ->
-        :ets.delete(state.peer_counts_table, node(peer))
-        :telemetry.execute([:census, state.scope, :node, :down], %{}, %{node: node(peer)})
+        peer_node = node(peer)
+
+        unless Enum.any?(new_peers, fn {other, _} -> node(other) == peer_node end) do
+          :ets.delete(state.peer_counts_table, peer_node)
+          :telemetry.execute([:census, state.scope, :node, :down], %{}, %{node: peer_node})
+        end
+
         {:noreply, %State{state | peers: new_peers}}
     end
   end

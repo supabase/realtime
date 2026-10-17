@@ -412,6 +412,66 @@ defmodule Forum.CensusTest do
     end
   end
 
+  describe "scope process replacement" do
+    setup %{scope: scope} do
+      start_supervised!(
+        spec(scope, partitions: 1, message_module: Forum.CensusTest.SilentAdapter)
+      )
+
+      scope_pid = Process.whereis(Forum.Supervisor.name(scope))
+      assert is_pid(scope_pid)
+      %{scope_pid: scope_pid}
+    end
+
+    test "a replacement peer's counts survive the old scope process going down", %{
+      scope: scope,
+      scope_pid: scope_pid
+    } do
+      old_peer = spawn(fn -> Process.sleep(:infinity) end)
+      new_peer = spawn(fn -> Process.sleep(:infinity) end)
+
+      send(scope_pid, {:discover, old_peer})
+      _ = :sys.get_state(scope_pid)
+      send(scope_pid, {:sync, old_peer, %{group1: 4}})
+      _ = :sys.get_state(scope_pid)
+
+      # The restarted scope publishes its counts before the monitor for the
+      # previous scope process is delivered.
+      send(scope_pid, {:discover, new_peer})
+      _ = :sys.get_state(scope_pid)
+      send(scope_pid, {:sync, new_peer, %{group1: 7}})
+      _ = :sys.get_state(scope_pid)
+      assert Forum.Census.Scope.member_count(scope, :group1) == 7
+
+      ref = Process.monitor(old_peer)
+      Process.exit(old_peer, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^old_peer, :killed}
+      _ = :sys.get_state(scope_pid)
+
+      assert Forum.Census.Scope.member_count(scope, :group1) == 7
+    end
+
+    test "the last peer on a node still drops that node's counts", %{
+      scope: scope,
+      scope_pid: scope_pid
+    } do
+      peer = spawn(fn -> Process.sleep(:infinity) end)
+
+      send(scope_pid, {:discover, peer})
+      _ = :sys.get_state(scope_pid)
+      send(scope_pid, {:sync, peer, %{group1: 4}})
+      _ = :sys.get_state(scope_pid)
+      assert Forum.Census.Scope.member_count(scope, :group1) == 4
+
+      ref = Process.monitor(peer)
+      Process.exit(peer, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^peer, :killed}
+      _ = :sys.get_state(scope_pid)
+
+      assert Forum.Census.Scope.member_count(scope, :group1) == 0
+    end
+  end
+
   @aux_mod (quote do
               defmodule PeerAux do
                 def start(scope) do
@@ -535,4 +595,28 @@ defmodule Forum.CensusTest do
       assert Census.member_counts(scope) == %{group1: 3, group2: 2, group3: 1}
     end
   end
+end
+
+defmodule Forum.CensusTest.SilentAdapter do
+  @moduledoc false
+  @behaviour Forum.Adapter
+
+  @impl true
+  def register(scope) do
+    name = Forum.Supervisor.name(scope)
+    if Process.whereis(name) == nil, do: Process.register(self(), name)
+    :ok
+  end
+
+  @impl true
+  def broadcast(_scope, _message), do: :ok
+
+  @impl true
+  def broadcast(_scope, _nodes, _message), do: :ok
+
+  @impl true
+  def send(_scope, _node, _message), do: :ok
+
+  @impl true
+  def call(_scope, _node, _module, _function, _args, _timeout), do: :ok
 end
