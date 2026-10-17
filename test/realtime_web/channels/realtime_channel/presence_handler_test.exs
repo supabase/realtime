@@ -680,6 +680,16 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
                PresenceHandler.handle(%{"event" => "track", "payload" => payload}, socket)
     end
 
+    test "returns an error on track when the tenant no longer exists", %{tenant: tenant, topic: topic} do
+      socket = socket_fixture(tenant, topic, random_string(), private?: false)
+      drop_tenant_from_cache(tenant)
+
+      assert {:error, :tenant_not_found} = PresenceHandler.handle(%{"event" => "track"}, socket)
+
+      topic = socket.assigns.tenant_topic
+      refute_receive %Broadcast{topic: ^topic, event: "presence_diff"}
+    end
+
     test "propagates a Connect rpc_error unchanged when authorizing an unresolved write policy on a private channel",
          %{tenant: tenant, topic: topic} do
       key = random_string()
@@ -766,6 +776,14 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       socket = socket_fixture(tenant, topic, key, policies: policies, private?: true, enabled?: false)
 
       assert :ok = PresenceHandler.sync(socket)
+      refute_receive {_, :text, _}
+    end
+
+    test "returns an error on sync when the tenant no longer exists", %{tenant: tenant, topic: topic} do
+      socket = socket_fixture(tenant, topic, random_string(), private?: false)
+      drop_tenant_from_cache(tenant)
+
+      assert {:error, :tenant_not_found} = PresenceHandler.sync(socket)
       refute_receive {_, :text, _}
     end
 
@@ -1002,6 +1020,13 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     if policies = context[:policies], do: create_rls_policies(db_conn, policies, %{topic: topic})
 
     {:ok, tenant: tenant, topic: topic}
+  end
+
+  # Seed a non-tenant value so lookups miss without the cache fallback reaching the database,
+  # then restore the entry since the tenant is pooled.
+  defp drop_tenant_from_cache(tenant) do
+    Cachex.put(Realtime.Tenants.Cache, {:get_tenant_by_external_id, tenant.external_id}, {:error, :not_found})
+    on_exit(fn -> Realtime.Tenants.Cache.update_cache(tenant) end)
   end
 
   defp socket_fixture(tenant, topic, presence_key, opts \\ []) do
