@@ -19,6 +19,7 @@ defmodule RealtimeWeb.Presence.Metrics do
   @feature_flag "presence_latency_metric"
   @latency_event [:realtime, :presence, :notify, :latency]
   @discarded_event [:realtime, :presence, :notify, :discarded]
+  @join_latency_event [:realtime, :presence, :join, :latency]
   # Phoenix.Tracker's down detection window (broadcast_period × max_silent_periods × 2). A join
   # older than this cannot be a live delivery; it is a replay from transfer_ack or netsplit recovery.
   @stale_after_ms 30_000
@@ -153,6 +154,24 @@ defmodule RealtimeWeb.Presence.Metrics do
       latency > @stale_after_ms -> :telemetry.execute(@discarded_event, %{count: 1}, Map.put(metadata, :reason, :stale))
       true -> :telemetry.execute(@latency_event, %{latency: latency}, metadata)
     end
+  end
+
+  @doc """
+  Records the latency from a client's channel join to its first `presence_state` push.
+
+  `tracker_state` is `:warm` when the local Tracker shard already held state for this topic
+  before this join, `:cold` when it was empty. Under today's full-gossip replication, `:cold`
+  is just an empty topic — there's no node that has the data but didn't get it yet. 
+  """
+  @spec record_join(integer(), String.t() | nil, :warm | :cold) :: :ok
+  def record_join(started_at, tenant_id, tracker_state) do
+    latency = System.convert_time_unit(System.monotonic_time() - started_at, :native, :millisecond)
+
+    :telemetry.execute(@join_latency_event, %{latency: latency}, %{
+      tenant: tenant_id,
+      state: tracker_state,
+      implementation: :phoenix
+    })
   end
 
   @doc """
