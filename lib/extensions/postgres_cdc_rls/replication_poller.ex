@@ -18,7 +18,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   Each `:poll` calls `Replications.list_changes/2`, which drains the slot and
   fans changes out to subscriber nodes. Reschedule cadence depends on activity:
 
-    * rows processed → poll again immediately
+    * rows processed, or a full batch of raw slot changes → poll again immediately
     * raw slot changes present but nothing for subscribers → poll after `poll_interval_ms` (+ jitter)
     * fully idle → back off to `poll_interval_ms * @idle_multiplier`.
 
@@ -197,7 +197,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
         pool_ref =
           cond do
-            processed_count > 0 ->
+            processed_count > 0 or slot_changes_count >= max_changes ->
               send(self(), :poll)
               nil
 
@@ -402,6 +402,22 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   defp supported_standby(synchronous_standby, _orioledb), do: synchronous_standby
 
+  # A limit change stops the RateCounter and the poller is what starts it again, so build fresh args from the
+  # cached tenant when it's missing instead of reusing the ones from init. Only the id of the args kept in state
+  # is reliable, their limit may be stale
+  defp get_rate_counter(tenant_id, %RateCounter.Args{id: id} = rate_counter_args) do
+    case RateCounter.find(id) do
+      {:ok, rate_counter} ->
+        {:ok, rate_counter}
+
+      {:error, :not_found} ->
+        case Tenants.Cache.get_tenant_by_external_id(tenant_id) do
+          %Realtime.Api.Tenant{} = tenant -> tenant |> Tenants.db_events_per_second_rate() |> RateCounter.get()
+          nil -> RateCounter.get(rate_counter_args)
+        end
+    end
+  end
+
   defp record_list_changes_telemetry(time, tenant_id) do
     Realtime.Telemetry.execute(
       [:realtime, :replication, :poller, :query, :stop],
@@ -435,7 +451,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         _ -> rows
       end
 
-    case RateCounter.get(rate_counter_args) do
+    case get_rate_counter(tenant_id, rate_counter_args) do
       {:ok, %{limit: %{triggered: true}}} ->
         if real_rows != [] do
           Realtime.Telemetry.execute(

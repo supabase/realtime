@@ -11,8 +11,6 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
 
   alias Forum.Muster
   alias Phoenix.Socket.Message
-  alias Realtime.Api
-  alias Realtime.FeatureFlags
   alias Realtime.Integration.WebsocketClient
   alias Realtime.Tenants
   alias Realtime.Tenants.Connect
@@ -490,12 +488,10 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
   describe "Muster channel join" do
     setup [:rls_context]
 
-    test "registers the joined socket in the real Muster scope when the flag is enabled", %{
+    test "registers the joined socket in the real Muster scope", %{
       tenant: tenant,
       serializer: serializer
     } do
-      enable_muster_join_flag!()
-
       scope = Application.fetch_env!(:realtime, :muster_scope)
       group = tenant.external_id
 
@@ -577,15 +573,5 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
     msg = %Message{topic: topic, event: event, payload: payload, ref: ref, join_ref: join_ref}
     {:socket_push, :text, chardata} = serializer.encode!(msg)
     WebsocketClient.send(socket, {:text, IO.chardata_to_string(chardata)})
-  end
-
-  # Enables the `use_muster_channel_join` flag for real (no Muster mocking): the
-  # flag is created and pushed into the local FeatureFlags cache so the channel
-  # process reads it synchronously, and torn down afterwards so it does not leak
-  # into other async tests via the shared in-memory cache.
-  defp enable_muster_join_flag! do
-    {:ok, flag} = Api.upsert_feature_flag(%{name: "use_muster_channel_join", enabled: true})
-    FeatureFlags.Cache.update_cache(flag)
-    on_exit(fn -> FeatureFlags.Cache.invalidate_cache("use_muster_channel_join") end)
   end
 end

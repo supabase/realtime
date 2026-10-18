@@ -5,6 +5,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
   use Mimic
 
   import ExUnit.CaptureLog
+  import WaitForIt
 
   alias Extensions.PostgresCdcRls.MessageDispatcher
   alias Extensions.PostgresCdcRls.ReplicationPoller, as: Poller
@@ -407,6 +408,33 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
       rate = Realtime.Tenants.db_events_per_second_rate(tenant)
       assert {:ok, %RateCounter{sum: sum}} = RateCounterHelper.tick!(rate)
       assert sum == 3
+    end
+
+    test "restarts the rate counter with a raised max_events_per_second", %{args: args, tenant: tenant} do
+      tenant_id = args["id"]
+      stub(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _, _ -> :ok end)
+
+      start_link_supervised!({Poller, args})
+      assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 500
+
+      rate = Realtime.Tenants.db_events_per_second_rate(tenant)
+      assert {:ok, %RateCounter{limit: %{value: 123}}} = RateCounterHelper.tick!(rate)
+
+      {:ok, tenant} = Realtime.Api.update_tenant_by_external_id(tenant_id, %{"max_events_per_second" => 1_000})
+
+      # The update stops the RateCounter; the next get/1 starts a new one once its cache entry expires
+      wait!(Cachex.get(RateCounter, rate.id) == {:ok, nil}, timeout: 3_000, interval: 50)
+
+      # A poll that returns changes is what gets the RateCounter again
+      expect(Replications, :list_changes, fn _, _ -> build_result([Ecto.UUID.bingenerate()]) end)
+
+      wait!(Registry.lookup(Realtime.Registry.Unique, {RateCounter, :rate_counter, rate.id}) != [],
+        timeout: 2_000,
+        interval: 20
+      )
+
+      rate = Realtime.Tenants.db_events_per_second_rate(tenant)
+      assert {:ok, %RateCounter{limit: %{value: 1_000}}} = RateCounterHelper.tick!(rate)
     end
 
     test "does not poll WAL when publication has no tables", %{args: args} do

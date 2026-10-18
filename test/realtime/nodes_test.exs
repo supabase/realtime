@@ -139,6 +139,14 @@ defmodule Realtime.NodesTest do
     end
   end
 
+  describe "launch_region/1" do
+    test "translates the tenant's region to the closest Realtime region" do
+      tenant = %Realtime.Api.Tenant{extensions: [%{settings: %{"region" => "eu-west-3"}}]}
+
+      assert Nodes.launch_region(tenant) == "eu-west-2"
+    end
+  end
+
   describe "platform_region_translator/1" do
     test "returns nil for nil input" do
       assert Nodes.platform_region_translator(nil) == nil
