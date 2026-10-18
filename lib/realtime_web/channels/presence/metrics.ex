@@ -170,16 +170,18 @@ defmodule RealtimeWeb.Presence.Metrics do
   @spec measure_tracker_call((-> {:track | :update, result})) :: {:track | :update, result}
         when result: term()
   def measure_tracker_call(fun) do
-    start = System.monotonic_time()
+    {duration, {action, result}} =
+      :timer.tc(
+        fn ->
+          try do
+            fun.()
+          catch
+            :exit, reason -> {:track, {:exit, reason}}
+          end
+        end,
+        :millisecond
+      )
 
-    {action, result} =
-      try do
-        fun.()
-      catch
-        :exit, reason -> {:track, {:exit, reason}}
-      end
-
-    duration = System.convert_time_unit(System.monotonic_time() - start, :native, :millisecond)
     {outcome, reason} = classify(result)
 
     :telemetry.execute(@track_duration_event, %{duration: duration}, %{
