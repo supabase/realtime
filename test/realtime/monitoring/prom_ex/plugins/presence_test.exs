@@ -80,6 +80,32 @@ defmodule Realtime.PromEx.Plugins.PresenceTest do
     end
   end
 
+  describe "track duration" do
+    alias RealtimeWeb.Presence.Metrics
+
+    @duration "realtime_presence_track_duration"
+
+    test "buckets each call by action, result and reason" do
+      tags = [action: "update", result: "ok", reason: "none", implementation: "phoenix"]
+      le_25_before = metric_value(@duration <> "_bucket", tags ++ [le: "25.0"]) || 0
+      count_before = metric_value(@duration <> "_count", tags) || 0
+
+      Metrics.measure_tracker_call(fn -> {:update, {:ok, :ref}} end)
+
+      assert metric_value(@duration <> "_bucket", tags ++ [le: "25.0"]) == le_25_before + 1
+      assert metric_value(@duration <> "_count", tags) == count_before + 1
+    end
+
+    test "records an exit under its reason" do
+      tags = [action: "track", result: "exit", reason: "timeout", implementation: "phoenix"]
+      count_before = metric_value(@duration <> "_count", tags) || 0
+
+      catch_exit(Metrics.measure_tracker_call(fn -> exit({:timeout, {GenServer, :call, []}}) end))
+
+      assert metric_value(@duration <> "_count", tags) == count_before + 1
+    end
+  end
+
   describe "usage metrics" do
     alias Realtime.Tenants
     alias Realtime.Test.PresenceUsageTracker, as: Tracker

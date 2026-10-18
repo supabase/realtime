@@ -5,6 +5,7 @@ defmodule Realtime.PromEx.Plugins.Presence do
   Presence metrics: 
     * inter-node replication traffic, measured on the receiving node, 
     * the latency from a client's track to each other subscriber being notified, 
+    * the duration of a client's track or update call on the presence shard, 
     * periodic usage numbers (tenant/topic counts, member-count distribution) 
       read off Phoenix.Tracker's own replicated state.
   """
@@ -16,6 +17,7 @@ defmodule Realtime.PromEx.Plugins.Presence do
   @event_replication_received [:realtime, :presence, :replication, :received]
   @event_notify_latency [:realtime, :presence, :notify, :latency]
   @event_notify_discarded [:realtime, :presence, :notify, :discarded]
+  @event_track_duration [:realtime, :presence, :track, :duration]
   @event_usage [:realtime, :presence, :usage]
   @event_usage_bucket [:realtime, :presence, :usage, :bucket]
 
@@ -27,6 +29,12 @@ defmodule Realtime.PromEx.Plugins.Presence do
     @moduledoc false
     # Dense around 1500ms: remote delivery waits for the Tracker heartbeat (broadcast_period).
     use Peep.Buckets.Custom, buckets: [5, 10, 25, 50, 100, 250, 500, 1000, 1500, 2000, 3000, 5000, 15_000]
+  end
+
+  defmodule Track.Buckets do
+    @moduledoc false
+    # Thresholds for a latency SLI, up to the 5s GenServer.call timeout.
+    use Peep.Buckets.Custom, buckets: [1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000]
   end
 
   defmodule Scan.Buckets do
@@ -53,6 +61,16 @@ defmodule Realtime.PromEx.Plugins.Presence do
         description: "Latency from a client's presence track to another subscriber being sent the presence_diff",
         tags: [:action, :origin, :path, :implementation],
         reporter_options: [peep_bucket_calculator: Notify.Buckets]
+      ),
+      distribution(
+        @event_track_duration,
+        event_name: @event_track_duration,
+        measurement: :duration,
+        unit: :millisecond,
+        description:
+          "Duration of a client's presence track or update call on the presence shard, tagged by result (ok, error, exit) and reason",
+        tags: [:action, :result, :reason, :implementation],
+        reporter_options: [peep_bucket_calculator: Track.Buckets]
       ),
       counter(
         @event_notify_discarded,
