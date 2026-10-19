@@ -80,6 +80,50 @@ defmodule Realtime.TenantsTest do
   end
 
   describe "create_messages_partitions/1" do
+    test "returns a partition creation error and can be retried after the lock is released" do
+      tenant = TestTenantDb.checkout_tenant(run_migrations: true)
+      {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+      {:ok, locking_conn} = Database.connect(tenant, "realtime_test", :stop)
+
+      %{rows: partitions} =
+        Postgrex.query!(
+          conn,
+          "SELECT format('DROP TABLE %s', inhrelid::regclass) FROM pg_inherits WHERE inhparent = 'realtime.messages'::regclass",
+          []
+        )
+
+      Enum.each(partitions, fn [drop_partition] -> Postgrex.query!(conn, drop_partition, []) end)
+
+      Postgrex.query!(conn, "SET lock_timeout = '100ms'", [])
+      Postgrex.query!(locking_conn, "BEGIN", [])
+      Postgrex.query!(locking_conn, "LOCK TABLE realtime.messages IN ACCESS EXCLUSIVE MODE", [])
+
+      result =
+        try do
+          Tenants.create_messages_partitions(conn)
+        after
+          Postgrex.query!(locking_conn, "ROLLBACK", [])
+        end
+
+      assert {:error, %Postgrex.Error{postgres: %{code: :lock_not_available}}} = result
+
+      assert {:ok, %{rows: [[0]]}} =
+               Postgrex.query(
+                 conn,
+                 "SELECT count(*) FROM pg_inherits WHERE inhparent = 'realtime.messages'::regclass",
+                 []
+               )
+
+      assert :ok = Tenants.create_messages_partitions(conn)
+
+      assert {:ok, %{rows: [[5]]}} =
+               Postgrex.query(
+                 conn,
+                 "SELECT count(*) FROM pg_inherits WHERE inhparent = 'realtime.messages'::regclass",
+                 []
+               )
+    end
+
     test "running twice keeps the same partitions" do
       tenant = TestTenantDb.checkout_tenant(run_migrations: true)
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
