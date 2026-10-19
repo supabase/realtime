@@ -117,7 +117,8 @@ config :realtime,
 
 config :realtime, RealtimeWeb.Endpoint,
   http: [port: port],
-  server: true
+  server: true,
+  secret_key_base: "ktyW57usZxrivYdvLo9os7UGcUUZYKchOMHT3tzndmnHuxD09k+fQnPUmxlPMUI3"
 
 # that's what config/runtime.exs expects to see as region
 System.put_env("REGION", "us-east-1")

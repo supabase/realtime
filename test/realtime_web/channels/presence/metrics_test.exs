@@ -220,6 +220,54 @@ defmodule RealtimeWeb.Presence.MetricsTest do
     end
   end
 
+  describe "measure_tracker_call/1" do
+    setup do
+      id = {__MODULE__, make_ref()}
+      :telemetry.attach(id, [:realtime, :presence, :track, :duration], &__MODULE__.handle_duration/4, self())
+      on_exit(fn -> :telemetry.detach(id) end)
+    end
+
+    test "records the duration, action and result, and returns the action and result" do
+      assert {:update, {:ok, :ref}} = Metrics.measure_tracker_call(fn -> {:update, {:ok, :ref}} end)
+
+      assert_receive {:duration, %{duration: duration}, %{action: :update, result: :ok, reason: :none}}
+      assert is_integer(duration) and duration >= 0
+    end
+
+    test "tags an error with its reason, and anything that is not an atom as other" do
+      assert {:track, {:error, :nopresence}} =
+               Metrics.measure_tracker_call(fn -> {:track, {:error, :nopresence}} end)
+
+      Metrics.measure_tracker_call(fn -> {:track, {:error, {:weird, 1}}} end)
+
+      assert_receive {:duration, _, %{action: :track, result: :error, reason: :nopresence}}
+      assert_receive {:duration, _, %{result: :error, reason: :other}}
+    end
+
+    test "records an exit by reason as a :track, then exits with the original reason" do
+      timeout = {:timeout, {GenServer, :call, [:shard, :msg, 5000]}}
+
+      assert catch_exit(Metrics.measure_tracker_call(fn -> exit(timeout) end)) == timeout
+      assert_receive {:duration, _, %{action: :track, result: :exit, reason: :timeout}}
+
+      catch_exit(Metrics.measure_tracker_call(fn -> exit({:noproc, {}}) end))
+      assert_receive {:duration, _, %{action: :track, result: :exit, reason: :noproc}}
+
+      catch_exit(Metrics.measure_tracker_call(fn -> exit(:killed) end))
+      assert_receive {:duration, _, %{result: :exit, reason: :other}}
+    end
+
+    test "measures the time spent in the call" do
+      Metrics.measure_tracker_call(fn ->
+        Process.sleep(20)
+        {:track, {:ok, :ref}}
+      end)
+
+      assert_receive {:duration, %{duration: duration}, _}
+      assert duration >= 20
+    end
+  end
+
   describe "record/2" do
     setup do
       tenant = "tenant-#{System.unique_integer([:positive])}"
@@ -290,6 +338,8 @@ defmodule RealtimeWeb.Presence.MetricsTest do
 
     on_exit(fn -> :telemetry.detach(id) end)
   end
+
+  def handle_duration(_event, measurements, metadata, pid), do: send(pid, {:duration, measurements, metadata})
 
   def handle_telemetry(event, measurements, metadata, %{pid: pid, tenant: tenant}) do
     if metadata[:tenant] == tenant, do: send(pid, {:telemetry, event, measurements, metadata})
