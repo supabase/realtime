@@ -1,4 +1,5 @@
 defmodule Realtime.PromEx do
+  alias Realtime.PromEx.Plugins.ClientRequests
   alias Realtime.PromEx.Plugins.Distributed
   alias Realtime.PromEx.Plugins.GenRpc
   alias Realtime.PromEx.Plugins.Migrations
@@ -122,7 +123,8 @@ defmodule Realtime.PromEx do
       {Distributed, poll_rate: poll_rate},
       {GenRpc, poll_rate: poll_rate},
       {Muster, poll_rate: poll_rate},
-      {Presence, poll_rate: presence_usage_poll_rate}
+      {Presence, poll_rate: presence_usage_poll_rate},
+      ClientRequests
     ]
   end
 

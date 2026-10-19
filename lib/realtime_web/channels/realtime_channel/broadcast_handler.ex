@@ -10,6 +10,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   alias Realtime.Messages
   alias Realtime.Tenants
   alias RealtimeWeb.RealtimeChannel
+  alias RealtimeWeb.RequestMetrics
   alias RealtimeWeb.TenantBroadcaster
   alias Phoenix.Socket
   alias Realtime.GenCounter
@@ -79,13 +80,21 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
 
   @doc """
   Replies with the error `code` when the channel acknowledges broadcasts.
+
+  This function also records the request outcome.
   """
   @spec maybe_reply_error(Socket.t(), atom()) ::
           {:reply, {:error, %{error: atom()}}, Socket.t()} | {:noreply, Socket.t()}
-  def maybe_reply_error(%{assigns: %{ack_broadcast: true}} = socket, code),
+  def maybe_reply_error(socket, code) do
+    {outcome, reason} = RequestMetrics.classify_broadcast_error(code)
+    socket = RequestMetrics.put_outcome(socket, outcome, reason)
+    reply_error(socket, code)
+  end
+
+  defp reply_error(%{assigns: %{ack_broadcast: true}} = socket, code),
     do: {:reply, {:error, %{error: code}}, socket}
 
-  def maybe_reply_error(socket, _code), do: {:noreply, socket}
+  defp reply_error(socket, _code), do: {:noreply, socket}
 
   @spec reply_success(Socket.t(), :ok | :skip | {:ok, map()}) ::
           {:reply, {:ok, map()} | :ok, Socket.t()} | {:noreply, Socket.t()}

@@ -32,6 +32,8 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias RealtimeWeb.RealtimeChannel.BroadcastHandler
   alias RealtimeWeb.RealtimeChannel.MessageDispatcher
   alias RealtimeWeb.RealtimeChannel.PresenceHandler
+  alias RealtimeWeb.RealtimeChannel.Tracker
+  alias RealtimeWeb.RequestMetrics
 
   # A JWT `exp` can be arbitrarily far in the future and `Process.send_after/3` rejects delays past
   # Erlang's maximum supported time value, so the re-confirmation timer is capped at this interval.
@@ -462,7 +464,15 @@ defmodule RealtimeWeb.RealtimeChannel do
   def handle_info(_, socket), do: {:noreply, socket}
 
   @impl true
-  def handle_in("broadcast", payload, %{assigns: %{private?: true}} = socket) do
+  def handle_in("broadcast" = event, payload, socket) do
+    RequestMetrics.track(:broadcast, :ws, fn -> do_handle_in(event, payload, socket) end)
+  end
+
+  def handle_in(event, payload, socket) do
+    do_handle_in(event, payload, socket)
+  end
+
+  defp do_handle_in("broadcast", payload, %{assigns: %{private?: true}} = socket) do
     %{tenant: tenant_id} = socket.assigns
 
     with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id) do
@@ -494,11 +504,11 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  def handle_in("broadcast", payload, %{assigns: %{private?: false}} = socket) do
+  defp do_handle_in("broadcast", payload, %{assigns: %{private?: false}} = socket) do
     BroadcastHandler.handle(payload, socket)
   end
 
-  def handle_in("presence", payload, socket) do
+  defp do_handle_in("presence", payload, socket) do
     with {:ok, socket, sync_needed} <- PresenceHandler.handle(payload, socket) do
       if sync_needed == :resync, do: send(self(), :sync_presence)
 
@@ -528,26 +538,30 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  def handle_in("access_token", %{"access_token" => "sb_" <> _}, socket), do: {:noreply, socket}
+  defp do_handle_in("access_token", %{"access_token" => "sb_" <> _}, socket), do: {:noreply, socket}
 
-  def handle_in("access_token", %{"access_token" => refresh_token}, %{assigns: %{access_token: access_token}} = socket)
-      when refresh_token == access_token do
+  defp do_handle_in(
+         "access_token",
+         %{"access_token" => refresh_token},
+         %{assigns: %{access_token: access_token}} = socket
+       )
+       when refresh_token == access_token do
     {:noreply, socket}
   end
 
-  def handle_in("access_token", %{"access_token" => nil}, socket), do: {:noreply, socket}
+  defp do_handle_in("access_token", %{"access_token" => nil}, socket), do: {:noreply, socket}
 
   # Already held for the current window, nothing new to verify
-  def handle_in(
-        "access_token",
-        %{"access_token" => refresh_token},
-        %{assigns: %{pending_access_token: pending}} = socket
-      )
-      when refresh_token == pending do
+  defp do_handle_in(
+         "access_token",
+         %{"access_token" => refresh_token},
+         %{assigns: %{pending_access_token: pending}} = socket
+       )
+       when refresh_token == pending do
     {:noreply, socket}
   end
 
-  def handle_in("access_token", %{"access_token" => refresh_token}, socket) when is_binary(refresh_token) do
+  defp do_handle_in("access_token", %{"access_token" => refresh_token}, socket) when is_binary(refresh_token) do
     %{assigns: %{access_token_verified_at: verified_at}} = socket
     throttle_ms = access_token_throttle_ms()
     now = now()
@@ -560,7 +574,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  def handle_in(type, payload, socket) do
+  defp do_handle_in(type, payload, socket) do
     count(socket)
 
     # Log info here so that bad messages from clients won't flood Logflare
