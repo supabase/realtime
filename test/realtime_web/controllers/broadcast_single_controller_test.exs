@@ -476,6 +476,18 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
     end
   end
 
+  describe "missing content-type" do
+    test "returns 415 and does not broadcast", %{conn: conn, tenant: tenant} do
+      sub_topic = "room:no-content-type"
+      subscribe(Tenants.tenant_topic(tenant, sub_topic), sub_topic)
+
+      conn = post_without_content_type(conn, sub_topic, ~s({"text":"hi"}))
+
+      assert conn.status == 415
+      refute_receive {:socket_push, _, _}
+    end
+  end
+
   describe "suspended tenant" do
     test "returns 403 and does not broadcast when tenant is suspended", %{conn: conn, tenant: tenant} do
       Realtime.Tenants.Cache.update_cache(%{tenant | suspend: true})
@@ -837,6 +849,15 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
   end
 
   defp messages_for(topic), do: from(m in Message, where: m.topic == ^topic)
+
+  # Phoenix.ConnTest refuses a binary body without a content-type, so dispatch directly
+  defp post_without_content_type(conn, sub_topic, body) do
+    path = Routes.broadcast_single_path(conn, :broadcast, sub_topic, "message")
+
+    conn
+    |> Plug.Adapters.Test.Conn.conn("POST", path, body)
+    |> Endpoint.call(Endpoint.init([]))
+  end
 
   defp generate_conn(conn, tenant) do
     now = System.system_time(:second)
