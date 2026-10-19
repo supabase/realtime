@@ -20,7 +20,6 @@ config :realtime,
 # Configures the endpoint
 config :realtime, RealtimeWeb.Endpoint,
   url: [host: "127.0.0.1"],
-  secret_key_base: "ktyW57usZxrivYdvLo9os7UGcUUZYKchOMHT3tzndmnHuxD09k+fQnPUmxlPMUI3",
   render_errors: [view: RealtimeWeb.ErrorView, accepts: ~w(html json), layout: false],
   pubsub_server: Realtime.PubSub,
   live_view: [signing_salt: "wUMBeR8j"]
