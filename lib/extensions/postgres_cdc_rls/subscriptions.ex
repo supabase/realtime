@@ -42,10 +42,6 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
       {:ok, results}
     end
-  rescue
-    e in DBConnection.ConnectionError -> {:error, e}
-  catch
-    :exit, reason -> {:error, {:exit, reason}}
   end
 
   defp insert_subscriptions(conn, publication, subscription_list) do
@@ -77,6 +73,10 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
       end,
       timeout: @transaction_timeout
     )
+  rescue
+    e in DBConnection.ConnectionError -> {:error, e}
+  catch
+    :exit, reason -> {:error, {:exit, reason}}
   end
 
   # A statement cancelled by `statement_timeout` (57014), or a connection torn down under us by
