@@ -456,6 +456,24 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       assert conn.status == 202
       assert %{"payload" => %{"payload" => %{"_binary" => "x"}}} = assert_receive_message()
     end
+
+    test "ignores private and persist keys in the JSON body", %{conn: conn, tenant: tenant} do
+      sub_topic = "room:flags-in-body"
+      subscribe(Tenants.tenant_topic(tenant, sub_topic), sub_topic)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(
+          Routes.broadcast_single_path(conn, :broadcast, sub_topic, "message"),
+          ~s({"private":true,"persist":true,"text":"x"})
+        )
+
+      assert conn.status == 202
+
+      assert %{"payload" => %{"payload" => %{"private" => true, "persist" => true, "text" => "x"}}} =
+               assert_receive_message()
+    end
   end
 
   describe "suspended tenant" do
