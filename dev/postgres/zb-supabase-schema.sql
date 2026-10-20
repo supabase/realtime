@@ -28,6 +28,7 @@ create or replace function auth.jwt() returns jsonb language sql stable as $$
       nullif(current_setting('request.jwt.claims', true), '')
   )::jsonb
 $$;
+alter function auth.jwt() owner to supabase_auth_admin;
 
 grant usage on schema auth to supabase_realtime_admin;
 grant execute on all functions in schema auth to supabase_realtime_admin;
