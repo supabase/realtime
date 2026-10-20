@@ -370,7 +370,7 @@ defmodule Realtime.NodesTest do
   end
 
   describe "short_node_id_from_name/1" do
-    test "extracts short ID from fly.io-style IPv6 node name" do
+    test "extracts short ID from IPv6 node name" do
       assert Nodes.short_node_id_from_name(:"realtime-prod@fdaa:0:cc:a7b:b385:83c3:cfe3:2") ==
                "83c3cfe3"
     end
