@@ -6,7 +6,8 @@ defmodule Integration.NoChannelsTimeoutTest do
   alias Realtime.Integration.WebsocketClient
 
   @config %{broadcast: %{self: true}, private: false, presence: %{enabled: false}}
-  @timeout 200
+  # Long enough for a test to connect and join before an idle socket is closed
+  @timeout 1000
 
   setup do
     tenant = TestTenantDb.checkout_tenant(run_migrations: true)
@@ -21,7 +22,7 @@ defmodule Integration.NoChannelsTimeoutTest do
   test "disconnects a socket that never joins a channel", %{tenant: tenant} do
     {socket, _} = get_connection(tenant)
 
-    assert_receive {:close_code, 1001}, @timeout * 5
+    assert_receive {:close_code, 1001}, @timeout * 2
     assert_receive {:close_reason, "No channels joined"}
     assert_process_down(socket)
   end
@@ -42,7 +43,7 @@ defmodule Integration.NoChannelsTimeoutTest do
       assert_receive %Message{topic: ^topic, event: "phx_close"}, 500
     end
 
-    assert_receive {:close_code, 1001}, @timeout * 5
+    assert_receive {:close_code, 1001}, @timeout * 2
     assert_receive {:close_reason, "No channels joined"}
     assert_process_down(socket)
   end
@@ -58,7 +59,7 @@ defmodule Integration.NoChannelsTimeoutTest do
     Process.exit(channel_pid, :kill)
 
     assert_receive %Message{topic: ^topic, event: "phx_error"}, 500
-    assert_receive {:close_code, 1001}, @timeout * 5
+    assert_receive {:close_code, 1001}, @timeout * 2
     assert_receive {:close_reason, "No channels joined"}
     assert_process_down(socket)
   end
@@ -71,31 +72,33 @@ defmodule Integration.NoChannelsTimeoutTest do
     assert_receive %Message{topic: ^topic, event: "phx_reply", payload: %{"status" => "ok"}}, 500
 
     # the timer started on connect fires while the channel is open
-    Process.sleep(@timeout * 2)
+    Process.sleep(div(@timeout * 3, 2))
 
     :ok = WebsocketClient.leave(socket, topic, %{})
     assert_receive %Message{topic: ^topic, event: "phx_close"}, 500
 
     refute_receive {:close_code, _}, div(@timeout, 2)
-    assert_receive {:close_code, 1001}, @timeout * 5
+    assert_receive {:close_code, 1001}, @timeout * 2
     assert_process_down(socket)
   end
 
-  test "disconnects a socket whose last channel is dropped by a rejected duplicate join", %{tenant: tenant} do
+  test "gives a full timeout after a rejected duplicate join drops the last channel", %{tenant: tenant} do
     {socket, _} = get_connection(tenant)
     topic = "realtime:#{random_string()}"
 
     :ok = WebsocketClient.join(socket, topic, %{config: @config})
     assert_receive %Message{topic: ^topic, event: "phx_reply", payload: %{"status" => "ok"}}, 500
 
-    # let the timer started on connect fire and clear while the channel is open
-    Process.sleep(@timeout * 2)
+    # the timer started on connect is still pending, with at most half a timeout left
+    Process.sleep(div(@timeout, 2))
 
     # rejoining the same topic closes the existing channel, and this join is rejected
     :ok = WebsocketClient.join(socket, topic, %{config: %{@config | private: true}})
     assert_receive %Message{topic: ^topic, event: "phx_reply", payload: %{"status" => "error"}}, 500
 
-    assert_receive {:close_code, 1001}, @timeout * 5
+    # a full timeout from losing the last channel, not what was left of the connect timer
+    refute_receive {:close_code, _}, div(@timeout * 3, 4)
+    assert_receive {:close_code, 1001}, @timeout * 2
     assert_process_down(socket)
   end
 
@@ -106,7 +109,7 @@ defmodule Integration.NoChannelsTimeoutTest do
     :ok = WebsocketClient.join(socket, topic, %{config: @config})
     assert_receive %Message{topic: ^topic, event: "phx_reply", payload: %{"status" => "ok"}}, 500
 
-    refute_receive {:close_code, _}, @timeout * 3
+    refute_receive {:close_code, _}, @timeout * 2
     assert Process.alive?(socket)
   end
 
@@ -116,7 +119,7 @@ defmodule Integration.NoChannelsTimeoutTest do
     :ok = WebsocketClient.join(socket, "realtime:", %{config: @config})
     assert_receive %Message{topic: "realtime:", event: "phx_reply", payload: %{"status" => "error"}}, 500
 
-    assert_receive {:close_code, 1001}, @timeout * 5
+    assert_receive {:close_code, 1001}, @timeout * 2
     assert_receive {:close_reason, "No channels joined"}
     assert_process_down(socket)
   end
@@ -133,7 +136,7 @@ defmodule Integration.NoChannelsTimeoutTest do
       assert_receive %Message{topic: "realtime:", event: "phx_reply", payload: %{"status" => "error"}}, 500
     end
 
-    refute_receive {:close_code, _}, @timeout * 3
+    refute_receive {:close_code, _}, @timeout * 2
     assert Process.alive?(socket)
   end
 
