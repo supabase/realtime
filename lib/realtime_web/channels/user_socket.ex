@@ -36,11 +36,13 @@ defmodule RealtimeWeb.UserSocket do
   end
 
   @impl Phoenix.Socket.Transport
-  def handle_in(message, {_state, socket} = full_state) do
+  def handle_in(message, {%{channels: previous_channels}, socket} = full_state) do
     case super(message, full_state) do
-      # A rejected duplicate join drops the existing channel without going through handle_info/2
-      {:reply, :error, reply, {%{channels: channels} = state, socket}} when channels == %{} ->
-        {:reply, :error, reply, {state, ensure_no_channels_timer(socket, no_channel_timeout_in_ms())}}
+      # A rejected duplicate join drops the existing channel without going through handle_info/2.
+      # An already empty socket keeps its running timer, so rejected joins can't extend it.
+      {:reply, :error, reply, {%{channels: channels} = state, socket}}
+      when channels == %{} and previous_channels != %{} ->
+        {:reply, :error, reply, {state, start_no_channels_timer(socket, no_channel_timeout_in_ms())}}
 
       result ->
         result
@@ -246,9 +248,6 @@ defmodule RealtimeWeb.UserSocket do
     if ref = socket.private[:no_channels_timer], do: :erlang.cancel_timer(ref, async: true, info: false)
     put_no_channels_timer(socket, :erlang.start_timer(timeout, self(), :no_channels))
   end
-
-  defp ensure_no_channels_timer(%{private: %{no_channels_timer: ref}} = socket, _) when is_reference(ref), do: socket
-  defp ensure_no_channels_timer(socket, timeout), do: start_no_channels_timer(socket, timeout)
 
   defp clear_no_channels_timer(socket), do: put_no_channels_timer(socket, nil)
 
