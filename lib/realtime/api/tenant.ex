@@ -88,6 +88,7 @@ defmodule Realtime.Api.Tenant do
       :feature_flags
     ])
     |> validate_required([:external_id])
+    |> validate_change(:external_id, &validate_external_id/2)
     |> check_constraint(:jwt_secret,
       name: :jwt_secret_or_jwt_jwks_required,
       message: "either jwt_secret or jwt_jwks must be provided"
@@ -100,6 +101,16 @@ defmodule Realtime.Api.Tenant do
     |> maybe_set_default(:max_events_per_second, :tenant_max_events_per_second)
     |> maybe_set_default(:max_joins_per_second, :tenant_max_joins_per_second)
     |> cast_assoc(:extensions, with: &Extensions.changeset/2)
+  end
+
+  # Tenant topics are "<external_id>:<topic>" when public and "<external_id>-private:<topic>" when private.
+  # An external_id ending in "-private" or containing ":" could produce another tenant's topic.
+  defp validate_external_id(:external_id, external_id) do
+    cond do
+      String.ends_with?(external_id, "-private") -> [external_id: ~s(must not end with "-private")]
+      String.contains?(external_id, ":") -> [external_id: ~s(must not contain ":")]
+      true -> []
+    end
   end
 
   def maybe_set_default(changeset, property, config_key) do

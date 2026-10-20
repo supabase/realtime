@@ -132,6 +132,26 @@ defmodule Realtime.ApiTest do
       reject(&Realtime.Tenants.Cache.global_cache_update/1)
       assert {:error, %Ecto.Changeset{}} = Api.create_tenant(%{external_id: nil, jwt_secret: nil, name: nil})
     end
+
+    test "external_id ending in -private returns error changeset" do
+      reject(&Realtime.Tenants.Cache.global_cache_update/1)
+      external_id = random_string() <> "-private"
+
+      assert {:error, %Ecto.Changeset{}} =
+               Api.create_tenant(%{external_id: external_id, jwt_secret: "secret", name: external_id})
+
+      refute Api.get_tenant_by_external_id(external_id, use_replica?: false)
+    end
+
+    test "external_id containing a colon returns error changeset" do
+      reject(&Realtime.Tenants.Cache.global_cache_update/1)
+      external_id = random_string() <> ":topic"
+
+      assert {:error, %Ecto.Changeset{}} =
+               Api.create_tenant(%{external_id: external_id, jwt_secret: "secret", name: external_id})
+
+      refute Api.get_tenant_by_external_id(external_id, use_replica?: false)
+    end
   end
 
   describe "get_tenant_by_external_id/2" do
@@ -186,6 +206,24 @@ defmodule Realtime.ApiTest do
     test "invalid data returns error changeset", %{tenants: [tenant | _]} do
       assert {:error, %Ecto.Changeset{}} =
                Api.update_tenant_by_external_id(tenant.external_id, %{external_id: nil, jwt_secret: nil, name: nil})
+    end
+
+    test "renaming to an external_id ending in -private returns error changeset", %{tenants: [tenant | _]} do
+      private_id = tenant.external_id <> "-private"
+
+      assert {:error, %Ecto.Changeset{}} =
+               Api.update_tenant_by_external_id(tenant.external_id, %{external_id: private_id})
+
+      refute Api.get_tenant_by_external_id(private_id, use_replica?: false)
+    end
+
+    test "renaming to an external_id containing a colon returns error changeset", %{tenants: [tenant | _]} do
+      colon_id = tenant.external_id <> ":topic"
+
+      assert {:error, %Ecto.Changeset{}} =
+               Api.update_tenant_by_external_id(tenant.external_id, %{external_id: colon_id})
+
+      refute Api.get_tenant_by_external_id(colon_id, use_replica?: false)
     end
 
     test "valid data and jwks change will send disconnect event", %{tenants: [tenant | _]} do
