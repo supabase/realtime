@@ -69,6 +69,10 @@ requires_direct_connection = if !direct_connection?, do: :requires_direct_connec
 
 requires_synchronous_standby = if !synchronous_standby?, do: :requires_synchronous_standby
 
+# The failover tests fail a dedicated three-cell Multigres cluster over, so they need its port.
+# See test/integration/rt_channel/failover_test.exs.
+requires_failover_cluster = if System.get_env("FAILOVER_TENANT_DB_PORT") == nil, do: :requires_failover_cluster
+
 exclude =
   Enum.reject(
     [
@@ -81,7 +85,8 @@ exclude =
       requires_orioledb,
       requires_docker_backend,
       requires_direct_connection,
-      requires_synchronous_standby
+      requires_synchronous_standby,
+      requires_failover_cluster
     ],
     &is_nil/1
   )

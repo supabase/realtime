@@ -1,0 +1,96 @@
+name: Failover Tests
+
+# Fails a dedicated three-cell Multigres cluster over under a running tenant and checks what clients see
+# (test/integration/rt_channel/failover_test.exs). Slower than the rest of the suite and needs a cluster of
+# its own, so it runs on the code that decides how Realtime reconnects, nightly, and on demand.
+on:
+  pull_request:
+    paths:
+      - "lib/realtime/tenants/connect.ex"
+      - "lib/realtime/tenants/replication_connection.ex"
+      - "lib/extensions/postgres_cdc_rls/**"
+      - "lib/realtime_web/channels/realtime_channel.ex"
+      - "test/integration/rt_channel/failover_test.exs"
+      - "test/support/test_tenant_db.ex"
+      - "compose.tenant-db.yml"
+      - ".github/db-images.json"
+      - ".github/workflows/failover_tests.yml"
+
+  schedule:
+    - cron: "0 5 * * *" # 05:00 UTC
+
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  MIX_ENV: test
+  # The failover cluster's port and compose project, which names its container.
+  FAILOVER_TENANT_DB_PORT: "5440"
+  FAILOVER_PROJECT: tenant-db-failover
+
+jobs:
+  failover:
+    name: Failover (${{ matrix.scenario }})
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    strategy:
+      # An unplanned failover leaves the killed cell down, so each scenario gets a cluster of its own.
+      fail-fast: false
+      matrix:
+        scenario: [planned, unplanned]
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Resolve DB images
+        run: .github/scripts/db_images.sh POSTGRES_IMAGE=pg17 TENANT_DB_IMAGE=multigres >> "$GITHUB_ENV"
+      - name: Setup elixir
+        id: beam
+        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1.24.0
+        with:
+          otp-version: 28.5.0.4
+          elixir-version: 1.19.5
+      - name: Cache Mix
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: |
+            deps
+            _build
+            priv/native
+          key: ${{ github.workflow }}-${{ runner.os }}-mix-${{ steps.beam.outputs.elixir-version }}-${{ steps.beam.outputs.otp-version }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ github.workflow }}-${{ runner.os }}-mix-${{ steps.beam.outputs.elixir-version }}-${{ steps.beam.outputs.otp-version }}-
+      - name: Install pgdelta
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
+        with:
+          install_args: "node@24 npm:@supabase/pg-delta"
+          env: false
+
+      - name: Install dependencies
+        run: mix deps.get
+      - name: Set up the Realtime database
+        run: docker compose -f compose.realtime-db.yml up -d --wait --wait-timeout 300
+      - name: Set up the failover cluster
+        run: |
+          export COMPOSE_PROJECT_NAME="$FAILOVER_PROJECT" TENANT_DB_PORT="$FAILOVER_TENANT_DB_PORT" \
+            MULTIGRES_NUM_CELLS=3 MT_BUFFER_ENABLED=true MT_BUFFER_MIN_TIME_BETWEEN_FAILOVERS=1s
+          docker compose -f compose.tenant-db.yml up -d --wait --wait-timeout 300
+          docker compose -f compose.tenant-db.yml run --rm tenant_db_bootstrap
+      - name: Start epmd
+        run: epmd -daemon
+
+      - name: Run the ${{ matrix.scenario }} failover test
+        env:
+          USE_EXTERNAL_TENANT_DB: "true"
+          EXTERNAL_TENANT_DB_PORTS: ${{ env.FAILOVER_TENANT_DB_PORT }}
+          FAILOVER_TENANT_DB_CONTAINER: ${{ env.FAILOVER_PROJECT }}-tenant_db-1
+        run: mix test test/integration/rt_channel/failover_test.exs --only failover:${{ matrix.scenario }} --color
+
+      - name: Cluster logs
+        if: failure()
+        run: |
+          docker exec "$FAILOVER_PROJECT-tenant_db-1" sh -c 'tail -n 200 /multigres/cluster/logs/dbs/postgres/*/*.log' || true
