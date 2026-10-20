@@ -274,6 +274,17 @@ run = """
     ${usage_args:-}
 """
 
+# Unlike `e2e` and `e2e-local`, which ride on the Supabase CLI's stack and so can't run Multigres,
+# this brings up a stack of its own around any image in .github/db-images.json. CI runs it for
+# each of them but pg14.
+[tasks.e2e-db]
+description = "Run the e2e suite against a Realtime image built from this checkout, on any supported tenant Postgres"
+usage = '''
+arg "<db>" help="A key of .github/db-images.json: pg14, pg15, pg15_latest, pg17, orioledb17 or multigres"
+arg "[args]..." help="Flags for realtime-check.ts, such as --test functional --parallel. Put them after --." var=#true
+'''
+run = 'exec test/e2e/stack/run.sh "$usage_db" ${usage_args:-}'
+
 # Use this over `e2e` when the checkout carries migrations that the released image does not.
 [tasks.e2e-local]
 description = "Run the e2e suite against a Realtime image built from this checkout"

@@ -32,108 +32,48 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   @spec handle(payload, pid() | nil, Socket.t()) ::
           {:reply, :ok | {:ok, map()} | {:error, any()}, Socket.t()} | {:noreply, Socket.t()}
   def handle(payload, db_conn, %{assigns: %{private?: true}} = socket) do
-    %{
-      assigns: %{
-        self_broadcast: self_broadcast,
-        tenant_topic: tenant_topic,
-        authorization_context: authorization_context,
-        policies: policies,
-        tenant: tenant_id
-      }
-    } = socket
+    with {:ok, socket} <- authorize_write(socket, db_conn),
+         socket = increment_rate_counter(socket),
+         :ok <- check_payload_size(socket, payload) do
+      %{
+        assigns: %{
+          policies: policies,
+          tenant_topic: tenant_topic,
+          self_broadcast: self_broadcast,
+          ack_broadcast: ack_broadcast,
+          tenant: tenant_id,
+          authorization_context: %{topic: topic}
+        }
+      } = socket
 
-    case run_authorization_check(policies || %Policies{}, db_conn, authorization_context) do
-      {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}} = policies} ->
-        socket =
-          socket
-          |> assign(:policies, policies)
-          |> increment_rate_counter()
+      # Broadcast first to prioritize throughput.
+      send_message(tenant_id, self_broadcast, tenant_topic, payload)
 
-        %{ack_broadcast: ack_broadcast} = socket.assigns
-
-        res =
-          case Tenants.validate_payload_size(tenant_id, payload) do
-            # Broadcast first to prioritize throughput.
-            :ok ->
-              send_message(tenant_id, self_broadcast, tenant_topic, payload)
-              # TODO: hard limits and buffering based on ack
-              maybe_persist(policies, db_conn, tenant_id, authorization_context.topic, payload, ack_broadcast)
-
-            {:error, error} ->
-              {:error, error}
-          end
-
-        cond do
-          ack_broadcast && match?({:error, :payload_size_exceeded}, res) ->
-            {:reply, {:error, %{error: :payload_size_exceeded}}, socket}
-
-          ack_broadcast && match?({:ok, _}, res) ->
-            {:reply, res, socket}
-
-          ack_broadcast ->
-            {:reply, :ok, socket}
-
-          true ->
-            {:noreply, socket}
-        end
-
-      {:ok, policies} ->
-        socket
-        |> assign(:policies, policies)
-        |> maybe_reply_error(:unauthorized)
-
-      {:error, :rls_policy_error, error} ->
-        log_error("RlsPolicyError", error)
-        maybe_reply_error(socket, :rls_policy_error)
-
-      {:error, :query_canceled, error} ->
-        log_error("QueryCanceled", error)
-        maybe_reply_error(socket, :query_canceled)
-
-      {:error, :missing_partition} ->
-        log_error("MissingPartition", "Realtime was unable to find the expected messages partition")
-        maybe_reply_error(socket, :missing_partition)
-
-      {:error, :tenant_database_unavailable} ->
-        log_error("UnableToConnectToProject", "Realtime was unable to connect to the project database")
-        maybe_reply_error(socket, :unable_to_connect_to_project)
-
-      {:error, :increase_connection_pool} ->
-        maybe_reply_error(socket, :increase_connection_pool)
-
-      {:error, error} ->
-        log_error("UnableToSetPolicies", error)
-        maybe_reply_error(socket, :unable_to_set_policies)
+      # TODO: hard limits and buffering based on ack
+      result = maybe_persist(policies, db_conn, tenant_id, topic, payload, ack_broadcast)
+      reply_success(socket, result)
+    else
+      {:error, code, socket} -> maybe_reply_error(socket, code)
     end
   end
 
   def handle(payload, _db_conn, %{assigns: %{private?: false}} = socket) do
-    %{
-      assigns: %{
-        tenant_topic: tenant_topic,
-        self_broadcast: self_broadcast,
-        ack_broadcast: ack_broadcast,
-        tenant: tenant_id
-      }
-    } = socket
-
+    # The rate counter goes before the `with` because a public broadcast counts even when too large.
     socket = increment_rate_counter(socket)
 
-    res =
-      case Tenants.validate_payload_size(tenant_id, payload) do
-        :ok -> send_message(tenant_id, self_broadcast, tenant_topic, payload)
-        error -> error
-      end
+    with :ok <- check_payload_size(socket, payload) do
+      %{
+        assigns: %{
+          tenant_topic: tenant_topic,
+          self_broadcast: self_broadcast,
+          tenant: tenant_id
+        }
+      } = socket
 
-    cond do
-      ack_broadcast && match?({:error, :payload_size_exceeded}, res) ->
-        {:reply, {:error, %{error: :payload_size_exceeded}}, socket}
-
-      ack_broadcast ->
-        {:reply, :ok, socket}
-
-      true ->
-        {:noreply, socket}
+      send_message(tenant_id, self_broadcast, tenant_topic, payload)
+      reply_success(socket, :ok)
+    else
+      {:error, code, socket} -> maybe_reply_error(socket, code)
     end
   end
 
@@ -146,6 +86,18 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
     do: {:reply, {:error, %{error: code}}, socket}
 
   def maybe_reply_error(socket, _code), do: {:noreply, socket}
+
+  @spec reply_success(Socket.t(), :ok | :skip | {:ok, map()}) ::
+          {:reply, {:ok, map()} | :ok, Socket.t()} | {:noreply, Socket.t()}
+  defp reply_success(%{assigns: %{ack_broadcast: true}} = socket, {:ok, _} = result) do
+    {:reply, result, socket}
+  end
+
+  defp reply_success(%{assigns: %{ack_broadcast: true}} = socket, _result) do
+    {:reply, :ok, socket}
+  end
+
+  defp reply_success(socket, _result), do: {:noreply, socket}
 
   defp send_message(tenant_id, self_broadcast, tenant_topic, payload) do
     broadcast = build_broadcast(tenant_topic, payload)
@@ -247,6 +199,47 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
     socket
   end
 
+  @spec authorize_write(Socket.t(), pid() | nil) :: {:ok, Socket.t()} | {:error, atom(), Socket.t()}
+  defp authorize_write(socket, db_conn) do
+    %{
+      assigns: %{
+        policies: policies,
+        authorization_context: authorization_context
+      }
+    } = socket
+
+    case run_authorization_check(policies || %Policies{}, db_conn, authorization_context) do
+      {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}} = policies} ->
+        {:ok, assign(socket, :policies, policies)}
+
+      {:ok, policies} ->
+        {:error, :unauthorized, assign(socket, :policies, policies)}
+
+      {:error, :rls_policy_error, error} ->
+        log_error("RlsPolicyError", error)
+        {:error, :rls_policy_error, socket}
+
+      {:error, :query_canceled, error} ->
+        log_error("QueryCanceled", error)
+        {:error, :query_canceled, socket}
+
+      {:error, :missing_partition} ->
+        log_error("MissingPartition", "Realtime was unable to find the expected messages partition")
+        {:error, :missing_partition, socket}
+
+      {:error, :tenant_database_unavailable} ->
+        log_error("UnableToConnectToProject", "Realtime was unable to connect to the project database")
+        {:error, :unable_to_connect_to_project, socket}
+
+      {:error, :increase_connection_pool} ->
+        {:error, :increase_connection_pool, socket}
+
+      {:error, error} ->
+        log_error("UnableToSetPolicies", error)
+        {:error, :unable_to_set_policies, socket}
+    end
+  end
+
   defp run_authorization_check(
          %Policies{broadcast: %BroadcastPolicies{write: nil}} = policies,
          db_conn,
@@ -260,6 +253,14 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
 
   defp run_authorization_check(socket, _db_conn, _authorization_context) do
     {:ok, socket}
+  end
+
+  @spec check_payload_size(Socket.t(), payload) :: :ok | {:error, :payload_size_exceeded, Socket.t()}
+  defp check_payload_size(%{assigns: %{tenant: tenant_id}} = socket, payload) do
+    case Tenants.validate_payload_size(tenant_id, payload) do
+      :ok -> :ok
+      {:error, :payload_size_exceeded} -> {:error, :payload_size_exceeded, socket}
+    end
   end
 
   # The persist policy needs its own probe, so only pay for it when the flag is on.

@@ -1,6 +1,6 @@
 import assert from "assert";
-import { SQL } from "bun";
-import { DB_URL, DB_SSL, RATE_LIMIT_PAUSE_MS } from "../context.ts";
+import { RATE_LIMIT_PAUSE_MS } from "../context.ts";
+import { connectDb } from "../db.ts";
 import type { SuiteDescriptor } from "../runner.ts";
 import { sleep, randomTopic, waitFor, stopClient, openReplicationChannel, REPLICATION_READY_CONFIG } from "../helpers.ts";
 
@@ -12,7 +12,7 @@ export const broadcastBinary: SuiteDescriptor = {
     await sleep(RATE_LIMIT_PAUSE_MS);
     await test("send_binary delivers a binary broadcast", async () => {
       const supabase = await authedClient();
-      const sql = new SQL(DB_URL, { tls: DB_SSL || undefined });
+      const sql = connectDb();
       try {
         const event = crypto.randomUUID();
         const topic = randomTopic();
@@ -34,7 +34,7 @@ export const broadcastBinary: SuiteDescriptor = {
         assert.ok(binary.every((b, i) => received[i] === b), "binary payload bytes mismatch");
         return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
       } finally {
-        await sql.close().catch(() => {});
+        await sql.end().catch(() => {});
         await stopClient(supabase);
       }
     });

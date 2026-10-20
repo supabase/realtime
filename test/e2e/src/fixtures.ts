@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import kleur from "kleur";
-import { SQL } from "bun";
-import { EMAIL_DOMAIN, DB_URL, DB_SSL, PROJECT_URL, ANON_KEY, SERVICE_KEY } from "./context.ts";
+import { EMAIL_DOMAIN, PROJECT_URL, ANON_KEY, SERVICE_KEY } from "./context.ts";
+import { connectDb } from "./db.ts";
 import { log } from "./runner.ts";
 import type { TestSession } from "./helpers.ts";
 
@@ -20,7 +20,7 @@ export async function setup(): Promise<{ userId: string; testUser: { email: stri
   const password = crypto.randomUUID();
 
   log("setup: connecting to database");
-  const sql = new SQL(DB_URL, { tls: DB_SSL || undefined });
+  const sql = connectDb();
   let userId: string;
   let session: TestSession | undefined;
   try {
@@ -196,7 +196,7 @@ export async function setup(): Promise<{ userId: string; testUser: { email: stri
 
     log(kleur.dim(`setup: done (${(performance.now() - start).toFixed(0)}ms)`));
   } finally {
-    await sql.close().catch(() => {});
+    await sql.end().catch(() => {});
   }
 
   return { userId: userId!, testUser: { email, password }, session: session! };
@@ -204,13 +204,13 @@ export async function setup(): Promise<{ userId: string; testUser: { email: stri
 
 export async function cleanup(userId: string) {
   log("cleanup: deleting test user");
-  const sql = new SQL(DB_URL, { tls: DB_SSL || undefined });
+  const sql = connectDb();
   try {
     await sql`DELETE FROM auth.users WHERE id = ${userId}`;
     log(kleur.dim("cleanup: done"));
   } catch (_e) {
     log(kleur.yellow("Warning: failed to clean up test user"));
   } finally {
-    await sql.close().catch(() => {});
+    await sql.end().catch(() => {});
   }
 }

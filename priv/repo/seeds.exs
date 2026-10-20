@@ -31,10 +31,11 @@ default_db_host = "host.docker.internal"
           "type" => "postgres_cdc_rls",
           "settings" => %{
             "db_name" => System.get_env("DB_NAME", "postgres"),
-            "db_host" => System.get_env("DB_HOST", default_db_host),
+            # The tenant shares Realtime's own database unless told otherwise.
+            "db_host" => System.get_env("SELF_HOST_TENANT_DB_HOST") || System.get_env("DB_HOST", default_db_host),
             "db_user" => System.get_env("DB_USER", "supabase_admin"),
             "db_password" => System.get_env("DB_PASSWORD", "postgres"),
-            "db_port" => System.get_env("DB_PORT", "5433"),
+            "db_port" => System.get_env("SELF_HOST_TENANT_DB_PORT") || System.get_env("DB_PORT", "5433"),
             "region" => "us-east-1",
             "poll_interval_ms" => 100,
             "poll_max_record_bytes" => 1_048_576,

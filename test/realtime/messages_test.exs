@@ -200,6 +200,45 @@ defmodule Realtime.MessagesTest do
                {:ok, [binary_message, json_message], MapSet.new([binary_message.id, json_message.id])}
     end
 
+    test "replay messages sent in one transaction in the order they were sent", %{conn: conn, tenant: tenant} do
+      {:ok, _} =
+        Postgrex.transaction(conn, fn conn ->
+          for value <- 1..5 do
+            Postgrex.query!(
+              conn,
+              "SELECT realtime.send(jsonb_build_object('value', $1::int), 'event', 'test', TRUE::bool)",
+              [value]
+            )
+          end
+        end)
+
+      assert {:ok, messages, _ids} = Messages.replay(conn, tenant.external_id, "test", 0, 10)
+      assert Enum.map(messages, & &1.payload["value"]) == [1, 2, 3, 4, 5]
+
+      updated_at = Enum.map(messages, & &1.updated_at)
+      assert updated_at == Enum.uniq(updated_at)
+      assert updated_at == Enum.sort(updated_at, NaiveDateTime)
+    end
+
+    test "replay messages sent from a session that is not in UTC", %{conn: conn, tenant: tenant} do
+      {:ok, _} =
+        Postgrex.transaction(conn, fn conn ->
+          Postgrex.query!(conn, "SET LOCAL timezone TO 'Asia/Tokyo'", [])
+
+          Postgrex.query!(
+            conn,
+            "SELECT realtime.send(jsonb_build_object('value', 1), 'event', 'test', TRUE::bool)",
+            []
+          )
+        end)
+
+      assert {:ok, [message], _ids} = Messages.replay(conn, tenant.external_id, "test", 0, 10)
+
+      now = NaiveDateTime.utc_now()
+      assert abs(NaiveDateTime.diff(message.inserted_at, now)) < 5
+      assert abs(NaiveDateTime.diff(message.updated_at, now)) < 5
+    end
+
     test "replay respects since", %{conn: conn, tenant: tenant} do
       m1 =
         message_fixture(tenant, %{

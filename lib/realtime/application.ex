@@ -115,6 +115,12 @@ defmodule Realtime.Application do
         Realtime.ErlSysMon,
         Realtime.GenCounter,
         Realtime.GenRpcMetrics,
+        # Before Realtime.PromEx: its presence usage poller depends on this, and
+        # :telemetry_poller's first tick fires near-instantly (init_delay defaults to 0), not
+        # after waiting out the poll period. Starting PromEx first meant that first tick ran
+        # before this existed, and :telemetry_poller permanently drops a measurement after its
+        # first failure - so the metric died silently on every boot.
+        {Task.Supervisor, name: Realtime.TaskSupervisor},
         Realtime.PromEx,
         Realtime.TenantPromEx,
         {Realtime.Telemetry.Logger, handler_id: "telemetry-logger"},
@@ -173,7 +179,6 @@ defmodule Realtime.Application do
         {Registry, keys: :unique, name: Realtime.Registry.Unique},
         {Registry, keys: :unique, name: Realtime.Tenants.Connect.Registry},
         {Registry, keys: :unique, name: Extensions.PostgresCdcRls.ReplicationPoller.Registry},
-        {Task.Supervisor, name: Realtime.TaskSupervisor},
         {Task.Supervisor, name: Realtime.Tenants.Migrations.TaskSupervisor},
         {PartitionSupervisor,
          child_spec: {DynamicSupervisor, max_restarts: 0},
