@@ -1,0 +1,83 @@
+# Presence TLA+ model notes
+
+A TLA+/TLC model of the replication protocol for the new per-tenant presence
+tracker, built incrementally. One module per step, numbered. Each step adds
+one mechanism and the property that mechanism is responsible for. Muster and
+PubSub are not modelled; from step 3 they are abstracted as a delivery layer
+that may drop a message to an interested node.
+
+Each module has a `.cfg` of the same name. Check it with TLC (2.19 at the
+time of writing) from this directory:
+
+```
+java -cp tla2tools.jar tlc2.TLC -workers auto -config Presence1.cfg Presence1.tla
+```
+
+## Step 1: `Presence1.tla`, local state only
+
+What: nodes track and untrack presence entries locally. No messages, no
+replication. The only property is that an entry belongs to one node at a time.
+
+Why this step first: it fixes the vocabulary every later step builds on.
+A presence entry is a ref, created by one `track` call and never reused.
+Each node is the authority for its own entries. Keys and payloads are left
+out until the client contract (step 7); replication does not depend on them.
+Entry uniqueness is set here because later steps rely on it to tell a stale
+replica of an entry from a fresh one.
+
+It also settles how behaviours end. The set of refs is finite, so every
+behaviour terminates, and the model needs a way to say so that is not a
+deadlock. Step 2's convergence property needs that quiescent state to exist.
+
+Runs (2026-10-20):
+
+| Config | Nodes | Refs | Distinct states | Depth | Result |
+|---|---|---|---|---|---|
+| `Presence1.cfg` | 2 | 2 | 16 | 5 | holds |
+| 3x3 (ad hoc) | 3 | 3 | 125 | 7 | holds |
+
+Witness (non-vacuity): hand-edit `Track` to drop the `r \notin used` guard.
+`OwnedOnce` violated in 3 states: `n2` tracks `r1`, then `n1` tracks `r1`.
+24 distinct states. Guard restored afterwards. Planned: replace the hand edit
+with a `UniqueRefs` boolean constant and a `Presence1_w1.cfg` that sets it
+`FALSE`, so the witness is reproducible from the repo.
+
+Observations:
+
+- Nothing in the spec orders nodes or refs, so a `SYMMETRY` set over both is
+  sound for safety checking. Not used: step 2 adds liveness, and TLC's
+  liveness checking under symmetry is not sound in general.
+- TLC writes a `states/` directory next to the spec. It should be ignored
+  (`states/`, `*.st`, `*.fp`, `*.chkpt`).
+
+## Roadmap
+
+Each step adds one mechanism and the property it is responsible for. The
+order is chosen so that each protocol decision is made with a counterexample
+in hand.
+
+2. **Snapshot heartbeat, perfect delivery.** A replica table per node and a
+   message set. A heartbeat carries a node's full local set. A node's view is
+   its local set plus every replica. First liveness property: once tracking
+   stops, every replica eventually equals its source. Introduces fairness.
+3. **Lossy delivery.** A `Drop` action with no fairness. Convergence must still
+   hold. Witness: heartbeat on change only, instead of periodic, and
+   convergence fails. This is the "keep the heartbeat" decision.
+4. **Interest.** A tracker exists on a node only while it has clients.
+   Heartbeats reach interested nodes only (the Muster abstraction). Cold start
+   on first client, teardown on last. Interest flapping first appears here.
+5. **Node crash and dead detection.** Permanent node down, a missed-heartbeat
+   counter per peer, a purge past a threshold. Properties: a dead node's
+   entries are eventually gone; a live node is never purged while it
+   heartbeats. With lossy delivery the second fails for a low threshold.
+   Decides which signal declares a peer dead.
+6. **Tracker restart.** Process restart on a live node. Decides whether local
+   entries survive, whether heartbeats carry an incarnation id, and what a
+   receiver does on seeing a new one. Resolves interest flapping.
+7. **Client contract.** What a subscribed socket receives: a full state at
+   sync, then diffs. Invariant: state plus diffs always equals the node's
+   current view. The only step where Phoenix terms appear. Decides cold-start
+   ordering and the local fast path.
+8. **Diff-mode heartbeats.** Sequence numbers, gap detection, checksum,
+   snapshot request. A separate model checked against the same properties as
+   the snapshot model.
