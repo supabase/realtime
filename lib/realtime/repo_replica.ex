@@ -7,18 +7,6 @@ defmodule Realtime.Repo.Replica do
     adapter: Ecto.Adapters.Postgres,
     read_only: true
 
-  @replicas_fly %{
-    "sea" => Realtime.Repo.Replica.SJC,
-    "sjc" => Realtime.Repo.Replica.SJC,
-    "gru" => Realtime.Repo.Replica.IAD,
-    "iad" => Realtime.Repo.Replica.IAD,
-    "sin" => Realtime.Repo.Replica.SIN,
-    "maa" => Realtime.Repo.Replica.SIN,
-    "syd" => Realtime.Repo.Replica.SIN,
-    "lhr" => Realtime.Repo.Replica.FRA,
-    "fra" => Realtime.Repo.Replica.FRA
-  }
-
   @replicas_aws %{
     "ap-southeast-1" => Realtime.Repo.Replica.Singapore,
     "ap-southeast-2" => Realtime.Repo.Replica.Singapore,
@@ -36,7 +24,7 @@ defmodule Realtime.Repo.Replica do
     "ap-south-1" => Realtime.Repo.Replica.Mumbai
   }
 
-  for replica_module <- Enum.uniq(Map.values(@replicas_fly) ++ Map.values(@replicas_aws)) do
+  for replica_module <- Enum.uniq(Map.values(@replicas_aws)) do
     defmodule replica_module do
       use Ecto.Repo,
         otp_app: :realtime,
@@ -83,7 +71,6 @@ defmodule Realtime.Repo.Replica do
       replicas =
         case Application.get_env(:realtime, :platform) do
           :aws -> @replicas_aws
-          :fly -> @replicas_fly
           _ -> %{}
         end
 
@@ -93,7 +80,5 @@ defmodule Realtime.Repo.Replica do
 
   if Mix.env() == :test do
     def replicas_aws, do: @replicas_aws
-
-    def replicas_fly, do: @replicas_fly
   end
 end

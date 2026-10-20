@@ -64,10 +64,6 @@ db_name = System.get_env("TEST_DB_NAME", "realtime_test#{partition}#{run_tag}")
 
 for repo <- [
       Realtime.Repo,
-      Realtime.Repo.Replica.FRA,
-      Realtime.Repo.Replica.IAD,
-      Realtime.Repo.Replica.SIN,
-      Realtime.Repo.Replica.SJC,
       Realtime.Repo.Replica.Singapore,
       Realtime.Repo.Replica.London,
       Realtime.Repo.Replica.NorthVirginia,
@@ -117,7 +113,8 @@ config :realtime,
 
 config :realtime, RealtimeWeb.Endpoint,
   http: [port: port],
-  server: true
+  server: true,
+  secret_key_base: "ktyW57usZxrivYdvLo9os7UGcUUZYKchOMHT3tzndmnHuxD09k+fQnPUmxlPMUI3"
 
 # that's what config/runtime.exs expects to see as region
 System.put_env("REGION", "us-east-1")

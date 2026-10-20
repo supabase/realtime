@@ -18,7 +18,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   Each `:poll` calls `Replications.list_changes/2`, which drains the slot and
   fans changes out to subscriber nodes. Reschedule cadence depends on activity:
 
-    * rows processed → poll again immediately
+    * rows processed, or a full batch of raw slot changes → poll again immediately
     * raw slot changes present but nothing for subscribers → poll after `poll_interval_ms` (+ jitter)
     * fully idle → back off to `poll_interval_ms * @idle_multiplier`.
 
@@ -197,7 +197,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
         pool_ref =
           cond do
-            processed_count > 0 ->
+            processed_count > 0 or slot_changes_count >= max_changes ->
               send(self(), :poll)
               nil
 

@@ -1289,13 +1289,9 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   end
 
   describe "Muster join" do
-    test "joins the Muster scope when the feature flag is enabled for the tenant", %{tenant: tenant} do
+    test "joins the Muster scope", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
-
-      expect(Realtime.FeatureFlags, :enabled?, fn "use_muster_channel_join", tenant_id ->
-        tenant_id == tenant.external_id
-      end)
 
       expect(Forum.Muster, :local_member?, fn _scope, _tenant_id, _pid -> false end)
 
@@ -1308,22 +1304,10 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
     end
 
-    test "does not join the Muster scope when the feature flag is disabled", %{tenant: tenant} do
-      jwt = Generators.generate_jwt_token(tenant)
-      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
-
-      expect(Realtime.FeatureFlags, :enabled?, fn "use_muster_channel_join", _tenant_id -> false end)
-      reject(&Forum.Muster.local_member?/3)
-      reject(&Forum.Muster.join/3)
-
-      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
-    end
-
     test "does not join again when the transport_pid is already a local member", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
 
-      expect(Realtime.FeatureFlags, :enabled?, fn "use_muster_channel_join", _tenant_id -> true end)
       expect(Forum.Muster, :local_member?, fn _scope, _tenant_id, _pid -> true end)
       reject(&Forum.Muster.join/3)
 
@@ -1334,7 +1318,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "error"}, conn_opts(tenant, jwt))
 
-      expect(Realtime.FeatureFlags, :enabled?, fn "use_muster_channel_join", _tenant_id -> true end)
       expect(Forum.Muster, :local_member?, fn _scope, _tenant_id, _pid -> false end)
       expect(Forum.Muster, :join, fn _scope, _tenant_id, _pid -> raise "boom" end)
 
@@ -1351,7 +1334,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "error"}, conn_opts(tenant, jwt))
 
-      expect(Realtime.FeatureFlags, :enabled?, fn "use_muster_channel_join", _tenant_id -> true end)
       expect(Forum.Muster, :local_member?, fn _scope, _tenant_id, _pid -> false end)
       expect(Forum.Muster, :join, fn _scope, _tenant_id, _pid -> exit(:boom) end)
 
@@ -1371,7 +1353,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "error"}, conn_opts(tenant, jwt))
 
-      expect(Realtime.FeatureFlags, :enabled?, fn "use_muster_channel_join", _tenant_id -> true end)
       expect(Forum.Muster, :local_member?, fn _scope, _tenant_id, _pid -> false end)
       expect(Forum.Muster, :join, fn _scope, _tenant_id, _pid -> Process.sleep(4_200) end)
 

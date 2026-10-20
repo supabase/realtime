@@ -43,6 +43,7 @@ port =
 
 config :realtime, RealtimeWeb.Endpoint,
   http: [port: port, compress: true],
+  secret_key_base: "ktyW57usZxrivYdvLo9os7UGcUUZYKchOMHT3tzndmnHuxD09k+fQnPUmxlPMUI3",
   debug_errors: true,
   code_reloader: true,
   check_origin: false,

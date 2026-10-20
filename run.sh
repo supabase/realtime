@@ -8,53 +8,6 @@ if [ -n "${RLIMIT_NOFILE:-}" ]; then
     ulimit -Sn "$RLIMIT_NOFILE"
 fi
 
-export ERL_CRASH_DUMP=/tmp/erl_crash.dump
-
-upload_crash_dump_to_s3() {
-    EXIT_CODE=${?:-0}
-    bucket=$ERL_CRASH_DUMP_S3_BUCKET
-    s3Host=$ERL_CRASH_DUMP_S3_HOST
-    s3Port=$ERL_CRASH_DUMP_S3_PORT
-
-    if [ "${AWS_CONTAINER_CREDENTIALS_RELATIVE_URI-}" ]; then
-        response=$(curl -s "http://169.254.170.2${AWS_CONTAINER_CREDENTIALS_RELATIVE_URI}")
-        s3Key=$(echo "$response" | grep -o '"AccessKeyId": *"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"')
-        s3Secret=$(echo "$response" | grep -o '"SecretAccessKey": *"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"')
-    else
-        s3Key=$ERL_CRASH_DUMP_S3_KEY
-        s3Secret=$ERL_CRASH_DUMP_S3_SECRET
-    fi
-
-    filePath=${ERL_CRASH_DUMP_FOLDER:-tmp}/$(date +%s)_${ERL_CRASH_DUMP_FILE_NAME:-erl_crash.dump}
-
-    if [ -f "${ERL_CRASH_DUMP_FOLDER:-tmp}/${ERL_CRASH_DUMP_FILE_NAME:-erl_crash.dump}" ]; then
-        mv "${ERL_CRASH_DUMP_FOLDER:-tmp}/${ERL_CRASH_DUMP_FILE_NAME:-erl_crash.dump}" "$filePath"
-
-        resource="/${bucket}/realtime/crash_dumps${filePath}"
-
-        contentType="application/octet-stream"
-        dateValue=$(date -R)
-        stringToSign="PUT\n\n${contentType}\n${dateValue}\n${resource}"
-
-        signature=$(echo -en "${stringToSign}" | openssl sha1 -hmac "${s3Secret}" -binary | base64)
-
-        if [ "${ERL_CRASH_DUMP_S3_SSL:-}" = true ]; then
-            protocol="https"
-        else
-            protocol="http"
-        fi
-
-        curl -v -X PUT -T "${filePath}" \
-            -H "Host: ${s3Host}" \
-            -H "Date: ${dateValue}" \
-            -H "Content-Type: ${contentType}" \
-            -H "Authorization: AWS ${s3Key}:${signature}" \
-            "${protocol}://${s3Host}:${s3Port}${resource}"
-    fi
-
-    exit "$EXIT_CODE"
-}
-
 generate_certs() {
     aws secretsmanager get-secret-value --secret-id "${CLUSTER_SECRET_ID}" --region "${CLUSTER_SECRET_REGION}" | jq -r '.SecretString' > cert_secrets
     jq -r '.key' cert_secrets | base64 -d > ca.key
@@ -85,10 +38,6 @@ generate_certs() {
 EOF
     export ERL_AFLAGS="${ERL_AFLAGS} -proto_dist inet_tls -ssl_dist_optfile ${CWD}/inet_tls.conf"
 }
-
-if [ "${ENABLE_ERL_CRASH_DUMP:-false}" = true ]; then
-    trap upload_crash_dump_to_s3 INT TERM EXIT
-fi
 
 if [[ -n "${GENERATE_CLUSTER_CERTS:-}" ]] ; then
     generate_certs
