@@ -448,6 +448,63 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
 
       assert conn.status == 202
     end
+
+    test "returns 422 when the JSON body is not an object", %{conn: conn, tenant: tenant} do
+      sub_topic = "room:not-an-object"
+      subscribe(Tenants.tenant_topic(tenant, sub_topic), sub_topic)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(Routes.broadcast_single_path(conn, :broadcast, sub_topic, "message"), "[1,2,3]")
+
+      assert conn.status == 422
+      assert Jason.decode!(conn.resp_body)["message"] == "Payload must be a JSON object"
+      refute_receive {:socket_push, _, _}
+    end
+
+    test "broadcasts a JSON object with a _binary key as JSON", %{conn: conn, tenant: tenant} do
+      sub_topic = "room:binary-key"
+      subscribe(Tenants.tenant_topic(tenant, sub_topic), sub_topic)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(Routes.broadcast_single_path(conn, :broadcast, sub_topic, "message"), ~s({"_binary":"x"}))
+
+      assert conn.status == 202
+      assert %{"payload" => %{"payload" => %{"_binary" => "x"}}} = assert_receive_message()
+    end
+
+    test "ignores private and persist keys in the JSON body", %{conn: conn, tenant: tenant} do
+      sub_topic = "room:flags-in-body"
+      subscribe(Tenants.tenant_topic(tenant, sub_topic), sub_topic)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(
+          Routes.broadcast_single_path(conn, :broadcast, sub_topic, "message"),
+          ~s({"private":true,"persist":true,"text":"x"})
+        )
+
+      assert conn.status == 202
+
+      assert %{"payload" => %{"payload" => %{"private" => true, "persist" => true, "text" => "x"}}} =
+               assert_receive_message()
+    end
+  end
+
+  describe "missing content-type" do
+    test "returns 415 and does not broadcast", %{conn: conn, tenant: tenant} do
+      sub_topic = "room:no-content-type"
+      subscribe(Tenants.tenant_topic(tenant, sub_topic), sub_topic)
+
+      conn = post_without_content_type(conn, sub_topic, ~s({"text":"hi"}))
+
+      assert conn.status == 415
+      refute_receive {:socket_push, _, _}
+    end
   end
 
   describe "suspended tenant" do
@@ -930,6 +987,15 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
   end
 
   defp messages_for(topic), do: from(m in Message, where: m.topic == ^topic)
+
+  # Phoenix.ConnTest refuses a binary body without a content-type, so dispatch directly
+  defp post_without_content_type(conn, sub_topic, body) do
+    path = Routes.broadcast_single_path(conn, :broadcast, sub_topic, "message")
+
+    conn
+    |> Plug.Adapters.Test.Conn.conn("POST", path, body)
+    |> Endpoint.call(Endpoint.init([]))
+  end
 
   defp generate_conn(conn, tenant) do
     now = System.system_time(:second)

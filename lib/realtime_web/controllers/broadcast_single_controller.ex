@@ -88,16 +88,16 @@ defmodule RealtimeWeb.BroadcastSingleController do
     }
   )
 
-  def broadcast(
-        %{assigns: %{tenant: tenant}, body_params: %{"_binary" => binary}} = conn,
-        %{"topic" => topic, "event" => event} = params
-      ) do
-    private = parse_boolean(params["private"])
+  def broadcast(%{assigns: %{tenant: tenant}} = conn, %{"topic" => topic, "event" => event}) do
+    # Read from the query string only: Plug merges JSON body keys into params, so a payload
+    # with a "private" or "persist" key would otherwise change how it is broadcast
+    private = parse_boolean(conn.query_params["private"])
     auth_params = build_auth_params(conn, tenant)
 
     with {:ok, persist} <- parse_persist(conn.query_params),
+         {:ok, payload, content_type} <- payload(conn),
          :ok <-
-           SingleBroadcast.broadcast(auth_params, tenant, topic, event, binary, :binary,
+           SingleBroadcast.broadcast(auth_params, tenant, topic, event, payload, content_type,
              private: private,
              persist: persist
            ) do
@@ -105,20 +105,14 @@ defmodule RealtimeWeb.BroadcastSingleController do
     end
   end
 
-  def broadcast(%{assigns: %{tenant: tenant}} = conn, %{"topic" => topic, "event" => event} = params) do
-    private = parse_boolean(params["private"])
-    payload = conn.body_params
-    auth_params = build_auth_params(conn, tenant)
+  defp payload(%{private: %{realtime_binary_body: body}}), do: {:ok, body, :binary}
+  defp payload(conn), do: json_payload(conn.body_params)
 
-    with {:ok, persist} <- parse_persist(conn.query_params),
-         :ok <-
-           SingleBroadcast.broadcast(auth_params, tenant, topic, event, payload, :json,
-             private: private,
-             persist: persist
-           ) do
-      send_resp(conn, :accepted, "")
-    end
-  end
+  # Plug.Parsers.JSON wraps a body that isn't a JSON object as %{"_json" => value}
+  defp json_payload(%{"_json" => value} = body) when map_size(body) == 1 and not is_map(value),
+    do: {:error, :unprocessable_entity, "Payload must be a JSON object"}
+
+  defp json_payload(body), do: {:ok, body, :json}
 
   # The query string carries the same `persist` shape as the WebSocket frame, except that Plug decodes
   # every value as a string: `persist=true` and `persist[ttl]=3600`.
@@ -144,6 +138,5 @@ defmodule RealtimeWeb.BroadcastSingleController do
   end
 
   defp parse_boolean("true"), do: true
-  defp parse_boolean(true), do: true
   defp parse_boolean(_), do: false
 end

@@ -88,6 +88,25 @@ For authenticated OTLP endpoints:
   --otel https://otlp.example.com --otel-token <token>
 ```
 
+### Against every supported Postgres (Multigres and OrioleDB included)
+
+`supabase start` only ever runs the Postgres the CLI ships. `mise run e2e-db` brings up a stack of
+its own instead ([`stack/compose.yml`](./stack/compose.yml)): Realtime built from this checkout,
+GoTrue, PostgREST and an nginx gateway, on a tenant database running any image in
+[`.github/db-images.json`](../../.github/db-images.json). CI runs it once per image.
+
+```bash
+mise run e2e-db multigres                                  # every suite
+mise run e2e-db pg15 -- --test functional --parallel       # flags after -- go to realtime-check.ts
+docker compose -p e2e-pg15 down -v                         # remove the stack when done
+```
+
+Each run recreates the stack from scratch, builds Realtime, runs the suite and leaves the stack up
+as the compose project `e2e-<db>`, to rerun against or inspect. It is published on ports Docker
+picks, so it never clashes with the dev databases or another stack. The fixtures connect as
+`supabase_admin` here: as `postgres` they need `supautils.policy_grants`, which the first pg15
+image and the local Multigres image don't set (hosted Multigres does).
+
 ### Remote project
 
 ```bash

@@ -239,6 +239,56 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       refute_receive _
     end
 
+    test "records a track and then an update on the presence shard", %{tenant: tenant, topic: topic} do
+      attach_duration()
+      policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
+      socket = socket_fixture(tenant, topic, random_string(), policies: policies)
+
+      assert {:ok, socket, _} = PresenceHandler.handle(%{"event" => "track", "payload" => %{"a" => "b"}}, socket)
+      assert_receive {:duration, %{duration: _}, %{action: :track, result: :ok, reason: :none}}
+
+      assert {:ok, _socket, _} = PresenceHandler.handle(%{"event" => "track", "payload" => %{"a" => "c"}}, socket)
+      assert_receive {:duration, %{duration: _}, %{action: :update, result: :ok, reason: :none}}
+
+      refute_receive {:duration, _, _}
+    end
+
+    test "records a shard timeout and still exits", %{tenant: tenant, topic: topic} do
+      attach_duration()
+      policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
+      socket = socket_fixture(tenant, topic, random_string(), policies: policies)
+      timeout = {:timeout, {GenServer, :call, [:shard, :msg, 5000]}}
+
+      expect(RealtimeWeb.Presence, :track, fn _, _, _, _ -> exit(timeout) end)
+
+      assert catch_exit(PresenceHandler.handle(%{"event" => "track", "payload" => %{"a" => "b"}}, socket)) == timeout
+      assert_receive {:duration, _, %{action: :track, result: :exit, reason: :timeout}}
+    end
+
+    test "does not record a track that is rejected before reaching the shard", %{tenant: tenant, topic: topic} do
+      attach_duration()
+      policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
+      socket = socket_fixture(tenant, topic, random_string(), policies: policies)
+
+      assert {:error, :invalid_payload} = PresenceHandler.handle(%{"event" => "track", "payload" => "nope"}, socket)
+      refute_receive {:duration, _, _}
+    end
+
+    test "a track with an update that errors reports unable_to_track_presence", %{tenant: tenant, topic: topic} do
+      attach_duration()
+      policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
+      socket = socket_fixture(tenant, topic, random_string(), policies: policies)
+
+      assert {:ok, socket, _} = PresenceHandler.handle(%{"event" => "track", "payload" => %{"a" => "b"}}, socket)
+      expect(RealtimeWeb.Presence, :update, fn _, _, _, _ -> {:error, :nopresence} end)
+
+      assert {:error, :unable_to_track_presence} =
+               PresenceHandler.handle(%{"event" => "track", "payload" => %{"a" => "c"}}, socket)
+
+      assert_receive {:duration, _, %{action: :track, result: :ok}}
+      assert_receive {:duration, _, %{action: :update, result: :error, reason: :nopresence}}
+    end
+
     test "a sampled track stores the latency envelope in the tracker meta only", %{tenant: tenant, topic: topic} do
       expect(Realtime.FeatureFlags, :enabled?, fn "presence_latency_metric", _ -> true end)
       key = random_string()
@@ -1084,6 +1134,17 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
         tenant: tenant.external_id
       }
     }
+  end
+
+  defp attach_duration do
+    id = {__MODULE__, make_ref()}
+    :telemetry.attach(id, [:realtime, :presence, :track, :duration], &__MODULE__.handle_duration/4, self())
+    on_exit(fn -> :telemetry.detach(id) end)
+  end
+
+  # Handlers run in the emitting process, so only the test's own calls are forwarded.
+  def handle_duration(_event, measures, metadata, pid) do
+    if self() == pid, do: send(pid, {:duration, measures, metadata})
   end
 
   def handle_telemetry(event, measures, metadata, %{pid: pid, tenant: tenant}) do

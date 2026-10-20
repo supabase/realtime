@@ -123,7 +123,7 @@ metrics_token_blocklist = Env.get_list("METRICS_TOKEN_BLOCKLIST", [])
 migration_partition_slots = Env.get_integer("MIGRATION_PARTITION_SLOTS", System.schedulers_online() * 2)
 no_channel_timeout_in_ms = Env.get_integer("NO_CHANNEL_TIMEOUT_IN_MS", to_timeout(minute: 10))
 node_balance_uptime_threshold_in_ms = Env.get_integer("NODE_BALANCE_UPTIME_THRESHOLD_IN_MS", to_timeout(minute: 5))
-platform = if System.get_env("AWS_EXECUTION_ENV") == "AWS_ECS_FARGATE", do: :aws, else: :fly
+platform = if System.get_env("AWS_EXECUTION_ENV") == "AWS_ECS_FARGATE", do: :aws
 postgres_cdc_scope_shards = Env.get_integer("POSTGRES_CDC_SCOPE_SHARDS", 5)
 presence_broadcast_period_in_ms = Env.get_integer("PRESENCE_BROADCAST_PERIOD_IN_MS", 1_500)
 presence_permdown_period_in_ms = Env.get_integer("PRESENCE_PERMDOWN_PERIOD_IN_MS", 1_200_000)
@@ -494,15 +494,19 @@ if config_env() == :prod do
   alias Realtime.Repo.Replica
 
   replica_repos = %{
-    Realtime.Repo.Replica.FRA => System.get_env("DB_HOST_REPLICA_FRA", db_host),
-    Realtime.Repo.Replica.IAD => System.get_env("DB_HOST_REPLICA_IAD", db_host),
-    Realtime.Repo.Replica.SIN => System.get_env("DB_HOST_REPLICA_SIN", db_host),
-    Realtime.Repo.Replica.SJC => System.get_env("DB_HOST_REPLICA_SJC", db_host),
     Realtime.Repo.Replica.Singapore => System.get_env("DB_HOST_REPLICA_SIN", db_host),
     Realtime.Repo.Replica.London => System.get_env("DB_HOST_REPLICA_FRA", db_host),
     Realtime.Repo.Replica.NorthVirginia => System.get_env("DB_HOST_REPLICA_IAD", db_host),
     Realtime.Repo.Replica.Oregon => System.get_env("DB_HOST_REPLICA_SJC", db_host),
     Realtime.Repo.Replica.SanJose => System.get_env("DB_HOST_REPLICA_SJC", db_host),
+    Realtime.Repo.Replica.Ohio => System.get_env("DB_HOST_REPLICA_CMH", db_host),
+    Realtime.Repo.Replica.Ireland => System.get_env("DB_HOST_REPLICA_DUB", db_host),
+    Realtime.Repo.Replica.Frankfurt => System.get_env("DB_HOST_REPLICA_FRA", db_host),
+    Realtime.Repo.Replica.Stockholm => System.get_env("DB_HOST_REPLICA_ARN", db_host),
+    Realtime.Repo.Replica.SaoPaulo => System.get_env("DB_HOST_REPLICA_GRU", db_host),
+    Realtime.Repo.Replica.Tokyo => System.get_env("DB_HOST_REPLICA_NRT", db_host),
+    Realtime.Repo.Replica.Seoul => System.get_env("DB_HOST_REPLICA_ICN", db_host),
+    Realtime.Repo.Replica.Mumbai => System.get_env("DB_HOST_REPLICA_BOM", db_host),
     Realtime.Repo.Replica.Local => db_host
   }
 

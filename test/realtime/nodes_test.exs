@@ -139,6 +139,14 @@ defmodule Realtime.NodesTest do
     end
   end
 
+  describe "launch_region/1" do
+    test "translates the tenant's region to the closest Realtime region" do
+      tenant = %Realtime.Api.Tenant{extensions: [%{settings: %{"region" => "eu-west-3"}}]}
+
+      assert Nodes.launch_region(tenant) == "eu-west-2"
+    end
+  end
+
   describe "platform_region_translator/1" do
     test "returns nil for nil input" do
       assert Nodes.platform_region_translator(nil) == nil
@@ -150,8 +158,9 @@ defmodule Realtime.NodesTest do
 
       Application.put_env(:realtime, :region_mapping, nil)
 
-      assert Nodes.platform_region_translator("eu-north-1") == "eu-west-2"
-      assert Nodes.platform_region_translator("us-west-2") == "us-west-1"
+      assert Nodes.platform_region_translator("eu-north-1") == "eu-north-1"
+      assert Nodes.platform_region_translator("us-west-2") == "us-west-2"
+      assert Nodes.platform_region_translator("eu-west-3") == "eu-west-2"
       assert Nodes.platform_region_translator("unknown-region") == nil
     end
 
@@ -361,7 +370,7 @@ defmodule Realtime.NodesTest do
   end
 
   describe "short_node_id_from_name/1" do
-    test "extracts short ID from fly.io-style IPv6 node name" do
+    test "extracts short ID from IPv6 node name" do
       assert Nodes.short_node_id_from_name(:"realtime-prod@fdaa:0:cc:a7b:b385:83c3:cfe3:2") ==
                "83c3cfe3"
     end

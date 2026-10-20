@@ -194,7 +194,11 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
   # A serializer raises on a message it can't encode (e.g. an event over its 255-byte limit).
   # Contain it so one message is skipped instead of crashing the shared process doing the dispatch.
   defp encode(serializer, msg) do
-    {:ok, serializer.fastlane!(msg)}
+    case serializer.fastlane!(msg) do
+      # Flatten so every subscriber shares one binary instead of getting its own copy of the iodata.
+      {:socket_push, opcode, payload} -> {:ok, {:socket_push, opcode, IO.iodata_to_binary(payload)}}
+      encoded -> {:ok, encoded}
+    end
   rescue
     error -> {:error, error}
   end

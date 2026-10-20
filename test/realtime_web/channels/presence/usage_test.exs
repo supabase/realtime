@@ -212,6 +212,27 @@ defmodule RealtimeWeb.Presence.UsageTest do
            }
   end
 
+  test "a tracker that hasn't started at all is treated as empty, not a crash" do
+    # No ETS table whatsoever, not even a :pool_size entry - the symptom of scanning before
+    # RealtimeWeb.Presence has started (e.g. a poller's near-instant first tick during boot).
+    tracker = :"usage_test_nonexistent_tracker_#{System.unique_integer([:positive])}"
+
+    assert Usage.scan(tracker) == %{
+             tenant_count: 0,
+             topic_count: 0,
+             buckets: %{
+               5 => 0,
+               10 => 0,
+               25 => 0,
+               50 => 0,
+               100 => 0,
+               200 => 0,
+               500 => 0,
+               :infinity => 0
+             }
+           }
+  end
+
   test "scanning the real RealtimeWeb.Presence returns a well-formed result" do
     assert %{tenant_count: tenant_count, topic_count: topic_count, buckets: buckets} =
              Usage.scan(Presence)

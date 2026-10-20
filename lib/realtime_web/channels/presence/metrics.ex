@@ -19,6 +19,7 @@ defmodule RealtimeWeb.Presence.Metrics do
   @feature_flag "presence_latency_metric"
   @latency_event [:realtime, :presence, :notify, :latency]
   @discarded_event [:realtime, :presence, :notify, :discarded]
+  @track_duration_event [:realtime, :presence, :track, :duration]
   # Phoenix.Tracker's down detection window (broadcast_period × max_silent_periods × 2). A join
   # older than this cannot be a live delivery; it is a replay from transfer_ack or netsplit recovery.
   @stale_after_ms 30_000
@@ -154,6 +155,54 @@ defmodule RealtimeWeb.Presence.Metrics do
       true -> :telemetry.execute(@latency_event, %{latency: latency}, metadata)
     end
   end
+
+  @doc """
+  Times a client's call into the presence tracker and emits `[:realtime, :presence, :track, :duration]`.
+
+  `fun` makes the tracker calls and returns `{action, result}`, where `action` is `:track` or
+  `:update`: the call that produced `result`. The duration covers everything `fun` does, so a
+  track that falls back to an update is one observation tagged `:update`.
+
+  Returns `{action, result}`. If `fun` exits, the exit is recorded under its reason and then
+  re-raised unchanged. An exit has no action to read, so it is recorded as `:track`, the call every
+  request starts with.
+  """
+  @spec measure_tracker_call((-> {:track | :update, result})) :: {:track | :update, result}
+        when result: term()
+  def measure_tracker_call(fun) do
+    {duration, {action, result}} =
+      :timer.tc(
+        fn ->
+          try do
+            fun.()
+          catch
+            :exit, reason -> {:track, {:exit, reason}}
+          end
+        end,
+        :millisecond
+      )
+
+    {outcome, reason} = classify(result)
+
+    :telemetry.execute(@track_duration_event, %{duration: duration}, %{
+      action: action,
+      result: outcome,
+      reason: reason,
+      implementation: :phoenix
+    })
+
+    case result do
+      {:exit, exit_reason} -> exit(exit_reason)
+      result -> {action, result}
+    end
+  end
+
+  defp classify({:ok, _}), do: {:ok, :none}
+  defp classify({:error, reason}) when is_atom(reason), do: {:error, reason}
+  defp classify({:error, _}), do: {:error, :other}
+  defp classify({:exit, {:timeout, _}}), do: {:exit, :timeout}
+  defp classify({:exit, {:noproc, _}}), do: {:exit, :noproc}
+  defp classify({:exit, _}), do: {:exit, :other}
 
   @doc """
   Strips the envelope from every meta in a grouped presence list.

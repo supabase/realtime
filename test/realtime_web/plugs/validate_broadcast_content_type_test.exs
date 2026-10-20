@@ -39,18 +39,21 @@ defmodule RealtimeWeb.Plugs.ValidateBroadcastContentTypeTest do
       refute conn.halted
       assert is_nil(conn.status)
     end
-
-    test "passes through when content-type header is missing" do
-      conn =
-        conn(:post, "/", "")
-        |> call()
-
-      refute conn.halted
-      assert is_nil(conn.status)
-    end
   end
 
   describe "rejected content types" do
+    test "returns 415 when content-type header is missing" do
+      conn =
+        conn(:post, "/", ~s({"text":"hi"}))
+        |> call()
+
+      assert conn.halted
+      assert conn.status == 415
+
+      assert Jason.decode!(conn.resp_body)["error"] ==
+               "Unsupported Media Type. Use application/json or application/octet-stream"
+    end
+
     test "returns 415 for text/plain" do
       conn =
         conn(:post, "/", "plain text")

@@ -80,6 +80,32 @@ defmodule Realtime.PromEx.Plugins.PresenceTest do
     end
   end
 
+  describe "track duration" do
+    alias RealtimeWeb.Presence.Metrics
+
+    @duration "realtime_presence_track_duration"
+
+    test "buckets each call by action, result and reason" do
+      tags = [action: "update", result: "ok", reason: "none", implementation: "phoenix"]
+      le_25_before = metric_value(@duration <> "_bucket", tags ++ [le: "25.0"]) || 0
+      count_before = metric_value(@duration <> "_count", tags) || 0
+
+      Metrics.measure_tracker_call(fn -> {:update, {:ok, :ref}} end)
+
+      assert metric_value(@duration <> "_bucket", tags ++ [le: "25.0"]) == le_25_before + 1
+      assert metric_value(@duration <> "_count", tags) == count_before + 1
+    end
+
+    test "records an exit under its reason" do
+      tags = [action: "track", result: "exit", reason: "timeout", implementation: "phoenix"]
+      count_before = metric_value(@duration <> "_count", tags) || 0
+
+      catch_exit(Metrics.measure_tracker_call(fn -> exit({:timeout, {GenServer, :call, []}}) end))
+
+      assert metric_value(@duration <> "_count", tags) == count_before + 1
+    end
+  end
+
   describe "usage metrics" do
     alias Realtime.Tenants
     alias Realtime.Test.PresenceUsageTracker, as: Tracker
@@ -130,10 +156,12 @@ defmodule Realtime.PromEx.Plugins.PresenceTest do
     end
 
     test "a crash in the scan is caught, logged, and does not propagate or record metrics" do
-      tracker = :"usage_test_nonexistent_tracker_#{System.unique_integer([:positive])}"
+      # Not a real tracker name: Usage.scan/1 now treats an unstarted/missing tracker as empty
+      # rather than crashing, so this forces a genuine crash (:ets.whereis/1 rejects a non-atom)
+      # purely to exercise the Task-level safety net itself, regardless of what trips it.
       tenants_before = metric_value("realtime_presence_usage_tenants", []) || 0
 
-      log = capture_log(fn -> assert Presence.execute_usage_metrics(tracker) end)
+      log = capture_log(fn -> assert Presence.execute_usage_metrics("not_an_atom_tracker") end)
 
       assert log =~ "PresenceUsageScanCrashed"
       assert (metric_value("realtime_presence_usage_tenants", []) || 0) == tenants_before

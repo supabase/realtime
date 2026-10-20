@@ -3,6 +3,13 @@ import { RATE_LIMIT_PAUSE_MS } from "../context.ts";
 import type { SuiteDescriptor } from "../runner.ts";
 import { sleep, randomTopic, waitFor, stopClient, openReplicationChannel, REPLICATION_READY_CONFIG } from "../helpers.ts";
 
+// The broadcast is sent by a trigger, so a write the trigger failed would otherwise only surface
+// as a timeout waiting for the event.
+async function write(query: PromiseLike<{ error: { message: string } | null }>, label: string) {
+  const { error } = await query;
+  if (error) throw new Error(`Error on broadcast_changes ${label}: ${error.message}`);
+}
+
 export const broadcastChanges: SuiteDescriptor = {
   name: "broadcast-changes",
   label: "broadcast changes",
@@ -22,7 +29,7 @@ export const broadcastChanges: SuiteDescriptor = {
           .on("broadcast", { event: "INSERT" }, (res) => (result = res));
 
         const { subscribeMs } = await openReplicationChannel(channel);
-        await supabase.from("broadcast_changes").insert({ value, id, topic: testTopic });
+        await write(supabase.from("broadcast_changes").insert({ value, id, topic: testTopic }), "insert");
         const { latencyMs: eventMs } = await waitFor(() => result, "INSERT event");
 
         assert.strictEqual(result.payload.record.id, id);
@@ -52,8 +59,8 @@ export const broadcastChanges: SuiteDescriptor = {
           .on("broadcast", { event: "UPDATE" }, (res) => (result = res));
 
         const { subscribeMs } = await openReplicationChannel(channel);
-        await supabase.from("broadcast_changes").insert({ value: originalValue, id, topic: testTopic });
-        await supabase.from("broadcast_changes").update({ value: updatedValue }).eq("id", id);
+        await write(supabase.from("broadcast_changes").insert({ value: originalValue, id, topic: testTopic }), "insert");
+        await write(supabase.from("broadcast_changes").update({ value: updatedValue }).eq("id", id), "update");
         const { latencyMs: eventMs } = await waitFor(() => result, "UPDATE event");
 
         assert.strictEqual(result.payload.record.id, id);
@@ -83,8 +90,8 @@ export const broadcastChanges: SuiteDescriptor = {
           .on("broadcast", { event: "DELETE" }, (res) => (result = res));
 
         const { subscribeMs } = await openReplicationChannel(channel);
-        await supabase.from("broadcast_changes").insert({ value, id, topic: testTopic });
-        await supabase.from("broadcast_changes").delete().eq("id", id);
+        await write(supabase.from("broadcast_changes").insert({ value, id, topic: testTopic }), "insert");
+        await write(supabase.from("broadcast_changes").delete().eq("id", id), "delete");
         const { latencyMs: eventMs } = await waitFor(() => result, "DELETE event");
 
         assert.strictEqual(result.payload.record, null);
