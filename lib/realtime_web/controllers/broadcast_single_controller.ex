@@ -86,9 +86,11 @@ defmodule RealtimeWeb.BroadcastSingleController do
     }
   )
 
-  def broadcast(%{assigns: %{tenant: tenant}} = conn, %{"topic" => topic, "event" => event} = params) do
-    private = parse_boolean(params["private"])
-    persist = parse_boolean(params["persist"])
+  def broadcast(%{assigns: %{tenant: tenant}} = conn, %{"topic" => topic, "event" => event}) do
+    # Read from the query string only: Plug merges JSON body keys into params, so a payload
+    # with a "private" or "persist" key would otherwise change how it is broadcast
+    private = parse_boolean(conn.query_params["private"])
+    persist = parse_boolean(conn.query_params["persist"])
     auth_params = build_auth_params(conn, tenant)
 
     with {:ok, payload, content_type} <- payload(conn),
@@ -121,6 +123,5 @@ defmodule RealtimeWeb.BroadcastSingleController do
   end
 
   defp parse_boolean("true"), do: true
-  defp parse_boolean(true), do: true
   defp parse_boolean(_), do: false
 end
