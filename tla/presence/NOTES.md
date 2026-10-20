@@ -36,11 +36,10 @@ Runs (2026-10-20):
 | `Presence1.cfg` | 2 | 2 | 16 | 5 | holds |
 | 3x3 (ad hoc) | 3 | 3 | 125 | 7 | holds |
 
-Witness (non-vacuity): hand-edit `Track` to drop the `r \notin used` guard.
-`OwnedOnce` violated in 3 states: `n2` tracks `r1`, then `n1` tracks `r1`.
-24 distinct states. Guard restored afterwards. Planned: replace the hand edit
-with a `UniqueRefs` boolean constant and a `Presence1_w1.cfg` that sets it
-`FALSE`, so the witness is reproducible from the repo.
+Witness (non-vacuity): `Presence1_w1.cfg` sets `UniqueRefs = FALSE`, which
+switches off the guard that stops a ref being tracked twice. `OwnedOnce`
+violated in 3 states: `n2` tracks `r1`, then `n1` tracks `r1`. 24 distinct
+states. The constant exists only for this; every other config sets it `TRUE`.
 
 Observations:
 

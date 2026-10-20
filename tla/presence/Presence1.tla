@@ -8,10 +8,13 @@
 CONSTANTS
   Nodes,  
   \* Refs are the equivalent of a phx_ref, every track call generates a unique one
-  Refs
+  Refs,
+  UniqueRefs \* Whether unique refs is enforced, enables easy tests
 
 VARIABLES local, \* maps nodes to the refs they hold locally
           used \* Every ref we've ever tracked
+
+ASSUME UniqueRefs \in BOOLEAN
 
 vars == <<local, used>>
 
@@ -26,12 +29,12 @@ TypeOK ==
 (***************************************************************************)
 (* Tracking a ref adds it to local for that node and to used               *)
 (***************************************************************************)
-Track(n, r) ==  /\ r \notin used
-               /\ local' = [local EXCEPT ![n] = local[n] \cup {r}]
-               /\ used' = used \cup {r}
+Track(n, r) == /\ UniqueRefs => r \notin used
+              /\ local' = [local EXCEPT ![n] = local[n] \cup {r}]
+              /\ used' = used \cup {r}
 
 (***************************************************************************)
-(* Untracking a ref from a node removes it from the node's list of refs    *)
+(* Untracking a ref from a node removes it from the node's set of refs    *)
 (***************************************************************************)
 Untrack(n, r) == /\ r \in local[n]
                 /\ local' = [local EXCEPT ![n] = local[n] \ {r}]
