@@ -13,6 +13,51 @@ time of writing) from this directory:
 java -cp tla2tools.jar tlc2.TLC -workers auto -config Presence1.cfg Presence1.tla
 ```
 
+## Assumptions
+
+- One tenant. The tracker is per tenant, heartbeats are per-tenant
+  broadcasts routed by Muster, and no state is shared between tenants. A
+  second tenant would add states without adding behaviour.
+- A node is the authority for the entries its own clients tracked. Nothing it
+  receives from a peer can conflict with its own entries, so there is no
+  merge, only replace.
+- Topics are not modelled until the client contract step. Replication,
+  interest and dead detection are tenant-level and do not look at topics.
+
+## Protocol options
+
+The heartbeat is periodic in every option. Step 3 shows why: with lossy
+delivery, send-on-change alone does not converge. The options differ in
+what a heartbeat carries.
+
+1. **Full state every heartbeat.** Each node sends the entries it owns, every
+   period, to every interested node. Receiver replaces its replica. No
+   sequence numbers, no gap detection; a lost heartbeat is repaired by the
+   next one. Cost scales with steady-state size: bytes are re-sent whether or
+   not anything changed.
+2. **Version-stamped full state.** Each node keeps a counter that increments
+   on every local change. Every heartbeat carries the counter; the entry set
+   rides along only when the counter changed since the last send. A receiver
+   that sees a version it has not applied, with no state attached, requests
+   a snapshot. Steady-state heartbeats are a few bytes. Any change, however
+   small, costs a full snapshot. Still replace-only on the receiver.
+3. **Diffs.** Heartbeats carry changes since the last heartbeat, with a
+   sequence number for gap detection and a checksum or similar to catch a
+   bad apply. Recovery from a gap, a restart, or a cold start is a full
+   snapshot, so this option contains option 1 as a sub-protocol. Cost scales
+   with change rate. Adds per-change bookkeeping on the sender and merge
+   logic on the receiver.
+
+Decision: model and implement option 1 first. It is the protocol everything
+else recovers through. Add option 2 if measurement shows steady-state bytes
+matter. Option 3 only if change rate is the problem.
+
+For the model, option 2 and option 3 share the machinery (a per-sender
+version, a request path, a receiver that detects it is behind). When that
+step arrives, the heartbeat action should nondeterministically carry full
+state, a diff, or a version only. One model then covers every threshold
+policy an implementation might choose; the policy stays out of the spec.
+
 ## Step 1: `Presence1.tla`, local state only
 
 What: nodes track and untrack presence entries locally. No messages, no
