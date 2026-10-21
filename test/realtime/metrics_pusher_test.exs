@@ -1,5 +1,6 @@
 defmodule Realtime.MetricsPusherTest do
   use Realtime.DataCase, async: true
+  use Mimic
   import ExUnit.CaptureLog
 
   alias Plug.Conn
@@ -13,9 +14,13 @@ defmodule Realtime.MetricsPusherTest do
       assert :ignore = MetricsPusher.start_link(opts)
     end
 
+    test "does not start when the URL list is empty" do
+      assert :ignore = MetricsPusher.start_link(urls: [])
+    end
+
     test "sends request successfully" do
       opts = [
-        url: "https://example.com:8428/api/v1/import/prometheus",
+        urls: ["https://example.com:8428/api/v1/import/prometheus"],
         user: "realtime",
         auth: "hunter2",
         compress: true,
@@ -62,7 +67,7 @@ defmodule Realtime.MetricsPusherTest do
 
     test "sends request successfully without auth header" do
       opts = [
-        url: "http://localhost:8428/api/v1/import/prometheus",
+        urls: ["http://localhost:8428/api/v1/import/prometheus"],
         compress: true,
         timeout: 5000
       ]
@@ -83,7 +88,7 @@ defmodule Realtime.MetricsPusherTest do
 
     test "sends request body untouched when compress=false" do
       opts = [
-        url: "http://localhost:8428/api/v1/import/prometheus",
+        urls: ["http://localhost:8428/api/v1/import/prometheus"],
         user: "hunter2",
         auth: "realtime",
         compress: false,
@@ -107,7 +112,7 @@ defmodule Realtime.MetricsPusherTest do
 
     test "when request receives non 2XX response" do
       opts = [
-        url: "https://example.com:8428/api/v1/import/prometheus",
+        urls: ["https://example.com:8428/api/v1/import/prometheus"],
         auth: "hunter2",
         compress: true,
         timeout: 5000
@@ -137,7 +142,7 @@ defmodule Realtime.MetricsPusherTest do
 
     test "when an error is raised" do
       opts = [
-        url: "https://example.com:8428/api/v1/import/prometheus",
+        urls: ["https://example.com:8428/api/v1/import/prometheus"],
         timeout: 5000
       ]
 
@@ -165,7 +170,7 @@ defmodule Realtime.MetricsPusherTest do
 
     test "appends extra_label query params to URL" do
       opts = [
-        url: "http://localhost:8428/api/v1/import/prometheus",
+        urls: ["http://localhost:8428/api/v1/import/prometheus"],
         compress: false,
         timeout: 5000,
         extra_labels: [{"region", "us-east-1"}, {"env", "prod"}]
@@ -197,7 +202,7 @@ defmodule Realtime.MetricsPusherTest do
 
       {:ok, pid} =
         start_and_allow_pusher(
-          url: "http://localhost:8428/api/v1/import/prometheus",
+          urls: ["http://localhost:8428/api/v1/import/prometheus"],
           timeout: 5000
         )
 
@@ -231,7 +236,11 @@ defmodule Realtime.MetricsPusherTest do
       end)
 
       {:ok, _pid} =
-        start_and_allow_pusher(scope: :global, url: "http://localhost:8428/api/v1/import/prometheus", compress: false)
+        start_and_allow_pusher(
+          scope: :global,
+          urls: ["http://localhost:8428/api/v1/import/prometheus"],
+          compress: false
+        )
 
       assert_receive {:req_called, body}, 1000
       assert body =~ @global_metric
@@ -249,7 +258,11 @@ defmodule Realtime.MetricsPusherTest do
       end)
 
       {:ok, _pid} =
-        start_and_allow_pusher(scope: :tenant, url: "http://localhost:8429/api/v1/import/prometheus", compress: false)
+        start_and_allow_pusher(
+          scope: :tenant,
+          urls: ["http://localhost:8429/api/v1/import/prometheus"],
+          compress: false
+        )
 
       assert_receive {:req_called, body}, 1000
       assert body =~ @tenant_metric
@@ -270,7 +283,7 @@ defmodule Realtime.MetricsPusherTest do
         start_and_allow_pusher(
           scope: :global,
           name: MetricsPusher.Global,
-          url: "http://global.example.com/api/v1/import/prometheus",
+          urls: ["http://global.example.com/api/v1/import/prometheus"],
           compress: false
         )
 
@@ -278,7 +291,7 @@ defmodule Realtime.MetricsPusherTest do
         start_and_allow_pusher(
           scope: :tenant,
           name: MetricsPusher.Tenant,
-          url: "http://tenant.example.com/api/v1/import/prometheus",
+          urls: ["http://tenant.example.com/api/v1/import/prometheus"],
           compress: false
         )
 
@@ -292,6 +305,181 @@ defmodule Realtime.MetricsPusherTest do
       refute bodies["global.example.com"] =~ @tenant_metric
       assert bodies["tenant.example.com"] =~ @tenant_metric
       refute bodies["tenant.example.com"] =~ @global_metric
+    end
+  end
+
+  describe "multiple URLs" do
+    test "pushes both metric sets to every URL" do
+      emit_tenant_metric()
+      parent = self()
+
+      # 2 metric sets x 2 URLs
+      Req.Test.expect(MetricsPusher, 4, fn conn ->
+        send(parent, {:req_called, conn.host, Req.Test.raw_body(conn)})
+        Req.Test.text(conn, "")
+      end)
+
+      {:ok, _pid} =
+        start_and_allow_pusher(
+          urls: [
+            "http://regional.example.com/api/v1/import/prometheus",
+            "http://central.example.com/api/v1/import/prometheus"
+          ],
+          compress: false
+        )
+
+      bodies_by_host =
+        for _ <- 1..4, reduce: %{} do
+          acc ->
+            assert_receive {:req_called, host, body}, 1000
+            Map.update(acc, host, [body], &[body | &1])
+        end
+
+      for host <- ["regional.example.com", "central.example.com"] do
+        bodies = Map.fetch!(bodies_by_host, host)
+        assert length(bodies) == 2
+        assert Enum.any?(bodies, &(&1 =~ @global_metric))
+        assert Enum.any?(bodies, &(&1 =~ @tenant_metric))
+      end
+    end
+
+    test "sends the same auth and extra labels to every URL" do
+      parent = self()
+
+      Req.Test.expect(MetricsPusher, 4, fn conn ->
+        send(parent, {:req_called, conn.host, Conn.get_req_header(conn, "authorization"), conn.query_string})
+        Req.Test.text(conn, "")
+      end)
+
+      {:ok, _pid} =
+        start_and_allow_pusher(
+          urls: [
+            "http://regional.example.com/api/v1/import/prometheus",
+            "http://central.example.com/api/v1/import/prometheus"
+          ],
+          user: "realtime",
+          auth: "hunter2",
+          compress: false,
+          extra_labels: [{"service", "realtime"}]
+        )
+
+      hosts =
+        for _ <- 1..4 do
+          assert_receive {:req_called, host, auth_header, query_string}, 1000
+          assert auth_header == ["Basic #{Base.encode64("realtime:hunter2")}"]
+          assert "extra_label=service=realtime" in decode_params(query_string)
+          host
+        end
+
+      assert Enum.frequencies(hosts) == %{"regional.example.com" => 2, "central.example.com" => 2}
+    end
+
+    test "a failing URL does not stop pushes to the other URLs" do
+      parent = self()
+
+      log =
+        capture_log(fn ->
+          Req.Test.expect(MetricsPusher, 4, fn conn ->
+            send(parent, {:req_called, conn.host})
+
+            case conn.host do
+              "broken.example.com" -> Conn.send_resp(conn, 500, "")
+              _ -> Req.Test.text(conn, "")
+            end
+          end)
+
+          {:ok, pid} =
+            start_and_allow_pusher(
+              urls: [
+                "http://broken.example.com/api/v1/import/prometheus",
+                "http://healthy.example.com/api/v1/import/prometheus"
+              ],
+              compress: false
+            )
+
+          hosts =
+            for _ <- 1..4 do
+              assert_receive {:req_called, host}, 1000
+              host
+            end
+
+          assert Enum.frequencies(hosts) == %{"broken.example.com" => 2, "healthy.example.com" => 2}
+          assert Process.alive?(pid)
+          :sys.get_state(pid)
+        end)
+
+      assert log =~ "metrics to http://broken.example.com/api/v1/import/prometheus"
+      refute log =~ "metrics to http://healthy.example.com"
+    end
+
+    test "an exception while fetching one metric set still pushes the other set to every URL" do
+      parent = self()
+
+      Req.Test.expect(MetricsPusher, 2, fn conn ->
+        send(parent, {:req_called, conn.host, Req.Test.raw_body(conn)})
+        Req.Test.text(conn, "")
+      end)
+
+      stub(Realtime.TenantPromEx, :get_metrics, fn -> raise RuntimeError, "boom" end)
+
+      log =
+        capture_log(fn ->
+          opts = [
+            urls: [
+              "http://regional.example.com/api/v1/import/prometheus",
+              "http://central.example.com/api/v1/import/prometheus"
+            ],
+            compress: false,
+            interval: :timer.minutes(5)
+          ]
+
+          pid = start_supervised!(Supervisor.child_spec({MetricsPusher, opts}, id: MetricsPusher))
+          Req.Test.allow(MetricsPusher, self(), pid)
+          allow(Realtime.TenantPromEx, self(), pid)
+          send(pid, :push)
+
+          for _ <- 1..2 do
+            assert_receive {:req_called, _host, body}, 1000
+            assert body =~ @global_metric
+          end
+
+          assert Process.alive?(pid)
+          :sys.get_state(pid)
+        end)
+
+      assert log =~ "MetricsPusher: Exception fetching tenant metrics"
+      assert log =~ "error_code=MetricsPusherException"
+    end
+
+    test ":tenant scope pushes tenant metrics to every URL" do
+      emit_tenant_metric()
+      parent = self()
+
+      Req.Test.expect(MetricsPusher, 2, fn conn ->
+        send(parent, {:req_called, conn.host, Req.Test.raw_body(conn)})
+        Req.Test.text(conn, "")
+      end)
+
+      {:ok, _pid} =
+        start_and_allow_pusher(
+          scope: :tenant,
+          urls: [
+            "http://regional.example.com/api/v1/import/prometheus",
+            "http://central.example.com/api/v1/import/prometheus"
+          ],
+          compress: false
+        )
+
+      bodies =
+        for _ <- 1..2, into: %{} do
+          assert_receive {:req_called, host, body}, 1000
+          {host, body}
+        end
+
+      for host <- ["regional.example.com", "central.example.com"] do
+        assert bodies[host] =~ @tenant_metric
+        refute bodies[host] =~ @global_metric
+      end
     end
   end
 
@@ -331,6 +519,10 @@ defmodule Realtime.MetricsPusherTest do
 
   defp scopes(child_specs) do
     Enum.map(child_specs, fn %{id: id, start: {_, _, [opts]}} -> {id, opts[:scope]} end)
+  end
+
+  defp decode_params(query_string) do
+    query_string |> String.split("&") |> Enum.map(&URI.decode_www_form/1)
   end
 
   defp emit_tenant_metric do

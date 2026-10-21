@@ -1,6 +1,6 @@
 defmodule Realtime.MetricsPusher do
   @moduledoc """
-  GenServer that periodically pushes Prometheus metrics to an endpoint.
+  GenServer that periodically pushes Prometheus metrics to one or more endpoints.
 
   Each pusher runs with a `:scope`:
 
@@ -11,8 +11,12 @@ defmodule Realtime.MetricsPusher do
   This lets global and tenant metrics go to different endpoints (central vs. regional).
   See `child_specs/1` for how the scopes are chosen from config.
 
-  Only starts if the scope's `url` is configured.
-  Pushes metrics every 30 seconds (configurable) to the configured URL endpoint.
+  Each scope takes a list of `urls` and pushes every metric set to every URL, with the same auth
+  and extra labels. This lets metrics go to an old and a new endpoint at the same time during a
+  migration.
+
+  Only starts if the scope has at least one URL configured.
+  Pushes metrics every 30 seconds (configurable) to each configured URL.
   """
 
   use GenServer
@@ -22,7 +26,7 @@ defmodule Realtime.MetricsPusher do
 
   @type scope :: :all | :global | :tenant
 
-  defstruct [:scope, :push_ref, :interval, :req_options]
+  defstruct [:scope, :push_ref, :interval, :req_options, :urls]
 
   @doc """
   Child specs for the pushers to start, based on which pushers are enabled.
@@ -58,13 +62,13 @@ defmodule Realtime.MetricsPusher do
   @spec start_link(keyword()) :: {:ok, pid()} | :ignore
   def start_link(opts) do
     scope = Keyword.get(opts, :scope, :all)
-    url = Keyword.get(opts, :url, get_env(scope, :url))
+    urls = Keyword.get(opts, :urls, get_env(scope, :urls, []))
     name = Keyword.get(opts, :name, __MODULE__)
 
-    if is_binary(url) do
+    if urls != [] do
       GenServer.start_link(__MODULE__, opts, name: name)
     else
-      Logger.warning("MetricsPusher (scope: #{scope}) not started: url must be configured")
+      Logger.warning("MetricsPusher (scope: #{scope}) not started: urls must be configured")
 
       :ignore
     end
@@ -73,7 +77,7 @@ defmodule Realtime.MetricsPusher do
   @impl true
   def init(opts) do
     scope = Keyword.get(opts, :scope, :all)
-    url = Keyword.get(opts, :url, get_env(scope, :url))
+    urls = Keyword.get(opts, :urls, get_env(scope, :urls, []))
     user = Keyword.get(opts, :user, get_env(scope, :user, "realtime"))
     auth = Keyword.get(opts, :auth, get_env(scope, :auth))
     interval = Keyword.get(opts, :interval, get_env(scope, :interval_ms, to_timeout(second: 30)))
@@ -83,7 +87,9 @@ defmodule Realtime.MetricsPusher do
 
     params = Enum.map(extra_labels, fn {k, v} -> {:extra_label, "#{k}=#{v}"} end)
 
-    Logger.info("Starting MetricsPusher (scope: #{scope}, url: #{url}, interval: #{interval}ms, compress: #{compress})")
+    Logger.info(
+      "Starting MetricsPusher (scope: #{scope}, urls: #{Enum.join(urls, ", ")}, interval: #{interval}ms, compress: #{compress})"
+    )
 
     headers = [{"content-type", "text/plain"}]
 
@@ -92,7 +98,6 @@ defmodule Realtime.MetricsPusher do
     req_options =
       [
         method: :post,
-        url: url,
         headers: headers,
         compress_body: compress,
         receive_timeout: timeout,
@@ -105,7 +110,8 @@ defmodule Realtime.MetricsPusher do
       scope: scope,
       push_ref: schedule_push(interval),
       interval: interval,
-      req_options: req_options
+      req_options: req_options,
+      urls: urls
     }
 
     {:ok, state}
@@ -113,7 +119,7 @@ defmodule Realtime.MetricsPusher do
 
   @impl true
   def handle_info(:push, state) do
-    {exec_time, _} = :timer.tc(fn -> push(state.scope, state.req_options) end, :millisecond)
+    {exec_time, _} = :timer.tc(fn -> push(state.scope, state.urls, state.req_options) end, :millisecond)
 
     if exec_time > :timer.seconds(5) do
       Logger.warning("Metrics push took: #{exec_time} ms")
@@ -132,13 +138,24 @@ defmodule Realtime.MetricsPusher do
 
   defp schedule_push(delay), do: Process.send_after(self(), :push, delay)
 
-  defp push(scope, req_options) do
+  # Fetches each metric set once and sends that body to every URL, one task per {set, URL} pair,
+  # so a slow or failing URL doesn't hold up the others. `TenantPromEx.get_metrics/0` also
+  # schedules an ETS flush, so it must not run once per URL.
+  defp push(scope, urls, req_options) do
     scope
     |> sources()
-    |> Enum.map(fn {label, get_metrics_fn} ->
-      Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn ->
-        push_metrics(label, get_metrics_fn, req_options)
-      end)
+    |> Enum.flat_map(fn {label, get_metrics_fn} ->
+      case fetch_metrics(label, get_metrics_fn) do
+        {:ok, metrics} ->
+          Enum.map(urls, fn url ->
+            Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn ->
+              push_metrics(label, metrics, [{:url, url} | req_options])
+            end)
+          end)
+
+        :error ->
+          []
+      end
     end)
     |> Task.yield_many(to_timeout(minute: 1))
     |> Enum.each(fn
@@ -158,9 +175,15 @@ defmodule Realtime.MetricsPusher do
   defp sources(:global), do: [{"global", &Realtime.PromEx.get_global_metrics/0}]
   defp sources(:tenant), do: [{"tenant", &Realtime.TenantPromEx.get_metrics/0}]
 
-  defp push_metrics(label, get_metrics_fn, req_options) do
-    metrics = get_metrics_fn.()
+  defp fetch_metrics(label, get_metrics_fn) do
+    {:ok, get_metrics_fn.()}
+  rescue
+    error ->
+      log_error("MetricsPusherException", "MetricsPusher: Exception fetching #{label} metrics: #{inspect(error)}")
+      :error
+  end
 
+  defp push_metrics(label, metrics, req_options) do
     case send_metrics(req_options, metrics) do
       :ok ->
         :ok

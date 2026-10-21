@@ -108,7 +108,7 @@ metrics_pusher_enabled = Env.get_boolean("METRICS_PUSHER_ENABLED", false)
 metrics_pusher_extra_labels = Env.get_key_value_list("METRICS_PUSHER_EXTRA_LABELS")
 metrics_pusher_interval_ms = Env.get_integer("METRICS_PUSHER_INTERVAL_MS", to_timeout(second: 30))
 metrics_pusher_timeout_ms = Env.get_integer("METRICS_PUSHER_TIMEOUT_MS", to_timeout(second: 15))
-metrics_pusher_url = System.get_env("METRICS_PUSHER_URL")
+metrics_pusher_urls = "METRICS_PUSHER_URL" |> Env.get_list([]) |> Enum.reject(&(&1 == ""))
 metrics_pusher_user = System.get_env("METRICS_PUSHER_USER", "realtime")
 tenant_metrics_pusher_auth = System.get_env("TENANT_METRICS_PUSHER_AUTH")
 tenant_metrics_pusher_compress = Env.get_boolean("TENANT_METRICS_PUSHER_COMPRESS", true)
@@ -116,7 +116,7 @@ tenant_metrics_pusher_enabled = Env.get_boolean("TENANT_METRICS_PUSHER_ENABLED",
 tenant_metrics_pusher_extra_labels = Env.get_key_value_list("TENANT_METRICS_PUSHER_EXTRA_LABELS")
 tenant_metrics_pusher_interval_ms = Env.get_integer("TENANT_METRICS_PUSHER_INTERVAL_MS", to_timeout(second: 30))
 tenant_metrics_pusher_timeout_ms = Env.get_integer("TENANT_METRICS_PUSHER_TIMEOUT_MS", to_timeout(second: 15))
-tenant_metrics_pusher_url = System.get_env("TENANT_METRICS_PUSHER_URL")
+tenant_metrics_pusher_urls = "TENANT_METRICS_PUSHER_URL" |> Env.get_list([]) |> Enum.reject(&(&1 == ""))
 tenant_metrics_pusher_user = System.get_env("TENANT_METRICS_PUSHER_USER", "realtime")
 metrics_rpc_timeout_in_ms = Env.get_integer("METRICS_RPC_TIMEOUT_IN_MS", to_timeout(second: 15))
 metrics_token_blocklist = Env.get_list("METRICS_TOKEN_BLOCKLIST", [])
@@ -258,7 +258,7 @@ config :realtime,
   log_throttle_janitor_interval_ms: log_throttle_janitor_interval_in_ms,
   disable_healthcheck_logging: disable_healthcheck_logging,
   metrics_pusher_enabled: metrics_pusher_enabled,
-  metrics_pusher_url: metrics_pusher_url,
+  metrics_pusher_urls: metrics_pusher_urls,
   metrics_pusher_user: metrics_pusher_user,
   metrics_pusher_auth: metrics_pusher_auth,
   metrics_pusher_interval_ms: metrics_pusher_interval_ms,
@@ -266,7 +266,7 @@ config :realtime,
   metrics_pusher_compress: metrics_pusher_compress,
   metrics_pusher_extra_labels: metrics_pusher_extra_labels,
   tenant_metrics_pusher_enabled: tenant_metrics_pusher_enabled,
-  tenant_metrics_pusher_url: tenant_metrics_pusher_url,
+  tenant_metrics_pusher_urls: tenant_metrics_pusher_urls,
   tenant_metrics_pusher_user: tenant_metrics_pusher_user,
   tenant_metrics_pusher_auth: tenant_metrics_pusher_auth,
   tenant_metrics_pusher_interval_ms: tenant_metrics_pusher_interval_ms,
