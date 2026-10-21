@@ -21,7 +21,7 @@ defmodule Realtime.PromEx.Plugins.ClientRequestsTest do
     tags = [request: "broadcast", transport: "ws", outcome: "rejected", reason: "unauthorized"]
     before = metric_value("realtime_client_requests_total", tags) || 0
 
-    RequestMetrics.record(:broadcast, :ws, :rejected, :unauthorized)
+    RequestMetrics.record(:broadcast, :ws, {:rejected, :unauthorized})
 
     assert metric_value("realtime_client_requests_total", tags) == before + 1
   end

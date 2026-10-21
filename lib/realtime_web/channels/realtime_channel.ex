@@ -32,7 +32,6 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias RealtimeWeb.RealtimeChannel.BroadcastHandler
   alias RealtimeWeb.RealtimeChannel.MessageDispatcher
   alias RealtimeWeb.RealtimeChannel.PresenceHandler
-  alias RealtimeWeb.RealtimeChannel.Tracker
   alias RealtimeWeb.RequestMetrics
 
   # A JWT `exp` can be arbitrarily far in the future and `Process.send_after/3` rejects delays past
@@ -464,51 +463,45 @@ defmodule RealtimeWeb.RealtimeChannel do
   def handle_info(_, socket), do: {:noreply, socket}
 
   @impl true
-  def handle_in("broadcast" = event, payload, socket) do
-    RequestMetrics.track(:broadcast, :ws, fn -> do_handle_in(event, payload, socket) end)
+  def handle_in("broadcast", payload, %{assigns: %{private?: true}} = socket) do
+    RequestMetrics.track(:broadcast, :ws, fn ->
+      %{tenant: tenant_id} = socket.assigns
+
+      with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id) do
+        BroadcastHandler.handle(payload, db_conn, socket)
+      else
+        {:error, :rpc_error, error} ->
+          log_error(socket, "UnableToHandleBroadcast", error)
+          BroadcastHandler.maybe_reply_error(socket, :unable_to_handle_broadcast)
+
+        {:error, :tenant_database_unavailable} ->
+          log_error(socket, "UnableToConnectToProject", :tenant_database_unavailable)
+          BroadcastHandler.maybe_reply_error(socket, :unable_to_connect_to_project)
+
+        {:error, :tenant_db_too_many_connections} ->
+          log_error(socket, "DatabaseLackOfConnections", :tenant_db_too_many_connections)
+          BroadcastHandler.maybe_reply_error(socket, :database_lack_of_connections)
+
+        {:error, :connect_rate_limit_reached} ->
+          log_error(socket, "DatabaseConnectionRateLimitReached", :connect_rate_limit_reached)
+          BroadcastHandler.maybe_reply_error(socket, :database_connection_rate_limit_reached)
+
+        {:error, reason} when reason in [:initializing, :tenant_database_connection_initializing] ->
+          log_error(socket, "InitializingProjectConnection", reason)
+          BroadcastHandler.maybe_reply_error(socket, :initializing_project_connection)
+
+        {:error, error} ->
+          log_error(socket, "UnableToHandleBroadcast", error)
+          BroadcastHandler.maybe_reply_error(socket, :unable_to_handle_broadcast)
+      end
+    end)
   end
 
-  def handle_in(event, payload, socket) do
-    do_handle_in(event, payload, socket)
+  def handle_in("broadcast", payload, %{assigns: %{private?: false}} = socket) do
+    RequestMetrics.track(:broadcast, :ws, fn -> BroadcastHandler.handle(payload, socket) end)
   end
 
-  defp do_handle_in("broadcast", payload, %{assigns: %{private?: true}} = socket) do
-    %{tenant: tenant_id} = socket.assigns
-
-    with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id) do
-      BroadcastHandler.handle(payload, db_conn, socket)
-    else
-      {:error, :rpc_error, error} ->
-        log_error(socket, "UnableToHandleBroadcast", error)
-        BroadcastHandler.maybe_reply_error(socket, :unable_to_handle_broadcast)
-
-      {:error, :tenant_database_unavailable} ->
-        log_error(socket, "UnableToConnectToProject", :tenant_database_unavailable)
-        BroadcastHandler.maybe_reply_error(socket, :unable_to_connect_to_project)
-
-      {:error, :tenant_db_too_many_connections} ->
-        log_error(socket, "DatabaseLackOfConnections", :tenant_db_too_many_connections)
-        BroadcastHandler.maybe_reply_error(socket, :database_lack_of_connections)
-
-      {:error, :connect_rate_limit_reached} ->
-        log_error(socket, "DatabaseConnectionRateLimitReached", :connect_rate_limit_reached)
-        BroadcastHandler.maybe_reply_error(socket, :database_connection_rate_limit_reached)
-
-      {:error, reason} when reason in [:initializing, :tenant_database_connection_initializing] ->
-        log_error(socket, "InitializingProjectConnection", reason)
-        BroadcastHandler.maybe_reply_error(socket, :initializing_project_connection)
-
-      {:error, error} ->
-        log_error(socket, "UnableToHandleBroadcast", error)
-        BroadcastHandler.maybe_reply_error(socket, :unable_to_handle_broadcast)
-    end
-  end
-
-  defp do_handle_in("broadcast", payload, %{assigns: %{private?: false}} = socket) do
-    BroadcastHandler.handle(payload, socket)
-  end
-
-  defp do_handle_in("presence", payload, socket) do
+  def handle_in("presence", payload, socket) do
     with {:ok, socket, sync_needed} <- PresenceHandler.handle(payload, socket) do
       if sync_needed == :resync, do: send(self(), :sync_presence)
 
@@ -538,30 +531,26 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp do_handle_in("access_token", %{"access_token" => "sb_" <> _}, socket), do: {:noreply, socket}
+  def handle_in("access_token", %{"access_token" => "sb_" <> _}, socket), do: {:noreply, socket}
 
-  defp do_handle_in(
-         "access_token",
-         %{"access_token" => refresh_token},
-         %{assigns: %{access_token: access_token}} = socket
-       )
-       when refresh_token == access_token do
+  def handle_in("access_token", %{"access_token" => refresh_token}, %{assigns: %{access_token: access_token}} = socket)
+      when refresh_token == access_token do
     {:noreply, socket}
   end
 
-  defp do_handle_in("access_token", %{"access_token" => nil}, socket), do: {:noreply, socket}
+  def handle_in("access_token", %{"access_token" => nil}, socket), do: {:noreply, socket}
 
   # Already held for the current window, nothing new to verify
-  defp do_handle_in(
-         "access_token",
-         %{"access_token" => refresh_token},
-         %{assigns: %{pending_access_token: pending}} = socket
-       )
-       when refresh_token == pending do
+  def handle_in(
+        "access_token",
+        %{"access_token" => refresh_token},
+        %{assigns: %{pending_access_token: pending}} = socket
+      )
+      when refresh_token == pending do
     {:noreply, socket}
   end
 
-  defp do_handle_in("access_token", %{"access_token" => refresh_token}, socket) when is_binary(refresh_token) do
+  def handle_in("access_token", %{"access_token" => refresh_token}, socket) when is_binary(refresh_token) do
     %{assigns: %{access_token_verified_at: verified_at}} = socket
     throttle_ms = access_token_throttle_ms()
     now = now()
@@ -574,7 +563,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp do_handle_in(type, payload, socket) do
+  def handle_in(type, payload, socket) do
     count(socket)
 
     # Log info here so that bad messages from clients won't flood Logflare

@@ -59,14 +59,14 @@ defmodule RealtimeWeb.RealtimeChannel.RequestOutcomeTest do
       refute_receive {:outcome, _}
     end
 
-    test "the outcome is not left on the returned socket", %{tenant: tenant, topic: topic} do
+    test "the client still gets the same reply", %{tenant: tenant, topic: topic} do
       socket = socket_fixture(tenant, topic, policies: %Policies{broadcast: %BroadcastPolicies{write: false}})
 
-      assert {:reply, {:error, %{error: :unauthorized}}, socket} =
+      assert {:reply, {:error, %{error: :unauthorized}}, returned} =
                RealtimeChannel.handle_in("broadcast", @payload, socket)
 
       assert_receive {:outcome, %{outcome: :rejected}}
-      refute Map.get(socket.assigns, :request_outcome)
+      assert returned.assigns == socket.assigns
     end
 
     test "a policy deny is rejected, with or without ack", %{tenant: tenant, topic: topic} do

@@ -16,66 +16,33 @@ defmodule RealtimeWeb.RequestMetricsTest do
     {:ok, socket: %Socket{assigns: %{}}}
   end
 
-  describe "put_outcome/3" do
-    test "stores the outcome and reason on the socket", %{socket: socket} do
-      socket = RequestMetrics.put_outcome(socket, :rejected, :unauthorized)
-
-      assert socket.assigns.request_outcome == {:rejected, :unauthorized}
-    end
-
-    test "the first outcome wins", %{socket: socket} do
-      socket =
-        socket
-        |> RequestMetrics.put_outcome(:upstream_failure, :query_canceled)
-        |> RequestMetrics.put_outcome(:internal_failure, :unable_to_set_policies)
-
-      assert socket.assigns.request_outcome == {:upstream_failure, :query_canceled}
-    end
-  end
-
   describe "track/3" do
-    test "records success when no outcome was put, and returns the result", %{socket: socket} do
-      assert {:noreply, ^socket} = RequestMetrics.track(:broadcast, :ws, fn -> {:noreply, socket} end)
+    test "records the outcome the function returns, and returns the result untouched", %{socket: socket} do
+      assert {:noreply, ^socket} = RequestMetrics.track(:broadcast, :ws, fn -> {{:noreply, socket}, :success} end)
 
       assert_receive {:outcome, %{count: 1}, %{request: :broadcast, transport: :ws, outcome: :success, reason: :none}}
       refute_receive {:outcome, _, _}
     end
 
-    test "records the outcome put on the returned socket", %{socket: socket} do
-      RequestMetrics.track(:broadcast, :ws, fn ->
-        {:noreply, RequestMetrics.put_outcome(socket, :rejected, :unauthorized)}
-      end)
+    test "records a failure with its reason", %{socket: socket} do
+      RequestMetrics.track(:broadcast, :ws, fn -> {{:noreply, socket}, {:rejected, :unauthorized}} end)
 
       assert_receive {:outcome, _, %{outcome: :rejected, reason: :unauthorized}}
       refute_receive {:outcome, _, _}
     end
 
-    test "finds the socket in every reply shape and clears the outcome from it", %{socket: socket} do
-      marked = RequestMetrics.put_outcome(socket, :rejected, :unauthorized)
-
-      for {result, socket_at} <- [
-            {{:noreply, marked}, 1},
-            {{:reply, :ok, marked}, 2},
-            {{:stop, :normal, marked}, 2},
-            {{:stop, :normal, :ok, marked}, 3}
+    # The result is not inspected, so any callback reply works and the socket is never touched.
+    test "returns every reply shape unchanged", %{socket: socket} do
+      for result <- [
+            {:noreply, socket},
+            {:reply, :ok, socket},
+            {:stop, :normal, socket},
+            {:stop, :normal, :ok, socket}
           ] do
-        returned = RequestMetrics.track(:broadcast, :ws, fn -> result end)
+        assert ^result = RequestMetrics.track(:broadcast, :ws, fn -> {result, :success} end)
 
-        assert_receive {:outcome, _, %{outcome: :rejected, reason: :unauthorized}}
-        refute Map.get(elem(returned, socket_at).assigns, :request_outcome)
+        assert_receive {:outcome, _, %{outcome: :success}}
       end
-    end
-
-    test "an outcome does not leak into the next request", %{socket: socket} do
-      {:noreply, socket} =
-        RequestMetrics.track(:broadcast, :ws, fn ->
-          {:noreply, RequestMetrics.put_outcome(socket, :rejected, :unauthorized)}
-        end)
-
-      assert_receive {:outcome, _, %{outcome: :rejected}}
-
-      RequestMetrics.track(:broadcast, :ws, fn -> {:noreply, socket} end)
-      assert_receive {:outcome, _, %{outcome: :success, reason: :none}}
     end
 
     test "a raise is counted as an internal failure and re-raised" do
@@ -94,27 +61,45 @@ defmodule RealtimeWeb.RequestMetricsTest do
       assert catch_throw(RequestMetrics.track(:broadcast, :ws, fn -> throw(:oops) end)) == :oops
       assert_receive {:outcome, _, %{outcome: :internal_failure, reason: :throw}}
     end
+
+    test "a crash keeps its original stacktrace" do
+      {_, stacktrace} =
+        try do
+          RequestMetrics.track(:broadcast, :ws, fn -> raise "boom" end)
+        rescue
+          error -> {error, __STACKTRACE__}
+        end
+
+      assert Enum.any?(stacktrace, fn {module, _fun, _arity, _loc} -> module == __MODULE__ end)
+    end
   end
 
-  describe "record/3 and record/4" do
-    test "a success needs no reason and records :none" do
+  # An outcome is :success or {kind, reason}. Only a success has no reason of its own, so the
+  # reason "none" can never be attached to a failure.
+  describe "record/3" do
+    test "a success records the reason :none" do
       RequestMetrics.record(:broadcast, :ws, :success)
 
-      assert_receive {:outcome, %{count: 1}, %{outcome: :success, reason: :none}}
+      assert_receive {:outcome, %{count: 1}, %{request: :broadcast, transport: :ws, outcome: :success, reason: :none}}
     end
 
-    test "every other outcome must give a reason" do
-      for outcome <- [:rejected, :internal_failure, :upstream_failure] do
-        assert_raise FunctionClauseError, fn -> RequestMetrics.record(:broadcast, :ws, outcome) end
-      end
+    test "a failure records the kind and the reason it carries" do
+      RequestMetrics.record(:broadcast, :http, {:upstream_failure, :query_canceled})
+
+      assert_receive {:outcome, %{count: 1}, %{transport: :http, outcome: :upstream_failure, reason: :query_canceled}}
+    end
+
+    test "a success cannot be given a reason" do
+      assert_raise FunctionClauseError, fn -> RequestMetrics.record(:broadcast, :ws, {:success, :none}) end
 
       refute_receive {:outcome, _, _}
     end
 
-    test "records the reason it is given" do
-      RequestMetrics.record(:broadcast, :ws, :upstream_failure, :query_canceled)
+    test "records exactly one event per call" do
+      RequestMetrics.record(:broadcast, :ws, {:rejected, :unauthorized})
 
-      assert_receive {:outcome, %{count: 1}, %{outcome: :upstream_failure, reason: :query_canceled}}
+      assert_receive {:outcome, _, %{outcome: :rejected}}
+      refute_receive {:outcome, _, _}
     end
   end
 
