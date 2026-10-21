@@ -2,11 +2,12 @@ defmodule Realtime.PromEx.Plugins.Presence do
   @moduledoc """
   Provides Presence related metric definitions.
 
-  Presence metrics: 
-    * inter-node replication traffic, measured on the receiving node, 
-    * the latency from a client's track to each other subscriber being notified, 
-    * the duration of a client's track or update call on the presence shard, 
-    * periodic usage numbers (tenant/topic counts, member-count distribution) 
+  Presence metrics:
+    * inter-node replication traffic, measured on the receiving node,
+    * the latency from a client's track to each other subscriber being notified,
+    * the latency from a client's join to its first presence_state push,
+    * the duration of a client's track or update call on the presence shard,
+    * periodic usage numbers (tenant/topic counts, member-count distribution)
       read off Phoenix.Tracker's own replicated state.
   """
 
@@ -20,6 +21,7 @@ defmodule Realtime.PromEx.Plugins.Presence do
   @event_track_duration [:realtime, :presence, :track, :duration]
   @event_usage [:realtime, :presence, :usage]
   @event_usage_bucket [:realtime, :presence, :usage, :bucket]
+  @event_join_latency [:realtime, :presence, :join, :latency]
 
   # Comfortably under the 60s poll interval, so a timed-out scan is never still in flight when
   # the next tick fires.
@@ -40,6 +42,13 @@ defmodule Realtime.PromEx.Plugins.Presence do
   defmodule Scan.Buckets do
     @moduledoc false
     use Peep.Buckets.Custom, buckets: [1, 5, 10, 25, 50, 100, 250, 500, 1_000, 2_500, 5_000]
+  end
+
+  defmodule Join.Buckets do
+    @moduledoc false
+    # The timer starts right at send(self(), :sync_presence) on join, so DB connection setup,
+    # RLS auth and message replay (all before that point) are out of scope
+    use Peep.Buckets.Custom, buckets: [5, 10, 25, 50, 100, 250, 500, 1000, 2000, 4000, 10_000, 20_000]
   end
 
   @impl true
@@ -77,6 +86,15 @@ defmodule Realtime.PromEx.Plugins.Presence do
         event_name: @event_notify_discarded,
         description: "Presence track latency observations discarded as clock skew (negative) or replays (stale)",
         tags: [:reason, :action, :origin, :path, :implementation]
+      ),
+      distribution(
+        @event_join_latency,
+        event_name: @event_join_latency,
+        measurement: :latency,
+        unit: :millisecond,
+        description: "Latency from a client's channel join to receiving its first presence_state push.",
+        tags: [:state, :implementation],
+        reporter_options: [peep_bucket_calculator: Join.Buckets]
       )
     ])
   end
