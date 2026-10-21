@@ -1,4 +1,6 @@
 ---------- MODULE Presence4 -------------
+EXTENDS Integers
+
 (*******************************************************************************)
 (* This is the fourth step of modelling presence.                              *)
 (*                                                                             *)
@@ -15,7 +17,11 @@ CONSTANTS
   (* Refs are the equivalent of a phx_ref, every track call generates a      *)
   (* unique one                                                              *)
   (***************************************************************************)
-  Refs
+  Refs,
+  (***************************************************************************)
+  (* Bound that we allow on joins per tracker                                *)
+  (***************************************************************************)
+  MaxJoins
 
 VARIABLES 
   \* maps nodes to the refs they hold locally
@@ -25,9 +31,15 @@ VARIABLES
   \* every node's copy of every other node's refs
   replica,
   \* inflight heartbeats
-  msgs
+  msgs,
+  \* whether the tracker is interested, i.e. running, on a node 
+  interested,
+  \* counter for how many joins we've seen per tracker
+  joins
 
-vars == <<local, used, replica, msgs>>
+ASSUME MaxJoins \in Nat
+
+vars == <<local, used, replica, msgs, joins, interested>>
 
 (***************************************************************************)
 (* The set of all possible messages. Self-addressed messages are excluded: *)
@@ -42,32 +54,67 @@ Init ==
     /\ replica = [n \in Nodes |-> [m \in Nodes |-> {}]]
     /\ msgs = {}
     /\ used = {}
+    /\ interested = [n \in Nodes |-> FALSE]
+    /\ joins = [n \in Nodes |-> 0]
 
 TypeOK == 
   /\ local \in [Nodes -> SUBSET Refs]
   /\ replica \in [Nodes -> [Nodes -> SUBSET Refs]]
   /\ msgs \subseteq Messages
   /\ used \subseteq Refs
+  /\ interested \in [Nodes -> BOOLEAN]
+  /\ joins \in [Nodes -> 0..MaxJoins]
 
 (***************************************************************************)
 (* Peers gets all the nodes that are not n.                                *)
 (***************************************************************************)
 Peers(n) == Nodes \ {n}
 
+Interested == {n \in Nodes : interested[n]}
+
+InterestedPeers(n) == Interested \ {n}
+
+Uninterested == {n \in Nodes : ~interested[n]}
+
+(***************************************************************************)
+(* Join represents a node starting from scratch, it's the cold start       *)
+(* before it's received any track calls.                                   *)
+(***************************************************************************)
+Join(n) == 
+  /\ ~interested[n]
+  /\ joins[n] < MaxJoins
+  /\ interested' = [interested EXCEPT ![n] = TRUE]
+  /\ replica' = [replica EXCEPT ![n] = [m \in Nodes |-> {}]]
+  /\ joins' = [joins EXCEPT ![n] = joins[n] + 1]
+  /\ UNCHANGED <<local, used, msgs>>
+
+(***************************************************************************)
+(* This happens when all clients on a node untrack and the tracker on that *)
+(* node shuts down                                                         *)
+(***************************************************************************)
+Leave(n) ==
+  /\ interested[n]
+  /\ local[n] = {}
+  /\ interested' = [interested EXCEPT ![n] = FALSE]
+  /\ replica' = [replica EXCEPT ![n] = [m \in Nodes |-> {}]]
+  /\ msgs' = {msg \in msgs : msg.dest /= n}
+  /\ UNCHANGED <<local, joins, used>>
+
 (***************************************************************************)
 (* Tracking a ref adds it to local for that node and to used               *)
 (***************************************************************************)
 Track(n, r) == /\ r \notin used
+              /\ interested[n]
               /\ local' = [local EXCEPT ![n] = local[n] \cup {r}]
               /\ used' = used \cup {r}
-              /\ UNCHANGED <<replica, msgs>>
+              /\ UNCHANGED <<replica, msgs, joins, interested>>
 
 (***************************************************************************)
 (* Untracking a ref from a node removes it from the node's set of refs    *)
 (***************************************************************************)
 Untrack(n, r) == /\ r \in local[n]
                 /\ local' = [local EXCEPT ![n] = local[n] \ {r}]
-                /\ UNCHANGED <<used, replica, msgs>>
+                /\ UNCHANGED <<used, replica, msgs, joins, interested>>
 
 (***************************************************************************)
 (* Heartbeat sent by a node to another node.                               *)
@@ -78,8 +125,9 @@ Untrack(n, r) == /\ r \in local[n]
 (* broadcast message goes from one source to every destination.            *)
 (***************************************************************************)
 Heartbeat(n) ==
-  /\ msgs' = msgs \cup { [src |-> n, dest |-> d, state |-> local[n]] : d \in Peers(n) }
-  /\ UNCHANGED <<used, replica, local>>
+  /\ interested[n]
+  /\ msgs' = msgs \cup { [src |-> n, dest |-> d, state |-> local[n]] : d \in InterestedPeers(n) }
+  /\ UNCHANGED <<used, replica, local, interested, joins>>
 
 (***************************************************************************)
 (* A message is delivered to a node which incorporates the updates into    *)
@@ -87,10 +135,11 @@ Heartbeat(n) ==
 (* replica set for the source node of the message.                         *)
 (***************************************************************************)
 Deliver(msg) ==
+  /\ interested[msg.dest]
   /\ msg \in msgs
   /\ msgs' = msgs \ {msg}
   /\ replica' = [replica EXCEPT ![msg.dest][msg.src] = msg.state]
-  /\ UNCHANGED <<used, local>>
+  /\ UNCHANGED <<used, local, interested, joins>>
 
 (***************************************************************************)
 (* We model lossy transmission by adding a Drop(msg) action, when this     *)
@@ -99,7 +148,7 @@ Deliver(msg) ==
 Drop(msg) ==
   /\ msg \in msgs
   /\ msgs' = msgs \ {msg}
-  /\ UNCHANGED <<used, local, replica>>
+  /\ UNCHANGED <<used, local, replica, interested, joins>>
 
 (***************************************************************************)
 (* Fairness makes sure that nodes send heartbeats and that messages get    *)
@@ -118,7 +167,7 @@ Fairness ==
 (***************************************************************************)
 Next == 
      \/ \E n \in Nodes, r \in Refs : Track(n, r) \/ Untrack(n, r)
-     \/ \E n \in Nodes : Heartbeat(n)
+     \/ \E n \in Nodes : Heartbeat(n) \/ Join(n) \/ Leave(n)
      \/ \E msg \in Messages : Deliver(msg)
      \/ \E msg \in Messages : Drop(msg)
 
@@ -135,11 +184,29 @@ ReplicaIsOwned ==
   \A n \in Nodes : \A m \in Peers(n) : replica[n][m] \subseteq used 
 
 (***************************************************************************)
+(* Dead trackers have no state and receive no messages                     *)
+(***************************************************************************)
+NoTrackerNoState == 
+  /\ \A n \in Uninterested : local[n] = {}
+  /\ \A n \in Uninterested : \A m \in Nodes : replica[n][m] = {}
+  /\ \A n \in Uninterested : \A msg \in msgs : msg.dest /= n
+  
+(***************************************************************************)
+(* Live trackers don't hold on to the state of dead trackers.              *)
+(* This won't actually pass at the moment, because when a tracker dies     *)
+(* after it just sends it heartbeat, other trackers have no way of         *)
+(* knowing... yet, we'll solve this in step 5, options are a leave message *)
+(* or purging state after a period of silence.                             *)
+(***************************************************************************)
+LiveTrackersDontCarryDeadTrackersState ==
+  /\ \A n \in Interested : \A m \in Uninterested : replica[n][m] = {}
+
+(***************************************************************************)
 (* We are Converged when all replicas across all nodes match the local set *)
 (* of that node.                                                           *)
 (***************************************************************************)
 Converged ==
-  \A n \in Nodes : \A m \in Peers(n) : replica[n][m] = local[m]
+  \A n \in Interested : \A m \in InterestedPeers(n) : replica[n][m] = local[m]
 
 (***************************************************************************)
 (* The system eventually converges.                                        *)

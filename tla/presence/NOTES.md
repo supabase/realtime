@@ -204,15 +204,83 @@ Observations:
   `\A n \in Nodes, m \in Peers(n)` is an error. Nest the quantifiers when
   one domain depends on another.
 
+## Step 4: `Presence4.tla`, interest
+
+What: a tracker exists on a node only while that node has clients for the
+tenant. A node joins (tracker starts, knowing nothing) and leaves (tracker
+stops, once its own entries are gone). Heartbeats go only to nodes with a
+tracker. Convergence is required only between live trackers.
+
+Why this step: it is the Muster abstraction. A broadcast reaches the
+interested set and nothing else; the model does not care how. It is also
+where cold start and teardown first exist, so it is the first step that can
+show interest flapping: a node leaving and coming back.
+
+Decisions recorded in the module:
+
+- Interest is its own state, not derived from tracked entries. A node can
+  have clients that track nothing.
+- A joining tracker starts with empty replicas. Nothing is pre-seeded; the
+  next round of heartbeats fills it.
+- Leaving requires the node's own entries to be gone. The last client's
+  entries are untracked when its channel dies, which is a sequence of
+  untracks the model already has.
+- In-flight messages *to* a departing node are discarded (a mailbox dies
+  with its process). In-flight messages *from* it are not: a heartbeat
+  already sent survives its sender stopping.
+- A heartbeat goes to the nodes interested at send time. A node that joined
+  after the send gets the next one.
+- Join and leave are bounded by a per-node counter. Tracking is already
+  bounded by the finite set of refs; without a bound on interest churn a
+  node can flap forever and "eventually always converged" has no quiescent
+  state to settle into. That is a counterexample about the environment, not
+  the protocol.
+
+Finding: a live tracker can hold entries for a tracker that has stopped,
+and nothing in the design so far removes them. The trace needs no loss: a
+node tracks, heartbeats, untracks and leaves; its last snapshot is still in
+flight and lands on a peer after it has gone. The correction was never sent,
+because nothing forces a heartbeat between an untrack and a leave. A
+goodbye message on leave would cover that case but not the one where the
+goodbye is dropped, or where a stale snapshot from the departed node is
+still in flight behind it. Silence-based purging is step 5. Most likely both
+are needed. The probe is kept as `LiveTrackersDontCarryDeadTrackersState`,
+expected to fail until step 5.
+
+Pruning done when copying step 3 to step 4: the witness switches
+(`UniqueRefs`, `PeriodicHeartbeat`, the dirty flag) were not carried
+forward, and self-addressed messages were excluded from `Messages`. Each
+possible message is a strong-fairness conjunct, and halving them took the
+step 3 temporal phase from 71s to under a second on the same model.
+Modules carry mechanisms forward, not witness switches.
+
+Runs (2026-10-21):
+
+| Config | Nodes | Refs | MaxJoins | Distinct states | Depth | Time | Result |
+|---|---|---|---|---|---|---|---|
+| `Presence4.cfg` | 2 | 2 | 2 | 6,661 | 19 | 1s | holds |
+
+Witnesses:
+
+- `Presence4_w1.cfg`: `LiveTrackersDontCarryDeadTrackersState` as an
+  invariant. Violated in 8 states, trace as described above. 534 states.
+
+Observations:
+
+- Deadlock checking is off in both configs. Once every node has used its
+  joins and left, no action is enabled. That is the bounded environment
+  running out, not a protocol deadlock.
+- Convergence between live trackers holds through cold start and through
+  leave-and-rejoin at `MaxJoins = 2`, so interest flapping is not itself a
+  problem for snapshot replication. The stale-entry gap is about what the
+  survivors hold, not about the returning node.
+
 ## Roadmap
 
 Each step adds one mechanism and the property it is responsible for. The
 order is chosen so that each protocol decision is made with a counterexample
 in hand.
 
-4. **Interest.** A tracker exists on a node only while it has clients.
-   Heartbeats reach interested nodes only (the Muster abstraction). Cold start
-   on first client, teardown on last. Interest flapping first appears here.
 5. **Node crash and dead detection.** Permanent node down, a missed-heartbeat
    counter per peer, a purge past a threshold. Properties: a dead node's
    entries are eventually gone; a live node is never purged while it
