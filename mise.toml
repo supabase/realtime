@@ -267,6 +267,8 @@ arg "[args]..." help="Flags for realtime-check.ts, such as --test postgres-chang
 run = """
   supabase start
   eval "$(supabase status --output env)"
+  # Without node_modules, Bun auto-installs the newest versions in range, ignoring bun.lock.
+  bun install --frozen-lockfile
   bun run realtime-check.ts --env local \
     --publishable-key "$PUBLISHABLE_KEY" \
     --secret-key "$SECRET_KEY" \
@@ -336,8 +338,10 @@ run = """
   done
 
   # 5. Run the suite against the stack (Kong -> our realtime). Do NOT call `supabase start` again
-  #    here, or it would recreate realtime from the stock image.
+  #    here, or it would recreate realtime from the stock image. Install from bun.lock first:
+  #    without node_modules, Bun auto-installs the newest versions in range instead.
   eval "$(supabase status --output env)"
+  bun install --frozen-lockfile
   bun run realtime-check.ts --env local \
     --publishable-key "$PUBLISHABLE_KEY" \
     --secret-key "$SECRET_KEY" \

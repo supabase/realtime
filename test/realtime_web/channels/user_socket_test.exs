@@ -101,6 +101,77 @@ defmodule RealtimeWeb.UserSocketTest do
     end
   end
 
+  describe "handle_info/2 with :measure_traffic" do
+    setup do
+      ref =
+        :telemetry_test.attach_event_handlers(self(), [
+          [:realtime, :channel, :output_bytes],
+          [:realtime, :channel, :input_bytes]
+        ])
+
+      # A transport process with no port links reports zero stats
+      transport_pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      {channels_state, socket} = @state
+
+      %{ref: ref, state: {channels_state, %{socket | transport_pid: transport_pid}}}
+    end
+
+    test "fires no telemetry when transport_pid is nil", %{ref: ref} do
+      assert {:ok, @state} = UserSocket.handle_info({:measure_traffic, 42, 99}, @state)
+
+      refute_received {[:realtime, :channel, _], ^ref, _, %{tenant: "test-tenant"}}
+    end
+
+    test "fires output_bytes and input_bytes telemetry with the tenant", %{ref: ref, state: state} do
+      assert {:ok, ^state} = UserSocket.handle_info({:measure_traffic, 0, 0}, state)
+
+      assert_received {[:realtime, :channel, :output_bytes], ^ref, %{size: 0}, %{tenant: "test-tenant"}}
+      assert_received {[:realtime, :channel, :input_bytes], ^ref, %{size: 0}, %{tenant: "test-tenant"}}
+    end
+
+    test "clamps deltas to zero when the previous stats exceed the current ones", %{ref: ref, state: state} do
+      assert {:ok, ^state} = UserSocket.handle_info({:measure_traffic, 1000, 500}, state)
+
+      assert_received {[:realtime, :channel, :output_bytes], ^ref, %{size: 0}, %{tenant: "test-tenant"}}
+      assert_received {[:realtime, :channel, :input_bytes], ^ref, %{size: 0}, %{tenant: "test-tenant"}}
+    end
+  end
+
+  describe "no channels timer" do
+    test "closes a socket without channels when its timer fires" do
+      timer = make_ref()
+      state = {%{channels: %{}, channels_inverse: %{}}, %{@socket | private: %{no_channels_timer: timer}}}
+
+      assert {:stop, {:shutdown, :no_channels}, {1001, "No channels joined"}, ^state} =
+               UserSocket.handle_info({:timeout, timer, :no_channels}, state)
+    end
+
+    test "ignores a timer that has since been replaced" do
+      # Restarting the timer cancels the previous one asynchronously, so its message can still arrive
+      state = {%{channels: %{}, channels_inverse: %{}}, %{@socket | private: %{no_channels_timer: make_ref()}}}
+
+      assert {:ok, ^state} = UserSocket.handle_info({:timeout, make_ref(), :no_channels}, state)
+    end
+
+    test "clears the timer when it fires while channels are open" do
+      timer = make_ref()
+      channels = %{"realtime:topic" => {self(), make_ref(), :joined}}
+      state = {%{channels: channels, channels_inverse: %{}}, %{@socket | private: %{no_channels_timer: timer}}}
+
+      assert {:ok, {%{channels: ^channels}, %{private: %{no_channels_timer: nil}}}} =
+               UserSocket.handle_info({:timeout, timer, :no_channels}, state)
+    end
+
+    test "keeps the timer running when a join is rejected on a socket without channels" do
+      socket = %{@socket | handler: UserSocket, private: %{no_channels_timer: make_ref()}}
+      state = {%{channels: %{}, channels_inverse: %{}}, socket}
+      # A topic without a channel is rejected by Phoenix without starting one
+      raw = Jason.encode!(["1", "1", "unknown:topic", "phx_join", %{}])
+
+      assert {:reply, :error, _reply, ^state} = UserSocket.handle_in({raw, [opcode: :text]}, state)
+    end
+  end
+
   describe "handle_error/2" do
     for {reason, status, message} <- [
           {:missing_api_key, 401, "API key is missing"},
