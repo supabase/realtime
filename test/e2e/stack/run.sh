@@ -32,11 +32,14 @@ tenant_db=$($compose port tenant_db 5432)
 anon_key=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0
 service_key=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU
 
+cd ..
+# Without node_modules, Bun auto-installs the newest versions in range, ignoring bun.lock.
+bun install --frozen-lockfile
+
 # The fixtures put policies on realtime.messages. As postgres that takes supautils.policy_grants,
 # or on images without it, membership of supabase_realtime_admin, which the committed tenant dumps
 # don't carry. The first pg15 and the local Multigres image have neither, so the fixtures set up
 # as supabase_admin, like the Elixir tests do. Hosted projects still exercise the postgres path.
-cd ..
 exec bun run realtime-check.ts --env local \
   --url "http://127.0.0.1:${gateway##*:}" \
   --db-url "postgresql://supabase_admin:postgres@127.0.0.1:${tenant_db##*:}/postgres" \

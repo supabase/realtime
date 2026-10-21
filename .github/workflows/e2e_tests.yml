@@ -50,9 +50,6 @@ jobs:
         with:
           working_directory: test/e2e
           install_args: "bun"
-      - name: Install realtime-check dependencies
-        working-directory: test/e2e
-        run: bun install --frozen-lockfile
 
       # What `mise run e2e-db` runs, called directly so mise doesn't install the Elixir toolchain.
       - name: Run e2e suite against ${{ matrix.db }}
