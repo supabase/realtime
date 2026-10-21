@@ -1,8 +1,12 @@
----------- MODULE Presence3 -------------
+---------- MODULE Presence4 -------------
 (*******************************************************************************)
-(* This is the third step of modelling precence.                               *)
+(* This is the fourth step of modelling presence.                              *)
 (*                                                                             *)
-(* In this step we build on replication and heartbeats to add a lossy network. *)
+(* In this step we add interest: a tracker exists on a node only while it has  *)
+(* clients, and heartbeats go only to nodes with a tracker.                    *)
+(*                                                                             *)
+(* The witness switches from step 3 (UniqueRefs, PeriodicHeartbeat, dirty)     *)
+(* are not carried forward; their lessons are recorded in Presence3 and NOTES. *)
 (*******************************************************************************)
 
 CONSTANTS
@@ -11,24 +15,7 @@ CONSTANTS
   (* Refs are the equivalent of a phx_ref, every track call generates a      *)
   (* unique one                                                              *)
   (***************************************************************************)
-  Refs,
-   
- (***************************************************************************)
- (* These constants switch mechanisms on or off so we can see the spec fail *)
- (* and show that these design choices are needed.                          *)
- (***************************************************************************)
-
-  (***************************************************************************)
-  (* Whether unique refs is enforced, enables easy tests                     *)
-  (***************************************************************************)
-  UniqueRefs,
-  (***************************************************************************)
-  (* Boolean allowing us to control whether we're doing a period heartbeat   *)
-  (* vs a send on change. We need to do a heartbeat, send on change fails to *)
-  (* converge with a lossy network.                                          *)
-  (***************************************************************************)
-  PeriodicHeartbeat
-
+  Refs
 
 VARIABLES 
   \* maps nodes to the refs they hold locally
@@ -38,33 +25,29 @@ VARIABLES
   \* every node's copy of every other node's refs
   replica,
   \* inflight heartbeats
-  msgs,
-  \* dirty flags let us similate heart on change if PeriodicHeartbeat is false
-  dirty
+  msgs
 
-ASSUME UniqueRefs \in BOOLEAN
-ASSUME PeriodicHeartbeat \in BOOLEAN
-
-vars == <<local, used, replica, msgs, dirty>>
+vars == <<local, used, replica, msgs>>
 
 (***************************************************************************)
-(* The set of all possible messages                                        *)
+(* The set of all possible messages. Self-addressed messages are excluded: *)
+(* no action creates one, and every member of this set is a strong         *)
+(* fairness conjunct, which is what makes liveness checking slow.          *)
 (***************************************************************************)
-Messages == [src:Nodes, dest: Nodes, state: SUBSET Refs]
+Messages ==
+  { m \in [src: Nodes, dest: Nodes, state: SUBSET Refs] : m.src /= m.dest }
 
 Init == 
     /\ local = [n \in Nodes |-> {}]
     /\ replica = [n \in Nodes |-> [m \in Nodes |-> {}]]
     /\ msgs = {}
     /\ used = {}
-    /\ dirty = [n \in Nodes |-> FALSE]
 
 TypeOK == 
   /\ local \in [Nodes -> SUBSET Refs]
   /\ replica \in [Nodes -> [Nodes -> SUBSET Refs]]
   /\ msgs \subseteq Messages
   /\ used \subseteq Refs
-  /\ dirty \in [Nodes -> BOOLEAN]
 
 (***************************************************************************)
 (* Peers gets all the nodes that are not n.                                *)
@@ -74,10 +57,9 @@ Peers(n) == Nodes \ {n}
 (***************************************************************************)
 (* Tracking a ref adds it to local for that node and to used               *)
 (***************************************************************************)
-Track(n, r) == /\ UniqueRefs => r \notin used
+Track(n, r) == /\ r \notin used
               /\ local' = [local EXCEPT ![n] = local[n] \cup {r}]
               /\ used' = used \cup {r}
-              /\ dirty' = [dirty EXCEPT ![n] = TRUE]
               /\ UNCHANGED <<replica, msgs>>
 
 (***************************************************************************)
@@ -85,7 +67,6 @@ Track(n, r) == /\ UniqueRefs => r \notin used
 (***************************************************************************)
 Untrack(n, r) == /\ r \in local[n]
                 /\ local' = [local EXCEPT ![n] = local[n] \ {r}]
-                /\ dirty' = [dirty EXCEPT ![n] = TRUE]
                 /\ UNCHANGED <<used, replica, msgs>>
 
 (***************************************************************************)
@@ -97,9 +78,7 @@ Untrack(n, r) == /\ r \in local[n]
 (* broadcast message goes from one source to every destination.            *)
 (***************************************************************************)
 Heartbeat(n) ==
-  /\ PeriodicHeartbeat \/ dirty[n]
   /\ msgs' = msgs \cup { [src |-> n, dest |-> d, state |-> local[n]] : d \in Peers(n) }
-  /\ dirty' = [dirty EXCEPT ![n] = FALSE]
   /\ UNCHANGED <<used, replica, local>>
 
 (***************************************************************************)
@@ -111,7 +90,7 @@ Deliver(msg) ==
   /\ msg \in msgs
   /\ msgs' = msgs \ {msg}
   /\ replica' = [replica EXCEPT ![msg.dest][msg.src] = msg.state]
-  /\ UNCHANGED <<used, local, dirty>>
+  /\ UNCHANGED <<used, local>>
 
 (***************************************************************************)
 (* We model lossy transmission by adding a Drop(msg) action, when this     *)
@@ -120,7 +99,7 @@ Deliver(msg) ==
 Drop(msg) ==
   /\ msg \in msgs
   /\ msgs' = msgs \ {msg}
-  /\ UNCHANGED <<used, local, replica, dirty>>
+  /\ UNCHANGED <<used, local, replica>>
 
 (***************************************************************************)
 (* Fairness makes sure that nodes send heartbeats and that messages get    *)
