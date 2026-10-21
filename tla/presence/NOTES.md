@@ -119,9 +119,9 @@ it, while a different message to the other node is never delivered and a
 stale copy persists. The fairness condition is satisfied because deliveries
 happen infinitely often. Fixed by quantifying fairness over every possible
 message, `\A msg \in Messages : WF_vars(Deliver(msg))`, which is the honest
-statement of "every message sent is eventually delivered". This formulation
-survives step 3: dropping a message disables its delivery, so weak fairness
-is satisfied without one.
+statement of "every message sent is eventually delivered" on a perfect
+network. Step 3 shows it is still too weak once loss exists; see finding 1
+there.
 
 Runs (2026-10-21):
 
@@ -147,15 +147,69 @@ Observations:
   for a moment. `<>[]` tolerates this. Whether the transient is acceptable
   is a client-contract question (step 7).
 
+## Step 3: `Presence3.tla`, lossy delivery
+
+What: any in-flight heartbeat may be dropped. Nothing else changes. The
+property is the same convergence as step 2, now required to hold despite
+loss.
+
+Why this step: it pins down what the model assumes about the transport and
+why the heartbeat has to be periodic. Both are decisions the design had
+already made; this step turns them into checked claims. Muster and PubSub
+are not modelled. Their contract, as the model now states it, is: a message
+may be lost, and a message that keeps being sent is eventually delivered.
+Nothing about ordering or at-most-once.
+
+Finding 1: weak fairness on delivery is not enough once loss exists. With
+`WF_vars(Deliver(msg))`, TLC found a loop where every heartbeat in one
+direction is dropped and the stale replica never repairs. Weak fairness
+only forces an action that is enabled continuously; a dropped message is
+enabled only in the moments between send and drop. The behaviour it
+permits is a permanent one-way partition, which is not "loss". Fixed with
+strong fairness, `SF_vars(Deliver(msg))`: an action enabled infinitely
+often must eventually occur. Heartbeat keeps weak fairness, since nothing
+ever disables it. Strong fairness is much slower to check: the temporal
+phase went from under a second to over a minute at the same constants.
+
+Finding 2: send-on-change does not converge. The `PeriodicHeartbeat`
+witness switch, with a per-node dirty flag, makes a node heartbeat only
+after a local change. One dropped heartbeat then leaves a replica stale
+forever, because the flag is already clear and nothing sends again. This
+is the "keep the heartbeat" decision as a six-step counterexample. The dirty
+flag is also the seed of protocol option 2: a version counter is a dirty
+flag that remembers how many times it was set.
+
+Runs (2026-10-21):
+
+| Config | Nodes | Refs | Distinct states | Depth | Time | Result |
+|---|---|---|---|---|---|---|
+| `Presence3.cfg` | 2 | 2 | 2,908 | 15 | 71s | holds |
+
+Witnesses:
+
+- `Presence3_w1.cfg`: `PeriodicHeartbeat = FALSE`. `Convergence` violated;
+  a change triggers one heartbeat, it is dropped, then stuttering. 714
+  states. Deadlock checking is off in this config: with send-on-change a
+  quiescent state has no enabled action, which is expected and not the
+  failure the witness is about.
+
+Observations:
+
+- Loss adds no states, only transitions. Distinct states rose from step 2
+  because of the dirty flag, not because of `Drop`.
+- Quantifying `Deliver` and `Drop` over the constant set `Messages` rather
+  than the variable `msgs` lets TLC name those steps in traces. Quantifiers
+  over a variable show up as anonymous `Next` steps.
+- In a multi-variable quantifier the bound sets are simultaneous, so
+  `\A n \in Nodes, m \in Peers(n)` is an error. Nest the quantifiers when
+  one domain depends on another.
+
 ## Roadmap
 
 Each step adds one mechanism and the property it is responsible for. The
 order is chosen so that each protocol decision is made with a counterexample
 in hand.
 
-3. **Lossy delivery.** A `Drop` action with no fairness. Convergence must still
-   hold. Witness: heartbeat on change only, instead of periodic, and
-   convergence fails. This is the "keep the heartbeat" decision.
 4. **Interest.** A tracker exists on a node only while it has clients.
    Heartbeats reach interested nodes only (the Muster abstraction). Cold start
    on first client, teardown on last. Interest flapping first appears here.
