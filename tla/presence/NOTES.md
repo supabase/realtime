@@ -13,6 +13,10 @@ time of writing) from this directory:
 java -cp tla2tools.jar tlc2.TLC -workers auto -config Presence1.cfg Presence1.tla
 ```
 
+For a run with liveness properties and more than about 100K states, add
+`-lncheck final`. By default TLC checks liveness on the partial state space
+every few seconds and again at the end; the option skips the partial passes.
+
 ## Assumptions
 
 - One tenant. The tracker is per tenant, heartbeats are per-tenant
@@ -21,8 +25,17 @@ java -cp tla2tools.jar tlc2.TLC -workers auto -config Presence1.cfg Presence1.tl
 - A node is the authority for the entries its own clients tracked. Nothing it
   receives from a peer can conflict with its own entries, so there is no
   merge, only replace.
-- Topics are not modelled until the client contract step. Replication,
-  interest and dead detection are tenant-level and do not look at topics.
+- Topics are not modelled. A topic is a projection of an entry's payload,
+  and the payload is opaque to replication. Replication, interest and dead
+  detection are tenant-level. Grouping entries by topic is an implementation
+  detail of the client-facing side.
+- The transport is unordered and lossy. Muster over gen_rpc uses a pool of
+  connections per node with no ordering guarantee, so two heartbeats from
+  one sender can arrive in either order. The model never assumes ordering.
+- Every tracker's heartbeat timer runs at the same rate, and delivery delay
+  is bounded in heartbeat periods. A silence threshold counted in heartbeats
+  means nothing without both. From step 5, time advances in cluster-wide
+  ticks and every message carries its age in ticks.
 
 ## Protocol options
 
@@ -275,24 +288,142 @@ Observations:
   problem for snapshot replication. The stale-entry gap is about what the
   survivors hold, not about the returning node.
 
+## Step 5: `Presence5.tla`, crash, goodbye and dead detection
+
+What: a node can crash. A tracker that stops gracefully sends a goodbye, an
+empty snapshot. Every tracker counts, per peer, how many heartbeat periods
+have passed since it last heard from that peer, and purges the peer's
+entries once the count reaches a threshold. Time is explicit from this
+step: one `Tick` action fires every live timer at once, and every message
+carries its age in ticks with a bound on how old it can get.
+
+Properties:
+
+- A stopped tracker's entries are eventually gone from every live replica,
+  and stay gone (`DeadStatesArePurged`).
+- Under unbounded loss, every link between two live trackers is correct
+  infinitely often (`PairRepair`).
+- Under bounded loss, the whole cluster is correct infinitely often and
+  eventually stays correct (`Convergence`, `Stabilisation`).
+
+Why this step: step 4 ended with survivors holding a departed tracker's
+entries. A goodbye covers the graceful case. It does not cover a crash, a
+lost goodbye, or a stale snapshot still in flight behind the goodbye, so
+silence-based purging is needed as well. Purging makes time part of the
+protocol: a threshold counted in heartbeats is only meaningful if the
+timers agree and delivery is not arbitrarily slow. This step states both
+assumptions and the constraint that follows from them.
+
+Decisions recorded in the module:
+
+- Crash wipes the node's entries, discards messages to it and sends
+  nothing. Leave sends an empty snapshot to every interested peer.
+- The silence counter is per tracker per peer, reset by any delivery from
+  that peer, and saturates at the threshold. Purge requires something to
+  purge and is weakly fair.
+- A message is delivered or dropped before it is older than `MaxDelay`
+  ticks. `Tick` is blocked while any message is at the bound.
+- `ASSUME MaxDelay + 1 < SilenceThreshold`. The counter goes up in the tick
+  the latest snapshot was sent, so a snapshot arriving `MaxDelay` ticks late
+  finds the counter at `MaxDelay + 1`. Below that threshold a late heartbeat
+  is indistinguishable from a dead peer.
+
+Finding 1: per-node heartbeat actions make the threshold meaningless. With
+each node's heartbeat as its own action, nothing relates one node's timer
+to another's. At threshold 1 TLC found a loop with no loss at all in which
+one node heartbeats repeatedly, its counter for the peer reaches the
+threshold, and it purges a live peer that simply has not had its turn yet.
+At threshold 2 the same thing needs one drop. No threshold fixes it. The design
+assumes timers run at the same rate; the model has to say so. Fixed by
+replacing per-node heartbeats with one cluster-wide `Tick`, and by giving
+messages an age so that "late" is bounded in the same unit.
+
+Finding 2: "eventually always converged" is false under unbounded loss for
+any threshold. Lose a peer's heartbeats threshold times in a row and it is
+purged; the next delivery restores it; loss can do this forever. The honest
+property under unbounded loss is repair, `[]<>`, not stabilisation, `<>[]`.
+Cluster-wide repair is false too: TLC found a 25-state loop where loss
+alternates between the two directions, so whenever one link is restored the
+other has just been purged. Each link repairs, but the cluster is never
+consistent as a whole at any instant. Per-link repair holds. Cluster-wide
+repair and stabilisation hold once loss is bounded (`BoundedLoss`,
+`MaxDrops`), which models a network that eventually stops losing.
+
+Finding 3: a false positive, purging a live peer, is reachable at any finite
+threshold. The probe `FalsePositivesUnreachable` says a non-empty, correct
+replica is never at the threshold. It fails through two consecutive drops.
+The threshold is a tuning parameter, not a correctness one: it trades
+detection delay against false positives, and the model cannot say how often
+a real network loses two in a row. The probe excludes a replica that no
+longer matches its source, because that is a crashed-and-rejoined peer's
+leftovers, which purging is right to remove.
+
+Finding 4: fairness per message was the entire liveness cost. Strong
+fairness quantified over every possible message put the temporal phase at
+33s for 31K states, and the number of conjuncts grows with the message
+domain. Replaced by strong fairness per link, on "some message in flight
+from s to d is delivered". That is sound because the age bound stops `Tick`
+while an old message is in flight, so no message can be starved by others
+on its link. It is a weaker assumption about the network, and the temporal
+phase dropped to under a second. A scratch run confirmed TLC still finds
+the alternating-loss loop under the new fairness.
+
+Runs (2026-10-21), all at `MaxJoins = 2`, `SilenceThreshold = 2`,
+`MaxDelay = 0`:
+
+| Config | Nodes | Refs | Loss | Distinct states | Depth | Time | Result |
+|---|---|---|---|---|---|---|---|
+| `Presence5.cfg` | 2 | 2 | unbounded | 31,133 | 20 | 1s | holds |
+| 3 refs (ad hoc) | 2 | 3 | unbounded | 239,461 | 22 | 24s | holds |
+| `Presence5_stable.cfg` | 2 | 2 | 2 drops | 64,365 | 20 | 2s | holds |
+| 3 nodes, invariants only (ad hoc) | 3 | 2 | unbounded | >188M | >27 | stopped at 15 min | unknown |
+
+Witnesses:
+
+- `Presence5_w1.cfg`: `FalsePositivesUnreachable` as an invariant. Violated
+  in 11 states: both nodes join, one tracks, one tick delivers both
+  heartbeats, the next tick's heartbeats are both dropped, and the tick after
+  that takes the counter to the threshold with a correct replica in hand.
+  10,698 states.
+- `Presence5_w2.cfg`: `PurgeEnabled = FALSE`. `DeadStatesArePurged`
+  violated in 16 states, ending in stuttering with one node crashed and the
+  survivor still holding its entry. Shows the goodbye alone is not enough.
+- `Presence5_w3.cfg`: cluster-wide `Convergence` under unbounded loss.
+  Violated, 26 states looping back to state 10. The alternating-loss trace
+  from finding 2.
+
+Observations:
+
+- A third node multiplies the state space rather than adding to it. The
+  3-node run was still generating states at 188 million. Two nodes is
+  representative for this protocol because no node forwards another's
+  entries, so each link depends only on its two endpoints. Three nodes
+  would matter if the design ever added forwarding.
+- Three refs at two nodes is cheap enough to use as a confirmation run. It
+  becomes the better default once heartbeats carry diffs, since a diff with
+  both an add and a remove needs a node holding two entries while a third
+  changes.
+- `MaxDelay = 1` with threshold 3, where two snapshots from one sender can
+  be in flight together, has not been run yet.
+
 ## Roadmap
 
 Each step adds one mechanism and the property it is responsible for. The
 order is chosen so that each protocol decision is made with a counterexample
 in hand.
 
-5. **Node crash and dead detection.** Permanent node down, a missed-heartbeat
-   counter per peer, a purge past a threshold. Properties: a dead node's
-   entries are eventually gone; a live node is never purged while it
-   heartbeats. With lossy delivery the second fails for a low threshold.
-   Decides which signal declares a peer dead.
-6. **Tracker restart.** Process restart on a live node. Decides whether local
-   entries survive, whether heartbeats carry an incarnation id, and what a
-   receiver does on seeing a new one. Resolves interest flapping.
+6. **Tracker restart.** The tracker process on a live node restarts while
+   the node's channels stay up. Decides whether the restarted tracker
+   rebuilds its own entries from the channels or starts empty, and what its
+   peers see in between. Interest does not change, so this is distinct from
+   leave-and-rejoin.
 7. **Client contract.** What a subscribed socket receives: a full state at
    sync, then diffs. Invariant: state plus diffs always equals the node's
-   current view. The only step where Phoenix terms appear. Decides cold-start
+   current view. The only step where Phoenix terms appear. Topics are a
+   projection of the payload and stay out of the model. Decides cold-start
    ordering and the local fast path.
-8. **Diff-mode heartbeats.** Sequence numbers, gap detection, checksum,
-   snapshot request. A separate model checked against the same properties as
-   the snapshot model.
+8. **Diff and version heartbeats.** The heartbeat nondeterministically
+   carries full state, a diff with a sequence number, or a version only. Gap
+   detection, snapshot request, and an incarnation id so a receiver can tell
+   a restarted sender from a delayed message. Checked against the same
+   properties as the snapshot model, at three refs.
