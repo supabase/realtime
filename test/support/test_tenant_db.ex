@@ -101,6 +101,14 @@ defmodule TestTenantDb do
   def checkout_tenant_unboxed(opts \\ []), do: do_checkout_tenant(opts, :unboxed)
 
   @doc """
+  Like `checkout_tenant/1`, on a database of the caller's own rather than one from the pool.
+
+  For tests that disturb their database (a failover), which would break whatever else was using it.
+  The caller owns the database: it is not probed, and nothing is handed back at the end.
+  """
+  def checkout_tenant_on(port, opts \\ []), do: do_checkout_tenant(opts, :sandbox, fn -> {:ok, port, fn -> :ok end} end)
+
+  @doc """
   Tears the pool down and hands the backend its resources back.
 
   Done after tests finish to not leave resources hanging.
@@ -268,8 +276,8 @@ defmodule TestTenantDb do
     end
   end
 
-  defp do_checkout_tenant(opts, mode) do
-    with {:ok, port, checkin} <- acquire_tenant_db() do
+  defp do_checkout_tenant(opts, mode, acquire \\ &acquire_tenant_db/0) do
+    with {:ok, port, checkin} <- acquire.() do
       tenant = repo_run(mode, fn -> Generators.tenant_fixture(%{port: port, migrations_ran: 0}) end)
 
       run_migrations? = Keyword.get(opts, :run_migrations, false)

@@ -17,8 +17,13 @@ services:
       POSTGRES_HOST: /var/run/postgresql
       POSTGRES_PASSWORD: postgres
       MULTIGRES_GATEWAY_PG_PORT: "5432"
-      # Minimum for the shard to elect a leader.
-      MULTIGRES_NUM_CELLS: "2"
+      # Minimum for the shard to elect a leader. The failover tests use three, so the shard keeps a
+      # quorum after losing a node, and turn on the gateway's failover buffer, as hosted projects do.
+      MULTIGRES_NUM_CELLS: "${MULTIGRES_NUM_CELLS:-2}"
+      MT_BUFFER_ENABLED: "${MT_BUFFER_ENABLED:-false}"
+      # The gateway buffers at most one failover a minute per shard, and the election that starts a
+      # cluster counts as one, so a test failing a fresh cluster over sets this low.
+      MT_BUFFER_MIN_TIME_BETWEEN_FAILOVERS: "${MT_BUFFER_MIN_TIME_BETWEEN_FAILOVERS:-1m}"
       # Admits the non-temporary slots some tests need.
       MT_ENABLE_SLOT_BASED_REPLICATION: "true"
       # Matches supabase/postgres, which the connection-budget tests assume.
