@@ -94,16 +94,65 @@ Observations:
 - TLC writes a `states/` directory next to the spec. It should be ignored
   (`states/`, `*.st`, `*.fp`, `*.chkpt`).
 
+## Step 2: `Presence2.tla`, snapshot heartbeat over a perfect network
+
+What: each node periodically sends the entries it owns to every other node,
+and a receiver replaces its copy of the sender's entries with what arrived.
+No loss. The new property is convergence: once tracking stops, every copy
+eventually matches its source and stays matched.
+
+Why this step: it is the first liveness property, and liveness needs
+fairness. Safety says what may never happen; convergence says what must
+eventually happen, and nothing in a bare transition system forces anything
+to happen. This step settles what the model assumes the environment
+guarantees (nodes keep heartbeating; a perfect network delivers every
+message) and what it does not (nobody forces a track or untrack).
+
+Messages are an unordered set. Delivery order is arbitrary, duplicates
+collapse. This over-approximates any real transport, so a property that
+holds here holds under stricter ordering too.
+
+Finding: fairness on "some message is eventually delivered" is not enough.
+With `WF_vars(\E msg \in msgs : Deliver(msg))`, TLC found a loop where one
+node re-sends the same heartbeat forever and the receiver keeps delivering
+it, while a different message to the other node is never delivered and a
+stale copy persists. The fairness condition is satisfied because deliveries
+happen infinitely often. Fixed by quantifying fairness over every possible
+message, `\A msg \in Messages : WF_vars(Deliver(msg))`, which is the honest
+statement of "every message sent is eventually delivered". This formulation
+survives step 3: dropping a message disables its delivery, so weak fairness
+is satisfied without one.
+
+Runs (2026-10-21):
+
+| Config | Nodes | Refs | Distinct states | Depth | Time | Result |
+|---|---|---|---|---|---|---|
+| `Presence2.cfg` | 2 | 2 | 1,440 | 13 | <1s | holds |
+| 3 nodes (ad hoc) | 3 | 2 | 778,528 | 21 | 26s | holds |
+
+Witnesses:
+
+- `Presence2_w1.cfg`: the spec without fairness. `Convergence` violated;
+  the trace ends in a stuttering state with a heartbeat in flight that is
+  never delivered.
+- `Presence2_w2.cfg`: `ReplicasEmpty` violated at the first delivery.
+  Replicas do fill.
+
+Observations:
+
+- Three nodes costs a few hundred thousand states with liveness on, and
+  symmetry reduction is unsound for liveness checking. Iterate at two nodes;
+  confirm at three.
+- A stale snapshot delivered after a fresher one makes a copy go backwards
+  for a moment. `<>[]` tolerates this. Whether the transient is acceptable
+  is a client-contract question (step 7).
+
 ## Roadmap
 
 Each step adds one mechanism and the property it is responsible for. The
 order is chosen so that each protocol decision is made with a counterexample
 in hand.
 
-2. **Snapshot heartbeat, perfect delivery.** A replica table per node and a
-   message set. A heartbeat carries a node's full local set. A node's view is
-   its local set plus every replica. First liveness property: once tracking
-   stops, every replica eventually equals its source. Introduces fairness.
 3. **Lossy delivery.** A `Drop` action with no fairness. Convergence must still
    hold. Witness: heartbeat on change only, instead of periodic, and
    convergence fails. This is the "keep the heartbeat" decision.
