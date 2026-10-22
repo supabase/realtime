@@ -33,13 +33,24 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
              | {:subscription_insert_failed, String.t()}}
 
   def create(conn, publication, subscription_list, manager, caller) do
+    # `send` is not transactional. Notifying the manager from inside the transaction records
+    # a subscriber for a row that a later failure in the same list rolls back.
+    with {:ok, results} <- insert_subscriptions(conn, publication, subscription_list) do
+      Enum.each(subscription_list, fn %{id: id} ->
+        send(manager, {:subscribed, {caller, id}})
+      end)
+
+      {:ok, results}
+    end
+  end
+
+  defp insert_subscriptions(conn, publication, subscription_list) do
     transaction(
       conn,
       fn conn ->
         Enum.map(subscription_list, fn %{id: id, claims: claims, subscription_params: params} ->
           case query(conn, publication, id, claims, params) do
             {:ok, %{num_rows: num} = result} when num > 0 ->
-              send(manager, {:subscribed, {caller, id}})
               result
 
             {:ok, _} ->
