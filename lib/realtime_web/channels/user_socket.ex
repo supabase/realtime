@@ -9,6 +9,7 @@ defmodule RealtimeWeb.UserSocket do
   alias Realtime.Api.Tenant
   alias Realtime.Database
   alias Realtime.Tenants
+  alias Realtime.TokenBucket
   alias Realtime.UsersCounter
 
   alias RealtimeWeb.TenantRateLimiters
@@ -138,7 +139,7 @@ defmodule RealtimeWeb.UserSocket do
 
       assigns = Map.from_struct(assigns)
 
-      {:ok, assign(socket, assigns)}
+      {:ok, socket |> assign(assigns) |> put_join_bucket(tenant)}
     else
       {:error, :tenant_not_found} ->
         log_error("TenantNotFound", "Tenant not found: #{external_id}")
@@ -237,6 +238,18 @@ defmodule RealtimeWeb.UserSocket do
 
   defp validate_token(token) when is_binary(token), do: {:ok, token}
   defp validate_token(_), do: {:error, :missing_api_key}
+
+  # While the `socket_join_limit` flag is on, every channel joined through this socket takes a token
+  # from this bucket, see `RealtimeChannel.join/3`. The burst is the tenant's channel cap, so a socket can
+  # join every channel it is allowed to hold at once, and only joins past that are limited.
+  # The cap is read here, so a changed cap applies to sockets connected afterwards.
+  defp put_join_bucket(socket, %Tenant{max_channels_per_client: max_channels}) do
+    per_second = Application.fetch_env!(:realtime, :client_join_rate_limit)[:per_second]
+    # A cap below 1 already refuses every join in `RealtimeChannel`, but a bucket needs a burst of at least 1
+    bucket = TokenBucket.new(per_second, max(max_channels, 1))
+
+    %{socket | private: Map.put(socket.private, :join_bucket, bucket)}
+  end
 
   defp connect_error(reason) do
     Process.sleep(connect_error_backoff_ms())

@@ -119,6 +119,13 @@ defmodule Realtime.FeatureFlagsTest do
       assert FeatureFlags.enabled?("enabled_flag", "nonexistent_tenant")
     end
 
+    test "returns global value when the tenant cache holds something other than a tenant" do
+      {:ok, _} = Api.upsert_feature_flag(%{name: "enabled_flag", enabled: true})
+      Cachex.put(TenantsCache, {:get_tenant_by_external_id, "not_a_tenant"}, {:error, :not_found})
+
+      assert FeatureFlags.enabled?("enabled_flag", "not_a_tenant")
+    end
+
     test "returns true when flag is enabled and tenant has no entry (follows global)" do
       {:ok, _} = Api.upsert_feature_flag(%{name: "partial_flag", enabled: true})
       tenant = tenant_fixture(%{feature_flags: %{}})

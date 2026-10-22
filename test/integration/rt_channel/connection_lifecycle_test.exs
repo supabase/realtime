@@ -545,7 +545,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
       tenant: tenant,
       serializer: serializer
     } do
-      enable_node_join_budget_flag!(tenant)
+      enable_tenant_flag!(tenant, "node_join_budget")
       {socket, _} = get_connection(tenant, serializer, role: "authenticated")
       config = %{broadcast: %{self: true}, private: false}
       topics = for _ <- 1..50, do: "realtime:#{random_string()}"
@@ -559,6 +559,43 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
       # config/test.exs makes the budget max(10, 2 * sockets) joins per second with a 2 second burst, so with one socket
       # the first 20 joins always fit and the rest outrun the refill of 10 per second
       assert node_join_budget_exceeded(tenant) in 1..30
+    end
+  end
+
+  describe "rate limits - joins per socket" do
+    setup [:rls_context]
+
+    test "rejects joins past the socket's burst and keeps the socket connected", %{
+      tenant: tenant,
+      serializer: serializer
+    } do
+      # The burst is the tenant's channel cap
+      change_tenant_configuration(tenant, :max_channels_per_client, 10)
+      enable_tenant_flag!(tenant, "socket_join_limit")
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      config = %{broadcast: %{self: true}, private: false}
+      [topic_1 | _] = topics = for _ <- 1..30, do: "realtime:#{random_string()}"
+
+      for topic <- topics, do: WebsocketClient.join(socket, topic, %{config: config})
+
+      replies =
+        for topic <- topics do
+          assert_receive %Message{event: "phx_reply", payload: %{"status" => status} = reply, topic: ^topic}, 5_000
+          {status, reply["response"]}
+        end
+
+      # The first 10 joins use the burst. The 20 sent right after them would need 10 seconds of refill at the 2 joins
+      # per second of config/test.exs to all pass the bucket, and the ones that pass hit the channel cap instead
+      rejected = {"error", %{"reason" => "SocketJoinRateLimitReached: Too many joins on this socket"}}
+      too_many_channels = {"error", %{"reason" => "ChannelRateLimitReached: Too many channels"}}
+      {first_10, rest} = Enum.split(replies, 10)
+      assert Enum.all?(first_10, &match?({"ok", _}, &1))
+      assert rejected in rest
+      assert Enum.all?(rest, &(&1 in [rejected, too_many_channels]))
+
+      payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+      WebsocketClient.send_event(socket, topic_1, "broadcast", payload)
+      assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic_1}, 500
     end
   end
 
@@ -662,12 +699,12 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
   end
 
   # The flag is created disabled and enabled only for this tenant, so it does not leak into other tests
-  defp enable_node_join_budget_flag!(tenant) do
-    {:ok, flag} = Realtime.Api.upsert_feature_flag(%{name: "node_join_budget", enabled: false})
+  defp enable_tenant_flag!(tenant, name) do
+    {:ok, flag} = Realtime.Api.upsert_feature_flag(%{name: name, enabled: false})
     Realtime.FeatureFlags.Cache.update_cache(flag)
-    {:ok, tenant} = Realtime.FeatureFlags.set_tenant_flag("node_join_budget", tenant.external_id, true)
+    {:ok, tenant} = Realtime.FeatureFlags.set_tenant_flag(name, tenant.external_id, true)
     Tenants.Cache.update_cache(tenant)
-    on_exit(fn -> Realtime.FeatureFlags.Cache.invalidate_cache("node_join_budget") end)
+    on_exit(fn -> Realtime.FeatureFlags.Cache.invalidate_cache(name) end)
   end
 
   defp node_join_budget_exceeded(tenant) do

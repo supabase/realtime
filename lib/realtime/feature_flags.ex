@@ -80,8 +80,9 @@ defmodule Realtime.FeatureFlags do
         rollout_result = in_rollout?(flag, tenant_id)
 
         case TenantsCache.get_tenant_by_external_id(tenant_id) do
-          nil -> rollout_result
           %{feature_flags: flags} -> Map.get(flags, flag_name, rollout_result)
+          # No tenant found, as `TenantsCache.fetch_tenant_by_external_id/1` treats anything but a tenant
+          _ -> rollout_result
         end
     end
   end

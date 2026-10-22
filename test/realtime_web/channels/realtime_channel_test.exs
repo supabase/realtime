@@ -14,6 +14,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   alias Realtime.Tenants.Connect
   alias Realtime.RateCounter
   alias Realtime.Tenants
+  alias Realtime.TokenBucket
   alias RealtimeWeb.UserSocket
 
   setup do
@@ -1189,6 +1190,152 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       # capture_log also collects logs from concurrently running tests, so only look at this tenant's
       refute log |> String.split("\n") |> Enum.any?(&(&1 =~ "ChannelRateLimitReached" and &1 =~ tenant.external_id))
+    end
+  end
+
+  describe "joins per socket" do
+    setup %{tenant: tenant} do
+      # Starts the tenant database connection so the joins below don't wait for it
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:warmup", %{})
+
+      stub_socket_join_limit_flag(true)
+      :ok
+    end
+
+    test "the bucket refills at the configured rate and holds the tenant's channel cap", %{tenant: tenant} do
+      Realtime.Tenants.Cache.update_cache(%{tenant | max_channels_per_client: 4})
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      interval = div(1_000_000, Application.fetch_env!(:realtime, :client_join_rate_limit)[:per_second])
+      tolerance = 3 * interval
+
+      assert %TokenBucket{interval: ^interval, tolerance: ^tolerance} = socket.private.join_bucket
+    end
+
+    test "the bucket holds at least one join when the tenant's channel cap is below 1", %{tenant: tenant} do
+      Realtime.Tenants.Cache.update_cache(%{tenant | max_channels_per_client: 0})
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      assert %TokenBucket{tolerance: 0} = socket.private.join_bucket
+    end
+
+    test "rejects joins once the socket used its burst and keeps the socket connected", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "error"}, conn_opts(tenant, jwt))
+      socket = put_join_bucket(socket, 1, 2)
+
+      assert {:ok, _, %Socket{channel_pid: channel_pid}} = subscribe_and_join(socket, "realtime:test1", %{})
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test2", %{})
+
+      # Nothing past the bucket runs for a rejected join
+      reject(&Realtime.Tenants.Cache.fetch_tenant_by_external_id/1)
+
+      log =
+        capture_log(fn ->
+          assert {:error, %{reason: "SocketJoinRateLimitReached: Too many joins on this socket"}} =
+                   subscribe_and_join(socket, "realtime:test3", %{})
+        end)
+
+      assert log =~ "SocketJoinRateLimitReached"
+      assert Process.alive?(channel_pid)
+      refute_received %Phoenix.Socket.Broadcast{event: "disconnect"}
+    end
+
+    test "joins rejected for other reasons still take a token", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+      socket = put_join_bucket(socket, 1, 1)
+
+      Realtime.Tenants.Cache.update_cache(%{tenant | private_only: true})
+      capture_log(fn -> assert {:error, _} = subscribe_and_join(socket, "realtime:test1", %{}) end)
+      Realtime.Tenants.Cache.update_cache(tenant)
+
+      assert {:error, %{reason: "SocketJoinRateLimitReached: Too many joins on this socket"}} =
+               subscribe_and_join(socket, "realtime:test2", %{})
+    end
+
+    test "each socket has its own bucket", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket_1} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+      {:ok, %Socket{} = socket_2} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      drain_join_bucket(socket_1)
+
+      assert {:error, %{reason: "SocketJoinRateLimitReached: " <> _}} =
+               subscribe_and_join(socket_1, "realtime:test1", %{})
+
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket_2, "realtime:test1", %{})
+    end
+
+    test "joins are allowed again as the bucket refills", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+      socket = put_join_bucket(socket, 20, 1)
+
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test1", %{})
+
+      # A join can take longer than the 50ms refill interval, so take whatever refilled meanwhile
+      drain_join_bucket(socket)
+
+      assert {:error, %{reason: "SocketJoinRateLimitReached: " <> _}} =
+               subscribe_and_join(socket, "realtime:test2", %{})
+
+      Process.sleep(100)
+
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test2", %{})
+    end
+
+    test "does not limit joins while the flag is off", %{tenant: tenant} do
+      stub_socket_join_limit_flag(false)
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+      socket = put_join_bucket(socket, 1, 1)
+
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test1", %{})
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test2", %{})
+      assert :ok = TokenBucket.take(socket.private.join_bucket)
+    end
+
+    test "switching the flag off lets the next join through", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+      socket = put_join_bucket(socket, 1, 1)
+
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test1", %{})
+
+      assert {:error, %{reason: "SocketJoinRateLimitReached: " <> _}} =
+               subscribe_and_join(socket, "realtime:test2", %{})
+
+      stub_socket_join_limit_flag(false)
+
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test2", %{})
+    end
+
+    test "logs every rejection", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "error"}, conn_opts(tenant, jwt))
+      socket = put_join_bucket(socket, 1, 1)
+
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test1", %{})
+
+      log =
+        capture_log(fn ->
+          for topic <- ["realtime:test2", "realtime:test3", "realtime:test4"] do
+            assert {:error, %{reason: "SocketJoinRateLimitReached: " <> _}} = subscribe_and_join(socket, topic, %{})
+          end
+        end)
+
+      # Async tests log too, so only this tenant's lines count
+      rejections =
+        log
+        |> String.split("\n")
+        |> Enum.count(&(&1 =~ "SocketJoinRateLimitReached" and &1 =~ "external_id=#{tenant.external_id}"))
+
+      assert rejections == 3
     end
   end
 
@@ -2390,6 +2537,22 @@ defmodule RealtimeWeb.RealtimeChannelTest do
               %{reason: "DatabaseLackOfConnections: Database can't accept more connections, Realtime won't connect"}} =
                subscribe_and_join(socket, "realtime:test", %{"config" => %{"private" => true}})
     end
+  end
+
+  # The tests run async, so they cannot change the configured defaults and swap in their own bucket instead
+  defp put_join_bucket(%Socket{} = socket, per_second, burst) do
+    %{socket | private: Map.put(socket.private, :join_bucket, TokenBucket.new(per_second, burst))}
+  end
+
+  defp drain_join_bucket(%Socket{private: %{join_bucket: bucket}}) do
+    Stream.repeatedly(fn -> TokenBucket.take(bucket) end) |> Enum.find(&(&1 == :error))
+  end
+
+  defp stub_socket_join_limit_flag(enabled) do
+    stub(Realtime.FeatureFlags, :enabled?, fn
+      "socket_join_limit", _tenant_id -> enabled
+      flag, tenant_id -> Mimic.call_original(Realtime.FeatureFlags, :enabled?, [flag, tenant_id])
+    end)
   end
 
   defp conn_opts(tenant, token) do
