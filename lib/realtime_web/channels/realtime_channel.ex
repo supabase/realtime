@@ -464,9 +464,9 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @impl true
   def handle_in("broadcast", payload, %{assigns: %{private?: true}} = socket) do
-    RequestMetrics.track(:broadcast, :ws, fn ->
-      %{tenant: tenant_id} = socket.assigns
+    %{tenant: tenant_id} = socket.assigns
 
+    RequestMetrics.track(:broadcast, :ws, tenant_id, fn ->
       with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id) do
         BroadcastHandler.handle(payload, db_conn, socket)
       else
@@ -498,7 +498,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_in("broadcast", payload, %{assigns: %{private?: false}} = socket) do
-    RequestMetrics.track(:broadcast, :ws, fn -> BroadcastHandler.handle(payload, socket) end)
+    RequestMetrics.track(:broadcast, :ws, socket.assigns.tenant, fn -> BroadcastHandler.handle(payload, socket) end)
   end
 
   def handle_in("presence", payload, socket) do

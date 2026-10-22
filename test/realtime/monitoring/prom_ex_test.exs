@@ -24,9 +24,8 @@ defmodule Realtime.PromExTest do
              )
     end
 
-    # The plugin test uses its own PromEx module, so this is what catches a plugin that is not registered.
-    test "includes the client request counter used by the SLO" do
-      RequestMetrics.record(:broadcast, :ws, :success)
+    test "includes the client request counter" do
+      RequestMetrics.record(:broadcast, :ws, "test-tenant", :success)
 
       metrics = PromEx.get_metrics() |> IO.iodata_to_binary()
 

@@ -1,16 +1,16 @@
 defmodule RealtimeWeb.RequestMetrics do
   @moduledoc """
-  Records one outcome per client request for the client request ingress SLI.
+  Records one outcome per client request.
 
   Every request ends in exactly one of four outcomes:
 
-    * `:success` - handled (good)
-    * `:rejected` - refused because of the client's request: policy deny, payload too large (good)
-    * `:internal_failure` - Realtime failed: a crash or an unexpected error (bad)
-    * `:upstream_failure` - a dependency failed: tenant database or connection pool (bad)
+    * `:success` - handled
+    * `:rejected` - refused because of the client's request: policy deny, payload too large
+    * `:internal_failure` - Realtime failed: a crash or an unexpected error
+    * `:upstream_failure` - a dependency failed: tenant database or connection pool
 
   An outcome is a value, either `:success` or `{kind, reason}`. The code that handles a request
-  returns its outcome next to its result, and `track/3` records it. Nothing is stored on the
+  returns its outcome next to its result, and `track/4` records it. Nothing is stored on the
   socket. A success has no reason of its own, so the reason `:none` appears only on a success.
   """
 
@@ -18,11 +18,14 @@ defmodule RealtimeWeb.RequestMetrics do
   @type transport :: :ws | :http
   @type kind :: :rejected | :internal_failure | :upstream_failure
   @type outcome :: :success | {kind(), atom()}
+  @type tenant :: String.t()
 
   @event [:realtime, :client_request]
 
   @doc """
   Returns the telemetry event name, [:realtime, :client_request].
+
+  The metadata carries `:request`, `:transport`, `:outcome`, `:reason` and `:tenant`.
   """
   def event, do: @event
 
@@ -36,16 +39,16 @@ defmodule RealtimeWeb.RequestMetrics do
   `:exit` or `:throw`. The exception is re-raised with `:erlang.raise/3` so the channel crashes
   exactly as it does today.
   """
-  @spec track(request(), transport(), (-> {result, outcome()})) :: result when result: tuple()
-  def track(request, transport, fun) do
+  @spec track(request(), transport(), tenant(), (-> {result, outcome()})) :: result when result: tuple()
+  def track(request, transport, tenant, fun) do
     fun.()
   catch
     kind, reason ->
-      record(request, transport, {:internal_failure, kind})
+      record(request, transport, tenant, {:internal_failure, kind})
       :erlang.raise(kind, reason, __STACKTRACE__)
   else
     {result, outcome} ->
-      record(request, transport, outcome)
+      record(request, transport, tenant, outcome)
       result
   end
 
@@ -55,13 +58,13 @@ defmodule RealtimeWeb.RequestMetrics do
   A `:success` is recorded with the reason `:none`. A failure is recorded with the kind and
   reason it carries. `{:success, :none}` is not an outcome and raises `FunctionClauseError`.
   """
-  @spec record(request(), transport(), outcome()) :: :ok
-  def record(request, transport, :success) do
-    emit(request, transport, :success, :none)
+  @spec record(request(), transport(), tenant(), outcome()) :: :ok
+  def record(request, transport, tenant, :success) do
+    emit(request, transport, tenant, :success, :none)
   end
 
-  def record(request, transport, {kind, reason}) when kind != :success do
-    emit(request, transport, kind, reason)
+  def record(request, transport, tenant, {kind, reason}) when kind != :success do
+    emit(request, transport, tenant, kind, reason)
   end
 
   @doc """
@@ -83,12 +86,13 @@ defmodule RealtimeWeb.RequestMetrics do
     end
   end
 
-  defp emit(request, transport, outcome, reason) do
+  defp emit(request, transport, tenant, outcome, reason) do
     :telemetry.execute(@event, %{count: 1}, %{
       request: request,
       transport: transport,
       outcome: outcome,
-      reason: reason
+      reason: reason,
+      tenant: tenant
     })
   end
 end

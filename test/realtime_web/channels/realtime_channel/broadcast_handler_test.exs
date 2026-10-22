@@ -633,8 +633,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     end
   end
 
-  # handle/3 and maybe_reply_error/2 return {channel_result, outcome} for the client request
-  # ingress SLI. The outcome is :success or {kind, reason}, and it is the same with or without ack.
+  # handle/3 and maybe_reply_error/2 return {channel_result, outcome}. The outcome is :success or
+  # {kind, reason}, and it is the same with or without ack.
   describe "outcome" do
     test "a permitted private broadcast is a success",
          %{topic: topic, tenant: tenant, db_conn: db_conn} do
@@ -695,7 +695,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
     test "a failing authorization query is an upstream failure",
          %{topic: topic, tenant: tenant, db_conn: db_conn} do
-      stub(Authorization, :get_write_authorizations, fn _, _, _, _ ->
+      expect(Authorization, :get_write_authorizations, fn _, _, _, _ ->
         {:error, :query_canceled, %Postgrex.Error{postgres: %{code: :query_canceled}}}
       end)
 
@@ -709,7 +709,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
     test "an unexpected authorization error is an internal failure",
          %{topic: topic, tenant: tenant, db_conn: db_conn} do
-      stub(Authorization, :get_write_authorizations, fn _, _, _, _ -> {:error, :something_unexpected} end)
+      expect(Authorization, :get_write_authorizations, fn _, _, _, _ -> {:error, :something_unexpected} end)
 
       socket = socket_fixture(tenant, topic, ack_broadcast: false)
 

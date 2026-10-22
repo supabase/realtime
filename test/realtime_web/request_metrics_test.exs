@@ -4,68 +4,73 @@ defmodule RealtimeWeb.RequestMetricsTest do
   alias Phoenix.Socket
   alias RealtimeWeb.RequestMetrics
 
-  # Telemetry handlers are global and run in the emitting process, so forward only this test's events.
-  def forward(_event, measurements, metadata, test_pid) do
-    if self() == test_pid, do: send(test_pid, {:outcome, measurements, metadata})
-  end
+  @event RequestMetrics.event()
 
+  # Handlers attached by :telemetry_test receive every emission in the VM, so each test gets its own
+  # tenant and only matches events for it.
   setup do
-    id = {__MODULE__, make_ref()}
-    :telemetry.attach(id, RequestMetrics.event(), &__MODULE__.forward/4, self())
-    on_exit(fn -> :telemetry.detach(id) end)
-    {:ok, socket: %Socket{assigns: %{}}}
+    ref = :telemetry_test.attach_event_handlers(self(), [@event])
+    tenant = "request-metrics-#{System.unique_integer([:positive])}"
+    {:ok, ref: ref, tenant: tenant, socket: %Socket{assigns: %{}}}
   end
 
-  describe "track/3" do
-    test "records the outcome the function returns, and returns the result untouched", %{socket: socket} do
-      assert {:noreply, ^socket} = RequestMetrics.track(:broadcast, :ws, fn -> {{:noreply, socket}, :success} end)
+  describe "track/4" do
+    test "records the outcome the function returns, and returns the result untouched", %{
+      ref: ref,
+      tenant: tenant,
+      socket: socket
+    } do
+      assert {:noreply, ^socket} =
+               RequestMetrics.track(:broadcast, :ws, tenant, fn -> {{:noreply, socket}, :success} end)
 
-      assert_receive {:outcome, %{count: 1}, %{request: :broadcast, transport: :ws, outcome: :success, reason: :none}}
-      refute_receive {:outcome, _, _}
+      assert_receive {@event, ^ref, %{count: 1},
+                      %{tenant: ^tenant, request: :broadcast, transport: :ws, outcome: :success, reason: :none}}
+
+      refute_receive {@event, ^ref, _, %{tenant: ^tenant}}
     end
 
-    test "records a failure with its reason", %{socket: socket} do
-      RequestMetrics.track(:broadcast, :ws, fn -> {{:noreply, socket}, {:rejected, :unauthorized}} end)
+    test "records a failure with its reason", %{ref: ref, tenant: tenant, socket: socket} do
+      RequestMetrics.track(:broadcast, :ws, tenant, fn -> {{:noreply, socket}, {:rejected, :unauthorized}} end)
 
-      assert_receive {:outcome, _, %{outcome: :rejected, reason: :unauthorized}}
-      refute_receive {:outcome, _, _}
+      assert_receive {@event, ^ref, _, %{tenant: ^tenant, outcome: :rejected, reason: :unauthorized}}
+      refute_receive {@event, ^ref, _, %{tenant: ^tenant}}
     end
 
     # The result is not inspected, so any callback reply works and the socket is never touched.
-    test "returns every reply shape unchanged", %{socket: socket} do
+    test "returns every reply shape unchanged", %{ref: ref, tenant: tenant, socket: socket} do
       for result <- [
             {:noreply, socket},
             {:reply, :ok, socket},
             {:stop, :normal, socket},
             {:stop, :normal, :ok, socket}
           ] do
-        assert ^result = RequestMetrics.track(:broadcast, :ws, fn -> {result, :success} end)
+        assert ^result = RequestMetrics.track(:broadcast, :ws, tenant, fn -> {result, :success} end)
 
-        assert_receive {:outcome, _, %{outcome: :success}}
+        assert_receive {@event, ^ref, _, %{tenant: ^tenant, outcome: :success}}
       end
     end
 
-    test "a raise is counted as an internal failure and re-raised" do
+    test "a raise is counted as an internal failure and re-raised", %{ref: ref, tenant: tenant} do
       assert_raise RuntimeError, "boom", fn ->
-        RequestMetrics.track(:broadcast, :ws, fn -> raise "boom" end)
+        RequestMetrics.track(:broadcast, :ws, tenant, fn -> raise "boom" end)
       end
 
-      assert_receive {:outcome, _, %{outcome: :internal_failure, reason: :error}}
-      refute_receive {:outcome, _, _}
+      assert_receive {@event, ^ref, _, %{tenant: ^tenant, outcome: :internal_failure, reason: :error}}
+      refute_receive {@event, ^ref, _, %{tenant: ^tenant}}
     end
 
-    test "an exit and a throw are counted and re-raised" do
-      assert catch_exit(RequestMetrics.track(:broadcast, :ws, fn -> exit(:shutdown) end)) == :shutdown
-      assert_receive {:outcome, _, %{outcome: :internal_failure, reason: :exit}}
+    test "an exit and a throw are counted and re-raised", %{ref: ref, tenant: tenant} do
+      assert catch_exit(RequestMetrics.track(:broadcast, :ws, tenant, fn -> exit(:shutdown) end)) == :shutdown
+      assert_receive {@event, ^ref, _, %{tenant: ^tenant, outcome: :internal_failure, reason: :exit}}
 
-      assert catch_throw(RequestMetrics.track(:broadcast, :ws, fn -> throw(:oops) end)) == :oops
-      assert_receive {:outcome, _, %{outcome: :internal_failure, reason: :throw}}
+      assert catch_throw(RequestMetrics.track(:broadcast, :ws, tenant, fn -> throw(:oops) end)) == :oops
+      assert_receive {@event, ^ref, _, %{tenant: ^tenant, outcome: :internal_failure, reason: :throw}}
     end
 
-    test "a crash keeps its original stacktrace" do
+    test "a crash keeps its original stacktrace", %{tenant: tenant} do
       {_, stacktrace} =
         try do
-          RequestMetrics.track(:broadcast, :ws, fn -> raise "boom" end)
+          RequestMetrics.track(:broadcast, :ws, tenant, fn -> raise "boom" end)
         rescue
           error -> {error, __STACKTRACE__}
         end
@@ -76,30 +81,32 @@ defmodule RealtimeWeb.RequestMetricsTest do
 
   # An outcome is :success or {kind, reason}. Only a success has no reason of its own, so the
   # reason "none" can never be attached to a failure.
-  describe "record/3" do
-    test "a success records the reason :none" do
-      RequestMetrics.record(:broadcast, :ws, :success)
+  describe "record/4" do
+    test "a success records the reason :none", %{ref: ref, tenant: tenant} do
+      RequestMetrics.record(:broadcast, :ws, tenant, :success)
 
-      assert_receive {:outcome, %{count: 1}, %{request: :broadcast, transport: :ws, outcome: :success, reason: :none}}
+      assert_receive {@event, ^ref, %{count: 1},
+                      %{tenant: ^tenant, request: :broadcast, transport: :ws, outcome: :success, reason: :none}}
     end
 
-    test "a failure records the kind and the reason it carries" do
-      RequestMetrics.record(:broadcast, :http, {:upstream_failure, :query_canceled})
+    test "a failure records the kind and the reason it carries", %{ref: ref, tenant: tenant} do
+      RequestMetrics.record(:broadcast, :http, tenant, {:upstream_failure, :query_canceled})
 
-      assert_receive {:outcome, %{count: 1}, %{transport: :http, outcome: :upstream_failure, reason: :query_canceled}}
+      assert_receive {@event, ^ref, %{count: 1},
+                      %{tenant: ^tenant, transport: :http, outcome: :upstream_failure, reason: :query_canceled}}
     end
 
-    test "a success cannot be given a reason" do
-      assert_raise FunctionClauseError, fn -> RequestMetrics.record(:broadcast, :ws, {:success, :none}) end
+    test "a success cannot be given a reason", %{ref: ref, tenant: tenant} do
+      assert_raise FunctionClauseError, fn -> RequestMetrics.record(:broadcast, :ws, tenant, {:success, :none}) end
 
-      refute_receive {:outcome, _, _}
+      refute_receive {@event, ^ref, _, %{tenant: ^tenant}}
     end
 
-    test "records exactly one event per call" do
-      RequestMetrics.record(:broadcast, :ws, {:rejected, :unauthorized})
+    test "records exactly one event per call", %{ref: ref, tenant: tenant} do
+      RequestMetrics.record(:broadcast, :ws, tenant, {:rejected, :unauthorized})
 
-      assert_receive {:outcome, _, %{outcome: :rejected}}
-      refute_receive {:outcome, _, _}
+      assert_receive {@event, ^ref, _, %{tenant: ^tenant, outcome: :rejected}}
+      refute_receive {@event, ^ref, _, %{tenant: ^tenant}}
     end
   end
 

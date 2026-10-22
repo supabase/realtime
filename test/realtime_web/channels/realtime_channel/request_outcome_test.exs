@@ -1,5 +1,5 @@
 defmodule RealtimeWeb.RealtimeChannel.RequestOutcomeTest do
-  # The broadcast outcomes RealtimeChannel.handle_in/3 records for the client request ingress SLI.
+  # The broadcast outcomes RealtimeChannel.handle_in/3 records.
   use Realtime.DataCase, async: true
 
   use Mimic
@@ -18,24 +18,11 @@ defmodule RealtimeWeb.RealtimeChannel.RequestOutcomeTest do
 
   @payload %{"event" => "test", "payload" => %{"a" => "b"}}
 
-  # Telemetry handlers are global and run in the emitting process, so forward only this test's events.
-  def forward(_event, _measurements, metadata, test_pid) do
-    if self() == test_pid, do: send(test_pid, {:outcome, metadata})
-  end
+  @event RequestMetrics.event()
 
   setup do
-    test_pid = self()
-    id = {__MODULE__, make_ref()}
-
-    :telemetry.attach(
-      id,
-      RequestMetrics.event(),
-      &__MODULE__.forward/4,
-      test_pid
-    )
-
-    on_exit(fn -> :telemetry.detach(id) end)
-    :ok
+    telemetry_ref = :telemetry_test.attach_event_handlers(self(), [@event])
+    {:ok, telemetry_ref: telemetry_ref}
   end
 
   setup context do
@@ -46,30 +33,47 @@ defmodule RealtimeWeb.RealtimeChannel.RequestOutcomeTest do
     {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
     assert Connect.ready?(tenant.external_id)
 
-    Map.merge(context, %{tenant: tenant, db_conn: db_conn, topic: random_string()})
+    Map.merge(context, %{tenant: tenant, tenant_id: tenant.external_id, db_conn: db_conn, topic: random_string()})
   end
 
   describe "private broadcast" do
-    test "a permitted broadcast is a success", %{tenant: tenant, topic: topic} do
+    test "a permitted broadcast is a success", %{
+      telemetry_ref: telemetry_ref,
+      tenant: tenant,
+      tenant_id: tenant_id,
+      topic: topic
+    } do
       socket = socket_fixture(tenant, topic, policies: %Policies{broadcast: %BroadcastPolicies{write: true}})
 
       assert {:reply, :ok, _} = RealtimeChannel.handle_in("broadcast", @payload, socket)
 
-      assert_receive {:outcome, %{request: :broadcast, transport: :ws, outcome: :success, reason: :none}}
-      refute_receive {:outcome, _}
+      assert_receive {@event, ^telemetry_ref, _,
+                      %{tenant: ^tenant_id, request: :broadcast, transport: :ws, outcome: :success, reason: :none}}
+
+      refute_receive {@event, ^telemetry_ref, _, %{tenant: ^tenant_id}}
     end
 
-    test "the client still gets the same reply", %{tenant: tenant, topic: topic} do
+    test "the client still gets the same reply", %{
+      telemetry_ref: telemetry_ref,
+      tenant: tenant,
+      tenant_id: tenant_id,
+      topic: topic
+    } do
       socket = socket_fixture(tenant, topic, policies: %Policies{broadcast: %BroadcastPolicies{write: false}})
 
       assert {:reply, {:error, %{error: :unauthorized}}, returned} =
                RealtimeChannel.handle_in("broadcast", @payload, socket)
 
-      assert_receive {:outcome, %{outcome: :rejected}}
+      assert_receive {@event, ^telemetry_ref, _, %{tenant: ^tenant_id, outcome: :rejected}}
       assert returned.assigns == socket.assigns
     end
 
-    test "a policy deny is rejected, with or without ack", %{tenant: tenant, topic: topic} do
+    test "a policy deny is rejected, with or without ack", %{
+      telemetry_ref: telemetry_ref,
+      tenant: tenant,
+      tenant_id: tenant_id,
+      topic: topic
+    } do
       for ack <- [true, false] do
         socket =
           socket_fixture(tenant, topic,
@@ -79,11 +83,16 @@ defmodule RealtimeWeb.RealtimeChannel.RequestOutcomeTest do
 
         RealtimeChannel.handle_in("broadcast", @payload, socket)
 
-        assert_receive {:outcome, %{outcome: :rejected, reason: :unauthorized}}
+        assert_receive {@event, ^telemetry_ref, _, %{tenant: ^tenant_id, outcome: :rejected, reason: :unauthorized}}
       end
     end
 
-    test "an oversized payload is rejected, with or without ack", %{tenant: tenant, topic: topic} do
+    test "an oversized payload is rejected, with or without ack", %{
+      telemetry_ref: telemetry_ref,
+      tenant: tenant,
+      tenant_id: tenant_id,
+      topic: topic
+    } do
       payload = oversized_payload(tenant)
 
       for ack <- [true, false] do
@@ -95,20 +104,32 @@ defmodule RealtimeWeb.RealtimeChannel.RequestOutcomeTest do
 
         RealtimeChannel.handle_in("broadcast", payload, socket)
 
-        assert_receive {:outcome, %{outcome: :rejected, reason: :payload_size_exceeded}}
+        assert_receive {@event, ^telemetry_ref, _,
+                        %{tenant: ^tenant_id, outcome: :rejected, reason: :payload_size_exceeded}}
       end
     end
 
-    test "unacked broadcasts are classified even though the reply is a bare noreply", %{tenant: tenant, topic: topic} do
-      stub(Authorization, :get_write_authorizations, fn _, _, _, _ -> {:error, :query_canceled, "timeout"} end)
+    test "unacked broadcasts are classified even though the reply is a bare noreply", %{
+      telemetry_ref: telemetry_ref,
+      tenant: tenant,
+      tenant_id: tenant_id,
+      topic: topic
+    } do
+      expect(Authorization, :get_write_authorizations, fn _, _, _, _ -> {:error, :query_canceled, "timeout"} end)
       socket = socket_fixture(tenant, topic, ack_broadcast: false, policies: nil)
 
       assert {:noreply, _} = RealtimeChannel.handle_in("broadcast", @payload, socket)
 
-      assert_receive {:outcome, %{outcome: :upstream_failure, reason: :query_canceled}}
+      assert_receive {@event, ^telemetry_ref, _,
+                      %{tenant: ^tenant_id, outcome: :upstream_failure, reason: :query_canceled}}
     end
 
-    test "authorization errors map to the proposal's table", %{tenant: tenant, topic: topic} do
+    test "authorization errors are classified by cause", %{
+      telemetry_ref: telemetry_ref,
+      tenant: tenant,
+      tenant_id: tenant_id,
+      topic: topic
+    } do
       cases = [
         {{:error, :rls_policy_error, "raised"}, :upstream_failure, :rls_policy_error},
         {{:error, :query_canceled, "timeout"}, :upstream_failure, :query_canceled},
@@ -119,16 +140,23 @@ defmodule RealtimeWeb.RealtimeChannel.RequestOutcomeTest do
       ]
 
       for {error, outcome, reason} <- cases do
-        stub(Authorization, :get_write_authorizations, fn _, _, _, _ -> error end)
+        expect(Authorization, :get_write_authorizations, fn _, _, _, _ -> error end)
         socket = socket_fixture(tenant, topic, policies: nil)
 
         RealtimeChannel.handle_in("broadcast", @payload, socket)
 
-        assert_receive {:outcome, %{outcome: ^outcome, reason: ^reason}}, 500, "for #{inspect(error)}"
+        assert_receive {@event, ^telemetry_ref, _, %{tenant: ^tenant_id, outcome: ^outcome, reason: ^reason}},
+                       500,
+                       "for #{inspect(error)}"
       end
     end
 
-    test "tenant database connection errors are upstream failures", %{tenant: tenant, topic: topic} do
+    test "tenant database connection errors are upstream failures", %{
+      telemetry_ref: telemetry_ref,
+      tenant: tenant,
+      tenant_id: tenant_id,
+      topic: topic
+    } do
       cases = [
         {{:error, :tenant_db_too_many_connections}, :upstream_failure, :database_lack_of_connections},
         {{:error, :connect_rate_limit_reached}, :upstream_failure, :database_connection_rate_limit_reached},
@@ -137,50 +165,70 @@ defmodule RealtimeWeb.RealtimeChannel.RequestOutcomeTest do
       ]
 
       for {error, outcome, reason} <- cases do
-        stub(Connect, :lookup_or_start_connection, fn _ -> error end)
+        expect(Connect, :lookup_or_start_connection, fn _ -> error end)
         socket = socket_fixture(tenant, topic)
 
         RealtimeChannel.handle_in("broadcast", @payload, socket)
 
-        assert_receive {:outcome, %{outcome: ^outcome, reason: ^reason}}, 500, "for #{inspect(error)}"
+        assert_receive {@event, ^telemetry_ref, _, %{tenant: ^tenant_id, outcome: ^outcome, reason: ^reason}},
+                       500,
+                       "for #{inspect(error)}"
       end
     end
 
-    test "a crash is counted as an internal failure and still raised", %{tenant: tenant, topic: topic} do
-      stub(Authorization, :get_write_authorizations, fn _, _, _, _ -> raise "boom" end)
+    test "a crash is counted as an internal failure and still raised", %{
+      telemetry_ref: telemetry_ref,
+      tenant: tenant,
+      tenant_id: tenant_id,
+      topic: topic
+    } do
+      expect(Authorization, :get_write_authorizations, fn _, _, _, _ -> raise "boom" end)
       socket = socket_fixture(tenant, topic, policies: nil)
 
       assert_raise RuntimeError, "boom", fn -> RealtimeChannel.handle_in("broadcast", @payload, socket) end
 
-      assert_receive {:outcome, %{request: :broadcast, outcome: :internal_failure, reason: :error}}
-      refute_receive {:outcome, _}
+      assert_receive {@event, ^telemetry_ref, _,
+                      %{tenant: ^tenant_id, request: :broadcast, outcome: :internal_failure, reason: :error}}
+
+      refute_receive {@event, ^telemetry_ref, _, %{tenant: ^tenant_id}}
     end
   end
 
   describe "public broadcast" do
-    test "is a success", %{tenant: tenant, topic: topic} do
+    test "is a success", %{telemetry_ref: telemetry_ref, tenant: tenant, tenant_id: tenant_id, topic: topic} do
       socket = socket_fixture(tenant, topic, private?: false)
 
       assert {:reply, :ok, _} = RealtimeChannel.handle_in("broadcast", @payload, socket)
 
-      assert_receive {:outcome, %{outcome: :success, reason: :none}}
+      assert_receive {@event, ^telemetry_ref, _, %{tenant: ^tenant_id, outcome: :success, reason: :none}}
     end
 
-    test "an oversized payload is rejected", %{tenant: tenant, topic: topic} do
+    test "an oversized payload is rejected", %{
+      telemetry_ref: telemetry_ref,
+      tenant: tenant,
+      tenant_id: tenant_id,
+      topic: topic
+    } do
       socket = socket_fixture(tenant, topic, private?: false)
 
       RealtimeChannel.handle_in("broadcast", oversized_payload(tenant), socket)
 
-      assert_receive {:outcome, %{outcome: :rejected, reason: :payload_size_exceeded}}
+      assert_receive {@event, ^telemetry_ref, _,
+                      %{tenant: ^tenant_id, outcome: :rejected, reason: :payload_size_exceeded}}
     end
   end
 
-  test "requests other than broadcast are not tracked yet", %{tenant: tenant, topic: topic} do
+  test "requests other than broadcast are not tracked yet", %{
+    telemetry_ref: telemetry_ref,
+    tenant: tenant,
+    tenant_id: tenant_id,
+    topic: topic
+  } do
     socket = socket_fixture(tenant, topic)
 
     assert {:noreply, _} = RealtimeChannel.handle_in("unknown_type", %{}, socket)
 
-    refute_receive {:outcome, _}
+    refute_receive {@event, ^telemetry_ref, _, %{tenant: ^tenant_id}}
   end
 
   defp oversized_payload(tenant) do

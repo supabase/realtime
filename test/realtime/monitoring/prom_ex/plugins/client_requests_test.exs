@@ -16,12 +16,12 @@ defmodule Realtime.PromEx.Plugins.ClientRequestsTest do
     :ok
   end
 
-  # The SLO in k8s-observability selects on this exact name and these labels.
+  # Anything that queries this metric depends on its exact name and labels.
   test "exposes realtime_client_requests_total with request, transport, outcome and reason" do
     tags = [request: "broadcast", transport: "ws", outcome: "rejected", reason: "unauthorized"]
     before = metric_value("realtime_client_requests_total", tags) || 0
 
-    RequestMetrics.record(:broadcast, :ws, {:rejected, :unauthorized})
+    RequestMetrics.record(:broadcast, :ws, "test-tenant", {:rejected, :unauthorized})
 
     assert metric_value("realtime_client_requests_total", tags) == before + 1
   end
@@ -30,7 +30,7 @@ defmodule Realtime.PromEx.Plugins.ClientRequestsTest do
     tags = [request: "broadcast", transport: "ws", outcome: "success", reason: "none"]
     before = metric_value("realtime_client_requests_total", tags) || 0
 
-    RequestMetrics.record(:broadcast, :ws, :success)
+    RequestMetrics.record(:broadcast, :ws, "test-tenant", :success)
 
     assert metric_value("realtime_client_requests_total", tags) == before + 1
   end
