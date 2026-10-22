@@ -1,5 +1,7 @@
 import Config
 
+config :esbuild, path: Path.expand("../assets/node_modules/.bin/esbuild", __DIR__)
+
 # For production, don't forget to configure the url host
 # to something meaningful, Phoenix uses this information
 # when generating URLs.
