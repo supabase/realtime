@@ -895,6 +895,110 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
                Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
     end
 
+    test "create subscribes only to the named table, not to tables that match it as a LIKE pattern", %{
+      conn: conn,
+      tenant: tenant
+    } do
+      on_exit(fn ->
+        {:ok, db_settings} = Database.from_tenant(tenant, "realtime_rls")
+
+        {:ok, cleanup_conn} =
+          db_settings |> Map.from_struct() |> Keyword.new() |> Postgrex.start_link()
+
+        Postgrex.query!(cleanup_conn, "DROP TABLE IF EXISTS public.item_1, public.items1, public.\"it%\"", [])
+      end)
+
+      # `_` and `%` are LIKE wildcards: `item_1` also matches `items1`, and `it%` matches both.
+      for table <- [~s|item_1|, ~s|items1|, ~s|"it%"|] do
+        Postgrex.query!(conn, "CREATE TABLE IF NOT EXISTS public.#{table} (id int)", [])
+        Postgrex.query!(conn, "GRANT ALL ON public.#{table} TO anon", [])
+      end
+
+      for table <- ["item_1", "it%"] do
+        {:ok, subscription_params} =
+          Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => table})
+
+        subscription_list = [
+          %{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}
+        ]
+
+        assert {:ok, [%Postgrex.Result{num_rows: 1}]} =
+                 Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+      end
+
+      assert %Postgrex.Result{rows: rows} =
+               Postgrex.query!(conn, "select entity::text from realtime.subscription order by 1", [])
+
+      assert rows == [[~s|"it%"|], ["item_1"]]
+    end
+
+    test "create keeps `_` and `%` as wildcards when no published table has that exact name", %{
+      conn: conn,
+      tenant: tenant
+    } do
+      create_published_tables!(conn, tenant, ["public.orders_2025", "public.orders_2026", "public.order_items"])
+
+      assert subscribed_entities(conn, %{"schema" => "public", "table" => "orders_%"}) == [
+               "orders_2025",
+               "orders_2026"
+             ]
+
+      assert subscribed_entities(conn, %{"schema" => "public", "table" => "orders_202_"}) == [
+               "orders_2025",
+               "orders_2026"
+             ]
+    end
+
+    test "create with a wildcard schema matches the table name exactly", %{conn: conn, tenant: tenant} do
+      create_published_tables!(conn, tenant, ["public.item_1", "public.items1"])
+
+      assert subscribed_entities(conn, %{"schema" => "*", "table" => "item_1"}) == ["item_1"]
+    end
+
+    test "create with a filter on a column only the named table has succeeds", %{conn: conn, tenant: tenant} do
+      create_published_tables!(conn, tenant, ["public.item_1", "public.items1"])
+      Postgrex.query!(conn, "ALTER TABLE public.item_1 ADD COLUMN owner text", [])
+
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "item_1",
+          "filter" => "owner=eq.bob"
+        })
+
+      subscription_list = [
+        %{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}
+      ]
+
+      assert {:ok, [%Postgrex.Result{num_rows: 1}]} =
+               Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+    end
+
+    test "create matches a schema exactly when a published schema has that name, and as a pattern otherwise", %{
+      conn: conn,
+      tenant: tenant
+    } do
+      on_exit(fn ->
+        {:ok, db_settings} = Database.from_tenant(tenant, "realtime_rls")
+
+        {:ok, cleanup_conn} =
+          db_settings |> Map.from_struct() |> Keyword.new() |> Postgrex.start_link()
+
+        Postgrex.query!(cleanup_conn, "DROP SCHEMA IF EXISTS app_1, apps1 CASCADE", [])
+      end)
+
+      for schema <- ["app_1", "apps1"] do
+        Postgrex.query!(conn, "CREATE SCHEMA IF NOT EXISTS #{schema}", [])
+        Postgrex.query!(conn, "GRANT USAGE ON SCHEMA #{schema} TO anon", [])
+      end
+
+      create_published_tables!(conn, tenant, ["app_1.users", "app_1.posts", "apps1.users"])
+
+      assert subscribed_entities(conn, %{"schema" => "app_1", "table" => "users"}) == ["app_1.users"]
+      assert subscribed_entities(conn, %{"schema" => "app_1"}) == ["app_1.posts", "app_1.users"]
+      assert subscribed_entities(conn, %{"schema" => "app%", "table" => "users"}) == ["app_1.users", "apps1.users"]
+    end
+
     test "user gets an error when Realtime is not enabled for the publication", %{conn: conn} do
       {:ok, subscription_params} =
         Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test"})
@@ -1643,5 +1747,40 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       end)
 
     Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+  end
+
+  defp create_published_tables!(conn, tenant, tables) do
+    on_exit(fn ->
+      {:ok, db_settings} = Database.from_tenant(tenant, "realtime_rls")
+
+      {:ok, cleanup_conn} =
+        db_settings |> Map.from_struct() |> Keyword.new() |> Postgrex.start_link()
+
+      Postgrex.query!(cleanup_conn, "DROP TABLE IF EXISTS #{Enum.join(tables, ", ")}", [])
+    end)
+
+    for table <- tables do
+      Postgrex.query!(conn, "CREATE TABLE IF NOT EXISTS #{table} (id int)", [])
+      Postgrex.query!(conn, "GRANT ALL ON #{table} TO anon", [])
+    end
+  end
+
+  defp subscribed_entities(conn, params) do
+    {:ok, subscription_params} = Subscriptions.parse_subscription_params(params)
+    id = UUID.uuid1()
+
+    subscription_list = [%{claims: %{"role" => "anon"}, id: id, subscription_params: subscription_params}]
+
+    assert {:ok, [%Postgrex.Result{}]} =
+             Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+
+    %Postgrex.Result{rows: rows} =
+      Postgrex.query!(
+        conn,
+        "select entity::text from realtime.subscription where subscription_id = $1::text::uuid",
+        [id]
+      )
+
+    rows |> List.flatten() |> Enum.sort()
   end
 end
