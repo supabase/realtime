@@ -61,7 +61,9 @@ defmodule Realtime.Tenants.SqlLogexLoader do
   def load(db_conn, tenant_id) do
     telemetry = [:realtime, :tenants, :sql_logex_snapshot_load]
     opts = [queue: false, telemetry: telemetry, tenant_id: tenant_id]
-    metadata = [project: tenant_id, external_id: tenant_id, tenant_id: tenant_id]
+    # No project/external_id: those route a log to the tenant's own logs, this is an experiment,
+    # for us to see and not to confuse the tenantß.
+    metadata = [tenant_id: tenant_id]
 
     case Database.transaction(db_conn, &read/1, opts, metadata) do
       {:ok, input} ->

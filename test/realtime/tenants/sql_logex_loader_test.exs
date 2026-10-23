@@ -19,7 +19,7 @@ defmodule Realtime.Tenants.SqlLogexLoaderTest do
 
     log
     |> String.split("\n")
-    |> Enum.filter(&(&1 =~ "SqlLogexUnsupportedPolicies" and &1 =~ "external_id=#{tenant.external_id}"))
+    |> Enum.filter(&(&1 =~ "SqlLogexUnsupportedPolicies" and &1 =~ "tenant_id=#{tenant.external_id}"))
     |> Enum.join("\n")
   end
 
@@ -107,6 +107,9 @@ defmodule Realtime.Tenants.SqlLogexLoaderTest do
       log = capture_loader_log(db_conn, tenant)
 
       assert log =~ "SqlLogexUnsupportedPolicies"
+      # Not project/external_id, which would route it to the tenant's own logs.
+      refute log =~ "project="
+      refute log =~ "external_id="
       assert log =~ "unparsed: :exists"
       assert log =~ "{:function, :other_schema, :not_allowlisted}"
       assert log =~ "cmd: \"r\""

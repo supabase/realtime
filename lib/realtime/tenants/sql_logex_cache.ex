@@ -21,7 +21,7 @@ defmodule Realtime.Tenants.SqlLogexCache do
   alias SqlLogex.Snapshot
 
   def child_spec(_) do
-    expiration = Application.get_env(:realtime, :sql_logex_snapshot_cache_expiration)
+    expiration = Application.fetch_env!(:realtime, :sql_logex_snapshot_cache_expiration)
 
     %{
       id: __MODULE__,

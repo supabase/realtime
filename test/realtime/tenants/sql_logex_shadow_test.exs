@@ -156,7 +156,16 @@ defmodule Realtime.Tenants.SqlLogexShadowTest do
       assert_received {:telemetry, ^decision_ref, _event, _measurements, %{tenant: ^tenant_id} = decision_metadata}
       assert decision_metadata.outcome == :mismatch
       assert decision_metadata.reason == :none
-      assert log =~ "SqlLogexShadowMismatch"
+
+      # Find our exact log line
+      assert [line] =
+               log
+               |> String.split("\n")
+               |> Enum.filter(&(&1 =~ "SqlLogexShadowMismatch" and &1 =~ "tenant_id=#{tenant_id}"))
+
+      # Make sure we include neither project nor external_id, as that's rout to the tenant logs
+      refute line =~ "project="
+      refute line =~ "external_id="
     end
 
     test "a real check that errored becomes :no_real_answer, not a crash or a mismatch" do
