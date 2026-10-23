@@ -8,7 +8,8 @@ create table "realtime"."messages" (
   "inserted_at"    timestamp without time zone not null,
   "id"             uuid                        not null,
   "binary_payload" bytea,
-  "skip_broadcast" boolean                     not null
+  "skip_broadcast" boolean                     not null,
+  "expires_at"     timestamp without time zone
 ) partition by range (inserted_at);
 
 alter table "realtime"."messages"
@@ -38,7 +39,7 @@ alter table "realtime"."messages"
 alter table "realtime"."messages"
   add constraint "messages_pkey" primary key (id, inserted_at);
 
-create index messages_inserted_at_topic_index on only realtime.messages using btree (inserted_at desc, topic)
-  where ((extension = 'broadcast'::text) AND (private is TRUE));
+create index messages_replay_index on only realtime.messages using btree (topic, inserted_at desc, COALESCE(expires_at, 'infinity'::timestamp without time zone))
+  where ((extension = 'broadcast'::text) AND (private = true));
 
 grant insert, select, update on table "realtime"."messages" to "anon", "authenticated", "service_role";

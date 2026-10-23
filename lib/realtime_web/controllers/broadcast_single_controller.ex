@@ -8,6 +8,7 @@ defmodule RealtimeWeb.BroadcastSingleController do
   use RealtimeWeb, :controller
   use OpenApiSpex.ControllerSpecs
 
+  alias Realtime.Messages
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.SingleBroadcast
   alias RealtimeWeb.OpenApiSchemas.EmptyResponse
@@ -56,11 +57,12 @@ defmodule RealtimeWeb.BroadcastSingleController do
       # persist: [
       #   in: :query,
       #   name: "persist",
-      #   schema: %OpenApiSpex.Schema{type: :boolean},
+      #   schema: %OpenApiSpex.Schema{type: :string},
       #   required: false,
-      #   example: false,
+      #   example: "true",
       #   description:
       #     "Whether to store the broadcast in realtime.messages (requires private and RLS authorization).
+      # `persist=true` keeps it for the maximum retention, `persist[ttl]=3600` for that many seconds.
       # Defaults to false."
       # ]
     ],
@@ -90,10 +92,10 @@ defmodule RealtimeWeb.BroadcastSingleController do
     # Read from the query string only: Plug merges JSON body keys into params, so a payload
     # with a "private" or "persist" key would otherwise change how it is broadcast
     private = parse_boolean(conn.query_params["private"])
-    persist = parse_boolean(conn.query_params["persist"])
     auth_params = build_auth_params(conn, tenant)
 
-    with {:ok, payload, content_type} <- payload(conn),
+    with {:ok, persist} <- parse_persist(conn.query_params),
+         {:ok, payload, content_type} <- payload(conn),
          :ok <-
            SingleBroadcast.broadcast(auth_params, tenant, topic, event, payload, content_type,
              private: private,
@@ -111,6 +113,19 @@ defmodule RealtimeWeb.BroadcastSingleController do
     do: {:error, :unprocessable_entity, "Payload must be a JSON object"}
 
   defp json_payload(body), do: {:ok, body, :json}
+
+  # The query string carries the same `persist` shape as the WebSocket frame, except that Plug decodes
+  # every value as a string: `persist=true` and `persist[ttl]=3600`.
+  defp parse_persist(params) do
+    case Messages.parse_persist(params["persist"]) do
+      {:error, :invalid_ttl} ->
+        {:error, :unprocessable_entity,
+         "persist ttl must be a positive integer of seconds from 1 to #{Messages.max_ttl_seconds()}"}
+
+      persist ->
+        persist
+    end
+  end
 
   defp build_auth_params(conn, tenant) do
     Authorization.build_authorization_params(%{

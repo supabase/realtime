@@ -27,11 +27,11 @@ defmodule Realtime.MessagesTest do
     %{conn: conn, tenant: tenant, date_start: date_start, date_end: date_end}
   end
 
-  describe "persist/4" do
+  describe "persist/6" do
     test "inserts a message marked as already broadcast", %{conn: conn, tenant: tenant} do
       topic = random_string()
 
-      assert {:ok, id} = Messages.persist(conn, tenant.id, topic, "test", %{"a" => "b"})
+      assert {:ok, id} = Messages.persist(conn, tenant.id, topic, "test", {:json, %{"a" => "b"}})
 
       assert {:ok,
               [
@@ -45,6 +45,15 @@ defmodule Realtime.MessagesTest do
               ]} = Repo.all(conn, Message, Message)
     end
 
+    test "binary is stored as binary even when it is valid JSON", %{conn: conn, tenant: tenant} do
+      topic = random_string()
+      binary = ~s({"a":"b"})
+
+      assert {:ok, id} = Messages.persist(conn, tenant.id, topic, "test", {:binary, binary})
+
+      assert {:ok, [%Message{id: ^id, payload: nil, binary_payload: ^binary}]} = Repo.all(conn, Message, Message)
+    end
+
     test "distributed store", %{conn: conn, tenant: tenant} do
       topic = random_string()
 
@@ -52,7 +61,7 @@ defmodule Realtime.MessagesTest do
 
       # Call remote node passing the database connection that is local to this node
       assert {:ok, id} =
-               :erpc.call(node, Messages, :persist, [conn, tenant.id, topic, "test", %{"a" => "b"}])
+               :erpc.call(node, Messages, :persist, [conn, tenant.id, topic, "test", {:json, %{"a" => "b"}}])
 
       assert {:ok, [%Message{id: ^id, topic: ^topic}]} = Repo.all(conn, Message, Message)
     end
@@ -72,6 +81,48 @@ defmodule Realtime.MessagesTest do
 
     test "empty replay", %{conn: conn} do
       assert Messages.replay(conn, "tenant_id", "test", 0, 10) == {:ok, [], MapSet.new()}
+    end
+
+    test "an expired message is not replayed", %{conn: conn, tenant: tenant} do
+      message_fixture(tenant, %{
+        "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-2, :minute),
+        "expires_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-1, :minute),
+        "event" => "gone",
+        "extension" => "broadcast",
+        "topic" => "ttl",
+        "private" => true,
+        "payload" => %{"value" => "gone"}
+      })
+
+      kept =
+        message_fixture(tenant, %{
+          "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-2, :minute),
+          "expires_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(1, :hour),
+          "event" => "kept",
+          "extension" => "broadcast",
+          "topic" => "ttl",
+          "private" => true,
+          "payload" => %{"value" => "kept"}
+        })
+
+      assert {:ok, [replayed], ids} = Messages.replay(conn, tenant.external_id, "ttl", 0, 10)
+      assert replayed.id == kept.id
+      assert ids == MapSet.new([kept.id])
+    end
+
+    test "a message with no expiry is replayed", %{conn: conn, tenant: tenant} do
+      forever =
+        message_fixture(tenant, %{
+          "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-2, :minute),
+          "event" => "forever",
+          "extension" => "broadcast",
+          "topic" => "no-ttl",
+          "private" => true,
+          "payload" => %{"value" => "forever"}
+        })
+
+      assert {:ok, [replayed], _ids} = Messages.replay(conn, tenant.external_id, "no-ttl", 0, 10)
+      assert replayed.id == forever.id
     end
 
     test "replay respects limit", %{conn: conn, tenant: tenant} do
@@ -344,6 +395,44 @@ defmodule Realtime.MessagesTest do
     end
   end
 
+  describe "replay_query/4" do
+    test "use the replay index", %{tenant: tenant} do
+      now = NaiveDateTime.utc_now()
+      query = Messages.replay_query("topic", NaiveDateTime.add(now, -72, :hour), now, 25)
+      {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
+
+      config = [
+        hostname: settings.hostname,
+        port: settings.port,
+        database: settings.database,
+        username: settings.username,
+        password: settings.password,
+        pool: DBConnection.ConnectionPool
+      ]
+
+      {:ok, {:ok, [%{"Plan" => plan}]}} =
+        Realtime.Repo.with_dynamic_repo(config, fn _repo ->
+          Realtime.Repo.transaction(fn ->
+            Realtime.Repo.query!("SET LOCAL enable_seqscan = off")
+            Realtime.Repo.query!("SET LOCAL enable_bitmapscan = off")
+            Realtime.Repo.explain(:all, query, format: :map, wrap_in_transaction: false)
+          end)
+        end)
+
+      scans = plan |> plan_nodes() |> Enum.filter(&(&1["Node Type"] =~ "Scan"))
+
+      assert scans != []
+
+      for scan <- scans do
+        assert "Index Scan" in [scan["Node Type"], scan["Custom Scan Subtype"]]
+        assert %{"Index Cond" => index_cond} = scan
+        assert index_cond =~ "topic ="
+        assert index_cond =~ "COALESCE(expires_at"
+        refute Map.has_key?(scan, "Filter")
+      end
+    end
+  end
+
   describe "delete_old_messages/1" do
     test "delete_old_messages/1 deletes messages older than 72 hours", %{
       conn: conn,
@@ -375,5 +464,59 @@ defmodule Realtime.MessagesTest do
     end
   end
 
+  describe "parse_persist/1" do
+    @max Messages.max_ttl_seconds()
+
+    test "asking to save without a ttl means the maximum" do
+      assert {:ok, %{ttl: @max}} = Messages.parse_persist(true)
+      assert {:ok, %{ttl: @max}} = Messages.parse_persist("true")
+      assert {:ok, %{ttl: @max}} = Messages.parse_persist(%{})
+      assert {:ok, %{ttl: @max}} = Messages.parse_persist(%{"ttl" => nil})
+    end
+
+    test "not asking to save means nil" do
+      assert {:ok, nil} = Messages.parse_persist(nil)
+      assert {:ok, nil} = Messages.parse_persist(false)
+      assert {:ok, nil} = Messages.parse_persist("false")
+    end
+
+    test "a whole number of seconds is taken" do
+      assert {:ok, %{ttl: 3600}} = Messages.parse_persist(%{"ttl" => 3600})
+      assert {:ok, %{ttl: 1}} = Messages.parse_persist(%{"ttl" => 1})
+    end
+
+    test "the query string sends seconds as a string" do
+      assert {:ok, %{ttl: 3600}} = Messages.parse_persist(%{"ttl" => "3600"})
+      assert {:ok, %{ttl: @max}} = Messages.parse_persist(%{"ttl" => to_string(@max)})
+    end
+
+    test "the maximum is accepted and anything past it is not" do
+      assert {:ok, %{ttl: @max}} = Messages.parse_persist(%{"ttl" => @max})
+      assert {:error, :invalid_ttl} = Messages.parse_persist(%{"ttl" => @max + 1})
+      assert {:error, :invalid_ttl} = Messages.parse_persist(%{"ttl" => to_string(@max + 1)})
+    end
+
+    test "zero, negative, and anything that is not a whole number of seconds are refused" do
+      for bad <- [0, -1, "0", "-1", "1h", "3600s", "", 3.5, :not_a_number, []] do
+        assert {:error, :invalid_ttl} = Messages.parse_persist(%{"ttl" => bad}),
+               "expected ttl #{inspect(bad)} to be refused"
+      end
+    end
+
+    test "a persist value that is neither a flag nor a map is refused" do
+      for bad <- [1, "yes", :persist, []] do
+        assert {:error, :invalid_ttl} = Messages.parse_persist(bad), "expected persist #{inspect(bad)} to be refused"
+      end
+    end
+
+    test "the parsed map keys are atoms, so nothing downstream handles string keys" do
+      assert {:ok, persist} = Messages.parse_persist(%{"ttl" => "3600"})
+      assert Map.keys(persist) == [:ttl]
+    end
+  end
+
   def handle_telemetry(event, measures, metadata, pid: pid), do: send(pid, {:telemetry, event, measures, metadata})
+
+  defp plan_nodes(%{"Plans" => children} = plan), do: [plan | Enum.flat_map(children, &plan_nodes/1)]
+  defp plan_nodes(plan), do: [plan]
 end

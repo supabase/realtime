@@ -1319,7 +1319,8 @@ CREATE TABLE realtime.messages (
     inserted_at timestamp without time zone DEFAULT timezone('utc'::text, clock_timestamp()) NOT NULL,
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     binary_payload bytea,
-    skip_broadcast boolean DEFAULT false NOT NULL
+    skip_broadcast boolean DEFAULT false NOT NULL,
+    expires_at timestamp without time zone
 )
 PARTITION BY RANGE (inserted_at);
 
@@ -1414,10 +1415,10 @@ CREATE INDEX ix_realtime_subscription_entity ON realtime.subscription USING btre
 
 
 --
--- Name: messages_inserted_at_topic_index; Type: INDEX; Schema: realtime; Owner: supabase_realtime_admin
+-- Name: messages_replay_index; Type: INDEX; Schema: realtime; Owner: supabase_realtime_admin
 --
 
-CREATE INDEX messages_inserted_at_topic_index ON ONLY realtime.messages USING btree (inserted_at DESC, topic) WHERE ((extension = 'broadcast'::text) AND (private IS TRUE));
+CREATE INDEX messages_replay_index ON ONLY realtime.messages USING btree (topic, inserted_at DESC, COALESCE(expires_at, 'infinity'::timestamp without time zone)) WHERE ((extension = 'broadcast'::text) AND (private = true));
 
 
 --
@@ -1776,5 +1777,7 @@ INSERT INTO realtime."schema_migrations" (version) VALUES (20260922120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260925120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260928120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261002120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20261007120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261008120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261009120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20261022120000);

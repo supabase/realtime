@@ -150,7 +150,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
 
       expect(GenCounter, :add, fn ^broadcast_events_key -> :ok end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
+      expect(Authorization, :get_write_authorizations, fn _, _, [:broadcast] ->
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
       end)
 
@@ -176,7 +176,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
           sub: sub
         })
 
-      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
+      expect(Authorization, :get_write_authorizations, fn _, _, [:broadcast] ->
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: false}}}
       end)
 
@@ -209,7 +209,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
 
       expect(GenCounter, :add, fn ^broadcast_events_key -> :ok end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
+      expect(Authorization, :get_write_authorizations, fn _, _, [:broadcast] ->
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
       end)
 
@@ -241,7 +241,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
           sub: sub
         })
 
-      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
+      expect(Authorization, :get_write_authorizations, fn _, _, [:broadcast] ->
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: false}}}
       end)
 
@@ -433,18 +433,14 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
       expect(Connect, :lookup_or_start_connection, fn _ -> {:ok, db_conn} end)
       expect(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _, _ -> :ok end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
-        {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
-      end)
-
-      expect(Authorization, :get_write_authorizations, fn _, _, _, :persistence ->
+      expect(Authorization, :get_write_authorizations, fn _, _, [:broadcast, :persistence] ->
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}}}
       end)
 
       assert :ok =
                SingleBroadcast.broadcast(auth_params, tenant, topic, "event", payload, :json,
                  private: true,
-                 persist: true
+                 persist: %{ttl: 3600}
                )
 
       assert_eventually(
@@ -474,18 +470,14 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
       expect(Connect, :lookup_or_start_connection, fn _ -> {:ok, db_conn} end)
       expect(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _, _ -> :ok end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
-        {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
-      end)
-
-      expect(Authorization, :get_write_authorizations, fn _, _, _, :persistence ->
+      expect(Authorization, :get_write_authorizations, fn _, _, [:broadcast, :persistence] ->
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: true, persist: false}}}
       end)
 
       assert :ok =
                SingleBroadcast.broadcast(auth_params, tenant, topic, "event", %{"a" => "b"}, :json,
                  private: true,
-                 persist: true
+                 persist: %{ttl: 3600}
                )
 
       # The policy denies persistence, so no task is spawned and there is nothing to wait for here
@@ -503,7 +495,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
       expect(Connect, :lookup_or_start_connection, fn _ -> {:ok, db_conn} end)
       expect(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _, _ -> :ok end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
+      expect(Authorization, :get_write_authorizations, fn _, _, [:broadcast] ->
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}}}
       end)
 
@@ -516,7 +508,9 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
       topic = random_string()
 
       assert {:error, %Ecto.Changeset{errors: errors}} =
-               SingleBroadcast.broadcast(auth_params, tenant, topic, "event", %{"a" => "b"}, :json, persist: true)
+               SingleBroadcast.broadcast(auth_params, tenant, topic, "event", %{"a" => "b"}, :json,
+                 persist: %{ttl: 3600}
+               )
 
       assert {:persist, {"can only be used on private channels", []}} in errors
     end
@@ -529,18 +523,14 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
       expect(Connect, :lookup_or_start_connection, fn _ -> {:ok, db_conn} end)
       expect(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _, _ -> :ok end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
-        {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
-      end)
-
-      expect(Authorization, :get_write_authorizations, fn _, _, _, :persistence ->
+      expect(Authorization, :get_write_authorizations, fn _, _, [:broadcast, :persistence] ->
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}}}
       end)
 
       assert :ok =
                SingleBroadcast.broadcast(auth_params, tenant, topic, "event", binary, :binary,
                  private: true,
-                 persist: true
+                 persist: %{ttl: 3600}
                )
 
       assert_eventually(
@@ -596,7 +586,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
       expect(GenCounter, :add, fn ^broadcast_events_key -> :ok end)
       expect(Connect, :lookup_or_start_connection, fn _ -> {:ok, db_conn} end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
+      expect(Authorization, :get_write_authorizations, fn _, _, [:broadcast] ->
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
       end)
 
