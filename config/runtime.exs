@@ -10,6 +10,7 @@ api_token_blocklist = Env.get_list("API_TOKEN_BLOCKLIST", [])
 app_name = System.get_env("APP_NAME", "")
 broadcast_pool_size = Env.get_integer("BROADCAST_POOL_SIZE", 10)
 channel_error_backoff_ms = Env.get_integer("CHANNEL_ERROR_BACKOFF_MS", to_timeout(second: 5))
+client_joins_per_second = Env.get_integer("CLIENT_JOINS_PER_SECOND", 5)
 client_presence_max_calls = Env.get_integer("CLIENT_PRESENCE_MAX_CALLS", 5)
 client_presence_window_ms = Env.get_integer("CLIENT_PRESENCE_WINDOW_MS", 30_000)
 access_token_throttle_ms = Env.get_integer("ACCESS_TOKEN_THROTTLE_MS", to_timeout(second: 10))
@@ -123,6 +124,7 @@ metrics_token_blocklist = Env.get_list("METRICS_TOKEN_BLOCKLIST", [])
 migration_partition_slots = Env.get_integer("MIGRATION_PARTITION_SLOTS", System.schedulers_online() * 2)
 no_channel_timeout_in_ms = Env.get_integer("NO_CHANNEL_TIMEOUT_IN_MS", to_timeout(minute: 10))
 node_balance_uptime_threshold_in_ms = Env.get_integer("NODE_BALANCE_UPTIME_THRESHOLD_IN_MS", to_timeout(minute: 5))
+node_join_budget_floor = Env.get_integer("NODE_JOIN_BUDGET_FLOOR", 200)
 platform = if System.get_env("AWS_EXECUTION_ENV") == "AWS_ECS_FARGATE", do: :aws
 postgres_cdc_scope_shards = Env.get_integer("POSTGRES_CDC_SCOPE_SHARDS", 5)
 presence_broadcast_period_in_ms = Env.get_integer("PRESENCE_BROADCAST_PERIOD_IN_MS", 1_500)
@@ -185,6 +187,9 @@ ssl_opts =
 
 if !(db_ip_version in [nil, "ipv6", "ipv4"]),
   do: raise("Invalid IP version, please set either ipv6 or ipv4")
+
+if client_joins_per_second < 1 or node_join_budget_floor < 1,
+  do: raise("CLIENT_JOINS_PER_SECOND and NODE_JOIN_BUDGET_FLOOR must be positive integers")
 
 if db_enc_key_gcm && byte_size(db_enc_key_gcm) != 32,
   do: raise("DB_ENC_KEY_GCM must be exactly 32 bytes for AES-256-GCM, got #{byte_size(db_enc_key_gcm)} bytes")
@@ -434,7 +439,9 @@ if config_env() != :test do
     max_gen_rpc_clients: max_gen_rpc_clients,
     max_gen_rpc_call_clients: max_gen_rpc_call_clients,
     connect_error_backoff_ms: connect_error_backoff_ms,
-    channel_error_backoff_ms: channel_error_backoff_ms
+    channel_error_backoff_ms: channel_error_backoff_ms,
+    client_join_rate_limit: [per_second: client_joins_per_second],
+    node_join_budget_floor: node_join_budget_floor
 end
 
 # Setup Production

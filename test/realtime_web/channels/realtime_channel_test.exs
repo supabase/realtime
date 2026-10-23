@@ -1288,6 +1288,64 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
   end
 
+  @node_join_budget_exceeded_event [:realtime, :channel, :node_join_budget_exceeded]
+
+  describe "joins per tenant per node" do
+    test "counts nothing for a join within the budget", %{tenant: tenant} do
+      tenant = enable_node_join_budget_flag!(tenant)
+      ref = :telemetry_test.attach_event_handlers(self(), [@node_join_budget_exceeded_event])
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
+
+      tenant_id = tenant.external_id
+      refute_receive {@node_join_budget_exceeded_event, ^ref, _, %{tenant: ^tenant_id}}
+    end
+
+    test "allows a join over the budget and counts it", %{tenant: tenant} do
+      tenant = enable_node_join_budget_flag!(tenant)
+      ref = :telemetry_test.attach_event_handlers(self(), [@node_join_budget_exceeded_event])
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+      use_up_node_join_budget(tenant)
+
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
+
+      tenant_id = tenant.external_id
+      assert_receive {@node_join_budget_exceeded_event, ^ref, %{count: 1}, %{tenant: ^tenant_id}}
+      refute_received %Phoenix.Socket.Broadcast{event: "disconnect"}
+    end
+
+    test "counts nothing while the flag is off", %{tenant: tenant} do
+      ref = :telemetry_test.attach_event_handlers(self(), [@node_join_budget_exceeded_event])
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+      use_up_node_join_budget(tenant)
+
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
+
+      tenant_id = tenant.external_id
+      refute_receive {@node_join_budget_exceeded_event, ^ref, _, %{tenant: ^tenant_id}}
+    end
+
+    # Takes every join a minute ahead, so the bucket stays empty for the rest of the test
+    defp use_up_node_join_budget(tenant) do
+      future = System.monotonic_time(:microsecond) + 60_000_000
+      Stream.repeatedly(fn -> Realtime.Tenants.NodeJoinBudget.take(tenant, future) end) |> Enum.find(&(&1 == :error))
+    end
+
+    # The flag is created disabled and enabled only for this tenant, so it does not leak into other tests
+    defp enable_node_join_budget_flag!(tenant) do
+      {:ok, flag} = Realtime.Api.upsert_feature_flag(%{name: "node_join_budget", enabled: false})
+      Realtime.FeatureFlags.Cache.update_cache(flag)
+      {:ok, tenant} = Realtime.FeatureFlags.set_tenant_flag("node_join_budget", tenant.external_id, true)
+      Realtime.Tenants.Cache.update_cache(tenant)
+      on_exit(fn -> Realtime.FeatureFlags.Cache.invalidate_cache("node_join_budget") end)
+      tenant
+    end
+  end
+
   describe "Muster join" do
     test "joins the Muster scope", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
