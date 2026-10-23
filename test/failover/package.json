@@ -1,0 +1,16 @@
+{
+  "name": "realtime-failover",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "bun run failover-harness.ts --"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.114.0",
+    "commander": "^14.0.3",
+    "postgres": "^3.4.9"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
