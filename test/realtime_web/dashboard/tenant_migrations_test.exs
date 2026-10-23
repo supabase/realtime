@@ -207,7 +207,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
       settings: settings,
       admin_conn: admin_conn
     } do
-      Postgrex.query!(admin_conn, "DROP INDEX realtime.messages_inserted_at_topic_index", [])
+      Postgrex.query!(admin_conn, "DROP INDEX realtime.messages_replay_index", [])
       Postgrex.query!(admin_conn, "ALTER TABLE realtime.messages OWNER TO postgres", [])
       Postgrex.query!(admin_conn, "ALTER TABLE realtime.subscription ADD COLUMN rogue_col text", [])
       Postgrex.query!(admin_conn, "CREATE POLICY customer_policy ON realtime.messages FOR SELECT USING (true)", [])
@@ -215,7 +215,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
       assert {:ok, %{status: :changes, sql: sql, plan: plan, destructive: destructive}} =
                TenantMigrations.run_pgdelta(settings)
 
-      assert sql =~ "CREATE INDEX messages_inserted_at_topic_index"
+      assert sql =~ "CREATE INDEX messages_replay_index"
       assert sql =~ ~s(ALTER TABLE "realtime"."messages" OWNER TO "supabase_realtime_admin")
       assert sql =~ ~s(ALTER TABLE "realtime"."subscription" DROP COLUMN "rogue_col")
       refute sql =~ "customer_policy"
@@ -285,11 +285,11 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
 
       Postgrex.query!(admin_conn, "GRANT USAGE ON SCHEMA realtime TO customer_role", [])
       Postgrex.query!(admin_conn, "GRANT SELECT, INSERT ON realtime.messages TO customer_role", [])
-      Postgrex.query!(admin_conn, "DROP INDEX realtime.messages_inserted_at_topic_index", [])
+      Postgrex.query!(admin_conn, "DROP INDEX realtime.messages_replay_index", [])
 
       assert {:ok, %{status: :changes, sql: sql, plan: plan}} = TenantMigrations.run_pgdelta(settings)
 
-      assert sql =~ "CREATE INDEX messages_inserted_at_topic_index"
+      assert sql =~ "CREATE INDEX messages_replay_index"
       refute sql =~ "customer_role"
 
       assert :ok = TenantMigrations.apply_pgdelta(tenant, plan)
@@ -362,7 +362,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
       settings: settings,
       admin_conn: admin_conn
     } do
-      Postgrex.query!(admin_conn, "DROP INDEX realtime.messages_inserted_at_topic_index", [])
+      Postgrex.query!(admin_conn, "DROP INDEX realtime.messages_replay_index", [])
       Postgrex.query!(admin_conn, "ALTER TABLE realtime.messages OWNER TO postgres", [])
       Postgrex.query!(admin_conn, "CREATE POLICY customer_policy ON realtime.messages FOR SELECT USING (true)", [])
       Postgrex.query!(admin_conn, "COMMENT ON POLICY customer_policy ON realtime.messages IS 'customer note'", [])
@@ -521,7 +521,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
 
   defp drift_messages(conn) do
     Postgrex.query!(conn, "ALTER TABLE realtime.messages ADD COLUMN rogue_col text", [])
-    Postgrex.query!(conn, "DROP INDEX realtime.messages_inserted_at_topic_index", [])
+    Postgrex.query!(conn, "DROP INDEX realtime.messages_replay_index", [])
   end
 
   defp messages_policies(conn) do

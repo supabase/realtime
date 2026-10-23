@@ -62,6 +62,8 @@ defmodule Realtime.Messages do
   @spec expires_at(pos_integer()) :: NaiveDateTime.t()
   def expires_at(seconds), do: NaiveDateTime.utc_now() |> NaiveDateTime.add(seconds, :second)
 
+  @type payload :: {:json, term()} | {:binary, binary()}
+
   @doc """
   Persists a broadcast for `topic`, either sent over WebSocket or through the single broadcast API.
 
@@ -81,7 +83,7 @@ defmodule Realtime.Messages do
           tenant_id :: String.t(),
           topic :: String.t(),
           event :: String.t(),
-          payload :: map() | binary(),
+          payload :: payload(),
           expires_at :: NaiveDateTime.t() | nil
         ) :: {:ok, binary()} | {:error, any()} | {:error, :rpc_error, term}
   def persist(conn, tenant_id, topic, event, payload, expires_at \\ nil)
@@ -119,8 +121,8 @@ defmodule Realtime.Messages do
     end
   end
 
-  defp payload_attr(payload) when is_binary(payload), do: %{binary_payload: payload}
-  defp payload_attr(payload), do: %{payload: payload}
+  defp payload_attr({:json, payload}), do: %{payload: payload}
+  defp payload_attr({:binary, payload}), do: %{binary_payload: payload}
 
   @doc """
   Fetch last `limit ` messages for a given `topic` inserted after `since`
@@ -155,30 +157,34 @@ defmodule Realtime.Messages do
   def replay(_, _, _, _, _), do: {:error, :invalid_replay_params}
 
   defp messages(conn, tenant_id, topic, since, limit) do
-    since = DateTime.to_naive(since)
-    now = NaiveDateTime.utc_now()
-
-    # We want to avoid searching partitions in the future as they should be empty
-    # so we limit to 1 minute in the future to account for any potential drift
-    now_plus_1m = NaiveDateTime.utc_now() |> NaiveDateTime.add(1, :minute)
-
-    query =
-      from m in Message,
-        where:
-          m.topic == ^topic and
-            m.private == true and
-            m.extension == :broadcast and
-            m.inserted_at >= ^since and
-            m.inserted_at < ^now_plus_1m and
-            (is_nil(m.expires_at) or m.expires_at > ^now),
-        limit: ^limit,
-        order_by: [desc: m.inserted_at]
+    query = replay_query(topic, DateTime.to_naive(since), NaiveDateTime.utc_now(), limit)
 
     {latency, value} =
       :timer.tc(Realtime.Tenants.Repo, :all, [conn, query, Message, [timeout: @default_timeout]], :millisecond)
 
     :telemetry.execute([:realtime, :tenants, :replay], %{latency: latency}, %{tenant: tenant_id})
     value
+  end
+
+  @doc false
+  @spec replay_query(String.t(), NaiveDateTime.t(), NaiveDateTime.t(), pos_integer()) :: Ecto.Query.t()
+  def replay_query(topic, since, now, limit) do
+    # We want to avoid searching partitions in the future as they should be empty
+    # so we limit to 1 minute in the future to account for any potential drift
+    now_plus_1m = NaiveDateTime.add(now, 1, :minute)
+
+    # COALESCE matches the messages_replay_index expression, so expired rows are skipped in the index.
+    # `is_nil(m.expires_at) or m.expires_at > ^now` can't use the index and reads every expired row.
+    from m in Message,
+      where:
+        m.topic == ^topic and
+          m.private == true and
+          m.extension == :broadcast and
+          m.inserted_at >= ^since and
+          m.inserted_at < ^now_plus_1m and
+          fragment("COALESCE(?, 'infinity'::timestamp) > ?", m.expires_at, ^now),
+      limit: ^limit,
+      order_by: [desc: m.inserted_at]
   end
 
   @doc """

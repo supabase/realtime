@@ -200,14 +200,13 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   end
 
   @spec convert_to_persistable_fields(payload) ::
-          {:ok, String.t(), map() | binary()} | {:error, :unsupported_payload}
-  defp convert_to_persistable_fields(%{"event" => event, "payload" => payload}), do: {:ok, event, payload}
-
+          {:ok, String.t(), Messages.payload()} | {:error, :unsupported_payload}
   # Already in JSON format, use Fragment to skip decode and re-encode
   defp convert_to_persistable_fields({event, :json, user_payload, _metadata}),
-    do: {:ok, event, Jason.Fragment.new(user_payload)}
+    do: {:ok, event, {:json, Jason.Fragment.new(user_payload)}}
 
-  defp convert_to_persistable_fields({event, :binary, user_payload, _metadata}), do: {:ok, event, user_payload}
+  defp convert_to_persistable_fields({event, :binary, user_payload, _metadata}),
+    do: {:ok, event, {:binary, user_payload}}
 
   defp convert_to_persistable_fields(_payload), do: {:error, :unsupported_payload}
 

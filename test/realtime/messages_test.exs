@@ -27,11 +27,11 @@ defmodule Realtime.MessagesTest do
     %{conn: conn, tenant: tenant, date_start: date_start, date_end: date_end}
   end
 
-  describe "persist/4" do
+  describe "persist/6" do
     test "inserts a message marked as already broadcast", %{conn: conn, tenant: tenant} do
       topic = random_string()
 
-      assert {:ok, id} = Messages.persist(conn, tenant.id, topic, "test", %{"a" => "b"})
+      assert {:ok, id} = Messages.persist(conn, tenant.id, topic, "test", {:json, %{"a" => "b"}})
 
       assert {:ok,
               [
@@ -45,6 +45,15 @@ defmodule Realtime.MessagesTest do
               ]} = Repo.all(conn, Message, Message)
     end
 
+    test "binary is stored as binary even when it is valid JSON", %{conn: conn, tenant: tenant} do
+      topic = random_string()
+      binary = ~s({"a":"b"})
+
+      assert {:ok, id} = Messages.persist(conn, tenant.id, topic, "test", {:binary, binary})
+
+      assert {:ok, [%Message{id: ^id, payload: nil, binary_payload: ^binary}]} = Repo.all(conn, Message, Message)
+    end
+
     test "distributed store", %{conn: conn, tenant: tenant} do
       topic = random_string()
 
@@ -52,7 +61,7 @@ defmodule Realtime.MessagesTest do
 
       # Call remote node passing the database connection that is local to this node
       assert {:ok, id} =
-               :erpc.call(node, Messages, :persist, [conn, tenant.id, topic, "test", %{"a" => "b"}])
+               :erpc.call(node, Messages, :persist, [conn, tenant.id, topic, "test", {:json, %{"a" => "b"}}])
 
       assert {:ok, [%Message{id: ^id, topic: ^topic}]} = Repo.all(conn, Message, Message)
     end
@@ -386,6 +395,44 @@ defmodule Realtime.MessagesTest do
     end
   end
 
+  describe "replay_query/4" do
+    test "use the replay index", %{tenant: tenant} do
+      now = NaiveDateTime.utc_now()
+      query = Messages.replay_query("topic", NaiveDateTime.add(now, -72, :hour), now, 25)
+      {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
+
+      config = [
+        hostname: settings.hostname,
+        port: settings.port,
+        database: settings.database,
+        username: settings.username,
+        password: settings.password,
+        pool: DBConnection.ConnectionPool
+      ]
+
+      {:ok, {:ok, [%{"Plan" => plan}]}} =
+        Realtime.Repo.with_dynamic_repo(config, fn _repo ->
+          Realtime.Repo.transaction(fn ->
+            Realtime.Repo.query!("SET LOCAL enable_seqscan = off")
+            Realtime.Repo.query!("SET LOCAL enable_bitmapscan = off")
+            Realtime.Repo.explain(:all, query, format: :map, wrap_in_transaction: false)
+          end)
+        end)
+
+      scans = plan |> plan_nodes() |> Enum.filter(&(&1["Node Type"] =~ "Scan"))
+
+      assert scans != []
+
+      for scan <- scans do
+        assert "Index Scan" in [scan["Node Type"], scan["Custom Scan Subtype"]]
+        assert %{"Index Cond" => index_cond} = scan
+        assert index_cond =~ "topic ="
+        assert index_cond =~ "COALESCE(expires_at"
+        refute Map.has_key?(scan, "Filter")
+      end
+    end
+  end
+
   describe "delete_old_messages/1" do
     test "delete_old_messages/1 deletes messages older than 72 hours", %{
       conn: conn,
@@ -469,4 +516,7 @@ defmodule Realtime.MessagesTest do
   end
 
   def handle_telemetry(event, measures, metadata, pid: pid), do: send(pid, {:telemetry, event, measures, metadata})
+
+  defp plan_nodes(%{"Plans" => children} = plan), do: [plan | Enum.flat_map(children, &plan_nodes/1)]
+  defp plan_nodes(plan), do: [plan]
 end

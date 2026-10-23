@@ -195,7 +195,7 @@ defmodule Realtime.Tenants.SingleBroadcast do
         tenant_id: tenant.external_id,
         topic: topic,
         event: event,
-        payload: payload,
+        payload: {content_type, payload},
         persist: persist
       )
 
@@ -257,7 +257,7 @@ defmodule Realtime.Tenants.SingleBroadcast do
   #   * `:tenant_id` - the tenant the message belongs to
   #   * `:topic` - the channel topic, used as the row's topic
   #   * `:event` - the event name
-  #   * `:payload` - the message payload
+  #   * `:payload` - the message payload tagged with its content type
   #   * `:persist` - what the sender asked for, or `nil` to not save the message
   #
   # All are required.
