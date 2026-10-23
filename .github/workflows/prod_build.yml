@@ -5,6 +5,7 @@ on:
       - "main"
     paths:
       - "forum/lib/**"
+      - "sql_logex/lib/**"
       - "lib/**"
       - "config/**"
       - "priv/**"
