@@ -36,6 +36,11 @@ every few seconds and again at the end; the option skips the partial passes.
   is bounded in heartbeat periods. A silence threshold counted in heartbeats
   means nothing without both. From step 5, time advances in cluster-wide
   ticks and every message carries its age in ticks.
+- A tracker's entries do not outlive the tracker. The tracker links to the
+  channel that tracked each entry, so a tracker crash takes those channels
+  with it and a channel crash is a leave. A tracker restart is therefore a
+  crash followed by a join, and the model has no separate restart. See
+  step 6.
 
 ## Protocol options
 
@@ -406,17 +411,57 @@ Observations:
 - `MaxDelay = 1` with threshold 3, where two snapshots from one sender can
   be in flight together, has not been run yet.
 
+## Step 6: tracker restart, no module
+
+What: the tracker process on a node restarts while the node stays up. The
+question was whether the entries tracked through it survive the restart.
+
+Decision: they do not. The tracker links to each channel that tracks an
+entry, so a tracker crash kills those channels, their clients rejoin and
+track again, and peers see the old entries leave and new ones join. A
+restart is a crash followed by a join, which step 5 already models and
+checks: `PairRepair` holds through Crash then Join at the default
+constants, because the first snapshot from the restarted tracker replaces
+whatever a peer still held.
+
+Why this way: it is what Phoenix Tracker does, and the new tracker runs side
+by side with Phoenix Presence for a while. Two implementations with
+different restart semantics would be two sets of client-visible behaviour
+to support. The per-tenant tracker still narrows the blast radius of a
+restart from every tenant sharing a shard to one tenant on one node.
+
+How Phoenix does it, for reference: the shard calls `Process.link` on the
+channel pid when it tracks and traps exits, so a dying channel is a leave.
+Channels do not trap exits, so a dying shard takes its channels down. The
+shard restarts empty with a new replica version. A remote shard that sees a
+heartbeat from the same node with a new version marks the old version
+permanently down, reports every entry from it as a leave, and syncs with
+the new one. The version is what lets peers drop the old state at once
+rather than waiting for silence.
+
+Deferred: monitoring the channels instead of linking, so a tracker restart
+leaves them connected. Worth revisiting once Phoenix Tracker is fully
+replaced, because channels surviving a tracker restart limits the blast
+radius across broadcast and database-changes features too. The cost, from
+working it through: the tracker has to rebuild its entries from the
+channels before it heartbeats, or peers see every entry leave and come
+back; its replicas are empty until the next tick, so its own clients see
+every remote entry leave and come back; and the entries' refs have to
+survive the restart, which means the channel owns the ref, not the tracker.
+Each of those is a mechanism the model would need to add.
+
+The incarnation id stays in step 8. In snapshot mode the next heartbeat
+corrects a peer completely, so nothing distinguishes a restarted sender
+from a delayed message except a replica going backwards for one period
+when `MaxDelay` is at least 1. That becomes corruption rather than a
+transient once heartbeats carry diffs.
+
 ## Roadmap
 
 Each step adds one mechanism and the property it is responsible for. The
 order is chosen so that each protocol decision is made with a counterexample
 in hand.
 
-6. **Tracker restart.** The tracker process on a live node restarts while
-   the node's channels stay up. Decides whether the restarted tracker
-   rebuilds its own entries from the channels or starts empty, and what its
-   peers see in between. Interest does not change, so this is distinct from
-   leave-and-rejoin.
 7. **Client contract.** What a subscribed socket receives: a full state at
    sync, then diffs. Invariant: state plus diffs always equals the node's
    current view. The only step where Phoenix terms appear. Topics are a
