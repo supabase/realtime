@@ -87,7 +87,7 @@ defmodule Realtime.MixProject do
       {:prom_ex, "~> 1.10"},
       # `peep` 4.4.0 doesn't seem backwards compatible for us, tests fail not knowing a struct we use:  `Peep.Persistent`
       # likely, as it's a record now: https://github.com/rkallos/peep/pull/64/changes#diff-e4d3a94d15db756ca760129d7f80f6794e0a0b3b3967591fc42537f348526b6c
-      {:peep, "~> 4.3.1"},
+      {:peep, "~> 4.4.0"},
       {:joken, "~> 2.6"},
       {:nimble_zta, "~> 0.1"},
       {:ex_json_schema, "~> 0.11"},
