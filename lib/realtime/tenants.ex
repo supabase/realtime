@@ -193,7 +193,6 @@ defmodule Realtime.Tenants do
   def limiter_keys(%Tenant{} = tenant) do
     [
       requests_per_second_key(tenant),
-      channels_per_client_key(tenant),
       joins_per_second_key(tenant),
       events_per_second_key(tenant),
       db_events_per_second_key(tenant),
@@ -250,16 +249,6 @@ defmodule Realtime.Tenants do
 
   def joins_per_second_key(%Tenant{} = tenant) do
     {:channel, :joins, tenant.external_id}
-  end
-
-  @doc "The Register key to use to limit the amount of channels connected to the websocket."
-  @spec channels_per_client_key(Tenant.t() | String.t()) :: {:channel, :clients_per, String.t()}
-  def channels_per_client_key(tenant) when is_binary(tenant) do
-    {:channel, :clients_per, tenant}
-  end
-
-  def channels_per_client_key(%Tenant{} = tenant) do
-    {:channel, :clients_per, tenant.external_id}
   end
 
   @doc "RateCounter arguments for counting events per second."
