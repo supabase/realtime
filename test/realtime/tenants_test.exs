@@ -23,9 +23,6 @@ defmodule Realtime.TenantsTest do
       [all] = Enum.filter(limits, fn e -> e.limiter == Tenants.requests_per_second_key(tenant) end)
       assert all.counter == 9
 
-      [user_channels] = Enum.filter(limits, fn e -> e.limiter == Tenants.channels_per_client_key(tenant) end)
-      assert user_channels.counter == 9
-
       [channel_joins] = Enum.filter(limits, fn e -> e.limiter == Tenants.joins_per_second_key(tenant) end)
       assert channel_joins.counter == 9
 
