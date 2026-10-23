@@ -108,7 +108,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_260_928_120_000, Migrations.AddListChangesSync},
     {20_261_002_120_000, Migrations.AddAuthorizeFunction},
     {20_261_008_120_000, Migrations.AuthorizeReadProbesSinglePartition},
-    {20_261_009_120_000, Migrations.MessagesClockTimestampDefaults}
+    {20_261_009_120_000, Migrations.MessagesClockTimestampDefaults},
+    {20_261_010_120_000, Migrations.FixApplyRlsVisibilityRescan}
   ]
 
   defstruct [:tenant_external_id, :settings, migrations_ran: 0]
