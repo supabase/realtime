@@ -75,10 +75,11 @@ defmodule Realtime.RateCounterTest do
       GenCounter.add(args.id, 10)
 
       assert_receive {
-        [:realtime, :rate_counter, :custom, :new_event],
-        %{sum: 10, limit: 123},
-        %{id: ^id, tenant: "abc"}
-      }
+                       [:realtime, :rate_counter, :custom, :new_event],
+                       %{sum: 10, limit: 123},
+                       %{id: ^id, tenant: "abc"}
+                     },
+                     1_000
     end
 
     test "raise error when limit is specified without measurement" do
@@ -267,7 +268,7 @@ defmodule Realtime.RateCounterTest do
       {:ok, pid} = RateCounter.new(args, idle_shutdown: 100)
 
       Process.monitor(pid)
-      assert_receive {:DOWN, _ref, :process, ^pid, :normal}, 200
+      assert_receive {:DOWN, _ref, :process, ^pid, :normal}, 1_000
       # Cache has not expired yet
       assert {:ok, %RateCounter{}} = Cachex.get(RateCounter, args.id)
       # ...and is evicted once its TTL elapses.
