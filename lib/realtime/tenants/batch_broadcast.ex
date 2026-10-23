@@ -15,7 +15,10 @@ defmodule Realtime.Tenants.BatchBroadcast do
   alias Realtime.Tenants.Connect
 
   alias RealtimeWeb.RealtimeChannel
+  alias RealtimeWeb.RequestMetrics
   alias RealtimeWeb.TenantBroadcaster
+
+  @payload_size_exceeded_error "Payload size exceeds tenant limit"
 
   embedded_schema do
     embeds_many :messages, Message do
@@ -48,7 +51,8 @@ defmodule Realtime.Tenants.BatchBroadcast do
     broadcast(auth_params, %Tenant{} = tenant, messages, super_user)
   end
 
-  def broadcast(_auth_params, %Tenant{suspend: true}, _messages, _super_user) do
+  def broadcast(_auth_params, %Tenant{suspend: true} = tenant, messages, _super_user) do
+    record_outcome_per_message(tenant, messages, :tenant_suspended)
     {:error, :forbidden, "Tenant is suspended"}
   end
 
@@ -81,6 +85,39 @@ defmodule Realtime.Tenants.BatchBroadcast do
             %Policies{broadcast: %BroadcastPolicies{write: true}} ->
               Enum.each(events, fn message -> send_message_and_count(tenant, events_per_second_rate, message, false) end)
 
+            %Policies{broadcast: %BroadcastPolicies{}} ->
+              record_outcome_per_message(tenant, events, :unauthorized)
+
+            {:error, :tenant_database_unavailable} ->
+              record_outcome_per_message(tenant, events, :unable_to_connect_to_project)
+
+            {:error, init_error} when init_error in [:initializing, :tenant_database_connection_initializing] ->
+              record_outcome_per_message(tenant, events, :initializing_project_connection)
+
+            {:error, :tenant_db_too_many_connections} ->
+              record_outcome_per_message(tenant, events, :database_lack_of_connections)
+
+            {:error, :connect_rate_limit_reached} ->
+              record_outcome_per_message(tenant, events, :database_connection_rate_limit_reached)
+
+            {:error, :rpc_error, _} ->
+              record_outcome_per_message(tenant, events, :unable_to_handle_broadcast)
+
+            {:error, :rls_policy_error, _} ->
+              record_outcome_per_message(tenant, events, :rls_policy_error)
+
+            {:error, :query_canceled, _} ->
+              record_outcome_per_message(tenant, events, :query_canceled)
+
+            {:error, :increase_connection_pool} ->
+              record_outcome_per_message(tenant, events, :increase_connection_pool)
+
+            {:error, :missing_partition} ->
+              record_outcome_per_message(tenant, events, :missing_partition)
+
+            {:error, _} ->
+              record_outcome_per_message(tenant, events, :unable_to_set_policies)
+
             _ ->
               nil
           end
@@ -89,8 +126,13 @@ defmodule Realtime.Tenants.BatchBroadcast do
 
       :ok
     else
-      %Ecto.Changeset{valid?: false} = changeset -> {:error, changeset}
-      error -> error
+      %Ecto.Changeset{valid?: false} = changeset ->
+        record_outcome_per_message(tenant, messages, changeset)
+        {:error, changeset}
+
+      {:error, :too_many_requests, _} = error ->
+        record_outcome_per_message(tenant, messages, :rate_limit_exceeded)
+        error
     end
   end
 
@@ -122,7 +164,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
 
     case Tenants.validate_payload_size(tenant, payload) do
       :ok -> changeset
-      _ -> add_error(changeset, :payload, "Payload size exceeds tenant limit")
+      _ -> add_error(changeset, :payload, @payload_size_exceeded_error)
     end
   end
 
@@ -148,6 +190,8 @@ defmodule Realtime.Tenants.BatchBroadcast do
       RealtimeChannel.MessageDispatcher,
       :broadcast
     )
+
+    record_outcome(tenant, :success)
   end
 
   defp permissions_for_message(_, nil, _), do: nil
@@ -181,5 +225,56 @@ defmodule Realtime.Tenants.BatchBroadcast do
       true ->
         :ok
     end
+  end
+
+  defp record_outcome(tenant, :success) do
+    RequestMetrics.record(:broadcast, :http, tenant.external_id, :success)
+  end
+
+  defp record_outcome(tenant, error_code) do
+    RequestMetrics.record(:broadcast, :http, tenant.external_id, RequestMetrics.classify_broadcast_error(error_code))
+  end
+
+  # Record one outcome per message, with the reason derived from the changeset errors.
+  # For an invalid changeset, check if any message error is a payload size error,
+  # else use :invalid_request.
+  defp record_outcome_per_message(tenant, _messages, %Ecto.Changeset{valid?: false} = changeset) do
+    case get_change(changeset, :messages) do
+      [_ | _] = message_changesets ->
+        for message_changeset <- message_changesets do
+          cond do
+            message_changeset.valid? ->
+              # This message was dropped because of its siblings, so it is recorded as a batch rejection.
+              record_outcome(tenant, :batch_rejected)
+
+            Enum.find(message_changeset.errors, fn {field, {error, _}} ->
+              field == :payload and error == @payload_size_exceeded_error
+            end) ->
+              record_outcome(tenant, :payload_size_exceeded)
+
+            true ->
+              record_outcome(tenant, :invalid_request)
+          end
+        end
+
+      _ ->
+        # If there are no message changesets, record one outcome for the whole request.
+        record_outcome(tenant, :invalid_request)
+    end
+  end
+
+  # Record one outcome per message, with the same reason for all of them.
+  defp record_outcome_per_message(tenant, %{"messages" => messages}, error_code) do
+    record_outcome_per_message(tenant, messages, error_code)
+  end
+
+  # Record one outcome per message, with the same reason for all of them.
+  defp record_outcome_per_message(tenant, messages, error_code) when is_list(messages) do
+    Enum.each(messages, fn _ -> record_outcome(tenant, error_code) end)
+  end
+
+  # We don't have a list of messages, so just record one outcome for the whole request.
+  defp record_outcome_per_message(tenant, _messages, error_code) do
+    record_outcome(tenant, error_code)
   end
 end

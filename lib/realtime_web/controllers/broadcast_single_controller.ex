@@ -15,6 +15,7 @@ defmodule RealtimeWeb.BroadcastSingleController do
   alias RealtimeWeb.OpenApiSchemas.BroadcastSingleBinaryParams
   alias RealtimeWeb.OpenApiSchemas.TooManyRequestsResponse
   alias RealtimeWeb.OpenApiSchemas.UnprocessableEntityResponse
+  alias RealtimeWeb.RequestMetrics
 
   action_fallback(RealtimeWeb.FallbackController)
 
@@ -100,6 +101,15 @@ defmodule RealtimeWeb.BroadcastSingleController do
              persist: persist
            ) do
       send_resp(conn, :accepted, "")
+    else
+      {:error, :invalid_json_object} ->
+        # This error comes from the local `payload/1` function and is not recorded anywhere else,
+        # so record it here.
+        RequestMetrics.record(:broadcast, :http, tenant.external_id, {:rejected, :invalid_request})
+        {:error, :unprocessable_entity, "Payload must be a JSON object"}
+
+      error ->
+        error
     end
   end
 
@@ -108,7 +118,7 @@ defmodule RealtimeWeb.BroadcastSingleController do
 
   # Plug.Parsers.JSON wraps a body that isn't a JSON object as %{"_json" => value}
   defp json_payload(%{"_json" => value} = body) when map_size(body) == 1 and not is_map(value),
-    do: {:error, :unprocessable_entity, "Payload must be a JSON object"}
+    do: {:error, :invalid_json_object}
 
   defp json_payload(body), do: {:ok, body, :json}
 

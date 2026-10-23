@@ -5,7 +5,8 @@ defmodule RealtimeWeb.RequestMetrics do
   Every request ends in exactly one of four outcomes:
 
     * `:success` - handled
-    * `:rejected` - refused because of the client's request: policy deny, payload too large
+    * `:rejected` - refused because of the client's request: policy deny, payload too large,
+      or rate limit
     * `:internal_failure` - Realtime failed: a crash or an unexpected error
     * `:upstream_failure` - a dependency failed: tenant database or connection pool
 
@@ -13,6 +14,8 @@ defmodule RealtimeWeb.RequestMetrics do
   returns its outcome next to its result, and `track/4` records it. Nothing is stored on the
   socket. A success has no reason of its own, so the reason `:none` appears only on a success.
   """
+
+  alias Realtime.Database
 
   @type request :: :join | :broadcast | :presence | :access_token | :postgres_changes
   @type transport :: :ws | :http
@@ -67,6 +70,22 @@ defmodule RealtimeWeb.RequestMetrics do
     emit(request, transport, tenant, kind, reason)
   end
 
+  def attach_router_handler do
+    :telemetry.attach(
+      "realtime-web-request-metrics-router-handler",
+      [:phoenix, :router_dispatch, :exception],
+      &__MODULE__.router_exception/4,
+      nil
+    )
+  end
+
+  def router_exception(_event, _measurements, metadata, _config) do
+    if metadata.route in ["/api/broadcast", "/api/broadcast/:topic/events/:event"] do
+      {:ok, tenant} = Database.get_external_id(metadata.conn.host)
+      record(:broadcast, :http, tenant, {:internal_failure, metadata.kind})
+    end
+  end
+
   @doc """
   Maps a `BroadcastHandler` error code to an outcome.
   """
@@ -74,7 +93,11 @@ defmodule RealtimeWeb.RequestMetrics do
   def classify_broadcast_error(code) do
     case code do
       :unauthorized -> {:rejected, code}
+      :invalid_request -> {:rejected, code}
+      :tenant_suspended -> {:rejected, code}
+      :rate_limit_exceeded -> {:rejected, code}
       :payload_size_exceeded -> {:rejected, code}
+      :batch_rejected -> {:rejected, code}
       :rls_policy_error -> {:upstream_failure, code}
       :query_canceled -> {:upstream_failure, code}
       :unable_to_connect_to_project -> {:upstream_failure, code}

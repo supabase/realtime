@@ -116,6 +116,12 @@ defmodule RealtimeWeb.RequestMetricsTest do
       assert {:rejected, :payload_size_exceeded} = RequestMetrics.classify_broadcast_error(:payload_size_exceeded)
     end
 
+    test "invalid requests, suspended tenants, rate limits, and batches rejected as a whole are rejected" do
+      for code <- [:invalid_request, :tenant_suspended, :rate_limit_exceeded, :batch_rejected] do
+        assert {:rejected, ^code} = RequestMetrics.classify_broadcast_error(code)
+      end
+    end
+
     test "dependency errors are upstream failures" do
       for code <- [
             :rls_policy_error,
