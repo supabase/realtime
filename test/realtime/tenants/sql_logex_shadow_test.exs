@@ -157,15 +157,18 @@ defmodule Realtime.Tenants.SqlLogexShadowTest do
       assert decision_metadata.outcome == :mismatch
       assert decision_metadata.reason == :none
 
-      # Find our exact log line
-      assert [line] =
-               log
-               |> String.split("\n")
-               |> Enum.filter(&(&1 =~ "SqlLogexShadowMismatch" and &1 =~ "tenant_id=#{tenant_id}"))
+      assert log =~ ~s(tenant_id: "#{tenant_id}")
 
-      # Make sure we include neither project nor external_id, as that's rout to the tenant logs
-      refute line =~ "project="
-      refute line =~ "external_id="
+      # No tenant logger metadata, as that may route it to the tenant's own logs. The message spans
+      # several lines, metadata is on the first: the one with the code.
+      header_lines = log |> String.split("\n") |> Enum.filter(&(&1 =~ "SqlLogexShadowMismatch"))
+      assert header_lines != []
+
+      for line <- header_lines do
+        refute line =~ "project="
+        refute line =~ "external_id="
+        refute line =~ "tenant_id="
+      end
     end
 
     test "a real check that errored becomes :no_real_answer, not a crash or a mismatch" do

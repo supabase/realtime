@@ -61,14 +61,11 @@ defmodule Realtime.Tenants.SqlLogexLoader do
   def load(db_conn, tenant_id) do
     telemetry = [:realtime, :tenants, :sql_logex_snapshot_load]
     opts = [queue: false, telemetry: telemetry, tenant_id: tenant_id]
-    # No project/external_id: those route a log to the tenant's own logs, this is an experiment,
-    # for us to see and not to confuse the tenantß.
-    metadata = [tenant_id: tenant_id]
 
-    case Database.transaction(db_conn, &read/1, opts, metadata) do
+    case Database.transaction(db_conn, &read/1, opts) do
       {:ok, input} ->
         snapshot = Snapshot.new(input)
-        log_unsupported(snapshot, metadata)
+        log_unsupported(snapshot, tenant_id)
         {:ok, snapshot}
 
       {:error, _} = error ->
@@ -76,14 +73,16 @@ defmodule Realtime.Tenants.SqlLogexLoader do
     end
   end
 
-  defp log_unsupported(snapshot, metadata) do
+  defp log_unsupported(snapshot, tenant_id) do
     case Snapshot.unsupported(snapshot) do
       [] ->
         :ok
 
       unsupported ->
         code = "SqlLogexUnsupportedPolicies"
-        Logger.info("#{code}: #{inspect(unsupported)}", [error_code: code] ++ metadata)
+        # no tenant metadata, as we do not want this experiment going to their logs confusing them
+        # so log tenant inside of the message
+        Logger.info("#{code}: #{inspect(%{tenant_id: tenant_id, unsupported: unsupported})}", error_code: code)
     end
   end
 

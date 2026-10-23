@@ -111,19 +111,20 @@ defmodule Realtime.Tenants.SqlLogexShadow do
         {:mismatch, sql_logex, _real} ->
           # topic/role/operation so a mismatch can be checked against the tenant's current policies by
           # hand — a stale cached snapshot (up to the cache TTL old) looks identical to a real bug
-          # otherwise. tenant_id rather than project/external_id: those route a log to the tenant's own
-          # logs, and this one is ours alone.
+          # otherwise.
+          # The tenant id is in the message, not logger metadata to avoid sending the logs to the tenant,
+          # it's an experiment and shouldn't confuse them.
           log_warning(
             "SqlLogexShadowMismatch",
             %{
+              tenant_id: tenant_id,
               operation: check.operation,
               extension: extension,
               topic: check.authorization_context.topic,
               role: check.authorization_context.role,
               sql_logex: sql_logex,
               real: real
-            },
-            tenant_id: tenant_id
+            }
           )
 
         _ ->
