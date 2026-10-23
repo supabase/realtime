@@ -8,6 +8,7 @@ defmodule RealtimeWeb.UserSocket do
   alias Realtime.Api.Tenant
   alias Realtime.Database
   alias Realtime.Tenants
+  alias Realtime.UsersCounter
 
   alias RealtimeWeb.TenantRateLimiters
   alias RealtimeWeb.ChannelsAuthorization
@@ -42,7 +43,7 @@ defmodule RealtimeWeb.UserSocket do
       # An already empty socket keeps its running timer, so rejected joins can't extend it.
       {:reply, :error, reply, {%{channels: channels} = state, socket}}
       when channels == %{} and previous_channels != %{} ->
-        {:reply, :error, reply, {state, start_no_channels_timer(socket, no_channel_timeout_in_ms())}}
+        {:reply, :error, reply, {state, left_last_channel(socket, no_channel_timeout_in_ms())}}
 
       result ->
         result
@@ -243,6 +244,15 @@ defmodule RealtimeWeb.UserSocket do
   defp measure_traffic_interval_in_ms, do: :persistent_term.get({__MODULE__, :measure_traffic_interval_in_ms})
   defp no_channel_timeout_in_ms, do: :persistent_term.get({__MODULE__, :no_channel_timeout_in_ms})
 
+  # A socket without channels is no longer a connected user, so it frees its
+  # `max_concurrent_users` slot now instead of when the timer disconnects it. This process waits
+  # for every join to return, and `RealtimeChannel.join/3` counts the socket before it returns, so
+  # a join can't land between the empty check and the removal.
+  defp left_last_channel(socket, timeout) do
+    if tenant = socket.assigns[:tenant], do: UsersCounter.remove(socket.transport_pid, tenant)
+    start_no_channels_timer(socket, timeout)
+  end
+
   # The timer runs from the moment a socket is left without channels.
   defp start_no_channels_timer(socket, timeout) do
     if ref = socket.private[:no_channels_timer], do: :erlang.cancel_timer(ref, async: true, info: false)
@@ -256,7 +266,7 @@ defmodule RealtimeWeb.UserSocket do
   defp restart_if_no_channels(result, _timeout), do: result
 
   defp restart({%{channels: channels} = state, socket}, timeout) when channels == %{},
-    do: {state, start_no_channels_timer(socket, timeout)}
+    do: {state, left_last_channel(socket, timeout)}
 
   defp restart(state, _timeout), do: state
 
