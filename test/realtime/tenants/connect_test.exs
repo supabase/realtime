@@ -935,14 +935,17 @@ defmodule Realtime.Tenants.ConnectTest do
 
       pid = Connect.whereis(tenant.external_id)
 
-      replication_pid = await_replication_connection!(tenant.external_id)
+      # The replication process is registered before its slot exists. Killing it mid-creation can
+      # leave its walsender behind, pushing recovery onto a longer backoff, so wait until it's fully up.
+      assert {:ok, replication_pid} = await_replication_status!(tenant.external_id)
       Process.monitor(replication_pid)
       Process.exit(replication_pid, :kill)
       assert_receive {:DOWN, _, :process, ^replication_pid, _}, 1000
 
       assert_eventually {:error, :not_connected} = Connect.replication_status(tenant.external_id), @local_wait
 
-      assert {:ok, _} = await_replication_status!(tenant.external_id)
+      # The first retry fires after a randomised 5-15s backoff, so 15s alone isn't enough
+      assert {:ok, _} = await_replication_status!(tenant.external_id, @slow_replication_wait)
 
       state = :sys.get_state(pid)
       assert state.replication_recovery_started_at == nil
