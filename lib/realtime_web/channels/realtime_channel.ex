@@ -32,6 +32,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias RealtimeWeb.RealtimeChannel.BroadcastHandler
   alias RealtimeWeb.RealtimeChannel.MessageDispatcher
   alias RealtimeWeb.RealtimeChannel.PresenceHandler
+  alias RealtimeWeb.RequestMetrics
 
   # A JWT `exp` can be arbitrarily far in the future and `Process.send_after/3` rejects delays past
   # Erlang's maximum supported time value, so the re-confirmation timer is capped at this interval.
@@ -469,37 +470,39 @@ defmodule RealtimeWeb.RealtimeChannel do
   def handle_in("broadcast", payload, %{assigns: %{private?: true}} = socket) do
     %{tenant: tenant_id} = socket.assigns
 
-    with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id) do
-      BroadcastHandler.handle(payload, db_conn, socket)
-    else
-      {:error, :rpc_error, error} ->
-        log_error(socket, "UnableToHandleBroadcast", error)
-        BroadcastHandler.maybe_reply_error(socket, :unable_to_handle_broadcast)
+    RequestMetrics.track(:broadcast, :ws, tenant_id, fn ->
+      with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id) do
+        BroadcastHandler.handle(payload, db_conn, socket)
+      else
+        {:error, :rpc_error, error} ->
+          log_error(socket, "UnableToHandleBroadcast", error)
+          BroadcastHandler.maybe_reply_error(socket, :unable_to_handle_broadcast)
 
-      {:error, :tenant_database_unavailable} ->
-        log_error(socket, "UnableToConnectToProject", :tenant_database_unavailable)
-        BroadcastHandler.maybe_reply_error(socket, :unable_to_connect_to_project)
+        {:error, :tenant_database_unavailable} ->
+          log_error(socket, "UnableToConnectToProject", :tenant_database_unavailable)
+          BroadcastHandler.maybe_reply_error(socket, :unable_to_connect_to_project)
 
-      {:error, :tenant_db_too_many_connections} ->
-        log_error(socket, "DatabaseLackOfConnections", :tenant_db_too_many_connections)
-        BroadcastHandler.maybe_reply_error(socket, :database_lack_of_connections)
+        {:error, :tenant_db_too_many_connections} ->
+          log_error(socket, "DatabaseLackOfConnections", :tenant_db_too_many_connections)
+          BroadcastHandler.maybe_reply_error(socket, :database_lack_of_connections)
 
-      {:error, :connect_rate_limit_reached} ->
-        log_error(socket, "DatabaseConnectionRateLimitReached", :connect_rate_limit_reached)
-        BroadcastHandler.maybe_reply_error(socket, :database_connection_rate_limit_reached)
+        {:error, :connect_rate_limit_reached} ->
+          log_error(socket, "DatabaseConnectionRateLimitReached", :connect_rate_limit_reached)
+          BroadcastHandler.maybe_reply_error(socket, :database_connection_rate_limit_reached)
 
-      {:error, reason} when reason in [:initializing, :tenant_database_connection_initializing] ->
-        log_error(socket, "InitializingProjectConnection", reason)
-        BroadcastHandler.maybe_reply_error(socket, :initializing_project_connection)
+        {:error, reason} when reason in [:initializing, :tenant_database_connection_initializing] ->
+          log_error(socket, "InitializingProjectConnection", reason)
+          BroadcastHandler.maybe_reply_error(socket, :initializing_project_connection)
 
-      {:error, error} ->
-        log_error(socket, "UnableToHandleBroadcast", error)
-        BroadcastHandler.maybe_reply_error(socket, :unable_to_handle_broadcast)
-    end
+        {:error, error} ->
+          log_error(socket, "UnableToHandleBroadcast", error)
+          BroadcastHandler.maybe_reply_error(socket, :unable_to_handle_broadcast)
+      end
+    end)
   end
 
   def handle_in("broadcast", payload, %{assigns: %{private?: false}} = socket) do
-    BroadcastHandler.handle(payload, socket)
+    RequestMetrics.track(:broadcast, :ws, socket.assigns.tenant, fn -> BroadcastHandler.handle(payload, socket) end)
   end
 
   def handle_in("presence", payload, socket) do
