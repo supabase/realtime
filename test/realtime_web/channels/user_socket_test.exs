@@ -8,7 +8,7 @@ defmodule RealtimeWeb.UserSocketTest do
 
   @socket %Phoenix.Socket{
     serializer: V2Serializer,
-    assigns: %{tenant: "test-tenant", access_token: "test-token", log_level: :error}
+    assigns: %{tenant: "test-tenant", access_token: "test-token", log_level: :error, channels_count: 0}
   }
   @state {%{channels: %{}, channels_inverse: %{}}, @socket}
 
@@ -169,6 +169,21 @@ defmodule RealtimeWeb.UserSocketTest do
       raw = Jason.encode!(["1", "1", "unknown:topic", "phx_join", %{}])
 
       assert {:reply, :error, _reply, ^state} = UserSocket.handle_in({raw, [opcode: :text]}, state)
+    end
+  end
+
+  describe "channels count" do
+    test "passes the number of open channels along before Phoenix handles a message" do
+      channels = %{
+        "realtime:a" => {self(), make_ref(), :joined},
+        "realtime:b" => {self(), make_ref(), :leaving}
+      }
+
+      state = {%{channels: channels, channels_inverse: %{}}, %{@socket | handler: UserSocket}}
+      raw = Jason.encode!([nil, "1", "phoenix", "heartbeat", %{}])
+
+      assert {:reply, :ok, _reply, {_, %{assigns: %{channels_count: 2}}}} =
+               UserSocket.handle_in({raw, [opcode: :text]}, state)
     end
   end
 
