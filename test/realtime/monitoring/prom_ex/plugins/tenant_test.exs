@@ -324,6 +324,26 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       assert_eventually metric_value(metric, hit: false) >= metric_value + 1
     end
 
+    test "node join budget exceeded counter increments per tenant", %{tenant: %{external_id: external_id}} do
+      for _ <- 1..2 do
+        :telemetry.execute([:realtime, :channel, :node_join_budget_exceeded], %{count: 1}, %{tenant: external_id})
+      end
+
+      assert_eventually metric_value("realtime_channel_node_join_budget_exceeded", tenant: external_id) == 2
+    end
+
+    test "global node join budget exceeded counter increments without a tenant tag", %{
+      tenant: %{external_id: external_id}
+    } do
+      metric = "realtime_channel_global_node_join_budget_exceeded"
+      metric_value = metric_value(metric) || 0
+
+      :telemetry.execute([:realtime, :channel, :node_join_budget_exceeded], %{count: 1}, %{tenant: external_id})
+
+      assert_eventually metric_value(metric) >= metric_value + 1
+      refute metric_value(metric, tenant: external_id)
+    end
+
     test "channel input bytes", context do
       external_id = context.tenant.external_id
 
