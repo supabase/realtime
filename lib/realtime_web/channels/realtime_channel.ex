@@ -13,17 +13,20 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   alias Realtime.Api.Message
   alias Realtime.Api.Tenant
+  alias Realtime.FeatureFlags
   alias Realtime.GenCounter
   alias Realtime.Helpers
   alias Realtime.PostgresCdc
   alias Realtime.RateCounter
   alias Realtime.SignalHandler
+  alias Realtime.Telemetry
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Cache
   alias Realtime.Tenants.Connect
+  alias Realtime.Tenants.NodeJoinBudget
   alias Realtime.UsersCounter
 
   alias RealtimeWeb.Channels.Payloads.Broadcast.Replay
@@ -43,6 +46,8 @@ defmodule RealtimeWeb.RealtimeChannel do
   @postgres_subscribe_error_code "RealtimeDisabledForConfiguration"
   @postgres_cdc_down Realtime.Syn.PostgresCdc.down_event()
   @fullsweep_after Application.compile_env!(:realtime, :websocket_fullsweep_after)
+  @node_join_budget_flag "node_join_budget"
+  @node_join_budget_exceeded_event [:realtime, :channel, :node_join_budget_exceeded]
 
   @impl true
   def join("realtime:", _params, socket) do
@@ -88,6 +93,7 @@ defmodule RealtimeWeb.RealtimeChannel do
          socket = assign(socket, PresenceHandler.join(join, tenant)),
          :ok <- only_private?(tenant, socket),
          :ok <- limit_max_users(tenant, transport_pid),
+         :ok <- measure_node_joins(tenant),
          :ok <- limit_joins(tenant, socket),
          :ok <- limit_channels(tenant, socket),
          {:ok, claims, confirm_token_ref} <- confirm_token(socket),
@@ -714,6 +720,16 @@ defmodule RealtimeWeb.RealtimeChannel do
         log_error(socket, "UnknownErrorOnCounter", error)
         {:error, error}
     end
+  end
+
+  # The node join budget is only measured for now: joins over it are counted, not refused. The flag is read on every
+  # join so switching it off takes effect without sockets reconnecting
+  defp measure_node_joins(tenant) do
+    if FeatureFlags.enabled?(@node_join_budget_flag, tenant.external_id) and NodeJoinBudget.take(tenant) == :error do
+      Telemetry.execute(@node_join_budget_exceeded_event, %{count: 1}, %{tenant: tenant.external_id})
+    end
+
+    :ok
   end
 
   def limit_channels(tenant, %{transport_pid: pid} = socket) do
