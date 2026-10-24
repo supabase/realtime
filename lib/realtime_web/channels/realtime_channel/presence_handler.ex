@@ -351,12 +351,17 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   defp check_track_payload(%{presence_track_payload: payload}, payload), do: {:error, :no_payload_change}
   defp check_track_payload(_assigns, _payload), do: :ok
 
+  # Reads the shard's table directly so a busy shard can't stall the sync. The table still holds
+  # the members of a node the tracker reported down until permdown_period passes, so members whose
+  # node is no longer connected are left out.
   defp presence_dirty_list(topic) do
     [{:pool_size, size}] = :ets.lookup(Presence, :pool_size)
+    connected = MapSet.new([node() | Node.list()])
+    shard = Shard.name_for_topic(Presence, topic, size)
+    tracked = :ets.select(shard, [{{{topic, :"$1", :"$2"}, :"$3", :_}, [], [{{:"$1", :"$2", :"$3"}}]}])
+    members = for {pid, key, meta} <- tracked, MapSet.member?(connected, node(pid)), do: {key, meta}
 
-    Presence
-    |> Shard.name_for_topic(topic, size)
-    |> Shard.dirty_list(topic)
+    members
     |> Phoenix.Presence.group()
     |> Presence.Metrics.strip_state()
   end
