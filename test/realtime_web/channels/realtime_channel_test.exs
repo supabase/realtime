@@ -2093,6 +2093,15 @@ defmodule RealtimeWeb.RealtimeChannelTest do
              end) =~ "InvalidJWTToken: Token has expired"
     end
 
+    test "log_level warn, as sent by realtime-js, logs warnings", %{tenant: tenant} do
+      api_key = Generators.generate_jwt_token(tenant, %{role: "authenticated", exp: System.system_time(:second) - 1})
+
+      assert capture_log(fn ->
+               assert {:error, :expired_token} =
+                        connect(UserSocket, %{"log_level" => "warn"}, conn_opts(tenant, api_key))
+             end) =~ "InvalidJWTToken: Token has expired"
+    end
+
     test "missing role claims returns a error", %{tenant: tenant} do
       api_key = Generators.generate_jwt_token(tenant, %{exp: System.system_time(:second) + 1000})
 
