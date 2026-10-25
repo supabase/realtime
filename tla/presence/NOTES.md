@@ -450,6 +450,21 @@ every remote entry leave and come back; and the entries' refs have to
 survive the restart, which means the channel owns the ref, not the tracker.
 Each of those is a mechanism the model would need to add.
 
+Shadow mode needs monitor semantics anyway, without the rebuild. While the
+new tracker runs alongside Phoenix Presence and is not the source of truth,
+a crash in it must not disconnect channels. The link is created by the
+tracker, which holds every channel pid, so the switch lives there and
+nowhere else: the tracker always monitors the channel pid and treats
+`:DOWN` as the leave, always traps exits, and in link mode also calls
+`Process.link` on the same pid. A per-tenant feature flag read once at
+tracker start picks the mode. Link rather than a channel-side monitor for
+the end state because an exit signal kills a non-trapping channel at once,
+while a `:DOWN` message queues behind whatever the channel is doing. In
+shadow mode a tracker crash loses this node's entries until each channel
+leaves and rejoins, and the shadow comparison diverges for that long; a
+telemetry event on tracker crash makes the divergence explainable. The
+model is unaffected: in both modes the tracker's entries die with it.
+
 The incarnation id stays in step 8. In snapshot mode the next heartbeat
 corrects a peer completely, so nothing distinguishes a restarted sender
 from a delayed message except a replica going backwards for one period
