@@ -167,6 +167,50 @@ defmodule Realtime.Tenants.MigrationsTest do
       assert_eventually Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total
     end
 
+    @tag :skip_orioledb
+    @tag :requires_pg_150000
+    test "loading the bundled dump leaves schema_migrations writable only by supabase_admin" do
+      tenant = TestTenantDb.checkout_tenant()
+      total = Enum.count(Migrations.migrations())
+
+      :telemetry.attach(
+        "dump-schema-migrations-grants-test",
+        [:realtime, :tenants, :migrations, :stop],
+        fn _event, _measurements, metadata, %{pid: pid} ->
+          send(pid, {:migrations_metadata, metadata.source, metadata.migrations_executed})
+        end,
+        %{pid: self()}
+      )
+
+      on_exit(fn -> :telemetry.detach("dump-schema-migrations-grants-test") end)
+
+      assert Migrations.run_migrations(tenant) == :ok
+      assert_receive {:migrations_metadata, :dump, ^total}
+
+      {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
+      {:ok, admin_conn} = Database.connect_db(%{settings | username: "supabase_admin"})
+      {:ok, postgres_conn} = Database.connect_db(%{settings | username: "postgres"})
+
+      assert schema_migrations_grants(admin_conn) == []
+
+      assert {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} =
+               Postgrex.query(postgres_conn, "TRUNCATE realtime.schema_migrations", [])
+    end
+
+    test "revokes the schema_migrations grants a tenant provisioned from an older dump still has" do
+      tenant = TestTenantDb.checkout_tenant(run_migrations: true)
+      total = Enum.count(Migrations.migrations())
+      {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
+      {:ok, conn} = Database.connect_db(%{settings | username: "supabase_admin"})
+
+      Postgrex.query!(conn, "GRANT ALL ON realtime.schema_migrations TO postgres, dashboard_user", [])
+      Postgrex.query!(conn, "DELETE FROM realtime.schema_migrations WHERE version = 20261026120000", [])
+
+      assert Migrations.run_migrations(%{tenant | migrations_ran: total - 1}) == :ok
+
+      assert schema_migrations_grants(conn) == []
+    end
+
     test "falls back to sequential migrations without crashing when the schema_migrations check errors unexpectedly" do
       tenant = TestTenantDb.checkout_tenant()
       total = Enum.count(Migrations.migrations())
@@ -296,5 +340,20 @@ defmodule Realtime.Tenants.MigrationsTest do
 
   def handle_telemetry(event, measurements, metadata, pid: pid) do
     send(pid, {:telemetry, event, measurements, metadata})
+  end
+
+  defp schema_migrations_grants(conn) do
+    %Postgrex.Result{rows: rows} =
+      Postgrex.query!(
+        conn,
+        """
+        SELECT acl.grantee::regrole::text, acl.privilege_type
+        FROM pg_class c, aclexplode(c.relacl) acl
+        WHERE c.oid = 'realtime.schema_migrations'::regclass AND acl.grantee <> c.relowner
+        """,
+        []
+      )
+
+    rows
   end
 end
