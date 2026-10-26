@@ -561,8 +561,8 @@ Next ==
      \/ \E n \in Nodes : \E m \in Peers(n) : Purge(n, m)
      \/ \E n \in Nodes : Start(n) \/ Stop(n) \/ Crash(n)
      \/ \E n \in Nodes : Subscribe(n) \/ Sync(n) \/ Consume(n) \/ Unsubscribe(n)
-     \/ \E msg \in Messages : Deliver(msg)
-     \/ \E msg \in Messages : Drop(msg)
+     \/ \E msg \in msgs : Deliver(msg)
+     \/ \E msg \in msgs : Drop(msg)
 
 (***************************************************************************)
 (* Fairness rules out runs where something is always possible but never    *)
