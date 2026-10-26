@@ -1,5 +1,5 @@
 ---------- MODULE Presence8 -------------
-EXTENDS Integers, Sequences, FiniteSets
+EXTENDS Integers, Sequences, FiniteSets, TLC
 
 (***************************************************************************)
 (* This is the eighth step of modelling presence: diff based replication   *)
@@ -59,6 +59,8 @@ CONSTANTS
   (***************************************************************************)
   SubscribeFirst,
   MaxDrops
+
+Symmetry == Permutations(Nodes) \cup Permutations(Refs)
 
 VARIABLES 
   (***************************************************************************)
@@ -154,7 +156,11 @@ Peer ==
   (* Captures the current version and incarnation this replica holds of the  *)
   (* peer's state.                                                           *)
   (***************************************************************************)
-    mark: Stamps
+    mark: Stamps,
+  (***************************************************************************)
+  (* True when the tracker knows it has missed something in this replica.    *)
+  (***************************************************************************)
+    behind: BOOLEAN
   ]
 
 Trackers ==
@@ -163,6 +169,12 @@ Trackers ==
   (* The refs the tracker holds locally                                      *)
   (***************************************************************************)
     local: SUBSET Refs,
+  (***************************************************************************)
+  (* Tracks a record of what was sent on the last heartbeat. The next diff   *)
+  (* we send is the changes between the current local and the state we last  *)
+  (* sent.                                                                   *)
+  (***************************************************************************)
+    sent: [state: SUBSET Refs, version: 0..MaxVersions],
   (***************************************************************************)
   (* Counts local changes since the tracker started. Used so a receiver of a *)
   (* replication message can tell if a snapshot is newer than what it holds  *)
@@ -195,13 +207,23 @@ Trackers ==
 Messages ==
   { m \in 
       [
+        kind: {"snapshot"},
         src: Nodes, 
         dest: Nodes, 
         state: SUBSET Refs, 
         age: 0..MaxDelay,
         stamp: Stamps
-      ] :
-      m.src /= m.dest 
+      ] \cup [
+        kind: {"diff"},
+        src: Nodes,
+        dest: Nodes,
+        age: 0..MaxDelay,
+        stamp: Stamps,
+        from: 0..MaxVersions,
+        joins: SUBSET Refs,
+        leaves: SUBSET Refs
+      ]
+      : m.src /= m.dest 
   }
 
 (***************************************************************************)
@@ -259,12 +281,14 @@ InitialPeer ==
     mark |-> [
       incarnation |-> 0,
       version |-> 0
-    ]
+    ],
+    behind |-> FALSE
   ]
 
 InitialTracker ==
   [
     local |-> {},
+    sent |-> [state |-> {}, version |-> 0],
     version |-> 0,
     running |-> FALSE,
     starts |-> 0,
@@ -429,6 +453,7 @@ Stop(n) ==
   /\ msgs' = {msg \in msgs : msg.dest /= n}
             (* This is the goodbye message in case of graceful shutdown *)
             \cup { [
+              kind |-> "snapshot",
               src |-> n, 
               dest |-> d, 
               state |-> {}, 
@@ -499,60 +524,118 @@ Untrack(n, r) ==
 (***************************************************************************)
 
 (***************************************************************************)
+(* Builds a heartbeat message.                                             *)
+(*                                                                         *)
+(* This can be either a snapshot, containing the full current state, or a  *)
+(* diff                                                                    *)
+(* containing changes since to apply on top of from version.               *)
+(***************************************************************************)
+Heartbeat(n, d, kind) == 
+  IF kind = "snapshot"
+  THEN [
+    kind |-> "snapshot",
+    src |-> n, 
+    dest |-> d, 
+    state |-> trackers[n].local, 
+    age |-> 0,
+    stamp |-> TrackerStamp(n)
+  ]
+  ELSE LET diff == Diff(trackers[n].sent.state, trackers[n].local)
+    IN [
+      kind |-> "diff",
+      src |-> n, 
+      dest |-> d, 
+      age |-> 0,
+      stamp |-> TrackerStamp(n),
+      from |-> trackers[n].sent.version,
+      joins |-> diff.joins,
+      leaves |-> diff.leaves
+    ]
+
+(***************************************************************************)
 (* One heartbeat period for the whole cluster: every live tracker's timer  *)
-(* fires. Each one sends a snapshot of its own refs to every running       *)
-(* peer and counts one more silent period for every peer. Every message    *)
-(* already in flight gets a period older.                                  *)
+(* fires. Each one sends a snapshot of its own refs or a diff to every     *)
+(* running peer and counts one more silent period for every peer. Every    *)
+(* message already in flight gets a period older.                          *)
 (*                                                                         *)
 (* The guard is the delay bound: time cannot advance while a message has   *)
 (* been in flight for MaxDelay periods already. It has to be delivered or  *)
 (* dropped first.                                                          *)
 (*                                                                         *)
-(* A message is a source/destination pair even though the implementation  *)
+(* A message is a source/destination pair even though the implementation   *)
 (* broadcasts, since every broadcast goes from one source to every         *)
 (* destination.                                                            *)
 (***************************************************************************)
 Tick ==
-  /\ \A msg \in msgs : msg.age < MaxDelay
-  /\ msgs' = { [msg EXCEPT !.age = msg.age + 1] : msg \in msgs }
-             \cup UNION { { 
-               [
-                 src |-> n, 
-                 dest |-> d, 
-                 state |-> trackers[n].local, 
-                 age |-> 0,
-                 stamp |-> TrackerStamp(n)
-                ] : d \in RunningPeers(n) } : n \in Running }
-  (* Every live tracker counts one more silent period for every peer. The *)
-  (* tracker record is rebuilt with its peers function replaced; stopped   *)
-  (* trackers are left as they are.                                        *)
-  /\ trackers' = [n \in Nodes |->
-       IF trackers[n].running
-       THEN [trackers[n] EXCEPT !.peers = [m \in Nodes |->
-              [trackers[n].peers[m] EXCEPT !.silent_beats = IncrementBeat(@)]]]
-       ELSE trackers[n]]
-  /\ UNCHANGED <<used, drops, clients>>
+  \E kinds \in [Running -> {"snapshot", "diff"}] :
+    /\ \A msg \in msgs : msg.age < MaxDelay
+    /\ msgs' = { [msg EXCEPT !.age = msg.age + 1] : msg \in msgs }
+               \cup UNION { { Heartbeat(n, d, kinds[n]) : d \in RunningPeers(n) } : 
+               n \in Running }
+    (* Every live tracker counts one more silent period for every peer. The *)
+    (* tracker record is rebuilt with its peers function replaced; stopped   *)
+    (* trackers are left as they are.                                        *)
+    /\ trackers' = [n \in Nodes |->
+         IF trackers[n].running
+         THEN [trackers[n] 
+                EXCEPT 
+                  !.peers = [m \in Nodes |->
+                      [trackers[n].peers[m] EXCEPT !.silent_beats = IncrementBeat(@)]
+                  ],
+                  (* Record what was sent in the message *)
+                  !.sent = [state |-> trackers[n].local, version |-> trackers[n].version]
+              ]
+         ELSE trackers[n]]
+    /\ UNCHANGED <<used, drops, clients>>
 
+
+(***************************************************************************)
+(* The message is a snapshot which can be applied                          *)
+(***************************************************************************)
+CanApplySnapshot(msg, peer) ==
+  /\ msg.kind = "snapshot"
+  /\ NewerThan(msg.stamp, peer.mark) 
+  
+(***************************************************************************)
+(* The message is a diff that applies to the version we hold               *)
+(***************************************************************************)
+CanApplyDiff(msg, peer) ==
+  /\ msg.kind = "diff"
+  /\ msg.stamp.incarnation = peer.mark.incarnation
+  /\ msg.from = peer.mark.version 
+
+(***************************************************************************)
+(* The message is a diff to a version we don't have so we're behind        *)
+(***************************************************************************)
+BehindDiff(msg, peer) ==
+  /\ msg.kind = "diff"
+  /\ NewerThan(msg.stamp, peer.mark)
+  /\ ~CanApplyDiff(msg, peer)
 
 (***************************************************************************)
 (* A message is delivered to a node which incorporates the updates into    *)
-(* its                                                                     *)
-(* replica set for the source node of the message.                         *)
+(* its replica set for the source node of the message.                     *)
 (***************************************************************************)
 Deliver(msg) ==
+  LET peer == trackers[msg.dest].peers[msg.src]
+      updated ==
+        CASE CanApplySnapshot(msg, peer) ->
+               [peer EXCEPT !.replica = msg.state,
+                            !.mark = msg.stamp,
+                            !.behind = FALSE]
+          []   CanApplyDiff(msg, peer) ->
+               [peer EXCEPT !.replica = (@ \ msg.leaves) \cup msg.joins,
+                            !.mark = msg.stamp]
+          []   BehindDiff(msg, peer) ->
+               [peer EXCEPT !.behind = TRUE]
+          []   OTHER -> peer
+  IN
   /\ trackers[msg.dest].running
   /\ msg \in msgs
   /\ msgs' = msgs \ {msg}
-  /\ IF NewerThan(msg.stamp, trackers[msg.dest].peers[msg.src].mark)
-      THEN 
-        /\ trackers' = [trackers EXCEPT
-             ![msg.dest].peers[msg.src].replica = msg.state,
-             ![msg.dest].peers[msg.src].mark = msg.stamp,
-             ![msg.dest].peers[msg.src].silent_beats = 0]
-        /\ clients' = Notify(msg.dest, NodeView(msg.dest), NodeView(msg.dest)')
-      ELSE 
-        /\ trackers' = [trackers EXCEPT ![msg.dest].peers[msg.src].silent_beats = 0]
-        /\ UNCHANGED clients
+  /\ trackers' = [trackers EXCEPT ![msg.dest].peers[msg.src] =
+                    [updated EXCEPT !.silent_beats = 0]]
+  /\ clients' = Notify(msg.dest, NodeView(msg.dest), NodeView(msg.dest)')
   /\ UNCHANGED <<used, drops>>
 
 (***************************************************************************)
