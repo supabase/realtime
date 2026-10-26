@@ -1,5 +1,5 @@
 ---------- MODULE Presence7 -------------
-EXTENDS Integers
+EXTENDS Integers, Sequences
 
 (***************************************************************************)
 (* This is the seventh step of modelling presence: the client contract.    *)
@@ -24,6 +24,10 @@ CONSTANTS
   (* Bound on how many times a tracker can start on a node                   *)
   (***************************************************************************)
   MaxStarts,
+  (***************************************************************************)
+  (* Bound on how many times a client can subscribe to a tracker.            *)
+  (***************************************************************************)
+  MaxSubscribes,
   (***************************************************************************)
   (* How much time has passed before we assume a node is dead, if we haven't *)
   (* heard from it. This is measured in "heartbeats" since we have no        *)
@@ -50,6 +54,13 @@ CONSTANTS
   (* loss is unbounded, and the protocol is only required to keep repairing. *)
   (***************************************************************************)
   BoundedLoss,
+  (***************************************************************************)
+  (* Witness switch that allows us to test what happens when a client        *)
+  (* receives state before subscribing. By default we subscribe then receive *)
+  (* state, the reverse should fail due to the gap between receiving state   *)
+  (* and subscribing for updates.                                            *)
+  (***************************************************************************)
+  SubscribeFirst,
   MaxDrops
 
 VARIABLES 
@@ -63,6 +74,11 @@ VARIABLES
   msgs,
   \* whether the tracker is interested, i.e. running, on a node 
   interested,
+  (***************************************************************************)
+  (* The client state on each node. A function mapping Node to Client        *)
+  (* record.                                                                 *)
+  (***************************************************************************)
+  clients,
   \* counter for how many times the tracker has started per node
   starts,
   (***************************************************************************)
@@ -74,23 +90,34 @@ VARIABLES
   drops
 
 ASSUME MaxStarts \in Nat
+ASSUME MaxSubscribes \in Nat
 ASSUME SilenceThreshold \in Nat \ {0}
 ASSUME MaxDelay \in Nat
 ASSUME PurgeEnabled \in BOOLEAN
 ASSUME BoundedLoss \in BOOLEAN
+ASSUME SubscribeFirst \in BOOLEAN
 ASSUME MaxDrops \in Nat
 
 (***************************************************************************)
-(* The design constraint this step exists to state. A tracker's silence    *)
-(* counter for a peer goes up every tick, including the tick in which the  *)
-(* peer's latest snapshot was sent and is still in flight. A snapshot sent  *)
-(* in tick r can arrive as late as tick r + MaxDelay, by which time the     *)
-(* counter reads MaxDelay + 1. The threshold must be strictly above that,   *)
-(* or a merely late heartbeat is indistinguishable from a dead peer.        *)
+(* MaxDelay is a promise about the transport, in heartbeat periods: a      *)
+(* message is delivered or lost within MaxDelay ticks of being sent. The   *)
+(* model enforces it by not letting Tick fire while a message that old is  *)
+(* still in flight, so time cannot move on until it is settled.            *)
+(*                                                                         *)
+(* SilenceThreshold is the receiver's rule for declaring a peer dead: it   *)
+(* has not heard from the peer for that many ticks.                        *)
+(*                                                                         *)
+(* The two have to agree. The counter goes up in the tick the snapshot was *)
+(* sent, and up to MaxDelay more times before the snapshot can land, so a  *)
+(* heartbeat from a healthy peer can arrive with the counter at            *)
+(* MaxDelay + 1. If the threshold is not above that, a merely late         *)
+(* heartbeat is indistinguishable from a dead peer and a perfect network   *)
+(* produces spurious leaves. This is a constraint on the implementation's  *)
+(* timer settings, not something the protocol can get right on its own.    *)
 (***************************************************************************)
 ASSUME MaxDelay + 1 < SilenceThreshold
 
-vars == <<local, used, replica, msgs, starts, interested, silent_beats, drops>>
+vars == <<local, used, replica, msgs, starts, interested, silent_beats, drops, clients>>
 
 (***************************************************************************)
 (* The set of all possible messages. Self-addressed messages are excluded. *)
@@ -99,12 +126,56 @@ Messages ==
   { m \in [src: Nodes, dest: Nodes, state: SUBSET Refs, age: 0..MaxDelay] :
       m.src /= m.dest }
 
+ClientMessages ==
+  [kind: {"state"}, refs: SUBSET Refs] \cup [kind: {"diff"}, joins: SUBSET Refs, leaves: SUBSET Refs]
+
+(***************************************************************************)
+(* The set of all possible clients states.                                 *)
+(***************************************************************************)
+Clients ==
+  [
+    (***************************************************************************)
+    (* Tracks subscriptions, i.e. whether a node's client is subscribed for    *)
+    (* updates.                                                                *)
+    (***************************************************************************)
+    subscribed: BOOLEAN,
+    (***************************************************************************)
+    (* Counter for how many times the node's client has subscribed. This is a  *)
+    (* bounding function.                                                      *)
+    (***************************************************************************)
+    subscribes: 0..MaxSubscribes,
+    (***************************************************************************)
+    (* Tracks whether a client has been sent the state message or not. Sync    *)
+    (* has to happen once per subscription, so this variable tracks that.      *)
+    (***************************************************************************)
+    synced: BOOLEAN,
+    (***************************************************************************)
+    (* Tracks the client's view of the state. This is what the client knows    *)
+    (* about the tracker state, either from the initial sync or by applying    *)
+    (* updates via diff messages.                                              *)
+    (***************************************************************************)
+    view: SUBSET Refs,
+    (***************************************************************************)
+    (* The message inbox for the client. This is a sequence of the messages    *)
+    (* sent to the client, that it hasn't yet processed.                       *)
+    (***************************************************************************)
+    inbox: Seq(ClientMessages)
+  ]
+
+(***************************************************************************)
+(* This defines a client's initial state, where it's not subscribed to a   *)
+(* node.                                                                   *)
+(***************************************************************************)
+InitialClient ==
+  [subscribed |-> FALSE, subscribes |-> 0, synced |-> FALSE, view |-> {}, inbox |-> <<>>]
+
 Init == 
     /\ local = [n \in Nodes |-> {}]
     /\ replica = [n \in Nodes |-> [m \in Nodes |-> {}]]
     /\ msgs = {}
     /\ used = {}
     /\ interested = [n \in Nodes |-> FALSE]
+    /\ clients = [n \in Nodes |-> InitialClient]
     /\ starts = [n \in Nodes |-> 0]
     /\ silent_beats = [n \in Nodes |-> [m \in Nodes |-> 0]]
     /\ drops = 0
@@ -115,6 +186,7 @@ TypeOK ==
   /\ msgs \subseteq Messages
   /\ used \subseteq Refs
   /\ interested \in [Nodes -> BOOLEAN]
+  /\ clients \in [Nodes -> Clients]
   /\ starts \in [Nodes -> 0..MaxStarts]
   /\ silent_beats \in [Nodes -> [Nodes -> 0..SilenceThreshold]]
   /\ drops \in 0..MaxDrops
@@ -131,6 +203,34 @@ InterestedPeers(n) == Interested \ {n}
 Uninterested == {n \in Nodes : ~interested[n]}
 
 (***************************************************************************)
+(* Gets a node's view of the state of the entries. This will return a set  *)
+(* of Refs that the node believes are "live", based on its local state    *)
+(* and the state of its replicas.                                          *)
+(***************************************************************************)
+NodeView(n) ==
+  local[n] \cup UNION { replica[n][m] : m \in Peers(n) }
+
+(***************************************************************************)
+(* Gets the diff of two views of the ref state. Returned as a diff client  *)
+(* message record.                                                         *)
+(***************************************************************************)
+Diff(old, new) ==
+  [
+    kind |-> "diff",
+    joins |-> new \ old,
+    leaves |-> old \ new
+  ]
+
+(***************************************************************************)
+(* Adds a diff message to the inbox for a node's client if the client is   *)
+(* subscribed and there are any changes to send.                           *)
+(***************************************************************************)
+Notify(n, old, new) ==
+  IF clients[n].subscribed /\ old /= new
+  THEN [clients EXCEPT ![n].inbox = Append(@, Diff(old, new))]
+  ELSE clients
+
+(***************************************************************************)
 (* Start represents a tracker starting from scratch on a node, the cold    *)
 (* start before it has received any track calls.                           *)
 (***************************************************************************)
@@ -141,7 +241,7 @@ Start(n) ==
   /\ replica' = [replica EXCEPT ![n] = [m \in Nodes |-> {}]]
   /\ starts' = [starts EXCEPT ![n] = starts[n] + 1]
   /\ silent_beats' = [silent_beats EXCEPT ![n] = [m \in Nodes |-> 0]]
-  /\ UNCHANGED <<local, used, msgs, drops>>
+  /\ UNCHANGED <<local, used, msgs, drops, clients>>
 
 (***************************************************************************)
 (* Stop is the tracker shutting down gracefully, once every client on the  *)
@@ -156,7 +256,7 @@ Stop(n) ==
   /\ msgs' = {msg \in msgs : msg.dest /= n}
             (* This is the goodbye message in case of graceful shutdown *)
             \cup { [src |-> n, dest |-> d, state |-> {}, age |-> 0] : d \in InterestedPeers(n) }
-  /\ UNCHANGED <<local, starts, used, silent_beats, drops>>
+  /\ UNCHANGED <<local, starts, used, silent_beats, drops, clients>>
 
 (***************************************************************************)
 (* A crash happens when a live node fails and dies. It's local state is    *)
@@ -169,7 +269,7 @@ Crash(n) ==
   /\ interested' = [interested EXCEPT ![n] = FALSE]
   /\ replica' = [replica EXCEPT ![n] = [m \in Nodes |-> {}]]
   /\ msgs' = {msg \in msgs : msg.dest /= n}
-  /\ UNCHANGED <<starts, used, silent_beats, drops>>
+  /\ UNCHANGED <<starts, used, silent_beats, drops, clients>>
 
 (***************************************************************************)
 (* Purge is how we detect that a peer node has crashed. If we haven't      *)
@@ -182,6 +282,7 @@ Purge(n, m) ==
   /\ interested[n]
   /\ silent_beats[n][m] = SilenceThreshold
   /\ replica' = [replica EXCEPT ![n][m] = {}]
+  /\ clients' = Notify(n, NodeView(n), NodeView(n)')
   /\ UNCHANGED <<used, starts, silent_beats, local, interested, msgs, drops>>
 
 (***************************************************************************)
@@ -191,6 +292,7 @@ Track(n, r) == /\ r \notin used
               /\ interested[n]
               /\ local' = [local EXCEPT ![n] = local[n] \cup {r}]
               /\ used' = used \cup {r}
+              /\ clients' = Notify(n, NodeView(n), NodeView(n)')
               /\ UNCHANGED <<replica, msgs, starts, interested, silent_beats, drops>>
 
 (***************************************************************************)
@@ -198,6 +300,7 @@ Track(n, r) == /\ r \notin used
 (***************************************************************************)
 Untrack(n, r) == /\ r \in local[n]
                 /\ local' = [local EXCEPT ![n] = local[n] \ {r}]
+                /\ clients' = Notify(n, NodeView(n), NodeView(n)')
                 /\ UNCHANGED <<used, replica, msgs, starts, interested, silent_beats, drops>>
 
 IncrementBeat(beats) ==
@@ -228,7 +331,7 @@ Tick ==
   /\ silent_beats' = [n \in Nodes |-> [m \in Nodes |->
                        IF interested[n] THEN IncrementBeat(silent_beats[n][m])
                                         ELSE silent_beats[n][m]]]
-  /\ UNCHANGED <<used, replica, local, interested, starts, drops>>
+  /\ UNCHANGED <<used, replica, local, interested, starts, drops, clients>>
 
 
 (***************************************************************************)
@@ -241,6 +344,7 @@ Deliver(msg) ==
   /\ msg \in msgs
   /\ msgs' = msgs \ {msg}
   /\ replica' = [replica EXCEPT ![msg.dest][msg.src] = msg.state]
+  /\ clients' = Notify(msg.dest, NodeView(msg.dest), NodeView(msg.dest)')
   /\ silent_beats' = [silent_beats EXCEPT ![msg.dest][msg.src] = 0]
   /\ UNCHANGED <<used, local, interested, starts, drops>>
 
@@ -261,7 +365,7 @@ Drop(msg) ==
   /\ BoundedLoss => drops < MaxDrops
   /\ msgs' = msgs \ {msg}
   /\ drops' = IF BoundedLoss THEN drops + 1 ELSE drops
-  /\ UNCHANGED <<used, local, replica, interested, starts, silent_beats>>
+  /\ UNCHANGED <<used, local, replica, interested, starts, silent_beats, clients>>
 
 (***************************************************************************)
 (* Fairness rules out runs where something is always possible but never    *)
