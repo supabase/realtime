@@ -286,6 +286,25 @@ Notify(n, old, new) ==
   ELSE clients
 
 (***************************************************************************)
+(* Creates a sync message from a node with includes it current state.      *)
+(***************************************************************************)
+SyncMessage(n) ==
+  [
+    kind |-> "state",
+    refs |-> NodeView(n)
+  ]
+
+(***************************************************************************)
+(* Resets a client's state, leaving the subscribed count intact.           *)
+(***************************************************************************)
+ResetClient(n) ==
+  [clients EXCEPT 
+    ![n].view = {}, 
+    ![n].inbox = <<>>, 
+    ![n].subscribed = FALSE, 
+    ![n].synced = FALSE]
+
+(***************************************************************************)
 (* `^{\large\textbf{Tracker Lifecycle Behaviours}}^'                                     *)
 (***************************************************************************)
 
@@ -310,6 +329,7 @@ Start(n) ==
 Stop(n) ==
   /\ interested[n]
   /\ local[n] = {}
+  /\ ~(clients[n].synced \/ clients[n].subscribed)
   /\ interested' = [interested EXCEPT ![n] = FALSE]
   /\ replica' = [replica EXCEPT ![n] = [m \in Nodes |-> {}]]
   /\ msgs' = {msg \in msgs : msg.dest /= n}
@@ -328,7 +348,8 @@ Crash(n) ==
   /\ interested' = [interested EXCEPT ![n] = FALSE]
   /\ replica' = [replica EXCEPT ![n] = [m \in Nodes |-> {}]]
   /\ msgs' = {msg \in msgs : msg.dest /= n}
-  /\ UNCHANGED <<starts, used, silent_beats, drops, clients>>
+  /\ clients' = ResetClient(n)
+  /\ UNCHANGED <<starts, used, silent_beats, drops>>
 
 (***************************************************************************)
 (* Purge is how we detect that a peer node has crashed. If we haven't      *)
@@ -341,8 +362,8 @@ Purge(n, m) ==
   /\ interested[n]
   /\ silent_beats[n][m] = SilenceThreshold
   /\ replica' = [replica EXCEPT ![n][m] = {}]
-  /\ clients' = Notify(n, NodeView(n), NodeView(n)')
   /\ UNCHANGED <<used, starts, silent_beats, local, interested, msgs, drops>>
+  /\ clients' = Notify(n, NodeView(n), NodeView(n)')
 
 (***************************************************************************)
 (* `^{\large\textbf{Tracking Behaviours}}^'                                *)
@@ -355,19 +376,19 @@ Track(n, r) == /\ r \notin used
               /\ interested[n]
               /\ local' = [local EXCEPT ![n] = local[n] \cup {r}]
               /\ used' = used \cup {r}
-              /\ clients' = Notify(n, NodeView(n), NodeView(n)')
               /\ UNCHANGED <<replica, msgs, starts, interested, silent_beats, drops>>
+              /\ clients' = Notify(n, NodeView(n), NodeView(n)')
 
 (***************************************************************************)
 (* Untracking a ref from a node removes it from the node's set of refs    *)
 (***************************************************************************)
 Untrack(n, r) == /\ r \in local[n]
                 /\ local' = [local EXCEPT ![n] = local[n] \ {r}]
-                /\ clients' = Notify(n, NodeView(n), NodeView(n)')
                 /\ UNCHANGED <<used, replica, msgs, starts, interested, silent_beats, drops>>
+                /\ clients' = Notify(n, NodeView(n), NodeView(n)')
 
 (***************************************************************************)
-(* `^{\large\textbf{Network Behaviours}}'                                   *)
+(* `^{\large\textbf{Network Behaviours}}^'                                   *)
 (***************************************************************************)
 
 (***************************************************************************)
@@ -406,9 +427,9 @@ Deliver(msg) ==
   /\ msg \in msgs
   /\ msgs' = msgs \ {msg}
   /\ replica' = [replica EXCEPT ![msg.dest][msg.src] = msg.state]
-  /\ clients' = Notify(msg.dest, NodeView(msg.dest), NodeView(msg.dest)')
   /\ silent_beats' = [silent_beats EXCEPT ![msg.dest][msg.src] = 0]
   /\ UNCHANGED <<used, local, interested, starts, drops>>
+  /\ clients' = Notify(msg.dest, NodeView(msg.dest), NodeView(msg.dest)')
 
 (***************************************************************************)
 (* Delivery of some message on one link: whatever is in flight from s to   *)
@@ -431,13 +452,65 @@ Drop(msg) ==
 
 
 (***************************************************************************)
-(* `^{\large\textbf{Client Behaviours}}'                                   *)
+(* `^{\large\textbf{Client Behaviours}}^'                                   *)
 (***************************************************************************)
 
+(***************************************************************************)
+(* The client subscribes to updates from the tracker.                      *)
+(*                                                                         *)
+(* This can only be done if the tracker is live, the client isn't already  *)
+(* subscribed, and we haven't hit max subscribes.                          *)
+(***************************************************************************)
 Subscribe(n) ==
   /\ interested[n]
-  /\ ~clients[n].synced
+  /\ ~clients[n].subscribed
+  /\ clients[n].subscribes < MaxSubscribes
+  /\ (SubscribeFirst \/ clients[n].synced)
+  /\ clients' = [clients EXCEPT ![n] = [@ EXCEPT !.subscribed = TRUE, !.subscribes = @ + 1]]
+  /\ UNCHANGED <<local, used, replica, interested, starts, silent_beats, drops, msgs>>
 
+(***************************************************************************)
+(* The client asks for a sync from the tracker.                            *)
+(*                                                                         *)
+(* This creates a new state message in the client's inbox.                 *)
+(***************************************************************************)
+Sync(n) ==
+  /\ interested[n]
+  /\ ~clients[n].synced
+  /\ (~SubscribeFirst \/ clients[n].subscribed)
+  /\ clients' = [clients EXCEPT ![n].inbox = Append(@, SyncMessage(n)), ![n].synced = TRUE ]
+  /\ UNCHANGED <<local, used, replica, interested, starts, silent_beats, drops, msgs>>
+
+(***************************************************************************)
+(* A client consumes the first message in its inbox.                       *)
+(*                                                                         *)
+(* If the message is a "state" message the clients refs are set to that    *)
+(* refs in the message.                                                    *)
+(*                                                                         *)
+(* If the message is a "diff" message, the changes are applied to the      *)
+(* client state.                                                           *)
+(***************************************************************************)
+Consume(n) ==
+  /\ Len(clients[n].inbox) > 0
+  /\ LET msg == Head(clients[n].inbox) 
+    IN IF msg.kind = "state"
+       THEN clients' = [clients EXCEPT ![n].view = msg.refs, ![n].inbox = Tail(@)]
+       ELSE clients' = [clients EXCEPT ![n].view = (@ \ msg.leaves) \cup msg.joins, ![n].inbox = Tail(@)]
+  /\ UNCHANGED <<local, used, replica, interested, starts, silent_beats, drops, msgs>>
+
+
+(***************************************************************************)
+(* A client unsubscribes from the tracker. This removes all state in the   *)
+(* client, except the subscribes count.                                    *)
+(***************************************************************************)
+Unsubscribe(n) ==
+  /\ clients[n].subscribed
+  /\ clients' = ResetClient(n)
+  /\ UNCHANGED <<local, used, replica, interested, starts, silent_beats, drops, msgs>>
+
+(***************************************************************************)
+(* `^{\large\textbf{Invariants and Assertions}}^'                          *)
+(***************************************************************************)
 
 (***************************************************************************)
 (* Next Action can be either tracking or untracking a valid ref on a valid *)
@@ -445,16 +518,13 @@ Subscribe(n) ==
 (* or a message has been dropped.                                          *)
 (***************************************************************************)
 Next == 
+     \/ Tick
      \/ \E n \in Nodes, r \in Refs : Track(n, r) \/ Untrack(n, r)
      \/ \E n \in Nodes : \E m \in Peers(n) : Purge(n, m)
-     \/ Tick
      \/ \E n \in Nodes : Start(n) \/ Stop(n) \/ Crash(n)
+     \/ \E n \in Nodes : Subscribe(n) \/ Sync(n) \/ Consume(n) \/ Unsubscribe(n)
      \/ \E msg \in Messages : Deliver(msg)
      \/ \E msg \in Messages : Drop(msg)
-
-(***************************************************************************)
-(* `^{\large\textbf{Invariants and Assertions}}^'                          *)
-(***************************************************************************)
 
 (***************************************************************************)
 (* Fairness rules out runs where something is always possible but never    *)
@@ -546,6 +616,21 @@ FalsePositivesUnreachable ==
   \A n \in Interested : \A m \in InterestedPeers(n) :
     (replica[n][m] /= {} /\ replica[n][m] = local[m])
       => silent_beats[n][m] < SilenceThreshold
+
+(***************************************************************************)
+(* If a client is subscribed, synced, and its inbox is empty the its view  *)
+(* should match the tracker its connected to.                              *)
+(***************************************************************************)
+ClientViewsAreCorrect ==
+  \A n \in Nodes : 
+    (clients[n].subscribed /\ clients[n].synced /\ clients[n].inbox = <<>>)
+    => clients[n].view = NodeView(n)
+
+(***************************************************************************)
+(* Client inboxes are bounded to length 2, so we don't run forever.        *)
+(***************************************************************************)
+InboxBounded ==
+  \A n \in Nodes: Len(clients[n].inbox) <= 2
 
 (***************************************************************************)
 (* We are Converged when all replicas across all nodes match the local set *)

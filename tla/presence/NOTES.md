@@ -471,17 +471,139 @@ from a delayed message except a replica going backwards for one period
 when `MaxDelay` is at least 1. That becomes corruption rather than a
 transient once heartbeats carry diffs.
 
+## Step 7: `Presence7.tla`, client contract
+
+What: the last hop, from the tracker on a node to a client connected to
+that node. The client is sent one full copy of what the node knows, then
+only changes: refs that joined and refs that left. It keeps its own copy
+and applies each message in turn. The property is that a client that has
+received the full copy and has nothing left to process holds exactly what
+the node knows, its own entries plus every replica.
+
+The module starts as a copy of step 5 with the tracker lifecycle renamed:
+Join is Start, Leave is Stop, `MaxJoins` is `MaxStarts`. Join and leave
+are what the client contract calls an entry appearing and disappearing,
+and this step adds that contract. Earlier modules keep the old names.
+
+Topics: a client subscribes to one topic per channel and is sent only that
+topic's state and diffs. Authorisation for the topic is decided before the
+subscription and the tracker never sees it. The model keeps one client per
+node receiving the unfiltered stream, because a topic's client is a
+projection of it. Filtering a set of refs by topic commutes with union and
+difference, so a client receiving the filtered state and filtered diffs
+ends with the filtered view exactly when the unfiltered client ends with
+the whole view. A ref's topic never changes, since a ref is one track
+call. The subscribe-then-read race is per topic in the same way: a change
+to the topic in the gap is lost just as it would be for the whole view.
+
+For the implementation this means the tracker fans one tenant stream out
+by topic: a diff computed over the tenant's view is split into per-topic
+diffs before publishing, and a state read is filtered by topic. Both are
+projections of the two things the model has. Putting topics in the module,
+a constant function from refs to topics and one client per node and topic,
+would check the same argument at a larger state space and find nothing the
+argument misses. Revisit only if step 8 makes diffs or checksums per topic.
+
+This is the only step where Phoenix terms map onto the model: the state
+message is `presence_state`, a diff is `presence_diff`, a ref is `phx_ref`.
+An update with the same key is an untrack and a track, which matches the
+SDK: it matches metas by ref, and an update produces a new ref with the old
+one as `phx_ref_prev`.
+
+Properties:
+
+- A client that is subscribed, has been sent the state message, and has
+  nothing left in its inbox holds exactly the node's view
+  (`ClientViewsAreCorrect`). An invariant, since every state has to satisfy
+  it, not just eventually.
+
+Decisions recorded in the module:
+
+- One client per node, as a record: subscribed, synced, view, inbox, and a
+  subscribe counter for the bound. The inbox is a sequence, not a set,
+  because the path from channel to socket to SDK is one ordered stream and
+  the contract depends on that order. Heartbeats stay a set.
+- Subscribe and Sync are separate actions so the race between them is in
+  the model. `SubscribeFirst` picks the order; TRUE is the default.
+- Every action that changes a node's view, Track, Untrack, Deliver and
+  Purge, queues a diff for the node's client through one helper, which
+  sends nothing when no client is subscribed or the view did not change.
+  Empty diffs are never sent.
+- Consume applies a state message by replacing the view and a diff by
+  removing the leaves then adding the joins, as set operations.
+- Crash resets the node's client, the link semantics from step 6. Stop
+  requires an idle client. Unsubscribe resets everything but the counter.
+- The default config checks invariants only, with a state constraint
+  bounding each inbox at two messages. The inbox is unbounded on paths where
+  the client never consumes, so without the constraint the state space is
+  infinite. TLC's liveness results are unreliable under a state constraint,
+  so the tracker's liveness properties are checked in a separate config with
+  the client switched off (`MaxSubscribes = 0`), where no constraint is
+  needed and the state space is exactly step 5's.
+
+Finding 1: the cold-start order is subscribe for changes first, then read
+and send the state. The other order loses any change that lands between
+the read and the subscription: it is in neither the state message nor a
+diff, and the client has no way to know. TLC finds it in 6 states. The
+current channel code already subscribes before it reads; the model shows
+why that order is the right one and that it is not optional.
+
+Finding 2: with subscribe first, a diff can reach the client before the
+state message. The client applies it to an empty view and the state message
+then replaces that view, which is correct. The contract point is that the
+state message must be applied as a replacement, or a merge equivalent to
+one, not as a set of joins. The SDK's state sync does this.
+
+Finding 3: the client multiplies the state space by about 290, from 31,133
+states to 8,970,793, because every tracker state is now paired with every
+reachable view and inbox. Still 72 seconds at two nodes and two refs. Two
+ways to pull it back if step 8 needs the room: symmetry on nodes and refs,
+which is unsound for liveness but sound for this invariants-only config,
+and an inbox bound of one, which still finds the ordering witness.
+
+By construction, not found by TLC: a track on a node reaches the node's own
+clients immediately, before any heartbeat, the local fast path. And every
+step 5 transient is client-visible here. A stale snapshot or a purge of a
+live peer is a leave followed by a join for an entry that never went
+anywhere. Nothing in this step fixes that; it is what snapshot mode under
+loss looks like from the outside.
+
+Runs (2026-10-26), all at two nodes, two refs, `MaxStarts = 2`,
+`SilenceThreshold = 2`, `MaxDelay = 0`, unbounded loss:
+
+| Config | Client | Distinct states | Depth | Time | Result |
+|---|---|---|---|---|---|
+| `Presence7.cfg` | on, inbox bounded at 2 | 8,970,793 | 42 | 72s | holds |
+| `Presence7_live.cfg` | off | 31,133 | 20 | 1s | holds |
+
+The liveness config's state count matches `Presence5.cfg` exactly, which is
+the check that the module edits did not disturb the tracker.
+
+Witnesses:
+
+- `Presence7_w1.cfg`: `SubscribeFirst = FALSE`. `ClientViewsAreCorrect`
+  violated in 6 states: Start, Sync of an empty view, Track, Subscribe,
+  Consume. The client holds nothing while the node holds one ref.
+
+Observations:
+
+- Keep the two-config split in step 8: the invariant config with the client
+  on and the constraint, the liveness config with the client off. The
+  client contract is a safety property, so losing liveness in the config
+  that checks it costs nothing.
+- A liveness property about the client itself, a subscribed client
+  eventually catches up, is not checked. It would need weak fairness on
+  Consume and a bounded-loss run with a constraint high enough not to cut
+  off any real behaviour.
+- Not yet run: the no-loss witness pair for the delay constraint, which
+  would replace the `ASSUME` with a checked claim, and `MaxDelay = 1`.
+
 ## Roadmap
 
 Each step adds one mechanism and the property it is responsible for. The
 order is chosen so that each protocol decision is made with a counterexample
 in hand.
 
-7. **Client contract.** What a subscribed socket receives: a full state at
-   sync, then diffs. Invariant: state plus diffs always equals the node's
-   current view. The only step where Phoenix terms appear. Topics are a
-   projection of the payload and stay out of the model. Decides cold-start
-   ordering and the local fast path.
 8. **Diff and version heartbeats.** The heartbeat nondeterministically
    carries full state, a diff with a sequence number, or a version only. Gap
    detection, snapshot request, and an incarnation id so a receiver can tell
