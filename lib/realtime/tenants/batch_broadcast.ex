@@ -100,7 +100,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
       {:ok, public_outcomes ++ private_outcomes}
     else
       %Ecto.Changeset{valid?: false} = changeset ->
-        {{:error, changeset}, changeset_outcomes(changeset)}
+        {{:error, changeset}, changeset_outcomes(changeset, messages)}
 
       {:error, :too_many_requests, _} = error ->
         with_outcome(error, :rate_limit_exceeded, messages)
@@ -240,12 +240,13 @@ defmodule Realtime.Tenants.BatchBroadcast do
   defp authorization_error_code({:error, :query_canceled, _}), do: :query_canceled
   defp authorization_error_code(_error), do: :unable_to_set_policies
 
-  # An invalid message rejects the whole batch, but each message gets its own reason. Without message
-  # changesets (`messages` is missing or not a list), the whole request counts once.
-  defp changeset_outcomes(changeset) do
+  # An invalid message rejects the whole batch, but each message gets its own reason. When an entry is not
+  # an object, `cast_embed` keeps no message changesets, so every entry counts as invalid and the count comes
+  # from `params`, what the client sent.
+  defp changeset_outcomes(changeset, params) do
     case get_change(changeset, :messages) do
       [_ | _] = message_changesets -> Enum.map(message_changesets, &message_outcome/1)
-      _ -> [RequestMetrics.classify_broadcast_error(:invalid_request)]
+      _ -> List.duplicate(RequestMetrics.classify_broadcast_error(:invalid_request), message_count(params))
     end
   end
 

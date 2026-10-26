@@ -368,6 +368,22 @@ defmodule RealtimeWeb.BroadcastRequestOutcomeTest do
       assert [%{transport: :http, outcome: :rejected, reason: :invalid_request}] = outcomes(ref, tenant)
     end
 
+    # A message that is not an object makes Ecto reject the whole list, so there are no message
+    # changesets. Each entry still counts, as invalid_request.
+    test "a list with entries that are not objects counts every entry as invalid", %{
+      conn: conn,
+      ref: ref,
+      tenant: tenant
+    } do
+      assert batch(conn, [message(), "oops", message(%{"payload" => oversized(tenant)})]).status == 422
+
+      assert [
+               %{transport: :http, outcome: :rejected, reason: :invalid_request},
+               %{outcome: :rejected, reason: :invalid_request},
+               %{outcome: :rejected, reason: :invalid_request}
+             ] = outcomes(ref, tenant)
+    end
+
     test "an oversized message is rejected as payload_size_exceeded", %{conn: conn, ref: ref, tenant: tenant} do
       assert batch(conn, [message(%{"payload" => oversized(tenant)})]).status == 422
 

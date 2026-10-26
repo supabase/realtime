@@ -629,6 +629,19 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
                BatchBroadcast.broadcast(nil, tenant, messages, false)
     end
 
+    test "a list with entries that are not objects gives one invalid_request per entry", %{tenant: tenant} do
+      messages = %{
+        messages: [
+          %{topic: random_string(), payload: %{"data" => "test"}, event: "event1"},
+          "oops",
+          %{topic: random_string(), payload: %{"data" => "test"}, event: "event2"}
+        ]
+      }
+
+      assert {{:error, %Ecto.Changeset{}}, outcomes} = BatchBroadcast.broadcast(nil, tenant, messages, false)
+      assert outcomes == List.duplicate({:rejected, :invalid_request}, 3)
+    end
+
     test "a suspended tenant rejects every message", %{tenant: tenant} do
       messages = %{
         messages: [
