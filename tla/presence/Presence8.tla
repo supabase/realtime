@@ -360,7 +360,7 @@ Stop(n) ==
   /\ ~(clients[n].synced \/ clients[n].subscribed)
   /\ trackers' = [trackers EXCEPT
        ![n].interested = FALSE,
-       ![n].peers = [m \in Nodes |-> [trackers[n].peers[m] EXCEPT !.replica = {}]]]
+       ![n].peers = [m \in Nodes |-> InitialPeer]]
   /\ msgs' = {msg \in msgs : msg.dest /= n}
             (* This is the goodbye message in case of graceful shutdown *)
             \cup { [src |-> n, dest |-> d, state |-> {}, age |-> 0] : d \in InterestedPeers(n) }
@@ -376,7 +376,7 @@ Crash(n) ==
   /\ trackers' = [trackers EXCEPT
        ![n].local = {},
        ![n].interested = FALSE,
-       ![n].peers = [m \in Nodes |-> [trackers[n].peers[m] EXCEPT !.replica = {}]]]
+       ![n].peers = [m \in Nodes |-> InitialPeer]]
   /\ msgs' = {msg \in msgs : msg.dest /= n}
   /\ clients' = ResetClient(n)
   /\ UNCHANGED <<used, drops>>
@@ -617,7 +617,7 @@ ReplicaIsOwned ==
 (***************************************************************************)
 NoTrackerNoState ==
   /\ \A n \in Uninterested : trackers[n].local = {}
-  /\ \A n \in Uninterested : \A m \in Nodes : Replica(n, m) = {}
+  /\ \A n \in Uninterested : \A m \in Nodes : trackers[n].peers[m] = InitialPeer
   /\ \A n \in Uninterested : \A msg \in msgs : msg.dest /= n
 
 (***************************************************************************)
