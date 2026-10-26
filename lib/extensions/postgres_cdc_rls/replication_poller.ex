@@ -496,6 +496,14 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
               )
           end
         end
+
+        if real_rows != [] do
+          Realtime.Telemetry.execute(
+            [:realtime, :replication, :poller, :changes, :dispatch],
+            %{count: length(real_rows)},
+            %{tenant: tenant_id}
+          )
+        end
     end
 
     {:ok, {length(real_rows), slot_changes_count}}
