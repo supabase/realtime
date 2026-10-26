@@ -4,5 +4,5 @@
   "pg15_latest": "supabase/postgres:15.19.0.004",
   "pg17": "supabase/postgres:17.11.0.004",
   "orioledb17": "supabase/postgres:17.11.0.004-orioledb",
-  "multigres": "ghcr.io/multigres/multigres-cluster-supabase:sha-b80767a"
+  "multigres": "ghcr.io/multigres/multigres-cluster-supabase:sha-d063d0b"
 }
