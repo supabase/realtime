@@ -94,23 +94,21 @@ defmodule RealtimeWeb.BroadcastSingleController do
     persist = parse_boolean(conn.query_params["persist"])
     auth_params = build_auth_params(conn, tenant)
 
-    with {:ok, payload, content_type} <- payload(conn),
-         :ok <-
-           SingleBroadcast.broadcast(auth_params, tenant, topic, event, payload, content_type,
-             private: private,
-             persist: persist
-           ) do
-      send_resp(conn, :accepted, "")
-    else
-      {:error, :invalid_json_object} ->
-        # This error comes from the local `payload/1` function and is not recorded anywhere else,
-        # so record it here.
-        RequestMetrics.record(:broadcast, :http, tenant.external_id, {:rejected, :invalid_request})
-        {:error, :unprocessable_entity, "Payload must be a JSON object"}
+    result =
+      RequestMetrics.track(:broadcast, :http, tenant.external_id, fn ->
+        with {:ok, payload, content_type} <- payload(conn) do
+          SingleBroadcast.broadcast(auth_params, tenant, topic, event, payload, content_type,
+            private: private,
+            persist: persist
+          )
+        else
+          {:error, :invalid_json_object} ->
+            {{:error, :unprocessable_entity, "Payload must be a JSON object"},
+             RequestMetrics.classify_broadcast_error(:invalid_request)}
+        end
+      end)
 
-      error ->
-        error
-    end
+    with :ok <- result, do: send_resp(conn, :accepted, "")
   end
 
   defp payload(%{private: %{realtime_binary_body: body}}), do: {:ok, body, :binary}

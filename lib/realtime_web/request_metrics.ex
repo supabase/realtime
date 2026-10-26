@@ -1,8 +1,8 @@
 defmodule RealtimeWeb.RequestMetrics do
   @moduledoc """
-  Records one outcome per client request.
+  Records one outcome per client request, or one per message for a request that carries several.
 
-  Every request ends in exactly one of four outcomes:
+  Every request, or message, ends in exactly one of four outcomes:
 
     * `:success` - handled
     * `:rejected` - refused because of the client's request: policy deny, payload too large,
@@ -15,12 +15,11 @@ defmodule RealtimeWeb.RequestMetrics do
   socket. A success has no reason of its own, so the reason `:none` appears only on a success.
   """
 
-  alias Realtime.Database
-
   @type request :: :join | :broadcast | :presence | :access_token | :postgres_changes
   @type transport :: :ws | :http
   @type kind :: :rejected | :internal_failure | :upstream_failure
   @type outcome :: :success | {kind(), atom()}
+  @type outcomes :: outcome() | [outcome()]
   @type tenant :: String.t()
 
   @event [:realtime, :client_request]
@@ -33,16 +32,17 @@ defmodule RealtimeWeb.RequestMetrics do
   def event, do: @event
 
   @doc """
-  Runs `fun.()`, which must return `{result, outcome}`, and emits exactly one event.
+  Runs `fun.()`, which must return `{result, outcomes}`, and emits one event for each outcome.
 
-  The outcome is recorded and `result` is returned untouched, so the caller gets the same channel
-  callback result it would get without tracking.
+  `outcomes` is one outcome, or a list of them for a request that carries several messages. The
+  outcomes are recorded and `result` is returned untouched, so the caller gets the same result it
+  would get without tracking.
 
   If `fun` raised, exited, or threw, `{:internal_failure, kind}` is emitted, where `kind` is `:error`,
-  `:exit` or `:throw`. The exception is re-raised with `:erlang.raise/3` so the channel crashes
+  `:exit` or `:throw`. The exception is re-raised with `:erlang.raise/3` so the caller crashes
   exactly as it does today.
   """
-  @spec track(request(), transport(), tenant(), (-> {result, outcome()})) :: result when result: tuple()
+  @spec track(request(), transport(), tenant(), (-> {result, outcomes()})) :: result when result: term()
   def track(request, transport, tenant, fun) do
     fun.()
   catch
@@ -50,8 +50,8 @@ defmodule RealtimeWeb.RequestMetrics do
       record(request, transport, tenant, {:internal_failure, kind})
       :erlang.raise(kind, reason, __STACKTRACE__)
   else
-    {result, outcome} ->
-      record(request, transport, tenant, outcome)
+    {result, outcomes} ->
+      outcomes |> List.wrap() |> Enum.each(&record(request, transport, tenant, &1))
       result
   end
 
@@ -68,22 +68,6 @@ defmodule RealtimeWeb.RequestMetrics do
 
   def record(request, transport, tenant, {kind, reason}) when kind != :success do
     emit(request, transport, tenant, kind, reason)
-  end
-
-  def attach_router_handler do
-    :telemetry.attach(
-      "realtime-web-request-metrics-router-handler",
-      [:phoenix, :router_dispatch, :exception],
-      &__MODULE__.router_exception/4,
-      nil
-    )
-  end
-
-  def router_exception(_event, _measurements, metadata, _config) do
-    if metadata.route in ["/api/broadcast", "/api/broadcast/:topic/events/:event"] do
-      {:ok, tenant} = Database.get_external_id(metadata.conn.host)
-      record(:broadcast, :http, tenant, {:internal_failure, metadata.kind})
-    end
   end
 
   @doc """

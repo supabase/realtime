@@ -11,7 +11,6 @@ defmodule Realtime.Application do
   alias Realtime.Tenants.ReplicationConnection
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Migrations
-  alias RealtimeWeb.RequestMetrics
 
   defmodule JwtSecretError, do: defexception([:message])
   defmodule JwtClaimValidatorsError, do: defexception([:message])
@@ -42,7 +41,6 @@ defmodule Realtime.Application do
         Enum.into([region: System.get_env("REGION"), cluster: System.get_env("CLUSTER")], primary_config.metadata)
       )
 
-    RequestMetrics.attach_router_handler()
     opentelemetry_setup()
     check_for_local_ipv6_host()
     Realtime.Crypto.check_config()

@@ -18,8 +18,6 @@ defmodule Realtime.Tenants.BatchBroadcast do
   alias RealtimeWeb.RequestMetrics
   alias RealtimeWeb.TenantBroadcaster
 
-  @payload_size_exceeded_error "Payload size exceeds tenant limit"
-
   embedded_schema do
     embeds_many :messages, Message do
       field :event, :string
@@ -29,6 +27,15 @@ defmodule Realtime.Tenants.BatchBroadcast do
     end
   end
 
+  @type result :: :ok | {:error, term()} | {:error, atom(), String.t()}
+
+  @doc """
+  Broadcasts a batch of messages.
+
+  Returns `{result, outcomes}`. `result` is what the API answers with. `outcomes` has one outcome for
+  each message, because the API answers `:ok` even when it drops the messages of a private topic.
+  The messages of a topic whose authorization gives no answer are dropped without an outcome.
+  """
   @spec broadcast(
           auth_params :: map() | nil,
           tenant :: Tenant.t(),
@@ -36,7 +43,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
             messages: list(%{id: String.t(), topic: String.t(), payload: map(), event: String.t(), private: boolean()})
           },
           super_user :: boolean()
-        ) :: :ok | {:error, atom() | Ecto.Changeset.t()}
+        ) :: {result(), [RequestMetrics.outcome()]}
   def broadcast(auth_params, tenant, messages, super_user \\ false)
 
   def broadcast(%Plug.Conn{} = conn, %Tenant{} = tenant, messages, super_user) do
@@ -51,9 +58,8 @@ defmodule Realtime.Tenants.BatchBroadcast do
     broadcast(auth_params, %Tenant{} = tenant, messages, super_user)
   end
 
-  def broadcast(_auth_params, %Tenant{suspend: true} = tenant, messages, _super_user) do
-    record_outcome_per_message(tenant, messages, :tenant_suspended)
-    {:error, :forbidden, "Tenant is suspended"}
+  def broadcast(_auth_params, %Tenant{suspend: true}, messages, _super_user) do
+    with_outcome({:error, :forbidden, "Tenant is suspended"}, :tenant_suspended, messages)
   end
 
   def broadcast(auth_params, %Tenant{} = tenant, messages, super_user) do
@@ -67,76 +73,41 @@ defmodule Realtime.Tenants.BatchBroadcast do
         |> Enum.group_by(fn event -> Map.get(event, :private, false) end)
 
       # Handle events for public channel
-      events
-      |> Map.get(false, [])
-      |> Enum.each(fn message ->
-        send_message_and_count(tenant, events_per_second_rate, message, true)
-      end)
+      public_outcomes =
+        events
+        |> Map.get(false, [])
+        |> Enum.map(fn message ->
+          send_message_and_count(tenant, events_per_second_rate, message, true)
+          :success
+        end)
 
-      # Handle events for private channel
-      events
-      |> Map.get(true, [])
-      |> Enum.group_by(fn event -> Map.get(event, :topic) end)
-      |> Enum.each(fn {topic, events} ->
-        if super_user do
-          Enum.each(events, fn message -> send_message_and_count(tenant, events_per_second_rate, message, false) end)
-        else
-          case permissions_for_message(tenant, auth_params, topic) do
-            %Policies{broadcast: %BroadcastPolicies{write: true}} ->
-              Enum.each(events, fn message -> send_message_and_count(tenant, events_per_second_rate, message, false) end)
+      # Handle events for private channel. Each topic is authorized once, and all of its messages
+      # get the outcome of that check.
+      private_outcomes =
+        events
+        |> Map.get(true, [])
+        |> Enum.group_by(fn event -> Map.get(event, :topic) end)
+        |> Enum.flat_map(fn {topic, events} ->
+          outcome = authorize_topic(tenant, auth_params, topic, super_user)
 
-            %Policies{broadcast: %BroadcastPolicies{}} ->
-              record_outcome_per_message(tenant, events, :unauthorized)
-
-            {:error, :tenant_database_unavailable} ->
-              record_outcome_per_message(tenant, events, :unable_to_connect_to_project)
-
-            {:error, init_error} when init_error in [:initializing, :tenant_database_connection_initializing] ->
-              record_outcome_per_message(tenant, events, :initializing_project_connection)
-
-            {:error, :tenant_db_too_many_connections} ->
-              record_outcome_per_message(tenant, events, :database_lack_of_connections)
-
-            {:error, :connect_rate_limit_reached} ->
-              record_outcome_per_message(tenant, events, :database_connection_rate_limit_reached)
-
-            {:error, :rpc_error, _} ->
-              record_outcome_per_message(tenant, events, :unable_to_handle_broadcast)
-
-            {:error, :rls_policy_error, _} ->
-              record_outcome_per_message(tenant, events, :rls_policy_error)
-
-            {:error, :query_canceled, _} ->
-              record_outcome_per_message(tenant, events, :query_canceled)
-
-            {:error, :increase_connection_pool} ->
-              record_outcome_per_message(tenant, events, :increase_connection_pool)
-
-            {:error, :missing_partition} ->
-              record_outcome_per_message(tenant, events, :missing_partition)
-
-            {:error, _} ->
-              record_outcome_per_message(tenant, events, :unable_to_set_policies)
-
-            _ ->
-              nil
+          if outcome == :success do
+            Enum.each(events, fn message -> send_message_and_count(tenant, events_per_second_rate, message, false) end)
           end
-        end
-      end)
 
-      :ok
+          outcome_per_message(outcome, events)
+        end)
+
+      {:ok, public_outcomes ++ private_outcomes}
     else
       %Ecto.Changeset{valid?: false} = changeset ->
-        record_outcome_per_message(tenant, messages, changeset)
-        {:error, changeset}
+        {{:error, changeset}, changeset_outcomes(changeset)}
 
       {:error, :too_many_requests, _} = error ->
-        record_outcome_per_message(tenant, messages, :rate_limit_exceeded)
-        error
+        with_outcome(error, :rate_limit_exceeded, messages)
     end
   end
 
-  def broadcast(_, nil, _, _), do: {:error, :tenant_not_found}
+  def broadcast(_, nil, _, _), do: {{:error, :tenant_not_found}, []}
 
   defp changeset(payload, attrs, tenant) do
     payload
@@ -164,7 +135,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
 
     case Tenants.validate_payload_size(tenant, payload) do
       :ok -> changeset
-      _ -> add_error(changeset, :payload, @payload_size_exceeded_error)
+      _ -> add_error(changeset, :payload, "Payload size exceeds tenant limit", validation: :payload_size)
     end
   end
 
@@ -190,8 +161,6 @@ defmodule Realtime.Tenants.BatchBroadcast do
       RealtimeChannel.MessageDispatcher,
       :broadcast
     )
-
-    record_outcome(tenant, :success)
   end
 
   defp permissions_for_message(_, nil, _), do: nil
@@ -227,54 +196,70 @@ defmodule Realtime.Tenants.BatchBroadcast do
     end
   end
 
-  defp record_outcome(tenant, :success) do
-    RequestMetrics.record(:broadcast, :http, tenant.external_id, :success)
+  # Every message gets the same outcome. `params` is what the client sent, so the count comes from it.
+  defp with_outcome(result, error_code, params) do
+    outcome = RequestMetrics.classify_broadcast_error(error_code)
+    {result, List.duplicate(outcome, message_count(params))}
   end
 
-  defp record_outcome(tenant, error_code) do
-    RequestMetrics.record(:broadcast, :http, tenant.external_id, RequestMetrics.classify_broadcast_error(error_code))
-  end
+  defp message_count(%{"messages" => messages}), do: message_count(messages)
+  defp message_count(%{messages: messages}), do: message_count(messages)
+  defp message_count(messages) when is_list(messages), do: length(messages)
+  # No list of messages, so the whole request counts once
+  defp message_count(_params), do: 1
 
-  # Record one outcome per message, with the reason derived from the changeset errors.
-  # For an invalid changeset, check if any message error is a payload size error,
-  # else use :invalid_request.
-  defp record_outcome_per_message(tenant, _messages, %Ecto.Changeset{valid?: false} = changeset) do
-    case get_change(changeset, :messages) do
-      [_ | _] = message_changesets ->
-        for message_changeset <- message_changesets do
-          cond do
-            message_changeset.valid? ->
-              # This message was dropped because of its siblings, so it is recorded as a batch rejection.
-              record_outcome(tenant, :batch_rejected)
+  # Super users are not authorized per topic. A nil outcome means there is no answer to count, so the
+  # messages of that topic are dropped without an outcome.
+  defp authorize_topic(_tenant, _auth_params, _topic, true), do: :success
 
-            Enum.find(message_changeset.errors, fn {field, {error, _}} ->
-              field == :payload and error == @payload_size_exceeded_error
-            end) ->
-              record_outcome(tenant, :payload_size_exceeded)
-
-            true ->
-              record_outcome(tenant, :invalid_request)
-          end
-        end
-
-      _ ->
-        # If there are no message changesets, record one outcome for the whole request.
-        record_outcome(tenant, :invalid_request)
+  defp authorize_topic(tenant, auth_params, topic, false) do
+    case permissions_for_message(tenant, auth_params, topic) do
+      %Policies{broadcast: %BroadcastPolicies{write: true}} -> :success
+      %Policies{broadcast: %BroadcastPolicies{}} -> RequestMetrics.classify_broadcast_error(:unauthorized)
+      {:error, _} = error -> RequestMetrics.classify_broadcast_error(authorization_error_code(error))
+      {:error, _, _} = error -> RequestMetrics.classify_broadcast_error(authorization_error_code(error))
+      _ -> nil
     end
   end
 
-  # Record one outcome per message, with the same reason for all of them.
-  defp record_outcome_per_message(tenant, %{"messages" => messages}, error_code) do
-    record_outcome_per_message(tenant, messages, error_code)
+  defp outcome_per_message(nil, _events), do: []
+  defp outcome_per_message(outcome, events), do: List.duplicate(outcome, length(events))
+
+  defp authorization_error_code({:error, :tenant_database_unavailable}), do: :unable_to_connect_to_project
+
+  defp authorization_error_code({:error, reason})
+       when reason in [:initializing, :tenant_database_connection_initializing],
+       do: :initializing_project_connection
+
+  defp authorization_error_code({:error, :tenant_db_too_many_connections}), do: :database_lack_of_connections
+  defp authorization_error_code({:error, :connect_rate_limit_reached}), do: :database_connection_rate_limit_reached
+  defp authorization_error_code({:error, :increase_connection_pool}), do: :increase_connection_pool
+  defp authorization_error_code({:error, :missing_partition}), do: :missing_partition
+  defp authorization_error_code({:error, :rpc_error, _}), do: :unable_to_handle_broadcast
+  defp authorization_error_code({:error, :rls_policy_error, _}), do: :rls_policy_error
+  defp authorization_error_code({:error, :query_canceled, _}), do: :query_canceled
+  defp authorization_error_code(_error), do: :unable_to_set_policies
+
+  # An invalid message rejects the whole batch, but each message gets its own reason. Without message
+  # changesets (`messages` is missing or not a list), the whole request counts once.
+  defp changeset_outcomes(changeset) do
+    case get_change(changeset, :messages) do
+      [_ | _] = message_changesets -> Enum.map(message_changesets, &message_outcome/1)
+      _ -> [RequestMetrics.classify_broadcast_error(:invalid_request)]
+    end
   end
 
-  # Record one outcome per message, with the same reason for all of them.
-  defp record_outcome_per_message(tenant, messages, error_code) when is_list(messages) do
-    Enum.each(messages, fn _ -> record_outcome(tenant, error_code) end)
+  # A valid message is only dropped because of the others in its batch
+  defp message_outcome(%Ecto.Changeset{valid?: true}), do: RequestMetrics.classify_broadcast_error(:batch_rejected)
+
+  defp message_outcome(%Ecto.Changeset{errors: errors}) do
+    # A payload size error names the cause, even when the message has other errors
+    if Enum.any?(errors, &payload_size_error?/1) do
+      RequestMetrics.classify_broadcast_error(:payload_size_exceeded)
+    else
+      RequestMetrics.classify_broadcast_error(:invalid_request)
+    end
   end
 
-  # We don't have a list of messages, so just record one outcome for the whole request.
-  defp record_outcome_per_message(tenant, _messages, error_code) do
-    record_outcome(tenant, error_code)
-  end
+  defp payload_size_error?({field, {_message, opts}}), do: field == :payload and opts[:validation] == :payload_size
 end

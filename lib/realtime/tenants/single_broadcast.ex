@@ -30,8 +30,6 @@ defmodule Realtime.Tenants.SingleBroadcast do
   alias RealtimeWeb.Socket.UserBroadcast
   alias RealtimeWeb.TenantBroadcaster
 
-  @payload_size_exceeded_error "Payload size exceeds tenant limit"
-
   @primary_key false
   embedded_schema do
     field :topic, :string
@@ -45,6 +43,7 @@ defmodule Realtime.Tenants.SingleBroadcast do
   end
 
   @type content_type :: :json | :binary
+  @type result :: :ok | {:error, term()} | {:error, atom(), String.t()}
 
   @doc """
   Broadcasts a single message to the specified topic.
@@ -68,13 +67,11 @@ defmodule Realtime.Tenants.SingleBroadcast do
           map() | binary(),
           content_type(),
           keyword()
-        ) :: :ok | {:error, term()} | {:error, atom(), String.t()}
+        ) :: {result(), RequestMetrics.outcome()}
   def broadcast(auth_params, tenant, topic, event, payload, content_type, opts \\ [])
 
-  def broadcast(_auth_params, %Tenant{suspend: true} = tenant, _topic, _event, _payload, _content_type, _opts) do
-    record_outcome(tenant, :tenant_suspended)
-
-    {:error, :forbidden, "Tenant is suspended"}
+  def broadcast(_auth_params, %Tenant{suspend: true}, _topic, _event, _payload, _content_type, _opts) do
+    with_outcome({:error, :forbidden, "Tenant is suspended"}, :tenant_suspended)
   end
 
   def broadcast(auth_params, %Tenant{} = tenant, topic, event, payload, content_type, opts) do
@@ -98,17 +95,14 @@ defmodule Realtime.Tenants.SingleBroadcast do
         )
       else
         send_message_and_count(tenant, events_per_second_rate, topic, event, payload, content_type, _public? = true)
-        record_outcome(tenant, :success)
-        :ok
+        {:ok, :success}
       end
     else
       %Ecto.Changeset{valid?: false} = changeset ->
-        record_changeset_error(changeset, tenant)
-        {:error, changeset}
+        with_outcome({:error, changeset}, changeset_error_code(changeset))
 
       {:error, :too_many_requests, _} = error ->
-        record_outcome(tenant, :rate_limit_exceeded)
-        error
+        with_outcome(error, :rate_limit_exceeded)
     end
   end
 
@@ -167,7 +161,7 @@ defmodule Realtime.Tenants.SingleBroadcast do
         :json ->
           case Tenants.validate_payload_size(tenant, payload) do
             :ok -> changeset
-            _ -> add_error(changeset, :payload, @payload_size_exceeded_error)
+            _ -> add_error(changeset, :payload, "Payload size exceeds tenant limit", validation: :payload_size)
           end
 
         :binary when is_binary(payload) ->
@@ -178,7 +172,7 @@ defmodule Realtime.Tenants.SingleBroadcast do
           payload_size = :erlang.external_size(payload)
 
           if payload_size > max_payload_size do
-            add_error(changeset, :payload, @payload_size_exceeded_error)
+            add_error(changeset, :payload, "Payload size exceeds tenant limit", validation: :payload_size)
           else
             changeset
           end
@@ -197,64 +191,61 @@ defmodule Realtime.Tenants.SingleBroadcast do
          {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}} = policies} <-
            permissions_for_message(db_conn, auth_params, topic, persist?) do
       send_message_and_count(tenant, rate_counter, topic, event, payload, content_type, false)
-      record_outcome(tenant, :success)
       if persist?, do: maybe_persist(policies.broadcast, db_conn, tenant, topic, event, payload)
-      :ok
+      {:ok, :success}
     else
       {:ok, %Policies{}} ->
-        record_outcome(tenant, :unauthorized)
-        {:error, :forbidden, "Unauthorized"}
+        with_outcome({:error, :forbidden, "Unauthorized"}, :unauthorized)
 
       {:error, :rls_policy_error, error} ->
-        record_outcome(tenant, :rls_policy_error)
         log_error("RlsPolicyError", error)
-        {:error, :unprocessable_entity, "RLS policy error"}
+        with_outcome({:error, :unprocessable_entity, "RLS policy error"}, :rls_policy_error)
 
       {:error, :query_canceled, error} ->
-        record_outcome(tenant, :query_canceled)
         log_error("QueryCanceled", error)
-        {:error, :unprocessable_entity, "Query canceled"}
+        with_outcome({:error, :unprocessable_entity, "Query canceled"}, :query_canceled)
 
       {:error, :rpc_error, error} ->
-        record_outcome(tenant, :unable_to_handle_broadcast)
         log_error("RpcError", error)
-        {:error, :internal_server_error, "RPC error"}
+        with_outcome({:error, :internal_server_error, "RPC error"}, :unable_to_handle_broadcast)
 
       {:error, :missing_partition} ->
-        record_outcome(tenant, :missing_partition)
         log_error("MissingPartition", "Realtime was unable to find the expected messages partition")
-        {:error, :unprocessable_entity, "Missing messages partition"}
+        with_outcome({:error, :unprocessable_entity, "Missing messages partition"}, :missing_partition)
 
       {:error, :increase_connection_pool} ->
-        record_outcome(tenant, :increase_connection_pool)
-        {:error, :too_many_requests, "Connection pool exhausted"}
+        with_outcome({:error, :too_many_requests, "Connection pool exhausted"}, :increase_connection_pool)
 
       {:error, :tenant_database_unavailable} ->
-        record_outcome(tenant, :unable_to_connect_to_project)
         log_error("UnableToConnectToProject", "Realtime was unable to connect to the project database")
-        {:error, :unprocessable_entity, "Tenant database unavailable"}
+        with_outcome({:error, :unprocessable_entity, "Tenant database unavailable"}, :unable_to_connect_to_project)
 
       {:error, :initializing} ->
-        record_outcome(tenant, :initializing_project_connection)
-        {:error, :unprocessable_entity, "Tenant database initializing"}
+        with_outcome({:error, :unprocessable_entity, "Tenant database initializing"}, :initializing_project_connection)
 
       {:error, :tenant_database_connection_initializing} ->
-        record_outcome(tenant, :initializing_project_connection)
-        {:error, :unprocessable_entity, "Tenant database connection initializing"}
+        with_outcome(
+          {:error, :unprocessable_entity, "Tenant database connection initializing"},
+          :initializing_project_connection
+        )
 
       {:error, :tenant_db_too_many_connections} ->
-        record_outcome(tenant, :database_lack_of_connections)
         log_error("DatabaseLackOfConnections", "Database can't accept more connections, Realtime won't connect")
-        {:error, :unprocessable_entity, "Tenant database has too many connections"}
+
+        with_outcome(
+          {:error, :unprocessable_entity, "Tenant database has too many connections"},
+          :database_lack_of_connections
+        )
 
       {:error, :connect_rate_limit_reached} ->
-        record_outcome(tenant, :database_connection_rate_limit_reached)
-        {:error, :unprocessable_entity, "Connect rate limit reached"}
+        with_outcome(
+          {:error, :unprocessable_entity, "Connect rate limit reached"},
+          :database_connection_rate_limit_reached
+        )
 
       {:error, error} ->
-        record_outcome(tenant, :unable_to_set_policies)
         log_error("UnableToSetPolicies", error)
-        {:error, :internal_server_error, "Unable to authorize broadcast"}
+        with_outcome({:error, :internal_server_error, "Unable to authorize broadcast"}, :unable_to_set_policies)
     end
   end
 
@@ -341,21 +332,12 @@ defmodule Realtime.Tenants.SingleBroadcast do
     }
   end
 
-  defp record_outcome(tenant, :success) do
-    RequestMetrics.record(:broadcast, :http, tenant.external_id, :success)
+  defp with_outcome(result, error_code), do: {result, RequestMetrics.classify_broadcast_error(error_code)}
+
+  # A payload size error names the cause, even when the changeset has other errors.
+  defp changeset_error_code(changeset) do
+    if Enum.any?(changeset.errors, &payload_size_error?/1), do: :payload_size_exceeded, else: :invalid_request
   end
 
-  defp record_outcome(tenant, error_code) do
-    RequestMetrics.record(:broadcast, :http, tenant.external_id, RequestMetrics.classify_broadcast_error(error_code))
-  end
-
-  defp record_changeset_error(changeset, tenant) do
-    if Enum.find(changeset.errors, fn {field, {error, _}} ->
-         field == :payload and error == @payload_size_exceeded_error
-       end) do
-      record_outcome(tenant, :payload_size_exceeded)
-    else
-      record_outcome(tenant, :invalid_request)
-    end
-  end
+  defp payload_size_error?({field, {_message, opts}}), do: field == :payload and opts[:validation] == :payload_size
 end

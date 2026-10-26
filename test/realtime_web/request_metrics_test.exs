@@ -36,6 +36,30 @@ defmodule RealtimeWeb.RequestMetricsTest do
       refute_receive {@event, ^ref, _, %{tenant: ^tenant}}
     end
 
+    test "records one event for each outcome of a list", %{ref: ref, tenant: tenant} do
+      outcomes = [:success, {:rejected, :unauthorized}, :success]
+
+      assert :ok = RequestMetrics.track(:broadcast, :http, tenant, fn -> {:ok, outcomes} end)
+
+      assert_receive {@event, ^ref, _, %{tenant: ^tenant, outcome: :success, reason: :none}}
+      assert_receive {@event, ^ref, _, %{tenant: ^tenant, outcome: :rejected, reason: :unauthorized}}
+      assert_receive {@event, ^ref, _, %{tenant: ^tenant, outcome: :success, reason: :none}}
+      refute_receive {@event, ^ref, _, %{tenant: ^tenant}}
+    end
+
+    test "records nothing for an empty list of outcomes", %{ref: ref, tenant: tenant} do
+      assert :ok = RequestMetrics.track(:broadcast, :http, tenant, fn -> {:ok, []} end)
+
+      refute_receive {@event, ^ref, _, %{tenant: ^tenant}}
+    end
+
+    test "a crash is one internal failure, whatever the request carries", %{ref: ref, tenant: tenant} do
+      assert_raise RuntimeError, fn -> RequestMetrics.track(:broadcast, :http, tenant, fn -> raise "boom" end) end
+
+      assert_receive {@event, ^ref, _, %{tenant: ^tenant, transport: :http, outcome: :internal_failure}}
+      refute_receive {@event, ^ref, _, %{tenant: ^tenant}}
+    end
+
     # The result is not inspected, so any callback reply works and the socket is never touched.
     test "returns every reply shape unchanged", %{ref: ref, tenant: tenant, socket: socket} do
       for result <- [
