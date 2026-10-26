@@ -45,6 +45,11 @@ CONSTANTS
   (***************************************************************************)
   PurgeEnabled,
   (***************************************************************************)
+  (* A probe that allows us to disable trackers from requesting updates if   *)
+  (* they've fallen behind.                                                  *)
+  (***************************************************************************)
+  RequestsEnabled,
+  (***************************************************************************)
   (* Witness switch for the stabilisation property. When TRUE, Drop is      *)
   (* limited to MaxDrops over the whole behaviour, modelling a network that  *)
   (* eventually stops losing messages. The default model leaves it FALSE:   *)
@@ -98,6 +103,7 @@ ASSUME PurgeEnabled \in BOOLEAN
 ASSUME BoundedLoss \in BOOLEAN
 ASSUME SubscribeFirst \in BOOLEAN
 ASSUME MaxDrops \in Nat
+ASSUME RequestsEnabled \in BOOLEAN
 
 (***************************************************************************)
 (* MaxDelay is a promise about the transport, in heartbeat periods: a      *)
@@ -222,6 +228,11 @@ Messages ==
         from: 0..MaxVersions,
         joins: SUBSET Refs,
         leaves: SUBSET Refs
+      ] \cup [
+        kind: {"request"},
+        src: Nodes,
+        dest: Nodes,
+        age: 0..MaxDelay
       ]
       : m.src /= m.dest 
   }
@@ -337,6 +348,11 @@ Running == {n \in Nodes : trackers[n].running}
 (* Returns all running nodes that are peers of n                           *)
 (***************************************************************************)
 RunningPeers(n) == Running \ {n}
+
+(***************************************************************************)
+(* Returns all peers where the tracker state for n is behind               *)
+(***************************************************************************)
+BehindPeers(n) == { p \in RunningPeers(n) : trackers[n].peers[p].behind /\ RequestsEnabled }
 
 (***************************************************************************)
 (* Returns all nodes whose tracker is not running, stopped or crashed      *)
@@ -520,15 +536,14 @@ Untrack(n, r) ==
   /\ UNCHANGED <<used, msgs, drops>>
 
 (***************************************************************************)
-(* `^{\large\textbf{Network Behaviours}}^'                                   *)
+(* `^{\large\textbf{Network Behaviours}}^'                                 *)
 (***************************************************************************)
 
 (***************************************************************************)
 (* Builds a heartbeat message.                                             *)
 (*                                                                         *)
 (* This can be either a snapshot, containing the full current state, or a  *)
-(* diff                                                                    *)
-(* containing changes since to apply on top of from version.               *)
+(* diff containing changes since to apply on top of from version.          *)
 (***************************************************************************)
 Heartbeat(n, d, kind) == 
   IF kind = "snapshot"
@@ -553,6 +568,17 @@ Heartbeat(n, d, kind) ==
     ]
 
 (***************************************************************************)
+(* Builds a message to request a snapshot for n from d                     *)
+(***************************************************************************)
+Request(n, d) ==
+  [
+    kind |-> "request",
+    src |-> n,
+    dest |-> d,
+    age |-> 0
+  ]
+
+(***************************************************************************)
 (* One heartbeat period for the whole cluster: every live tracker's timer  *)
 (* fires. Each one sends a snapshot of its own refs or a diff to every     *)
 (* running peer and counts one more silent period for every peer. Every    *)
@@ -571,7 +597,8 @@ Tick ==
     /\ \A msg \in msgs : msg.age < MaxDelay
     /\ msgs' = { [msg EXCEPT !.age = msg.age + 1] : msg \in msgs }
                \cup UNION { { Heartbeat(n, d, kinds[n]) : d \in RunningPeers(n) } : 
-               n \in Running }
+                 n \in Running }
+               \cup UNION { { Request(n, d) : d \in BehindPeers(n) } : n \in Running }
     (* Every live tracker counts one more silent period for every peer. The *)
     (* tracker record is rebuilt with its peers function replaced; stopped   *)
     (* trackers are left as they are.                                        *)
@@ -632,7 +659,10 @@ Deliver(msg) ==
   IN
   /\ trackers[msg.dest].running
   /\ msg \in msgs
-  /\ msgs' = msgs \ {msg}
+  /\ msgs' = (msgs \ {msg}) 
+            \cup IF msg.kind = "request" /\ trackers[msg.src].running
+              THEN {Heartbeat(msg.dest, msg.src, "snapshot")}
+              ELSE {}
   /\ trackers' = [trackers EXCEPT ![msg.dest].peers[msg.src] =
                     [updated EXCEPT !.silent_beats = 0]]
   /\ clients' = Notify(msg.dest, NodeView(msg.dest), NodeView(msg.dest)')
@@ -645,6 +675,13 @@ Deliver(msg) ==
 (***************************************************************************)
 DeliverOn(s, d) ==
   \E msg \in msgs : msg.src = s /\ msg.dest = d /\ Deliver(msg)
+
+(***************************************************************************)
+(* Delivery of some message on a link of a particular kind. Same as        *)
+(* DeliverOn but include kind.                                             *)
+(***************************************************************************)
+DeliverOnKind(s, d, k) ==
+  \E msg \in msgs : msg.src = s /\ msg.dest = d /\ msg.kind = k /\ Deliver(msg)
 
 (***************************************************************************)
 (* We model lossy transmission by adding a Drop(msg) action, when this     *)
@@ -777,7 +814,7 @@ Next ==
 (***************************************************************************)
 Fairness ==
   /\ WF_vars(Tick)
-  /\ \A s \in Nodes : \A d \in Peers(s) : SF_vars(DeliverOn(s, d))
+  /\ \A s \in Nodes : \A d \in Peers(s) : \A k \in {"snapshot", "diff", "request"} : SF_vars(DeliverOnKind(s, d, k))
   /\ \A n \in Nodes : \A m \in Peers(n) : WF_vars(Purge(n, m))
 
 
@@ -864,8 +901,10 @@ FalsePositivesUnreachable ==
 (* probe makes the overtaking visible.                                     *)
 (***************************************************************************)
 NoStaleInFlight ==
+
   \A msg \in msgs :
-    ~NewerThan(trackers[msg.dest].peers[msg.src].mark, msg.stamp)
+    msg.kind /= "request"
+    => ~NewerThan(trackers[msg.dest].peers[msg.src].mark, msg.stamp)
 
 (***************************************************************************)
 (* If a client is subscribed, synced, and its inbox is empty the its view  *)

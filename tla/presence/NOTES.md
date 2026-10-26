@@ -41,6 +41,17 @@ every few seconds and again at the end; the option skips the partial passes.
   with it and a channel crash is a leave. A tracker restart is therefore a
   crash followed by a join, and the model has no separate restart. See
   step 6.
+- A link is never dead for good, for any one kind of message. Step 5 only
+  needed "something on the link eventually gets through". Once a link
+  carries snapshots, diffs and requests, loss that always picks the one
+  useful kind defeats repair while that weaker assumption still holds. From
+  step 8 the fairness assumption is per link per kind: the network does not
+  discriminate by message kind.
+- Every message carries the sender's incarnation and version, and only
+  their order is ever compared. The incarnation is any value strictly
+  greater for each new start of a tracker on a node; a timestamp taken at
+  tracker start serves, and nothing needs to be persisted across restarts.
+  See step 8.
 
 ## Protocol options
 
@@ -598,14 +609,187 @@ Observations:
 - Not yet run: the no-loss witness pair for the delay constraint, which
   would replace the `ASSUME` with a checked claim, and `MaxDelay = 1`.
 
-## Roadmap
+## Step 8: `Presence8.tla`, diff heartbeats, versions and recovery
 
-Each step adds one mechanism and the property it is responsible for. The
-order is chosen so that each protocol decision is made with a counterexample
-in hand.
+What: the heartbeat stops being a snapshot every time. Each tick a sender
+chooses, with no policy in the model, to send its full state or a diff
+since its last heartbeat. Every message carries a stamp, the sender's
+incarnation and version. A receiver keeps a mark per peer saying what its
+replica is at, applies a diff only to the baseline it was computed from,
+notices when it has missed something, and asks the sender for a snapshot.
+Everything from steps 5 and 7 stays: silence purge, goodbye, the client.
 
-8. **Diff and version heartbeats.** The heartbeat nondeterministically
-   carries full state, a diff with a sequence number, or a version only. Gap
-   detection, snapshot request, and an incarnation id so a receiver can tell
-   a restarted sender from a delayed message. Checked against the same
-   properties as the snapshot model, at three refs.
+Why this step: steady-state bytes. A snapshot every period re-sends every
+entry whether or not anything changed. Options 2 and 3 from the protocol
+options both need a version, a way to detect being behind, and a way to
+recover, so one model covers both. The choice of kind is nondeterministic,
+which makes every sending policy an implementation might pick a path in
+the state graph; the properties have to hold on all of them.
+
+Properties: the step 5 set unchanged, which is the real test, plus one:
+
+- A receiver whose mark for a peer equals that peer's current stamp holds
+  exactly that peer's entries (`MarkedReplicaIsCurrent`). An invariant with
+  no history variable. A diff applied to the wrong base is exactly what
+  breaks it.
+
+Before the protocol changed, two refactors with the step 7 configs as the
+regression test. Tracker state became one record per node, with a record
+per peer inside it, so that step 8's five new fields did not become five
+more global variables; all three step 7 counts were identical afterwards.
+Then Stop and Crash were made to reset the whole peer record, counters
+included, rather than only the replica, since a stopped tracker's counters
+are never read; the liveness config went from 31,133 states to 21,989, and
+that is the step 8 baseline. `interested` became `running` at the same
+time. Next quantifies delivery and loss over the messages actually in
+flight rather than every possible message, through named wrappers so
+traces keep their labels.
+
+Decisions recorded in the module:
+
+- The version counts local changes since the tracker started. Refs are
+  never reused, so it is bounded by twice the number of refs with no new
+  constant and no state constraint. The incarnation is the start count,
+  compared only for order. The implementation provides a timestamp taken
+  at tracker start; the pid identifies the channel link, not the
+  incarnation, and is never sent.
+- A receiver's mark per peer is the stamp its replica came from. Newer is
+  incarnation first, then version. A newer snapshot replaces the replica
+  and the mark. A diff applies only if its incarnation matches the mark and
+  its from-version equals the mark's version. A diff that is newer but does
+  not fit sets the peer's behind flag. Anything else is stale and ignored.
+  Every delivery resets the silence counter, since any message proves the
+  sender alive.
+- Purge resets the whole peer record, mark included, so a live peer's next
+  heartbeat counts as new after a false-positive purge.
+- Two heartbeat kinds, not three. A diff with nothing in it, from and to
+  equal and both sets empty, is the version-only heartbeat of option 2: a
+  receiver at that version applies nothing and resets its counter, a
+  receiver behind it sees a gap.
+- The choice of kind is per sender per tick, because the heartbeat is a
+  broadcast; every peer gets the same message.
+- Recovery is a request. A receiver that is behind sends one to the peer
+  every tick until it is no longer behind, so a lost request retries itself
+  with no extra state. The sender replies at once with a snapshot to the
+  requester alone, the one targeted message in the protocol. The reply
+  does not advance the sender's last-sent state, which is the base for the
+  broadcast. A request from a tracker that has since stopped gets no reply.
+- Fairness is strong, per link, per message kind.
+- The default config uses symmetry on nodes and refs. Sound because it
+  checks invariants only; the liveness config does not use it.
+- The committed liveness config runs at `MaxStarts = 1`. The liveness pass
+  is single-threaded and scales with states times the fairness tableau, and
+  per-kind fairness tripled the tableau. At `MaxStarts = 2` the two
+  properties were checked once each, separately, and hold; see the runs.
+
+Finding 1: messages overtake each other without any delivery delay. The
+probe `NoStaleInFlight` says no message in flight is older than its
+receiver's mark for the sender. It was meant to hold at `MaxDelay = 0` and
+fail at 1. It fails at both. At 0 the route is a restart: Stop, Start,
+Stop on one node with no tick between puts goodbyes from two incarnations
+in flight together, and the newer can land first. So the incarnation check
+is needed even on a network that never delivers late. At `MaxDelay = 1` it
+fails within one incarnation, two snapshots from one sender with the newer
+landing first, which is the version check's job. The step 5 properties
+cannot see either case, because per-link repair tolerates a replica going
+backwards for a period just as it tolerates a purge.
+
+Finding 2: diffs alone cannot repair a link. With requests switched off, a
+receiver that misses one message is behind for ever: every later diff is a
+gap, nothing obliges the sender ever to choose a snapshot, and delivery
+fairness is satisfied by the diffs that keep arriving. The bounded-loss
+form is the sharper one: spend the allowed drops, then the network is
+perfect, and the system still never settles. That is the justification for
+the request path, and both are kept as witnesses.
+
+Finding 3: per-link delivery fairness is not enough once a link carries
+messages of different usefulness. With requests in and the step 5
+fairness, TLC found a loop where every request gets through, every reply
+is dropped, and every diff gets through. "Something on the link eventually
+gets through" holds and the link never repairs. The assumption the request
+path needs is that loss does not discriminate by kind: strong fairness per
+link per kind. It is a stronger assumption about the network than step 5
+made, and it is now in the assumptions list.
+
+Finding 4: a reply can be addressed to a dead tracker. A request in flight
+when its sender crashes is still delivered, and the reply then goes to a
+node that will never take it. At `MaxDelay = 0` a message in flight blocks
+the tick, so every fair action was disabled and the behaviour stuttered
+with dead state never purged. Tick already only sends to running peers and
+Crash already discards messages to the node, but a reply made inside
+Deliver bypassed both. The reply now requires the requester to be running.
+The live config had been checking only TypeOK and the new invariant, so
+`NoTrackerNoState`, which says no message is in flight to a stopped node,
+was not in it and would have caught this in seconds; it is in now.
+
+Finding 5: the diff-application invariant is only fully checked by a run
+with no temporal properties. A liveness violation stops TLC before the
+state enumeration is complete, so a run that reports one has not checked
+the invariants over the whole space. During run 3, when `PairRepair` was
+expected to fail, `MarkedReplicaIsCurrent` was confirmed over the full
+1,093,309 states by a separate invariants-only run.
+
+Runs (2026-10-26), all at two nodes, two refs, `SilenceThreshold = 2`,
+`MaxDelay = 0`, client off unless stated:
+
+| Config | Starts | Loss | Requests | Distinct states | Depth | Time | Result |
+|---|---|---|---|---|---|---|---|
+| `Presence8_live.cfg` | 1 | unbounded | on | 572,160 | 28 | 15 min | holds |
+| `PairRepair` alone (ad hoc) | 2 | unbounded | on | 4,461,130 | 32 | 1h 12min | holds |
+| `DeadStatesArePurged` alone (ad hoc) | 2 | unbounded | on | 4,461,130 | 32 | 41 min | holds |
+| `Presence8_stable.cfg` | 1 | 2 drops | on | 490,576 | 28 | 10 min | holds |
+
+The default config, client on, `MaxStarts = 2`, symmetry, grew through the
+step: 8,574,657 states after the refactors, 11,376,008 with the version,
+29,020,066 with marks and stamps, 158,018,215 with the kind choice and no
+symmetry, 40,131,237 with symmetry. The final run, with diffs applied,
+requests and replies, is 288,928,270 states at depth 48 in 53 minutes,
+every invariant holding. It is a run for the end of a step, not for every
+edit; the liveness config is the per-edit check.
+
+Witnesses:
+
+- `Presence8_w1.cfg`: the step 7 ordering witness, unchanged. Violated in
+  6 states.
+- `Presence8_w2.cfg`: `NoStaleInFlight` at `MaxDelay = 1`, threshold 3.
+  Violated in 7 states: Start, Start, Tick, Track, Tick, Deliver, the
+  version-overtaking case. Run at `MaxDelay = 0` it fails through the
+  restart route from finding 1, also 7 states.
+- `Presence8_w3.cfg`: requests off. `PairRepair` violated, 14 states
+  looping back to state 12, one peer's behind flag set and never cleared.
+- `Presence8_w4.cfg`: requests off under bounded loss. `Stabilisation`
+  violated, 14 states looping back to state 12; both drops spent, then
+  diffs for ever.
+
+Observations:
+
+- A requester can go behind twice. The reply carries the sender's state at
+  reply time, but the next broadcast diff starts from the last heartbeat,
+  so if a change landed between the two the requester sees one more gap and
+  asks again. Bounded by the number of changes, and the properties hold, so
+  it is a cost not a bug; the implementation could have the reply advance a
+  per-peer base if the extra round matters.
+- The pid-as-incarnation variant, where any different incarnation counts
+  as newer with no order, was not modelled. It is safe but flaps on the
+  restart overtaking in finding 1. A constant switch on the ordering plus
+  an action property saying a receiver's held incarnation never goes
+  backwards would show it.
+- Three refs and `MaxDelay = 1` liveness have not been run at this step.
+  The `MaxDelay = 1` probe run exercised the stale rules; the liveness
+  properties at that delay have only been checked at step 5.
+- A liveness property about the client, a subscribed client eventually
+  catches up, remains unchecked, as at step 7.
+
+## Further work
+
+The planned steps are done. Candidates, none of which change a decision
+already recorded:
+
+- The no-loss witness pair for the delay constraint, replacing the
+  `ASSUME` with a checked claim.
+- Three refs at step 8, as a confirmation run for diffs that both add and
+  remove.
+- `MaxDelay = 1` liveness at step 8.
+- The pid-as-incarnation witness from the step 8 observations.
+- Client liveness under bounded loss with a constraint high enough not to
+  cut off real behaviour.
