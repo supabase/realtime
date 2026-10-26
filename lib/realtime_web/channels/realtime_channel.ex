@@ -231,9 +231,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, :token_malformed, msg} ->
         log_error(socket, "MalformedJWT", msg)
 
-      {:error, invalid_exp} when is_integer(invalid_exp) and invalid_exp <= 0 ->
-        log_error(socket, "InvalidJWTToken", "Token expiration time is invalid")
-
       {:error, :private_only} ->
         log_error(socket, "PrivateOnly", "This project only allows private channels")
 
@@ -843,6 +840,10 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       {:error, error, message} ->
         {:error, error, message}
+
+      # A decimal exp is validated before rounding, so rounding down can leave no time on a valid token
+      exp_diff when is_integer(exp_diff) ->
+        {:error, :expired_token, "Token has expired #{-exp_diff} seconds ago"}
 
       e ->
         {:error, e}
