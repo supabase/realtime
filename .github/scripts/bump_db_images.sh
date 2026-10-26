@@ -2,7 +2,7 @@
 set -euo pipefail
 
 postgres_release() {
-  gh api repos/supabase/postgres/contents/ansible/vars.yml -H "Accept: application/vnd.github.raw" |
+  gh api repos/supabase/postgres/contents/ansible/postgres_release.yml -H "Accept: application/vnd.github.raw" |
     key="$1" yq -e '.postgres_release[strenv(key)]'
 }
 
