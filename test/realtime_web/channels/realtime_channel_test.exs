@@ -1700,6 +1700,31 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                      1000
     end
 
+    test "token with a decimal exp expires on schedule", %{tenant: tenant} do
+      jwt =
+        Generators.generate_jwt_token(tenant, %{role: "authenticated", exp: System.system_time(:second) + 2.25})
+
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      assert %Socket{channel_pid: channel_pid} = subscribe_and_join!(socket, "realtime:test", %{})
+
+      ref = Process.monitor(channel_pid)
+      assert_receive {:DOWN, ^ref, :process, ^channel_pid, _reason}, 4000
+
+      assert_receive %Socket.Message{
+        topic: "realtime:test",
+        event: "system",
+        payload: %{
+          message: message,
+          status: "error",
+          extension: "system",
+          channel: "test"
+        }
+      }
+
+      assert message == "Token has expired 0 seconds ago"
+    end
+
     test "shuts down cleanly with JwtSignerError when the signer can no longer be generated", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
