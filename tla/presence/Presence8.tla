@@ -141,9 +141,9 @@ Trackers ==
   (***************************************************************************)
     local: SUBSET Refs,
   (***************************************************************************)
-  (* Whether the tracker is interested, i.e. running, on a node              *)
+  (* Whether the tracker is running on the node. FALSE after Stop or Crash.  *)
   (***************************************************************************)
-    interested: BOOLEAN,
+    running: BOOLEAN,
   (***************************************************************************)
   (* How many times the tracker has been started on the node.                *)
   (***************************************************************************)
@@ -218,7 +218,7 @@ InitialPeer ==
 InitialTracker ==
   [
     local |-> {},
-    interested |-> FALSE,
+    running |-> FALSE,
     starts |-> 0,
     peers |-> [p \in Nodes |-> InitialPeer]
   ]
@@ -257,19 +257,19 @@ TypeOK ==
 Peers(n) == Nodes \ {n}
 
 (***************************************************************************)
-(* Returns all interested nodes                                            *)
+(* Returns all nodes whose tracker is running                              *)
 (***************************************************************************)
-Interested == {n \in Nodes : trackers[n].interested}
+Running == {n \in Nodes : trackers[n].running}
 
 (***************************************************************************)
-(* Returns all interested nodes that are peers of n                        *)
+(* Returns all running nodes that are peers of n                           *)
 (***************************************************************************)
-InterestedPeers(n) == Interested \ {n}
+RunningPeers(n) == Running \ {n}
 
 (***************************************************************************)
-(* Returns all uninterested nodes                                          *)
+(* Returns all nodes whose tracker is not running, stopped or crashed      *)
 (***************************************************************************)
-Uninterested == {n \in Nodes : ~trackers[n].interested}
+Stopped == {n \in Nodes : ~trackers[n].running}
 
 (***************************************************************************)
 (* Increments Beat if it's below the silence threshold                     *)
@@ -342,10 +342,10 @@ ResetClient(n) ==
 (* start before it has received any track calls.                           *)
 (***************************************************************************)
 Start(n) ==
-  /\ ~trackers[n].interested
+  /\ ~trackers[n].running
   /\ trackers[n].starts < MaxStarts
   /\ trackers' = [trackers EXCEPT ![n] =
-       [InitialTracker EXCEPT !.interested = TRUE,
+       [InitialTracker EXCEPT !.running = TRUE,
                                  !.starts = trackers[n].starts + 1]]
   /\ UNCHANGED <<used, msgs, drops, clients>>
 
@@ -355,15 +355,15 @@ Start(n) ==
 (* silence to notice.                                                      *)
 (***************************************************************************)
 Stop(n) ==
-  /\ trackers[n].interested
+  /\ trackers[n].running
   /\ trackers[n].local = {}
   /\ ~(clients[n].synced \/ clients[n].subscribed)
   /\ trackers' = [trackers EXCEPT
-       ![n].interested = FALSE,
+       ![n].running = FALSE,
        ![n].peers = [m \in Nodes |-> InitialPeer]]
   /\ msgs' = {msg \in msgs : msg.dest /= n}
             (* This is the goodbye message in case of graceful shutdown *)
-            \cup { [src |-> n, dest |-> d, state |-> {}, age |-> 0] : d \in InterestedPeers(n) }
+            \cup { [src |-> n, dest |-> d, state |-> {}, age |-> 0] : d \in RunningPeers(n) }
   /\ UNCHANGED <<used, drops, clients>>
 
 (***************************************************************************)
@@ -372,10 +372,10 @@ Stop(n) ==
 (* messages.                                                               *)
 (***************************************************************************)
 Crash(n) ==
-  /\ trackers[n].interested
+  /\ trackers[n].running
   /\ trackers' = [trackers EXCEPT
        ![n].local = {},
-       ![n].interested = FALSE,
+       ![n].running = FALSE,
        ![n].peers = [m \in Nodes |-> InitialPeer]]
   /\ msgs' = {msg \in msgs : msg.dest /= n}
   /\ clients' = ResetClient(n)
@@ -389,7 +389,7 @@ Crash(n) ==
 Purge(n, m) ==
   /\ PurgeEnabled
   /\ Replica(n, m) /= {}
-  /\ trackers[n].interested
+  /\ trackers[n].running
   /\ trackers[n].peers[m].silent_beats = SilenceThreshold
   /\ trackers' = [trackers EXCEPT ![n].peers[m].replica = {}]
   /\ clients' = Notify(n, NodeView(n), NodeView(n)')
@@ -404,7 +404,7 @@ Purge(n, m) ==
 (***************************************************************************)
 Track(n, r) ==
   /\ r \notin used
-  /\ trackers[n].interested
+  /\ trackers[n].running
   /\ trackers' = [trackers EXCEPT ![n].local = @ \cup {r}]
   /\ used' = used \cup {r}
   /\ clients' = Notify(n, NodeView(n), NodeView(n)')
@@ -425,7 +425,7 @@ Untrack(n, r) ==
 
 (***************************************************************************)
 (* One heartbeat period for the whole cluster: every live tracker's timer  *)
-(* fires. Each one sends a snapshot of its own refs to every interested    *)
+(* fires. Each one sends a snapshot of its own refs to every running       *)
 (* peer and counts one more silent period for every peer. Every message    *)
 (* already in flight gets a period older.                                  *)
 (*                                                                         *)
@@ -441,13 +441,13 @@ Tick ==
   /\ \A msg \in msgs : msg.age < MaxDelay
   /\ msgs' = { [msg EXCEPT !.age = msg.age + 1] : msg \in msgs }
              \cup UNION { { [src |-> n, dest |-> d, state |-> trackers[n].local, age |-> 0]
-                            : d \in InterestedPeers(n) }
-                          : n \in Interested }
+                            : d \in RunningPeers(n) }
+                          : n \in Running }
   (* Every live tracker counts one more silent period for every peer. The *)
   (* tracker record is rebuilt with its peers function replaced; stopped   *)
   (* trackers are left as they are.                                        *)
   /\ trackers' = [n \in Nodes |->
-       IF trackers[n].interested
+       IF trackers[n].running
        THEN [trackers[n] EXCEPT !.peers = [m \in Nodes |->
               [trackers[n].peers[m] EXCEPT !.silent_beats = IncrementBeat(@)]]]
        ELSE trackers[n]]
@@ -460,7 +460,7 @@ Tick ==
 (* replica set for the source node of the message.                         *)
 (***************************************************************************)
 Deliver(msg) ==
-  /\ trackers[msg.dest].interested
+  /\ trackers[msg.dest].running
   /\ msg \in msgs
   /\ msgs' = msgs \ {msg}
   /\ trackers' = [trackers EXCEPT
@@ -500,7 +500,7 @@ Drop(msg) ==
 (* subscribed, and we haven't hit max subscribes.                          *)
 (***************************************************************************)
 Subscribe(n) ==
-  /\ trackers[n].interested
+  /\ trackers[n].running
   /\ ~clients[n].subscribed
   /\ clients[n].subscribes < MaxSubscribes
   /\ (SubscribeFirst \/ clients[n].synced)
@@ -513,7 +513,7 @@ Subscribe(n) ==
 (* This creates a new state message in the client's inbox.                 *)
 (***************************************************************************)
 Sync(n) ==
-  /\ trackers[n].interested
+  /\ trackers[n].running
   /\ ~clients[n].synced
   /\ (~SubscribeFirst \/ clients[n].subscribed)
   /\ clients' = [clients EXCEPT ![n].inbox = Append(@, SyncMessage(n)), ![n].synced = TRUE ]
@@ -616,15 +616,15 @@ ReplicaIsOwned ==
 (* Dead trackers have no state and receive no messages                     *)
 (***************************************************************************)
 NoTrackerNoState ==
-  /\ \A n \in Uninterested : trackers[n].local = {}
-  /\ \A n \in Uninterested : \A m \in Nodes : trackers[n].peers[m] = InitialPeer
-  /\ \A n \in Uninterested : \A msg \in msgs : msg.dest /= n
+  /\ \A n \in Stopped : trackers[n].local = {}
+  /\ \A n \in Stopped : \A m \in Nodes : trackers[n].peers[m] = InitialPeer
+  /\ \A n \in Stopped : \A msg \in msgs : msg.dest /= n
 
 (***************************************************************************)
 (* Live trackers don't hold on to the state of dead trackers.              *)
 (***************************************************************************)
 LiveTrackersDontCarryDeadTrackersState ==
-  /\ \A n \in Interested : \A m \in Uninterested : Replica(n, m) = {}
+  /\ \A n \in Running : \A m \in Stopped : Replica(n, m) = {}
 
 DeadStatesArePurged == <>[]LiveTrackersDontCarryDeadTrackersState
 
@@ -651,7 +651,7 @@ DeadStatesArePurged == <>[]LiveTrackersDontCarryDeadTrackersState
 (* false positive is purging a replica that is non-empty and correct.      *)
 (***************************************************************************)
 FalsePositivesUnreachable ==
-  \A n \in Interested : \A m \in InterestedPeers(n) :
+  \A n \in Running : \A m \in RunningPeers(n) :
     (Replica(n, m) /= {} /\ Replica(n, m) = trackers[m].local)
       => trackers[n].peers[m].silent_beats < SilenceThreshold
 
@@ -675,7 +675,7 @@ InboxBounded ==
 (* of that node.                                                           *)
 (***************************************************************************)
 Converged ==
-  \A n \in Interested : \A m \in InterestedPeers(n) : Replica(n, m) = trackers[m].local
+  \A n \in Running : \A m \in RunningPeers(n) : Replica(n, m) = trackers[m].local
 
 (***************************************************************************)
 (* Repair, per link: for every pair of live trackers, the replica one      *)
@@ -686,7 +686,7 @@ Converged ==
 (***************************************************************************)
 PairRepair ==
   \A n \in Nodes : \A m \in Peers(n) :
-    []<>( ~(trackers[n].interested /\ trackers[m].interested)
+    []<>( ~(trackers[n].running /\ trackers[m].running)
           \/ Replica(n, m) = trackers[m].local )
 
 (***************************************************************************)
