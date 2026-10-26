@@ -64,15 +64,28 @@ CONSTANTS
   MaxDrops
 
 VARIABLES 
-  \* maps nodes to the refs they hold locally
+  (***************************************************************************)
+  (* Maps nodes to the refs they hold locally                                *)
+  (***************************************************************************)
   local, 
-  \* Every ref we've ever tracked
+  (***************************************************************************)
+  (* Every ref we've ever tracked                                            *)
+  (***************************************************************************)
   used,
-  \* every node's copy of every other node's refs
+  (***************************************************************************)
+  (* Every node's copy of every other node's refs. This is a set of sets     *)
+  (* that can be referenced using n, m, where n is the node holding the      *)
+  (* replicas, and m is its replica state for node m.                        *)
+  (***************************************************************************)
   replica,
-  \* inflight heartbeats
+  (***************************************************************************)
+  (* The set of messages that have been sent between nodes. This is modeled  *)
+  (* a set to capture the fact that out of order delivery is possible.       *)
+  (***************************************************************************)
   msgs,
-  \* whether the tracker is interested, i.e. running, on a node 
+  (***************************************************************************)
+  (* Whether the tracker is interested, i.e. running, on a node              *)
+  (***************************************************************************)
   interested,
   (***************************************************************************)
   (* The client state on each node. A function mapping Node to Client        *)
@@ -82,11 +95,13 @@ VARIABLES
   \* counter for how many times the tracker has started per node
   starts,
   (***************************************************************************)
-  (* Cool variable name. This stores the beats that have passed since a node *)
-  (* has heard from each other node                                          *)
+  (* This stores the beats that have passed since a node has heard from each *)
+  (* other node                                                              *)
   (***************************************************************************)
   silent_beats,
-  \* messages dropped so far; only counted when BoundedLoss is TRUE
+  (***************************************************************************)
+  (* Messages dropped so far; only counted when BoundedLoss is TRUE          *)
+  (***************************************************************************)
   drops
 
 ASSUME MaxStarts \in Nat
@@ -117,7 +132,11 @@ ASSUME MaxDrops \in Nat
 (***************************************************************************)
 ASSUME MaxDelay + 1 < SilenceThreshold
 
-vars == <<local, used, replica, msgs, starts, interested, silent_beats, drops, clients>>
+(***************************************************************************)
+(* A tuple of all the state vars.                                          *)
+(***************************************************************************)
+vars == 
+ <<local, used, replica, msgs, starts, interested, silent_beats, drops, clients>>
 
 (***************************************************************************)
 (* The set of all possible messages. Self-addressed messages are excluded. *)
@@ -126,8 +145,13 @@ Messages ==
   { m \in [src: Nodes, dest: Nodes, state: SUBSET Refs, age: 0..MaxDelay] :
       m.src /= m.dest }
 
+(***************************************************************************)
+(* The set of valid messages a tracker may send to a client.               *)
+(***************************************************************************)
 ClientMessages ==
-  [kind: {"state"}, refs: SUBSET Refs] \cup [kind: {"diff"}, joins: SUBSET Refs, leaves: SUBSET Refs]
+  [kind: {"state"}, refs: SUBSET Refs] 
+  \cup 
+  [kind: {"diff"}, joins: SUBSET Refs, leaves: SUBSET Refs]
 
 (***************************************************************************)
 (* The set of all possible clients states.                                 *)
@@ -169,6 +193,12 @@ Clients ==
 InitialClient ==
   [subscribed |-> FALSE, subscribes |-> 0, synced |-> FALSE, view |-> {}, inbox |-> <<>>]
 
+(***************************************************************************)
+(* This is our initial state.                                              *)
+(*                                                                         *)
+(* All nodes are empty, no nodes have started, no clients are subscribed   *)
+(* and no messages have been sent. It's a cold start.                      *)
+(***************************************************************************)
 Init == 
     /\ local = [n \in Nodes |-> {}]
     /\ replica = [n \in Nodes |-> [m \in Nodes |-> {}]]
@@ -180,6 +210,10 @@ Init ==
     /\ silent_beats = [n \in Nodes |-> [m \in Nodes |-> 0]]
     /\ drops = 0
 
+(***************************************************************************)
+(* Type checking invariant that ensures our state is always valid          *)
+(* according to the types.                                                 *)
+(***************************************************************************)
 TypeOK ==
   /\ local \in [Nodes -> SUBSET Refs]
   /\ replica \in [Nodes -> [Nodes -> SUBSET Refs]]
@@ -192,15 +226,36 @@ TypeOK ==
   /\ drops \in 0..MaxDrops
 
 (***************************************************************************)
+(* `^{\large\textbf{Helper Formula}}^'                                     *)
+(***************************************************************************)
+
+(***************************************************************************)
 (* Peers gets all the nodes that are not n.                                *)
 (***************************************************************************)
 Peers(n) == Nodes \ {n}
 
+(***************************************************************************)
+(* Returns all interested nodes                                            *)
+(***************************************************************************)
 Interested == {n \in Nodes : interested[n]}
 
+(***************************************************************************)
+(* Returns all interested nodes that are peers of n                        *)
+(***************************************************************************)
 InterestedPeers(n) == Interested \ {n}
 
+(***************************************************************************)
+(* Returns all uninterested nodes                                          *)
+(***************************************************************************)
 Uninterested == {n \in Nodes : ~interested[n]}
+
+(***************************************************************************)
+(* Increments Beat if it's below the silence threshold                     *)
+(***************************************************************************)
+IncrementBeat(beats) ==
+  IF beats < SilenceThreshold
+  THEN beats + 1
+  ELSE SilenceThreshold
 
 (***************************************************************************)
 (* Gets a node's view of the state of the entries. This will return a set  *)
@@ -229,6 +284,10 @@ Notify(n, old, new) ==
   IF clients[n].subscribed /\ old /= new
   THEN [clients EXCEPT ![n].inbox = Append(@, Diff(old, new))]
   ELSE clients
+
+(***************************************************************************)
+(* `^{\large\textbf{Tracker Lifecycle Behaviours}}^'                                     *)
+(***************************************************************************)
 
 (***************************************************************************)
 (* Start represents a tracker starting from scratch on a node, the cold    *)
@@ -286,6 +345,10 @@ Purge(n, m) ==
   /\ UNCHANGED <<used, starts, silent_beats, local, interested, msgs, drops>>
 
 (***************************************************************************)
+(* `^{\large\textbf{Tracking Behaviours}}^'                                *)
+(***************************************************************************)
+
+(***************************************************************************)
 (* Tracking a ref adds it to local for that node and to used               *)
 (***************************************************************************)
 Track(n, r) == /\ r \notin used
@@ -303,10 +366,9 @@ Untrack(n, r) == /\ r \in local[n]
                 /\ clients' = Notify(n, NodeView(n), NodeView(n)')
                 /\ UNCHANGED <<used, replica, msgs, starts, interested, silent_beats, drops>>
 
-IncrementBeat(beats) ==
-  IF beats < SilenceThreshold
-  THEN beats + 1
-  ELSE SilenceThreshold
+(***************************************************************************)
+(* `^{\large\textbf{Network Behaviours}}'                                   *)
+(***************************************************************************)
 
 (***************************************************************************)
 (* One heartbeat period for the whole cluster: every live tracker's timer  *)
@@ -367,6 +429,33 @@ Drop(msg) ==
   /\ drops' = IF BoundedLoss THEN drops + 1 ELSE drops
   /\ UNCHANGED <<used, local, replica, interested, starts, silent_beats, clients>>
 
+
+(***************************************************************************)
+(* `^{\large\textbf{Client Behaviours}}'                                   *)
+(***************************************************************************)
+
+Subscribe(n) ==
+  /\ interested[n]
+  /\ ~clients[n].synced
+
+
+(***************************************************************************)
+(* Next Action can be either tracking or untracking a valid ref on a valid *)
+(* node, we're sending a heart beat, or we're handling delivery of a msg,  *)
+(* or a message has been dropped.                                          *)
+(***************************************************************************)
+Next == 
+     \/ \E n \in Nodes, r \in Refs : Track(n, r) \/ Untrack(n, r)
+     \/ \E n \in Nodes : \E m \in Peers(n) : Purge(n, m)
+     \/ Tick
+     \/ \E n \in Nodes : Start(n) \/ Stop(n) \/ Crash(n)
+     \/ \E msg \in Messages : Deliver(msg)
+     \/ \E msg \in Messages : Drop(msg)
+
+(***************************************************************************)
+(* `^{\large\textbf{Invariants and Assertions}}^'                          *)
+(***************************************************************************)
+
 (***************************************************************************)
 (* Fairness rules out runs where something is always possible but never    *)
 (* happens. Without it the checker could pick a run where no timer ever    *)
@@ -402,18 +491,6 @@ Fairness ==
   /\ \A s \in Nodes : \A d \in Peers(s) : SF_vars(DeliverOn(s, d))
   /\ \A n \in Nodes : \A m \in Peers(n) : WF_vars(Purge(n, m))
 
-(***************************************************************************)
-(* Next Action can be either tracking or untracking a valid ref on a valid *)
-(* node, we're sending a heart beat, or we're handling delivery of a msg,  *)
-(* or a message has been dropped.                                          *)
-(***************************************************************************)
-Next == 
-     \/ \E n \in Nodes, r \in Refs : Track(n, r) \/ Untrack(n, r)
-     \/ \E n \in Nodes : \E m \in Peers(n) : Purge(n, m)
-     \/ Tick
-     \/ \E n \in Nodes : Start(n) \/ Stop(n) \/ Crash(n)
-     \/ \E msg \in Messages : Deliver(msg)
-     \/ \E msg \in Messages : Drop(msg)
 
 (***************************************************************************)
 (* Every ref can only exist in one node's local refs                        *)
