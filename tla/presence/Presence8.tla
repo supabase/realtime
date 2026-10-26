@@ -1,5 +1,5 @@
 ---------- MODULE Presence8 -------------
-EXTENDS Integers, Sequences
+EXTENDS Integers, Sequences, FiniteSets
 
 (***************************************************************************)
 (* This is the eighth step of modelling presence: diff based replication   *)
@@ -117,9 +117,27 @@ ASSUME MaxDrops \in Nat
 ASSUME MaxDelay + 1 < SilenceThreshold
 
 (***************************************************************************)
+(* Version can never exceed twice the cardinality of Refs, since each ref  *)
+(* can only be tracked and untracked once each.                            *)
+(***************************************************************************)
+MaxVersions == Cardinality(Refs) * 2
+
+(***************************************************************************)
 (* A tuple of all the state vars.                                          *)
 (***************************************************************************)
 vars == <<trackers, used, msgs, drops, clients>>
+
+(***************************************************************************)
+(* The incarnation and version of a tracker.                               *)
+(*                                                                         *)
+(* Combined, these tell us whether a new message matches the state this    *)
+(* tracker holds for a replica.                                            *)
+(***************************************************************************)
+Stamps ==
+  [
+    incarnation: 0..MaxStarts,
+    version: 0..MaxVersions
+  ]
 
 Peer ==
   [
@@ -131,7 +149,12 @@ Peer ==
   (* This stores the beats that have passed since a node has heard from each *)
   (* other node                                                              *)
   (***************************************************************************)
-    silent_beats: 0..SilenceThreshold
+    silent_beats: 0..SilenceThreshold,
+  (***************************************************************************)
+  (* Captures the current version and incarnation this replica holds of the  *)
+  (* peer's state.                                                           *)
+  (***************************************************************************)
+    mark: Stamps
   ]
 
 Trackers ==
@@ -141,11 +164,23 @@ Trackers ==
   (***************************************************************************)
     local: SUBSET Refs,
   (***************************************************************************)
+  (* Counts local changes since the tracker started. Used so a receiver of a *)
+  (* replication message can tell if a snapshot is newer than what it holds  *)
+  (* or whether a diff applies to what it holds. This is reset to 0 whenever *)
+  (* a tracker restarts                                                      *)
+  (***************************************************************************)
+    version: 0..MaxVersions,
+  (***************************************************************************)
   (* Whether the tracker is running on the node. FALSE after Stop or Crash.  *)
   (***************************************************************************)
     running: BOOLEAN,
   (***************************************************************************)
-  (* How many times the tracker has been started on the node.                *)
+  (* How many times the tracker has been started on the node. Doubles as    *)
+  (* the incarnation in message stamps: it is strictly greater for each new *)
+  (* start, which is all a receiver needs to tell a restarted sender from a *)
+  (* delayed message. The implementation provides a timestamp taken at      *)
+  (* tracker start for this, not a counter it has to persist across         *)
+  (* restarts. Only the order is ever compared.                             *)
   (***************************************************************************)
     starts: 0..MaxStarts,
   (***************************************************************************)
@@ -158,8 +193,16 @@ Trackers ==
 (* The set of all possible messages. Self-addressed messages are excluded. *)
 (***************************************************************************)
 Messages ==
-  { m \in [src: Nodes, dest: Nodes, state: SUBSET Refs, age: 0..MaxDelay] :
-      m.src /= m.dest }
+  { m \in 
+      [
+        src: Nodes, 
+        dest: Nodes, 
+        state: SUBSET Refs, 
+        age: 0..MaxDelay,
+        stamp: Stamps
+      ] :
+      m.src /= m.dest 
+  }
 
 (***************************************************************************)
 (* The set of valid messages a tracker may send to a client.               *)
@@ -212,12 +255,17 @@ InitialClient ==
 InitialPeer ==
   [
     replica |-> {},
-    silent_beats |-> 0
+    silent_beats |-> 0,
+    mark |-> [
+      incarnation |-> 0,
+      version |-> 0
+    ]
   ]
 
 InitialTracker ==
   [
     local |-> {},
+    version |-> 0,
     running |-> FALSE,
     starts |-> 0,
     peers |-> [p \in Nodes |-> InitialPeer]
@@ -334,6 +382,23 @@ ResetClient(n) ==
     ![n].synced = FALSE]
 
 (***************************************************************************)
+(* Helper to check if the Stamp a is newer than the stamp b.               *)
+(***************************************************************************)
+NewerThan(a, b) == 
+      \/ a.incarnation > b.incarnation
+      \/ a.incarnation = b.incarnation /\ a.version > b.version
+
+(***************************************************************************)
+(* Gets the current stamp from a tracker.                                  *)
+(***************************************************************************)
+TrackerStamp(n) ==
+  LET tracker == trackers[n]
+  IN [
+    incarnation |-> tracker.starts, 
+    version |-> tracker.version
+  ]
+
+(***************************************************************************)
 (* `^{\large\textbf{Tracker Lifecycle Behaviours}}^'                                     *)
 (***************************************************************************)
 
@@ -363,7 +428,13 @@ Stop(n) ==
        ![n].peers = [m \in Nodes |-> InitialPeer]]
   /\ msgs' = {msg \in msgs : msg.dest /= n}
             (* This is the goodbye message in case of graceful shutdown *)
-            \cup { [src |-> n, dest |-> d, state |-> {}, age |-> 0] : d \in RunningPeers(n) }
+            \cup { [
+              src |-> n, 
+              dest |-> d, 
+              state |-> {}, 
+              age |-> 0, 
+              stamp |-> TrackerStamp(n)
+            ] : d \in RunningPeers(n) }
   /\ UNCHANGED <<used, drops, clients>>
 
 (***************************************************************************)
@@ -391,7 +462,7 @@ Purge(n, m) ==
   /\ Replica(n, m) /= {}
   /\ trackers[n].running
   /\ trackers[n].peers[m].silent_beats = SilenceThreshold
-  /\ trackers' = [trackers EXCEPT ![n].peers[m].replica = {}]
+  /\ trackers' = [trackers EXCEPT ![n].peers[m] = InitialPeer]
   /\ clients' = Notify(n, NodeView(n), NodeView(n)')
   /\ UNCHANGED <<used, msgs, drops>>
 
@@ -405,7 +476,9 @@ Purge(n, m) ==
 Track(n, r) ==
   /\ r \notin used
   /\ trackers[n].running
-  /\ trackers' = [trackers EXCEPT ![n].local = @ \cup {r}]
+  /\ trackers' = [trackers 
+                  EXCEPT ![n].local = @ \cup {r},
+                         ![n].version = @ + 1]
   /\ used' = used \cup {r}
   /\ clients' = Notify(n, NodeView(n), NodeView(n)')
   /\ UNCHANGED <<msgs, drops>>
@@ -415,7 +488,9 @@ Track(n, r) ==
 (***************************************************************************)
 Untrack(n, r) ==
   /\ r \in trackers[n].local
-  /\ trackers' = [trackers EXCEPT ![n].local = @ \ {r}]
+  /\ trackers' = [trackers 
+                  EXCEPT ![n].local = @ \ {r},
+                         ![n].version = @ + 1]
   /\ clients' = Notify(n, NodeView(n), NodeView(n)')
   /\ UNCHANGED <<used, msgs, drops>>
 
@@ -440,9 +515,14 @@ Untrack(n, r) ==
 Tick ==
   /\ \A msg \in msgs : msg.age < MaxDelay
   /\ msgs' = { [msg EXCEPT !.age = msg.age + 1] : msg \in msgs }
-             \cup UNION { { [src |-> n, dest |-> d, state |-> trackers[n].local, age |-> 0]
-                            : d \in RunningPeers(n) }
-                          : n \in Running }
+             \cup UNION { { 
+               [
+                 src |-> n, 
+                 dest |-> d, 
+                 state |-> trackers[n].local, 
+                 age |-> 0,
+                 stamp |-> TrackerStamp(n)
+                ] : d \in RunningPeers(n) } : n \in Running }
   (* Every live tracker counts one more silent period for every peer. The *)
   (* tracker record is rebuilt with its peers function replaced; stopped   *)
   (* trackers are left as they are.                                        *)
@@ -463,10 +543,16 @@ Deliver(msg) ==
   /\ trackers[msg.dest].running
   /\ msg \in msgs
   /\ msgs' = msgs \ {msg}
-  /\ trackers' = [trackers EXCEPT
-       ![msg.dest].peers[msg.src].replica = msg.state,
-       ![msg.dest].peers[msg.src].silent_beats = 0]
-  /\ clients' = Notify(msg.dest, NodeView(msg.dest), NodeView(msg.dest)')
+  /\ IF NewerThan(msg.stamp, trackers[msg.dest].peers[msg.src].mark)
+      THEN 
+        /\ trackers' = [trackers EXCEPT
+             ![msg.dest].peers[msg.src].replica = msg.state,
+             ![msg.dest].peers[msg.src].mark = msg.stamp,
+             ![msg.dest].peers[msg.src].silent_beats = 0]
+        /\ clients' = Notify(msg.dest, NodeView(msg.dest), NodeView(msg.dest)')
+      ELSE 
+        /\ trackers' = [trackers EXCEPT ![msg.dest].peers[msg.src].silent_beats = 0]
+        /\ UNCHANGED clients
   /\ UNCHANGED <<used, drops>>
 
 (***************************************************************************)
@@ -487,6 +573,18 @@ Drop(msg) ==
   /\ msgs' = msgs \ {msg}
   /\ drops' = IF BoundedLoss THEN drops + 1 ELSE drops
   /\ UNCHANGED <<used, trackers, clients>>
+
+(***************************************************************************)
+(* Some message in flight is delivered, or dropped. Next quantifies over   *)
+(* the messages actually in flight rather than every possible message,    *)
+(* which is far cheaper once messages carry stamps. These wrappers exist   *)
+(* so TLC still names the step in a trace: a quantifier over a variable    *)
+(* inside Next is reported as "Next", a named operator is reported by its  *)
+(* name.                                                                   *)
+(***************************************************************************)
+DeliverAny == \E msg \in msgs : Deliver(msg)
+
+DropAny == \E msg \in msgs : Drop(msg)
 
 
 (***************************************************************************)
@@ -561,8 +659,8 @@ Next ==
      \/ \E n \in Nodes : \E m \in Peers(n) : Purge(n, m)
      \/ \E n \in Nodes : Start(n) \/ Stop(n) \/ Crash(n)
      \/ \E n \in Nodes : Subscribe(n) \/ Sync(n) \/ Consume(n) \/ Unsubscribe(n)
-     \/ \E msg \in msgs : Deliver(msg)
-     \/ \E msg \in msgs : Drop(msg)
+     \/ DeliverAny
+     \/ DropAny
 
 (***************************************************************************)
 (* Fairness rules out runs where something is always possible but never    *)
@@ -613,6 +711,15 @@ ReplicaIsOwned ==
   \A n \in Nodes : \A m \in Peers(n) : Replica(n, m) \subseteq used
 
 (***************************************************************************)
+(* If a replica's mark is current its state should match the state of the  *)
+(* tracker.                                                                *)
+(***************************************************************************)
+MarkedReplicaIsCurrent ==
+  \A n \in Running : \A m \in RunningPeers(n) :
+    trackers[n].peers[m].mark = TrackerStamp(m)
+    => trackers[n].peers[m].replica = trackers[m].local
+
+(***************************************************************************)
 (* Dead trackers have no state and receive no messages                     *)
 (***************************************************************************)
 NoTrackerNoState ==
@@ -654,6 +761,28 @@ FalsePositivesUnreachable ==
   \A n \in Running : \A m \in RunningPeers(n) :
     (Replica(n, m) /= {} /\ Replica(n, m) = trackers[m].local)
       => trackers[n].peers[m].silent_beats < SilenceThreshold
+
+(***************************************************************************)
+(* Probe, expected to FAIL: no message in flight is older than what its    *)
+(* receiver already holds for the sender. Every counterexample is a        *)
+(* message the mark exists to ignore; without the mark, delivering it      *)
+(* would take the replica backwards for a period.                          *)
+(*                                                                         *)
+(* It fails at MaxDelay = 0 through a restart: Stop, Start, Stop on one    *)
+(* node with no tick between puts two goodbyes from different incarnations *)
+(* in flight together, and the newer can land first. So the incarnation    *)
+(* check is needed even on a network that never delivers late. At         *)
+(* MaxDelay = 1 it also fails within one incarnation: two snapshots from   *)
+(* one sender are in flight together and the newer lands first, which is   *)
+(* the version check's job.                                                *)
+(*                                                                         *)
+(* The step 5 properties cannot see either case, because per-link repair   *)
+(* tolerates a replica going backwards just as it tolerates a purge. This  *)
+(* probe makes the overtaking visible.                                     *)
+(***************************************************************************)
+NoStaleInFlight ==
+  \A msg \in msgs :
+    ~NewerThan(trackers[msg.dest].peers[msg.src].mark, msg.stamp)
 
 (***************************************************************************)
 (* If a client is subscribed, synced, and its inbox is empty the its view  *)
