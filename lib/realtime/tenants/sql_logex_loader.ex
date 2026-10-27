@@ -62,6 +62,8 @@ defmodule Realtime.Tenants.SqlLogexLoader do
     telemetry = [:realtime, :tenants, :sql_logex_snapshot_load]
     opts = [queue: false, telemetry: telemetry, tenant_id: tenant_id]
 
+    # A transaction, not plain queries: read/1 pins `SET LOCAL search_path = ''`, which only takes
+    # effect inside a transaction block.
     case Database.transaction(db_conn, &read/1, opts) do
       {:ok, input} ->
         snapshot = Snapshot.new(input)
