@@ -1702,6 +1702,31 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                      1000
     end
 
+    test "token with a decimal exp expires on schedule", %{tenant: tenant} do
+      jwt =
+        Generators.generate_jwt_token(tenant, %{role: "authenticated", exp: System.system_time(:second) + 2.25})
+
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      assert %Socket{channel_pid: channel_pid} = subscribe_and_join!(socket, "realtime:test", %{})
+
+      ref = Process.monitor(channel_pid)
+      assert_receive {:DOWN, ^ref, :process, ^channel_pid, _reason}, 4000
+
+      assert_receive %Socket.Message{
+        topic: "realtime:test",
+        event: "system",
+        payload: %{
+          message: message,
+          status: "error",
+          extension: "system",
+          channel: "test"
+        }
+      }
+
+      assert message == "Token has expired 0 seconds ago"
+    end
+
     test "shuts down cleanly with JwtSignerError when the signer can no longer be generated", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
@@ -1885,6 +1910,16 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       assert {:error, %{reason: "InvalidJWTToken: Token has expired " <> _}} =
                subscribe_and_join(socket, "realtime:test", %{"access_token" => jwt})
+    end
+
+    test "access_token with a decimal exp has expired", %{tenant: tenant} do
+      api_key = Generators.generate_jwt_token(tenant)
+      jwt = Generators.generate_jwt_token(tenant, %{role: "authenticated", exp: System.system_time(:second) - 10.5})
+
+      assert {:ok, socket} = connect(UserSocket, %{}, conn_opts(tenant, api_key))
+
+      assert {:error, %{reason: reason}} = subscribe_and_join(socket, "realtime:test", %{"access_token" => jwt})
+      assert reason =~ ~r/^InvalidJWTToken: Token has expired \d+ seconds ago$/
     end
 
     test "access_token missing exp claim on join", %{tenant: tenant} do
@@ -2093,6 +2128,15 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                assert {:error, :expired_token} =
                         connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, api_key))
              end) =~ "InvalidJWTToken: Token has expired"
+    end
+
+    test "api_key with a decimal exp has expired", %{tenant: tenant} do
+      api_key = Generators.generate_jwt_token(tenant, %{role: "authenticated", exp: System.system_time(:second) - 10.5})
+
+      assert capture_log(fn ->
+               assert {:error, :expired_token} =
+                        connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, api_key))
+             end) =~ ~r/InvalidJWTToken: Token has expired \d+ seconds ago/
     end
 
     test "missing role claims returns a error", %{tenant: tenant} do
