@@ -18,6 +18,14 @@ Other documentation files are listed in README.md
 
 Regenerate tenant schema whenever tenant migrations changes, see `mise.toml`.
 
+## Pull requests
+
+The PR title becomes the squash commit that semantic-release reads.
+
+- Title format: `type(scope): summary`, scope optional, summary lowercase with no trailing period.
+- Types: `feat` (minor release), `fix` and `perf` (patch release), `build`, `ci`, `docs`, `refactor`, `test`, `revert`, `chore` (no release).
+- Do not use `!`; the title check rejects it. A breaking change needs a `BREAKING CHANGE:` footer added to the squash commit message at merge time.
+
 ## Security
 
 Follow the repository [security policy](https://github.com/supabase/realtime/security/policy).
