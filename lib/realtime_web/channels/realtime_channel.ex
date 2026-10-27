@@ -5,14 +5,14 @@ defmodule RealtimeWeb.RealtimeChannel do
   use RealtimeWeb, :channel
   use RealtimeWeb.RealtimeChannel.Logging
 
+  require RealtimeWeb.RealtimeChannel.PresenceHandler
+
   alias DBConnection.Backoff
 
   alias Forum.Muster
 
   alias Realtime.Api.Message
   alias Realtime.Api.Tenant
-  alias Realtime.Crypto
-  alias Realtime.FeatureFlags
   alias Realtime.GenCounter
   alias Realtime.Helpers
   alias Realtime.PostgresCdc
@@ -26,15 +26,23 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Realtime.Tenants.Connect
   alias Realtime.UsersCounter
 
+  alias RealtimeWeb.Channels.Payloads.Broadcast.Replay
   alias RealtimeWeb.Channels.Payloads.Join
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.RealtimeChannel.BroadcastHandler
   alias RealtimeWeb.RealtimeChannel.MessageDispatcher
   alias RealtimeWeb.RealtimeChannel.PresenceHandler
-  alias RealtimeWeb.RealtimeChannel.Tracker
+  alias RealtimeWeb.RequestMetrics
 
-  @confirm_token_ms_interval :timer.minutes(5)
+  # A JWT `exp` can be arbitrarily far in the future and `Process.send_after/3` rejects delays past
+  # Erlang's maximum supported time value, so the re-confirmation timer is capped at this interval.
+  @confirm_token_ms_max_interval :timer.hours(1)
   @replication_ready_check_interval 500
+  @postgres_subscribe_backoff_min 100
+  @postgres_subscribe_backoff_max 1_000
+  @postgres_subscribe_fatal_reasons [:malformed_subscription_params, :subscription_insert_failed]
+  @postgres_subscribe_error_code "RealtimeDisabledForConfiguration"
+  @postgres_cdc_down Realtime.Syn.PostgresCdc.down_event()
   @fullsweep_after Application.compile_env!(:realtime, :websocket_fullsweep_after)
 
   @impl true
@@ -54,7 +62,6 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     Process.flag(:max_heap_size, max_heap_size())
     Process.flag(:fullsweep_after, @fullsweep_after)
-    Tracker.track(socket.transport_pid)
     Logger.metadata(external_id: tenant_id, project: tenant_id)
     Logger.put_process_level(self(), log_level)
 
@@ -76,12 +83,10 @@ defmodule RealtimeWeb.RealtimeChannel do
       |> assign_access_token(params)
       |> assign(:private?, Join.private?(join))
       |> assign(:policies, nil)
-      |> assign(:presence_enabled?, Join.presence_enabled?(join))
 
     with :ok <- SignalHandler.shutdown_in_progress?(),
          {:ok, tenant} <- Cache.fetch_tenant_by_external_id(tenant_id),
-         socket =
-           assign(socket, :presence_enabled?, presence_enabled?(socket.assigns.presence_enabled?, tenant)),
+         socket = assign(socket, PresenceHandler.join(join, tenant)),
          :ok <- only_private?(tenant, socket),
          :ok <- limit_max_users(tenant, transport_pid),
          :ok <- limit_joins(tenant, socket),
@@ -101,10 +106,9 @@ defmodule RealtimeWeb.RealtimeChannel do
       RealtimeWeb.Endpoint.subscribe(tenant_topic, metadata: metadata)
       RealtimeWeb.Endpoint.subscribe("realtime:operations:" <> tenant_id, metadata: metadata)
 
-      replication_ready_opt_in? = !!get_in(params, ["config", "broadcast", "replication_ready"])
+      replication_ready_opt_in? = Join.replication_ready?(join)
 
       is_new_api = new_api?(params)
-      presence_enabled? = socket.assigns.presence_enabled?
 
       pg_change_params = pg_change_params(is_new_api, params, channel_pid, claims, sub_topic)
 
@@ -127,13 +131,13 @@ defmodule RealtimeWeb.RealtimeChannel do
         is_new_api: is_new_api,
         pg_sub_ref: nil,
         pg_change_params: pg_change_params,
-        presence_key: Join.presence_key(join),
         self_broadcast: Join.self_broadcast?(join),
         tenant_topic: tenant_topic,
         channel_name: sub_topic,
-        presence_enabled?: presence_enabled?,
         fastlane_metadata: metadata,
-        replayed_message_ids: replayed_message_ids
+        replayed_message_ids: replayed_message_ids,
+        access_token_verified_at: nil,
+        pending_access_token: nil
       }
 
       assigns =
@@ -148,20 +152,22 @@ defmodule RealtimeWeb.RealtimeChannel do
           assigns
         end
 
+      tenant |> Tenants.events_per_second_rate() |> RateCounter.new()
+
+      socket = assign(socket, PresenceHandler.join_rate_limits(tenant))
+
       socket =
-        socket
-        |> assign_counter(tenant)
-        |> assign_presence_counter(tenant)
-        |> assign_client_presence_rate_limit(tenant)
+        if socket.assigns.presence_enabled? do
+          send(self(), :sync_presence)
+          PresenceHandler.stamp_join_started_at(socket)
+        else
+          socket
+        end
 
-      # Start presence and add user if presence is enabled
-      if presence_enabled?, do: send(self(), :sync_presence)
-
-      UsersCounter.add(transport_pid, tenant_id)
-
-      case await_muster_join(muster_join_task, socket) do
-        :ok -> {:ok, state, assign(socket, assigns)}
-        {:error, _} = error -> error
+      with :ok <- await_muster_join(muster_join_task, socket),
+           :ok <- start_postgres_subscribe(socket, join, tenant, pg_change_params) do
+        UsersCounter.add(transport_pid, tenant_id)
+        {:ok, state, assign(socket, assigns)}
       end
     else
       {:error, :expired_token, msg} ->
@@ -289,20 +295,16 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
-  def handle_info(:update_rate_counter, socket) do
-    count(socket)
-
-    {:ok, rate_counter} = RateCounter.get(socket.assigns.rate_counter)
-
-    if rate_counter.limit.triggered do
-      message = "Too many messages per second"
-      shutdown_response(socket, message)
+  def handle_info(:check_rate_counter, %{assigns: %{tenant: tenant_id}} = socket) do
+    with %Tenant{} = tenant <- Cache.get_tenant_by_external_id(tenant_id),
+         {:ok, %{limit: %{triggered: true}}} <- RateCounter.get(Tenants.events_per_second_rate(tenant)) do
+      shutdown_response(socket, "Too many messages per second")
     else
-      {:noreply, socket}
+      _ -> {:noreply, socket}
     end
   end
 
-  def handle_info(%{event: "postgres_cdc_rls_down"}, socket) do
+  def handle_info(%{event: @postgres_cdc_down}, socket) do
     %{assigns: %{pg_sub_ref: pg_sub_ref}} = socket
     Helpers.cancel_timer(pg_sub_ref)
     pg_sub_ref = postgres_subscribe()
@@ -346,46 +348,36 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
+  def handle_info(:postgres_changes_subscribed, %{assigns: %{channel_name: channel_name}} = socket) do
+    push_postgres_changes_subscribed(socket, channel_name)
+    {:noreply, socket}
+  end
+
   def handle_info(:postgres_subscribe, %{assigns: %{channel_name: channel_name}} = socket) do
-    %{
-      assigns: %{
-        tenant: tenant_id,
-        pg_sub_ref: pg_sub_ref,
-        pg_change_params: pg_change_params
-      }
-    } = socket
+    %{assigns: %{tenant: tenant_id, pg_sub_ref: pg_sub_ref, pg_change_params: pg_change_params}} = socket
 
     Helpers.cancel_timer(pg_sub_ref)
 
     %Tenant{} = tenant = Cache.get_tenant_by_external_id(tenant_id)
-    {:ok, module} = PostgresCdc.driver(tenant.postgres_cdc_default)
-    postgres_extension = PostgresCdc.filter_settings(tenant.postgres_cdc_default, tenant.extensions)
 
-    args = %{"region" => postgres_extension["region"], "id" => tenant_id}
+    case postgres_subscribe_attempt(tenant, pg_change_params) do
+      {:ok, _response} ->
+        push_postgres_changes_subscribed(socket, channel_name)
+        {:noreply, assign(socket, :pg_sub_ref, nil)}
 
-    case PostgresCdc.connect(module, args) do
-      {:ok, response} ->
-        case PostgresCdc.after_connect(module, response, postgres_extension, pg_change_params, tenant_id) do
-          {:ok, _response} ->
-            message = "Subscribed to PostgreSQL"
-            maybe_log_info(socket, message)
-            push_system_message("postgres_changes", socket, "ok", message, channel_name)
-            {:noreply, assign(socket, :pg_sub_ref, nil)}
+      {:error, :fatal, error} ->
+        maybe_log_warning(socket, @postgres_subscribe_error_code, error)
+        push_system_message("postgres_changes", socket, "error", error, channel_name)
+        # No point in retrying if the params are invalid
+        {:noreply, assign(socket, :pg_sub_ref, nil)}
 
-          {:error, {reason, error}} when reason in [:malformed_subscription_params, :subscription_insert_failed] ->
-            maybe_log_warning(socket, "RealtimeDisabledForConfiguration", error)
-            push_system_message("postgres_changes", socket, "error", error, channel_name)
-            # No point in retrying if the params are invalid
-            {:noreply, assign(socket, :pg_sub_ref, nil)}
+      {:error, :retry, error} ->
+        maybe_log_warning(socket, @postgres_subscribe_error_code, error)
 
-          error ->
-            maybe_log_warning(socket, "RealtimeDisabledForConfiguration", error)
+        push_system_message("postgres_changes", socket, "error", error, channel_name)
+        {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe(5, 10))}
 
-            push_system_message("postgres_changes", socket, "error", error, channel_name)
-            {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe(5, 10))}
-        end
-
-      nil ->
+      {:error, :not_connected} ->
         maybe_log_warning(
           socket,
           "ReconnectSubscribeToPostgres",
@@ -393,17 +385,19 @@ defmodule RealtimeWeb.RealtimeChannel do
         )
 
         {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe())}
-
-      error ->
-        maybe_log_error(socket, "UnableToSubscribeToPostgres", error)
-        push_system_message("postgres_changes", socket, "error", error, channel_name)
-        {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe(5, 10))}
     end
   rescue
     error ->
       log_warning(socket, "UnableToSubscribeToPostgres", error)
       push_system_message("postgres_changes", socket, "error", error, channel_name)
       {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe(5, 10))}
+  end
+
+  def handle_info(:apply_pending_access_token, socket), do: apply_pending_access_token(socket)
+
+  # Apply the pending token if confirm_token fires first, instead of validating the old one
+  def handle_info(:confirm_token, %{assigns: %{pending_access_token: pending}} = socket) when is_binary(pending) do
+    apply_pending_access_token(socket)
   end
 
   def handle_info(:confirm_token, %{assigns: %{pg_change_params: pg_change_params}} = socket) do
@@ -425,6 +419,11 @@ defmodule RealtimeWeb.RealtimeChannel do
         log_error(socket, "JwtSignerError", msg)
         shutdown_response(socket, msg)
 
+      {:error, :error_generating_signer} ->
+        msg = "Failed to generate JWT signer, check your JWT secret or JWKS configuration"
+        log_error(socket, "JwtSignerError", msg)
+        shutdown_response(socket, msg)
+
       {:error, error} ->
         shutdown_response(socket, Realtime.Logs.to_log(error))
     end
@@ -432,7 +431,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   def handle_info(:sync_presence, %{assigns: %{presence_enabled?: true}} = socket) do
     case PresenceHandler.sync(socket) do
-      :ok ->
+      {:ok, socket} ->
         {:noreply, socket}
 
       {:error, :rate_limit_exceeded} ->
@@ -446,8 +445,22 @@ defmodule RealtimeWeb.RealtimeChannel do
   # then) is routed here by the dispatcher instead of fastlaned. Deliver it only if this socket is
   # authorized for presence.read (authorized on-demand when presence was auto-enabled via track),
   # otherwise drop it.
-  def handle_info({:authorize_presence_diff, %Phoenix.Socket.Broadcast{} = msg}, socket) do
-    if can_read_presence?(socket), do: push(socket, "presence_diff", msg.payload)
+  def handle_info(
+        {:authorize_presence_diff, %Phoenix.Socket.Broadcast{} = msg},
+        %{assigns: %{tenant: tenant_id}} = socket
+      )
+      when PresenceHandler.can_read_presence?(socket) do
+    context = RealtimeWeb.Presence.Metrics.context(tenant_id, :channel)
+    {msg, envelopes} = RealtimeWeb.Presence.Metrics.strip_diff(msg)
+
+    push(socket, "presence_diff", msg.payload)
+
+    RealtimeWeb.Presence.Metrics.record(envelopes, context)
+
+    {:noreply, socket}
+  end
+
+  def handle_info({:authorize_presence_diff, _msg}, socket) do
     {:noreply, socket}
   end
 
@@ -457,24 +470,45 @@ defmodule RealtimeWeb.RealtimeChannel do
   def handle_in("broadcast", payload, %{assigns: %{private?: true}} = socket) do
     %{tenant: tenant_id} = socket.assigns
 
-    with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id) do
-      BroadcastHandler.handle(payload, db_conn, socket)
-    else
-      {:error, error} ->
-        log_error(socket, "UnableToHandleBroadcast", error)
-        {:noreply, socket}
-    end
+    RequestMetrics.track(:broadcast, :ws, tenant_id, fn ->
+      with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id) do
+        BroadcastHandler.handle(payload, db_conn, socket)
+      else
+        {:error, :rpc_error, error} ->
+          log_error(socket, "UnableToHandleBroadcast", error)
+          BroadcastHandler.maybe_reply_error(socket, :unable_to_handle_broadcast)
+
+        {:error, :tenant_database_unavailable} ->
+          log_error(socket, "UnableToConnectToProject", :tenant_database_unavailable)
+          BroadcastHandler.maybe_reply_error(socket, :unable_to_connect_to_project)
+
+        {:error, :tenant_db_too_many_connections} ->
+          log_error(socket, "DatabaseLackOfConnections", :tenant_db_too_many_connections)
+          BroadcastHandler.maybe_reply_error(socket, :database_lack_of_connections)
+
+        {:error, :connect_rate_limit_reached} ->
+          log_error(socket, "DatabaseConnectionRateLimitReached", :connect_rate_limit_reached)
+          BroadcastHandler.maybe_reply_error(socket, :database_connection_rate_limit_reached)
+
+        {:error, reason} when reason in [:initializing, :tenant_database_connection_initializing] ->
+          log_error(socket, "InitializingProjectConnection", reason)
+          BroadcastHandler.maybe_reply_error(socket, :initializing_project_connection)
+
+        {:error, error} ->
+          log_error(socket, "UnableToHandleBroadcast", error)
+          BroadcastHandler.maybe_reply_error(socket, :unable_to_handle_broadcast)
+      end
+    end)
   end
 
   def handle_in("broadcast", payload, %{assigns: %{private?: false}} = socket) do
-    BroadcastHandler.handle(payload, socket)
+    RequestMetrics.track(:broadcast, :ws, socket.assigns.tenant, fn -> BroadcastHandler.handle(payload, socket) end)
   end
 
-  def handle_in("presence", payload, %{assigns: %{private?: true}} = socket) do
-    %{tenant: tenant_id} = socket.assigns
+  def handle_in("presence", payload, socket) do
+    with {:ok, socket, sync_needed} <- PresenceHandler.handle(payload, socket) do
+      if sync_needed == :resync, do: send(self(), :sync_presence)
 
-    with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
-         {:ok, socket} <- PresenceHandler.handle(payload, db_conn, socket) do
       {:reply, :ok, socket}
     else
       {:error, :client_rate_limit_exceeded} ->
@@ -491,29 +525,9 @@ defmodule RealtimeWeb.RealtimeChannel do
         log_error(socket, "InvalidPresencePayload", :invalid_payload)
         {:reply, {:error, %{reason: "Presence track payload must be a map"}}, socket}
 
-      {:error, error} ->
+      {:error, :rpc_error, error} ->
         log_error(socket, "UnableToHandlePresence", error)
         {:reply, :error, socket}
-    end
-  end
-
-  def handle_in("presence", payload, %{assigns: %{private?: false}} = socket) do
-    with {:ok, socket} <- PresenceHandler.handle(payload, nil, socket) do
-      {:reply, :ok, socket}
-    else
-      {:error, :client_rate_limit_exceeded} ->
-        log_error(socket, "ClientPresenceRateLimitReached", :client_rate_limit_exceeded)
-        shutdown_response(socket, "Client presence rate limit exceeded")
-
-      {:error, :rate_limit_exceeded} ->
-        shutdown_response(socket, "Too many presence messages per second")
-
-      {:error, :payload_size_exceeded} ->
-        shutdown_response(socket, "Track message size exceeded")
-
-      {:error, :invalid_payload} ->
-        log_error(socket, "InvalidPresencePayload", :invalid_payload)
-        {:reply, {:error, %{reason: "Presence track payload must be a map"}}, socket}
 
       {:error, error} ->
         log_error(socket, "UnableToHandlePresence", error)
@@ -521,21 +535,65 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  def handle_in("access_token", %{"access_token" => "sb_" <> _}, socket) do
-    {:noreply, socket}
-  end
+  def handle_in("access_token", %{"access_token" => "sb_" <> _}, socket), do: {:noreply, socket}
 
   def handle_in("access_token", %{"access_token" => refresh_token}, %{assigns: %{access_token: access_token}} = socket)
       when refresh_token == access_token do
     {:noreply, socket}
   end
 
-  def handle_in("access_token", %{"access_token" => refresh_token}, %{assigns: %{access_token: _access_token}} = socket)
-      when is_nil(refresh_token) do
+  def handle_in("access_token", %{"access_token" => nil}, socket), do: {:noreply, socket}
+
+  # Already held for the current window, nothing new to verify
+  def handle_in(
+        "access_token",
+        %{"access_token" => refresh_token},
+        %{assigns: %{pending_access_token: pending}} = socket
+      )
+      when refresh_token == pending do
     {:noreply, socket}
   end
 
   def handle_in("access_token", %{"access_token" => refresh_token}, socket) when is_binary(refresh_token) do
+    %{assigns: %{access_token_verified_at: verified_at}} = socket
+    throttle_ms = access_token_throttle_ms()
+    now = now()
+
+    # First refresh of the channel, or the window has closed
+    if is_nil(verified_at) or now - verified_at >= throttle_ms do
+      apply_access_token(socket, refresh_token, now)
+    else
+      {:noreply, hold_access_token(socket, refresh_token, throttle_ms - (now - verified_at))}
+    end
+  end
+
+  def handle_in(type, payload, socket) do
+    count(socket)
+
+    # Log info here so that bad messages from clients won't flood Logflare
+    # Can subscribe to a Channel with `log_level` `info` to see these messages
+    message = "Unexpected message from client of type `#{type}` with payload: #{inspect(payload)}"
+    Logger.info(message)
+
+    {:noreply, socket}
+  end
+
+  # Validate and update token later.
+  defp hold_access_token(%{assigns: %{pending_access_token: nil}} = socket, refresh_token, remaining_ms) do
+    log_warning(socket, "AccessTokenRefreshThrottled", "Token refresh throttled, applying in #{remaining_ms}ms")
+    Process.send_after(self(), :apply_pending_access_token, remaining_ms)
+    assign(socket, :pending_access_token, refresh_token)
+  end
+
+  defp hold_access_token(socket, refresh_token, _remaining_ms), do: assign(socket, :pending_access_token, refresh_token)
+
+  defp apply_pending_access_token(%{assigns: %{pending_access_token: nil}} = socket), do: {:noreply, socket}
+
+  defp apply_pending_access_token(%{assigns: %{pending_access_token: token}} = socket) do
+    apply_access_token(socket, token, now())
+  end
+
+  defp apply_access_token(socket, refresh_token, now) do
     %{
       assigns: %{
         tenant: tenant_id,
@@ -548,8 +606,13 @@ defmodule RealtimeWeb.RealtimeChannel do
     # Keep track of the policies evaluated with the previous token so we can detect revoked permissions
     previous_policies = socket.assigns.policies
 
-    # Update token and reset policies
-    socket = assign(socket, %{access_token: refresh_token, policies: nil})
+    socket =
+      assign(socket, %{
+        access_token: refresh_token,
+        policies: nil,
+        access_token_verified_at: now,
+        pending_access_token: nil
+      })
 
     with {:ok, claims, confirm_token_ref} <- confirm_token(socket),
          socket = assign_authorization_context(socket, channel_name, claims),
@@ -611,27 +674,20 @@ defmodule RealtimeWeb.RealtimeChannel do
         log_error(socket, "JwtSignerError", msg)
         shutdown_response(socket, msg)
 
+      {:error, :error_generating_signer} ->
+        msg = "Failed to generate JWT signer, check your JWT secret or JWKS configuration"
+        log_error(socket, "JwtSignerError", msg)
+        shutdown_response(socket, msg)
+
       {:error, error} ->
         shutdown_response(socket, inspect(error))
     end
   end
 
-  def handle_in(type, payload, socket) do
-    count(socket)
-
-    # Log info here so that bad messages from clients won't flood Logflare
-    # Can subscribe to a Channel with `log_level` `info` to see these messages
-    message = "Unexpected message from client of type `#{type}` with payload: #{inspect(payload)}"
-    Logger.info(message)
-
-    {:noreply, socket}
-  end
-
   @impl true
-  def terminate(reason, %{transport_pid: transport_pid}) do
+  def terminate(reason, _socket) do
     Logger.debug("Channel terminated with reason: #{inspect(reason)}")
     :telemetry.execute([:prom_ex, :plugin, :realtime, :disconnected], %{})
-    Tracker.untrack(transport_pid)
     :ok
   end
 
@@ -663,21 +719,17 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  def limit_channels(tenant, %{transport_pid: pid} = socket) do
-    key = Tenants.channels_per_client_key(tenant)
-    count = Registry.count_match(Realtime.Registry, key, pid)
-
+  # channels_count is the number of channels the transport already holds, set by UserSocket
+  def limit_channels(tenant, %{assigns: %{channels_count: count}} = socket) do
     cond do
       count >= tenant.max_channels_per_client ->
         {:error, :too_many_channels}
 
       count + 1 == tenant.max_channels_per_client ->
-        Registry.register(Realtime.Registry, key, pid)
         log_error(socket, "ChannelRateLimitReached", "Too many channels")
         :ok
 
       true ->
-        Registry.register(Realtime.Registry, key, pid)
         :ok
     end
   end
@@ -690,20 +742,18 @@ defmodule RealtimeWeb.RealtimeChannel do
   # task always returns a plain term instead of exiting abnormally, so its
   # link to this process can never propagate a crash back to the channel.
   defp maybe_start_muster_join(tenant_id, transport_pid) do
-    if FeatureFlags.enabled?("use_muster_channel_join", tenant_id) do
-      scope = Application.get_env(:realtime, :muster_scope)
+    scope = Application.get_env(:realtime, :muster_scope)
 
-      unless Muster.local_member?(scope, tenant_id, transport_pid) do
-        Task.async(fn ->
-          try do
-            Muster.join(scope, tenant_id, transport_pid)
-          rescue
-            e -> {:error, Exception.message(e)}
-          catch
-            :exit, reason -> {:error, reason}
-          end
-        end)
-      end
+    unless Muster.local_member?(scope, tenant_id, transport_pid) do
+      Task.async(fn ->
+        try do
+          Muster.join(scope, tenant_id, transport_pid)
+        rescue
+          e -> {:error, Exception.message(e)}
+        catch
+          :exit, reason -> {:error, reason}
+        end
+      end)
     end
   end
 
@@ -736,47 +786,11 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp assign_counter(socket, tenant) do
-    rate_args = Tenants.events_per_second_rate(tenant)
+  defp access_token_throttle_ms, do: Application.fetch_env!(:realtime, :access_token_throttle_ms)
 
-    RateCounter.new(rate_args)
-    assign(socket, :rate_counter, rate_args)
-  end
+  defp now, do: System.monotonic_time(:millisecond)
 
-  defp assign_presence_counter(socket, tenant) do
-    rate_args = Tenants.presence_events_per_second_rate(tenant)
-
-    RateCounter.new(rate_args)
-
-    assign(socket, :presence_rate_counter, rate_args)
-  end
-
-  defp assign_client_presence_rate_limit(socket, tenant) do
-    config = Application.get_env(:realtime, :client_presence_rate_limit, max_calls: 5, window_ms: 30_000)
-
-    max_calls =
-      case tenant.max_client_presence_events_per_window do
-        value when is_integer(value) and value > 0 -> value
-        _ -> config[:max_calls]
-      end
-
-    window_ms =
-      case tenant.client_presence_window_ms do
-        value when is_integer(value) and value > 0 -> value
-        _ -> config[:window_ms]
-      end
-
-    client_rate_limit = %{
-      max_calls: max_calls,
-      window_ms: window_ms,
-      counter: 0,
-      reset_at: nil
-    }
-
-    assign(socket, :presence_client_rate_limit, client_rate_limit)
-  end
-
-  defp count(%{assigns: %{rate_counter: counter}}), do: GenCounter.add(counter.id)
+  defp count(%{assigns: %{tenant: tenant_id}}), do: GenCounter.add(Tenants.events_per_second_key(tenant_id))
 
   defp assign_access_token(%{assigns: %{tenant_token: tenant_token}} = socket, params) do
     access_token = Map.get(params, "access_token") || Map.get(params, "user_token")
@@ -801,18 +815,21 @@ defmodule RealtimeWeb.RealtimeChannel do
     assign(socket, :access_token, tenant_token)
   end
 
+  # Only place cached policies get re-evaluated (access_token refresh) or the socket gets
+  # disconnected (JWT expiry). Keep client JWT expiry short: see
+  # https://supabase.com/docs/guides/realtime/authorization#updating-rls-policies
   defp confirm_token(%{assigns: assigns}) do
     %{jwt_secret: jwt_secret, access_token: access_token} = assigns
 
     jwt_jwks = Map.get(assigns, :jwt_jwks)
 
-    with jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
+    with jwt_secret_dec <- Tenant.decrypt_jwt_secret(jwt_secret),
          {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
            ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec, jwt_jwks),
          exp_diff when exp_diff > 0 <- exp - Joken.current_time() do
       if ref = assigns[:confirm_token_ref], do: Helpers.cancel_timer(ref)
 
-      interval = min(@confirm_token_ms_interval, exp_diff * 1000)
+      interval = min(@confirm_token_ms_max_interval, exp_diff * 1000)
       ref = Process.send_after(self(), :confirm_token, interval)
 
       {:ok, claims, ref}
@@ -935,9 +952,88 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:ok, module} = PostgresCdc.driver(tenant.postgres_cdc_default)
     PostgresCdc.subscribe(module, pg_change_params, tenant.external_id, metadata)
 
-    send(self(), :postgres_subscribe)
-
     pg_change_params
+  end
+
+  @spec postgres_subscribe_attempt(Tenant.t(), list()) ::
+          {:ok, term()} | {:error, :not_connected} | {:error, :fatal | :retry, term()}
+  defp postgres_subscribe_attempt(%Tenant{external_id: tenant_id} = tenant, pg_change_params) do
+    {:ok, module} = PostgresCdc.driver(tenant.postgres_cdc_default)
+    settings = PostgresCdc.filter_settings(tenant.postgres_cdc_default, tenant.extensions)
+    args = %{"region" => settings["region"], "id" => tenant_id}
+
+    with {:ok, connection} <- PostgresCdc.connect(module, args),
+         {:ok, response} <- PostgresCdc.after_connect(module, connection, settings, pg_change_params, tenant_id) do
+      {:ok, response}
+    else
+      nil -> {:error, :not_connected}
+      {:error, {reason, error}} when reason in @postgres_subscribe_fatal_reasons -> {:error, :fatal, error}
+      error -> {:error, :retry, error}
+    end
+  end
+
+  defp start_postgres_subscribe(_socket, _join, _tenant, []), do: :ok
+
+  defp start_postgres_subscribe(socket, join, tenant, pg_change_params) do
+    case Join.postgres_changes_wait_timeout(join) do
+      nil ->
+        send(self(), :postgres_subscribe)
+        :ok
+
+      timeout ->
+        await_postgres_subscribe(socket, %{
+          tenant: tenant,
+          pg_change_params: pg_change_params,
+          timeout: timeout,
+          deadline: System.monotonic_time(:millisecond) + timeout,
+          backoff:
+            Backoff.new(
+              backoff_min: @postgres_subscribe_backoff_min,
+              backoff_max: @postgres_subscribe_backoff_max,
+              backoff_type: :rand_exp
+            )
+        })
+    end
+  end
+
+  defp await_postgres_subscribe(socket, %{tenant: tenant, pg_change_params: pg_change_params} = wait) do
+    case postgres_subscribe_attempt(tenant, pg_change_params) do
+      {:ok, _response} ->
+        send(self(), :postgres_changes_subscribed)
+        :ok
+
+      {:error, :fatal, error} ->
+        maybe_log_warning(socket, @postgres_subscribe_error_code, error)
+
+      {:error, :not_connected} ->
+        sleep_and_retry_postgres_subscribe(socket, wait)
+
+      {:error, :retry, error} ->
+        maybe_log_warning(socket, @postgres_subscribe_error_code, error)
+        sleep_and_retry_postgres_subscribe(socket, wait)
+    end
+  end
+
+  defp sleep_and_retry_postgres_subscribe(socket, %{deadline: deadline, backoff: backoff, timeout: timeout} = wait) do
+    case deadline - System.monotonic_time(:millisecond) do
+      remaining when remaining > 0 ->
+        {interval, backoff} = Backoff.backoff(backoff)
+        Process.sleep(min(interval, remaining))
+        await_postgres_subscribe(socket, %{wait | backoff: backoff})
+
+      _ ->
+        log_error(
+          socket,
+          "PostgresChangesSubscribeTimeout",
+          "Timed out after #{timeout}ms waiting for the postgres_changes subscription"
+        )
+    end
+  end
+
+  defp push_postgres_changes_subscribed(socket, channel_name) do
+    message = "Subscribed to PostgreSQL"
+    maybe_log_info(socket, message)
+    push_system_message("postgres_changes", socket, "ok", message, channel_name)
   end
 
   defp add_id_to_postgres_changes(pg_change_params) do
@@ -961,6 +1057,9 @@ defmodule RealtimeWeb.RealtimeChannel do
     assign(socket, :authorization_context, authorization_context)
   end
 
+  # Result is cached in assigns.policies for the JWT's or socket's life time (whichever comes first).
+  # We recommend short-lived JWTs to force re-evaluation.
+  # See https://supabase.com/docs/guides/realtime/authorization#updating-rls-policies
   defp maybe_assign_policies(topic, db_conn, %{assigns: %{private?: true}} = socket)
        when not is_nil(topic) do
     authorization_context = socket.assigns.authorization_context
@@ -1078,13 +1177,15 @@ defmodule RealtimeWeb.RealtimeChannel do
          true = _private?
        )
        when is_map(replay_params) do
+    replay_defaults = %Replay{}
+
     with {:ok, messages, message_ids} <-
            Realtime.Messages.replay(
              db_conn,
              tenant_id,
              sub_topic,
-             replay_params["since"],
-             replay_params["limit"] || 25
+             replay_params["since"] || replay_defaults.since,
+             replay_params["limit"] || replay_defaults.limit
            ) do
       # Send to self because we can't write to the socket before finishing the join process
       send(self(), {:replay, messages})
@@ -1109,14 +1210,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     push(socket, "broadcast", payload)
   end
 
-  defp presence_enabled?(client_enabled?, %Tenant{presence_enabled: tenant_enabled}) do
-    client_enabled? || tenant_enabled
-  end
-
-  defp can_read_presence?(%{assigns: %{policies: %Policies{presence: %{read: true}}}}), do: true
-  defp can_read_presence?(_socket), do: false
-
-  defp max_heap_size(), do: :persistent_term.get({RealtimeWeb.UserSocket, :websocket_max_heap_size})
+  defp max_heap_size, do: :persistent_term.get({RealtimeWeb.UserSocket, :websocket_max_heap_size})
 
   defp join_error({:error, _} = error) do
     Process.sleep(channel_error_backoff_ms())
@@ -1125,5 +1219,5 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   defp join_error(other), do: other
 
-  defp channel_error_backoff_ms(), do: :persistent_term.get({__MODULE__, :channel_error_backoff_ms})
+  defp channel_error_backoff_ms, do: :persistent_term.get({__MODULE__, :channel_error_backoff_ms})
 end

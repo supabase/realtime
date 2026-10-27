@@ -1,10 +1,14 @@
 defmodule Realtime.Tenants.Janitor.MaintenanceTaskTest do
   use Realtime.DataCase, async: true
+  use Mimic
 
   alias Realtime.Tenants.Janitor.MaintenanceTask
   alias Realtime.Api.Message
   alias Realtime.Database
+  alias Realtime.Messages
   alias Realtime.Tenants.Repo
+
+  setup :set_mimic_from_context
 
   setup do
     tenant = TestTenantDb.checkout_tenant(run_migrations: true)
@@ -71,6 +75,41 @@ defmodule Realtime.Tenants.Janitor.MaintenanceTaskTest do
     end
   end
 
+  describe "connection lifecycle" do
+    setup do
+      %{task_supervisor: start_supervised!(Task.Supervisor)}
+    end
+
+    test "the connection is closed once the janitor task finishes", ctx do
+      %{tenant: tenant, task_supervisor: task_supervisor} = ctx
+
+      expect(Messages, :delete_old_messages, fn _conn -> :ok end)
+
+      task = run_in_task(task_supervisor, tenant)
+
+      assert Task.await(task, 5000) == :ok
+
+      assert [[conn]] = Mimic.calls(Messages, :delete_old_messages, 1)
+      # Monitoring an already dead connection still delivers :DOWN (with :noproc)
+      conn_ref = Process.monitor(conn)
+      assert_receive {:DOWN, ^conn_ref, :process, ^conn, _}, 5000
+    end
+
+    test "the connection is closed when maintenance raises", ctx do
+      %{tenant: tenant, task_supervisor: task_supervisor} = ctx
+
+      expect(Messages, :delete_old_messages, fn _conn -> raise "maintenance failed" end)
+
+      %{pid: pid, ref: ref} = run_in_task(task_supervisor, tenant)
+
+      assert_receive {:DOWN, ^ref, :process, ^pid, {%RuntimeError{message: "maintenance failed"}, _}}, 5000
+
+      assert [[conn]] = Mimic.calls(Messages, :delete_old_messages, 1)
+      conn_ref = Process.monitor(conn)
+      assert_receive {:DOWN, ^conn_ref, :process, ^conn, _}, 5000
+    end
+  end
+
   test "exits if fails to remove old messages" do
     extensions = [
       %{
@@ -105,5 +144,23 @@ defmodule Realtime.Tenants.Janitor.MaintenanceTaskTest do
     ref = t.ref
     assert_receive {:EXIT, ^pid, :killed}
     assert_receive {:DOWN, ^ref, :process, ^pid, :killed}
+  end
+
+  # Run maintenance the way the Janitor does: inside a task, which owns the connection.
+  # The task waits for :go so Mimic can allow it before the expectation is called.
+  defp run_in_task(task_supervisor, tenant) do
+    test_pid = self()
+
+    task =
+      Task.Supervisor.async_nolink(task_supervisor, fn ->
+        receive do
+          :go -> MaintenanceTask.run(tenant.external_id)
+        end
+      end)
+
+    Mimic.allow(Messages, test_pid, task.pid)
+    send(task.pid, :go)
+
+    task
   end
 end

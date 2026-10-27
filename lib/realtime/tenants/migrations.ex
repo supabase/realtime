@@ -99,7 +99,17 @@ defmodule Realtime.Tenants.Migrations do
     {20_260_706_120_000, Migrations.GrantCheckEqualityOp5Arg},
     {20_260_707_120_000, Migrations.RestrictRealtimeSchema},
     {20_260_709_120_000, Migrations.FixApplyRlsFilterRoleLeak},
-    {20_260_815_130_000, Migrations.HashSubscriptionFiltersIndex}
+    {20_260_714_120_000, Migrations.AddBroadcastPersistence},
+    {20_260_827_120_000, Migrations.EmptySelectColumnsReturnPrimaryKeys},
+    {20_260_914_120_000, Migrations.DelegateMessagesGrantsToPostgres},
+    {20_260_916_120_000, Migrations.AllowPostgresToDelegateRealtimeSchemaUsage},
+    {20_260_922_120_000, Migrations.RevokeRealtimeSchemaGrantOptionFromRealtimeAdmin},
+    {20_260_925_120_000, Migrations.RestoreMessagesBaseGrants},
+    {20_260_928_120_000, Migrations.AddListChangesSync},
+    {20_261_002_120_000, Migrations.AddAuthorizeFunction},
+    {20_261_008_120_000, Migrations.AuthorizeReadProbesSinglePartition},
+    {20_261_009_120_000, Migrations.MessagesClockTimestampDefaults},
+    {20_261_027_120_000, Migrations.HashSubscriptionFiltersIndex}
   ]
 
   defstruct [:tenant_external_id, :settings, migrations_ran: 0]
@@ -212,6 +222,7 @@ defmodule Realtime.Tenants.Migrations do
         backoff_type: settings.backoff_type,
         socket_options: settings.socket_options,
         parameters: [application_name: settings.application_name],
+        after_connect: after_connect(),
         ssl: settings.ssl
       ]
       |> Repo.with_dynamic_repo(fn repo ->
@@ -221,7 +232,7 @@ defmodule Realtime.Tenants.Migrations do
 
         try do
           {applied_count, migrations_executed, source} =
-            if load_db_dump?(migrations_ran, repo) do
+            if __MODULE__.load_db_dump?(migrations_ran, repo) do
               case load_db_dump(repo) do
                 {:ok, applied_count} -> {applied_count, applied_count, :dump}
                 {:error, _} -> run_pending_migrations(repo)
@@ -281,10 +292,15 @@ defmodule Realtime.Tenants.Migrations do
   # Best-effort checking to find if it should load the DB dump or fallback to sequential migrations.
   # `migrations_ran` can be stale on DB restore or cluster migration operations,
   # so it needs to also query `realtime.schema_migrations` to make sure.
-  defp load_db_dump?(0 = _migrations_ran, repo), do: schema_migrations_empty?(repo)
-  defp load_db_dump?(_migrations_ran, _repo), do: false
+  @doc false
+  def load_db_dump?(0 = _migrations_ran, repo) do
+    Application.get_env(:realtime, :load_tenant_db_dump, true) and schema_migrations_empty?(repo)
+  end
 
-  defp schema_migrations_empty?(repo) do
+  def load_db_dump?(_migrations_ran, _repo), do: false
+
+  @doc false
+  def schema_migrations_empty?(repo) do
     case Repo.query("SELECT count(*)::int FROM realtime.schema_migrations", [], dynamic_repo: repo) do
       {:ok, %{rows: [[0]]}} ->
         true
@@ -331,4 +347,13 @@ defmodule Realtime.Tenants.Migrations do
   """
   @spec migrations() :: [{pos_integer(), module()}]
   def migrations, do: @migrations
+
+  @doc """
+  `after_connect` for the connection these migrations run on.
+
+  They build SQL dynamically, which Multigres' gateway refuses to forward;
+  `unsafe_connection` lets it through. A no-op on plain Postgres.
+  """
+  @spec after_connect() :: {module(), atom(), [term()]}
+  def after_connect, do: {Postgrex, :query!, ["SET multigres.unsafe_connection = on", []]}
 end

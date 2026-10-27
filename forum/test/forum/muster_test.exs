@@ -638,6 +638,13 @@ defmodule Forum.MusterTest do
       key = {:gc_g, :src@nowhere}
       src = fake_pid()
 
+      # Make the source a cluster member. reap_departed_sources/1 rides the same
+      # :sweep_tombstones tick and deletes rows whose source is both outside the
+      # view and disconnected -- which a bare :src@nowhere is -- so without this
+      # the sweeps below would reap the row outright and the test would no longer
+      # be measuring the tombstone window at all.
+      inject_fake_remote(scope, :src@nowhere)
+
       :ok = Scope.occupied(scope, :gc_g, :src@nowhere, 1, src)
       assert :ok = Scope.vacant_batch(scope, [:gc_g], :src@nowhere, 2, src)
 
@@ -2372,6 +2379,31 @@ defmodule Forum.MusterTest do
       assert :occupied = wait_for_group_state(scope, g, :occupied, 2_000)
     end
 
+    test "a coordinator crash mid-drain reopens the join gate on restart",
+         %{scope: scope} do
+      # drain/2 closes the join gate by setting the :accepting_joins
+      # persistent_term to false.
+      # Because it lives outside the coordinator's process state, a crash before
+      # the node actually dies would otherwise leave it stuck false forever: the
+      # restarted incarnation re-pairs and routes normally, yet every join would
+      # keep returning {:error, :draining} for the life of the OS process. init/1
+      # must reopen the gate.
+      :persistent_term.put({Forum.Muster, scope, :accepting_joins}, false)
+      pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      assert {:error, :draining} = Muster.join(scope, :drain_crash_g, pid)
+
+      coord = Process.whereis(Forum.Supervisor.name(scope))
+      ref = Process.monitor(coord)
+      Process.exit(coord, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^coord, :killed}, 1_000
+
+      new_coord = wait_for_new_pid(Forum.Supervisor.name(scope), coord)
+      assert is_pid(new_coord)
+
+      assert :ok = wait_until_join_ok(scope, :drain_crash_g, pid)
+      assert :persistent_term.get({Forum.Muster, scope, :accepting_joins}) == true
+    end
+
     test "a rejoin during a coordinator restart does not leave targets/3 silently dropping a live member",
          %{scope: scope} do
       # Forum.Muster.Shard.handle_join/4's
@@ -2779,6 +2811,7 @@ defmodule Forum.MusterTest do
 
       # Suspend a shard so the gather blocks on it.
       shard_pid = Process.whereis(Forum.Supervisor.shard_name(gt_scope, 0))
+      shard_ref = Process.monitor(shard_pid)
       :ok = :sys.suspend(shard_pid)
 
       coord = Process.whereis(Forum.Supervisor.name(gt_scope))
@@ -2790,10 +2823,9 @@ defmodule Forum.MusterTest do
       # Crash arrives ~150ms in -- well under the 15s default -- proving the timeout
       # is in force.
       assert_receive {:DOWN, ^ref, :process, ^coord, reason}, 1_000
-      assert match?({:timeout, _}, reason) or match?(:killed, reason) or is_tuple(reason)
+      assert {:timeout, {GenServer, :call, [_shard, {:rebalance, _}, 150]}} = reason
 
-      # Let the suspended shard go so teardown is clean.
-      :sys.resume(shard_pid)
+      assert_receive {:DOWN, ^shard_ref, :process, ^shard_pid, :shutdown}, 1_000
     end
   end
 

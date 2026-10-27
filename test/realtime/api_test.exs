@@ -10,6 +10,7 @@ defmodule Realtime.ApiTest do
   alias Realtime.Api.FeatureFlag
   alias Realtime.Api.Tenant
   alias Realtime.Crypto
+  alias Realtime.Env
   alias Realtime.GenCounter
   alias Realtime.GenRpc
   alias Realtime.Nodes
@@ -49,6 +50,31 @@ defmodule Realtime.ApiTest do
     end
   end
 
+  describe "list_existing_external_ids/1" do
+    setup [:create_tenants]
+
+    test "returns only the ids that have a tenant", %{tenants: [tenant1, tenant2, _]} do
+      result = Api.list_existing_external_ids([tenant1.external_id, "nope", tenant2.external_id])
+
+      assert Enum.sort(result) == Enum.sort([tenant1.external_id, tenant2.external_id])
+    end
+
+    test "returns an empty list when no id matches" do
+      assert Api.list_existing_external_ids(["nope", "also-nope"]) == []
+    end
+
+    test "returns an empty list for an empty input" do
+      assert Api.list_existing_external_ids([]) == []
+    end
+
+    test "does not read the replica", %{tenants: [tenant | _]} do
+      # A tenant created moments ago must never read as absent, so the query has to hit the primary.
+      Mimic.reject(&Realtime.Repo.Replica.replica/0)
+
+      assert Api.list_existing_external_ids([tenant.external_id]) == [tenant.external_id]
+    end
+  end
+
   describe "get_tenant!/1" do
     setup [:create_tenants]
 
@@ -61,7 +87,7 @@ defmodule Realtime.ApiTest do
 
   describe "create_tenant/1" do
     test "valid data creates a tenant" do
-      port = Generators.port()
+      port = Env.unused_port()
 
       external_id = random_string()
 
@@ -97,7 +123,7 @@ defmodule Realtime.ApiTest do
       assert {:ok, %Tenant{} = tenant} = Api.create_tenant(valid_attrs)
 
       assert tenant.external_id == external_id
-      assert tenant.jwt_secret == "YIriPuuJO1uerq5hSZ1W5Q=="
+      assert Crypto.decrypt!(tenant.jwt_secret) == "new secret"
       assert tenant.name == external_id
       assert tenant.broadcast_adapter == :gen_rpc
     end
@@ -105,6 +131,26 @@ defmodule Realtime.ApiTest do
     test "invalid data returns error changeset" do
       reject(&Realtime.Tenants.Cache.global_cache_update/1)
       assert {:error, %Ecto.Changeset{}} = Api.create_tenant(%{external_id: nil, jwt_secret: nil, name: nil})
+    end
+
+    test "external_id ending in -private returns error changeset" do
+      reject(&Realtime.Tenants.Cache.global_cache_update/1)
+      external_id = random_string() <> "-private"
+
+      assert {:error, %Ecto.Changeset{}} =
+               Api.create_tenant(%{external_id: external_id, jwt_secret: "secret", name: external_id})
+
+      refute Api.get_tenant_by_external_id(external_id, use_replica?: false)
+    end
+
+    test "external_id containing a colon returns error changeset" do
+      reject(&Realtime.Tenants.Cache.global_cache_update/1)
+      external_id = random_string() <> ":topic"
+
+      assert {:error, %Ecto.Changeset{}} =
+               Api.create_tenant(%{external_id: external_id, jwt_secret: "secret", name: external_id})
+
+      refute Api.get_tenant_by_external_id(external_id, use_replica?: false)
     end
   end
 
@@ -116,8 +162,7 @@ defmodule Realtime.ApiTest do
         Api.get_tenant_by_external_id(tenant.external_id)
 
       assert Map.has_key?(extension.settings, "db_password")
-      password = extension.settings["db_password"]
-      assert ^password = "v1QVng3N+pZd/0AEObABwg=="
+      assert Crypto.decrypt!(extension.settings["db_password"]) == "postgres"
     end
 
     test "fetch by external id using replica", %{tenants: [tenant | _]} do
@@ -125,8 +170,7 @@ defmodule Realtime.ApiTest do
         Api.get_tenant_by_external_id(tenant.external_id, use_replica?: true)
 
       assert Map.has_key?(extension.settings, "db_password")
-      password = extension.settings["db_password"]
-      assert ^password = "v1QVng3N+pZd/0AEObABwg=="
+      assert Crypto.decrypt!(extension.settings["db_password"]) == "postgres"
     end
 
     test "fetch by external id using no replica", %{tenants: [tenant | _]} do
@@ -134,8 +178,11 @@ defmodule Realtime.ApiTest do
         Api.get_tenant_by_external_id(tenant.external_id, use_replica?: false)
 
       assert Map.has_key?(extension.settings, "db_password")
-      password = extension.settings["db_password"]
-      assert ^password = "v1QVng3N+pZd/0AEObABwg=="
+      assert Crypto.decrypt!(extension.settings["db_password"]) == "postgres"
+    end
+
+    test "rejects unknown options", %{tenants: [tenant | _]} do
+      assert_raise ArgumentError, fn -> Api.get_tenant_by_external_id(tenant.external_id, use_replica: false) end
     end
   end
 
@@ -152,13 +199,31 @@ defmodule Realtime.ApiTest do
       assert {:ok, %Tenant{} = tenant} = Api.update_tenant_by_external_id(tenant.external_id, update_attrs)
       assert tenant.external_id == tenant.external_id
 
-      assert tenant.jwt_secret == Crypto.encrypt!("some updated jwt_secret")
+      assert Crypto.decrypt!(tenant.jwt_secret) == "some updated jwt_secret"
       assert tenant.name == "some updated name"
     end
 
     test "invalid data returns error changeset", %{tenants: [tenant | _]} do
       assert {:error, %Ecto.Changeset{}} =
                Api.update_tenant_by_external_id(tenant.external_id, %{external_id: nil, jwt_secret: nil, name: nil})
+    end
+
+    test "renaming to an external_id ending in -private returns error changeset", %{tenants: [tenant | _]} do
+      private_id = tenant.external_id <> "-private"
+
+      assert {:error, %Ecto.Changeset{}} =
+               Api.update_tenant_by_external_id(tenant.external_id, %{external_id: private_id})
+
+      refute Api.get_tenant_by_external_id(private_id, use_replica?: false)
+    end
+
+    test "renaming to an external_id containing a colon returns error changeset", %{tenants: [tenant | _]} do
+      colon_id = tenant.external_id <> ":topic"
+
+      assert {:error, %Ecto.Changeset{}} =
+               Api.update_tenant_by_external_id(tenant.external_id, %{external_id: colon_id})
+
+      refute Api.get_tenant_by_external_id(colon_id, use_replica?: false)
     end
 
     test "valid data and jwks change will send disconnect event", %{tenants: [tenant | _]} do
@@ -420,11 +485,14 @@ defmodule Realtime.ApiTest do
   end
 
   describe "rename_settings_field/2" do
-    @tag skip: "** (Postgrex.Error) ERROR 0A000 (feature_not_supported) cached plan must not change result type"
     test "renames setting fields" do
       tenant = tenant_fixture()
+
       Api.rename_settings_field("poll_interval_ms", "poll_interval")
-      assert %{extensions: [%{settings: %{"poll_interval" => _}}]} = tenant
+
+      assert %{extensions: [extension]} = Api.get_tenant_by_external_id(tenant.external_id)
+      assert Map.has_key?(extension.settings, "poll_interval")
+      refute Map.has_key?(extension.settings, "poll_interval_ms")
     end
   end
 
@@ -671,6 +739,24 @@ defmodule Realtime.ApiTest do
       end)
 
       assert {:ok, %Tenant{external_id: ^external_id}} = Api.create_tenant(attrs)
+    end
+
+    test "list_existing_external_ids dispatches to master with empty opts", %{master_node: master_node} do
+      Mimic.expect(GenRpc, :call, fn ^master_node, Api, :list_existing_external_ids, args, opts ->
+        assert args == [["abc", "def"]]
+        assert opts == []
+        ["abc"]
+      end)
+
+      assert Api.list_existing_external_ids(["abc", "def"]) == ["abc"]
+    end
+
+    test "list_existing_external_ids surfaces an unreachable master", %{master_node: master_node} do
+      Mimic.expect(GenRpc, :call, fn ^master_node, Api, :list_existing_external_ids, _args, _opts ->
+        {:error, :rpc_error, :timeout}
+      end)
+
+      assert Api.list_existing_external_ids(["abc"]) == {:error, :timeout}
     end
   end
 end

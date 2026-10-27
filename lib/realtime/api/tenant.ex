@@ -34,6 +34,7 @@ defmodule Realtime.Api.Tenant do
     field(:client_presence_window_ms, :integer)
     field(:presence_enabled, :boolean, default: false)
     field(:feature_flags, :map, default: %{})
+    field(:gcm_migrated_at, :utc_datetime)
 
     has_many(:extensions, Realtime.Api.Extensions,
       foreign_key: :tenant_external_id,
@@ -87,6 +88,7 @@ defmodule Realtime.Api.Tenant do
       :feature_flags
     ])
     |> validate_required([:external_id])
+    |> validate_change(:external_id, &validate_external_id/2)
     |> check_constraint(:jwt_secret,
       name: :jwt_secret_or_jwt_jwks_required,
       message: "either jwt_secret or jwt_jwks must be provided"
@@ -101,6 +103,16 @@ defmodule Realtime.Api.Tenant do
     |> cast_assoc(:extensions, with: &Extensions.changeset/2)
   end
 
+  # Tenant topics are "<external_id>:<topic>" when public and "<external_id>-private:<topic>" when private.
+  # An external_id ending in "-private" or containing ":" could produce another tenant's topic.
+  defp validate_external_id(:external_id, external_id) do
+    cond do
+      String.ends_with?(external_id, "-private") -> [external_id: ~s(must not end with "-private")]
+      String.contains?(external_id, ":") -> [external_id: ~s(must not contain ":")]
+      true -> []
+    end
+  end
+
   def maybe_set_default(changeset, property, config_key) do
     has_key? = Map.get(changeset.data, property) || Map.get(changeset.changes, property)
 
@@ -111,8 +123,19 @@ defmodule Realtime.Api.Tenant do
     end
   end
 
-  def encrypt_jwt_secret(%Ecto.Changeset{valid?: true} = changeset),
-    do: update_change(changeset, :jwt_secret, &Crypto.encrypt!/1)
+  def encrypt_jwt_secret(%Ecto.Changeset{valid?: true, changes: %{jwt_secret: plaintext}} = changeset)
+      when is_binary(plaintext),
+      do: put_change(changeset, :jwt_secret, Crypto.encrypt!(plaintext))
 
   def encrypt_jwt_secret(changeset), do: changeset
+
+  def decrypt_jwt_secret(nil), do: nil
+  def decrypt_jwt_secret(jwt_secret), do: Crypto.decrypt!(jwt_secret)
+
+  @doc false
+  def gcm_migrated_at_changeset(tenant, attrs) do
+    tenant
+    |> cast(attrs, [:gcm_migrated_at])
+    |> validate_required([:gcm_migrated_at])
+  end
 end

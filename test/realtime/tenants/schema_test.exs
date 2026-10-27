@@ -135,6 +135,47 @@ defmodule Realtime.Tenants.SchemaTest do
       Postgrex.query!(conn_postgres, "DROP ROLE role_test", [])
     end
 
+    test "can grant SELECT and INSERT on realtime.messages to a custom role", %{conn_postgres: conn_postgres} do
+      role = "role_test_delegated_#{System.unique_integer([:positive])}"
+      Postgrex.query!(conn_postgres, "CREATE ROLE #{role}", [])
+
+      assert {:ok, _} =
+               Postgrex.query(conn_postgres, "GRANT SELECT, INSERT ON realtime.messages TO #{role}", [])
+
+      assert %Postgrex.Result{rows: [[true, true]]} =
+               Postgrex.query!(
+                 conn_postgres,
+                 """
+                 SELECT
+                   has_table_privilege($1, 'realtime.messages', 'SELECT'),
+                   has_table_privilege($1, 'realtime.messages', 'INSERT')
+                 """,
+                 [role]
+               )
+
+      Postgrex.query!(conn_postgres, "REVOKE SELECT, INSERT ON realtime.messages FROM #{role}", [])
+      Postgrex.query!(conn_postgres, "DROP ROLE #{role}", [])
+    end
+
+    @tag :requires_supautils_policy_grants
+    test "cannot delegate any other realtime.messages privilege to a custom role", %{conn_postgres: conn_postgres} do
+      role = "role_test_undelegatable_#{System.unique_integer([:positive])}"
+      Postgrex.query!(conn_postgres, "CREATE ROLE #{role}", [])
+
+      for privilege <- ~w(UPDATE DELETE TRUNCATE TRIGGER REFERENCES) do
+        Postgrex.query!(conn_postgres, "GRANT #{privilege} ON realtime.messages TO #{role}", [])
+
+        assert %Postgrex.Result{rows: [[false]]} =
+                 Postgrex.query!(
+                   conn_postgres,
+                   "SELECT has_table_privilege($1, 'realtime.messages', $2)",
+                   [role, privilege]
+                 )
+      end
+
+      Postgrex.query!(conn_postgres, "DROP ROLE #{role}", [])
+    end
+
     test "can insert into realtime.messages", %{conn_postgres: conn_postgres} do
       assert {:ok, %Postgrex.Result{num_rows: 1}} =
                Postgrex.query(
@@ -1073,6 +1114,29 @@ defmodule Realtime.Tenants.SchemaTest do
       assert_allowed(conn_postgres, "TRUNCATE realtime.messages")
       assert_denied(conn_postgres, "CREATE TABLE realtime.new_table (id int)")
     end
+  end
+
+  describe "supabase_realtime_admin grants on the realtime schema" do
+    test "keeps usage and create", %{conn_superuser: conn_superuser} do
+      assert has_schema_privilege?(conn_superuser, "USAGE")
+      assert has_schema_privilege?(conn_superuser, "CREATE")
+    end
+
+    test "holds no grant option", %{conn_superuser: conn_superuser} do
+      refute has_schema_privilege?(conn_superuser, "USAGE WITH GRANT OPTION")
+      refute has_schema_privilege?(conn_superuser, "CREATE WITH GRANT OPTION")
+    end
+  end
+
+  defp has_schema_privilege?(conn, privilege) do
+    %Postgrex.Result{rows: [[granted]]} =
+      Postgrex.query!(
+        conn,
+        "SELECT has_schema_privilege('supabase_realtime_admin', 'realtime', $1)",
+        [privilege]
+      )
+
+    granted
   end
 
   defp relacl(conn, table) do

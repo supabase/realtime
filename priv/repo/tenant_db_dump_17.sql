@@ -1,3 +1,15 @@
+--
+-- Auto-generated. Do not edit.
+--
+-- Tenant `realtime` schema for Postgres 17
+--
+-- Beyond priv/repo/tenant_schema it also:
+--   - creates the supabase_realtime_admin role
+--   - creates realtime.schema_migrations and records every applied version
+--   - sets ALTER DEFAULT PRIVILEGES and the dashboard_user/postgres grants
+--
+-- See dev/scripts/export-tenant-db-dump.sh
+--
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_realtime_admin') THEN
@@ -16,8 +28,8 @@ END $$;
 --
 
 
--- Dumped from database version 17.6
--- Dumped by pg_dump version 17.11 (Ubuntu 17.11-1.pgdg24.04+2)
+-- Dumped from database version 17.11
+-- Dumped by pg_dump version 17.11
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -500,6 +512,77 @@ $$;
 ALTER FUNCTION realtime.apply_rls(wal jsonb, max_record_bytes integer) OWNER TO supabase_realtime_admin;
 
 --
+-- Name: authorize(text, text, text, text, text, text[], text[]); Type: FUNCTION; Schema: realtime; Owner: supabase_realtime_admin
+--
+
+CREATE FUNCTION realtime.authorize(role_name text, topic_name text, claims text, sub text, headers text, read_extensions text[], write_extensions text[], OUT read_allowed boolean[], OUT write_allowed boolean[]) RETURNS record
+    LANGUAGE plpgsql
+    AS $$
+declare
+  probe_ids uuid[];
+  probe_inserted_at timestamp := now() at time zone 'utc';
+  visible_ids uuid[];
+  ext text;
+  allowed boolean;
+begin
+  -- The probe inserts are rolled back, but they still give the transaction an xid, so it ends
+  -- in a commit. Nothing durable was written, so skip waiting on the WAL flush and sync standbys.
+  -- Set outside the block below, whose rollback would undo it.
+  perform set_config('synchronous_commit', 'off', true);
+
+  -- The RAISE at the end of this block rolls back everything in it.
+  begin
+    probe_ids := array(select gen_random_uuid() from unnest(read_extensions));
+
+    insert into realtime.messages (id, topic, extension, inserted_at, updated_at)
+    select p.id, topic_name, p.extension, probe_inserted_at, probe_inserted_at
+    from unnest(probe_ids, read_extensions) as p(id, extension);
+
+    perform set_config('role', role_name, true),
+            set_config('realtime.topic', topic_name, true),
+            set_config('request.jwt.claims', claims, true),
+            set_config('request.jwt.claim.sub', sub, true),
+            set_config('request.jwt.claim.role', role_name, true),
+            set_config('request.headers', headers, true);
+
+    -- One lookup for every probe, by the full primary key.
+    visible_ids := array(
+      select m.id
+      from realtime.messages m
+      where m.inserted_at = probe_inserted_at
+        and m.id = any(probe_ids));
+
+    read_allowed := array(
+      select p.id = any(visible_ids)
+      from unnest(probe_ids) with ordinality as p(id, n)
+      order by p.n);
+
+    write_allowed := '{}';
+
+    foreach ext in array write_extensions loop
+      begin
+        insert into realtime.messages (topic, extension, inserted_at, updated_at)
+        values (topic_name, ext, now() at time zone 'utc', now() at time zone 'utc');
+
+        allowed := true;
+      exception when insufficient_privilege then
+        allowed := false;
+      end;
+
+      write_allowed := write_allowed || allowed;
+    end loop;
+
+    raise sqlstate 'RTA01';
+  exception when sqlstate 'RTA01' then
+    null;
+  end;
+end;
+$$;
+
+
+ALTER FUNCTION realtime.authorize(role_name text, topic_name text, claims text, sub text, headers text, read_extensions text[], write_extensions text[], OUT read_allowed boolean[], OUT write_allowed boolean[]) OWNER TO supabase_realtime_admin;
+
+--
 -- Name: broadcast_changes(text, text, text, text, text, record, record, text); Type: FUNCTION; Schema: realtime; Owner: supabase_realtime_admin
 --
 
@@ -708,8 +791,9 @@ ALTER FUNCTION realtime.check_equality_op(op realtime.equality_op, type_ regtype
 CREATE FUNCTION realtime.filters_hash(filters realtime.user_defined_filter[]) RETURNS bytea
     LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
     AS $$
-      select pg_catalog.sha256(pg_catalog.convert_to(filters::text, 'UTF8'))
-    $$;
+  select pg_catalog.int8send(pg_catalog.hash_array_extended(filters, 0))
+      || pg_catalog.int8send(pg_catalog.hash_array_extended(filters, 1))
+$$;
 
 
 ALTER FUNCTION realtime.filters_hash(filters realtime.user_defined_filter[]) OWNER TO supabase_realtime_admin;
@@ -819,6 +903,78 @@ $$;
 ALTER FUNCTION realtime.list_changes(publication name, slot_name name, max_changes integer, max_record_bytes integer) OWNER TO supabase_realtime_admin;
 
 --
+-- Name: list_changes_sync(name, name, integer, integer); Type: FUNCTION; Schema: realtime; Owner: supabase_realtime_admin
+--
+
+CREATE FUNCTION realtime.list_changes_sync(publication name, slot_name name, max_changes integer, max_record_bytes integer) RETURNS TABLE(wal jsonb, is_rls_enabled boolean, subscription_ids uuid[], errors text[], slot_changes_count bigint)
+    LANGUAGE sql
+    SET log_min_messages TO 'fatal'
+    AS $$
+  WITH pub AS (
+    SELECT
+      concat_ws(
+        ',',
+        CASE WHEN bool_or(pubinsert) THEN 'insert' ELSE NULL END,
+        CASE WHEN bool_or(pubupdate) THEN 'update' ELSE NULL END,
+        CASE WHEN bool_or(pubdelete) THEN 'delete' ELSE NULL END
+      ) AS w2j_actions,
+      coalesce(
+        string_agg(
+          realtime.quote_wal2json(format('%I.%I', schemaname, tablename)::regclass),
+          ','
+        ) filter (WHERE ppt.tablename IS NOT NULL),
+        ''
+      ) AS w2j_add_tables
+    FROM pg_publication pp
+    LEFT JOIN pg_publication_tables ppt ON pp.pubname = ppt.pubname
+    WHERE pp.pubname = publication
+    GROUP BY pp.pubname
+    LIMIT 1
+  ),
+  -- MATERIALIZED ensures the slot is read exactly once.
+  consumed AS MATERIALIZED (
+    SELECT x.*, pub.w2j_add_tables
+    FROM pub,
+         realtime.settled_changes(
+           slot_name, max_changes,
+           'include-pk', 'true',
+           'include-transaction', 'false',
+           'include-timestamp', 'true',
+           'include-type-oids', 'true',
+           'format-version', '2',
+           'actions', pub.w2j_actions,
+           'add-tables', pub.w2j_add_tables
+         ) x
+  ),
+  slot_count AS (
+    SELECT count(*)::bigint AS cnt
+    FROM consumed
+    WHERE consumed.w2j_add_tables <> ''
+  ),
+  rls_filtered AS (
+    SELECT xyz.wal, xyz.is_rls_enabled, xyz.subscription_ids, xyz.errors
+    FROM consumed,
+         realtime.apply_rls(
+           wal := consumed.data::jsonb,
+           max_record_bytes := max_record_bytes
+         ) xyz(wal, is_rls_enabled, subscription_ids, errors)
+    WHERE consumed.w2j_add_tables <> ''
+      AND xyz.subscription_ids[1] IS NOT NULL
+  )
+  SELECT rf.wal, rf.is_rls_enabled, rf.subscription_ids, rf.errors, sc.cnt
+  FROM rls_filtered rf, slot_count sc
+
+  UNION ALL
+
+  SELECT null, null, null, null, sc.cnt
+  FROM slot_count sc
+  WHERE NOT EXISTS (SELECT 1 FROM rls_filtered)
+$$;
+
+
+ALTER FUNCTION realtime.list_changes_sync(publication name, slot_name name, max_changes integer, max_record_bytes integer) OWNER TO supabase_realtime_admin;
+
+--
 -- Name: quote_wal2json(regclass); Type: FUNCTION; Schema: realtime; Owner: supabase_realtime_admin
 --
 
@@ -899,6 +1055,99 @@ $$;
 
 
 ALTER FUNCTION realtime.send_binary(payload bytea, event text, topic text, private boolean) OWNER TO supabase_realtime_admin;
+
+--
+-- Name: settled_changes(name, integer, text[]); Type: FUNCTION; Schema: realtime; Owner: supabase_realtime_admin
+--
+
+CREATE FUNCTION realtime.settled_changes(slot_name name, max_changes integer, VARIADIC opts text[]) RETURNS TABLE(lsn pg_lsn, xid xid, data text)
+    LANGUAGE plpgsql
+    AS $$
+declare
+  upto pg_lsn;
+  total bigint;
+  xids xid[];
+  starts bigint[];
+  snapshot pg_snapshot;
+  running_xids xid[];
+  xmax_age int;
+  cut bigint;
+begin
+  -- Each statement in a volatile function takes its own snapshot, which is what lets the
+  -- check below see a writer that was still in flight when the peek ran. Under REPEATABLE
+  -- READ the snapshot never advances, so a deferred change would never be released.
+  if current_setting('transaction_isolation') <> 'read committed' then
+    raise exception 'realtime.settled_changes requires READ COMMITTED';
+  end if;
+
+  -- The peek and the read below cover the same WAL, so the read cannot reach a commit the
+  -- check never saw.
+  upto := pg_current_wal_flush_lsn();
+
+  -- One entry per transaction, in commit order: its xid and the position of its first
+  -- change. The peek uses the caller's own options, so max_changes counts exactly what the
+  -- read counts. A non-transactional logical message is emitted as soon as it is decoded,
+  -- tagged with the xid of whatever transaction wrote it, so it does not mark where that
+  -- transaction starts.
+  select coalesce(sum(g.n), 0),
+         array_agg(g.x order by g.first) filter (where g.first is not null),
+         array_agg(g.first order by g.first) filter (where g.first is not null)
+    into total, xids, starts
+    from (
+      select p.xid as x, count(*) as n,
+             min(p.ord) filter (where not case
+               when starts_with(p.data, '{"action":"M"') then (p.data::jsonb->>'transactional')::boolean is false
+               else false
+             end) as first
+      from pg_logical_slot_peek_changes(slot_name, upto, max_changes, variadic opts)
+           with ordinality as p(lsn, xid, data, ord)
+      group by p.xid
+    ) g;
+
+  -- Nothing for the caller, but the slot still has to move past what the peek covered.
+  if total = 0 then
+    perform pg_replication_slot_advance(slot_name, upto);
+    return;
+  end if;
+
+  if xids is not null then
+    -- Taken after the peek is materialized, so a writer that was still in flight during
+    -- decoding is guaranteed to show up here.
+    snapshot := pg_current_snapshot();
+
+    -- A commit record reaches the WAL before the writer leaves the proc array, so a change
+    -- can be decoded while its row is invisible. apply_rls would resolve a policy against a
+    -- row it cannot see and authorize it for nobody, while the read consumed it regardless.
+    --
+    -- xip lists transactions running when the snapshot was taken. It does not cover a writer
+    -- whose xid sits at or beyond xmax, which never appears there, so the horizon is checked
+    -- too. age() counts backwards from the current xid and so compares correctly across
+    -- wraparound.
+    select coalesce(array_agg(running.x::xid), array[]::xid[])
+      into running_xids
+      from pg_snapshot_xip(snapshot) running(x);
+    xmax_age := age(pg_snapshot_xmax(snapshot)::xid);
+
+    select min(u.s) into cut
+      from unnest(xids, starts) as u(x, s)
+      where u.x = any(running_xids) or age(u.x) <= xmax_age;
+  end if;
+
+  -- The read stops right after the commit that brings its count to upto_nchanges, so the
+  -- count of changes in front of the first unsettled transaction stops it just before that
+  -- transaction.
+  if cut is null then
+    return query
+      select p.* from pg_logical_slot_get_changes(slot_name, upto, max_changes, variadic opts) p;
+  elsif cut > 1 then
+    return query
+      select p.* from pg_logical_slot_get_changes(slot_name, upto, (cut - 1)::int, variadic opts) p;
+  end if;
+end;
+$$;
+
+
+ALTER FUNCTION realtime.settled_changes(slot_name name, max_changes integer, VARIADIC opts text[]) OWNER TO supabase_realtime_admin;
 
 --
 -- Name: subscription_check_filters(); Type: FUNCTION; Schema: realtime; Owner: supabase_realtime_admin
@@ -1010,10 +1259,19 @@ begin
         '{}'
     ) from unnest(new.filters) f;
 
-    new.selected_columns = (
-        select array_agg(c order by c)
-        from unnest(new.selected_columns) c
-    );
+    -- Normalize selected_columns order so ARRAY['a','b'] and ARRAY['b','a'] are treated
+    -- as the same subscription group in apply_rls. Preserve an empty array as '{}'
+    -- ("primary keys only") so it stays distinct from NULL ("all columns"); array_agg
+    -- over an empty set would otherwise collapse '{}' back to NULL.
+    if new.selected_columns is not null then
+        new.selected_columns = coalesce(
+            (
+                select array_agg(c order by c)
+                from unnest(new.selected_columns) c
+            ),
+            '{}'::text[]
+        );
+    end if;
 
     return new;
 end;
@@ -1072,10 +1330,11 @@ CREATE TABLE realtime.messages (
     payload jsonb,
     event text,
     private boolean DEFAULT false,
-    updated_at timestamp without time zone DEFAULT now() NOT NULL,
-    inserted_at timestamp without time zone DEFAULT now() NOT NULL,
+    updated_at timestamp without time zone DEFAULT timezone('utc'::text, clock_timestamp()) NOT NULL,
+    inserted_at timestamp without time zone DEFAULT timezone('utc'::text, clock_timestamp()) NOT NULL,
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    binary_payload bytea
+    binary_payload bytea,
+    skip_broadcast boolean DEFAULT false NOT NULL
 )
 PARTITION BY RANGE (inserted_at);
 
@@ -1203,7 +1462,7 @@ ALTER TABLE realtime.messages ENABLE ROW LEVEL SECURITY;
 GRANT USAGE ON SCHEMA realtime TO postgres WITH GRANT OPTION;
 GRANT USAGE ON SCHEMA realtime TO anon;
 GRANT USAGE ON SCHEMA realtime TO service_role;
-GRANT ALL ON SCHEMA realtime TO supabase_realtime_admin WITH GRANT OPTION;
+GRANT ALL ON SCHEMA realtime TO supabase_realtime_admin;
 GRANT USAGE ON SCHEMA realtime TO authenticated;
 
 
@@ -1216,6 +1475,14 @@ GRANT ALL ON FUNCTION realtime.apply_rls(wal jsonb, max_record_bytes integer) TO
 GRANT ALL ON FUNCTION realtime.apply_rls(wal jsonb, max_record_bytes integer) TO anon;
 GRANT ALL ON FUNCTION realtime.apply_rls(wal jsonb, max_record_bytes integer) TO authenticated;
 GRANT ALL ON FUNCTION realtime.apply_rls(wal jsonb, max_record_bytes integer) TO service_role;
+
+
+--
+-- Name: FUNCTION authorize(role_name text, topic_name text, claims text, sub text, headers text, read_extensions text[], write_extensions text[], OUT read_allowed boolean[], OUT write_allowed boolean[]); Type: ACL; Schema: realtime; Owner: supabase_realtime_admin
+--
+
+GRANT ALL ON FUNCTION realtime.authorize(role_name text, topic_name text, claims text, sub text, headers text, read_extensions text[], write_extensions text[], OUT read_allowed boolean[], OUT write_allowed boolean[]) TO postgres;
+GRANT ALL ON FUNCTION realtime.authorize(role_name text, topic_name text, claims text, sub text, headers text, read_extensions text[], write_extensions text[], OUT read_allowed boolean[], OUT write_allowed boolean[]) TO dashboard_user;
 
 
 --
@@ -1275,6 +1542,7 @@ GRANT ALL ON FUNCTION realtime.check_equality_op(op realtime.equality_op, type_ 
 --
 
 GRANT ALL ON FUNCTION realtime.filters_hash(filters realtime.user_defined_filter[]) TO postgres;
+GRANT ALL ON FUNCTION realtime.filters_hash(filters realtime.user_defined_filter[]) TO dashboard_user;
 GRANT ALL ON FUNCTION realtime.filters_hash(filters realtime.user_defined_filter[]) TO anon;
 GRANT ALL ON FUNCTION realtime.filters_hash(filters realtime.user_defined_filter[]) TO authenticated;
 GRANT ALL ON FUNCTION realtime.filters_hash(filters realtime.user_defined_filter[]) TO service_role;
@@ -1297,6 +1565,14 @@ GRANT ALL ON FUNCTION realtime.is_visible_through_filters(columns realtime.wal_c
 
 GRANT ALL ON FUNCTION realtime.list_changes(publication name, slot_name name, max_changes integer, max_record_bytes integer) TO postgres;
 GRANT ALL ON FUNCTION realtime.list_changes(publication name, slot_name name, max_changes integer, max_record_bytes integer) TO dashboard_user;
+
+
+--
+-- Name: FUNCTION list_changes_sync(publication name, slot_name name, max_changes integer, max_record_bytes integer); Type: ACL; Schema: realtime; Owner: supabase_realtime_admin
+--
+
+GRANT ALL ON FUNCTION realtime.list_changes_sync(publication name, slot_name name, max_changes integer, max_record_bytes integer) TO postgres;
+GRANT ALL ON FUNCTION realtime.list_changes_sync(publication name, slot_name name, max_changes integer, max_record_bytes integer) TO dashboard_user;
 
 
 --
@@ -1324,6 +1600,14 @@ GRANT ALL ON FUNCTION realtime.send(payload jsonb, event text, topic text, priva
 
 GRANT ALL ON FUNCTION realtime.send_binary(payload bytea, event text, topic text, private boolean) TO postgres;
 GRANT ALL ON FUNCTION realtime.send_binary(payload bytea, event text, topic text, private boolean) TO dashboard_user;
+
+
+--
+-- Name: FUNCTION settled_changes(slot_name name, max_changes integer, VARIADIC opts text[]); Type: ACL; Schema: realtime; Owner: supabase_realtime_admin
+--
+
+GRANT ALL ON FUNCTION realtime.settled_changes(slot_name name, max_changes integer, VARIADIC opts text[]) TO postgres;
+GRANT ALL ON FUNCTION realtime.settled_changes(slot_name name, max_changes integer, VARIADIC opts text[]) TO dashboard_user;
 
 
 --
@@ -1368,7 +1652,8 @@ GRANT ALL ON FUNCTION realtime.wal2json_escape_identifier(name text) TO dashboar
 -- Name: TABLE messages; Type: ACL; Schema: realtime; Owner: supabase_realtime_admin
 --
 
-GRANT ALL ON TABLE realtime.messages TO postgres;
+GRANT REFERENCES,DELETE,TRIGGER,TRUNCATE,MAINTAIN,UPDATE ON TABLE realtime.messages TO postgres;
+GRANT SELECT,INSERT ON TABLE realtime.messages TO postgres WITH GRANT OPTION;
 GRANT ALL ON TABLE realtime.messages TO dashboard_user;
 GRANT SELECT,INSERT,UPDATE ON TABLE realtime.messages TO anon;
 GRANT SELECT,INSERT,UPDATE ON TABLE realtime.messages TO authenticated;
@@ -1417,7 +1702,8 @@ ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA realtime GRANT ALL ON
 -- Name: DEFAULT PRIVILEGES FOR TABLES; Type: DEFAULT ACL; Schema: realtime; Owner: supabase_admin
 --
 
-ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA realtime GRANT ALL ON TABLES TO postgres;
+ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA realtime GRANT REFERENCES,DELETE,TRIGGER,TRUNCATE,MAINTAIN,UPDATE ON TABLES TO postgres;
+ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA realtime GRANT SELECT,INSERT ON TABLES TO postgres WITH GRANT OPTION;
 ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA realtime GRANT ALL ON TABLES TO dashboard_user;
 
 
@@ -1508,4 +1794,14 @@ INSERT INTO realtime."schema_migrations" (version) VALUES (20260626120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260706120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260707120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20260709120000);
-INSERT INTO realtime."schema_migrations" (version) VALUES (20260815130000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20260714120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20260827120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20260914120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20260916120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20260922120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20260925120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20260928120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20261002120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20261008120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20261009120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20261027120000);

@@ -4,17 +4,21 @@ defmodule Realtime.MixProject do
   def project do
     [
       app: :realtime,
-      version: "2.128.3",
+      version: "2.148.3",
       elixir: "~> 1.19",
       elixirc_paths: elixirc_paths(Mix.env()),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
+      listeners: [Phoenix.CodeReloader],
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
       dialyzer: dialyzer(),
       test_coverage: [tool: ExCoveralls],
       hex: [
-        ignore_advisories: ["CVE-2026-43969", "CVE-2026-43966"]
+        # Can be overridden via `HEX_COOLDOWN=0d` should you want to, see DEVELOPERS.md#dependency-cooldown
+        cooldown: "7d",
+        # These are all cowlib, have no released fixes as of now but also shouldn't impact us.
+        ignore_advisories: ["CVE-2026-43969", "CVE-2026-43966", "CVE-2026-43971"]
       ],
       releases: [
         realtime: [
@@ -58,7 +62,7 @@ defmodule Realtime.MixProject do
   defp deps do
     [
       phoenix_dep(),
-      {:phoenix_ecto, "~> 4.4.0"},
+      {:phoenix_ecto, "~> 4.7.0"},
       {:ecto_sql, "~> 3.11"},
       {:ecto_psql_extras, "~> 0.8"},
       {:postgrex, "~> 0.22"},
@@ -67,7 +71,6 @@ defmodule Realtime.MixProject do
       {:phoenix_live_view, "~> 1.0"},
       {:phoenix_live_reload, "~> 1.2", only: :dev},
       {:phoenix_live_dashboard, "~> 0.7"},
-      {:lumis, "~> 0.7"},
       {:phoenix_view, "~> 2.0"},
       {:esbuild, "~> 0.4", runtime: Mix.env() == :dev},
       {:tailwind, "~> 0.1", runtime: Mix.env() == :dev},
@@ -75,16 +78,16 @@ defmodule Realtime.MixProject do
        github: "tailwindlabs/heroicons", tag: "v2.1.1", sparse: "optimized", app: false, compile: false, depth: 1},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
-      {:gettext, "~> 0.19"},
+      {:gettext, "~> 1.0"},
       {:jason, "~> 1.3"},
       {:plug_cowboy, "~> 2.8"},
       {:libcluster, "~> 3.3"},
       {:libcluster_postgres, "~> 0.2"},
       {:uuid, "~> 1.1"},
       {:prom_ex, "~> 1.10"},
-      # prom_ex depends on peep ~> 3.0 but there is no issue using peep ~> 4.0
-      # https://github.com/akoutmos/prom_ex/pull/270
-      {:peep, "~> 4.3", override: true},
+      # `peep` 4.4.0 doesn't seem backwards compatible for us, tests fail not knowing a struct we use:  `Peep.Persistent`
+      # likely, as it's a record now: https://github.com/rkallos/peep/pull/64/changes#diff-e4d3a94d15db756ca760129d7f80f6794e0a0b3b3967591fc42537f348526b6c
+      {:peep, "~> 4.3.1"},
       {:joken, "~> 2.6"},
       {:nimble_zta, "~> 0.1"},
       {:ex_json_schema, "~> 0.11"},
@@ -96,7 +99,7 @@ defmodule Realtime.MixProject do
       {:cachex, "~> 4.0"},
       {:open_api_spex, "~> 3.16"},
       {:corsica, "~> 2.0"},
-      {:observer_cli, "~> 1.7"},
+      {:observer_cli, "~> 2.0"},
       {:opentelemetry_exporter, "~> 1.10"},
       {:opentelemetry, "~> 1.7"},
       {:opentelemetry_api, "~> 1.5"},
@@ -106,20 +109,21 @@ defmodule Realtime.MixProject do
       {:gen_rpc, git: "https://github.com/emqx/gen_rpc.git", tag: "3.6.1"},
       # gen_rpc uses a git dependency
       {:snabbkaffe, "~> 1.0", override: true},
-      {:req, "~> 0.6.2"},
+      {:req, "~> 0.7.4"},
       {:mimic, "~> 2.0", only: :test},
       {:floki, ">= 0.30.0", only: :test},
       {:lazy_html, ">= 0.1.0", only: :test},
       {:mint_web_socket, "~> 1.0", only: :test},
       {:postgres_replication, git: "https://github.com/filipecabaco/postgres_replication.git", only: :test},
-      {:benchee, "~> 1.1.0", only: [:dev, :test]},
+      {:benchee, "~> 1.5.1", only: [:dev, :test]},
       {:excoveralls, "~> 0.18", only: [:dev, :test], runtime: false},
       {:ex_crap, "~> 0.1", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: :dev, runtime: false},
       {:poolboy, "~> 1.5", only: :test},
-      {:mix_test_watch, "~> 1.0", only: [:dev, :test], runtime: false}
+      {:mix_test_watch, "~> 1.0", only: [:dev, :test], runtime: false},
+      {:wait_for_it, "~> 2.6", only: [:dev, :test]}
     ]
   end
 
@@ -139,12 +143,14 @@ defmodule Realtime.MixProject do
   # See the documentation for `Mix` for more info on aliases.
   defp aliases do
     [
-      setup: ["deps.get", "ecto.setup", "cmd npm install --prefix assets"],
+      # Databases, migrations and the seed tenant come from `mise run db-start`.
+      setup: ["deps.get", "cmd npm install --prefix assets"],
       "ecto.setup": ["ecto.create", "ecto.migrate", "seed"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       seed: ["run priv/repo/dev_seeds.exs"],
       "test.setup": [
         "cmd epmd -daemon",
+        &start_distribution/1,
         "ecto.create --quiet",
         "ecto.migrate"
       ],
@@ -153,6 +159,16 @@ defmodule Realtime.MixProject do
       "crap.ci": ["compile", &merge_coverdata/1, "crap"],
       "assets.deploy": ["esbuild default --minify", "tailwind default --minify", "phx.digest"]
     ]
+  end
+
+  defp start_distribution(_args) do
+    name = Application.fetch_env!(:realtime, :test_node_name)
+
+    case :net_kernel.start([name, :longnames]) do
+      {:ok, _pid} -> :ok
+      {:error, {:already_started, _pid}} -> :ok
+      {:error, reason} -> Mix.raise("could not start distribution as #{name}: #{inspect(reason)}")
+    end
   end
 
   defp merge_coverdata(_args) do

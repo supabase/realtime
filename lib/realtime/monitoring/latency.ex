@@ -1,6 +1,8 @@
 defmodule Realtime.Latency do
   @moduledoc """
     Measures the latency of the cluster from each node and broadcasts it over PubSub.
+
+    The `"admin:cluster"` messages are consumed by `RealtimeWeb.StatusLive.Index`.
   """
 
   use GenServer

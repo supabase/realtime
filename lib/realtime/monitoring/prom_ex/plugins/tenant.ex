@@ -2,7 +2,7 @@ defmodule Realtime.PromEx.Plugins.Tenant do
   @moduledoc false
 
   use PromEx.Plugin
-  alias Realtime.FeatureFlags
+  alias Realtime.MetricsCleaner
   alias Realtime.Telemetry
   alias Realtime.Tenants
   alias Realtime.UsersCounter
@@ -22,33 +22,9 @@ defmodule Realtime.PromEx.Plugins.Tenant do
       channel_events(),
       payload_size_metrics(),
       replication_metrics(),
-      subscription_metrics(),
-      broadcast_fanout_metrics()
+      subscription_metrics()
     ]
   end
-
-  defp broadcast_fanout_metrics do
-    Event.build(
-      :realtime_tenant_broadcast_fanout_metrics,
-      [
-        counter(
-          [:realtime, :broadcast, :fanout, :node_delivery, :total],
-          event_name: [:realtime, :broadcast, :fanout, :node_delivery],
-          description:
-            "Cross-cluster broadcast deliveries to this node for the tenant, split by whether the node held a connection for the tenant. hit=false means the send could have been avoided.",
-          tags: [:tenant, :hit],
-          keep: &__MODULE__.track_fanout_metric?/1
-        )
-      ]
-    )
-  end
-
-  @doc false
-  def track_fanout_metric?(%{tenant: tenant_id}) when is_binary(tenant_id) do
-    FeatureFlags.enabled?("track_fanout_metric", tenant_id)
-  end
-
-  def track_fanout_metric?(_), do: false
 
   defmodule PayloadSize.Buckets do
     @moduledoc false
@@ -103,26 +79,38 @@ defmodule Realtime.PromEx.Plugins.Tenant do
     local_tenant_counts = UsersCounter.local_tenant_counts()
 
     for {t, count} <- local_tenant_counts do
-      tenant = Tenants.Cache.get_tenant_by_external_id(t)
+      execute_connections(t, count, cluster_counts)
+    end
 
-      if tenant != nil do
-        Telemetry.execute(
-          [:realtime, :connections],
-          %{
-            connected: count,
-            connected_cluster: Map.get(cluster_counts, t, 0),
-            limit: tenant.max_concurrent_users
-          },
-          %{tenant: t}
-        )
-      end
+    # These are `last_value` metrics, so a tenant that lost its last local websocket would keep
+    # exporting its previous count until MetricsCleaner prunes the tenant tag. Report zero for them in
+    # the meantime. A tenant that got a websocket back was already reported above.
+    for t <- MetricsCleaner.recently_vacated_tenants(), not Map.has_key?(local_tenant_counts, t) do
+      execute_connections(t, 0, cluster_counts)
+    end
+  end
+
+  defp execute_connections(tenant_id, count, cluster_counts) do
+    tenant = Tenants.Cache.get_tenant_by_external_id(tenant_id)
+
+    if tenant != nil do
+      Telemetry.execute(
+        [:realtime, :connections],
+        %{
+          connected: count,
+          connected_cluster: Map.get(cluster_counts, tenant_id, 0),
+          limit: tenant.max_concurrent_users
+        },
+        %{tenant: tenant_id}
+      )
     end
   end
 
   defmodule Replication.Buckets do
     @moduledoc false
-    use Peep.Buckets.Custom,
-      buckets: [250, 500, 1000, 3000, 5000, 10_000, 25_000, 100_000, 500_000, 1_000_000, 3_000_000]
+    # Milliseconds. 100 is the default `poll_interval_ms`: past it the query outruns its own loop.
+    # 15_000 is the Postgrex call timeout, so nothing lands meaningfully above it.
+    use Peep.Buckets.Custom, buckets: [10, 25, 50, 100, 250, 500, 2500, 15_000]
   end
 
   defp replication_metrics do
@@ -185,19 +173,14 @@ defmodule Realtime.PromEx.Plugins.Tenant do
     )
   end
 
-  defmodule PolicyAuthorization.Buckets do
+  defmodule Latency.Buckets do
     @moduledoc false
-    use Peep.Buckets.Custom, buckets: [10, 250, 5000, 15_000]
+    use Peep.Buckets.Custom, buckets: [10, 25, 50, 100, 250, 500, 1000, 5000, 15_000]
   end
 
   defmodule BroadcastFromDatabase.Buckets do
     @moduledoc false
-    use Peep.Buckets.Custom, buckets: [10, 250, 5000]
-  end
-
-  defmodule Replay.Buckets do
-    @moduledoc false
-    use Peep.Buckets.Custom, buckets: [10, 250, 5000, 15_000]
+    use Peep.Buckets.Custom, buckets: [10, 25, 50, 100, 250, 500, 1000, 5000, 30_000]
   end
 
   defp channel_events do
@@ -253,7 +236,7 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           unit: :millisecond,
           description: "Latency of read authorization checks.",
           tags: [:tenant],
-          reporter_options: [peep_bucket_calculator: PolicyAuthorization.Buckets]
+          reporter_options: [peep_bucket_calculator: Latency.Buckets]
         ),
         distribution(
           [:realtime, :tenants, :write_authorization_check],
@@ -262,7 +245,7 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           unit: :millisecond,
           description: "Latency of write authorization checks.",
           tags: [:tenant],
-          reporter_options: [peep_bucket_calculator: PolicyAuthorization.Buckets]
+          reporter_options: [peep_bucket_calculator: Latency.Buckets]
         ),
         distribution(
           [:realtime, :tenants, :broadcast_from_database, :latency_committed_at],
@@ -289,7 +272,7 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           unit: :millisecond,
           description: "Latency of broadcast replay",
           tags: [:tenant],
-          reporter_options: [peep_bucket_calculator: Replay.Buckets]
+          reporter_options: [peep_bucket_calculator: Latency.Buckets]
         )
       ]
     )

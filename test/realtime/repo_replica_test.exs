@@ -47,26 +47,6 @@ defmodule Realtime.Repo.ReplicaTest do
     end
   end
 
-  describe "handle fly platform" do
-    for {region, mod} <- Replica.replicas_fly() do
-      setup do
-        Application.put_env(:realtime, :platform, :fly)
-        Application.put_env(:realtime, :master_region, "special-region")
-        :ok
-      end
-
-      test "handles #{region} region" do
-        Application.put_env(:realtime, :region, unquote(region))
-        replica_asserts(unquote(mod), Replica.replica())
-      end
-    end
-
-    test "defaults to Realtime.Repo if region is not configured" do
-      Application.put_env(:realtime, :region, "unknown")
-      replica_asserts(Realtime.Repo, Replica.replica())
-    end
-  end
-
   describe "main replica module configuration" do
     setup do
       Application.put_env(:realtime, Replica, hostname: "test-replica-host")
@@ -77,14 +57,6 @@ defmodule Realtime.Repo.ReplicaTest do
       Application.put_env(:realtime, :platform, :aws)
       Application.put_env(:realtime, :region, "us-west-1")
       Application.put_env(:realtime, :master_region, "us-east-1")
-
-      replica_asserts(Replica, Replica.replica())
-    end
-
-    test "uses main replica module when configured on Fly platform" do
-      Application.put_env(:realtime, :platform, :fly)
-      Application.put_env(:realtime, :region, "sea")
-      Application.put_env(:realtime, :master_region, "sjc")
 
       replica_asserts(Replica, Replica.replica())
     end

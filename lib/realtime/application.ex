@@ -16,7 +16,7 @@ defmodule Realtime.Application do
   defmodule JwtClaimValidatorsError, do: defexception([:message])
   defmodule RegionMappingError, do: defexception([:message])
 
-  defp check_for_local_ipv6_host() do
+  defp check_for_local_ipv6_host do
     hostname = Node.self() |> Atom.to_string()
 
     if String.contains?(hostname, "fd00:ec2::172:2") do
@@ -43,6 +43,7 @@ defmodule Realtime.Application do
 
     opentelemetry_setup()
     check_for_local_ipv6_host()
+    Realtime.Crypto.check_config()
 
     topologies = Application.get_env(:libcluster, :topologies) || []
 
@@ -69,22 +70,24 @@ defmodule Realtime.Application do
     set_persist_storage(RealtimeWeb.UserSocket, :realtime, :websocket_max_heap_size)
     set_persist_storage(RealtimeWeb.UserSocket, :realtime, :measure_traffic_interval_in_ms)
     set_persist_storage(RealtimeWeb.UserSocket, :realtime, :connect_error_backoff_ms)
+    set_persist_storage(RealtimeWeb.UserSocket, :realtime, :no_channel_timeout_in_ms)
     set_persist_storage(RealtimeWeb.RealtimeChannel, :realtime, :channel_error_backoff_ms)
 
     :syn.set_event_handler(Realtime.SynHandler)
     :ok = :syn.add_node_to_scopes([RegionNodes, Realtime.Tenants.Connect])
 
-    region = Application.get_env(:realtime, :region)
+    region = Realtime.Nodes.region()
     broadcast_pool_size = Application.get_env(:realtime, :broadcast_pool_size, 10)
     presence_pool_size = Application.get_env(:realtime, :presence_pool_size, 10)
     presence_broadcast_period = Application.get_env(:realtime, :presence_broadcast_period, 1_500)
     presence_permdown_period = Application.get_env(:realtime, :presence_permdown_period, 1_200_000)
     migration_partition_slots = Application.get_env(:realtime, :migration_partition_slots)
     connect_partition_slots = Application.get_env(:realtime, :connect_partition_slots)
-    no_channel_timeout_in_ms = Application.get_env(:realtime, :no_channel_timeout_in_ms)
     master_region = Application.get_env(:realtime, :master_region) || region
     user_scope_shards = Application.fetch_env!(:realtime, :users_scope_shards)
     user_scope_broadast_interval_in_ms = Application.get_env(:realtime, :users_scope_broadcast_interval_in_ms, 10_000)
+    user_scope_discover_interval_in_ms = Application.get_env(:realtime, :users_scope_discover_interval_in_ms, 60_000)
+
     muster_scope_shards = Application.fetch_env!(:realtime, :muster_scope_shards)
 
     # Only set in :test, where the single-node scope must reach :ready quickly
@@ -96,7 +99,7 @@ defmodule Realtime.Application do
     # One Muster scope per region: the atom is otherwise just an identifier, so
     # embedding the region keeps each region's ring/gossip/rebalancing isolated
     # even though ErlDist's broadcast fans out over the whole distribution mesh.
-    muster_scope = :"realtime_channels_#{region || "local"}"
+    muster_scope = :"realtime_channels_#{region}"
     Application.put_env(:realtime, :muster_scope, muster_scope)
 
     :syn.join(RegionNodes, region, self(), node: node())
@@ -111,23 +114,19 @@ defmodule Realtime.Application do
       [
         Realtime.ErlSysMon,
         Realtime.GenCounter,
+        Realtime.GenRpcMetrics,
+        # Before Realtime.PromEx: its presence usage poller depends on this, and
+        # :telemetry_poller's first tick fires near-instantly (init_delay defaults to 0), not
+        # after waiting out the poll period. Starting PromEx first meant that first tick ran
+        # before this existed, and :telemetry_poller permanently drops a measurement after its
+        # first failure - so the metric died silently on every boot.
+        {Task.Supervisor, name: Realtime.TaskSupervisor},
         Realtime.PromEx,
         Realtime.TenantPromEx,
         {Realtime.Telemetry.Logger, handler_id: "telemetry-logger"},
         RealtimeWeb.Telemetry,
         Realtime.GenRpcPubSub.RegionRings,
         {Cluster.Supervisor, [topologies, [name: Realtime.ClusterSupervisor]]},
-        {Phoenix.PubSub,
-         name: Realtime.PubSub, pool_size: 10, adapter: pubsub_adapter(), broadcast_pool_size: broadcast_pool_size},
-        {Forum.Census,
-         [
-           :users,
-           [
-             partitions: user_scope_shards,
-             broadcast_interval_in_ms: user_scope_broadast_interval_in_ms,
-             message_module: Realtime.ForumPubSubAdapter
-           ]
-         ]},
         {Forum.Muster,
          [
            muster_scope,
@@ -142,6 +141,24 @@ defmodule Realtime.Application do
                do: [singleton_promotion_timeout_ms: muster_singleton_promotion_timeout_ms],
                else: []
              )
+         ]},
+        # Placed right after Forum.Muster (and before RealtimeWeb.Endpoint): on
+        # shutdown children terminate in reverse start order, so this drains the
+        # Muster router role AFTER the Endpoint closed its websockets and BEFORE
+        # the Muster coordinator terminates. See Realtime.MusterDrainer.
+        {Realtime.MusterDrainer,
+         scope: muster_scope, drain_opts: Application.get_env(:realtime, :muster_drain_opts, [])},
+        {Phoenix.PubSub,
+         name: Realtime.PubSub, pool_size: 10, adapter: pubsub_adapter(), broadcast_pool_size: broadcast_pool_size},
+        {Forum.Census,
+         [
+           :users,
+           [
+             partitions: user_scope_shards,
+             broadcast_interval_in_ms: user_scope_broadast_interval_in_ms,
+             discover_interval_in_ms: user_scope_discover_interval_in_ms,
+             message_module: Realtime.ForumPubSubAdapter
+           ]
          ]},
         Supervisor.child_spec({Cachex, name: Realtime.RateCounter}, id: Realtime.RateCounter),
         Supervisor.child_spec({Cachex, name: Realtime.Nodes.Cache}, id: Realtime.Nodes.Cache),
@@ -158,11 +175,9 @@ defmodule Realtime.Application do
         Realtime.FeatureFlags.Cache,
         Realtime.RateCounter.DynamicSupervisor,
         Realtime.Latency,
-        {Registry, keys: :duplicate, name: Realtime.Registry},
         {Registry, keys: :unique, name: Realtime.Registry.Unique},
         {Registry, keys: :unique, name: Realtime.Tenants.Connect.Registry},
         {Registry, keys: :unique, name: Extensions.PostgresCdcRls.ReplicationPoller.Registry},
-        {Task.Supervisor, name: Realtime.TaskSupervisor},
         {Task.Supervisor, name: Realtime.Tenants.Migrations.TaskSupervisor},
         {PartitionSupervisor,
          child_spec: {DynamicSupervisor, max_restarts: 0},
@@ -180,14 +195,13 @@ defmodule Realtime.Application do
          name: Connect.DynamicSupervisor,
          partitions: connect_partition_slots},
         Realtime.Tenants.Reconnector,
-        {RealtimeWeb.RealtimeChannel.Tracker, check_interval_in_ms: no_channel_timeout_in_ms},
         RealtimeWeb.Endpoint,
         {RealtimeWeb.Presence,
          log_level: :info,
          pool_size: presence_pool_size,
          broadcast_period: presence_broadcast_period,
          permdown_period: presence_permdown_period}
-      ] ++ extensions_supervisors() ++ janitor_tasks() ++ metrics_pusher_children() ++ zta_children
+      ] ++ extensions_supervisors() ++ janitor_tasks() ++ Realtime.MetricsPusher.child_specs() ++ zta_children
 
     database_connections = if master_region == region, do: [Realtime.Repo], else: [Replica.replica()]
 
@@ -231,14 +245,6 @@ defmodule Realtime.Application do
         Realtime.Tenants.Janitor,
         Realtime.MetricsCleaner
       ]
-    else
-      []
-    end
-  end
-
-  defp metrics_pusher_children do
-    if Application.get_env(:realtime, :metrics_pusher_enabled) do
-      [Realtime.MetricsPusher]
     else
       []
     end

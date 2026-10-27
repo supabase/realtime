@@ -52,6 +52,17 @@ defmodule RealtimeWeb.BroadcastSingleController do
         example: false,
         description: "Whether this is a private broadcast (requires RLS authorization). Defaults to false."
       ]
+      # TODO: uncomment when broadcast persistence is public and ready
+      # persist: [
+      #   in: :query,
+      #   name: "persist",
+      #   schema: %OpenApiSpex.Schema{type: :boolean},
+      #   required: false,
+      #   example: false,
+      #   description:
+      #     "Whether to store the broadcast in realtime.messages (requires private and RLS authorization).
+      # Defaults to false."
+      # ]
     ],
     request_body: %OpenApiSpex.RequestBody{
       description: "Broadcast message payload. Supports both JSON and binary formats.",
@@ -75,27 +86,31 @@ defmodule RealtimeWeb.BroadcastSingleController do
     }
   )
 
-  def broadcast(
-        %{assigns: %{tenant: tenant}, body_params: %{"_binary" => binary}} = conn,
-        %{"topic" => topic, "event" => event} = params
-      ) do
-    private = parse_private(params["private"])
+  def broadcast(%{assigns: %{tenant: tenant}} = conn, %{"topic" => topic, "event" => event}) do
+    # Read from the query string only: Plug merges JSON body keys into params, so a payload
+    # with a "private" or "persist" key would otherwise change how it is broadcast
+    private = parse_boolean(conn.query_params["private"])
+    persist = parse_boolean(conn.query_params["persist"])
     auth_params = build_auth_params(conn, tenant)
 
-    with :ok <- SingleBroadcast.broadcast(auth_params, tenant, topic, event, private, binary, :binary) do
+    with {:ok, payload, content_type} <- payload(conn),
+         :ok <-
+           SingleBroadcast.broadcast(auth_params, tenant, topic, event, payload, content_type,
+             private: private,
+             persist: persist
+           ) do
       send_resp(conn, :accepted, "")
     end
   end
 
-  def broadcast(%{assigns: %{tenant: tenant}} = conn, %{"topic" => topic, "event" => event} = params) do
-    private = parse_private(params["private"])
-    payload = conn.body_params
-    auth_params = build_auth_params(conn, tenant)
+  defp payload(%{private: %{realtime_binary_body: body}}), do: {:ok, body, :binary}
+  defp payload(conn), do: json_payload(conn.body_params)
 
-    with :ok <- SingleBroadcast.broadcast(auth_params, tenant, topic, event, private, payload, :json) do
-      send_resp(conn, :accepted, "")
-    end
-  end
+  # Plug.Parsers.JSON wraps a body that isn't a JSON object as %{"_json" => value}
+  defp json_payload(%{"_json" => value} = body) when map_size(body) == 1 and not is_map(value),
+    do: {:error, :unprocessable_entity, "Payload must be a JSON object"}
+
+  defp json_payload(body), do: {:ok, body, :json}
 
   defp build_auth_params(conn, tenant) do
     Authorization.build_authorization_params(%{
@@ -107,7 +122,6 @@ defmodule RealtimeWeb.BroadcastSingleController do
     })
   end
 
-  defp parse_private("true"), do: true
-  defp parse_private(true), do: true
-  defp parse_private(_), do: false
+  defp parse_boolean("true"), do: true
+  defp parse_boolean(_), do: false
 end

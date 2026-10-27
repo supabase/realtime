@@ -9,16 +9,19 @@ api_jwt_secret =
 api_token_blocklist = Env.get_list("API_TOKEN_BLOCKLIST", [])
 app_name = System.get_env("APP_NAME", "")
 broadcast_pool_size = Env.get_integer("BROADCAST_POOL_SIZE", 10)
-channel_error_backoff_ms = Env.get_integer("CHANNEL_ERROR_BACKOFF_MS", :timer.seconds(5))
+channel_error_backoff_ms = Env.get_integer("CHANNEL_ERROR_BACKOFF_MS", to_timeout(second: 5))
 client_presence_max_calls = Env.get_integer("CLIENT_PRESENCE_MAX_CALLS", 5)
 client_presence_window_ms = Env.get_integer("CLIENT_PRESENCE_WINDOW_MS", 30_000)
-connect_error_backoff_ms = Env.get_integer("CONNECT_ERROR_BACKOFF_MS", :timer.seconds(2))
+access_token_throttle_ms = Env.get_integer("ACCESS_TOKEN_THROTTLE_MS", to_timeout(second: 10))
+connect_error_backoff_ms = Env.get_integer("CONNECT_ERROR_BACKOFF_MS", to_timeout(second: 2))
 connect_partition_slots = Env.get_integer("CONNECT_PARTITION_SLOTS", System.schedulers_online() * 2)
 dashboard_auth = System.get_env("DASHBOARD_AUTH", "basic_auth")
 dashboard_password = System.get_env("DASHBOARD_PASSWORD", :crypto.strong_rand_bytes(12) |> Base.encode16(case: :lower))
 dashboard_user = System.get_env("DASHBOARD_USER", :crypto.strong_rand_bytes(12) |> Base.encode16(case: :lower))
 db_after_connect_query = System.get_env("DB_AFTER_CONNECT_QUERY")
 db_enc_key = System.get_env("DB_ENC_KEY")
+db_enc_key_gcm = System.get_env("DB_ENC_KEY_GCM")
+db_enc_write_gcm = Env.get_boolean("DB_ENC_WRITE_GCM", false)
 db_host = System.get_env("DB_HOST", "127.0.0.1")
 db_ip_version = System.get_env("DB_IP_VERSION")
 db_master_region = System.get_env("DB_MASTER_REGION")
@@ -47,53 +50,99 @@ gen_rpc_socket_recbuf = Env.get_integer("GEN_RPC_SOCKET_RECEIVE_BUFFER")
 gen_rpc_socket_sndbuf = Env.get_integer("GEN_RPC_SOCKET_SEND_BUFFER")
 gen_rpc_ssl_client_port = Env.get_integer("GEN_RPC_SSL_CLIENT_PORT", 6369)
 gen_rpc_ssl_server_port = Env.get_integer("GEN_RPC_SSL_SERVER_PORT")
-gen_rpc_tcp_client_port = Env.get_integer("GEN_RPC_TCP_CLIENT_PORT", 5369)
-gen_rpc_tcp_server_port = Env.get_integer("GEN_RPC_TCP_SERVER_PORT", 5369)
+
+gen_rpc_default_port = 5369
+gen_rpc_dev_port_range = gen_rpc_default_port..(gen_rpc_default_port + 99)
+gen_rpc_tcp_client_port = Env.get_integer("GEN_RPC_TCP_CLIENT_PORT", gen_rpc_default_port)
+
+# Only the server port is bound. Nodes on one machine cannot share it, so a dev node takes the
+# first free port of the range and Realtime.GenRpc.get_config/1 tells its peers which one it took.
+# A test run derives its ports from one scan in config/test.exs instead, and dials peers through
+# gen_rpc's own tcp_client_port, the same lookup production uses.
+gen_rpc_tcp_server_port =
+  case {config_env(), Env.get_integer("GEN_RPC_TCP_SERVER_PORT")} do
+    {:test, _port} ->
+      nil
+
+    # A mix task without distribution (mix seed, mix ecto.migrate) has no cluster to serve, and
+    # binding a port would make two of them collide.
+    {:dev, nil} ->
+      if Node.alive?() do
+        Enum.find(gen_rpc_dev_port_range, &Env.port_available?/1) ||
+          raise "no free gen_rpc port on range #{inspect(gen_rpc_dev_port_range)}"
+      else
+        false
+      end
+
+    {:dev, port} ->
+      if Env.port_available?(port) do
+        port
+      else
+        raise "GEN_RPC_TCP_SERVER_PORT=#{port} is set but it's already in use."
+      end
+
+    {_env, port} ->
+      port || gen_rpc_default_port
+  end
+
 http_dynamic_buffer_min = Env.get_integer("HTTP_DYNAMIC_BUFFER_MIN")
 http_dynamic_buffer_max = Env.get_integer("HTTP_DYNAMIC_BUFFER_MAX")
-janitor_children_timeout = Env.get_integer("JANITOR_CHILDREN_TIMEOUT", :timer.seconds(5))
+janitor_children_timeout = Env.get_integer("JANITOR_CHILDREN_TIMEOUT", to_timeout(second: 5))
 janitor_chunk_size = Env.get_integer("JANITOR_CHUNK_SIZE", 10)
 janitor_max_children = Env.get_integer("JANITOR_MAX_CHILDREN", 5)
-janitor_run_after_in_ms = Env.get_integer("JANITOR_RUN_AFTER_IN_MS", :timer.minutes(10))
+janitor_run_after_in_ms = Env.get_integer("JANITOR_RUN_AFTER_IN_MS", to_timeout(minute: 10))
 janitor_schedule_randomize = Env.get_boolean("JANITOR_SCHEDULE_RANDOMIZE", true)
-janitor_schedule_timer_in_ms = Env.get_integer("JANITOR_SCHEDULE_TIMER_IN_MS", :timer.hours(4))
+janitor_schedule_timer_in_ms = Env.get_integer("JANITOR_SCHEDULE_TIMER_IN_MS", to_timeout(hour: 4))
 jwt_claim_validators = System.get_env("JWT_CLAIM_VALIDATORS", "{}")
 log_level = System.get_env("LOG_LEVEL", "info") |> String.to_existing_atom()
-log_throttle_janitor_interval_in_ms = Env.get_integer("LOG_THROTTLE_JANITOR_INTERVAL_IN_MS", :timer.minutes(10))
+log_throttle_janitor_interval_in_ms = Env.get_integer("LOG_THROTTLE_JANITOR_INTERVAL_IN_MS", to_timeout(minute: 10))
 logflare_logger_backend_url = System.get_env("LOGFLARE_LOGGER_BACKEND_URL", "https://api.logflare.app")
 logs_engine = System.get_env("LOGS_ENGINE")
 max_gen_rpc_clients = Env.get_integer("MAX_GEN_RPC_CLIENTS", 5)
 max_gen_rpc_call_clients = Env.get_integer("MAX_GEN_RPC_CALL_CLIENTS", 1)
-measure_traffic_interval_in_ms = Env.get_integer("MEASURE_TRAFFIC_INTERVAL_IN_MS", :timer.seconds(10))
-metrics_cleaner_schedule_timer_in_ms = Env.get_integer("METRICS_CLEANER_SCHEDULE_TIMER_IN_MS", :timer.minutes(30))
+measure_traffic_interval_in_ms = Env.get_integer("MEASURE_TRAFFIC_INTERVAL_IN_MS", to_timeout(second: 10))
+metrics_cleaner_schedule_timer_in_ms = Env.get_integer("METRICS_CLEANER_SCHEDULE_TIMER_IN_MS", to_timeout(minute: 30))
 metrics_pusher_auth = System.get_env("METRICS_PUSHER_AUTH")
 metrics_pusher_compress = Env.get_boolean("METRICS_PUSHER_COMPRESS", true)
 metrics_pusher_enabled = Env.get_boolean("METRICS_PUSHER_ENABLED", false)
-metrics_pusher_extra_labels = System.get_env("METRICS_PUSHER_EXTRA_LABELS", "")
-metrics_pusher_interval_ms = Env.get_integer("METRICS_PUSHER_INTERVAL_MS", :timer.seconds(30))
-metrics_pusher_timeout_ms = Env.get_integer("METRICS_PUSHER_TIMEOUT_MS", :timer.seconds(15))
+metrics_pusher_extra_labels = Env.get_key_value_list("METRICS_PUSHER_EXTRA_LABELS")
+metrics_pusher_interval_ms = Env.get_integer("METRICS_PUSHER_INTERVAL_MS", to_timeout(second: 30))
+metrics_pusher_timeout_ms = Env.get_integer("METRICS_PUSHER_TIMEOUT_MS", to_timeout(second: 15))
 metrics_pusher_url = System.get_env("METRICS_PUSHER_URL")
 metrics_pusher_user = System.get_env("METRICS_PUSHER_USER", "realtime")
-metrics_rpc_timeout_in_ms = Env.get_integer("METRICS_RPC_TIMEOUT_IN_MS", :timer.seconds(15))
+tenant_metrics_pusher_auth = System.get_env("TENANT_METRICS_PUSHER_AUTH")
+tenant_metrics_pusher_compress = Env.get_boolean("TENANT_METRICS_PUSHER_COMPRESS", true)
+tenant_metrics_pusher_enabled = Env.get_boolean("TENANT_METRICS_PUSHER_ENABLED", false)
+tenant_metrics_pusher_extra_labels = Env.get_key_value_list("TENANT_METRICS_PUSHER_EXTRA_LABELS")
+tenant_metrics_pusher_interval_ms = Env.get_integer("TENANT_METRICS_PUSHER_INTERVAL_MS", to_timeout(second: 30))
+tenant_metrics_pusher_timeout_ms = Env.get_integer("TENANT_METRICS_PUSHER_TIMEOUT_MS", to_timeout(second: 15))
+tenant_metrics_pusher_url = System.get_env("TENANT_METRICS_PUSHER_URL")
+tenant_metrics_pusher_user = System.get_env("TENANT_METRICS_PUSHER_USER", "realtime")
+metrics_rpc_timeout_in_ms = Env.get_integer("METRICS_RPC_TIMEOUT_IN_MS", to_timeout(second: 15))
 metrics_token_blocklist = Env.get_list("METRICS_TOKEN_BLOCKLIST", [])
 migration_partition_slots = Env.get_integer("MIGRATION_PARTITION_SLOTS", System.schedulers_online() * 2)
-no_channel_timeout_in_ms = Env.get_integer("NO_CHANNEL_TIMEOUT_IN_MS", :timer.minutes(10))
-node_balance_uptime_threshold_in_ms = Env.get_integer("NODE_BALANCE_UPTIME_THRESHOLD_IN_MS", :timer.minutes(5))
-platform = if System.get_env("AWS_EXECUTION_ENV") == "AWS_ECS_FARGATE", do: :aws, else: :fly
+no_channel_timeout_in_ms = Env.get_integer("NO_CHANNEL_TIMEOUT_IN_MS", to_timeout(minute: 10))
+node_balance_uptime_threshold_in_ms = Env.get_integer("NODE_BALANCE_UPTIME_THRESHOLD_IN_MS", to_timeout(minute: 5))
+platform = if System.get_env("AWS_EXECUTION_ENV") == "AWS_ECS_FARGATE", do: :aws
 postgres_cdc_scope_shards = Env.get_integer("POSTGRES_CDC_SCOPE_SHARDS", 5)
 presence_broadcast_period_in_ms = Env.get_integer("PRESENCE_BROADCAST_PERIOD_IN_MS", 1_500)
 presence_permdown_period_in_ms = Env.get_integer("PRESENCE_PERMDOWN_PERIOD_IN_MS", 1_200_000)
 presence_pool_size = Env.get_integer("PRESENCE_POOL_SIZE", 10)
+presence_usage_poll_rate = Env.get_integer("PRESENCE_USAGE_POLL_RATE_MS", 60_000)
+
+presence_latency_sample_rate =
+  Env.get_float("PRESENCE_LATENCY_SAMPLE_RATE", if(config_env() == :test, do: 1.0, else: 0.0))
+
 prom_poll_rate = Env.get_integer("PROM_POLL_RATE", 5000)
 realtime_ip_version = System.get_env("REALTIME_IP_VERSION")
-rebalance_check_interval_in_ms = Env.get_integer("REBALANCE_CHECK_INTERVAL_IN_MS", :timer.minutes(10))
-region = System.get_env("REGION")
+rebalance_check_interval_in_ms = Env.get_integer("REBALANCE_CHECK_INTERVAL_IN_MS", to_timeout(minute: 10))
+region = System.get_env("REGION", "local")
 region_mapping = System.get_env("REGION_MAPPING")
 request_id_baggage_key = System.get_env("REQUEST_ID_BAGGAGE_KEY", "request-id")
-rpc_timeout = Env.get_integer("RPC_TIMEOUT", :timer.seconds(30))
+rpc_timeout = Env.get_integer("RPC_TIMEOUT", to_timeout(second: 30))
 run_janitor = Env.get_boolean("RUN_JANITOR", false)
 slot_name_suffix = System.get_env("SLOT_NAME_SUFFIX")
-tenant_cache_expiration_in_ms = Env.get_integer("TENANT_CACHE_EXPIRATION_IN_MS", :timer.seconds(30))
+tenant_cache_expiration_in_ms = Env.get_integer("TENANT_CACHE_EXPIRATION_IN_MS", to_timeout(second: 30))
 tenant_max_bytes_per_second = Env.get_integer("TENANT_MAX_BYTES_PER_SECOND", 100_000)
 tenant_max_channels_per_client = Env.get_integer("TENANT_MAX_CHANNELS_PER_CLIENT", 100)
 tenant_max_concurrent_users = Env.get_integer("TENANT_MAX_CONCURRENT_USERS", 200)
@@ -101,15 +150,18 @@ tenant_max_events_per_second = Env.get_integer("TENANT_MAX_EVENTS_PER_SECOND", 1
 tenant_max_joins_per_second = Env.get_integer("TENANT_MAX_JOINS_PER_SECOND", 100)
 users_scope_shards = Env.get_integer("USERS_SCOPE_SHARDS", 5)
 muster_scope_shards = Env.get_integer("MUSTER_SCOPE_SHARDS", 5)
+
+# Forum.Muster router-role handoff at shutdown (see Realtime.MusterDrainer).
+# `timeout_ms` caps how long we wait for every peer to ack having rebalanced us out
+# of its ring; `settle_ms` is the post-ack window we stay alive servicing inbound
+# route RPCs, and must be at least the Muster scope's :rpc_timeout_ms (5s) so a
+# broadcast a peer routed here just before evicting us can still fan out. The
+# SIGTERM grace period must exceed timeout + settle + the rest of shutdown.
+muster_drain_timeout_ms = Env.get_integer("MUSTER_DRAIN_TIMEOUT_MS", :timer.seconds(10))
+muster_drain_settle_ms = Env.get_integer("MUSTER_DRAIN_SETTLE_MS", 7_500)
 websocket_max_heap_size = div(Env.get_integer("WEBSOCKET_MAX_HEAP_SIZE", 50_000_000), :erlang.system_info(:wordsize))
 
-cluster_strategies =
-  Env.get_binary("CLUSTER_STRATEGIES", fn ->
-    case config_env() do
-      :prod -> "POSTGRES"
-      _ -> "EPMD"
-    end
-  end)
+cluster_strategies = Env.get_binary("CLUSTER_STRATEGIES", "POSTGRES")
 
 metrics_jwt_secret =
   if config_env() == :test do
@@ -131,22 +183,11 @@ ssl_opts =
     true -> false
   end
 
-metrics_pusher_extra_labels =
-  case metrics_pusher_extra_labels do
-    "" ->
-      []
-
-    labels ->
-      labels
-      |> String.split(",")
-      |> Enum.map(fn pair ->
-        [k, v] = String.split(pair, "=", parts: 2)
-        {k, v}
-      end)
-  end
-
 if !(db_ip_version in [nil, "ipv6", "ipv4"]),
   do: raise("Invalid IP version, please set either ipv6 or ipv4")
+
+if db_enc_key_gcm && byte_size(db_enc_key_gcm) != 32,
+  do: raise("DB_ENC_KEY_GCM must be exactly 32 bytes for AES-256-GCM, got #{byte_size(db_enc_key_gcm)} bytes")
 
 socket_options =
   cond do
@@ -163,20 +204,7 @@ socket_options =
       end
   end
 
-[_, node_host] = node() |> Atom.to_string() |> String.split("@")
-
-metrics_tags = %{
-  region: region,
-  host: node_host,
-  id: Realtime.Nodes.short_node_id_from_name(node())
-}
-
-config :realtime, Realtime.Repo,
-  hostname: db_host,
-  username: db_user,
-  password: db_password,
-  database: db_name,
-  port: db_port,
+repo_opts = [
   pool_size: db_pool_size,
   queue_target: db_queue_target,
   queue_interval: db_queue_interval,
@@ -184,6 +212,16 @@ config :realtime, Realtime.Repo,
   after_connect: after_connect_query_args,
   socket_options: socket_options,
   ssl: ssl_opts
+]
+
+# Where to connect, except in test: config/test.exs points a run at a database named after itself,
+# on the port that run scanned, and this would overwrite both.
+repo_opts =
+  if config_env() == :test,
+    do: repo_opts,
+    else: [hostname: db_host, username: db_user, password: db_password, database: db_name, port: db_port] ++ repo_opts
+
+config :realtime, Realtime.Repo, repo_opts
 
 config :realtime,
   websocket_max_heap_size: websocket_max_heap_size,
@@ -205,12 +243,13 @@ config :realtime,
   presence_pool_size: presence_pool_size,
   presence_broadcast_period: presence_broadcast_period_in_ms,
   presence_permdown_period: presence_permdown_period_in_ms,
+  presence_latency_sample_rate: presence_latency_sample_rate,
   users_scope_shards: users_scope_shards,
   muster_scope_shards: muster_scope_shards,
+  muster_drain_opts: [timeout_ms: muster_drain_timeout_ms, settle_ms: muster_drain_settle_ms],
   postgres_cdc_scope_shards: postgres_cdc_scope_shards,
   master_region: db_master_region,
   region_mapping: region_mapping,
-  metrics_tags: metrics_tags,
   measure_traffic_interval_in_ms: measure_traffic_interval_in_ms,
   client_presence_rate_limit: [
     max_calls: client_presence_max_calls,
@@ -225,7 +264,15 @@ config :realtime,
   metrics_pusher_interval_ms: metrics_pusher_interval_ms,
   metrics_pusher_timeout_ms: metrics_pusher_timeout_ms,
   metrics_pusher_compress: metrics_pusher_compress,
-  metrics_pusher_extra_labels: metrics_pusher_extra_labels
+  metrics_pusher_extra_labels: metrics_pusher_extra_labels,
+  tenant_metrics_pusher_enabled: tenant_metrics_pusher_enabled,
+  tenant_metrics_pusher_url: tenant_metrics_pusher_url,
+  tenant_metrics_pusher_user: tenant_metrics_pusher_user,
+  tenant_metrics_pusher_auth: tenant_metrics_pusher_auth,
+  tenant_metrics_pusher_interval_ms: tenant_metrics_pusher_interval_ms,
+  tenant_metrics_pusher_timeout_ms: tenant_metrics_pusher_timeout_ms,
+  tenant_metrics_pusher_compress: tenant_metrics_pusher_compress,
+  tenant_metrics_pusher_extra_labels: tenant_metrics_pusher_extra_labels
 
 if config_env() != :test && run_janitor do
   config :realtime,
@@ -254,6 +301,23 @@ cluster_topologies =
           ]
         ] ++ acc
 
+      "EPMD" ->
+        # Every node is dialed by name, so they must be known upfront. The default is what
+        # compose.yml names its nodes.
+        hosts =
+          "CLUSTER_EPMD_HOSTS"
+          |> Env.get_list(["pink@127.0.0.1", "orange@127.0.0.1"])
+          |> Enum.map(&String.to_atom/1)
+
+        [
+          epmd: [
+            strategy: Cluster.Strategy.Epmd,
+            config: [hosts: hosts],
+            connect: {:net_kernel, :connect_node, []},
+            disconnect: {:net_kernel, :disconnect_node, []}
+          ]
+        ] ++ acc
+
       "POSTGRES" ->
         [
           postgres: [
@@ -269,16 +333,6 @@ cluster_topologies =
               ssl: ssl_opts,
               heartbeat_interval: 5_000
             ]
-          ]
-        ] ++ acc
-
-      "EPMD" ->
-        [
-          dev: [
-            strategy: Cluster.Strategy.Epmd,
-            config: [hosts: [:"orange@127.0.0.1", :"pink@127.0.0.1"]],
-            connect: {:net_kernel, :connect_node, []},
-            disconnect: {:net_kernel, :disconnect_node, []}
           ]
         ] ++ acc
 
@@ -371,8 +425,11 @@ if config_env() != :test do
     metrics_blocklist: metrics_token_blocklist,
     metrics_jwt_secret: metrics_jwt_secret,
     db_enc_key: db_enc_key,
+    db_enc_key_gcm: db_enc_key_gcm,
+    db_enc_write_gcm: db_enc_write_gcm,
     region: region,
     prom_poll_rate: prom_poll_rate,
+    presence_usage_poll_rate: presence_usage_poll_rate,
     slot_name_suffix: slot_name_suffix,
     max_gen_rpc_clients: max_gen_rpc_clients,
     max_gen_rpc_call_clients: max_gen_rpc_call_clients,
@@ -385,6 +442,7 @@ end
 if config_env() == :prod do
   config :libcluster, debug: false, topologies: cluster_topologies
   config :realtime, node_balance_uptime_threshold_in_ms: node_balance_uptime_threshold_in_ms
+  config :realtime, access_token_throttle_ms: access_token_throttle_ms
   secret_key_base = System.fetch_env!("SECRET_KEY_BASE")
   if app_name == "", do: raise("APP_NAME not available")
 
@@ -436,15 +494,19 @@ if config_env() == :prod do
   alias Realtime.Repo.Replica
 
   replica_repos = %{
-    Realtime.Repo.Replica.FRA => System.get_env("DB_HOST_REPLICA_FRA", db_host),
-    Realtime.Repo.Replica.IAD => System.get_env("DB_HOST_REPLICA_IAD", db_host),
-    Realtime.Repo.Replica.SIN => System.get_env("DB_HOST_REPLICA_SIN", db_host),
-    Realtime.Repo.Replica.SJC => System.get_env("DB_HOST_REPLICA_SJC", db_host),
     Realtime.Repo.Replica.Singapore => System.get_env("DB_HOST_REPLICA_SIN", db_host),
     Realtime.Repo.Replica.London => System.get_env("DB_HOST_REPLICA_FRA", db_host),
     Realtime.Repo.Replica.NorthVirginia => System.get_env("DB_HOST_REPLICA_IAD", db_host),
     Realtime.Repo.Replica.Oregon => System.get_env("DB_HOST_REPLICA_SJC", db_host),
     Realtime.Repo.Replica.SanJose => System.get_env("DB_HOST_REPLICA_SJC", db_host),
+    Realtime.Repo.Replica.Ohio => System.get_env("DB_HOST_REPLICA_CMH", db_host),
+    Realtime.Repo.Replica.Ireland => System.get_env("DB_HOST_REPLICA_DUB", db_host),
+    Realtime.Repo.Replica.Frankfurt => System.get_env("DB_HOST_REPLICA_FRA", db_host),
+    Realtime.Repo.Replica.Stockholm => System.get_env("DB_HOST_REPLICA_ARN", db_host),
+    Realtime.Repo.Replica.SaoPaulo => System.get_env("DB_HOST_REPLICA_GRU", db_host),
+    Realtime.Repo.Replica.Tokyo => System.get_env("DB_HOST_REPLICA_NRT", db_host),
+    Realtime.Repo.Replica.Seoul => System.get_env("DB_HOST_REPLICA_ICN", db_host),
+    Realtime.Repo.Replica.Mumbai => System.get_env("DB_HOST_REPLICA_BOM", db_host),
     Realtime.Repo.Replica.Local => db_host
   }
 
@@ -499,5 +561,10 @@ if config_env() != :test do
 end
 
 if config_env() == :dev do
-  config :libcluster, debug: false, topologies: cluster_topologies
+  # Dev servers find each other through the realtime database they share, the same way production
+  # nodes do. A mix task without distribution has no cluster to join.
+  topologies = if Node.alive?(), do: cluster_topologies, else: []
+
+  config :libcluster, debug: false, topologies: topologies
+  config :gen_rpc, client_config_per_node: {:external, Realtime.GenRpc}
 end

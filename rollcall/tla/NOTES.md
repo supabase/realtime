@@ -1,0 +1,795 @@
+# Presence TLA+ model notes
+
+A TLA+/TLC model of the replication protocol for the new per-tenant presence
+tracker, built incrementally. One module per step, numbered. Each step adds
+one mechanism and the property that mechanism is responsible for. Muster and
+PubSub are not modelled; from step 3 they are abstracted as a delivery layer
+that may drop a message to an interested node.
+
+Each module has a `.cfg` of the same name. Check it with TLC (2.19 at the
+time of writing) from this directory:
+
+```
+java -cp tla2tools.jar tlc2.TLC -workers auto -config Presence1.cfg Presence1.tla
+```
+
+For a run with liveness properties and more than about 100K states, add
+`-lncheck final`. By default TLC checks liveness on the partial state space
+every few seconds and again at the end; the option skips the partial passes.
+
+## Assumptions
+
+- One tenant. The tracker is per tenant, heartbeats are per-tenant
+  broadcasts routed by Muster, and no state is shared between tenants. A
+  second tenant would add states without adding behaviour.
+- A node is the authority for the entries its own clients tracked. Nothing it
+  receives from a peer can conflict with its own entries, so there is no
+  merge, only replace.
+- Topics are not modelled. A topic is a projection of an entry's payload,
+  and the payload is opaque to replication. Replication, interest and dead
+  detection are tenant-level. Grouping entries by topic is an implementation
+  detail of the client-facing side.
+- The transport is unordered and lossy. Muster over gen_rpc uses a pool of
+  connections per node with no ordering guarantee, so two heartbeats from
+  one sender can arrive in either order. The model never assumes ordering.
+- Every tracker's heartbeat timer runs at the same rate, and delivery delay
+  is bounded in heartbeat periods. A silence threshold counted in heartbeats
+  means nothing without both. From step 5, time advances in cluster-wide
+  ticks and every message carries its age in ticks.
+- A tracker's entries do not outlive the tracker. The tracker links to the
+  channel that tracked each entry, so a tracker crash takes those channels
+  with it and a channel crash is a leave. A tracker restart is therefore a
+  crash followed by a join, and the model has no separate restart. See
+  step 6.
+- A link is never dead for good, for any one kind of message. Step 5 only
+  needed "something on the link eventually gets through". Once a link
+  carries snapshots, diffs and requests, loss that always picks the one
+  useful kind defeats repair while that weaker assumption still holds. From
+  step 8 the fairness assumption is per link per kind: the network does not
+  discriminate by message kind.
+- Every message carries the sender's incarnation and version, and only
+  their order is ever compared. The incarnation is any value strictly
+  greater for each new start of a tracker on a node; a timestamp taken at
+  tracker start serves, and nothing needs to be persisted across restarts.
+  See step 8.
+
+## Protocol options
+
+The heartbeat is periodic in every option. Step 3 shows why: with lossy
+delivery, send-on-change alone does not converge. The options differ in
+what a heartbeat carries.
+
+1. **Full state every heartbeat.** Each node sends the entries it owns, every
+   period, to every interested node. Receiver replaces its replica. No
+   sequence numbers, no gap detection; a lost heartbeat is repaired by the
+   next one. Cost scales with steady-state size: bytes are re-sent whether or
+   not anything changed.
+2. **Version-stamped full state.** Each node keeps a counter that increments
+   on every local change. Every heartbeat carries the counter; the entry set
+   rides along only when the counter changed since the last send. A receiver
+   that sees a version it has not applied, with no state attached, requests
+   a snapshot. Steady-state heartbeats are a few bytes. Any change, however
+   small, costs a full snapshot. Still replace-only on the receiver.
+3. **Diffs.** Heartbeats carry changes since the last heartbeat, with a
+   sequence number for gap detection and a checksum or similar to catch a
+   bad apply. Recovery from a gap, a restart, or a cold start is a full
+   snapshot, so this option contains option 1 as a sub-protocol. Cost scales
+   with change rate. Adds per-change bookkeeping on the sender and merge
+   logic on the receiver.
+
+Decision: model and implement option 1 first. It is the protocol everything
+else recovers through. Add option 2 if measurement shows steady-state bytes
+matter. Option 3 only if change rate is the problem.
+
+For the model, option 2 and option 3 share the machinery (a per-sender
+version, a request path, a receiver that detects it is behind). When that
+step arrives, the heartbeat action should nondeterministically carry full
+state, a diff, or a version only. One model then covers every threshold
+policy an implementation might choose; the policy stays out of the spec.
+
+## Step 1: `Presence1.tla`, local state only
+
+What: nodes track and untrack presence entries locally. No messages, no
+replication. The only property is that an entry belongs to one node at a time.
+
+Why this step first: it fixes the vocabulary every later step builds on.
+A presence entry is a ref, created by one `track` call and never reused.
+Each node is the authority for its own entries. Keys and payloads are left
+out until the client contract (step 7); replication does not depend on them.
+Entry uniqueness is set here because later steps rely on it to tell a stale
+replica of an entry from a fresh one.
+
+It also settles how behaviours end. The set of refs is finite, so every
+behaviour terminates, and the model needs a way to say so that is not a
+deadlock. Step 2's convergence property needs that quiescent state to exist.
+
+Runs (2026-10-20):
+
+| Config | Nodes | Refs | Distinct states | Depth | Result |
+|---|---|---|---|---|---|
+| `Presence1.cfg` | 2 | 2 | 16 | 5 | holds |
+| 3x3 (ad hoc) | 3 | 3 | 125 | 7 | holds |
+
+Witness (non-vacuity): `Presence1_w1.cfg` sets `UniqueRefs = FALSE`, which
+switches off the guard that stops a ref being tracked twice. `OwnedOnce`
+violated in 3 states: `n2` tracks `r1`, then `n1` tracks `r1`. 24 distinct
+states. The constant exists only for this; every other config sets it `TRUE`.
+
+Observations:
+
+- Nothing in the spec orders nodes or refs, so a `SYMMETRY` set over both is
+  sound for safety checking. Not used: step 2 adds liveness, and TLC's
+  liveness checking under symmetry is not sound in general.
+- TLC writes a `states/` directory next to the spec. It should be ignored
+  (`states/`, `*.st`, `*.fp`, `*.chkpt`).
+
+## Step 2: `Presence2.tla`, snapshot heartbeat over a perfect network
+
+What: each node periodically sends the entries it owns to every other node,
+and a receiver replaces its copy of the sender's entries with what arrived.
+No loss. The new property is convergence: once tracking stops, every copy
+eventually matches its source and stays matched.
+
+Why this step: it is the first liveness property, and liveness needs
+fairness. Safety says what may never happen; convergence says what must
+eventually happen, and nothing in a bare transition system forces anything
+to happen. This step settles what the model assumes the environment
+guarantees (nodes keep heartbeating; a perfect network delivers every
+message) and what it does not (nobody forces a track or untrack).
+
+Messages are an unordered set. Delivery order is arbitrary, duplicates
+collapse. This over-approximates any real transport, so a property that
+holds here holds under stricter ordering too.
+
+Finding: fairness on "some message is eventually delivered" is not enough.
+With `WF_vars(\E msg \in msgs : Deliver(msg))`, TLC found a loop where one
+node re-sends the same heartbeat forever and the receiver keeps delivering
+it, while a different message to the other node is never delivered and a
+stale copy persists. The fairness condition is satisfied because deliveries
+happen infinitely often. Fixed by quantifying fairness over every possible
+message, `\A msg \in Messages : WF_vars(Deliver(msg))`, which is the honest
+statement of "every message sent is eventually delivered" on a perfect
+network. Step 3 shows it is still too weak once loss exists; see finding 1
+there.
+
+Runs (2026-10-21):
+
+| Config | Nodes | Refs | Distinct states | Depth | Time | Result |
+|---|---|---|---|---|---|---|
+| `Presence2.cfg` | 2 | 2 | 1,440 | 13 | <1s | holds |
+| 3 nodes (ad hoc) | 3 | 2 | 778,528 | 21 | 26s | holds |
+
+Witnesses:
+
+- `Presence2_w1.cfg`: the spec without fairness. `Convergence` violated;
+  the trace ends in a stuttering state with a heartbeat in flight that is
+  never delivered.
+- `Presence2_w2.cfg`: `ReplicasEmpty` violated at the first delivery.
+  Replicas do fill.
+
+Observations:
+
+- Three nodes costs a few hundred thousand states with liveness on, and
+  symmetry reduction is unsound for liveness checking. Iterate at two nodes;
+  confirm at three.
+- A stale snapshot delivered after a fresher one makes a copy go backwards
+  for a moment. `<>[]` tolerates this. Whether the transient is acceptable
+  is a client-contract question (step 7).
+
+## Step 3: `Presence3.tla`, lossy delivery
+
+What: any in-flight heartbeat may be dropped. Nothing else changes. The
+property is the same convergence as step 2, now required to hold despite
+loss.
+
+Why this step: it pins down what the model assumes about the transport and
+why the heartbeat has to be periodic. Both are decisions the design had
+already made; this step turns them into checked claims. Muster and PubSub
+are not modelled. Their contract, as the model now states it, is: a message
+may be lost, and a message that keeps being sent is eventually delivered.
+Nothing about ordering or at-most-once.
+
+Finding 1: weak fairness on delivery is not enough once loss exists. With
+`WF_vars(Deliver(msg))`, TLC found a loop where every heartbeat in one
+direction is dropped and the stale replica never repairs. Weak fairness
+only forces an action that is enabled continuously; a dropped message is
+enabled only in the moments between send and drop. The behaviour it
+permits is a permanent one-way partition, which is not "loss". Fixed with
+strong fairness, `SF_vars(Deliver(msg))`: an action enabled infinitely
+often must eventually occur. Heartbeat keeps weak fairness, since nothing
+ever disables it. Strong fairness is much slower to check: the temporal
+phase went from under a second to over a minute at the same constants.
+
+Finding 2: send-on-change does not converge. The `PeriodicHeartbeat`
+witness switch, with a per-node dirty flag, makes a node heartbeat only
+after a local change. One dropped heartbeat then leaves a replica stale
+forever, because the flag is already clear and nothing sends again. This
+is the "keep the heartbeat" decision as a six-step counterexample. The dirty
+flag is also the seed of protocol option 2: a version counter is a dirty
+flag that remembers how many times it was set.
+
+Runs (2026-10-21):
+
+| Config | Nodes | Refs | Distinct states | Depth | Time | Result |
+|---|---|---|---|---|---|---|
+| `Presence3.cfg` | 2 | 2 | 2,908 | 15 | 71s | holds |
+
+Witnesses:
+
+- `Presence3_w1.cfg`: `PeriodicHeartbeat = FALSE`. `Convergence` violated;
+  a change triggers one heartbeat, it is dropped, then stuttering. 714
+  states. Deadlock checking is off in this config: with send-on-change a
+  quiescent state has no enabled action, which is expected and not the
+  failure the witness is about.
+
+Observations:
+
+- Loss adds no states, only transitions. Distinct states rose from step 2
+  because of the dirty flag, not because of `Drop`.
+- Quantifying `Deliver` and `Drop` over the constant set `Messages` rather
+  than the variable `msgs` lets TLC name those steps in traces. Quantifiers
+  over a variable show up as anonymous `Next` steps.
+- In a multi-variable quantifier the bound sets are simultaneous, so
+  `\A n \in Nodes, m \in Peers(n)` is an error. Nest the quantifiers when
+  one domain depends on another.
+
+## Step 4: `Presence4.tla`, interest
+
+What: a tracker exists on a node only while that node has clients for the
+tenant. A node joins (tracker starts, knowing nothing) and leaves (tracker
+stops, once its own entries are gone). Heartbeats go only to nodes with a
+tracker. Convergence is required only between live trackers.
+
+Why this step: it is the Muster abstraction. A broadcast reaches the
+interested set and nothing else; the model does not care how. It is also
+where cold start and teardown first exist, so it is the first step that can
+show interest flapping: a node leaving and coming back.
+
+Decisions recorded in the module:
+
+- Interest is its own state, not derived from tracked entries. A node can
+  have clients that track nothing.
+- A joining tracker starts with empty replicas. Nothing is pre-seeded; the
+  next round of heartbeats fills it.
+- Leaving requires the node's own entries to be gone. The last client's
+  entries are untracked when its channel dies, which is a sequence of
+  untracks the model already has.
+- In-flight messages *to* a departing node are discarded (a mailbox dies
+  with its process). In-flight messages *from* it are not: a heartbeat
+  already sent survives its sender stopping.
+- A heartbeat goes to the nodes interested at send time. A node that joined
+  after the send gets the next one.
+- Join and leave are bounded by a per-node counter. Tracking is already
+  bounded by the finite set of refs; without a bound on interest churn a
+  node can flap forever and "eventually always converged" has no quiescent
+  state to settle into. That is a counterexample about the environment, not
+  the protocol.
+
+Finding: a live tracker can hold entries for a tracker that has stopped,
+and nothing in the design so far removes them. The trace needs no loss: a
+node tracks, heartbeats, untracks and leaves; its last snapshot is still in
+flight and lands on a peer after it has gone. The correction was never sent,
+because nothing forces a heartbeat between an untrack and a leave. A
+goodbye message on leave would cover that case but not the one where the
+goodbye is dropped, or where a stale snapshot from the departed node is
+still in flight behind it. Silence-based purging is step 5. Most likely both
+are needed. The probe is kept as `LiveTrackersDontCarryDeadTrackersState`,
+expected to fail until step 5.
+
+Pruning done when copying step 3 to step 4: the witness switches
+(`UniqueRefs`, `PeriodicHeartbeat`, the dirty flag) were not carried
+forward, and self-addressed messages were excluded from `Messages`. Each
+possible message is a strong-fairness conjunct, and halving them took the
+step 3 temporal phase from 71s to under a second on the same model.
+Modules carry mechanisms forward, not witness switches.
+
+Runs (2026-10-21):
+
+| Config | Nodes | Refs | MaxJoins | Distinct states | Depth | Time | Result |
+|---|---|---|---|---|---|---|---|
+| `Presence4.cfg` | 2 | 2 | 2 | 6,661 | 19 | 1s | holds |
+
+Witnesses:
+
+- `Presence4_w1.cfg`: `LiveTrackersDontCarryDeadTrackersState` as an
+  invariant. Violated in 8 states, trace as described above. 534 states.
+
+Observations:
+
+- Deadlock checking is off in both configs. Once every node has used its
+  joins and left, no action is enabled. That is the bounded environment
+  running out, not a protocol deadlock.
+- Convergence between live trackers holds through cold start and through
+  leave-and-rejoin at `MaxJoins = 2`, so interest flapping is not itself a
+  problem for snapshot replication. The stale-entry gap is about what the
+  survivors hold, not about the returning node.
+
+## Step 5: `Presence5.tla`, crash, goodbye and dead detection
+
+What: a node can crash. A tracker that stops gracefully sends a goodbye, an
+empty snapshot. Every tracker counts, per peer, how many heartbeat periods
+have passed since it last heard from that peer, and purges the peer's
+entries once the count reaches a threshold. Time is explicit from this
+step: one `Tick` action fires every live timer at once, and every message
+carries its age in ticks with a bound on how old it can get.
+
+Properties:
+
+- A stopped tracker's entries are eventually gone from every live replica,
+  and stay gone (`DeadStatesArePurged`).
+- Under unbounded loss, every link between two live trackers is correct
+  infinitely often (`PairRepair`).
+- Under bounded loss, the whole cluster is correct infinitely often and
+  eventually stays correct (`Convergence`, `Stabilisation`).
+
+Why this step: step 4 ended with survivors holding a departed tracker's
+entries. A goodbye covers the graceful case. It does not cover a crash, a
+lost goodbye, or a stale snapshot still in flight behind the goodbye, so
+silence-based purging is needed as well. Purging makes time part of the
+protocol: a threshold counted in heartbeats is only meaningful if the
+timers agree and delivery is not arbitrarily slow. This step states both
+assumptions and the constraint that follows from them.
+
+Decisions recorded in the module:
+
+- Crash wipes the node's entries, discards messages to it and sends
+  nothing. Leave sends an empty snapshot to every interested peer.
+- The silence counter is per tracker per peer, reset by any delivery from
+  that peer, and saturates at the threshold. Purge requires something to
+  purge and is weakly fair.
+- A message is delivered or dropped before it is older than `MaxDelay`
+  ticks. `Tick` is blocked while any message is at the bound.
+- `ASSUME MaxDelay + 1 < SilenceThreshold`. The counter goes up in the tick
+  the latest snapshot was sent, so a snapshot arriving `MaxDelay` ticks late
+  finds the counter at `MaxDelay + 1`. Below that threshold a late heartbeat
+  is indistinguishable from a dead peer.
+
+Finding 1: per-node heartbeat actions make the threshold meaningless. With
+each node's heartbeat as its own action, nothing relates one node's timer
+to another's. At threshold 1 TLC found a loop with no loss at all in which
+one node heartbeats repeatedly, its counter for the peer reaches the
+threshold, and it purges a live peer that simply has not had its turn yet.
+At threshold 2 the same thing needs one drop. No threshold fixes it. The design
+assumes timers run at the same rate; the model has to say so. Fixed by
+replacing per-node heartbeats with one cluster-wide `Tick`, and by giving
+messages an age so that "late" is bounded in the same unit.
+
+Finding 2: "eventually always converged" is false under unbounded loss for
+any threshold. Lose a peer's heartbeats threshold times in a row and it is
+purged; the next delivery restores it; loss can do this forever. The honest
+property under unbounded loss is repair, `[]<>`, not stabilisation, `<>[]`.
+Cluster-wide repair is false too: TLC found a 25-state loop where loss
+alternates between the two directions, so whenever one link is restored the
+other has just been purged. Each link repairs, but the cluster is never
+consistent as a whole at any instant. Per-link repair holds. Cluster-wide
+repair and stabilisation hold once loss is bounded (`BoundedLoss`,
+`MaxDrops`), which models a network that eventually stops losing.
+
+Finding 3: a false positive, purging a live peer, is reachable at any finite
+threshold. The probe `FalsePositivesUnreachable` says a non-empty, correct
+replica is never at the threshold. It fails through two consecutive drops.
+The threshold is a tuning parameter, not a correctness one: it trades
+detection delay against false positives, and the model cannot say how often
+a real network loses two in a row. The probe excludes a replica that no
+longer matches its source, because that is a crashed-and-rejoined peer's
+leftovers, which purging is right to remove.
+
+Finding 4: fairness per message was the entire liveness cost. Strong
+fairness quantified over every possible message put the temporal phase at
+33s for 31K states, and the number of conjuncts grows with the message
+domain. Replaced by strong fairness per link, on "some message in flight
+from s to d is delivered". That is sound because the age bound stops `Tick`
+while an old message is in flight, so no message can be starved by others
+on its link. It is a weaker assumption about the network, and the temporal
+phase dropped to under a second. A scratch run confirmed TLC still finds
+the alternating-loss loop under the new fairness.
+
+Runs (2026-10-21), all at `MaxJoins = 2`, `SilenceThreshold = 2`,
+`MaxDelay = 0`:
+
+| Config | Nodes | Refs | Loss | Distinct states | Depth | Time | Result |
+|---|---|---|---|---|---|---|---|
+| `Presence5.cfg` | 2 | 2 | unbounded | 31,133 | 20 | 1s | holds |
+| 3 refs (ad hoc) | 2 | 3 | unbounded | 239,461 | 22 | 24s | holds |
+| `Presence5_stable.cfg` | 2 | 2 | 2 drops | 64,365 | 20 | 2s | holds |
+| 3 nodes, invariants only (ad hoc) | 3 | 2 | unbounded | >188M | >27 | stopped at 15 min | unknown |
+
+Witnesses:
+
+- `Presence5_w1.cfg`: `FalsePositivesUnreachable` as an invariant. Violated
+  in 11 states: both nodes join, one tracks, one tick delivers both
+  heartbeats, the next tick's heartbeats are both dropped, and the tick after
+  that takes the counter to the threshold with a correct replica in hand.
+  10,698 states.
+- `Presence5_w2.cfg`: `PurgeEnabled = FALSE`. `DeadStatesArePurged`
+  violated in 16 states, ending in stuttering with one node crashed and the
+  survivor still holding its entry. Shows the goodbye alone is not enough.
+- `Presence5_w3.cfg`: cluster-wide `Convergence` under unbounded loss.
+  Violated, 26 states looping back to state 10. The alternating-loss trace
+  from finding 2.
+
+Observations:
+
+- A third node multiplies the state space rather than adding to it. The
+  3-node run was still generating states at 188 million. Two nodes is
+  representative for this protocol because no node forwards another's
+  entries, so each link depends only on its two endpoints. Three nodes
+  would matter if the design ever added forwarding.
+- Three refs at two nodes is cheap enough to use as a confirmation run. It
+  becomes the better default once heartbeats carry diffs, since a diff with
+  both an add and a remove needs a node holding two entries while a third
+  changes.
+- `MaxDelay = 1` with threshold 3, where two snapshots from one sender can
+  be in flight together, has not been run yet.
+
+## Step 6: tracker restart, no module
+
+What: the tracker process on a node restarts while the node stays up. The
+question was whether the entries tracked through it survive the restart.
+
+Decision: they do not. The tracker links to each channel that tracks an
+entry, so a tracker crash kills those channels, their clients rejoin and
+track again, and peers see the old entries leave and new ones join. A
+restart is a crash followed by a join, which step 5 already models and
+checks: `PairRepair` holds through Crash then Join at the default
+constants, because the first snapshot from the restarted tracker replaces
+whatever a peer still held.
+
+Why this way: it is what Phoenix Tracker does, and the new tracker runs side
+by side with Phoenix Presence for a while. Two implementations with
+different restart semantics would be two sets of client-visible behaviour
+to support. The per-tenant tracker still narrows the blast radius of a
+restart from every tenant sharing a shard to one tenant on one node.
+
+How Phoenix does it, for reference: the shard calls `Process.link` on the
+channel pid when it tracks and traps exits, so a dying channel is a leave.
+Channels do not trap exits, so a dying shard takes its channels down. The
+shard restarts empty with a new replica version. A remote shard that sees a
+heartbeat from the same node with a new version marks the old version
+permanently down, reports every entry from it as a leave, and syncs with
+the new one. The version is what lets peers drop the old state at once
+rather than waiting for silence.
+
+Deferred: monitoring the channels instead of linking, so a tracker restart
+leaves them connected. Worth revisiting once Phoenix Tracker is fully
+replaced, because channels surviving a tracker restart limits the blast
+radius across broadcast and database-changes features too. The cost, from
+working it through: the tracker has to rebuild its entries from the
+channels before it heartbeats, or peers see every entry leave and come
+back; its replicas are empty until the next tick, so its own clients see
+every remote entry leave and come back; and the entries' refs have to
+survive the restart, which means the channel owns the ref, not the tracker.
+Each of those is a mechanism the model would need to add.
+
+Shadow mode needs monitor semantics anyway, without the rebuild. While the
+new tracker runs alongside Phoenix Presence and is not the source of truth,
+a crash in it must not disconnect channels. The link is created by the
+tracker, which holds every channel pid, so the switch lives there and
+nowhere else: the tracker always monitors the channel pid and treats
+`:DOWN` as the leave, always traps exits, and in link mode also calls
+`Process.link` on the same pid. A per-tenant feature flag read once at
+tracker start picks the mode. Link rather than a channel-side monitor for
+the end state because an exit signal kills a non-trapping channel at once,
+while a `:DOWN` message queues behind whatever the channel is doing. In
+shadow mode a tracker crash loses this node's entries until each channel
+leaves and rejoins, and the shadow comparison diverges for that long; a
+telemetry event on tracker crash makes the divergence explainable. The
+model is unaffected: in both modes the tracker's entries die with it.
+
+The incarnation id stays in step 8. In snapshot mode the next heartbeat
+corrects a peer completely, so nothing distinguishes a restarted sender
+from a delayed message except a replica going backwards for one period
+when `MaxDelay` is at least 1. That becomes corruption rather than a
+transient once heartbeats carry diffs.
+
+## Step 7: `Presence7.tla`, client contract
+
+What: the last hop, from the tracker on a node to a client connected to
+that node. The client is sent one full copy of what the node knows, then
+only changes: refs that joined and refs that left. It keeps its own copy
+and applies each message in turn. The property is that a client that has
+received the full copy and has nothing left to process holds exactly what
+the node knows, its own entries plus every replica.
+
+The module starts as a copy of step 5 with the tracker lifecycle renamed:
+Join is Start, Leave is Stop, `MaxJoins` is `MaxStarts`. Join and leave
+are what the client contract calls an entry appearing and disappearing,
+and this step adds that contract. Earlier modules keep the old names.
+
+Topics: a client subscribes to one topic per channel and is sent only that
+topic's state and diffs. Authorisation for the topic is decided before the
+subscription and the tracker never sees it. The model keeps one client per
+node receiving the unfiltered stream, because a topic's client is a
+projection of it. Filtering a set of refs by topic commutes with union and
+difference, so a client receiving the filtered state and filtered diffs
+ends with the filtered view exactly when the unfiltered client ends with
+the whole view. A ref's topic never changes, since a ref is one track
+call. The subscribe-then-read race is per topic in the same way: a change
+to the topic in the gap is lost just as it would be for the whole view.
+
+For the implementation this means the tracker fans one tenant stream out
+by topic: a diff computed over the tenant's view is split into per-topic
+diffs before publishing, and a state read is filtered by topic. Both are
+projections of the two things the model has. Putting topics in the module,
+a constant function from refs to topics and one client per node and topic,
+would check the same argument at a larger state space and find nothing the
+argument misses. Revisit only if step 8 makes diffs or checksums per topic.
+
+This is the only step where Phoenix terms map onto the model: the state
+message is `presence_state`, a diff is `presence_diff`, a ref is `phx_ref`.
+An update with the same key is an untrack and a track, which matches the
+SDK: it matches metas by ref, and an update produces a new ref with the old
+one as `phx_ref_prev`.
+
+Properties:
+
+- A client that is subscribed, has been sent the state message, and has
+  nothing left in its inbox holds exactly the node's view
+  (`ClientViewsAreCorrect`). An invariant, since every state has to satisfy
+  it, not just eventually.
+
+Decisions recorded in the module:
+
+- One client per node, as a record: subscribed, synced, view, inbox, and a
+  subscribe counter for the bound. The inbox is a sequence, not a set,
+  because the path from channel to socket to SDK is one ordered stream and
+  the contract depends on that order. Heartbeats stay a set.
+- Subscribe and Sync are separate actions so the race between them is in
+  the model. `SubscribeFirst` picks the order; TRUE is the default.
+- Every action that changes a node's view, Track, Untrack, Deliver and
+  Purge, queues a diff for the node's client through one helper, which
+  sends nothing when no client is subscribed or the view did not change.
+  Empty diffs are never sent.
+- Consume applies a state message by replacing the view and a diff by
+  removing the leaves then adding the joins, as set operations.
+- Crash resets the node's client, the link semantics from step 6. Stop
+  requires an idle client. Unsubscribe resets everything but the counter.
+- The default config checks invariants only, with a state constraint
+  bounding each inbox at two messages. The inbox is unbounded on paths where
+  the client never consumes, so without the constraint the state space is
+  infinite. TLC's liveness results are unreliable under a state constraint,
+  so the tracker's liveness properties are checked in a separate config with
+  the client switched off (`MaxSubscribes = 0`), where no constraint is
+  needed and the state space is exactly step 5's.
+
+Finding 1: the cold-start order is subscribe for changes first, then read
+and send the state. The other order loses any change that lands between
+the read and the subscription: it is in neither the state message nor a
+diff, and the client has no way to know. TLC finds it in 6 states. The
+current channel code already subscribes before it reads; the model shows
+why that order is the right one and that it is not optional.
+
+Finding 2: with subscribe first, a diff can reach the client before the
+state message. The client applies it to an empty view and the state message
+then replaces that view, which is correct. The contract point is that the
+state message must be applied as a replacement, or a merge equivalent to
+one, not as a set of joins. The SDK's state sync does this.
+
+Finding 3: the client multiplies the state space by about 290, from 31,133
+states to 8,970,793, because every tracker state is now paired with every
+reachable view and inbox. Still 72 seconds at two nodes and two refs. Two
+ways to pull it back if step 8 needs the room: symmetry on nodes and refs,
+which is unsound for liveness but sound for this invariants-only config,
+and an inbox bound of one, which still finds the ordering witness.
+
+By construction, not found by TLC: a track on a node reaches the node's own
+clients immediately, before any heartbeat, the local fast path. And every
+step 5 transient is client-visible here. A stale snapshot or a purge of a
+live peer is a leave followed by a join for an entry that never went
+anywhere. Nothing in this step fixes that; it is what snapshot mode under
+loss looks like from the outside.
+
+Runs (2026-10-26), all at two nodes, two refs, `MaxStarts = 2`,
+`SilenceThreshold = 2`, `MaxDelay = 0`, unbounded loss:
+
+| Config | Client | Distinct states | Depth | Time | Result |
+|---|---|---|---|---|---|
+| `Presence7.cfg` | on, inbox bounded at 2 | 8,970,793 | 42 | 72s | holds |
+| `Presence7_live.cfg` | off | 31,133 | 20 | 1s | holds |
+
+The liveness config's state count matches `Presence5.cfg` exactly, which is
+the check that the module edits did not disturb the tracker.
+
+Witnesses:
+
+- `Presence7_w1.cfg`: `SubscribeFirst = FALSE`. `ClientViewsAreCorrect`
+  violated in 6 states: Start, Sync of an empty view, Track, Subscribe,
+  Consume. The client holds nothing while the node holds one ref.
+
+Observations:
+
+- Keep the two-config split in step 8: the invariant config with the client
+  on and the constraint, the liveness config with the client off. The
+  client contract is a safety property, so losing liveness in the config
+  that checks it costs nothing.
+- A liveness property about the client itself, a subscribed client
+  eventually catches up, is not checked. It would need weak fairness on
+  Consume and a bounded-loss run with a constraint high enough not to cut
+  off any real behaviour.
+- Not yet run: the no-loss witness pair for the delay constraint, which
+  would replace the `ASSUME` with a checked claim, and `MaxDelay = 1`.
+
+## Step 8: `Presence8.tla`, diff heartbeats, versions and recovery
+
+What: the heartbeat stops being a snapshot every time. Each tick a sender
+chooses, with no policy in the model, to send its full state or a diff
+since its last heartbeat. Every message carries a stamp, the sender's
+incarnation and version. A receiver keeps a mark per peer saying what its
+replica is at, applies a diff only to the baseline it was computed from,
+notices when it has missed something, and asks the sender for a snapshot.
+Everything from steps 5 and 7 stays: silence purge, goodbye, the client.
+
+Why this step: steady-state bytes. A snapshot every period re-sends every
+entry whether or not anything changed. Options 2 and 3 from the protocol
+options both need a version, a way to detect being behind, and a way to
+recover, so one model covers both. The choice of kind is nondeterministic,
+which makes every sending policy an implementation might pick a path in
+the state graph; the properties have to hold on all of them.
+
+Properties: the step 5 set unchanged, which is the real test, plus one:
+
+- A receiver whose mark for a peer equals that peer's current stamp holds
+  exactly that peer's entries (`MarkedReplicaIsCurrent`). An invariant with
+  no history variable. A diff applied to the wrong base is exactly what
+  breaks it.
+
+Before the protocol changed, two refactors with the step 7 configs as the
+regression test. Tracker state became one record per node, with a record
+per peer inside it, so that step 8's five new fields did not become five
+more global variables; all three step 7 counts were identical afterwards.
+Then Stop and Crash were made to reset the whole peer record, counters
+included, rather than only the replica, since a stopped tracker's counters
+are never read; the liveness config went from 31,133 states to 21,989, and
+that is the step 8 baseline. `interested` became `running` at the same
+time. Next quantifies delivery and loss over the messages actually in
+flight rather than every possible message, through named wrappers so
+traces keep their labels.
+
+Decisions recorded in the module:
+
+- The version counts local changes since the tracker started. Refs are
+  never reused, so it is bounded by twice the number of refs with no new
+  constant and no state constraint. The incarnation is the start count,
+  compared only for order. The implementation provides a timestamp taken
+  at tracker start; the pid identifies the channel link, not the
+  incarnation, and is never sent.
+- A receiver's mark per peer is the stamp its replica came from. Newer is
+  incarnation first, then version. A newer snapshot replaces the replica
+  and the mark. A diff applies only if its incarnation matches the mark and
+  its from-version equals the mark's version. A diff that is newer but does
+  not fit sets the peer's behind flag. Anything else is stale and ignored.
+  Every delivery resets the silence counter, since any message proves the
+  sender alive.
+- Purge resets the whole peer record, mark included, so a live peer's next
+  heartbeat counts as new after a false-positive purge.
+- Two heartbeat kinds, not three. A diff with nothing in it, from and to
+  equal and both sets empty, is the version-only heartbeat of option 2: a
+  receiver at that version applies nothing and resets its counter, a
+  receiver behind it sees a gap.
+- The choice of kind is per sender per tick, because the heartbeat is a
+  broadcast; every peer gets the same message.
+- Recovery is a request. A receiver that is behind sends one to the peer
+  every tick until it is no longer behind, so a lost request retries itself
+  with no extra state. The sender replies at once with a snapshot to the
+  requester alone, the one targeted message in the protocol. The reply
+  does not advance the sender's last-sent state, which is the base for the
+  broadcast. A request from a tracker that has since stopped gets no reply.
+- Fairness is strong, per link, per message kind.
+- The default config uses symmetry on nodes and refs. Sound because it
+  checks invariants only; the liveness config does not use it.
+- The committed liveness config runs at `MaxStarts = 1`. The liveness pass
+  is single-threaded and scales with states times the fairness tableau, and
+  per-kind fairness tripled the tableau. At `MaxStarts = 2` the two
+  properties were checked once each, separately, and hold; see the runs.
+
+Finding 1: messages overtake each other without any delivery delay. The
+probe `NoStaleInFlight` says no message in flight is older than its
+receiver's mark for the sender. It was meant to hold at `MaxDelay = 0` and
+fail at 1. It fails at both. At 0 the route is a restart: Stop, Start,
+Stop on one node with no tick between puts goodbyes from two incarnations
+in flight together, and the newer can land first. So the incarnation check
+is needed even on a network that never delivers late. At `MaxDelay = 1` it
+fails within one incarnation, two snapshots from one sender with the newer
+landing first, which is the version check's job. The step 5 properties
+cannot see either case, because per-link repair tolerates a replica going
+backwards for a period just as it tolerates a purge.
+
+Finding 2: diffs alone cannot repair a link. With requests switched off, a
+receiver that misses one message is behind for ever: every later diff is a
+gap, nothing obliges the sender ever to choose a snapshot, and delivery
+fairness is satisfied by the diffs that keep arriving. The bounded-loss
+form is the sharper one: spend the allowed drops, then the network is
+perfect, and the system still never settles. That is the justification for
+the request path, and both are kept as witnesses.
+
+Finding 3: per-link delivery fairness is not enough once a link carries
+messages of different usefulness. With requests in and the step 5
+fairness, TLC found a loop where every request gets through, every reply
+is dropped, and every diff gets through. "Something on the link eventually
+gets through" holds and the link never repairs. The assumption the request
+path needs is that loss does not discriminate by kind: strong fairness per
+link per kind. It is a stronger assumption about the network than step 5
+made, and it is now in the assumptions list.
+
+Finding 4: a reply can be addressed to a dead tracker. A request in flight
+when its sender crashes is still delivered, and the reply then goes to a
+node that will never take it. At `MaxDelay = 0` a message in flight blocks
+the tick, so every fair action was disabled and the behaviour stuttered
+with dead state never purged. Tick already only sends to running peers and
+Crash already discards messages to the node, but a reply made inside
+Deliver bypassed both. The reply now requires the requester to be running.
+The live config had been checking only TypeOK and the new invariant, so
+`NoTrackerNoState`, which says no message is in flight to a stopped node,
+was not in it and would have caught this in seconds; it is in now.
+
+Finding 5: the diff-application invariant is only fully checked by a run
+with no temporal properties. A liveness violation stops TLC before the
+state enumeration is complete, so a run that reports one has not checked
+the invariants over the whole space. During run 3, when `PairRepair` was
+expected to fail, `MarkedReplicaIsCurrent` was confirmed over the full
+1,093,309 states by a separate invariants-only run.
+
+Runs (2026-10-26), all at two nodes, two refs, `SilenceThreshold = 2`,
+`MaxDelay = 0`, client off unless stated:
+
+| Config | Starts | Loss | Requests | Distinct states | Depth | Time | Result |
+|---|---|---|---|---|---|---|---|
+| `Presence8_live.cfg` | 1 | unbounded | on | 572,160 | 28 | 15 min | holds |
+| `PairRepair` alone (ad hoc) | 2 | unbounded | on | 4,461,130 | 32 | 1h 12min | holds |
+| `DeadStatesArePurged` alone (ad hoc) | 2 | unbounded | on | 4,461,130 | 32 | 41 min | holds |
+| `Presence8_stable.cfg` | 1 | 2 drops | on | 490,576 | 28 | 10 min | holds |
+
+The default config, client on, `MaxStarts = 2`, symmetry, grew through the
+step: 8,574,657 states after the refactors, 11,376,008 with the version,
+29,020,066 with marks and stamps, 158,018,215 with the kind choice and no
+symmetry, 40,131,237 with symmetry. The final run, with diffs applied,
+requests and replies, is 288,928,270 states at depth 48 in 53 minutes,
+every invariant holding. It is a run for the end of a step, not for every
+edit; the liveness config is the per-edit check.
+
+Witnesses:
+
+- `Presence8_w1.cfg`: the step 7 ordering witness, unchanged. Violated in
+  6 states.
+- `Presence8_w2.cfg`: `NoStaleInFlight` at `MaxDelay = 1`, threshold 3.
+  Violated in 7 states: Start, Start, Tick, Track, Tick, Deliver, the
+  version-overtaking case. Run at `MaxDelay = 0` it fails through the
+  restart route from finding 1, also 7 states.
+- `Presence8_w3.cfg`: requests off. `PairRepair` violated, 14 states
+  looping back to state 12, one peer's behind flag set and never cleared.
+- `Presence8_w4.cfg`: requests off under bounded loss. `Stabilisation`
+  violated, 14 states looping back to state 12; both drops spent, then
+  diffs for ever.
+
+Observations:
+
+- A requester can go behind twice. The reply carries the sender's state at
+  reply time, but the next broadcast diff starts from the last heartbeat,
+  so if a change landed between the two the requester sees one more gap and
+  asks again. Bounded by the number of changes, and the properties hold, so
+  it is a cost not a bug; the implementation could have the reply advance a
+  per-peer base if the extra round matters.
+- The pid-as-incarnation variant, where any different incarnation counts
+  as newer with no order, was not modelled. It is safe but flaps on the
+  restart overtaking in finding 1. A constant switch on the ordering plus
+  an action property saying a receiver's held incarnation never goes
+  backwards would show it.
+- Three refs and `MaxDelay = 1` liveness have not been run at this step.
+  The `MaxDelay = 1` probe run exercised the stale rules; the liveness
+  properties at that delay have only been checked at step 5.
+- A liveness property about the client, a subscribed client eventually
+  catches up, remains unchecked, as at step 7.
+
+## Further work
+
+The planned steps are done. Candidates, none of which change a decision
+already recorded:
+
+- The no-loss witness pair for the delay constraint, replacing the
+  `ASSUME` with a checked claim.
+- Three refs at step 8, as a confirmation run for diffs that both add and
+  remove.
+- `MaxDelay = 1` liveness at step 8.
+- The pid-as-incarnation witness from the step 8 observations.
+- Client liveness under bounded loss with a constraint high enough not to
+  cut off real behaviour.

@@ -4,12 +4,16 @@ Code.require_file("../../deps/phoenix_pubsub/test/shared/pubsub_test.exs", __DIR
 defmodule Realtime.GenRpcPubSubTest do
   # Application env being changed
   use ExUnit.Case, async: false
+  use TestHelpers
 
   alias Forum.Muster
-  alias Realtime.FeatureFlags
   alias Realtime.GenRpcPubSub.RegionRings
   alias Realtime.GenRpcPubSub.Worker
   alias RealtimeWeb.RealtimeChannel.MessageDispatcher
+
+  @cluster_wait [timeout: 15_000, interval: 100]
+
+  @ring_convergence_wait [timeout: 20_000, interval: 100]
 
   test "it sets off_heap message_queue_data flag on the workers" do
     assert Realtime.PubSubElixir.Realtime.PubSub.Adapter_1
@@ -25,12 +29,23 @@ defmodule Realtime.GenRpcPubSubTest do
 
   @aux_mod (quote do
               defmodule Subscriber do
+                import WaitForIt
+
                 # Relay messages to testing node
                 def subscribe(subscriber, topic) do
                   spawn(fn ->
                     RealtimeWeb.Endpoint.subscribe(topic)
-                    2 = length(Realtime.Nodes.region_nodes("us-east-1"))
-                    2 = length(Realtime.Nodes.region_nodes("ap-southeast-2"))
+
+                    # syn RegionNodes membership propagates asynchronously across the cluster.
+                    # A TimeoutError here names the counts actually seen on this peer, where the
+                    # old `eventually/2` + `raise` could only report a fixed string.
+                    match_wait!(
+                      %{"us-east-1" => 2, "ap-southeast-2" => 2},
+                      region_node_counts(),
+                      timeout: 15_000,
+                      interval: 100
+                    )
+
                     send(subscriber, {:ready, Application.get_env(:realtime, :region)})
 
                     loop = fn f ->
@@ -45,10 +60,8 @@ defmodule Realtime.GenRpcPubSubTest do
                   end)
                 end
 
-                # Register a long-lived local member for the tenant so this node reports hit=true.
-                def add_user(tenant_id) do
-                  pid = spawn(fn -> Process.sleep(:infinity) end)
-                  :ok = Realtime.UsersCounter.add(pid, tenant_id)
+                def region_node_counts do
+                  Map.new(["us-east-1", "ap-southeast-2"], &{&1, length(Realtime.Nodes.region_nodes(&1))})
                 end
 
                 # Relay the fan-out telemetry emitted on this (receiving) node back to the test process.
@@ -97,6 +110,8 @@ defmodule Realtime.GenRpcPubSubTest do
 
   @topic "gen-rpc-pub-sub-test-topic"
 
+  @presence_event [:realtime, :presence, :replication, :received]
+
   describe "regional broadcasting" do
     setup do
       previous_region = Application.get_env(:realtime, :region)
@@ -106,7 +121,7 @@ defmodule Realtime.GenRpcPubSubTest do
       :ok
     end
 
-    test "broadcasts fan out across regions and each receiving node emits fan-out telemetry" do
+    test "untagged broadcasts fan out across regions" do
       # start 1 node in us-east-1 to test my region broadcasting
       # start 2 nodes in ap-southeast-2 to test other region broadcasting
 
@@ -119,9 +134,9 @@ defmodule Realtime.GenRpcPubSubTest do
 
       client_config_per_node = %{
         node() => gen_rpc_port,
-        :"#{us_node}@127.0.0.1" => 16970,
-        :"#{ap2_nodeX}@127.0.0.1" => 16971,
-        :"#{ap2_nodeY}@127.0.0.1" => 16972
+        TestEnv.peer_node(us_node) => TestEnv.peer_gen_rpc_port(us_node),
+        TestEnv.peer_node(ap2_nodeX) => TestEnv.peer_gen_rpc_port(ap2_nodeX),
+        TestEnv.peer_node(ap2_nodeY) => TestEnv.peer_gen_rpc_port(ap2_nodeY)
       }
 
       extra_config = [{:gen_rpc, :client_config_per_node, {:internal, client_config_per_node}}]
@@ -130,32 +145,51 @@ defmodule Realtime.GenRpcPubSubTest do
       Application.put_env(:gen_rpc, :client_config_per_node, {:internal, client_config_per_node})
 
       us_extra_config =
-        [{:realtime, :region, "us-east-1"}, {:gen_rpc, :tcp_server_port, 16970}] ++ extra_config
+        [{:realtime, :region, "us-east-1"}, {:gen_rpc, :tcp_server_port, TestEnv.peer_gen_rpc_port(us_node)}] ++
+          extra_config
 
-      {:ok, _} = Clustered.start(@aux_mod, name: us_node, extra_config: us_extra_config, phoenix_port: 4014)
+      {:ok, us} =
+        Clustered.start(@aux_mod,
+          name: us_node,
+          extra_config: us_extra_config,
+          phoenix_port: TestEnv.peer_http_port(us_node)
+        )
 
       ap2_nodeX_extra_config =
-        [{:realtime, :region, "ap-southeast-2"}, {:gen_rpc, :tcp_server_port, 16971}] ++ extra_config
+        [{:realtime, :region, "ap-southeast-2"}, {:gen_rpc, :tcp_server_port, TestEnv.peer_gen_rpc_port(ap2_nodeX)}] ++
+          extra_config
 
-      {:ok, _} = Clustered.start(@aux_mod, name: ap2_nodeX, extra_config: ap2_nodeX_extra_config, phoenix_port: 4015)
+      {:ok, ap_x} =
+        Clustered.start(@aux_mod,
+          name: ap2_nodeX,
+          extra_config: ap2_nodeX_extra_config,
+          phoenix_port: TestEnv.peer_http_port(ap2_nodeX)
+        )
 
       ap2_nodeY_extra_config =
-        [{:realtime, :region, "ap-southeast-2"}, {:gen_rpc, :tcp_server_port, 16972}] ++ extra_config
+        [{:realtime, :region, "ap-southeast-2"}, {:gen_rpc, :tcp_server_port, TestEnv.peer_gen_rpc_port(ap2_nodeY)}] ++
+          extra_config
 
-      {:ok, _} = Clustered.start(@aux_mod, name: ap2_nodeY, extra_config: ap2_nodeY_extra_config, phoenix_port: 4016)
+      {:ok, ap_y} =
+        Clustered.start(@aux_mod,
+          name: ap2_nodeY,
+          extra_config: ap2_nodeY_extra_config,
+          phoenix_port: TestEnv.peer_http_port(ap2_nodeY)
+        )
 
-      # Ensuring that syn had enough time to propagate to all nodes the group information
-      Process.sleep(3000)
+      # syn RegionNodes membership propagates asynchronously across the cluster. Waiting on the
+      # counts *per region* rather than on a combined boolean means a failure names the region
+      # that did not converge, and how far it got.
+      assert_eventually %{"us-east-1" => 2, "ap-southeast-2" => 2} = region_node_counts(), @cluster_wait
 
       RealtimeWeb.Endpoint.subscribe(@topic)
       :erpc.multicall(Node.list(), Subscriber, :subscribe, [self(), @topic])
 
-      assert length(Realtime.Nodes.region_nodes("us-east-1")) == 2
-      assert length(Realtime.Nodes.region_nodes("ap-southeast-2")) == 2
+      receive_timeout = to_timeout(second: 2)
 
-      assert_receive {:ready, "us-east-1"}
-      assert_receive {:ready, "ap-southeast-2"}
-      assert_receive {:ready, "ap-southeast-2"}
+      assert_receive {:ready, "us-east-1"}, receive_timeout
+      assert_receive {:ready, "ap-southeast-2"}, receive_timeout
+      assert_receive {:ready, "ap-southeast-2"}, receive_timeout
 
       # Relay the fan-out telemetry emitted on every receiving node back to this process.
       for node <- Node.list(), do: :ok = :erpc.call(node, Subscriber, :attach_fanout, [self()])
@@ -167,53 +201,71 @@ defmodule Realtime.GenRpcPubSubTest do
       assert_receive ^message
 
       # Remote nodes received the broadcast
-      assert_receive {:relay, :"us_node@127.0.0.1", ^message}, 5000
-      assert_receive {:relay, :"ap2_nodeX@127.0.0.1", ^message}, 1000
-      assert_receive {:relay, :"ap2_nodeY@127.0.0.1", ^message}, 1000
+      assert_receive {:relay, ^us, ^message}, 5000
+      assert_receive {:relay, ^ap_x, ^message}, 1000
+      assert_receive {:relay, ^ap_y, ^message}, 1000
 
       # Untagged messages do not emit fan-out telemetry
       refute_receive {:fanout, _, _, _}
       refute_receive _any
 
-      # Tagged broadcast: fans out via :ftl (us_node, same region) and :ftr (ap nodes, other region),
-      # and each receiving node emits the fan-out telemetry. Register a connection on us_node so it
-      # reports hit=true while the ap nodes report hit=false.
-      tenant_id = "fanout-#{System.unique_integer([:positive])}"
-      :ok = :erpc.call(:"us_node@127.0.0.1", Subscriber, :add_user, [tenant_id])
+      presence_topic = "phx_presence:gen_rpc_pub_sub_test"
+      presence_message = {:pub, :heartbeat, {:gen_rpc_pub_sub_test, 1}, :empty, %{}}
+      size = :erlang.external_size(Worker.forward_to_local(presence_topic, presence_message, Phoenix.PubSub))
 
-      tagged_message = %Phoenix.Socket.Broadcast{topic: @topic, event: "an event", payload: %{"a" => "b"}}
+      refs =
+        for node <- [us, ap_x, ap_y],
+            do: :erpc.call(node, :telemetry_test, :attach_event_handlers, [self(), [@presence_event]])
 
-      Phoenix.PubSub.broadcast(
-        Realtime.PubSub,
-        @topic,
-        {:tb, tenant_id, tagged_message},
-        RealtimeWeb.RealtimeChannel.MessageDispatcher
-      )
+      Phoenix.PubSub.broadcast(Realtime.PubSub, presence_topic, presence_message)
 
-      # The tag is stripped before delivery: subscribers only ever see the underlying struct
-      assert_receive ^tagged_message
-      assert_receive {:relay, :"us_node@127.0.0.1", ^tagged_message}, 5000
-      assert_receive {:relay, :"ap2_nodeX@127.0.0.1", ^tagged_message}, 1000
-      assert_receive {:relay, :"ap2_nodeY@127.0.0.1", ^tagged_message}, 1000
+      for ref <- refs do
+        assert_receive {@presence_event, ^ref, %{size: ^size}, %{implementation: "phoenix"}}, 5000
+      end
 
-      # us_node holds a connection for the tenant (:ftl path) -> hit=true
-      assert_receive {:fanout, :"us_node@127.0.0.1", %{local_tenant_users: us_count}, %{tenant: ^tenant_id, hit: true}},
-                     5000
-
-      assert us_count >= 1
-
-      # ap nodes hold no connection for the tenant (:ftr path + its re-forwarded :ftl) -> hit=false
-      assert_receive {:fanout, :"ap2_nodeX@127.0.0.1", %{local_tenant_users: 0}, %{tenant: ^tenant_id, hit: false}},
-                     1000
-
-      assert_receive {:fanout, :"ap2_nodeY@127.0.0.1", %{local_tenant_users: 0}, %{tenant: ^tenant_id, hit: false}},
-                     1000
-
-      refute_receive _any
+      refute_receive {@presence_event, _, %{size: ^size}, _}
     end
   end
 
-  describe "muster-routed broadcasting (use_muster_broadcast)" do
+  describe "presence traffic telemetry" do
+    setup do
+      topic = "phx_presence:gen_rpc_pub_sub_test_#{System.unique_integer([:positive])}"
+      message = {:pub, :heartbeat, {:gen_rpc_pub_sub_test, 1}, :empty, %{}}
+      ref = :telemetry_test.attach_event_handlers(self(), [@presence_event])
+      %{topic: topic, message: message, ref: ref}
+    end
+
+    test "the receiving worker emits the envelope's external size for presence topics", %{
+      topic: topic,
+      message: message,
+      ref: ref
+    } do
+      ftl = Worker.forward_to_local(topic, message, Phoenix.PubSub)
+      ftr = Worker.forward_to_region(topic, message, Phoenix.PubSub)
+      size = :erlang.external_size(ftl)
+      assert :erlang.external_size(ftr) == size
+
+      route_to_worker(node(), ftl)
+      assert_receive {@presence_event, ^ref, %{size: ^size}, %{implementation: "phoenix"}}, 1000
+
+      route_to_worker(node(), ftr)
+      assert_receive {@presence_event, ^ref, %{size: ^size}, %{implementation: "phoenix"}}, 1000
+    end
+
+    test "the receiving worker emits nothing for non-presence topics", %{message: message, ref: ref} do
+      ftl = Worker.forward_to_local(@topic, message, Phoenix.PubSub)
+      ftr = Worker.forward_to_region(@topic, message, Phoenix.PubSub)
+
+      size = :erlang.external_size(ftl)
+
+      route_to_worker(node(), ftl)
+      route_to_worker(node(), ftr)
+
+      refute_receive {@presence_event, ^ref, %{size: ^size}, _}
+    end
+  end
+
+  describe "muster-routed broadcasting" do
     setup do
       previous_region = Application.get_env(:realtime, :region)
       Application.put_env(:realtime, :region, "us-east-1")
@@ -224,7 +276,7 @@ defmodule Realtime.GenRpcPubSubTest do
 
     test "delivers to origin subscribers exactly once (routed path excludes the origin)" do
       scope = Application.fetch_env!(:realtime, :muster_scope)
-      wait_until(fn -> Muster.status(scope) == :ready end)
+      assert_eventually Muster.status(scope) == :ready, @cluster_wait
 
       tenant_id = "muster-bcast-#{System.unique_integer([:positive])}"
       topic = "muster-bcast-#{System.unique_integer([:positive])}"
@@ -235,7 +287,6 @@ defmodule Realtime.GenRpcPubSubTest do
       :ok = Muster.join(scope, tenant_id, member)
       assert Muster.targets(scope, tenant_id, Muster.view_hash(scope)) == {:ok, [node()]}
 
-      enable_broadcast_flag!(tenant_id)
       RealtimeWeb.Endpoint.subscribe(topic)
 
       message = %Phoenix.Socket.Broadcast{topic: topic, event: "an event", payload: %{"a" => "b"}}
@@ -263,8 +314,6 @@ defmodule Realtime.GenRpcPubSubTest do
 
         # Only the holder joins the tenant's Muster group.
         _pid = :erpc.call(holder_node, Subscriber, :muster_join, [scope, tenant_id])
-
-        enable_broadcast_flag!(tenant_id)
 
         topic = "muster-prune-#{label}-#{System.unique_integer([:positive])}"
         RealtimeWeb.Endpoint.subscribe(topic)
@@ -328,14 +377,9 @@ defmodule Realtime.GenRpcPubSubTest do
 
       # The origin (us-east-1) must have learned the ap region's membership via syn
       # and reconciled a local copy of its ring whose view agrees with the ap scope.
-      wait_until(fn -> length(Realtime.Nodes.region_nodes("ap-southeast-2")) == 2 end)
+      assert_eventually %{"ap-southeast-2" => 2} = region_node_counts(), @cluster_wait
 
-      wait_until(fn ->
-        case RegionRings.expected_router("ap-southeast-2", "probe") do
-          {:ok, _node, vh} -> vh == :erpc.call(ap_holder, Muster, :view_hash, [ap_scope])
-          _ -> false
-        end
-      end)
+      assert_eventually {:agreed, _node, _vh} = ap_router_agreement(ap_holder, ap_scope), @cluster_wait
 
       # Pick a tenant whose ap-region router is the holder, so the holder is both the
       # router and the sole occupancy node (the clean, non-flood routed path).
@@ -353,8 +397,6 @@ defmodule Realtime.GenRpcPubSubTest do
       # Only the holder joins the tenant's ap Muster group.
       _pid = :erpc.call(ap_holder, Subscriber, :muster_join, [ap_scope, tenant_id])
 
-      enable_broadcast_flag!(tenant_id)
-
       topic = "muster-xregion-#{System.unique_integer([:positive])}"
       subscribe_region_relays(ap_holder, ap_bystander, topic)
 
@@ -370,46 +412,51 @@ defmodule Realtime.GenRpcPubSubTest do
   # Start two extra us-east-1 nodes (holder + bystander) so the origin makes three,
   # and wait until the region's Muster ring is :ready and agrees on a single view.
   defp start_us_east_region_cluster do
-    start_region_cluster("us-east-1", gen_rpc_ports: {16980, 16981}, phoenix_ports: {4024, 4025})
+    start_region_cluster("us-east-1", holder: :holder_us, bystander: :bystander_us)
   end
 
   # Start two nodes in a *different* region (ap-southeast-2) than the origin, and
   # wait until their Muster scope is :ready and agrees on a single view.
   defp start_ap_region_cluster do
-    start_region_cluster("ap-southeast-2", gen_rpc_ports: {16990, 16991}, phoenix_ports: {4026, 4027})
+    start_region_cluster("ap-southeast-2", holder: :holder_ap, bystander: :bystander_ap)
   end
 
   # Start a holder + bystander pair in `region` and wait until their Muster scope is
   # :ready and agrees on a single view. When `region` is the origin's own region the
   # origin joins the ring too, so it is included in the convergence wait; otherwise
-  # only the two remote nodes are. Ports are passed in so callers can keep clusters on
-  # disjoint ranges, avoiding collisions with a port that has not yet been torn down.
+  # only the two remote nodes are. Each region's pair takes its own peer slots, so the
+  # two clusters never reuse a port that has not yet been torn down.
   defp start_region_cluster(region, opts) do
-    {holder_gen, bystander_gen} = Keyword.fetch!(opts, :gen_rpc_ports)
-    {holder_phx, bystander_phx} = Keyword.fetch!(opts, :phoenix_ports)
+    holder = Keyword.fetch!(opts, :holder)
+    bystander = Keyword.fetch!(opts, :bystander)
 
     gen_rpc_port = Application.fetch_env!(:gen_rpc, :tcp_server_port)
 
-    holder = :holder_node
-    bystander = :bystander_node
-
     client_config_per_node = %{
       node() => gen_rpc_port,
-      :"#{holder}@127.0.0.1" => holder_gen,
-      :"#{bystander}@127.0.0.1" => bystander_gen
+      TestEnv.peer_node(holder) => TestEnv.peer_gen_rpc_port(holder),
+      TestEnv.peer_node(bystander) => TestEnv.peer_gen_rpc_port(bystander)
     }
 
     on_exit(fn -> Application.put_env(:gen_rpc, :client_config_per_node, {:internal, %{}}) end)
     Application.put_env(:gen_rpc, :client_config_per_node, {:internal, client_config_per_node})
     extra_config = [{:gen_rpc, :client_config_per_node, {:internal, client_config_per_node}}]
 
-    holder_config = [{:realtime, :region, region}, {:gen_rpc, :tcp_server_port, holder_gen}] ++ extra_config
-    {:ok, holder_node} = Clustered.start(@aux_mod, name: holder, extra_config: holder_config, phoenix_port: holder_phx)
+    holder_config =
+      [{:realtime, :region, region}, {:gen_rpc, :tcp_server_port, TestEnv.peer_gen_rpc_port(holder)}] ++ extra_config
 
-    bystander_config = [{:realtime, :region, region}, {:gen_rpc, :tcp_server_port, bystander_gen}] ++ extra_config
+    {:ok, holder_node} =
+      Clustered.start(@aux_mod, name: holder, extra_config: holder_config, phoenix_port: TestEnv.peer_http_port(holder))
+
+    bystander_config =
+      [{:realtime, :region, region}, {:gen_rpc, :tcp_server_port, TestEnv.peer_gen_rpc_port(bystander)}] ++ extra_config
 
     {:ok, bystander_node} =
-      Clustered.start(@aux_mod, name: bystander, extra_config: bystander_config, phoenix_port: bystander_phx)
+      Clustered.start(@aux_mod,
+        name: bystander,
+        extra_config: bystander_config,
+        phoenix_port: TestEnv.peer_http_port(bystander)
+      )
 
     scope = :"realtime_channels_#{region}"
 
@@ -418,15 +465,32 @@ defmodule Realtime.GenRpcPubSubTest do
         do: [node(), holder_node, bystander_node],
         else: [holder_node, bystander_node]
 
-    wait_until(
-      fn ->
-        Enum.all?(nodes, fn n -> :erpc.call(n, Muster, :status, [scope]) == :ready end) and
-          nodes |> Enum.map(&:erpc.call(&1, Muster, :view_hash, [scope])) |> Enum.uniq() |> length() == 1
-      end,
-      20_000
+    assert_eventually(
+      %{statuses: [:ready], view_hashes: [_one]} = muster_convergence(nodes, scope),
+      @ring_convergence_wait
     )
 
     %{holder_node: holder_node, bystander_node: bystander_node, scope: scope}
+  end
+
+  defp region_node_counts do
+    Map.new(["us-east-1", "ap-southeast-2"], &{&1, length(Realtime.Nodes.region_nodes(&1))})
+  end
+
+  defp ap_router_agreement(ap_holder, ap_scope) do
+    remote_view_hash = :erpc.call(ap_holder, Muster, :view_hash, [ap_scope])
+
+    case RegionRings.expected_router("ap-southeast-2", "probe") do
+      {:ok, node, ^remote_view_hash} -> {:agreed, node, remote_view_hash}
+      other -> {:disagreed, other, remote_view_hash}
+    end
+  end
+
+  defp muster_convergence(nodes, scope) do
+    %{
+      statuses: nodes |> Enum.map(&:erpc.call(&1, Muster, :status, [scope])) |> Enum.uniq(),
+      view_hashes: nodes |> Enum.map(&:erpc.call(&1, Muster, :view_hash, [scope])) |> Enum.uniq()
+    }
   end
 
   # Find a group key whose consistent-hash router is `target_node` (all nodes agree
@@ -454,35 +518,5 @@ defmodule Realtime.GenRpcPubSubTest do
     assert_receive {:subscribed, ^holder_node}, 5000
     assert_receive {:subscribed, ^bystander_node}, 5000
     :ok
-  end
-
-  # Poll `fun` until it returns truthy or the timeout elapses.
-  defp wait_until(fun, timeout \\ 15_000, interval \\ 100) do
-    deadline = System.monotonic_time(:millisecond) + timeout
-    do_wait_until(fun, deadline, interval)
-  end
-
-  defp do_wait_until(fun, deadline, interval) do
-    cond do
-      fun.() -> :ok
-      System.monotonic_time(:millisecond) >= deadline -> flunk("wait_until timed out")
-      true -> Process.sleep(interval) && do_wait_until(fun, deadline, interval)
-    end
-  end
-
-  # Enable `use_muster_broadcast` for the tenant without touching the DB: seed both
-  # the flag cache (so the flag exists) and the tenant cache (with an override), then
-  # tear them down so nothing leaks into other async tests via the shared caches.
-  defp enable_broadcast_flag!(tenant_id) do
-    flag = %Realtime.Api.FeatureFlag{name: "use_muster_broadcast", enabled: true, rollout_percentage: 100}
-    {:ok, true} = FeatureFlags.Cache.update_cache(flag)
-
-    tenant = %Realtime.Api.Tenant{external_id: tenant_id, feature_flags: %{"use_muster_broadcast" => true}}
-    {:ok, true} = Realtime.Tenants.Cache.update_cache(tenant)
-
-    on_exit(fn ->
-      FeatureFlags.Cache.invalidate_cache("use_muster_broadcast")
-      Realtime.Tenants.Cache.invalidate_tenant_cache(tenant_id)
-    end)
   end
 end

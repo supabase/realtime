@@ -41,6 +41,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
          {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop),
          {:ok, schema_migrations, orioledb?} <- with_tenant_conn(settings, &fetch_tenant_state/1) do
       socket
+      |> cancel_pgdelta()
       |> reset_assigns()
       |> assign(external_id: ref, tenant: tenant, schema_migrations: {:ok, schema_migrations})
       |> start_pgdelta(tenant, orioledb?)
@@ -56,7 +57,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   end
 
   def handle_params(_params, _uri, socket) do
-    {:noreply, reset_assigns(socket)}
+    {:noreply, socket |> cancel_pgdelta() |> reset_assigns()}
   end
 
   @impl true
@@ -180,11 +181,21 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
         <%= schema_migrations(@schema_migrations) %>
 
         <h6 class="mt-4">pg-delta plan vs committed schema</h6>
-        <div :if={@pgdelta_running} class="alert alert-info d-flex align-items-center" style="gap: 8px;">
+        <div
+          :if={@pgdelta_running}
+          data-test-id="pgdelta-running"
+          class="alert alert-info d-flex align-items-center"
+          style="gap: 8px;"
+        >
           <div class="spinner-border spinner-border-sm" role="status"></div>
           <span>Processing... (<%= div(@pgdelta_elapsed_ms, 1000) %>s)</span>
         </div>
-        <div :if={@applying} class="alert alert-info d-flex align-items-center" style="gap: 8px;">
+        <div
+          :if={@applying}
+          data-test-id="pgdelta-applying"
+          class="alert alert-info d-flex align-items-center"
+          style="gap: 8px;"
+        >
           <div class="spinner-border spinner-border-sm" role="status"></div>
           <span>Applying plan to tenant database...</span>
         </div>
@@ -212,6 +223,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
 
   defp assign_error(socket, ref, msg) do
     socket
+    |> cancel_pgdelta()
     |> reset_assigns()
     |> assign(external_id: ref, error: msg)
   end
@@ -239,32 +251,30 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   defp start_pgdelta(socket, _tenant, true = _orioledb?), do: assign(socket, pgdelta_result: :unsupported)
 
   defp start_pgdelta(socket, %Tenant{} = tenant, false = _orioledb?) do
-    task =
-      Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn ->
-        tenant |> run_pgdelta() |> highlight_plan()
-      end)
+    if connected?(socket) do
+      task =
+        Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn ->
+          run_pgdelta(tenant)
+        end)
 
-    running_pgdelta(socket, task)
-  end
-
-  defp highlight_plan({:ok, %{status: :changes, sql: sql} = result}) do
-    formatter =
-      {:html_multi_themes,
-       language: "sql", themes: [light: "github_light", dark: "github_dark"], default_theme: "light-dark()"}
-
-    case Lumis.highlight(sql, formatter: formatter) do
-      {:ok, html} -> {:ok, Map.put(result, :highlighted, html)}
-      {:error, _reason} -> {:ok, result}
+      running_pgdelta(socket, task)
+    else
+      socket
     end
   end
 
-  defp highlight_plan(result), do: result
+  defp cancel_pgdelta(%{assigns: %{pgdelta_task: %Task{} = task}} = socket) do
+    Task.Supervisor.terminate_child(Realtime.TaskSupervisor, task.pid)
+    Process.demonitor(task.ref, [:flush])
+    socket
+  end
+
+  defp cancel_pgdelta(socket), do: socket
 
   defp start_recheck(socket, %Tenant{} = tenant, %Database{} = settings) do
     task =
       Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn ->
-        {:rechecked, with_tenant_conn(settings, &fetch_schema_migrations/1),
-         tenant |> run_pgdelta() |> highlight_plan()}
+        {:rechecked, with_tenant_conn(settings, &fetch_schema_migrations/1), run_pgdelta(tenant)}
       end)
 
     socket
@@ -396,7 +406,6 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   defp pgdelta_plan({:ok, %{status: :changes} = result}, _schema_migrations, apply_disabled) do
     assigns = %{
       sql: result.sql,
-      highlighted: Map.get(result, :highlighted),
       destructive: result.destructive,
       apply_disabled: apply_disabled
     }
@@ -411,27 +420,6 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
       </div>
     </div>
     <style>
-      .pgdelta-sql pre.lumis {
-        margin: 0;
-        padding: 16px 64px 16px 16px;
-        border-radius: 6px;
-        max-width: 100%;
-        max-height: 60vh;
-        overflow-y: auto;
-        overflow-x: hidden;
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-        color-scheme: light dark;
-        font-family: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Mono", "Cascadia Code", Menlo, Consolas,
-          "DejaVu Sans Mono", "Liberation Mono", monospace;
-        font-size: 0.85rem;
-        line-height: 1.55;
-        font-variant-ligatures: none;
-      }
-      .pgdelta-sql .l-line {
-        padding-left: 2em;
-        text-indent: -2em;
-      }
       pre.pgdelta-sql-plain {
         font-family: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Mono", "Cascadia Code", Menlo, Consolas,
           "DejaVu Sans Mono", "Liberation Mono", monospace;
@@ -440,7 +428,6 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
         font-variant-ligatures: none;
       }
       @media (max-width: 768px) {
-        .pgdelta-sql pre.lumis,
         pre.pgdelta-sql-plain {
           padding: 12px 48px 12px 12px;
           font-size: 0.78rem;
@@ -464,9 +451,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
         "}
         style="position: absolute; top: 8px; right: 8px; z-index: 2;"
       >Copy</button>
-      <div :if={@highlighted} class="pgdelta-sql"><%= Phoenix.HTML.raw(@highlighted) %></div>
       <pre
-        :if={!@highlighted}
         class="pgdelta-sql-plain"
         style="color-scheme: light dark; background: light-dark(#ffffff, #0d1117); color: light-dark(#1f2328, #e6edf3); margin: 0; padding: 16px 64px 16px 16px; border-radius: 6px; max-width: 100%; max-height: 60vh; overflow-y: auto; overflow-x: hidden; white-space: pre-wrap; overflow-wrap: anywhere;"
       ><code class="language-sql"><%= @sql %></code></pre>
@@ -493,10 +478,27 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     ON CONFLICT (version) DO NOTHING
     """
 
-    case Postgrex.query(conn, insert, [versions], timeout: @query_timeout) do
-      {:ok, _} -> :ok
-      {:error, _} = err -> err
+    with {:ok, _} <- restore_schema_migrations_pkey(conn),
+         {:ok, _} <- Postgrex.query(conn, insert, [versions], timeout: @query_timeout) do
+      :ok
     end
+  end
+
+  defp restore_schema_migrations_pkey(conn) do
+    restore = """
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'realtime.schema_migrations'::regclass AND contype = 'p'
+      ) THEN
+        ALTER TABLE realtime.schema_migrations ADD PRIMARY KEY (version);
+      END IF;
+    END
+    $$
+    """
+
+    Postgrex.query(conn, restore, [], timeout: @query_timeout)
   end
 
   defp fetch_schema_migrations(conn) do
@@ -539,26 +541,35 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   def postgres_url(%Database{} = db) do
     sslmode = if db.ssl, do: "require", else: "disable"
 
-    hostname =
-      case :inet.parse_ipv6strict_address(String.to_charlist(db.hostname)) do
-        {:ok, _} -> "[#{db.hostname}]"
-        _ -> db.hostname
-      end
-
     IO.iodata_to_binary([
       "postgresql://",
       URI.encode_www_form(db.username),
       ":",
       URI.encode_www_form(db.password),
       "@",
-      hostname,
+      url_host(db),
       ":",
       Integer.to_string(db.port),
       "/",
       URI.encode_www_form(db.database),
       "?sslmode=",
-      sslmode
+      sslmode,
+      host_param(db)
     ])
+  end
+
+  defp url_host(%Database{hostname: hostname} = db) do
+    if ipv6_literal?(db), do: "[#{hostname}]", else: hostname
+  end
+
+  # node-postgres passes the URL host to getaddrinfo verbatim, so brackets fail with
+  # `ENOTFOUND [::1]`. A `host` query param overrides the URL host, unbracketed.
+  defp host_param(%Database{hostname: hostname} = db) do
+    if ipv6_literal?(db), do: ["&host=", hostname], else: []
+  end
+
+  defp ipv6_literal?(%Database{hostname: hostname}) do
+    match?({:ok, _}, :inet.parse_ipv6strict_address(String.to_charlist(hostname)))
   end
 
   @doc false

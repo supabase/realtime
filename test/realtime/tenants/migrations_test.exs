@@ -18,6 +18,14 @@ defmodule Realtime.Tenants.MigrationsTest do
   end
 
   describe "run_migrations/1" do
+    setup do
+      stub(Migrations, :load_db_dump?, fn migrations_ran, repo ->
+        migrations_ran == 0 and Migrations.schema_migrations_empty?(repo)
+      end)
+
+      :ok
+    end
+
     test "migrations for a given tenant only run once" do
       tenant = TestTenantDb.checkout_tenant()
 
@@ -36,9 +44,9 @@ defmodule Realtime.Tenants.MigrationsTest do
 
       assert Migrations.run_migrations(tenant) == :ok
 
-      assert eventually(fn ->
-               Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == Enum.count(Migrations.migrations())
-             end)
+      assert_eventually(
+        Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == Enum.count(Migrations.migrations())
+      )
     end
 
     test "migrations do not run if tenant has migrations_ran at the count of all migrations" do
@@ -63,7 +71,26 @@ defmodule Realtime.Tenants.MigrationsTest do
 
       assert Migrations.run_migrations(tenant) == :ok
       assert_receive {:migrations_metadata, :migrator, ^total}
-      assert eventually(fn -> Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total end)
+
+      assert_eventually Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total
+    end
+
+    test "creates realtime types even when same-named types exist in other schemas" do
+      tenant = %{TestTenantDb.checkout_tenant() | migrations_ran: 1}
+      total = Enum.count(Migrations.migrations())
+      type_names = ~w(equality_op user_defined_filter action wal_rls wal_column)
+
+      # Every table has a same-named row type in pg_type
+      {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+      for name <- type_names, do: Postgrex.query!(conn, "CREATE TABLE public.#{name} (id int)", [])
+
+      assert Migrations.run_migrations(tenant) == :ok
+      assert_eventually Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total
+
+      for name <- type_names do
+        assert %{rows: [[true]]} =
+                 Postgrex.query!(conn, "SELECT to_regtype($1) IS NOT NULL", ["realtime.#{name}"])
+      end
     end
 
     test "reconciles migrations_ran instead of reloading the dump when the database is already migrated" do
@@ -71,7 +98,8 @@ defmodule Realtime.Tenants.MigrationsTest do
       total = Enum.count(Migrations.migrations())
 
       assert Migrations.run_migrations(tenant) == :ok
-      assert eventually(fn -> Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total end)
+
+      assert_eventually Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total
 
       :telemetry.attach(
         "reconcile-test",
@@ -87,7 +115,8 @@ defmodule Realtime.Tenants.MigrationsTest do
       stale_tenant = %{tenant | migrations_ran: 0}
       assert Migrations.run_migrations(stale_tenant) == :ok
       assert_receive {:migrations_metadata, :migrator, 0}
-      assert eventually(fn -> Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total end)
+
+      assert_eventually Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total
     end
 
     @tag :skip_orioledb
@@ -134,7 +163,8 @@ defmodule Realtime.Tenants.MigrationsTest do
 
       assert Migrations.run_migrations(tenant) == :ok
       assert_receive {:migrations_metadata, :dump, ^total}
-      assert eventually(fn -> Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total end)
+
+      assert_eventually Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total
     end
 
     test "falls back to sequential migrations without crashing when the schema_migrations check errors unexpectedly" do
@@ -152,7 +182,7 @@ defmodule Realtime.Tenants.MigrationsTest do
 
       assert log =~ "TenantMigrationsRanCheckFailed"
 
-      assert eventually(fn -> Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total end)
+      assert_eventually Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == total
     end
 
     test "does not check the database when migrations_ran is already greater than 0" do
@@ -170,10 +200,9 @@ defmodule Realtime.Tenants.MigrationsTest do
 
       assert Migrations.run_migrations_async(tenant) == :ok
 
-      assert eventually(fn ->
-               Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran ==
-                 Enum.count(Migrations.migrations())
-             end)
+      assert_eventually(
+        Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == Enum.count(Migrations.migrations())
+      )
     end
 
     test "does not run if tenant has migrations_ran equal to count of all migrations" do

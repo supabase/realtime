@@ -51,25 +51,38 @@ defmodule Realtime.Database do
     |> then(&from_settings(&1, application_name, backoff))
   end
 
+  @encrypted_keys ~w(db_host db_port db_name db_user db_password)
+
   @doc """
-  Creates a database connection struct from the given settings.
+  Decrypts the credential fields in a tenant's stored settings.
+  """
+  @spec decrypt_settings(map()) :: map()
+  def decrypt_settings(settings) do
+    decrypted_settings =
+      settings
+      |> Map.take(@encrypted_keys)
+      |> Map.new(fn {k, v} -> {k, Crypto.decrypt!(v)} end)
+
+    Map.merge(settings, decrypted_settings)
+  end
+
+  @doc """
+  Creates a database connection struct from a tenant's stored settings.
   """
   @spec from_settings(map(), binary(), :stop | :exp | :rand | :rand_exp) :: {:ok, t()} | {:error, :nxdomain}
   def from_settings(settings, application_name, backoff \\ :rand_exp) do
-    pool = pool_size_by_application_name(application_name, settings)
+    settings
+    |> decrypt_settings()
+    |> from_plaintext_settings(application_name, backoff)
+  end
 
-    settings =
-      settings
-      |> Map.take([
-        "db_host",
-        "db_port",
-        "db_name",
-        "db_user",
-        "db_password"
-      ])
-      |> Enum.map(fn {k, v} -> {k, Crypto.decrypt!(v)} end)
-      |> Map.new()
-      |> then(&Map.merge(settings, &1))
+  @doc """
+  Same as `from_settings/3`, for settings whose credentials are already plaintext.
+  """
+  @spec from_plaintext_settings(map(), binary(), :stop | :exp | :rand | :rand_exp) ::
+          {:ok, t()} | {:error, :nxdomain}
+  def from_plaintext_settings(settings, application_name, backoff \\ :rand_exp) do
+    pool = pool_size_by_application_name(application_name, settings)
 
     with {:ok, addrtype} <- detect_ip_version(settings["db_host"]) do
       ssl = if default_ssl_param(settings), do: [verify: :verify_none], else: false
@@ -161,10 +174,12 @@ defmodule Realtime.Database do
   SELECT count(*)::int FROM realtime.schema_migrations
   """
 
+  # Client backends are the only ones holding a max_connections slot
   @connections_query """
-  SELECT (current_setting('max_connections')::int - count(*))::int
+  SELECT GREATEST(current_setting('max_connections')::int - count(*), 0)::int
   FROM pg_stat_activity
-  WHERE application_name NOT IN ('realtime_connect', 'realtime_connect_probe')
+  WHERE backend_type = 'client backend'
+    AND application_name NOT IN ('realtime_connect', 'realtime_connect_probe')
   """
 
   defp query_connection_info(conn) do
@@ -181,28 +196,56 @@ defmodule Realtime.Database do
       {:error, e}
   end
 
-  @slot_lag_query """
+  @slot_check_query """
   SELECT
-    COALESCE(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn), 0) >
-      (pg_size_bytes(current_setting('max_slot_wal_keep_size')) / 2)
+    active,
+    CASE
+      WHEN current_setting('max_slot_wal_keep_size') = '-1' THEN false
+      ELSE COALESCE(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn), 0) >
+        (pg_size_bytes(current_setting('max_slot_wal_keep_size')) / 2)
+    END
   FROM pg_replication_slots
   WHERE slot_name = $1
-    AND current_setting('max_slot_wal_keep_size') != '-1'
   """
 
   @doc """
-  Checks if a replication slot's WAL lag exceeds 50% of max_slot_wal_keep_size.
+  Checks the health of a replication slot in a single query.
 
-  Returns :ok when the slot is within safe bounds, max_slot_wal_keep_size is disabled (-1),
-  or the slot does not exist. Returns {:error, :lag_too_high} only when the slot is confirmed
-  to be consuming more than 50% of the per-slot WAL limit.
+  It verifies that the slot exists, that its WAL lag does not exceed 50% of
+  max_slot_wal_keep_size, and that it is actively being consumed. The lag check is a no-op
+  when max_slot_wal_keep_size is disabled with -1, as there is no per-slot threshold to
+  enforce.
+
+  Errors are reported from most to least severe: an excessive WAL lag (a disk risk that
+  applies whether or not the slot is active) takes precedence over the slot merely being
+  inactive.
+
+  Returns:
+    * `:ok` - the slot exists, is active, and is within safe WAL bounds
+    * `{:error, :slot_not_found}` - the slot no longer exists
+    * `{:error, :lag_too_high}` - the slot is consuming more than 50% of the per-slot WAL limit
+    * `{:error, :slot_inactive}` - the slot exists and is within WAL bounds but is not being consumed
+    * `{:error, reason}` - the check itself failed
   """
-  @spec check_replication_slot_lag(pid(), String.t()) ::
-          :ok | {:error, :lag_too_high} | {:error, any()}
-  def check_replication_slot_lag(conn, slot_name) do
-    case Postgrex.query(conn, @slot_lag_query, [slot_name]) do
-      {:ok, %{rows: [[true]]}} -> {:error, :lag_too_high}
-      {:ok, %{rows: _}} -> :ok
+  @spec check_replication_slot(pid(), String.t()) ::
+          :ok | {:error, :slot_not_found | :slot_inactive | :lag_too_high | any()}
+  def check_replication_slot(conn, slot_name) do
+    case Postgrex.query(conn, @slot_check_query, [slot_name]) do
+      {:ok, %{rows: []}} -> {:error, :slot_not_found}
+      {:ok, %{rows: [[_active, true]]}} -> {:error, :lag_too_high}
+      {:ok, %{rows: [[false, false]]}} -> {:error, :slot_inactive}
+      {:ok, %{rows: [[true, false]]}} -> :ok
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
+  Reports whether the database has the OrioleDB extension.
+  """
+  @spec orioledb(pid()) :: {:ok, boolean()} | {:error, any()}
+  def orioledb(conn) do
+    case Postgrex.query(conn, "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'orioledb')", []) do
+      {:ok, %Postgrex.Result{rows: [[orioledb]]}} -> {:ok, orioledb}
       {:error, _} = err -> err
     end
   end
@@ -268,6 +311,36 @@ defmodule Realtime.Database do
   catch
     :exit, reason ->
       log_error("ErrorExecutingTransaction", reason, metadata)
+      {:error, {:exit, reason}}
+  end
+
+  @doc """
+  Runs a single query on a local connection, without the round trips a transaction adds.
+
+  Mirrors `transaction/4`: with a `:telemetry` event in `opts` it emits the query latency for
+  `:tenant_id`, and a raised error or an exit comes back as an error tuple. The remaining opts go
+  to `Postgrex.query/4`.
+  """
+  @spec query(DBConnection.conn(), iodata(), list(), keyword(), keyword()) ::
+          {:ok, Postgrex.Result.t()} | {:error, any()}
+  def query(db_conn, statement, params, opts \\ [], metadata \\ []) do
+    {telemetry, opts} = Keyword.pop(opts, :telemetry)
+    {tenant_id, opts} = Keyword.pop(opts, :tenant_id)
+
+    if telemetry do
+      {latency, value} = :timer.tc(Postgrex, :query, [db_conn, statement, params, opts], :millisecond)
+      Telemetry.execute(telemetry, %{latency: latency}, %{tenant: tenant_id})
+      value
+    else
+      Postgrex.query(db_conn, statement, params, opts)
+    end
+  rescue
+    e ->
+      log_error("ErrorExecutingQuery", e, metadata)
+      {:error, e}
+  catch
+    :exit, reason ->
+      log_error("ErrorExecutingQuery", reason, metadata)
       {:error, {:exit, reason}}
   end
 
@@ -382,8 +455,9 @@ defmodule Realtime.Database do
     query =
       "select slot_name from pg_replication_slots where slot_name like '%realtime%'"
 
-    with {:ok, %{rows: [rows]}} <- Postgrex.query(conn, query, []) do
+    with {:ok, %{rows: rows}} <- Postgrex.query(conn, query, []) do
       rows
+      |> List.flatten()
       |> Enum.reject(&is_nil/1)
       |> Enum.each(&replication_slot_teardown(conn, &1))
     end

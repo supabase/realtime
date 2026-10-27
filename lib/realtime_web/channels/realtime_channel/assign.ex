@@ -6,7 +6,6 @@ defmodule RealtimeWeb.RealtimeChannel.Assigns do
   defstruct [
     :tenant,
     :log_level,
-    :rate_counter,
     :limits,
     :tenant_topic,
     :pg_sub_ref,
@@ -19,13 +18,13 @@ defmodule RealtimeWeb.RealtimeChannel.Assigns do
     :access_token,
     :postgres_cdc_module,
     :channel_name,
-    :headers
+    :headers,
+    channels_count: 0
   ]
 
   @type t :: %__MODULE__{
           tenant: String.t(),
           log_level: Logger.level(),
-          rate_counter: Realtime.RateCounter.t(),
           limits: %{
             max_events_per_second: integer(),
             max_concurrent_users: integer(),
@@ -38,10 +37,11 @@ defmodule RealtimeWeb.RealtimeChannel.Assigns do
           pg_change_params: map(),
           postgres_extension: map(),
           claims: map(),
-          jwt_secret: String.t(),
+          jwt_secret: String.t() | nil,
           jwt_jwks: map(),
           tenant_token: String.t(),
           access_token: String.t(),
-          channel_name: String.t()
+          channel_name: String.t(),
+          channels_count: non_neg_integer()
         }
 end

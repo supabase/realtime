@@ -9,6 +9,7 @@ defmodule RealtimeWeb.Channels.Payloads.JoinTest do
   alias RealtimeWeb.Channels.Payloads.Broadcast.Replay
   alias RealtimeWeb.Channels.Payloads.Presence
   alias RealtimeWeb.Channels.Payloads.PostgresChange
+  alias RealtimeWeb.Channels.Payloads.PostgresChangesOptions
 
   describe "validate/1" do
     test "valid payload allows join" do
@@ -65,6 +66,50 @@ defmodule RealtimeWeb.Channels.Payloads.JoinTest do
       assert {:ok, %Join{config: %Config{presence: %Presence{key: key}}}} = Join.validate(config)
 
       assert key == 123
+    end
+
+    test "presence key cannot be a map" do
+      config = %{"config" => %{"presence" => %{"enabled" => true, "key" => %{"a" => 1}}}}
+
+      assert {
+               :error,
+               :invalid_join_payload,
+               %{config: %{presence: %{key: ["unable to parse, expected a string"]}}}
+             } = Join.validate(config)
+    end
+
+    for key <- [["a", "b"], [%{"a" => 1}]] do
+      test "presence key cannot be a list: #{inspect(key)}" do
+        config = %{"config" => %{"presence" => %{"enabled" => true, "key" => unquote(Macro.escape(key))}}}
+
+        assert {
+                 :error,
+                 :invalid_join_payload,
+                 %{config: %{presence: %{key: ["unable to parse, expected a string"]}}}
+               } = Join.validate(config)
+      end
+    end
+
+    for key <- ["a", 123, 1.5, true] do
+      test "presence key #{inspect(key)} is accepted" do
+        config = %{"config" => %{"presence" => %{"enabled" => true, "key" => unquote(key)}}}
+
+        assert {:ok, join} = Join.validate(config)
+        assert Join.presence_key(join) == unquote(key)
+      end
+    end
+
+    test "presence_key falls back to a generated key when the key is not a string or number" do
+      # The channel proceeds even when the join payload is invalid, so presence_key/1 must never
+      # hand a non-string key to Phoenix.Presence regardless of what the client sent.
+      join =
+        %{"config" => %{"presence" => %{"enabled" => true, "key" => %{"a" => 1}}}}
+        |> then(&Join.changeset(%Join{}, &1))
+        |> Ecto.Changeset.apply_changes()
+
+      key = Join.presence_key(join)
+      assert is_binary(key)
+      assert key != ""
     end
 
     test "invalid replay" do
@@ -300,6 +345,59 @@ defmodule RealtimeWeb.Channels.Payloads.JoinTest do
 
     test "defaults to false when config is nil" do
       refute Join.private?(%Join{config: nil})
+    end
+  end
+
+  describe "postgres_changes_options" do
+    test "parses wait and timeout" do
+      config = %{"config" => %{"postgres_changes_options" => %{"wait" => true, "timeout" => 10_000}}}
+
+      assert {:ok, %Join{config: %Config{postgres_changes_options: options}} = join} = Join.validate(config)
+      assert %PostgresChangesOptions{wait: true, timeout: 10_000} = options
+      assert Join.postgres_changes_wait_timeout(join) == 10_000
+    end
+
+    test "does not wait when not asked to" do
+      for config <- [%{"config" => %{}}, %{"config" => %{"postgres_changes_options" => %{}}}] do
+        assert {:ok, join} = Join.validate(config)
+        assert Join.postgres_changes_wait_timeout(join) == nil
+      end
+    end
+
+    test "accepts string booleans for wait and defaults the timeout" do
+      config = %{"config" => %{"postgres_changes_options" => %{"wait" => "true"}}}
+
+      assert {:ok, join} = Join.validate(config)
+      assert Join.postgres_changes_wait_timeout(join) == 15_000
+    end
+
+    test "clamps the timeout to the server maximum" do
+      max = Application.fetch_env!(:realtime, :postgres_changes_wait_max_timeout)
+      config = %{"config" => %{"postgres_changes_options" => %{"wait" => true, "timeout" => max * 10}}}
+
+      assert {:ok, join} = Join.validate(config)
+      assert Join.postgres_changes_wait_timeout(join) == max
+    end
+
+    test "invalid timeout returns errors" do
+      config = %{"config" => %{"postgres_changes_options" => %{"timeout" => "soon"}}}
+
+      assert {:error, :invalid_join_payload, errors} = Join.validate(config)
+      assert errors == %{config: %{postgres_changes_options: %{timeout: ["unable to parse, expected integer"]}}}
+    end
+
+    test "non positive timeout returns errors" do
+      config = %{"config" => %{"postgres_changes_options" => %{"timeout" => 0}}}
+
+      assert {:error, :invalid_join_payload, %{config: %{postgres_changes_options: %{timeout: [_]}}}} =
+               Join.validate(config)
+    end
+
+    test "non map options returns errors" do
+      config = %{"config" => %{"postgres_changes_options" => 123}}
+
+      assert {:error, :invalid_join_payload, errors} = Join.validate(config)
+      assert errors == %{config: %{postgres_changes_options: ["unable to parse, expected a map"]}}
     end
   end
 

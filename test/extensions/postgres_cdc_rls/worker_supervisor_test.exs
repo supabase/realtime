@@ -137,22 +137,10 @@ defmodule Extensions.PostgresCdcRls.WorkerSupervisorTest do
   end
 
   defp wait_for_restart(sup, id, old_pid, timeout \\ 2000) do
-    deadline = System.monotonic_time(:millisecond) + timeout
-    do_wait_for_restart(sup, id, old_pid, deadline)
-  end
-
-  defp do_wait_for_restart(sup, id, old_pid, deadline) do
-    case child_pid(sup, id) do
-      pid when is_pid(pid) and pid != old_pid ->
-        pid
-
-      _ ->
-        if System.monotonic_time(:millisecond) >= deadline do
-          flunk("child #{inspect(id)} was not restarted within the timeout")
-        else
-          Process.sleep(20)
-          do_wait_for_restart(sup, id, old_pid, deadline)
-        end
+    case_wait child_pid(sup, id), timeout: timeout, interval: 20 do
+      pid when is_pid(pid) and pid != old_pid -> pid
+    else
+      _ -> flunk("child #{inspect(id)} was not restarted within the timeout")
     end
   end
 end

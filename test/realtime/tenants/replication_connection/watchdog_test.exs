@@ -2,6 +2,7 @@ defmodule Realtime.Tenants.ReplicationConnection.WatchdogTest do
   use ExUnit.Case, async: true
 
   use Mimic
+  use TestHelpers
 
   setup :set_mimic_from_context
 
@@ -70,15 +71,11 @@ defmodule Realtime.Tenants.ReplicationConnection.WatchdogTest do
         {Watchdog, parent_pid: fake_pid, tenant_id: "test-tenant", watchdog_interval: 50, watchdog_timeout: 100}
       )
 
-    # Wait for at least 2 health check cycles
-    Process.sleep(150)
+    # Wait for at least 2 health check cycles and verify health checks were performed.
+    assert_eventually FakeReplicationConnection.get_health_check_count(fake_pid) >= 2, timeout: 1_000, interval: 10
 
     assert Process.alive?(watchdog_pid)
     assert Process.alive?(fake_pid)
-
-    # Verify health checks were performed
-    count = FakeReplicationConnection.get_health_check_count(fake_pid)
-    assert count >= 2
   end
 
   describe "timeout handling" do
@@ -135,8 +132,7 @@ defmodule Realtime.Tenants.ReplicationConnection.WatchdogTest do
           {Watchdog, parent_pid: fake_pid, tenant_id: "test-tenant", watchdog_interval: 50, watchdog_timeout: 100}
         )
 
-      # Wait for first successful health check
-      Process.sleep(80)
+      assert_eventually FakeReplicationConnection.get_health_check_count(fake_pid) >= 1, timeout: 1_000, interval: 10
       assert Process.alive?(watchdog_pid)
 
       ref = Process.monitor(watchdog_pid)
@@ -161,7 +157,7 @@ defmodule Realtime.Tenants.ReplicationConnection.WatchdogTest do
 
     test "continues when slot lag is below threshold", %{fake_pid: fake_pid} do
       stub(Connect, :get_status, fn _tenant_id -> {:ok, :fake_conn} end)
-      stub(Database, :check_replication_slot_lag, fn _conn, _slot -> :ok end)
+      stub(Database, :check_replication_slot, fn _conn, _slot -> :ok end)
 
       watchdog_pid =
         start_supervised!(
@@ -176,14 +172,12 @@ defmodule Realtime.Tenants.ReplicationConnection.WatchdogTest do
       Mimic.allow(Connect, self(), watchdog_pid)
       Mimic.allow(Database, self(), watchdog_pid)
 
-      Process.sleep(120)
-
-      assert Process.alive?(watchdog_pid)
+      assert_always Process.alive?(watchdog_pid), timeout: 120, interval: 10
     end
 
     test "stops with :slot_lag_too_high when lag exceeds threshold", %{fake_pid: fake_pid} do
       stub(Connect, :get_status, fn _tenant_id -> {:ok, :fake_conn} end)
-      stub(Database, :check_replication_slot_lag, fn _conn, _slot -> {:error, :lag_too_high} end)
+      stub(Database, :check_replication_slot, fn _conn, _slot -> {:error, :lag_too_high} end)
 
       logs =
         capture_log(fn ->
@@ -224,12 +218,66 @@ defmodule Realtime.Tenants.ReplicationConnection.WatchdogTest do
 
           Mimic.allow(Connect, self(), watchdog_pid)
 
-          Process.sleep(120)
-
-          assert Process.alive?(watchdog_pid)
+          assert_always Process.alive?(watchdog_pid), timeout: 120, interval: 10
         end)
 
-      assert logs =~ "ReplicationSlotLagCheckSkipped"
+      assert logs =~ "ReplicationSlotCheckSkipped"
+    end
+  end
+
+  describe "slot liveness monitoring" do
+    setup do
+      fake_pid = start_link_supervised!(FakeReplicationConnection)
+      %{fake_pid: fake_pid}
+    end
+
+    for {reason, description} <- [slot_not_found: "no longer exists", slot_inactive: "is inactive"] do
+      test "stops with :replication_slot_not_alive when slot #{description}", %{fake_pid: fake_pid} do
+        reason = unquote(reason)
+        stub(Connect, :get_status, fn _tenant_id -> {:ok, :fake_conn} end)
+        stub(Database, :check_replication_slot, fn _conn, _slot -> {:error, reason} end)
+
+        logs =
+          capture_log(fn ->
+            watchdog_pid =
+              start_supervised!(
+                {Watchdog,
+                 parent_pid: fake_pid,
+                 tenant_id: "slot-test",
+                 watchdog_interval: 50,
+                 watchdog_timeout: 100,
+                 replication_slot_name: "test_slot"}
+              )
+
+            Mimic.allow(Connect, self(), watchdog_pid)
+            Mimic.allow(Database, self(), watchdog_pid)
+
+            ref = Process.monitor(watchdog_pid)
+            assert_receive {:DOWN, ^ref, :process, ^watchdog_pid, :replication_slot_not_alive}, 500
+          end)
+
+        assert logs =~ "ReplicationSlotNotAlive"
+      end
+    end
+
+    test "continues when slot is alive and lag is below threshold", %{fake_pid: fake_pid} do
+      stub(Connect, :get_status, fn _tenant_id -> {:ok, :fake_conn} end)
+      stub(Database, :check_replication_slot, fn _conn, _slot -> :ok end)
+
+      watchdog_pid =
+        start_supervised!(
+          {Watchdog,
+           parent_pid: fake_pid,
+           tenant_id: "slot-test",
+           watchdog_interval: 50,
+           watchdog_timeout: 100,
+           replication_slot_name: "test_slot"}
+        )
+
+      Mimic.allow(Connect, self(), watchdog_pid)
+      Mimic.allow(Database, self(), watchdog_pid)
+
+      assert_always Process.alive?(watchdog_pid), timeout: 120, interval: 10
     end
   end
 end

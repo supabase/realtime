@@ -3,6 +3,17 @@ defmodule Clustered do
   Uses the gist https://gist.github.com/ityonemo/177cbc96f8c8722bfc4d127ff9baec62 to start a node for testing
   """
 
+  import WaitForIt
+
+  alias Realtime.Env
+
+  @port_wait_timeout_ms 5_000
+  @port_wait_interval_ms 100
+
+  @gen_rpc_wait_timeout_ms 15_000
+  @gen_rpc_poll_start_ms 20
+  @gen_rpc_poll_max_ms 200
+
   @doc """
   Starts a node for testing.
 
@@ -22,6 +33,14 @@ defmodule Clustered do
     assert ok = :rpc.call(node, Aux, :checker, [:ok])
   end
   ```
+
+  ## Options
+
+  - `:warm_clients` - Whether to eagerly establish the gen_rpc client pool against the node
+    before returning, defaulting to `true`. Set to `false` when the node is intentionally
+    unreachable (e.g. a broken gen_rpc port), so warming doesn't leave dead client processes
+    that can race with the test's own calls.
+
   """
   @spec start(any(), keyword()) :: {:ok, node}
   def start(aux_mod \\ nil, opts \\ []) do
@@ -31,15 +50,17 @@ defmodule Clustered do
 
     true = Node.connect(node)
 
-    max_cast_clients = Application.get_env(:realtime, :max_gen_rpc_clients, 5)
-    max_call_clients = Application.get_env(:realtime, :max_gen_rpc_call_clients, 1)
+    if Access.get(opts, :warm_clients, true) do
+      max_cast_clients = Application.get_env(:realtime, :max_gen_rpc_clients, 5)
+      max_call_clients = Application.get_env(:realtime, :max_gen_rpc_call_clients, 1)
 
-    for key <- 1..max_cast_clients do
-      _ = :gen_rpc.call({node, {:cast, key}}, :erlang, :node, [], 5_000)
-    end
+      for key <- 1..max_cast_clients do
+        _ = :gen_rpc.call({node, {:cast, key}}, :erlang, :node, [], 5_000)
+      end
 
-    for key <- 1..max_call_clients do
-      _ = :gen_rpc.call({node, {:call, key}}, :erlang, :node, [], 5_000)
+      for key <- 1..max_call_clients do
+        _ = :gen_rpc.call({node, {:call, key}}, :erlang, :node, [], 5_000)
+      end
     end
 
     {:ok, node}
@@ -51,11 +72,10 @@ defmodule Clustered do
   @spec start_disconnected(any(), keyword()) :: {:ok, :peer.server_ref(), node}
   def start_disconnected(aux_mod \\ nil, opts \\ []) do
     extra_config = Keyword.get(opts, :extra_config, [])
-    phoenix_port = Keyword.get(opts, :phoenix_port, 4012)
-    name = Keyword.get(opts, :name, :peer.random_name())
+    phoenix_port = Keyword.get(opts, :phoenix_port, TestEnv.peer_http_port())
+    name = opts |> Keyword.get(:name, :peer.random_name()) |> TestEnv.peer_name()
 
-    partition = System.get_env("MIX_TEST_PARTITION")
-    node_name = if partition, do: :"main#{partition}@127.0.0.1", else: :"main@127.0.0.1"
+    node_name = TestEnv.node_name()
 
     :ok =
       case :net_kernel.start([node_name]) do
@@ -110,6 +130,7 @@ defmodule Clustered do
     # Configure gen_rpc swapping port definitons
     gen_rpc_tcp_server_port = Application.fetch_env!(:gen_rpc, :tcp_server_port)
     gen_rpc_tcp_client_port = Application.fetch_env!(:gen_rpc, :tcp_client_port)
+    peer_gen_rpc_port = peer_gen_rpc_port(extra_config, gen_rpc_tcp_client_port)
 
     :ok = :peer.call(pid, Application, :put_env, [:gen_rpc, :tcp_server_port, gen_rpc_tcp_client_port])
     :ok = :peer.call(pid, Application, :put_env, [:gen_rpc, :tcp_client_port, gen_rpc_tcp_server_port])
@@ -122,14 +143,21 @@ defmodule Clustered do
       :ok = :peer.call(pid, Application, :put_env, [app_name, key, value])
     end
 
-    wait_for_port_free(gen_rpc_tcp_client_port)
-    {:ok, _} = :peer.call(pid, Application, :ensure_all_started, [:gen_rpc])
-    {:ok, _} = :peer.call(pid, Application, :ensure_all_started, [:mix])
+    await_port_available!(peer_gen_rpc_port, "gen_rpc", "TEST_PEER_GEN_RPC_PORT_BASE")
+    await_port_available!(phoenix_port, "Phoenix", "TEST_PEER_PORT_BASE")
+
+    # :peer.call/4 defaults to a 5s gen_server.call timeout, which starting the full
+    # :realtime app (DB pools, endpoint, etc.) on the peer can exceed under CI CPU
+    # contention. Give a more generous timeout instead.
+    peer_call_timeout = to_timeout(second: 12)
+
+    {:ok, _} = :peer.call(pid, Application, :ensure_all_started, [:gen_rpc], peer_call_timeout)
+    {:ok, _} = :peer.call(pid, Application, :ensure_all_started, [:mix], peer_call_timeout)
     :ok = :peer.call(pid, Mix, :env, [Mix.env()])
 
     Enum.each(
       [:logger, :runtime_tools, :prom_ex, :mix, :os_mon, :realtime],
-      fn app -> {:ok, _} = :peer.call(pid, Application, :ensure_all_started, [app]) end
+      fn app -> {:ok, _} = :peer.call(pid, Application, :ensure_all_started, [app], peer_call_timeout) end
     )
 
     if aux_mod do
@@ -143,37 +171,50 @@ defmodule Clustered do
     port = :peer.call(pid, Application, :get_env, [:gen_rpc, :tcp_server_port])
 
     case port do
-      port when is_integer(port) and port > 0 -> wait_for_port({127, 0, 0, 1}, port, 50, 100)
+      port when is_integer(port) and port > 0 -> wait_for_port({127, 0, 0, 1}, port)
       _ -> raise "gen_rpc tcp_server_port is not configured: #{inspect(port)}"
     end
   end
 
-  defp wait_for_port_free(port, attempts \\ 50, delay_ms \\ 100)
-  defp wait_for_port_free(_port, 0, _delay_ms), do: :ok
-
-  defp wait_for_port_free(port, attempts, delay_ms) do
-    case :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false], 100) do
-      {:ok, socket} ->
-        :gen_tcp.close(socket)
-        Process.sleep(delay_ms)
-        wait_for_port_free(port, attempts - 1, delay_ms)
-
-      {:error, _} ->
-        :ok
-    end
+  # The peer's own gen_rpc server port: extra_config wins, otherwise it inherits the
+  # local node's client port (they are swapped above so the two can talk).
+  defp peer_gen_rpc_port(extra_config, default) do
+    Enum.find_value(extra_config, default, fn
+      {:gen_rpc, :tcp_server_port, port} -> port
+      _ -> nil
+    end)
   end
 
-  defp wait_for_port(_host, _port, 0, _delay_ms), do: raise("gen_rpc tcp server did not start in time")
+  # A peer that stopped moments ago may still be releasing its port, hence the retries.
+  # Anything still holding it after that is another test run or a dev server, and starting
+  # the peer anyway only fails later and less clearly.
+  defp await_port_available!(port, label, env_var) do
+    available? =
+      wait(Env.port_available?(port),
+        timeout: @port_wait_timeout_ms,
+        interval: @port_wait_interval_ms
+      )
 
-  defp wait_for_port(host, port, attempts, delay_ms) do
-    case :gen_tcp.connect(host, port, [:binary, active: false], 200) do
+    if not available? do
+      raise """
+      #{label} port #{port} is still in use after #{div(@port_wait_timeout_ms, 1000)}s.
+      Another test run or a dev server is bound to it. Set #{env_var} to move this run to a free block.
+      """
+    end
+
+    :ok
+  end
+
+  defp wait_for_port(host, port) do
+    case_wait :gen_tcp.connect(host, port, [:binary, active: false], 200),
+      timeout: @gen_rpc_wait_timeout_ms,
+      interval: WaitForIt.Backoff.exponential(start: @gen_rpc_poll_start_ms, max: @gen_rpc_poll_max_ms) do
       {:ok, socket} ->
         :ok = :gen_tcp.close(socket)
         :ok
-
-      {:error, _reason} ->
-        Process.sleep(delay_ms)
-        wait_for_port(host, port, attempts - 1, delay_ms)
+    else
+      {:error, reason} ->
+        raise "gen_rpc tcp server on port #{port} did not start in time. Last error: #{inspect(reason)}"
     end
   end
 end

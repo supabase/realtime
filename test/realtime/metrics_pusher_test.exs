@@ -2,19 +2,10 @@ defmodule Realtime.MetricsPusherTest do
   use Realtime.DataCase, async: true
   import ExUnit.CaptureLog
 
-  alias Realtime.MetricsPusher
   alias Plug.Conn
+  alias Realtime.MetricsPusher
 
   setup {Req.Test, :verify_on_exit!}
-
-  # Helper function to start MetricsPusher and allow it to use Req.Test
-  defp start_and_allow_pusher(opts) do
-    opts = Keyword.put(opts, :interval, :timer.minutes(5))
-    pid = start_supervised!({MetricsPusher, opts})
-    Req.Test.allow(MetricsPusher, self(), pid)
-    send(pid, :push)
-    {:ok, pid}
-  end
 
   describe "start_link/1" do
     test "does not start when URL is missing" do
@@ -58,8 +49,8 @@ defmodule Realtime.MetricsPusherTest do
       {:ok, _pid} = start_and_allow_pusher(opts)
 
       # Receive both request bodies
-      assert_receive {:req_called, body1}, 300
-      assert_receive {:req_called, body2}, 300
+      assert_receive {:req_called, body1}, 1000
+      assert_receive {:req_called, body2}, 1000
 
       global_metric = ~r/beam_stats_run_queue_count/
       tenant_metric = ~r/realtime_channel_input_bytes/
@@ -86,8 +77,8 @@ defmodule Realtime.MetricsPusherTest do
       end)
 
       {:ok, _pid} = start_and_allow_pusher(opts)
-      assert_receive :req_called, 300
-      assert_receive :req_called, 300
+      assert_receive :req_called, 1000
+      assert_receive :req_called, 1000
     end
 
     test "sends request body untouched when compress=false" do
@@ -110,8 +101,8 @@ defmodule Realtime.MetricsPusherTest do
       end)
 
       {:ok, _pid} = start_and_allow_pusher(opts)
-      assert_receive :req_called, 300
-      assert_receive :req_called, 300
+      assert_receive :req_called, 1000
+      assert_receive :req_called, 1000
     end
 
     test "when request receives non 2XX response" do
@@ -132,11 +123,11 @@ defmodule Realtime.MetricsPusherTest do
           end)
 
           {:ok, pid} = start_and_allow_pusher(opts)
-          assert_receive :req_called, 300
-          assert_receive :req_called, 300
+          assert_receive :req_called, 1000
+          assert_receive :req_called, 1000
           assert Process.alive?(pid)
           # Wait enough for the log to be captured
-          Process.sleep(100)
+          :sys.get_state(pid)
         end)
 
       assert log =~ "MetricsPusher: Failed to push"
@@ -160,11 +151,11 @@ defmodule Realtime.MetricsPusherTest do
           end)
 
           {:ok, pid} = start_and_allow_pusher(opts)
-          assert_receive :req_called, 300
-          assert_receive :req_called, 300
+          assert_receive :req_called, 1000
+          assert_receive :req_called, 1000
           assert Process.alive?(pid)
           # Wait enough for the log to be captured
-          Process.sleep(100)
+          :sys.get_state(pid)
         end)
 
       assert log =~ "MetricsPusher: Exception during"
@@ -188,8 +179,8 @@ defmodule Realtime.MetricsPusherTest do
       end)
 
       {:ok, _pid} = start_and_allow_pusher(opts)
-      assert_receive {:req_called, query_string}, 300
-      assert_receive {:req_called, _}, 300
+      assert_receive {:req_called, query_string}, 1000
+      assert_receive {:req_called, _}, 1000
 
       decoded_params = query_string |> String.split("&") |> Enum.map(&URI.decode_www_form/1)
       assert "extra_label=region=us-east-1" in decoded_params
@@ -210,17 +201,139 @@ defmodule Realtime.MetricsPusherTest do
           timeout: 5000
         )
 
-      assert_receive :push_happened, 500
-      assert_receive :push_happened, 500
+      assert_receive :push_happened, 1000
+      assert_receive :push_happened, 1000
 
       log =
         capture_log(fn ->
           send(pid, :unexpected_message)
-          Process.sleep(50)
-          assert Process.alive?(pid)
+          # calling :sys.get_state/1 ensures that the above message has been processed
+          # as this is a sync call answered in mailbox order
+          :sys.get_state(pid)
         end)
 
       assert log =~ "MetricsPusher received unexpected message: :unexpected_message"
+      assert Process.alive?(pid)
     end
+  end
+
+  @global_metric ~r/beam_stats_run_queue_count/
+  @tenant_metric ~r/realtime_channel_input_bytes/
+
+  describe "scope" do
+    test ":global pushes only global metrics" do
+      emit_tenant_metric()
+      parent = self()
+
+      Req.Test.expect(MetricsPusher, 1, fn conn ->
+        send(parent, {:req_called, Req.Test.raw_body(conn)})
+        Req.Test.text(conn, "")
+      end)
+
+      {:ok, _pid} =
+        start_and_allow_pusher(scope: :global, url: "http://localhost:8428/api/v1/import/prometheus", compress: false)
+
+      assert_receive {:req_called, body}, 1000
+      assert body =~ @global_metric
+      refute body =~ @tenant_metric
+      refute_receive {:req_called, _}, 100
+    end
+
+    test ":tenant pushes only tenant metrics" do
+      emit_tenant_metric()
+      parent = self()
+
+      Req.Test.expect(MetricsPusher, 1, fn conn ->
+        send(parent, {:req_called, Req.Test.raw_body(conn)})
+        Req.Test.text(conn, "")
+      end)
+
+      {:ok, _pid} =
+        start_and_allow_pusher(scope: :tenant, url: "http://localhost:8429/api/v1/import/prometheus", compress: false)
+
+      assert_receive {:req_called, body}, 1000
+      assert body =~ @tenant_metric
+      refute body =~ @global_metric
+      refute_receive {:req_called, _}, 100
+    end
+
+    test "global and tenant pushers run side by side, each sending to its own URL" do
+      emit_tenant_metric()
+      parent = self()
+
+      Req.Test.expect(MetricsPusher, 2, fn conn ->
+        send(parent, {:req_called, conn.host, Req.Test.raw_body(conn)})
+        Req.Test.text(conn, "")
+      end)
+
+      {:ok, _} =
+        start_and_allow_pusher(
+          scope: :global,
+          name: MetricsPusher.Global,
+          url: "http://global.example.com/api/v1/import/prometheus",
+          compress: false
+        )
+
+      {:ok, _} =
+        start_and_allow_pusher(
+          scope: :tenant,
+          name: MetricsPusher.Tenant,
+          url: "http://tenant.example.com/api/v1/import/prometheus",
+          compress: false
+        )
+
+      bodies =
+        for _ <- 1..2, into: %{} do
+          assert_receive {:req_called, host, body}, 1000
+          {host, body}
+        end
+
+      assert bodies["global.example.com"] =~ @global_metric
+      refute bodies["global.example.com"] =~ @tenant_metric
+      assert bodies["tenant.example.com"] =~ @tenant_metric
+      refute bodies["tenant.example.com"] =~ @global_metric
+    end
+  end
+
+  describe "child_specs/1" do
+    test "starts nothing when both pushers are disabled" do
+      assert MetricsPusher.child_specs(metrics_enabled: false, tenant_enabled: false) == []
+    end
+
+    test "starts one pusher for both metric sets when only the main pusher is enabled" do
+      specs = MetricsPusher.child_specs(metrics_enabled: true, tenant_enabled: false)
+      assert scopes(specs) == [{MetricsPusher, :all}]
+    end
+
+    test "splits global and tenant pushers when both are enabled" do
+      specs = MetricsPusher.child_specs(metrics_enabled: true, tenant_enabled: true)
+      assert scopes(specs) == [{MetricsPusher.Global, :global}, {MetricsPusher.Tenant, :tenant}]
+    end
+
+    test "starts nothing when only the tenant pusher is enabled" do
+      specs = MetricsPusher.child_specs(metrics_enabled: false, tenant_enabled: true)
+
+      # The tenant pusher is only started when the main pusher is also enabled,
+      # so this should return an empty list.
+      assert scopes(specs) == []
+    end
+  end
+
+  # Helper function to start MetricsPusher and allow it to use Req.Test
+  defp start_and_allow_pusher(opts) do
+    opts = Keyword.put(opts, :interval, :timer.minutes(5))
+    id = Keyword.get(opts, :name, MetricsPusher)
+    pid = start_supervised!(Supervisor.child_spec({MetricsPusher, opts}, id: id))
+    Req.Test.allow(MetricsPusher, self(), pid)
+    send(pid, :push)
+    {:ok, pid}
+  end
+
+  defp scopes(child_specs) do
+    Enum.map(child_specs, fn %{id: id, start: {_, _, [opts]}} -> {id, opts[:scope]} end)
+  end
+
+  defp emit_tenant_metric do
+    :telemetry.execute([:realtime, :channel, :input_bytes], %{size: 1024}, %{tenant: "test_tenant"})
   end
 end

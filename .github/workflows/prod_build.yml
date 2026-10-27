@@ -19,6 +19,8 @@ on:
 jobs:
   release:
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: read
     outputs:
       published: ${{ steps.semantic.outputs.new_release_published }}
       version: ${{ steps.semantic.outputs.new_release_version }}
@@ -49,6 +51,8 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     if: needs.release.outputs.published == 'true'
     timeout-minutes: 120
+    permissions:
+      contents: read
     env:
       arch: amd64
     outputs:
@@ -88,6 +92,8 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404-arm
     if: needs.release.outputs.published == 'true'
     timeout-minutes: 120
+    permissions:
+      contents: read
     env:
       arch: arm64
     outputs:
@@ -179,6 +185,7 @@ jobs:
   dispatch-deploy:
     needs: [release, merge_manifest]
     if: needs.release.outputs.published == 'true'
+    permissions: {}
     uses: ./.github/workflows/dispatch_deploy.yml
     secrets: inherit
     with:
@@ -187,6 +194,8 @@ jobs:
   update-branch-name:
     needs: [release, docker_x86_release, docker_arm_release, merge_manifest]
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: write
     steps:
       - name: Checkout branch
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

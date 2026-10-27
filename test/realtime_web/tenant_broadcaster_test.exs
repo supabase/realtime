@@ -44,6 +44,14 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
                 end
 
                 def relay_fanout(_event, _measurements, _metadata, _config), do: :ok
+
+                # Register a Muster member for the tenant on this node without counting it as a
+                # connected user, so routed broadcasts reach this node yet it still reports hit=false.
+                def muster_join(tenant_id) do
+                  scope = Application.fetch_env!(:realtime, :muster_scope)
+                  pid = spawn(fn -> Process.sleep(:infinity) end)
+                  :ok = Forum.Muster.join(scope, tenant_id, pid)
+                end
               end
             end)
 
@@ -267,7 +275,12 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
     end
 
     test "tags :broadcast messages dispatched via MessageDispatcher so the receiving node measures fan-out",
-         %{tenant_id: tenant_id, topic: topic} do
+         %{node: node, tenant_id: tenant_id, topic: topic} do
+      # Tagged broadcasts are routed through Muster, so the remote node must hold the tenant
+      :ok = :erpc.call(node, Subscriber, :muster_join, [tenant_id])
+      scope = Application.fetch_env!(:realtime, :muster_scope)
+      assert_eventually router_targets(scope, tenant_id) == {:ok, [node]}
+
       message = %Broadcast{topic: topic, event: "an event", payload: %{"a" => "b"}}
 
       TenantBroadcaster.pubsub_broadcast(tenant_id, topic, message, MessageDispatcher, :broadcast)
@@ -378,6 +391,13 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
       assert :ok = TenantBroadcaster.measure_broadcast_fanout("untagged message")
 
       refute_receive {[:realtime, :broadcast, :fanout, :node_delivery], ^ref, _, _}
+    end
+  end
+
+  # targets/3 is only authoritative on the tenant's router node
+  defp router_targets(scope, tenant_id) do
+    with {:ok, router} <- Forum.Muster.router(scope, tenant_id) do
+      :erpc.call(router, Forum.Muster, :targets, [scope, tenant_id, Forum.Muster.view_hash(scope)])
     end
   end
 

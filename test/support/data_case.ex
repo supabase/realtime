@@ -25,7 +25,8 @@ defmodule Realtime.DataCase do
       import Realtime.DataCase
       import Generators
       import TenantConnection
-      import TestHelpers
+
+      use TestHelpers
     end
   end
 

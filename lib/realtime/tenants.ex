@@ -11,6 +11,7 @@ defmodule Realtime.Tenants do
   alias Realtime.Repo.Replica
   alias Realtime.Tenants.Cache
   alias Realtime.Tenants.Connect
+  alias Realtime.Tenants.EncryptionReconciler
   alias Realtime.Tenants.Migrations
   alias Realtime.UsersCounter
 
@@ -60,7 +61,7 @@ defmodule Realtime.Tenants do
                node: String.t()
              }}
   def health_check(external_id) when is_binary(external_id) do
-    region = Application.get_env(:realtime, :region)
+    region = Realtime.Nodes.region()
     node = Node.self() |> to_string()
 
     with %Tenant{} = tenant <- Cache.get_tenant_by_external_id(external_id),
@@ -112,6 +113,8 @@ defmodule Realtime.Tenants do
 
   @doc """
   Creates the `realtime.messages` partitions for the days around today.
+
+  Partitions that already exist are left untouched.
   """
   @spec create_messages_partitions(pid()) :: :ok
   def create_messages_partitions(db_conn_pid) do
@@ -122,31 +125,58 @@ defmodule Realtime.Tenants do
 
     dates = Date.range(yesterday, future)
 
-    Enum.each(dates, fn date ->
-      partition_name = "messages_#{date |> Date.to_iso8601() |> String.replace("-", "_")}"
-      start_timestamp = Date.to_string(date)
-      end_timestamp = Date.to_string(Date.add(date, 1))
+    # ALTER TABLE ... OWNER TO takes an ACCESS EXCLUSIVE lock on the partition even when the owner
+    # doesn't change, blocking broadcasts and authorization queries, so only touch new partitions
+    case existing_partitions(db_conn_pid) do
+      {:ok, existing} ->
+        Enum.each(dates, fn date ->
+          partition_name = "messages_#{date |> Date.to_iso8601() |> String.replace("-", "_")}"
 
-      Database.transaction(db_conn_pid, fn conn ->
-        create = """
-        CREATE TABLE IF NOT EXISTS realtime.#{partition_name}
-        PARTITION OF realtime.messages
-        FOR VALUES FROM ('#{start_timestamp}') TO ('#{end_timestamp}');
-        """
+          if not MapSet.member?(existing, partition_name),
+            do: create_partition(db_conn_pid, partition_name, date)
+        end)
 
-        alter_owner = "ALTER TABLE realtime.#{partition_name} OWNER TO supabase_realtime_admin"
-
-        with {:ok, _} <- Postgrex.query(conn, create, []),
-             {:ok, _} <- Postgrex.query(conn, alter_owner, []) do
-          Logger.debug("Partition #{partition_name} created")
-        else
-          {:error, %Postgrex.Error{postgres: %{code: :duplicate_table}}} -> :ok
-          {:error, error} -> log_error("PartitionCreationFailed", error)
-        end
-      end)
-    end)
+      {:error, error} ->
+        log_error("PartitionCreationFailed", error)
+    end
 
     :ok
+  end
+
+  defp existing_partitions(db_conn_pid) do
+    query = """
+    SELECT c.relname
+    FROM pg_inherits i
+    JOIN pg_class c ON c.oid = i.inhrelid
+    WHERE i.inhparent = 'realtime.messages'::regclass
+    """
+
+    with {:ok, %{rows: rows}} <- Postgrex.query(db_conn_pid, query, []) do
+      {:ok, MapSet.new(rows, fn [name] -> name end)}
+    end
+  end
+
+  defp create_partition(db_conn_pid, partition_name, date) do
+    start_timestamp = Date.to_string(date)
+    end_timestamp = Date.to_string(Date.add(date, 1))
+
+    Database.transaction(db_conn_pid, fn conn ->
+      create = """
+      CREATE TABLE IF NOT EXISTS realtime.#{partition_name}
+      PARTITION OF realtime.messages
+      FOR VALUES FROM ('#{start_timestamp}') TO ('#{end_timestamp}');
+      """
+
+      alter_owner = "ALTER TABLE realtime.#{partition_name} OWNER TO supabase_realtime_admin"
+
+      with {:ok, _} <- Postgrex.query(conn, create, []),
+           {:ok, _} <- Postgrex.query(conn, alter_owner, []) do
+        Logger.debug("Partition #{partition_name} created")
+      else
+        {:error, %Postgrex.Error{postgres: %{code: :duplicate_table}}} -> :ok
+        {:error, error} -> log_error("PartitionCreationFailed", error)
+      end
+    end)
   end
 
   defp replication_connected?(external_id) do
@@ -163,7 +193,6 @@ defmodule Realtime.Tenants do
   def limiter_keys(%Tenant{} = tenant) do
     [
       requests_per_second_key(tenant),
-      channels_per_client_key(tenant),
       joins_per_second_key(tenant),
       events_per_second_key(tenant),
       db_events_per_second_key(tenant),
@@ -220,16 +249,6 @@ defmodule Realtime.Tenants do
 
   def joins_per_second_key(%Tenant{} = tenant) do
     {:channel, :joins, tenant.external_id}
-  end
-
-  @doc "The Register key to use to limit the amount of channels connected to the websocket."
-  @spec channels_per_client_key(Tenant.t() | String.t()) :: {:channel, :clients_per, String.t()}
-  def channels_per_client_key(tenant) when is_binary(tenant) do
-    {:channel, :clients_per, tenant}
-  end
-
-  def channels_per_client_key(%Tenant{} = tenant) do
-    {:channel, :clients_per, tenant.external_id}
   end
 
   @doc "RateCounter arguments for counting events per second."
@@ -480,9 +499,14 @@ defmodule Realtime.Tenants do
   def get_tenant_by_external_id(external_id) do
     repo_replica = Replica.replica()
 
-    Tenant
-    |> repo_replica.get_by(external_id: external_id)
-    |> repo_replica.preload(:extensions)
+    tenant =
+      Tenant
+      |> repo_replica.get_by(external_id: external_id)
+      |> repo_replica.preload(:extensions)
+
+    if tenant, do: EncryptionReconciler.reconcile(tenant)
+
+    tenant
   end
 
   @doc """
@@ -522,7 +546,8 @@ defmodule Realtime.Tenants do
 
   @doc """
   """
-  @spec validate_payload_size(Tenant.t() | binary(), map() | binary()) :: :ok | {:error, :payload_size_exceeded}
+  @spec validate_payload_size(Tenant.t() | binary(), map() | binary() | {String.t(), :json | :binary, binary(), map()}) ::
+          :ok | {:error, :payload_size_exceeded}
   def validate_payload_size(tenant_id, payload) when is_binary(tenant_id) do
     tenant_id
     |> Cache.get_tenant_by_external_id()

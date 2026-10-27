@@ -52,7 +52,8 @@ defmodule Realtime.Integration.RtChannel.AuthorizationTest do
     } do
       change_tenant_configuration(tenant, :private_only, true)
 
-      Process.sleep(100)
+      # The cache update is what the socket reads on connect.
+      assert_eventually Realtime.Tenants.Cache.get_tenant_by_external_id(tenant.external_id).private_only
 
       {socket, _} = get_connection(tenant, serializer, role: "authenticated")
       config = %{broadcast: %{self: true}, private: true}
