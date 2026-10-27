@@ -37,8 +37,8 @@ The design makes three changes:
 Two further effects follow from the tenant unit:
 
 - A tracker crash affects one tenant on one node. In the current
-  implementation a shard crash affects all tenants in the shard on every
-  node.
+  implementation a shard crash on one node affects every tenant in that
+  shard, and every other node sees the entries of that node leave.
 - A new node starts with no state. It receives the state of a tenant when
   the first client of that tenant connects.
 
