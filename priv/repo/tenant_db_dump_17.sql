@@ -372,10 +372,12 @@ begin
 
                         execute 'execute walrus_rls_stmt' into subscription_has_access;
                     exception
+                        -- No raise warning here: list_changes runs with log_min_messages
+                        -- 'fatal', so it would only reach the poller's connection, once per
+                        -- subscription per change. The Error 500 row below is the signal.
                         when others then
                             subscription_has_access = false;
                             errored_role_sub_ids = errored_role_sub_ids || subscription_id;
-                            raise warning 'WarnApplyingRlsToSubscription %: %', subscription_id, sqlerrm;
                     end;
 
                     -- Reset the role on every FOR..LOOP batch execution.
