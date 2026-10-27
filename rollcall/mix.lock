@@ -1,0 +1,4 @@
+%{
+  "snabbkaffe": {:hex, :snabbkaffe, "1.0.10", "9be2f54f61fc6862391b666b2b5b76c3fa53598e2989a17cef1b48cf347a8a63", [:rebar3], [], "hexpm", "70a98df36ae756908d55b5770891d443d63c903833e3e87d544036e13d4fac26"},
+  "snabbkaffex": {:hex, :snabbkaffex, "0.1.0", "141ac3e2c15ad48058a5076b75a032c47eaa880f0b25e95ec8754511e7979635", [:mix], [{:snabbkaffe, "~> 1.0", [hex: :snabbkaffe, repo: "hexpm", optional: false]}], "hexpm", "690700b398656531a10b08ebdeb35b331856def6dabe3bfe39a648b85bc5904e"},
+}
