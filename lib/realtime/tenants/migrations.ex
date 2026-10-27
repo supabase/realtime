@@ -7,7 +7,6 @@ defmodule Realtime.Tenants.Migrations do
   use Realtime.Logs
 
   alias Realtime.Database
-  alias Realtime.FeatureFlags
   alias Realtime.Registry.Unique
   alias Realtime.Repo
   alias Realtime.Api.Tenant
@@ -94,8 +93,22 @@ defmodule Realtime.Tenants.Migrations do
     {20_260_603_120_000, Migrations.AddSendBinaryFunction},
     {20_260_605_120_000, Migrations.RenameBroadcastSendWarning},
     {20_260_606_110_000, Migrations.SubscriptionCheckFiltersUsePgAttribute},
-    {20_260_606_120_000, Migrations.SetupSupabaseRealtimeAdmin},
-    {20_260_616_120_000, Migrations.AddPostgrestFilterOps}
+    {20_260_616_120_000, Migrations.AddPostgrestFilterOps},
+    {20_260_624_120_000, Migrations.RevertPostgrestFilterOps},
+    {20_260_626_120_000, Migrations.ReAddPostgrestFilterOps},
+    {20_260_706_120_000, Migrations.GrantCheckEqualityOp5Arg},
+    {20_260_707_120_000, Migrations.RestrictRealtimeSchema},
+    {20_260_709_120_000, Migrations.FixApplyRlsFilterRoleLeak},
+    {20_260_714_120_000, Migrations.AddBroadcastPersistence},
+    {20_260_827_120_000, Migrations.EmptySelectColumnsReturnPrimaryKeys},
+    {20_260_914_120_000, Migrations.DelegateMessagesGrantsToPostgres},
+    {20_260_916_120_000, Migrations.AllowPostgresToDelegateRealtimeSchemaUsage},
+    {20_260_922_120_000, Migrations.RevokeRealtimeSchemaGrantOptionFromRealtimeAdmin},
+    {20_260_925_120_000, Migrations.RestoreMessagesBaseGrants},
+    {20_260_928_120_000, Migrations.AddListChangesSync},
+    {20_261_002_120_000, Migrations.AddAuthorizeFunction},
+    {20_261_008_120_000, Migrations.AuthorizeReadProbesSinglePartition},
+    {20_261_009_120_000, Migrations.MessagesClockTimestampDefaults}
   ]
 
   defstruct [:tenant_external_id, :settings, migrations_ran: 0]
@@ -110,12 +123,7 @@ defmodule Realtime.Tenants.Migrations do
   """
   @spec run_migrations?(Tenant.t() | integer()) :: boolean()
   def run_migrations?(%Tenant{} = tenant) do
-    available_migrations =
-      tenant.external_id
-      |> migrations()
-      |> Enum.count()
-
-    tenant.migrations_ran < available_migrations
+    tenant.migrations_ran < Enum.count(migrations())
   end
 
   def run_migrations?(migrations_ran) when is_integer(migrations_ran),
@@ -182,14 +190,14 @@ defmodule Realtime.Tenants.Migrations do
     GenServer.start_link(__MODULE__, attrs, name: name)
   end
 
-  def init(%__MODULE__{tenant_external_id: tenant_external_id, settings: settings}) do
+  def init(%__MODULE__{tenant_external_id: tenant_external_id, settings: settings, migrations_ran: migrations_ran}) do
     Logger.metadata(external_id: tenant_external_id, project: tenant_external_id)
 
-    case migrate(tenant_external_id, settings) do
-      :ok ->
+    case migrate(tenant_external_id, settings, migrations_ran) do
+      {:ok, applied_count} ->
         Task.Supervisor.async_nolink(__MODULE__.TaskSupervisor, Api, :update_migrations_ran, [
           tenant_external_id,
-          Enum.count(migrations(tenant_external_id))
+          applied_count
         ])
 
         :ignore
@@ -199,7 +207,7 @@ defmodule Realtime.Tenants.Migrations do
     end
   end
 
-  defp migrate(tenant_external_id, settings) do
+  defp migrate(tenant_external_id, settings, migrations_ran) do
     platform_region = Map.get(settings, "region")
 
     with {:ok, settings} <- Database.from_settings(settings, "realtime_migrations", :stop) do
@@ -213,6 +221,7 @@ defmodule Realtime.Tenants.Migrations do
         backoff_type: settings.backoff_type,
         socket_options: settings.socket_options,
         parameters: [application_name: settings.application_name],
+        after_connect: after_connect(),
         ssl: settings.ssl
       ]
       |> Repo.with_dynamic_repo(fn repo ->
@@ -221,9 +230,23 @@ defmodule Realtime.Tenants.Migrations do
         start_time = Telemetry.start(event, metadata)
 
         try do
-          opts = [all: true, prefix: "realtime", dynamic_repo: repo]
-          result = Ecto.Migrator.run(Repo, migrations(tenant_external_id), :up, opts)
-          Telemetry.stop(event, start_time, Map.put(metadata, :migrations_executed, length(result)))
+          {applied_count, migrations_executed, source} =
+            if __MODULE__.load_db_dump?(migrations_ran, repo) do
+              case load_db_dump(repo) do
+                {:ok, applied_count} -> {applied_count, applied_count, :dump}
+                {:error, _} -> run_pending_migrations(repo)
+              end
+            else
+              run_pending_migrations(repo)
+            end
+
+          metadata =
+            metadata
+            |> Map.put(:migrations_executed, migrations_executed)
+            |> Map.put(:source, source)
+
+          Telemetry.stop(event, start_time, metadata)
+          {:ok, applied_count}
         rescue
           error ->
             metadata = Map.put(metadata, :error_code, error_code(error))
@@ -247,22 +270,89 @@ defmodule Realtime.Tenants.Migrations do
   defp error_code(%DBConnection.ConnectionError{}), do: :connection_error
   defp error_code(_), do: :other
 
+  @dump_timeout 30_000
+
+  defp load_db_dump(repo) do
+    with {:ok, _} <- do_load_dump(repo) do
+      {:ok, Enum.count(migrations())}
+    else
+      {:error, reason} = e ->
+        log_error("TenantMigrationsDumpSkipped", reason)
+        e
+    end
+  end
+
+  defp run_pending_migrations(repo) do
+    opts = [all: true, prefix: "realtime", dynamic_repo: repo]
+    result = Ecto.Migrator.run(Repo, migrations(), :up, opts)
+    {Enum.count(migrations()), length(result), :migrator}
+  end
+
+  # Best-effort checking to find if it should load the DB dump or fallback to sequential migrations.
+  # `migrations_ran` can be stale on DB restore or cluster migration operations,
+  # so it needs to also query `realtime.schema_migrations` to make sure.
+  @doc false
+  def load_db_dump?(0 = _migrations_ran, repo) do
+    Application.get_env(:realtime, :load_tenant_db_dump, true) and schema_migrations_empty?(repo)
+  end
+
+  def load_db_dump?(_migrations_ran, _repo), do: false
+
+  @doc false
+  def schema_migrations_empty?(repo) do
+    case Repo.query("SELECT count(*)::int FROM realtime.schema_migrations", [], dynamic_repo: repo) do
+      {:ok, %{rows: [[0]]}} ->
+        true
+
+      {:ok, %{rows: [[_count]]}} ->
+        false
+
+      {:error, %Postgrex.Error{postgres: %{code: :undefined_table}}} ->
+        true
+
+      {:error, error} ->
+        log_warning("TenantMigrationsRanCheckFailed", error)
+        false
+    end
+  end
+
+  defp do_load_dump(repo) do
+    with {:ok, major} <- fetch_pg_major(repo),
+         {:ok, path} <- dump_path(major),
+         {:ok, sql} <- File.read(path) do
+      Repo.query(sql, [], dynamic_repo: repo, query_type: :text, timeout: @dump_timeout)
+    end
+  end
+
+  defp fetch_pg_major(repo) do
+    query = """
+    SELECT current_setting('server_version_num'), EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'orioledb')
+    """
+
+    case Repo.query(query, [], dynamic_repo: repo, timeout: @dump_timeout) do
+      {:ok, %{rows: [[_version_num, true]]}} -> {:error, :orioledb_not_supported}
+      {:ok, %{rows: [[version_num, false]]}} -> {:ok, version_num |> String.to_integer() |> div(10_000)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp dump_path(major) do
+    path = Application.app_dir(:realtime, "priv/repo/tenant_db_dump_#{major}.sql")
+    if File.exists?(path), do: {:ok, path}, else: {:error, {:dump_not_found, major}}
+  end
+
   @doc """
   Returns the migrations to run.
   """
-  @spec migrations(String.t() | nil) :: [{pos_integer(), module()}]
-  def migrations(tenant_external_id \\ nil) do
-    Enum.filter(@migrations, fn {_version, module} -> migration_enabled?(module, tenant_external_id) end)
-  end
+  @spec migrations() :: [{pos_integer(), module()}]
+  def migrations, do: @migrations
 
-  defp migration_enabled?(Migrations.SetupSupabaseRealtimeAdmin, nil = _tenant_external_id) do
-    FeatureFlags.enabled?("use_supabase_realtime_admin")
-  end
+  @doc """
+  `after_connect` for the connection these migrations run on.
 
-  defp migration_enabled?(Migrations.SetupSupabaseRealtimeAdmin, tenant_external_id)
-       when is_binary(tenant_external_id) do
-    FeatureFlags.enabled?("use_supabase_realtime_admin", tenant_external_id)
-  end
-
-  defp migration_enabled?(_migration, _tenant_external_id), do: true
+  They build SQL dynamically, which Multigres' gateway refuses to forward;
+  `unsafe_connection` lets it through. A no-op on plain Postgres.
+  """
+  @spec after_connect() :: {module(), atom(), [term()]}
+  def after_connect, do: {Postgrex, :query!, ["SET multigres.unsafe_connection = on", []]}
 end

@@ -34,21 +34,9 @@ defmodule Realtime.ExtensionsTest do
       assert "db_password" in field_names
     end
 
-    test "optional contains the runtime credentials" do
-      %{required: required, optional: optional} = Extensions.db_settings("postgres_cdc_rls")
-      required_names = Enum.map(required, fn {name, _validator, _encrypt} -> name end)
-      optional_names = Enum.map(optional, fn {name, _validator, _encrypt} -> name end)
-
-      assert "db_user_realtime" in optional_names
-      assert "db_pass_realtime" in optional_names
-
-      refute "db_user_realtime" in required_names
-      refute "db_pass_realtime" in required_names
-    end
-
     test "returns empty default for unknown extension type" do
       result = Extensions.db_settings("unknown_extension")
-      assert %{default: %{}, required: [], optional: []} = result
+      assert %{default: %{}, required: []} = result
     end
   end
 end

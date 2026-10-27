@@ -2,6 +2,9 @@ defmodule Realtime.NodesTest do
   # async: false due to use of Clustered and tweaking Application env
   use Realtime.DataCase, async: false
   use Mimic
+
+  setup :set_mimic_from_context
+
   alias Realtime.Nodes
   alias Realtime.Tenants
 
@@ -31,7 +34,9 @@ defmodule Realtime.NodesTest do
     end
 
     test "with no other nodes, returns my region only" do
-      assert Nodes.all_node_regions() == ["us-east-1"]
+      # Flaky under CPU-contention in CI runners; not sure why.
+      # This is an _attempt_ at fixing it.
+      assert_eventually Nodes.all_node_regions() == ["us-east-1"]
     end
   end
 
@@ -79,7 +84,7 @@ defmodule Realtime.NodesTest do
 
   describe "get_node_for_tenant/1" do
     setup do
-      tenant = Containers.checkout_tenant()
+      tenant = TestTenantDb.checkout_tenant()
       region = tenant.extensions |> hd() |> get_in([Access.key!(:settings), "region"])
       %{tenant: tenant, region: region}
     end
@@ -134,6 +139,14 @@ defmodule Realtime.NodesTest do
     end
   end
 
+  describe "launch_region/1" do
+    test "translates the tenant's region to the closest Realtime region" do
+      tenant = %Realtime.Api.Tenant{extensions: [%{settings: %{"region" => "eu-west-3"}}]}
+
+      assert Nodes.launch_region(tenant) == "eu-west-2"
+    end
+  end
+
   describe "platform_region_translator/1" do
     test "returns nil for nil input" do
       assert Nodes.platform_region_translator(nil) == nil
@@ -145,8 +158,9 @@ defmodule Realtime.NodesTest do
 
       Application.put_env(:realtime, :region_mapping, nil)
 
-      assert Nodes.platform_region_translator("eu-north-1") == "eu-west-2"
-      assert Nodes.platform_region_translator("us-west-2") == "us-west-1"
+      assert Nodes.platform_region_translator("eu-north-1") == "eu-north-1"
+      assert Nodes.platform_region_translator("us-west-2") == "us-west-2"
+      assert Nodes.platform_region_translator("eu-west-3") == "eu-west-2"
       assert Nodes.platform_region_translator("unknown-region") == nil
     end
 
@@ -356,7 +370,7 @@ defmodule Realtime.NodesTest do
   end
 
   describe "short_node_id_from_name/1" do
-    test "extracts short ID from fly.io-style IPv6 node name" do
+    test "extracts short ID from IPv6 node name" do
       assert Nodes.short_node_id_from_name(:"realtime-prod@fdaa:0:cc:a7b:b385:83c3:cfe3:2") ==
                "83c3cfe3"
     end

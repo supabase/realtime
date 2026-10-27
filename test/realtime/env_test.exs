@@ -9,6 +9,34 @@ defmodule Realtime.EnvTest do
     %{env: env}
   end
 
+  describe "get_float/2" do
+    test "returns the default when env is unset", %{env: env} do
+      assert Env.get_float(env, 0.5) == 0.5
+    end
+
+    test "returns nil when env is unset and no default is provided", %{env: env} do
+      assert Env.get_float(env) == nil
+    end
+
+    test "parses float and integer env values", %{env: env} do
+      System.put_env(env, "0.01")
+      assert Env.get_float(env, 0.0) == 0.01
+
+      System.put_env(env, "1")
+      assert Env.get_float(env, 0.0) == 1.0
+    end
+
+    test "raises on invalid float env values", %{env: env} do
+      System.put_env(env, "lots")
+
+      assert_raise ArgumentError, ~r/expected a Float/, fn -> Env.get_float(env, 0.0) end
+    end
+
+    test "raises when the default is not a float or nil", %{env: env} do
+      assert_raise ArgumentError, ~r/expected either Float or empty/, fn -> Env.get_float(env, 1) end
+    end
+  end
+
   describe "get_integer/2" do
     test "returns the default when env is unset", %{env: env} do
       assert Env.get_integer(env, 10) == 10
@@ -136,6 +164,47 @@ defmodule Realtime.EnvTest do
     end
   end
 
+  describe "get_key_value_list/1" do
+    test "returns an empty list when env is unset", %{env: env} do
+      assert Env.get_key_value_list(env) == []
+    end
+
+    test "returns an empty list when env is empty", %{env: env} do
+      System.put_env(env, "")
+      assert Env.get_key_value_list(env) == []
+    end
+
+    test "parses a single pair", %{env: env} do
+      System.put_env(env, "region=us-east-1")
+      assert Env.get_key_value_list(env) == [{"region", "us-east-1"}]
+    end
+
+    test "parses comma-separated pairs in order", %{env: env} do
+      System.put_env(env, "service=realtime,cluster=main")
+      assert Env.get_key_value_list(env) == [{"service", "realtime"}, {"cluster", "main"}]
+    end
+
+    test "keeps equals signs in values", %{env: env} do
+      System.put_env(env, "query=a=b")
+      assert Env.get_key_value_list(env) == [{"query", "a=b"}]
+    end
+
+    test "skips segments without an equals sign instead of raising", %{env: env} do
+      System.put_env(env, "region")
+      assert Env.get_key_value_list(env) == []
+    end
+
+    test "skips empty segments from trailing or double commas", %{env: env} do
+      System.put_env(env, "region=us-east-1,,cluster=main,")
+      assert Env.get_key_value_list(env) == [{"region", "us-east-1"}, {"cluster", "main"}]
+    end
+
+    test "trims whitespace around keys and values", %{env: env} do
+      System.put_env(env, " region = us-east-1 , cluster=main")
+      assert Env.get_key_value_list(env) == [{"region", "us-east-1"}, {"cluster", "main"}]
+    end
+  end
+
   describe "get_non_empty_binary/1" do
     test "returns nil when env is unset", %{env: env} do
       assert Env.get_non_empty_binary(env) == nil
@@ -187,6 +256,33 @@ defmodule Realtime.EnvTest do
       assert_raise FunctionClauseError, fn ->
         Env.get_list(env, "not-a-list")
       end
+    end
+  end
+
+  describe "port_available?/1" do
+    test "true for a port nothing is listening on" do
+      assert Env.port_available?(Env.unused_port())
+    end
+
+    test "false while a listener holds the port" do
+      {:ok, socket} = :gen_tcp.listen(0, [:inet, ip: {0, 0, 0, 0}, reuseaddr: true, active: false])
+      {:ok, port} = :inet.port(socket)
+      on_exit(fn -> :gen_tcp.close(socket) end)
+
+      refute Env.port_available?(port)
+    end
+
+    test "the endpoint port this run claimed is held by this run" do
+      refute Env.port_available?(TestEnv.http_port())
+    end
+  end
+
+  describe "unused_port/0" do
+    test "returns a closed port nothing can be reached on" do
+      port = Env.unused_port()
+
+      assert port in 1..65_535
+      assert {:error, :econnrefused} = :gen_tcp.connect(~c"127.0.0.1", port, [:inet, active: false], 500)
     end
   end
 end

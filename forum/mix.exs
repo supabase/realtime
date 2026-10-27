@@ -5,10 +5,11 @@ defmodule Forum.MixProject do
     [
       app: :forum,
       version: "1.0.0",
-      elixir: "~> 1.18",
+      elixir: "~> 1.19",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
-      deps: deps()
+      deps: deps(),
+      aliases: aliases()
     ]
   end
 
@@ -27,7 +28,15 @@ defmodule Forum.MixProject do
   defp deps do
     [
       {:telemetry, "~> 1.3"},
+      {:ex_hash_ring, "~> 6.0"},
+      {:snabbkaffex, "~> 0.1"},
+      {:mimic, "~> 2.0", only: :test},
       {:mix_test_watch, "~> 1.0", only: [:dev, :test], runtime: false}
     ]
+  end
+
+  defp aliases do
+    # Start distribution first
+    [test: ["cmd epmd -daemon", "test"]]
   end
 end

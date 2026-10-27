@@ -8,7 +8,10 @@ defmodule TenantConnection do
   alias Realtime.Tenants.Connect
   alias RealtimeWeb.Endpoint
 
-  def create_message(attrs, conn, opts \\ [mode: :savepoint]) do
+  # Can't use `opts \\ [mode: :savepoint]` because OrioleDB logical decoding drops
+  # INSERTs made inside a SAVEPOINT (Postgrex `mode: :savepoint`)
+  # See https://github.com/orioledb/orioledb/issues/936
+  def create_message(attrs, conn, opts \\ []) do
     message = Message.changeset(%Message{}, attrs)
 
     {:ok, result} =

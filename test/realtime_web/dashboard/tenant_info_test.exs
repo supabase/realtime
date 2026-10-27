@@ -1,14 +1,17 @@
 defmodule RealtimeWeb.Dashboard.TenantInfoTest do
-  use RealtimeWeb.ConnCase
+  use RealtimeWeb.ConnCase, async: false
   import Phoenix.LiveViewTest
   import Mimic
 
   alias Extensions.PostgresCdcRls
+  alias Realtime.Database
   alias Realtime.Nodes
   alias Realtime.Tenants.Connect
   alias Realtime.UsersCounter
 
-  setup do
+  setup :set_mimic_from_context
+
+  setup_all do
     Application.put_env(:realtime, :dashboard_auth, :basic_auth)
     Application.put_env(:realtime, :dashboard_credentials, {"user", "pass"})
 
@@ -17,10 +20,14 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
       Application.delete_env(:realtime, :dashboard_credentials)
     end)
 
-    tenant = Containers.checkout_tenant(run_migrations: true)
-    conn = using_basic_auth(build_conn(), "user", "pass")
+    tenant = TestTenantDb.checkout_tenant_unboxed(run_migrations: true)
 
-    %{tenant: tenant, conn: conn}
+    %{tenant: tenant}
+  end
+
+  setup do
+    conn = using_basic_auth(build_conn(), "user", "pass")
+    %{conn: conn}
   end
 
   test "renders lookup form", %{conn: conn} do
@@ -36,6 +43,21 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
     assert html =~ tenant.external_id
     assert html =~ tenant.name
     assert html =~ "postgres_cdc_rls"
+  end
+
+  @tag :requires_direct_connection
+  test "tenant lookup releases the postgres version connection", %{conn: conn, tenant: tenant} do
+    {:ok, _view, _html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
+
+    {:ok, settings} = Database.from_tenant(tenant, "tenant_info_test", :stop)
+    {:ok, query_conn} = Database.connect_db(settings)
+
+    assert {:ok, %{rows: [[0]]}} =
+             Postgrex.query(
+               query_conn,
+               "SELECT count(*) FROM pg_stat_activity WHERE application_name = $1",
+               ["realtime_dashboard_tenant_info"]
+             )
   end
 
   test "shows tenant info for valid external_id via form submit", %{conn: conn, tenant: tenant} do
@@ -68,12 +90,6 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
     refute html =~ "db_password"
   end
 
-  test "does not show db_pass_realtime", %{conn: conn, tenant: tenant} do
-    {:ok, _view, html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
-
-    refute html =~ "db_pass_realtime"
-  end
-
   test "shows decrypted db_host", %{conn: conn, tenant: tenant} do
     {:ok, _view, html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
 
@@ -84,6 +100,24 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
     {:ok, _view, html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
 
     assert html =~ "db_host_resolved"
+  end
+
+  test "shows feature flags section with 'no feature flags' when empty", %{conn: conn, tenant: tenant} do
+    {:ok, _view, html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
+
+    assert html =~ "Feature Flags"
+    assert html =~ "No feature flags set"
+  end
+
+  test "shows feature flags when set", %{conn: conn, tenant: tenant} do
+    {:ok, tenant} =
+      Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{feature_flags: %{"new_thing" => true}})
+
+    {:ok, _view, html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
+
+    assert html =~ "Feature Flags"
+    assert html =~ "new_thing"
+    assert html =~ "true"
   end
 
   test "shows runtime status for connect and replication", %{conn: conn, tenant: tenant} do
@@ -115,17 +149,15 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
   end
 
   describe "runtime info with mocked status" do
-    setup :set_mimic_global
-
     test "shows connect, replication and cdc_rls as up with their node", %{conn: conn, tenant: tenant} do
       manager = self()
       conn_pid = self()
       replication = self()
       connect = self()
 
-      stub(Connect, :whereis, fn _ -> connect end)
-      stub(Connect, :replication_status, fn _ -> {:ok, replication} end)
-      stub(PostgresCdcRls, :get_manager_conn, fn _ -> {:ok, manager, conn_pid} end)
+      expect(Connect, :whereis, 2, fn _ -> connect end)
+      expect(Connect, :replication_status, 2, fn _ -> {:ok, replication} end)
+      expect(PostgresCdcRls, :get_manager_conn, 2, fn _ -> {:ok, manager, conn_pid} end)
 
       {:ok, _view, html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
 
@@ -139,9 +171,9 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
     test "shows replication and cdc_rls as not connected when down", %{conn: conn, tenant: tenant} do
       connect = self()
 
-      stub(Connect, :whereis, fn _ -> connect end)
-      stub(Connect, :replication_status, fn _ -> {:error, :not_connected} end)
-      stub(PostgresCdcRls, :get_manager_conn, fn _ -> {:error, :wait} end)
+      expect(Connect, :whereis, 2, fn _ -> connect end)
+      expect(Connect, :replication_status, 2, fn _ -> {:error, :not_connected} end)
+      expect(PostgresCdcRls, :get_manager_conn, 2, fn _ -> {:error, :wait} end)
 
       {:ok, _view, html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
 
@@ -176,6 +208,36 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
       assert {"eu-west-2", "1", "5"} in rows
       # cluster total comes straight from UsersCounter.tenant_users/1
       assert {"total (cluster)", "", "12"} in rows
+    end
+  end
+
+  describe "shutdown actions" do
+    test "shutdown_connect button calls Connect.shutdown/1", %{conn: conn, tenant: tenant} do
+      test_pid = self()
+      expect(Connect, :shutdown, fn ext_id -> send(test_pid, {:connect_shutdown, ext_id}) && :ok end)
+
+      {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
+
+      html = view |> element("button[phx-click='shutdown_connect']") |> render_click()
+
+      assert_receive {:connect_shutdown, ext_id}
+      assert ext_id == tenant.external_id
+      assert html =~ "Attempting to shutdown Connect for #{tenant.external_id}"
+    end
+
+    test "shutdown_cdc_rls button calls PostgresCdcRls.handle_stop/2", %{conn: conn, tenant: tenant} do
+      test_pid = self()
+
+      expect(PostgresCdcRls, :handle_stop, fn ext_id, timeout -> send(test_pid, {:cdc_stop, ext_id, timeout}) && :ok end)
+
+      {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
+
+      html = view |> element("button[phx-click='shutdown_cdc_rls']") |> render_click()
+
+      assert_receive {:cdc_stop, ext_id, timeout}
+      assert ext_id == tenant.external_id
+      assert is_integer(timeout)
+      assert html =~ "Attempting to shutdown Postgres Replication (CDC RLS) for #{tenant.external_id}"
     end
   end
 

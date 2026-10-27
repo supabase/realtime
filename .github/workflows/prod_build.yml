@@ -4,6 +4,7 @@ on:
     branches:
       - "main"
     paths:
+      - "forum/lib/**"
       - "lib/**"
       - "config/**"
       - "priv/**"
@@ -18,6 +19,8 @@ on:
 jobs:
   release:
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: read
     outputs:
       published: ${{ steps.semantic.outputs.new_release_published }}
       version: ${{ steps.semantic.outputs.new_release_version }}
@@ -28,7 +31,7 @@ jobs:
 
       - name: Generate token
         id: app-token
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ secrets.GH_APP_ID }}
           private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
@@ -48,6 +51,8 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     if: needs.release.outputs.published == 'true'
     timeout-minutes: 120
+    permissions:
+      contents: read
     env:
       arch: amd64
     outputs:
@@ -87,6 +92,8 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404-arm
     if: needs.release.outputs.published == 'true'
     timeout-minutes: 120
+    permissions:
+      contents: read
     env:
       arch: arm64
     outputs:
@@ -168,7 +175,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Mirror to ECR
-        uses: akhilerm/tag-push-action@f35ff2cb99d407368b5c727adbcc14a2ed81d509 # v2.2.0
+        uses: akhilerm/tag-push-action@eadeefebd39db8a47e146115649adae1fce576a6 # v2.3.0
         with:
           src: docker.io/supabase/realtime:v${{ needs.release.outputs.version }}
           dst: |
@@ -178,6 +185,7 @@ jobs:
   dispatch-deploy:
     needs: [release, merge_manifest]
     if: needs.release.outputs.published == 'true'
+    permissions: {}
     uses: ./.github/workflows/dispatch_deploy.yml
     secrets: inherit
     with:
@@ -186,6 +194,8 @@ jobs:
   update-branch-name:
     needs: [release, docker_x86_release, docker_arm_release, merge_manifest]
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: write
     steps:
       - name: Checkout branch
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

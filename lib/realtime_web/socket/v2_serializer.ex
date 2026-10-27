@@ -127,6 +127,17 @@ defmodule RealtimeWeb.Socket.V2Serializer do
     {:socket_push, :binary, bin}
   end
 
+  # Reuse fastlane! @user_broadcast framing which is the only decodable format by SDK
+  def encode!(%Message{payload: {user_event, :binary, user_payload, metadata}, topic: topic}) do
+    fastlane!(%UserBroadcast{
+      topic: topic,
+      user_event: user_event,
+      user_payload: user_payload,
+      user_payload_encoding: :binary,
+      metadata: metadata
+    })
+  end
+
   def encode!(%Message{payload: %{}} = msg) do
     data = [msg.join_ref, msg.ref, msg.topic, msg.event, msg.payload]
     {:socket_push, :text, Phoenix.json_library().encode_to_iodata!(data)}

@@ -11,12 +11,16 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
 
   alias Phoenix.Socket.Message
   alias Postgrex
+  alias Realtime.Api
   alias Realtime.Database
+  alias Realtime.FeatureFlags
   alias Realtime.Integration.WebsocketClient
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.ReplicationConnection
 
   @moduletag :capture_log
+
+  @fanout_event [:realtime, :broadcast, :fanout, :node_delivery]
 
   setup [:checkout_tenant_and_connect]
 
@@ -37,8 +41,36 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
       assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 500
     end
 
+    @tag serializer: RealtimeWeb.Socket.V2Serializer
+    test "a V2 json user broadcast with an invalid payload is dropped for a V1 subscriber", %{tenant: tenant} do
+      topic = "realtime:any"
+      config = %{broadcast: %{self: false}, private: false}
+
+      {v2_sender, _} = get_connection(tenant, RealtimeWeb.Socket.V2Serializer)
+      {v1_receiver, _} = get_connection(tenant, Phoenix.Socket.V1.JSONSerializer)
+
+      WebsocketClient.join(v2_sender, topic, %{config: config})
+      WebsocketClient.join(v1_receiver, topic, %{config: config})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+
+      WebsocketClient.send_user_broadcast(v2_sender, topic, "evt", "not json at all", encoding: :json)
+      refute_receive %Message{event: "broadcast"}, 500
+
+      # valid JSON still delivers
+      WebsocketClient.send_user_broadcast(v2_sender, topic, "evt", ~s|{"a":1}|, encoding: :json)
+
+      assert_receive %Message{
+                       event: "broadcast",
+                       topic: ^topic,
+                       payload: %{"event" => "evt", "payload" => %{"a" => 1}, "type" => "broadcast"}
+                     },
+                     1000
+    end
+
     test "broadcast to another tenant does not get mixed up", %{tenant: tenant, serializer: serializer} do
-      other_tenant = Containers.checkout_tenant(run_migrations: true)
+      other_tenant = TestTenantDb.checkout_tenant(run_migrations: true)
 
       Realtime.Tenants.Cache.update_cache(other_tenant)
 
@@ -192,6 +224,32 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
       assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 500
     end
 
+    @tag policies: [:authenticated_read_broadcast_and_presence]
+    test "private broadcast with ack and no write permissions replies with an unauthorized error", %{
+      tenant: tenant,
+      topic: topic,
+      serializer: serializer
+    } do
+      config = %{broadcast: %{self: true, ack: true}, private: true}
+      topic = "realtime:#{topic}"
+
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      WebsocketClient.join(socket, topic, %{config: config})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+
+      payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+      WebsocketClient.send_event(socket, topic, "broadcast", payload)
+
+      assert_receive %Message{
+                       topic: ^topic,
+                       event: "phx_reply",
+                       payload: %{"response" => %{"error" => "unauthorized"}, "status" => "error"}
+                     },
+                     500
+
+      refute_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 500
+    end
+
     @tag policies: []
     test "private broadcast with valid channel and no read permissions won't join", %{
       tenant: tenant,
@@ -246,11 +304,475 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
           :syn.update_registry(Connect, tenant.external_id, fn _pid, meta -> %{meta | conn: nil} end)
           payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
           WebsocketClient.send_event(service_role_socket, topic, "broadcast", payload)
-          # Waiting more than 15 seconds as this is the amount of time we will wait for the Connection to be ready
-          refute_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 16000
+          # Wait past the (test-configured) connection-ready timeout to confirm nothing is delivered
+          refute_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 3000
         end)
 
-      assert log =~ "UnableToHandleBroadcast"
+      assert log =~ "UnableToConnectToProject"
+    end
+  end
+
+  describe "broadcast persistence" do
+    setup [:rls_context]
+
+    setup %{tenant: tenant} do
+      enable_broadcast_persistence_flag!(tenant)
+      :ok
+    end
+
+    test "public broadcast is delivered but not stored", %{
+      tenant: tenant,
+      topic: topic,
+      db_conn: db_conn,
+      serializer: serializer
+    } do
+      {socket, _} = get_connection(tenant, serializer)
+      config = %{broadcast: %{self: true}, private: false}
+      full_topic = "realtime:#{topic}"
+      WebsocketClient.join(socket, full_topic, %{config: config})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^full_topic}, 300
+
+      payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+      WebsocketClient.send_event(socket, full_topic, "broadcast", payload)
+
+      assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^full_topic}, 500
+
+      assert {:ok, %Postgrex.Result{rows: []}} =
+               Postgrex.query(db_conn, "SELECT id FROM realtime.messages WHERE topic = $1", [topic])
+    end
+
+    test "a broadcast on a topic matching the persistence policy is delivered and stored", %{
+      tenant: tenant,
+      db_conn: db_conn,
+      serializer: serializer
+    } do
+      allow_broadcast(db_conn)
+      allow_persistence(db_conn, "realtime.topic() LIKE 'stored:%'")
+
+      topic = "stored:#{random_string()}"
+      full_topic = "realtime:#{topic}"
+      payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      WebsocketClient.join(socket, full_topic, %{config: %{broadcast: %{self: true, ack: true}, private: true}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^full_topic}, 300
+
+      WebsocketClient.send_event(socket, full_topic, "broadcast", payload)
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       payload: %{"status" => "ok", "response" => %{"id" => id}},
+                       topic: ^full_topic
+                     },
+                     500
+
+      assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^full_topic}, 500
+
+      assert {:ok, %Postgrex.Result{rows: [[^id, ^topic]]}} =
+               Postgrex.query(db_conn, "SELECT id::text, topic FROM realtime.messages WHERE topic = $1", [topic])
+    end
+
+    @tag serializer: RealtimeWeb.Socket.V2Serializer
+    test "a binary broadcast is stored as binary_payload and replayed as a binary frame", %{
+      tenant: tenant,
+      db_conn: db_conn,
+      serializer: RealtimeWeb.Socket.V2Serializer = serializer
+    } do
+      allow_broadcast(db_conn)
+      allow_persistence(db_conn, "realtime.topic() LIKE 'stored:%'")
+
+      topic = "stored:#{random_string()}"
+      full_topic = "realtime:#{topic}"
+      binary = <<0xCA, 0xFE, 0xBA, 0xBE, 0x00, 0x11>>
+      event = "my-binary-event"
+
+      {sender, _} = get_connection(tenant, serializer, role: "authenticated")
+      WebsocketClient.join(sender, full_topic, %{config: %{broadcast: %{self: true, ack: true}, private: true}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^full_topic}, 300
+
+      WebsocketClient.send_user_broadcast(sender, full_topic, event, binary, encoding: :binary)
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       payload: %{"status" => "ok", "response" => %{"id" => id}},
+                       topic: ^full_topic
+                     },
+                     500
+
+      assert {:ok, %Postgrex.Result{rows: [[^binary, nil]]}} =
+               Postgrex.query(db_conn, "SELECT binary_payload, payload FROM realtime.messages WHERE topic = $1", [
+                 topic
+               ])
+
+      {joiner, _} = get_connection(tenant, serializer, role: "authenticated")
+
+      WebsocketClient.join(joiner, full_topic, %{
+        config: %{private: true, broadcast: %{replay: %{limit: 10, since: 0}}}
+      })
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^full_topic}, 500
+
+      assert_receive %Message{
+                       event: "broadcast",
+                       topic: ^full_topic,
+                       payload: %{
+                         "event" => ^event,
+                         "payload" => {:binary, ^binary},
+                         "type" => "broadcast",
+                         "meta" => %{"id" => ^id, "replayed" => true}
+                       }
+                     },
+                     1_000
+    end
+
+    test "a stored broadcast is replayed to a client joining later", %{
+      tenant: tenant,
+      db_conn: db_conn,
+      serializer: serializer
+    } do
+      allow_broadcast(db_conn)
+      allow_persistence(db_conn, "realtime.topic() LIKE 'stored:%'")
+
+      topic = "stored:#{random_string()}"
+      full_topic = "realtime:#{topic}"
+      event = "TEST"
+      user_payload = %{"msg" => 1}
+      payload = %{"event" => event, "payload" => user_payload, "type" => "broadcast"}
+
+      {sender, _} = get_connection(tenant, serializer, role: "authenticated")
+      WebsocketClient.join(sender, full_topic, %{config: %{broadcast: %{self: true, ack: true}, private: true}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^full_topic}, 300
+
+      WebsocketClient.send_event(sender, full_topic, "broadcast", payload)
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       payload: %{"status" => "ok", "response" => %{"id" => id}},
+                       topic: ^full_topic
+                     },
+                     500
+
+      assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^full_topic}, 500
+
+      {joiner, _} = get_connection(tenant, serializer, role: "authenticated")
+
+      WebsocketClient.join(joiner, full_topic, %{
+        config: %{private: true, broadcast: %{replay: %{limit: 10, since: 0}}}
+      })
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^full_topic}, 500
+
+      assert_receive %Message{
+                       event: "broadcast",
+                       topic: ^full_topic,
+                       payload: %{
+                         "event" => ^event,
+                         "payload" => ^user_payload,
+                         "type" => "broadcast",
+                         "meta" => %{"id" => ^id, "replayed" => true}
+                       }
+                     },
+                     1_000
+    end
+
+    test "a broadcast on a topic not matching the persistence policy is delivered but not stored", %{
+      tenant: tenant,
+      db_conn: db_conn,
+      serializer: serializer
+    } do
+      allow_broadcast(db_conn)
+      allow_persistence(db_conn, "realtime.topic() LIKE 'stored:%'")
+
+      topic = "other:#{random_string()}"
+      full_topic = "realtime:#{topic}"
+      payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      WebsocketClient.join(socket, full_topic, %{config: %{broadcast: %{self: true, ack: true}, private: true}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^full_topic}, 300
+
+      WebsocketClient.send_event(socket, full_topic, "broadcast", payload)
+      assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^full_topic}, 500
+
+      assert {:ok, %Postgrex.Result{rows: []}} =
+               Postgrex.query(db_conn, "SELECT id FROM realtime.messages WHERE topic = $1", [topic])
+    end
+
+    test "dropping the persistence policy stops new broadcasts from being stored", %{
+      tenant: tenant,
+      db_conn: db_conn,
+      serializer: serializer
+    } do
+      allow_broadcast(db_conn)
+      allow_persistence(db_conn, "realtime.topic() LIKE 'stored:%'")
+
+      topic = "stored:#{random_string()}"
+      full_topic = "realtime:#{topic}"
+      payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      WebsocketClient.join(socket, full_topic, %{config: %{broadcast: %{self: true, ack: true}, private: true}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^full_topic}, 300
+
+      WebsocketClient.send_event(socket, full_topic, "broadcast", payload)
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok", "response" => %{"id" => _id}}}, 500
+      assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^full_topic}, 500
+
+      assert {:ok, %Postgrex.Result{rows: [[1]]}} =
+               Postgrex.query(db_conn, "SELECT count(*)::int FROM realtime.messages WHERE topic = $1", [topic])
+
+      Postgrex.query!(db_conn, "DROP POLICY persist_store ON realtime.messages", [])
+
+      {socket2, _} = get_connection(tenant, serializer, role: "authenticated")
+      WebsocketClient.join(socket2, full_topic, %{config: %{broadcast: %{self: true, ack: true}, private: true}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^full_topic}, 300
+
+      WebsocketClient.send_event(socket2, full_topic, "broadcast", payload)
+      assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^full_topic}, 500
+
+      assert {:ok, %Postgrex.Result{rows: [[1]]}} =
+               Postgrex.query(db_conn, "SELECT count(*)::int FROM realtime.messages WHERE topic = $1", [topic])
+    end
+  end
+
+  describe "broadcast replay" do
+    setup [:rls_context]
+
+    @tag policies: [:authenticated_read_broadcast_and_presence]
+    test "replays messages sent in one transaction in the order they were sent", %{
+      tenant: tenant,
+      topic: topic,
+      db_conn: db_conn,
+      serializer: serializer
+    } do
+      # realtime.send leaves inserted_at to the column default, and replay orders by inserted_at, so
+      # the default has to tell apart messages that share a transaction.
+      {:ok, _} =
+        Postgrex.transaction(db_conn, fn conn ->
+          for value <- 1..5 do
+            Postgrex.query!(
+              conn,
+              "SELECT realtime.send(jsonb_build_object('value', $1::int), 'event', $2::text, TRUE::bool)",
+              [value, topic]
+            )
+          end
+        end)
+
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, topic, %{config: %{private: true, broadcast: %{replay: %{limit: 10, since: 0}}}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+
+      replayed =
+        for _ <- 1..5 do
+          assert_receive %Message{event: "broadcast", topic: ^topic, payload: %{"payload" => %{"value" => value}}}, 1000
+          value
+        end
+
+      assert replayed == [1, 2, 3, 4, 5]
+    end
+
+    @tag policies: [:authenticated_read_broadcast_and_presence], serializer: RealtimeWeb.Socket.V2Serializer
+    test "replays binary messages as binary frames", %{
+      tenant: tenant,
+      topic: topic,
+      serializer: RealtimeWeb.Socket.V2Serializer = serializer
+    } do
+      binary = <<0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0xFF>>
+      event = "bin"
+
+      %{id: id} =
+        message_fixture(tenant, %{
+          "event" => event,
+          "extension" => "broadcast",
+          "topic" => topic,
+          "private" => true,
+          "binary_payload" => binary
+        })
+
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, topic, %{config: %{private: true, broadcast: %{replay: %{limit: 10, since: 0}}}})
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       payload: %{"status" => "ok"},
+                       topic: ^topic,
+                       join_ref: join_ref
+                     },
+                     500
+
+      assert is_binary(join_ref)
+
+      assert_receive %Message{
+                       event: "broadcast",
+                       topic: ^topic,
+                       join_ref: nil,
+                       payload: %{
+                         "event" => ^event,
+                         "payload" => {:binary, ^binary},
+                         "type" => "broadcast",
+                         "meta" => %{"id" => ^id, "replayed" => true}
+                       }
+                     },
+                     1_000
+    end
+
+    @tag policies: [:authenticated_read_broadcast_and_presence], serializer: RealtimeWeb.Socket.V2Serializer
+    test "replays binary and json messages in insertion order", %{
+      tenant: tenant,
+      topic: topic,
+      serializer: RealtimeWeb.Socket.V2Serializer = serializer
+    } do
+      binary = <<1, 2, 3>>
+      value = random_string()
+
+      %{id: binary_id} =
+        message_fixture(tenant, %{
+          "event" => "bin",
+          "extension" => "broadcast",
+          "topic" => topic,
+          "private" => true,
+          "binary_payload" => binary
+        })
+
+      %{id: json_id} =
+        message_fixture(tenant, %{
+          "event" => "json",
+          "extension" => "broadcast",
+          "topic" => topic,
+          "private" => true,
+          "payload" => %{"value" => value}
+        })
+
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, topic, %{config: %{private: true, broadcast: %{replay: %{limit: 10, since: 0}}}})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+
+      assert_receive %Message{
+                       event: "broadcast",
+                       topic: ^topic,
+                       payload: %{
+                         "event" => "bin",
+                         "payload" => {:binary, ^binary},
+                         "type" => "broadcast",
+                         "meta" => %{"id" => ^binary_id, "replayed" => true}
+                       }
+                     },
+                     1000
+
+      assert_receive %Message{
+                       event: "broadcast",
+                       topic: ^topic,
+                       payload: %{
+                         "event" => "json",
+                         "payload" => %{"value" => ^value},
+                         "type" => "broadcast",
+                         "meta" => %{"id" => ^json_id, "replayed" => true}
+                       }
+                     },
+                     1000
+    end
+
+    @tag policies: [:authenticated_read_broadcast_and_presence], serializer: Phoenix.Socket.V1.JSONSerializer
+    test "binary messages are skipped on V1 sockets", %{
+      tenant: tenant,
+      topic: topic,
+      serializer: Phoenix.Socket.V1.JSONSerializer = serializer
+    } do
+      value = random_string()
+
+      message_fixture(tenant, %{
+        "event" => "bin",
+        "extension" => "broadcast",
+        "topic" => topic,
+        "private" => true,
+        "binary_payload" => <<1, 2, 3>>
+      })
+
+      %{id: json_id} =
+        message_fixture(tenant, %{
+          "event" => "json",
+          "extension" => "broadcast",
+          "topic" => topic,
+          "private" => true,
+          "payload" => %{"value" => value}
+        })
+
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, topic, %{config: %{private: true, broadcast: %{replay: %{limit: 10, since: 0}}}})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+
+      assert_receive %Message{
+                       event: "broadcast",
+                       topic: ^topic,
+                       payload: %{
+                         "event" => "json",
+                         "payload" => %{"value" => ^value},
+                         "meta" => %{"id" => ^json_id, "replayed" => true}
+                       }
+                     },
+                     1000
+
+      refute_receive %Message{event: "broadcast", payload: %{"event" => "bin"}}, 500
+    end
+  end
+
+  describe "broadcast fan-out telemetry" do
+    setup [:rls_context, :attach_fanout_telemetry]
+
+    test "a broadcast sent by a connected client is measured locally with hit=true", %{
+      tenant: tenant,
+      serializer: serializer,
+      fanout_ref: ref
+    } do
+      external_id = tenant.external_id
+      {socket, _} = get_connection(tenant, serializer)
+      config = %{broadcast: %{self: true}, private: false}
+      topic = "realtime:any"
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+
+      payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+      WebsocketClient.send_event(socket, topic, "broadcast", payload)
+
+      assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 500
+
+      # The sending node dispatches locally without going through the Worker, but must still
+      # emit the fan-out metric. hit=true because the node holds the client's connection.
+      assert_receive {@fanout_event, ^ref, %{local_tenant_users: count}, %{tenant: ^external_id, hit: true}}, 500
+      assert count >= 1
+    end
+
+    test "a broadcast with no local subscribers is measured locally with hit=false", %{
+      tenant: tenant,
+      topic: topic,
+      db_conn: db_conn,
+      fanout_ref: ref
+    } do
+      external_id = tenant.external_id
+      assert ReplicationConnection.ready?(external_id)
+
+      # No socket is connected for this tenant, so the publishing node holds no connection -> hit=false.
+      value = random_string()
+      event = random_string()
+
+      Postgrex.query!(
+        db_conn,
+        "SELECT realtime.send (json_build_object ('value', $1 :: text)::jsonb, $2 :: text, $3 :: text, FALSE::bool);",
+        [value, event, topic]
+      )
+
+      assert_receive {@fanout_event, ^ref, %{local_tenant_users: 0}, %{tenant: ^external_id, hit: false}}, 2000
     end
   end
 
@@ -513,6 +1035,10 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
     end
   end
 
+  defp attach_fanout_telemetry(_context) do
+    %{fanout_ref: :telemetry_test.attach_event_handlers(self(), [@fanout_event])}
+  end
+
   defp setup_trigger(%{tenant: tenant, topic: topic}) do
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
     random_name = String.downcase("test_#{random_string()}")
@@ -553,5 +1079,40 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
     end)
 
     %{table_name: random_name, db_conn: db_conn}
+  end
+
+  @test_namespaces "(realtime.topic() LIKE 'stored:%' OR realtime.topic() LIKE 'other:%')"
+
+  defp allow_broadcast(db_conn) do
+    create_message_policy(db_conn, "persist_read", "FOR SELECT TO authenticated USING #{@test_namespaces}")
+
+    create_message_policy(
+      db_conn,
+      "persist_send",
+      "FOR INSERT TO authenticated WITH CHECK (realtime.messages.extension = 'broadcast' AND #{@test_namespaces})"
+    )
+  end
+
+  defp allow_persistence(db_conn, check_expr) do
+    create_message_policy(
+      db_conn,
+      "persist_store",
+      "FOR INSERT TO authenticated WITH CHECK (realtime.messages.extension = 'persistence' AND #{check_expr})"
+    )
+  end
+
+  defp create_message_policy(db_conn, name, definition) do
+    Postgrex.query!(db_conn, "CREATE POLICY #{name} ON realtime.messages #{definition}", [])
+  end
+
+  # Enables the `broadcast_persistence` flag for real: the flag is created and pushed into the local
+  # FeatureFlags cache so the channel and replication connection processes read it synchronously, and
+  # torn down afterwards so it does not leak into other tests via the shared in-memory cache.
+  defp enable_broadcast_persistence_flag!(tenant) do
+    {:ok, flag} = Api.upsert_feature_flag(%{name: "broadcast_persistence", enabled: false})
+    FeatureFlags.Cache.update_cache(flag)
+    {:ok, tenant} = FeatureFlags.set_tenant_flag("broadcast_persistence", tenant.external_id, true)
+    Realtime.Tenants.Cache.update_cache(tenant)
+    on_exit(fn -> FeatureFlags.Cache.invalidate_cache("broadcast_persistence") end)
   end
 end

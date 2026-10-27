@@ -3,7 +3,16 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
   use RealtimeWeb.ConnCase, async: false
   use Mimic
 
+  setup :set_mimic_from_context
+
   import ExUnit.CaptureLog
+
+  # Booting a peer node is expensive (~seconds) and generic across these tests, so start one
+  # shared node for the whole module and reuse it. async: false already serializes the module.
+  setup_all do
+    {:ok, node} = Clustered.start()
+    %{node: node}
+  end
 
   alias Realtime.Database
   alias Realtime.Tenants
@@ -35,7 +44,16 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
         Authorization.get_write_authorizations(
           policies,
           context.db_conn,
-          context.authorization_context
+          context.authorization_context,
+          :broadcast
+        )
+
+      {:ok, policies} =
+        Authorization.get_write_authorizations(
+          policies,
+          context.db_conn,
+          context.authorization_context,
+          :presence
         )
 
       assert %Policies{
@@ -63,7 +81,16 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
         Authorization.get_write_authorizations(
           policies,
           context.db_conn,
-          context.authorization_context
+          context.authorization_context,
+          :broadcast
+        )
+
+      {:ok, policies} =
+        Authorization.get_write_authorizations(
+          policies,
+          context.db_conn,
+          context.authorization_context,
+          :presence
         )
 
       assert %Policies{
@@ -81,7 +108,7 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
         Authorization.get_read_authorizations(%Policies{}, db_conn, context.authorization_context)
 
       {:error, :increase_connection_pool} =
-        Authorization.get_write_authorizations(%Policies{}, db_conn, context.authorization_context)
+        Authorization.get_write_authorizations(%Policies{}, db_conn, context.authorization_context, :broadcast)
     end
 
     @tag role: "anon", policies: []
@@ -116,7 +143,7 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
         capture_log(fn ->
           for _ <- 1..6 do
             {:error, :increase_connection_pool} =
-              Authorization.get_write_authorizations(%Policies{}, pid, context.authorization_context)
+              Authorization.get_write_authorizations(%Policies{}, pid, context.authorization_context, :broadcast)
           end
 
           rate_counter = Realtime.Tenants.authorization_errors_per_second_rate(context.tenant)
@@ -124,7 +151,7 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
 
           for _ <- 1..10 do
             {:error, :increase_connection_pool} =
-              Authorization.get_write_authorizations(%Policies{}, pid, context.authorization_context)
+              Authorization.get_write_authorizations(%Policies{}, pid, context.authorization_context, :broadcast)
           end
         end)
 
@@ -136,19 +163,10 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
   describe "database error" do
     @tag role: "authenticated",
          policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence],
+         db_queue_target: 50,
          timeout: :timer.minutes(1)
     test "handles small pool size", context do
-      task =
-        Task.async(fn ->
-          :erpc.call(node(context.db_conn), Postgrex, :query!, [
-            context.db_conn,
-            "SELECT pg_sleep(19)",
-            [],
-            [timeout: :timer.seconds(20)]
-          ])
-        end)
-
-      Process.sleep(100)
+      TestHelpers.hold_connections!(context.db_conn)
 
       log =
         capture_log(fn ->
@@ -168,7 +186,8 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
                        Authorization.get_write_authorizations(
                          %Policies{},
                          context.db_conn,
-                         context.authorization_context
+                         context.authorization_context,
+                         :broadcast
                        )
             end)
 
@@ -181,8 +200,6 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
 
       assert log =~
                "project=#{external_id} external_id=#{external_id} [critical] IncreaseConnectionPool: Too many database timeouts"
-
-      Task.await(task, :timer.seconds(30))
     end
 
     @tag role: "authenticated",
@@ -199,7 +216,8 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
                Authorization.get_write_authorizations(
                  %Policies{},
                  context.db_conn,
-                 context.authorization_context
+                 context.authorization_context,
+                 :presence
                )
 
       assert {:error, :rls_policy_error, %Postgrex.Error{}} =
@@ -213,20 +231,24 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
                Authorization.get_write_authorizations(
                  %Policies{},
                  context.db_conn,
-                 context.authorization_context
+                 context.authorization_context,
+                 :presence
                )
 
       assert {:error, :rls_policy_error, %Postgrex.Error{}} =
                Authorization.get_write_authorizations(
                  %Policies{},
                  context.db_conn,
-                 context.authorization_context
+                 context.authorization_context,
+                 :presence
                )
     end
   end
 
-  defp remote_rls_context(context) do
-    tenant = Containers.checkout_tenant_unboxed(run_migrations: true)
+  defp remote_rls_context(%{node: node} = context) do
+    tenant =
+      TestTenantDb.checkout_tenant_unboxed(run_migrations: true)
+      |> maybe_set_queue_target(Map.get(context, :db_queue_target))
 
     {:ok, local_db_conn} = Database.connect(tenant, "realtime_test", :stop)
     topic = random_string()
@@ -247,7 +269,6 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
     Realtime.Tenants.create_messages_partitions(local_db_conn)
     create_rls_policies(local_db_conn, context.policies, %{topic: topic})
 
-    {:ok, node} = Clustered.start()
     region = Tenants.region(tenant)
     {:ok, db_conn} = :erpc.call(node, Connect, :connect, [tenant.external_id, region])
 
@@ -260,5 +281,29 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
       node: node,
       authorization_context: authorization_context
     }
+  end
+
+  # Writing extensions back re-encrypts the credential fields, so they have to go in as
+  # plaintext or the next connection attempt resolves a ciphertext as a hostname.
+  defp maybe_set_queue_target(tenant, nil), do: tenant
+
+  defp maybe_set_queue_target(tenant, target) do
+    extensions =
+      Enum.map(tenant.extensions, fn extension ->
+        settings =
+          extension.settings
+          |> Database.decrypt_settings()
+          |> Map.put("db_queue_target", target)
+
+        %{"type" => extension.type, "settings" => settings}
+      end)
+
+    # The tenant row was created outside the sandbox, so update it outside too.
+    {:ok, tenant} =
+      Ecto.Adapters.SQL.Sandbox.unboxed_run(Realtime.Repo, fn ->
+        Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{extensions: extensions})
+      end)
+
+    tenant
   end
 end

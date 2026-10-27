@@ -8,12 +8,14 @@ defmodule RealtimeWeb.Channels.Payloads.Config do
   alias RealtimeWeb.Channels.Payloads.Broadcast
   alias RealtimeWeb.Channels.Payloads.Presence
   alias RealtimeWeb.Channels.Payloads.PostgresChange
+  alias RealtimeWeb.Channels.Payloads.PostgresChangesOptions
   alias RealtimeWeb.Channels.Payloads.FlexibleBoolean
 
   embedded_schema do
     embeds_one :broadcast, Broadcast
     embeds_one :presence, Presence
     embeds_many :postgres_changes, PostgresChange
+    embeds_one :postgres_changes_options, PostgresChangesOptions
     field :private, FlexibleBoolean, default: false
   end
 
@@ -32,5 +34,6 @@ defmodule RealtimeWeb.Channels.Payloads.Config do
     |> cast_embed(:broadcast, invalid_message: "unable to parse, expected a map")
     |> cast_embed(:presence, invalid_message: "unable to parse, expected a map")
     |> cast_embed(:postgres_changes, invalid_message: "unable to parse, expected an array of maps")
+    |> cast_embed(:postgres_changes_options, invalid_message: "unable to parse, expected a map")
   end
 end

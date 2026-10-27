@@ -75,10 +75,11 @@ defmodule Realtime.RateCounterTest do
       GenCounter.add(args.id, 10)
 
       assert_receive {
-        [:realtime, :rate_counter, :custom, :new_event],
-        %{sum: 10, limit: 123},
-        %{id: ^id, tenant: "abc"}
-      }
+                       [:realtime, :rate_counter, :custom, :new_event],
+                       %{sum: 10, limit: 123},
+                       %{id: ^id, tenant: "abc"}
+                     },
+                     1_000
     end
 
     test "raise error when limit is specified without measurement" do
@@ -185,9 +186,11 @@ defmodule Realtime.RateCounterTest do
       # Splitting by the error message returns the error message and the rest of the log only
       assert length(String.split(log, "ErrorMessage: Reason")) == 2
 
-      Process.sleep(400)
-
-      assert {:ok, %RateCounter{limit: %{triggered: false}}} = RateCounter.get(args)
+      # The limit clears itself on a later tick.
+      assert_eventually({:ok, %RateCounter{limit: %{triggered: false}}} = RateCounter.get(args),
+        timeout: 1_000,
+        interval: 20
+      )
     end
 
     test "starts a new rate counter with sum limit to log" do
@@ -239,9 +242,11 @@ defmodule Realtime.RateCounterTest do
       # Splitting by the error message returns the error message and the rest of the log only
       assert length(String.split(log, "ErrorMessage: Reason")) == 2
 
-      Process.sleep(600)
-
-      assert {:ok, %RateCounter{sum: 0, limit: %{triggered: false}}} = RateCounter.get(args)
+      # The bucket drains and the limit clears on later ticks.
+      assert_eventually({:ok, %RateCounter{sum: 0, limit: %{triggered: false}}} = RateCounter.get(args),
+        timeout: 2_000,
+        interval: 20
+      )
     end
 
     test "reset counter if GenCounter already had something" do
@@ -263,11 +268,11 @@ defmodule Realtime.RateCounterTest do
       {:ok, pid} = RateCounter.new(args, idle_shutdown: 100)
 
       Process.monitor(pid)
-      assert_receive {:DOWN, _ref, :process, ^pid, :normal}, 200
+      assert_receive {:DOWN, _ref, :process, ^pid, :normal}, 1_000
       # Cache has not expired yet
       assert {:ok, %RateCounter{}} = Cachex.get(RateCounter, args.id)
-      Process.sleep(2000)
-      assert {:ok, nil} = Cachex.get(RateCounter, args.id)
+      # ...and is evicted once its TTL elapses.
+      assert_eventually {:ok, nil} = Cachex.get(RateCounter, args.id), timeout: 5_000, interval: 100
 
       # Ok new RateCounter automatically started now
       assert {:ok, %RateCounter{}} = RateCounter.get(args)
@@ -385,6 +390,23 @@ defmodule Realtime.RateCounterTest do
       args = %Args{id: {:domain, :metric, Ecto.UUID.generate()}}
 
       assert {:ok, %RateCounter{}} = RateCounter.get(args)
+    end
+  end
+
+  describe "find/1" do
+    test "gets the state of a running rate counter" do
+      args = %Args{id: {:domain, :metric, Ecto.UUID.generate()}}
+      {:ok, _} = RateCounter.new(args)
+
+      assert {:ok, %RateCounter{id: id}} = RateCounter.find(args.id)
+      assert id == args.id
+    end
+
+    test "does not start a rate counter" do
+      id = {:domain, :metric, Ecto.UUID.generate()}
+
+      assert RateCounter.find(id) == {:error, :not_found}
+      assert RateCounter.find(id) == {:error, :not_found}
     end
   end
 

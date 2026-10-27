@@ -1,10 +1,7 @@
 defmodule Realtime.Integration.RtChannel.WalBloatTest do
-  use RealtimeWeb.ConnCase,
-    async: false,
-    parameterize: [
-      %{serializer: Phoenix.Socket.V1.JSONSerializer},
-      %{serializer: RealtimeWeb.Socket.V2Serializer}
-    ]
+  # WAL-bloat detection and replication recovery are serializer-independent, so this
+  # only runs under a single serializer (the websocket encode/decode path is covered elsewhere).
+  use RealtimeWeb.ConnCase, async: false
 
   import Generators
 
@@ -17,7 +14,7 @@ defmodule Realtime.Integration.RtChannel.WalBloatTest do
 
   @moduletag :capture_log
 
-  setup [:checkout_tenant_and_connect]
+  setup [:short_replication_watchdog, :checkout_tenant_and_connect]
 
   describe "WAL bloat handling" do
     setup %{tenant: tenant} do
@@ -28,7 +25,7 @@ defmodule Realtime.Integration.RtChannel.WalBloatTest do
       %{rows: [[wal_keep_size]]} = Postgrex.query!(db_conn, "SHOW wal_keep_size", [])
       %{rows: [[max_slot_wal_keep_size]]} = Postgrex.query!(db_conn, "SHOW max_slot_wal_keep_size", [])
 
-      assert max_wal_size == "32MB"
+      assert max_wal_size == "1GB"
       assert wal_keep_size == "32MB"
       assert max_slot_wal_keep_size == "32MB"
 
@@ -73,8 +70,8 @@ defmodule Realtime.Integration.RtChannel.WalBloatTest do
     end
 
     @tag timeout: :timer.minutes(3)
-    test "track PID changes during WAL bloat creation", %{tenant: tenant, topic: topic, serializer: serializer} do
-      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+    test "track PID changes during WAL bloat creation", %{tenant: tenant, topic: topic} do
+      {socket, _} = get_connection(tenant, RealtimeWeb.Socket.V2Serializer, role: "authenticated")
       full_topic = "realtime:#{topic}"
 
       WebsocketClient.join(socket, full_topic, %{config: %{broadcast: %{self: true}, private: false}})
@@ -85,7 +82,7 @@ defmodule Realtime.Integration.RtChannel.WalBloatTest do
       original_connect_pid = Connect.whereis(tenant.external_id)
       # Replication now starts asynchronously, so wait for the slot to be active before
       # reading the replication pid (it would otherwise race and return nil).
-      await_replication_slot_active(db_conn, 30, 500)
+      await_replication_slot_active(db_conn, 15_000)
       original_db_pid = active_replication_slot_pid!(db_conn)
       original_replication_pid = ReplicationConnection.whereis(tenant.external_id)
 
@@ -98,7 +95,7 @@ defmodule Realtime.Integration.RtChannel.WalBloatTest do
 
       assert Connect.ready?(tenant.external_id)
       {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-      new_db_pid = await_replication_slot_active(db_conn, 60, 1000)
+      new_db_pid = await_replication_slot_active(db_conn, 60_000)
 
       assert new_db_pid != original_db_pid
       assert ^original_connect_pid = Connect.whereis(tenant.external_id)
@@ -125,6 +122,12 @@ defmodule Realtime.Integration.RtChannel.WalBloatTest do
     end
   end
 
+  defp short_replication_watchdog(_context) do
+    prev = Application.get_env(:realtime, :replication_watchdog_interval)
+    ExUnit.Callbacks.on_exit(fn -> Application.put_env(:realtime, :replication_watchdog_interval, prev) end)
+    Application.put_env(:realtime, :replication_watchdog_interval, 100)
+  end
+
   defp active_replication_slot_pid!(db_conn) do
     %{rows: [[pid]]} =
       Postgrex.query!(
@@ -136,25 +139,20 @@ defmodule Realtime.Integration.RtChannel.WalBloatTest do
     pid
   end
 
-  defp await_replication_slot_active(db_conn, retries, interval_ms) do
-    Enum.reduce_while(1..retries, nil, fn _, _ ->
-      case Postgrex.query!(
-             db_conn,
-             "SELECT active_pid FROM pg_replication_slots WHERE active_pid IS NOT NULL AND slot_name = 'supabase_realtime_messages_replication_slot_'",
-             []
-           ) do
-        %{rows: [[pid]]} ->
-          {:halt, pid}
+  # Waits for the slot to be not just active, but caught up (lag back under the
+  # watchdog's threshold). A slot can briefly show an active_pid while still
+  # replaying leftover WAL from the bloat, only for the watchdog to kill it again
+  # moments later - checking the same condition the watchdog checks avoids that race.
+  defp await_replication_slot_active(db_conn, timeout_ms) do
+    slot_name = "supabase_realtime_messages_replication_slot_"
 
-        _ ->
-          Process.sleep(interval_ms)
-          {:cont, nil}
-      end
-    end)
-    |> then(fn
-      nil -> flunk("Replication slot did not become active within #{retries}s")
-      pid -> pid
-    end)
+    case_wait Database.check_replication_slot(db_conn, slot_name),
+      timeout: timeout_ms,
+      interval: WaitForIt.Backoff.exponential(start: 25, max: 500) do
+      :ok -> active_replication_slot_pid!(db_conn)
+    else
+      last -> flunk("Replication slot did not become active within #{timeout_ms}ms. Last check: #{inspect(last)}")
+    end
   end
 
   defp generate_wal_bloat(tenant) do

@@ -12,6 +12,8 @@ jobs:
   docker_x86_release:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 120
+    permissions:
+      contents: read
     env:
       arch: amd64
     outputs:
@@ -45,6 +47,8 @@ jobs:
   docker_arm_release:
     runs-on: blacksmith-4vcpu-ubuntu-2404-arm
     timeout-minutes: 120
+    permissions:
+      contents: read
     env:
       arch: arm64
     outputs:
@@ -120,7 +124,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Mirror to ECR
-        uses: akhilerm/tag-push-action@f35ff2cb99d407368b5c727adbcc14a2ed81d509 # v2.2.0
+        uses: akhilerm/tag-push-action@eadeefebd39db8a47e146115649adae1fce576a6 # v2.3.0
         with:
           src: docker.io/supabase/realtime:v${{ github.event.inputs.docker_tag }}
           dst: |

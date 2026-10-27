@@ -63,21 +63,15 @@ defmodule RealtimeWeb.Router do
   scope "/", RealtimeWeb do
     pipe_through(:browser)
 
-    live("/", PageLive.Index, :index)
-    live("/inspector", InspectorLive.Index, :index)
-    live("/inspector/new", InspectorLive.Index, :new)
+    live("/", InspectorLive.Index, :index)
     live("/status", StatusLive.Index, :index)
+    get("/inspector", PageController, :redirect_to_root)
+    get("/inspector/new", PageController, :redirect_to_root)
   end
 
   scope "/swaggerui" do
     pipe_through(:browser)
     get("/", OpenApiSpex.Plug.SwaggerUI, path: "/api/openapi")
-  end
-
-  scope "/admin", RealtimeWeb do
-    pipe_through [:browser, :dashboard_admin]
-    live("/tenants", TenantsLive.Index, :index)
-    live("/feature-flags", FeatureFlagsLive.Index, :index)
   end
 
   scope "/metrics", RealtimeWeb do
@@ -100,6 +94,7 @@ defmodule RealtimeWeb.Router do
     post("/tenants/:tenant_id/reload", TenantController, :reload)
     post("/tenants/:tenant_id/shutdown", TenantController, :shutdown)
     get("/tenants/:tenant_id/health", TenantController, :health)
+    post("/tenants/health", TenantController, :bulk_health)
   end
 
   scope "/api", RealtimeWeb do
@@ -144,6 +139,7 @@ defmodule RealtimeWeb.Router do
         route_name: RealtimeWeb.Dashboard.ProcessDump,
         recon_trace: RealtimeWeb.Dashboard.ReconTrace,
         node_info: RealtimeWeb.Dashboard.NodeInfo,
+        muster: RealtimeWeb.Dashboard.Muster,
         tenant_info: RealtimeWeb.Dashboard.TenantInfo,
         tenant_migrations: RealtimeWeb.Dashboard.TenantMigrations,
         sql_inspector: RealtimeWeb.Dashboard.SqlInspector,

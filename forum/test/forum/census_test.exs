@@ -63,6 +63,52 @@ defmodule Forum.CensusTest do
                      Census.start_link(scope, broadcast_interval_in_ms: :invalid)
                    end
     end
+
+    test "raises on invalid discover_interval_in_ms", %{scope: scope} do
+      assert_raise ArgumentError,
+                   ~r/expected :discover_interval_in_ms to be a positive integer/,
+                   fn ->
+                     Census.start_link(scope, discover_interval_in_ms: 0)
+                   end
+
+      assert_raise ArgumentError,
+                   ~r/expected :discover_interval_in_ms to be a positive integer/,
+                   fn ->
+                     Census.start_link(scope, discover_interval_in_ms: -1)
+                   end
+
+      assert_raise ArgumentError,
+                   ~r/expected :discover_interval_in_ms to be a positive integer/,
+                   fn ->
+                     Census.start_link(scope, discover_interval_in_ms: :invalid)
+                   end
+    end
+
+    test "raises on invalid max_restarts", %{scope: scope} do
+      assert_raise ArgumentError, ~r/expected :max_restarts/, fn ->
+        Census.start_link(scope, max_restarts: -1)
+      end
+    end
+
+    test "raises on invalid max_seconds", %{scope: scope} do
+      assert_raise ArgumentError, ~r/expected :max_seconds/, fn ->
+        Census.start_link(scope, max_seconds: 0)
+      end
+    end
+  end
+
+  describe "restart intensity (:max_restarts/:max_seconds)" do
+    test "a tiny :max_restarts terminates the scope's own supervisor once exceeded",
+         %{scope: scope} do
+      sup_pid = start_supervised!(spec(scope, partitions: 2, max_restarts: 0, max_seconds: 1))
+      ref = Process.monitor(sup_pid)
+
+      [partition | _] = Forum.Supervisor.partitions(scope)
+      partition_pid = Process.whereis(partition)
+      Process.exit(partition_pid, :kill)
+
+      assert_receive {:DOWN, ^ref, :process, ^sup_pid, _reason}, 1_000
+    end
   end
 
   describe "join/3 and leave/3" do
@@ -341,6 +387,28 @@ defmodule Forum.CensusTest do
 
       assert partition1 == partition2
       assert partition2 == partition3
+    end
+  end
+
+  describe "sync gating" do
+    setup %{scope: scope} do
+      start_supervised!(spec(scope, partitions: 2))
+      :ok
+    end
+
+    test "ignores counts from a peer it has not registered", %{scope: scope} do
+      scope_proc = Process.whereis(Forum.Supervisor.name(scope))
+      assert is_pid(scope_proc)
+
+      # Simulate a `:sync` racing ahead of (or arriving after) registration,
+      # e.g. a late broadcast after the peer's `:DOWN` was already handled.
+      fake_peer = spawn(fn -> Process.sleep(:infinity) end)
+      send(scope_proc, {:sync, fake_peer, %{group1: 5}})
+
+      # Flush the mailbox: this call is handled after the :sync above.
+      _ = :sys.get_state(scope_proc)
+
+      assert Forum.Census.Scope.member_counts(scope) == %{}
     end
   end
 

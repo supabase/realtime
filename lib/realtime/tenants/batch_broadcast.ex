@@ -159,7 +159,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
         |> Map.put(:topic, topic)
         |> Authorization.build_authorization_params()
 
-      case Authorization.get_write_authorizations(db_conn, auth_params) do
+      case Authorization.get_write_authorizations(db_conn, auth_params, :broadcast) do
         {:ok, policies} -> policies
         {:error, :not_found} -> nil
         error -> error

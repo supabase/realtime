@@ -1,13 +1,14 @@
 defmodule RealtimeWeb.UserSocketTest do
   use ExUnit.Case, async: true
   import ExUnit.CaptureLog
+  import Plug.Test
 
   alias RealtimeWeb.Socket.V2Serializer
   alias RealtimeWeb.UserSocket
 
   @socket %Phoenix.Socket{
     serializer: V2Serializer,
-    assigns: %{tenant: "test-tenant", access_token: "test-token", log_level: :error}
+    assigns: %{tenant: "test-tenant", access_token: "test-token", log_level: :error, channels_count: 0}
   }
   @state {%{channels: %{}, channels_inverse: %{}}, @socket}
 
@@ -97,6 +98,148 @@ defmodule RealtimeWeb.UserSocketTest do
         end)
 
       assert log =~ "UnknownErrorOnWebSocketMessage"
+    end
+  end
+
+  describe "handle_info/2 with :measure_traffic" do
+    setup do
+      ref =
+        :telemetry_test.attach_event_handlers(self(), [
+          [:realtime, :channel, :output_bytes],
+          [:realtime, :channel, :input_bytes]
+        ])
+
+      # A transport process with no port links reports zero stats
+      transport_pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      {channels_state, socket} = @state
+
+      %{ref: ref, state: {channels_state, %{socket | transport_pid: transport_pid}}}
+    end
+
+    test "fires no telemetry when transport_pid is nil", %{ref: ref} do
+      assert {:ok, @state} = UserSocket.handle_info({:measure_traffic, 42, 99}, @state)
+
+      refute_received {[:realtime, :channel, _], ^ref, _, %{tenant: "test-tenant"}}
+    end
+
+    test "fires output_bytes and input_bytes telemetry with the tenant", %{ref: ref, state: state} do
+      assert {:ok, ^state} = UserSocket.handle_info({:measure_traffic, 0, 0}, state)
+
+      assert_received {[:realtime, :channel, :output_bytes], ^ref, %{size: 0}, %{tenant: "test-tenant"}}
+      assert_received {[:realtime, :channel, :input_bytes], ^ref, %{size: 0}, %{tenant: "test-tenant"}}
+    end
+
+    test "clamps deltas to zero when the previous stats exceed the current ones", %{ref: ref, state: state} do
+      assert {:ok, ^state} = UserSocket.handle_info({:measure_traffic, 1000, 500}, state)
+
+      assert_received {[:realtime, :channel, :output_bytes], ^ref, %{size: 0}, %{tenant: "test-tenant"}}
+      assert_received {[:realtime, :channel, :input_bytes], ^ref, %{size: 0}, %{tenant: "test-tenant"}}
+    end
+  end
+
+  describe "no channels timer" do
+    test "closes a socket without channels when its timer fires" do
+      timer = make_ref()
+      state = {%{channels: %{}, channels_inverse: %{}}, %{@socket | private: %{no_channels_timer: timer}}}
+
+      assert {:stop, {:shutdown, :no_channels}, {1001, "No channels joined"}, ^state} =
+               UserSocket.handle_info({:timeout, timer, :no_channels}, state)
+    end
+
+    test "ignores a timer that has since been replaced" do
+      # Restarting the timer cancels the previous one asynchronously, so its message can still arrive
+      state = {%{channels: %{}, channels_inverse: %{}}, %{@socket | private: %{no_channels_timer: make_ref()}}}
+
+      assert {:ok, ^state} = UserSocket.handle_info({:timeout, make_ref(), :no_channels}, state)
+    end
+
+    test "clears the timer when it fires while channels are open" do
+      timer = make_ref()
+      channels = %{"realtime:topic" => {self(), make_ref(), :joined}}
+      state = {%{channels: channels, channels_inverse: %{}}, %{@socket | private: %{no_channels_timer: timer}}}
+
+      assert {:ok, {%{channels: ^channels}, %{private: %{no_channels_timer: nil}}}} =
+               UserSocket.handle_info({:timeout, timer, :no_channels}, state)
+    end
+
+    test "keeps the timer running when a join is rejected on a socket without channels" do
+      socket = %{@socket | handler: UserSocket, private: %{no_channels_timer: make_ref()}}
+      state = {%{channels: %{}, channels_inverse: %{}}, socket}
+      # A topic without a channel is rejected by Phoenix without starting one
+      raw = Jason.encode!(["1", "1", "unknown:topic", "phx_join", %{}])
+
+      assert {:reply, :error, _reply, ^state} = UserSocket.handle_in({raw, [opcode: :text]}, state)
+    end
+  end
+
+  describe "channels count" do
+    test "passes the number of open channels along before Phoenix handles a message" do
+      channels = %{
+        "realtime:a" => {self(), make_ref(), :joined},
+        "realtime:b" => {self(), make_ref(), :leaving}
+      }
+
+      state = {%{channels: channels, channels_inverse: %{}}, %{@socket | handler: UserSocket}}
+      raw = Jason.encode!([nil, "1", "phoenix", "heartbeat", %{}])
+
+      assert {:reply, :ok, _reply, {_, %{assigns: %{channels_count: 2}}}} =
+               UserSocket.handle_in({raw, [opcode: :text]}, state)
+    end
+  end
+
+  describe "handle_error/2" do
+    for {reason, status, message} <- [
+          {:missing_api_key, 401, "API key is missing"},
+          {:expired_token, 401, "Token has expired"},
+          {:missing_claims, 401, "Fields `role` and `exp` are required in JWT"},
+          {:token_malformed, 401, "The token provided is not a valid JWT"},
+          {:invalid_token, 401, "The token provided is not a valid JWT"},
+          {:signature_error, 401, "Failed to validate JWT signature"},
+          {:error_generating_signer, 401, "Failed to generate JWT signer, check your JWT secret or JWKS configuration"},
+          {:tenant_suspended, 403, "Realtime was disabled for this tenant"},
+          {:tenant_not_found, 404, "Tenant not found"},
+          {:too_many_connections, 429, "Too many connected users"},
+          {:too_many_joins, 429, "Too many joins per second"}
+        ] do
+      test "maps #{reason} to a #{status} JSON response" do
+        conn = UserSocket.handle_error(conn(:get, "/socket/websocket"), unquote(reason))
+
+        assert conn.status == unquote(status)
+        assert Jason.decode!(conn.resp_body) == %{"error" => unquote(message)}
+
+        assert Plug.Conn.get_resp_header(conn, "content-type") == [
+                 "application/json; charset=utf-8"
+               ]
+      end
+    end
+
+    test "unwraps {:error, reason} tuples returned by connect/3" do
+      conn = UserSocket.handle_error(conn(:get, "/socket/websocket"), {:error, :signature_error})
+      assert conn.status == 401
+      assert Jason.decode!(conn.resp_body) == %{"error" => "Failed to validate JWT signature"}
+    end
+
+    test "display kid on bad signer error" do
+      conn =
+        UserSocket.handle_error(
+          conn(:get, "/socket/websocket"),
+          {:error, {:error_generating_signer, "19de8c2c"}}
+        )
+
+      assert conn.status == 401
+
+      assert Jason.decode!(conn.resp_body) ==
+               %{
+                 "error" =>
+                   "Failed to generate JWT signer for key ID (kid) \"19de8c2c\", check your JWT secret or JWKS configuration"
+               }
+    end
+
+    test "maps unknown reasons to a generic 500 JSON response" do
+      conn = UserSocket.handle_error(conn(:get, "/socket/websocket"), {:error, :some_weird_reason})
+
+      assert conn.status == 500
+      assert Jason.decode!(conn.resp_body) == %{"error" => "Error connecting to Realtime"}
     end
   end
 end

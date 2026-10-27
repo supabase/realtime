@@ -5,7 +5,7 @@ defmodule Realtime.Tenants.Connect.RegisterProcessTest do
 
   describe "run/1" do
     setup do
-      tenant = Containers.checkout_tenant(run_migrations: true)
+      tenant = TestTenantDb.checkout_tenant(run_migrations: true)
       # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
       Realtime.Tenants.Cache.update_cache(tenant)
       {:ok, conn} = Database.connect(tenant, "realtime_test")

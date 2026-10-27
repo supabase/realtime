@@ -2,6 +2,12 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
   use RealtimeWeb.ConnCase, async: true
   use Mimic
 
+  setup :set_mimic_from_context
+
+  import Ecto.Query, only: [from: 2]
+
+  alias Realtime.FeatureFlags
+  alias Realtime.Api.Message
   alias Realtime.Database
   alias Realtime.GenCounter
   alias Realtime.RateCounter
@@ -11,11 +17,12 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Connect
+  alias Realtime.Tenants.Repo
 
   alias RealtimeWeb.TenantBroadcaster
 
-  setup do
-    tenant = Containers.checkout_tenant(run_migrations: true)
+  setup_all do
+    tenant = TestTenantDb.checkout_tenant_unboxed(run_migrations: true)
     Realtime.Tenants.Cache.update_cache(tenant)
     {:ok, tenant: tenant}
   end
@@ -144,7 +151,9 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       Authorization
       |> expect(:build_authorization_params, fn params -> params end)
-      |> expect(:get_write_authorizations, fn _, _ -> {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}} end)
+      |> expect(:get_write_authorizations, fn _, _, :broadcast ->
+        {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
+      end)
 
       expect(TenantBroadcaster, :pubsub_broadcast, 1, fn _, _, _, _, _ -> :ok end)
 
@@ -167,7 +176,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       Authorization
       |> expect(:build_authorization_params, 1, fn params -> params end)
-      |> expect(:get_write_authorizations, 1, fn _, _ ->
+      |> expect(:get_write_authorizations, 1, fn _, _, :broadcast ->
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: false}}}
       end)
 
@@ -209,8 +218,8 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       Authorization
       |> expect(:build_authorization_params, 2, fn params -> params end)
       |> expect(:get_write_authorizations, 2, fn
-        _, %{topic: ^topic} -> %Policies{broadcast: %BroadcastPolicies{write: true}}
-        _, _ -> %Policies{broadcast: %BroadcastPolicies{write: false}}
+        _, %{topic: ^topic}, :broadcast -> {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
+        _, _, :broadcast -> {:ok, %Policies{broadcast: %BroadcastPolicies{write: false}}}
       end)
 
       # Only one topic will actually be broadcasted
@@ -249,7 +258,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       Authorization
       |> expect(:build_authorization_params, 2, fn params -> params end)
-      |> expect(:get_write_authorizations, 2, fn _, _ ->
+      |> expect(:get_write_authorizations, 2, fn _, _, :broadcast ->
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
       end)
 
@@ -322,7 +331,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       Authorization
       |> expect(:build_authorization_params, fn params -> params end)
-      |> expect(:get_write_authorizations, fn _, _ ->
+      |> expect(:get_write_authorizations, fn _, _, :broadcast ->
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
       end)
 
@@ -488,6 +497,54 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
     end
   end
 
+  describe "message persistence" do
+    setup %{tenant: tenant} do
+      stub(FeatureFlags, :enabled?, fn
+        "broadcast_persistence", _tenant_id -> true
+        flag, tenant_id -> call_original(FeatureFlags, :enabled?, [flag, tenant_id])
+      end)
+
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+      Tenants.create_messages_partitions(db_conn)
+
+      sub = random_string()
+      role = "authenticated"
+
+      auth_params = %{
+        tenant_id: tenant.external_id,
+        headers: [{"header-1", "value-1"}],
+        claims: %{"sub" => sub, "role" => role, "exp" => Joken.current_time() + 1_000},
+        role: role,
+        sub: sub
+      }
+
+      %{db_conn: db_conn, auth_params: auth_params}
+    end
+
+    test "the batch API never stores messages, even when authorized to persist", %{
+      tenant: tenant,
+      db_conn: db_conn,
+      auth_params: auth_params
+    } do
+      topic = random_string()
+      messages = %{messages: [%{topic: topic, payload: %{"data" => "x"}, event: "event1", private: true}]}
+
+      expect(GenCounter, :add, fn _ -> :ok end)
+      expect(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _, _ -> :ok end)
+      expect(Connect, :lookup_or_start_connection, fn _ -> {:ok, db_conn} end)
+
+      Authorization
+      |> expect(:build_authorization_params, fn params -> params end)
+      |> expect(:get_write_authorizations, fn _, _, :broadcast ->
+        {:ok, %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}}}
+      end)
+
+      assert :ok = BatchBroadcast.broadcast(auth_params, tenant, messages, false)
+
+      refute_eventually match?({:ok, [_ | _]}, Repo.all(db_conn, messages_for(topic), Message))
+    end
+  end
+
   describe "error handling" do
     test "returns error when tenant is nil" do
       messages = %{messages: [%{topic: "topic1", payload: %{"data" => "test"}, event: "event1"}]}
@@ -536,4 +593,6 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       assert calls(&TenantBroadcaster.pubsub_broadcast/5) == []
     end
   end
+
+  defp messages_for(topic), do: from(m in Message, where: m.topic == ^topic)
 end

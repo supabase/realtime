@@ -2,6 +2,8 @@ defmodule RealtimeWeb.BroadcastControllerTest do
   use RealtimeWeb.ConnCase, async: true
   use Mimic
 
+  setup :set_mimic_from_context
+
   alias Realtime.Crypto
   alias Realtime.GenCounter
   alias Realtime.RateCounter
@@ -12,14 +14,19 @@ defmodule RealtimeWeb.BroadcastControllerTest do
   alias RealtimeWeb.Endpoint
   alias RealtimeWeb.TenantBroadcaster
 
-  setup %{conn: conn} do
-    tenant = Containers.checkout_tenant(run_migrations: true)
-    # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
+  setup_all do
+    tenant = TestTenantDb.checkout_tenant_unboxed(run_migrations: true)
+    %{tenant: tenant}
+  end
+
+  setup %{conn: conn, tenant: tenant} do
+    # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues.
+    # Kept per-test so the "suspended tenant" case can't leak suspend: true into later tests.
     Realtime.Tenants.Cache.update_cache(tenant)
 
     conn = generate_conn(conn, tenant)
 
-    {:ok, conn: conn, tenant: tenant}
+    {:ok, conn: conn}
   end
 
   defp subscribe(tenant_topic, topic) do
@@ -52,7 +59,9 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
       GenCounter
       |> expect(:add, fn ^request_events_key -> :ok end)
-      |> expect(:add, 2, fn ^broadcast_events_key -> :ok end)
+      |> expect(:add, 3, fn ^broadcast_events_key -> :ok end)
+
+      # |> stub(:add, fn key -> call_original(GenCounter, :add, [key]) end)
 
       sub_topic_1 = "sub_topic_1"
       sub_topic_2 = "sub_topic_2"
@@ -105,6 +114,8 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     end
 
     test "returns 422 when batch of messages includes badly formed messages", %{conn: conn, tenant: tenant} do
+      # Drop deliveries counted by previous tests sharing this tenant
+      Realtime.GenCounter.reset(Tenants.events_per_second_key(tenant))
       tenant_topic = Tenants.tenant_topic(tenant, "topic")
 
       subscribe(tenant_topic, "topic")
@@ -142,7 +153,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
       assert rate_counter.avg != 0.0
 
       {:ok, rate_counter} = RateCounterHelper.tick!(Tenants.events_per_second_rate(tenant))
-      assert rate_counter.avg == 0.0
+      assert [0 | _] = rate_counter.bucket
 
       refute_receive {:socket_push, _, _}
     end

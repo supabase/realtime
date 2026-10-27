@@ -16,6 +16,7 @@ defmodule RealtimeWeb.Endpoint do
   socket "/socket", RealtimeWeb.UserSocket,
     websocket: [
       connect_info: [:peer_data, :uri, :x_headers],
+      error_handler: {RealtimeWeb.UserSocket, :handle_error, []},
       fullsweep_after: @fullsweep_after,
       max_frame_size: 5_000_000,
       # https://github.com/ninenines/cowboy/blob/24d32de931a0c985ff7939077463fc8be939f0e9/doc/src/manual/cowboy_websocket.asciidoc#L228
@@ -80,6 +81,9 @@ defmodule RealtimeWeb.Endpoint do
   def log_level(%{path_info: ["api", "tenants", _, "health"]}) do
     if Application.get_env(:realtime, :disable_healthcheck_logging, false), do: false, else: :info
   end
+
+  def log_level(%{status: status}) when is_integer(status) and status >= 500, do: :error
+  def log_level(%{status: status}) when is_integer(status) and status >= 400, do: :warning
 
   def log_level(_), do: :info
 

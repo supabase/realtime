@@ -7,6 +7,7 @@ defmodule Forum.Census.Scope do
   alias Forum.Census
 
   @default_broadcast_interval 5_000
+  @default_discover_interval 60_000
 
   @spec member_counts(atom) :: %{Forum.group() => non_neg_integer}
   def member_counts(scope) do
@@ -57,6 +58,7 @@ defmodule Forum.Census.Scope do
             scope: atom,
             message_module: module,
             broadcast_interval: non_neg_integer,
+            discover_interval: non_neg_integer,
             peer_counts_table: :ets.tid(),
             peers: %{pid => reference}
           }
@@ -64,6 +66,7 @@ defmodule Forum.Census.Scope do
       :scope,
       :message_module,
       :broadcast_interval,
+      :discover_interval,
       :peer_counts_table,
       peers: %{}
     ]
@@ -82,6 +85,9 @@ defmodule Forum.Census.Scope do
     broadcast_interval =
       Keyword.get(opts, :broadcast_interval_in_ms, @default_broadcast_interval)
 
+    discover_interval =
+      Keyword.get(opts, :discover_interval_in_ms, @default_discover_interval)
+
     message_module = Keyword.get(opts, :message_module, Forum.Adapter.ErlDist)
 
     Logger.info("Forum[#{node()}|#{scope}] Starting")
@@ -93,6 +99,7 @@ defmodule Forum.Census.Scope do
        scope: scope,
        message_module: message_module,
        broadcast_interval: broadcast_interval,
+       discover_interval: discover_interval,
        peer_counts_table: peer_counts_table
      }, {:continue, :discover}}
   end
@@ -102,6 +109,7 @@ defmodule Forum.Census.Scope do
   def handle_continue(:discover, state) do
     state.message_module.broadcast(state.scope, {:discover, self()})
     Process.send_after(self(), :broadcast_counts, state.broadcast_interval)
+    Process.send_after(self(), :broadcast_discover, state.discover_interval)
     {:noreply, state}
   end
 
@@ -110,6 +118,7 @@ defmodule Forum.Census.Scope do
           {:discover, pid}
           | {:sync, pid, member_counts}
           | :broadcast_counts
+          | :broadcast_discover
           | {:nodeup, node}
           | {:nodedown, node}
           | {:DOWN, reference, :process, pid, term},
@@ -146,9 +155,15 @@ defmodule Forum.Census.Scope do
     end
   end
 
-  # A remote peer has sent us its local member counts
   def handle_info({:sync, peer, member_counts}, state) do
-    :ets.insert(state.peer_counts_table, {node(peer), member_counts})
+    if Map.has_key?(state.peers, peer) do
+      :ets.insert(state.peer_counts_table, {node(peer), member_counts})
+    else
+      Logger.debug(
+        "Forum[#{node()}|#{state.scope}] Ignoring counts from unregistered peer #{inspect(peer)} on node #{node(peer)}"
+      )
+    end
+
     {:noreply, state}
   end
 
@@ -166,6 +181,16 @@ defmodule Forum.Census.Scope do
     )
 
     Process.send_after(self(), :broadcast_counts, state.broadcast_interval)
+    {:noreply, state}
+  end
+
+  # Periodically re-announce ourselves to the whole cluster so that any peer we
+  # lost track of (e.g. a discover that raced a `:DOWN`, or was dropped by the
+  # transport) re-registers us. Kept much less frequent than `:broadcast_counts`
+  # since it only needs to heal the rare case where registration was missed.
+  def handle_info(:broadcast_discover, state) do
+    state.message_module.broadcast(state.scope, {:discover, self()})
+    Process.send_after(self(), :broadcast_discover, state.discover_interval)
     {:noreply, state}
   end
 

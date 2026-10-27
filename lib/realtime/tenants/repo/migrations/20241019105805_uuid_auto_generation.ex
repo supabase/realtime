@@ -3,8 +3,12 @@ defmodule Realtime.Tenants.Migrations.UuidAutoGeneration do
   use Ecto.Migration
 
   def change do
-    alter table(:messages) do
-      modify :uuid, :uuid, null: false, default: fragment("gen_random_uuid()")
-    end
+    execute("UPDATE realtime.messages SET uuid = gen_random_uuid() WHERE uuid IS NULL")
+
+    execute("""
+    ALTER TABLE realtime.messages
+      ALTER COLUMN uuid SET DEFAULT gen_random_uuid(),
+      ALTER COLUMN uuid SET NOT NULL
+    """)
   end
 end

@@ -1,6 +1,9 @@
 defmodule Realtime.PromEx.Plugins.GenRpcTest do
   # Async false due to Clustered usage
   use ExUnit.Case, async: false
+
+  import WaitForIt
+
   alias Realtime.PromEx.Plugins
 
   defmodule MetricsTest do
@@ -14,10 +17,23 @@ defmodule Realtime.PromEx.Plugins.GenRpcTest do
   setup_all do
     {:ok, node} = Clustered.start()
     start_supervised!(MetricsTest)
-    # Send some data back and forth
-    25 = :gen_rpc.call(node, String, :to_integer, ["25"])
-    # Wait for MetricsTest to fetch metrics
-    Process.sleep(200)
+
+    # The cumulative counters (recv/send oct/cnt) are accumulated as per-socket
+    # deltas across polls: the first poll after a socket appears only establishes
+    # a baseline and contributes 0. Generate traffic spanning several poll cycles
+    # (poll_rate: 100) so the deltas are captured and the exported counters become
+    # non-zero.
+    for _ <- 1..20 do
+      25 = :gen_rpc.call(node, String, :to_integer, ["25"])
+      Process.sleep(50)
+    end
+
+    wait!(
+      metric_value(PromEx.get_metrics(MetricsTest), "gen_rpc_send_count", origin_node: node(), target_node: node),
+      timeout: 2_000,
+      interval: 25
+    )
+
     %{node: node}
   end
 

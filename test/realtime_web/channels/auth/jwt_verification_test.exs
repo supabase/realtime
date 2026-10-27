@@ -16,7 +16,23 @@ defmodule RealtimeWeb.JwtVerificationTest do
 
   setup do
     start_supervised(Mock)
-    on_exit(fn -> Application.put_env(:realtime, :jwt_claim_validators, %{}) end)
+
+    # Route Joken's current_time/0 through the Mock so Mock.freeze/0 actually
+    # controls the clock the code under test sees. Without this the mock is a
+    # no-op and exp/iat assertions flake on second boundaries.
+    previous_adapter = Application.get_env(:joken, :current_time_adapter)
+    Application.put_env(:joken, :current_time_adapter, Mock)
+
+    on_exit(fn ->
+      Application.put_env(:realtime, :jwt_claim_validators, %{})
+
+      if previous_adapter do
+        Application.put_env(:joken, :current_time_adapter, previous_adapter)
+      else
+        Application.delete_env(:joken, :current_time_adapter)
+      end
+    end)
+
     :ok
   end
 
@@ -445,7 +461,7 @@ defmodule RealtimeWeb.JwtVerificationTest do
       jwt_secret = "secret"
       jwks = %{"keys" => [%{"kty" => "RSA", "kid" => "some_other_kid"}]}
 
-      assert {:error, :error_generating_signer} = JwtVerification.verify(token, jwt_secret, jwks)
+      assert {:error, {:error_generating_signer, "key-id-1"}} = JwtVerification.verify(token, jwt_secret, jwks)
     end
 
     test "returns error when no matching JWK is found for EC algorithm" do
@@ -456,7 +472,7 @@ defmodule RealtimeWeb.JwtVerificationTest do
       jwt_secret = "secret"
       jwks = %{"keys" => [%{"kty" => "EC", "kid" => "some_other_kid"}]}
 
-      assert {:error, :error_generating_signer} = JwtVerification.verify(token, jwt_secret, jwks)
+      assert {:error, {:error_generating_signer, "key-id-1"}} = JwtVerification.verify(token, jwt_secret, jwks)
     end
 
     test "returns error when no matching JWK is found for OKP algorithm" do
@@ -467,36 +483,65 @@ defmodule RealtimeWeb.JwtVerificationTest do
       jwt_secret = "secret"
       jwks = %{"keys" => [%{"kty" => "OKP", "kid" => "some_other_kid"}]}
 
-      assert {:error, :error_generating_signer} = JwtVerification.verify(token, jwt_secret, jwks)
+      assert {:error, {:error_generating_signer, "key-id-1"}} = JwtVerification.verify(token, jwt_secret, jwks)
     end
 
-    test "using Ed25519 JWK" do
-      # Generate Ed25519 key pair
-      {pub, priv} = :crypto.generate_key(:eddsa, :ed25519)
+    test "returns error without kid when the header has no kid" do
+      header = Base.url_encode64(Jason.encode!(%{"alg" => "RS256", "typ" => "JWT"}), padding: false)
+      claims = Base.url_encode64(Jason.encode!(%{"exp" => 9_999_999_999}), padding: false)
+      token = "#{header}.#{claims}.signature"
 
-      jwk = %{
-        "kty" => "OKP",
-        "crv" => "Ed25519",
-        "x" => Base.url_encode64(pub, padding: false),
-        "d" => Base.url_encode64(priv, padding: false),
-        "kid" => "ed-key-1"
+      jwks = %{"keys" => [%{"kty" => "RSA", "kid" => "some_kid"}]}
+
+      assert {:error, :error_generating_signer} = JwtVerification.verify(token, "secret", jwks)
+    end
+
+    test "using EdDSA(Ed25519) JWK" do
+      jwks = %{
+        "keys" => [
+          %{
+            "kty" => "OKP",
+            "crv" => "Ed25519",
+            "x" => "hR5rgn8NeZtkO6c5zBqQWFskBWnkBGa8c1Noa1L7FRw",
+            "d" => "B760w5vOLrntFkIfGZRy7di_WPIYymxTjxufHiuHY0g",
+            "kid" => "key-id-1"
+          }
+        ]
       }
 
-      jwks = %{"keys" => [jwk]}
+      token =
+        "eyJhbGciOiJFZERTQSIsImtpZCI6ImtleS1pZC0xIiwidHlwIjoiSldUIn0.eyJleHAiOjE3MTIwNTMyNTcsImlhdCI6MTcxMjA0OTY1Nywicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJzdWIiOiJ1c2VyLWlkIn0.aPgmoz7qHith4CA-T-hazSA375EHTkGQ2o1cjrKd8AkdB22OXy35fsHwjjnNzdQGpkVIaIq0ydLjCtVC7BOCDA"
 
-      signer = Joken.Signer.create("Ed25519", jwk, %{"kid" => "ed-key-1"})
+      # Check that the signature is valid even though time may be off.
+      assert {:error, [message: _, claim: "exp", claim_val: _]} = JwtVerification.verify(token, @jwt_secret, jwks)
+    end
 
-      Mock.freeze()
-      current_time = Mock.current_time()
+    test "using EdDSA(Ed25519) JWK with wrong signature" do
+      jwks = %{
+        "keys" => [
+          %{
+            "kty" => "OKP",
+            "crv" => "Ed25519",
+            "x" => "hR5rgn8NeZtkO6c5zBqQWFskBWnkBGa8c1Noa1L7FRw",
+            "d" => "B760w5vOLrntFkIfGZRy7di_WPIYymxTjxufHiuHY0g",
+            "kid" => "key-id-1"
+          }
+        ]
+      }
 
       token =
-        Joken.generate_and_sign!(
-          %{"exp" => %Joken.Claim{generate: fn -> current_time + 100 end}},
-          %{},
-          signer
-        )
+        "eyJhbGciOiJFZERTQSIsImtpZCI6ImtleS1pZC0xIiwidHlwIjoiSldUIn0.eyJleHAiOjE3MTIwNTMyNTcsImlhdCI6MTcxMjA0OTY1Nywicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJzdWIiOiJ1c2VyLWlkIn0.aPgmoz7qHith4CA-T-hazSA375EHTkGQ2o1cjrKd8AkdB22OXy35fsHwjjnNzdQGpkVIaIq0ydLjCtVC7BOCDQ"
 
-      assert {:ok, _claims} = JwtVerification.verify(token, @jwt_secret, jwks)
+      assert JwtVerification.verify(token, @jwt_secret, jwks) == {:error, :signature_error}
+    end
+
+    test "returns error for an EdDSA alg whose JWK has no supported curve" do
+      jwk = %{"kty" => "OKP", "crv" => "X25519", "kid" => "ed-key-1"}
+      header = Base.url_encode64(Jason.encode!(%{"alg" => "EdDSA", "kid" => "ed-key-1"}), padding: false)
+      claims = Base.url_encode64(Jason.encode!(%{"exp" => 9_999_999_999}), padding: false)
+      token = "#{header}.#{claims}.signature"
+
+      assert {:error, _} = JwtVerification.verify(token, @jwt_secret, %{"keys" => [jwk]})
     end
 
     test "returns error for unsupported algorithm with kid and jwks" do
@@ -525,6 +570,45 @@ defmodule RealtimeWeb.JwtVerificationTest do
       jwks = %{"keys" => [%{"kty" => "oct", "kid" => "wrong-kid"}]}
 
       assert {:ok, _claims} = JwtVerification.verify(token, @jwt_secret, jwks)
+    end
+
+    test "returns error for HS256 when there is no jwt_secret" do
+      header = Base.url_encode64(Jason.encode!(%{"alg" => "HS256"}), padding: false)
+      claims = Base.url_encode64(Jason.encode!(%{"exp" => 9_999_999_999}), padding: false)
+      token = "#{header}.#{claims}.signature"
+
+      assert {:error, :error_generating_signer} = JwtVerification.verify(token, nil, nil)
+    end
+
+    test "returns error when HS256 kid has no matching JWK and there is no jwt_secret" do
+      header = Base.url_encode64(Jason.encode!(%{"alg" => "HS256", "kid" => "key-1"}), padding: false)
+      claims = Base.url_encode64(Jason.encode!(%{"exp" => 9_999_999_999}), padding: false)
+      token = "#{header}.#{claims}.signature"
+
+      jwks = %{"keys" => [%{"kty" => "oct", "kid" => "wrong-kid"}]}
+
+      assert {:error, {:error_generating_signer, "key-1"}} = JwtVerification.verify(token, nil, jwks)
+    end
+
+    test "verifies HS256 against a matching oct JWK when there is no jwt_secret" do
+      Mock.freeze()
+      current_time = Mock.current_time()
+
+      secret = "jwks-only-secret"
+      signer = Joken.Signer.create("HS256", secret, %{"kid" => "jwks-key"})
+
+      token =
+        Joken.generate_and_sign!(
+          %{"exp" => %Joken.Claim{generate: fn -> current_time + 100 end}},
+          %{},
+          signer
+        )
+
+      jwks = %{
+        "keys" => [%{"kty" => "oct", "kid" => "jwks-key", "k" => Base.url_encode64(secret, padding: false)}]
+      }
+
+      assert {:ok, _claims} = JwtVerification.verify(token, nil, jwks)
     end
   end
 end

@@ -1,9 +1,12 @@
 defmodule Realtime.PromEx do
+  alias Realtime.PromEx.Plugins.ClientRequests
   alias Realtime.PromEx.Plugins.Distributed
   alias Realtime.PromEx.Plugins.GenRpc
   alias Realtime.PromEx.Plugins.Migrations
+  alias Realtime.PromEx.Plugins.Muster
   alias Realtime.PromEx.Plugins.OsMon
   alias Realtime.PromEx.Plugins.Phoenix
+  alias Realtime.PromEx.Plugins.Presence
   alias Realtime.PromEx.Plugins.TenantGlobal
   alias Realtime.PromEx.Plugins.Tenants
 
@@ -88,15 +91,27 @@ defmodule Realtime.PromEx do
       Peep.child_spec(
         name: name,
         metrics: metrics,
-        global_tags: Application.get_env(:realtime, :metrics_tags, %{}),
+        global_tags: global_tags(),
         storage: {Realtime.Monitoring.Peep.PartitionedTables, tables: 4, routing_tag: :tenant}
       )
+    end
+
+    defp global_tags do
+      node = node()
+      [_name, host] = node |> Atom.to_string() |> String.split("@", parts: 2)
+
+      %{
+        region: Realtime.Nodes.region(),
+        host: host,
+        id: Realtime.Nodes.short_node_id_from_name(node)
+      }
     end
   end
 
   @impl true
   def plugins do
     poll_rate = Application.get_env(:realtime, :prom_poll_rate)
+    presence_usage_poll_rate = Application.get_env(:realtime, :presence_usage_poll_rate)
 
     [
       {Plugins.Beam, poll_rate: poll_rate, metric_prefix: [:beam]},
@@ -106,7 +121,10 @@ defmodule Realtime.PromEx do
       {Tenants, poll_rate: poll_rate},
       {TenantGlobal, poll_rate: poll_rate},
       {Distributed, poll_rate: poll_rate},
-      {GenRpc, poll_rate: poll_rate}
+      {GenRpc, poll_rate: poll_rate},
+      {Muster, poll_rate: poll_rate},
+      {Presence, poll_rate: presence_usage_poll_rate},
+      ClientRequests
     ]
   end
 

@@ -235,8 +235,9 @@ defmodule Realtime.Integration.WebsocketClient do
           {[binary_decode(data)], state}
 
         # prepare to close the connection when a close frame is received
-        {:close, code, _data}, state ->
+        {:close, code, reason}, state ->
           Kernel.send(state.sender, {:close_code, code})
+          if reason != "", do: Kernel.send(state.sender, {:close_reason, reason})
           {[], put_in(state.closing?, true)}
 
         frame, state ->
@@ -400,6 +401,11 @@ defmodule Realtime.Integration.WebsocketClient do
          metadata::binary-size(metadata_size),
          user_payload::binary
        >>) do
+    payload = user_broadcast_payload(user_event, user_payload_encoding, user_payload, metadata, metadata_size)
+    %Message{topic: topic, event: "broadcast", payload: payload}
+  end
+
+  defp user_broadcast_payload(user_event, user_payload_encoding, user_payload, metadata, metadata_size) do
     decoded_metadata = if metadata_size > 0, do: Jason.decode!(metadata), else: %{}
 
     decoded_payload =
@@ -408,13 +414,11 @@ defmodule Realtime.Integration.WebsocketClient do
         0 -> {:binary, user_payload}
       end
 
-    payload = %{
+    %{
       "event" => user_event,
       "payload" => decoded_payload,
       "type" => "broadcast",
       "meta" => decoded_metadata
     }
-
-    %Message{topic: topic, event: "broadcast", payload: payload}
   end
 end

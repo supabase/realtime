@@ -1,0 +1,410 @@
+defmodule RealtimeWeb.Presence.MetricsTest do
+  use ExUnit.Case, async: true
+  use Mimic
+
+  setup :set_mimic_from_context
+
+  alias Phoenix.Socket.Broadcast
+  alias Realtime.FeatureFlags
+  alias RealtimeWeb.Presence.Metrics
+  alias RealtimeWeb.Presence.Metrics.Envelope
+
+  @tenant "tenant-123"
+
+  # A user payload as it arrives from JSON: string keys, nested maps and lists, mixed scalar types,
+  # and "_rt" keys of the user's own at several depths, including one shaped like our envelope.
+  @nested_payload %{
+    "name" => "alice",
+    "_rt" => %{"ts" => 1, "node" => "theirs"},
+    "profile" => %{
+      "_rt" => "nested",
+      "tags" => ["admin", "beta"],
+      "address" => %{"city" => "Adelaide", "geo" => %{"lat" => -34.9, "lng" => 138.6}}
+    },
+    "cursors" => [%{"x" => 1, "y" => 2, "_rt" => nil}, %{"x" => 3, "y" => 4}],
+    "online" => true,
+    "last_seen" => nil,
+    "score" => 42
+  }
+
+  describe "stamp/2" do
+    test "adds an envelope with the current time in ms and this node's short id when sampled" do
+      stub(FeatureFlags, :enabled?, fn "presence_latency_metric", @tenant -> true end)
+
+      before = System.system_time(:millisecond)
+      stamped = Metrics.stamp(%{"name" => "alice"}, @tenant)
+      after_ = System.system_time(:millisecond)
+
+      assert %{_rt: %{ts: ts, node: node}} = stamped
+      assert is_integer(ts) and ts >= before and ts <= after_
+      assert node == Realtime.Nodes.short_node_id_from_name(node())
+    end
+
+    test "leaves the user payload untouched" do
+      stub(FeatureFlags, :enabled?, fn _, _ -> true end)
+      payload = %{"name" => "alice", "nested" => %{"a" => 1}}
+
+      assert Map.delete(Metrics.stamp(payload, @tenant), :_rt) == payload
+    end
+
+    test "a user's own \"_rt\" field is neither overwritten by the stamp nor removed by the strip" do
+      stub(FeatureFlags, :enabled?, fn _, _ -> true end)
+
+      # User keys arrive as strings from JSON; the envelope key is an atom, so they never collide.
+      stamped = Metrics.stamp(%{"name" => "alice", "_rt" => "mine"}, @tenant)
+      assert %{"_rt" => "mine", :_rt => %{ts: _, node: _}} = stamped
+
+      diff = %Broadcast{event: "presence_diff", payload: %{joins: %{"alice" => %{metas: [stamped]}}, leaves: %{}}}
+      assert {%Broadcast{payload: %{joins: %{"alice" => %{metas: [meta]}}}}, [_envelope]} = Metrics.strip_diff(diff)
+      assert meta == %{"name" => "alice", "_rt" => "mine"}
+    end
+
+    test "adds only a top-level envelope to a nested payload, leaving every nested value untouched" do
+      stub(FeatureFlags, :enabled?, fn _, _ -> true end)
+
+      stamped = Metrics.stamp(@nested_payload, @tenant)
+
+      assert %{_rt: %{ts: _, node: _}} = stamped
+      assert Map.delete(stamped, :_rt) == @nested_payload
+    end
+
+    test "returns the payload untouched when the feature flag is off for the tenant" do
+      stub(FeatureFlags, :enabled?, fn "presence_latency_metric", @tenant -> false end)
+      payload = %{"name" => "alice"}
+
+      assert Metrics.stamp(payload, @tenant) == payload
+    end
+
+    test "passes a non-map payload through for validation to reject" do
+      reject(&FeatureFlags.enabled?/2)
+
+      assert Metrics.stamp("not a map", @tenant) == "not a map"
+      assert Metrics.stamp(nil, @tenant) == nil
+    end
+  end
+
+  describe "sample?/2" do
+    test "never samples at rate 0, without consulting the feature flag" do
+      reject(&FeatureFlags.enabled?/2)
+
+      refute Enum.any?(1..100, fn _ -> Metrics.sample?(@tenant, 0.0) end)
+    end
+
+    test "always samples at rate 1 when the flag is on" do
+      stub(FeatureFlags, :enabled?, fn "presence_latency_metric", @tenant -> true end)
+
+      assert Enum.all?(1..100, fn _ -> Metrics.sample?(@tenant, 1.0) end)
+    end
+
+    test "never samples when the flag is off, whatever the rate" do
+      stub(FeatureFlags, :enabled?, fn "presence_latency_metric", @tenant -> false end)
+
+      refute Enum.any?(1..100, fn _ -> Metrics.sample?(@tenant, 1.0) end)
+    end
+  end
+
+  describe "strip_diff/1" do
+    test "removes the envelope from every join and leave meta, keeping everything else" do
+      envelope = %{ts: 1, node: "n1"}
+
+      diff = %Broadcast{
+        topic: "realtime:room",
+        event: "presence_diff",
+        payload: %{
+          joins: %{
+            "alice" => %{
+              metas: [
+                %{"name" => "alice", :phx_ref => "a1", :phx_ref_prev => "a0", :_rt => envelope},
+                %{"name" => "alice", :phx_ref => "a2"}
+              ]
+            }
+          },
+          leaves: %{"alice" => %{metas: [%{"name" => "alice", :phx_ref => "a0", :_rt => envelope}]}}
+        }
+      }
+
+      assert {stripped, _envelopes} = Metrics.strip_diff(diff)
+
+      assert stripped == %Broadcast{
+               topic: "realtime:room",
+               event: "presence_diff",
+               payload: %{
+                 joins: %{
+                   "alice" => %{
+                     metas: [
+                       %{"name" => "alice", :phx_ref => "a1", :phx_ref_prev => "a0"},
+                       %{"name" => "alice", :phx_ref => "a2"}
+                     ]
+                   }
+                 },
+                 leaves: %{"alice" => %{metas: [%{"name" => "alice", :phx_ref => "a0"}]}}
+               }
+             }
+    end
+
+    test "returns one envelope per stamped join meta, naming the action, and none for leaves" do
+      diff = %Broadcast{
+        event: "presence_diff",
+        payload: %{
+          joins: %{
+            # An update: the meta replaces a previous one.
+            "alice" => %{
+              metas: [
+                %{"name" => "alice", :phx_ref => "a1", :phx_ref_prev => "a0", :_rt => %{ts: 1, node: "n1"}},
+                %{"name" => "alice", :phx_ref => "a2"}
+              ]
+            },
+            # A first track.
+            "bob" => %{metas: [%{"name" => "bob", :phx_ref => "b1", :_rt => %{ts: 2, node: "n2"}}]}
+          },
+          # The leave carries the envelope from when it was tracked; it is stripped but never measured.
+          leaves: %{"alice" => %{metas: [%{"name" => "alice", :phx_ref => "a0", :_rt => %{ts: 0, node: "n1"}}]}}
+        }
+      }
+
+      assert {_stripped, envelopes} = Metrics.strip_diff(diff)
+
+      assert Enum.sort_by(envelopes, & &1.ts) == [
+               %Envelope{ts: 1, node: "n1", action: :update},
+               %Envelope{ts: 2, node: "n2", action: :track}
+             ]
+    end
+
+    test "strips only the top-level envelope from nested metas, keeping nested maps, lists and user \"_rt\" keys" do
+      meta = Map.merge(@nested_payload, %{:phx_ref => "a1", :_rt => %{ts: 1, node: "n1"}})
+
+      diff = %Broadcast{
+        event: "presence_diff",
+        payload: %{joins: %{"alice" => %{metas: [meta]}}, leaves: %{"alice" => %{metas: [meta]}}}
+      }
+
+      assert {stripped, [%Envelope{ts: 1, node: "n1", action: :track}]} = Metrics.strip_diff(diff)
+
+      expected = Map.put(@nested_payload, :phx_ref, "a1")
+
+      assert stripped.payload == %{
+               joins: %{"alice" => %{metas: [expected]}},
+               leaves: %{"alice" => %{metas: [expected]}}
+             }
+    end
+
+    test "a diff without an envelope comes back as is, with no envelopes" do
+      diff = %Broadcast{
+        event: "presence_diff",
+        payload: %{joins: %{"bob" => %{metas: [%{"name" => "bob", :phx_ref => "b1"}]}}, leaves: %{}}
+      }
+
+      assert {^diff, []} = Metrics.strip_diff(diff)
+    end
+
+    test "does not add joins or leaves keys that were not there, and tolerates empty metas" do
+      diff = %Broadcast{event: "presence_diff", payload: %{joins: %{"bob" => %{metas: []}}}}
+
+      assert {^diff, []} = Metrics.strip_diff(diff)
+    end
+
+    test "a diff with only leaves is stripped and yields no envelopes" do
+      diff = %Broadcast{
+        event: "presence_diff",
+        payload: %{leaves: %{"bob" => %{metas: [%{"name" => "bob", :phx_ref => "b1", :_rt => %{ts: 1, node: "n1"}}]}}}
+      }
+
+      assert {stripped, []} = Metrics.strip_diff(diff)
+      assert stripped.payload == %{leaves: %{"bob" => %{metas: [%{"name" => "bob", :phx_ref => "b1"}]}}}
+    end
+
+    test "any other broadcast passes through untouched" do
+      msg = %Broadcast{event: "broadcast", payload: %{"_rt" => "not ours", :_rt => "nor this"}}
+
+      assert {^msg, []} = Metrics.strip_diff(msg)
+    end
+  end
+
+  describe "measure_tracker_call/1" do
+    setup do
+      id = {__MODULE__, make_ref()}
+      :telemetry.attach(id, [:realtime, :presence, :track, :duration], &__MODULE__.handle_duration/4, self())
+      on_exit(fn -> :telemetry.detach(id) end)
+    end
+
+    test "records the duration, action and result, and returns the action and result" do
+      assert {:update, {:ok, :ref}} = Metrics.measure_tracker_call(fn -> {:update, {:ok, :ref}} end)
+
+      assert_receive {:duration, %{duration: duration}, %{action: :update, result: :ok, reason: :none}}
+      assert is_integer(duration) and duration >= 0
+    end
+
+    test "tags an error with its reason, and anything that is not an atom as other" do
+      assert {:track, {:error, :nopresence}} =
+               Metrics.measure_tracker_call(fn -> {:track, {:error, :nopresence}} end)
+
+      Metrics.measure_tracker_call(fn -> {:track, {:error, {:weird, 1}}} end)
+
+      assert_receive {:duration, _, %{action: :track, result: :error, reason: :nopresence}}
+      assert_receive {:duration, _, %{result: :error, reason: :other}}
+    end
+
+    test "records an exit by reason as a :track, then exits with the original reason" do
+      timeout = {:timeout, {GenServer, :call, [:shard, :msg, 5000]}}
+
+      assert catch_exit(Metrics.measure_tracker_call(fn -> exit(timeout) end)) == timeout
+      assert_receive {:duration, _, %{action: :track, result: :exit, reason: :timeout}}
+
+      catch_exit(Metrics.measure_tracker_call(fn -> exit({:noproc, {}}) end))
+      assert_receive {:duration, _, %{action: :track, result: :exit, reason: :noproc}}
+
+      catch_exit(Metrics.measure_tracker_call(fn -> exit(:killed) end))
+      assert_receive {:duration, _, %{result: :exit, reason: :other}}
+    end
+
+    test "measures the time spent in the call" do
+      Metrics.measure_tracker_call(fn ->
+        Process.sleep(20)
+        {:track, {:ok, :ref}}
+      end)
+
+      assert_receive {:duration, %{duration: duration}, _}
+      assert duration >= 20
+    end
+  end
+
+  describe "record/2" do
+    setup do
+      tenant = "tenant-#{System.unique_integer([:positive])}"
+      attach_telemetry(tenant)
+
+      context = %{tenant: tenant, path: :fastlane, implementation: :phoenix, now: 10_000, node: "n1"}
+
+      %{tenant: tenant, context: context}
+    end
+
+    test "emits one latency observation per envelope, tagged with the context", %{
+      tenant: tenant,
+      context: context
+    } do
+      envelopes = [
+        %Envelope{ts: 9_990, node: "n1", action: :track},
+        %Envelope{ts: 8_500, node: "n2", action: :update}
+      ]
+
+      assert :ok = Metrics.record(envelopes, context)
+
+      assert_receive {:telemetry, [:realtime, :presence, :notify, :latency], %{latency: 10},
+                      %{tenant: ^tenant, action: :track, origin: :local, path: :fastlane, implementation: :phoenix}}
+
+      assert_receive {:telemetry, [:realtime, :presence, :notify, :latency], %{latency: 1_500},
+                      %{tenant: ^tenant, action: :update, origin: :remote, path: :fastlane, implementation: :phoenix}}
+
+      refute_receive {:telemetry, _, _, _}
+    end
+
+    test "a negative latency is discarded as clock skew rather than recorded", %{tenant: tenant, context: context} do
+      assert :ok = Metrics.record([%Envelope{ts: 10_005, node: "n2", action: :track}], context)
+
+      assert_receive {:telemetry, [:realtime, :presence, :notify, :discarded], _, %{tenant: ^tenant, reason: :negative}}
+      refute_receive {:telemetry, [:realtime, :presence, :notify, :latency], _, _}
+    end
+
+    test "anything older than the stale bound is discarded, the bound itself is not", %{
+      tenant: tenant,
+      context: context
+    } do
+      assert :ok = Metrics.record([%Envelope{ts: 10_000 - 30_001, node: "n2", action: :track}], context)
+
+      assert_receive {:telemetry, [:realtime, :presence, :notify, :discarded], _, %{tenant: ^tenant, reason: :stale}}
+      refute_receive {:telemetry, [:realtime, :presence, :notify, :latency], _, _}
+
+      assert :ok = Metrics.record([%Envelope{ts: 10_000 - 30_000, node: "n2", action: :track}], context)
+
+      assert_receive {:telemetry, [:realtime, :presence, :notify, :latency], %{latency: 30_000}, %{tenant: ^tenant}}
+    end
+
+    test "records nothing for no envelopes", %{context: context} do
+      assert :ok = Metrics.record([], context)
+
+      refute_receive {:telemetry, _, _, _}
+    end
+  end
+
+  describe "record_join/3" do
+    setup do
+      tenant = "tenant-#{System.unique_integer([:positive])}"
+      attach_join_telemetry(tenant)
+      %{tenant: tenant}
+    end
+
+    test "emits latency in milliseconds, tagged with tenant, tracker state, and implementation", %{tenant: tenant} do
+      started_at = System.monotonic_time()
+      Process.sleep(10)
+
+      assert :ok = Metrics.record_join(started_at, tenant, :warm)
+
+      assert_receive {:telemetry, [:realtime, :presence, :join, :latency], %{latency: latency},
+                      %{tenant: ^tenant, state: :warm, implementation: :phoenix}}
+
+      assert latency >= 10
+    end
+
+    test "tags :cold the same way", %{tenant: tenant} do
+      assert :ok = Metrics.record_join(System.monotonic_time(), tenant, :cold)
+
+      assert_receive {:telemetry, [:realtime, :presence, :join, :latency], _, %{tenant: ^tenant, state: :cold}}
+    end
+  end
+
+  defp attach_join_telemetry(tenant) do
+    id = {__MODULE__, :join, tenant}
+
+    :telemetry.attach(
+      id,
+      [:realtime, :presence, :join, :latency],
+      &__MODULE__.handle_telemetry/4,
+      %{pid: self(), tenant: tenant}
+    )
+
+    on_exit(fn -> :telemetry.detach(id) end)
+  end
+
+  defp attach_telemetry(tenant) do
+    id = {__MODULE__, tenant}
+
+    :telemetry.attach_many(
+      id,
+      [[:realtime, :presence, :notify, :latency], [:realtime, :presence, :notify, :discarded]],
+      &__MODULE__.handle_telemetry/4,
+      %{pid: self(), tenant: tenant}
+    )
+
+    on_exit(fn -> :telemetry.detach(id) end)
+  end
+
+  def handle_duration(_event, measurements, metadata, pid), do: send(pid, {:duration, measurements, metadata})
+
+  def handle_telemetry(event, measurements, metadata, %{pid: pid, tenant: tenant}) do
+    if metadata[:tenant] == tenant, do: send(pid, {:telemetry, event, measurements, metadata})
+  end
+
+  describe "strip_state/1" do
+    test "removes the envelope from every meta in a grouped presence list" do
+      state = %{
+        "alice" => %{metas: [%{"name" => "alice", :phx_ref => "a1", :_rt => %{ts: 1, node: "n1"}}]},
+        "bob" => %{metas: [%{"name" => "bob", :phx_ref => "b1"}]}
+      }
+
+      assert Metrics.strip_state(state) == %{
+               "alice" => %{metas: [%{"name" => "alice", :phx_ref => "a1"}]},
+               "bob" => %{metas: [%{"name" => "bob", :phx_ref => "b1"}]}
+             }
+    end
+
+    test "strips only the top-level envelope from nested metas" do
+      state = %{"alice" => %{metas: [Map.merge(@nested_payload, %{:phx_ref => "a1", :_rt => %{ts: 1, node: "n1"}})]}}
+
+      assert Metrics.strip_state(state) == %{"alice" => %{metas: [Map.put(@nested_payload, :phx_ref, "a1")]}}
+    end
+
+    test "an empty list stays empty" do
+      assert Metrics.strip_state(%{}) == %{}
+    end
+  end
+end

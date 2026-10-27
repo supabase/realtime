@@ -34,5 +34,17 @@ defmodule RealtimeWeb.Plugs.BaggageRequestId do
     end
   end
 
-  defp valid_request_id?(s), do: byte_size(s) in 10..200
+  # Request IDs are opaque ASCII tokens (UUIDs, hex, base64url, ...), so we
+  # accept only printable ASCII.
+  defp valid_request_id?(s) when byte_size(s) in 10..200, do: printable_ascii?(s)
+  defp valid_request_id?(_), do: false
+
+  defp printable_ascii?(<<>>), do: true
+
+  # 0x20..0x7E is the printable ASCII range: 0x20 (32) is space, the first
+  # printable char, and 0x7E (126) is "~", the last. This excludes C0 controls
+  # (< 0x20, e.g. newline/tab/ESC), DEL (0x7F), and every byte >= 0x80 (all
+  # multibyte UTF-8 and malformed bytes).
+  defp printable_ascii?(<<b, rest::binary>>) when b in 0x20..0x7E, do: printable_ascii?(rest)
+  defp printable_ascii?(_), do: false
 end

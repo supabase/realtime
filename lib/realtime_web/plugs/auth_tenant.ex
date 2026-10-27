@@ -6,9 +6,10 @@ defmodule RealtimeWeb.AuthTenant do
   import Phoenix.Controller, only: [json: 2]
 
   alias Realtime.Api.Tenant
-  alias Realtime.Crypto
 
   alias RealtimeWeb.ChannelsAuthorization
+
+  require Logger
 
   def init(opts), do: opts
 
@@ -17,7 +18,7 @@ defmodule RealtimeWeb.AuthTenant do
 
     with %Tenant{jwt_secret: jwt_secret, jwt_jwks: jwt_jwks} <- tenant,
          token when is_binary(token) <- access_token(conn),
-         jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
+         jwt_secret_dec <- Tenant.decrypt_jwt_secret(jwt_secret),
          {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec, jwt_jwks) do
       conn
       |> assign(:claims, claims)
@@ -25,7 +26,15 @@ defmodule RealtimeWeb.AuthTenant do
       |> assign(:role, claims["role"])
       |> assign(:sub, claims["sub"])
     else
-      _error -> unauthorized(conn)
+      {:error, {:error_generating_signer, kid}} ->
+        Logger.error(
+          "JwtSignerError: Failed to generate JWT signer for key ID (kid) #{inspect(kid)}, check your JWT secret or JWKS configuration"
+        )
+
+        unauthorized(conn)
+
+      _error ->
+        unauthorized(conn)
     end
   end
 
@@ -44,9 +53,10 @@ defmodule RealtimeWeb.AuthTenant do
           nil
 
         [value | _] ->
-          [bearer, token] = value |> String.split(" ")
-          bearer = String.downcase(bearer)
-          if bearer == "bearer", do: token
+          case String.split(value, " ", parts: 2) do
+            [bearer, token] -> if String.downcase(bearer) == "bearer", do: token
+            _ -> nil
+          end
       end
 
     apikey =

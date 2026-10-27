@@ -3,7 +3,8 @@ defmodule RealtimeWeb.JwtVerification do
   Parse JWT and verify claims
   """
 
-  # Matching error in Dialyzer when using Joken.peek_claims/1 but {:ok, []} is actually possible and covered by our testing
+  # Matching error in Dialyzer when using Joken.peek_claims/1 but {:ok, []} is actually possible and covered by our
+  # testing
   @dialyzer {:no_match, check_claims_format: 1}
 
   defmodule JwtAuthToken do
@@ -37,12 +38,20 @@ defmodule RealtimeWeb.JwtVerification do
   @hs_algorithms ["HS256", "HS384", "HS512"]
   @rs_algorithms ["RS256", "RS384", "RS512"]
   @es_algorithms ["ES256", "ES384", "ES512"]
-  @ed_algorithms ["Ed25519", "Ed448"]
+  # RFC 8037 always sets alg to EdDSA and carries the curve in the JWK, while
+  # JOSE (and Joken) also name the signer after the curve itself. Tokens minted
+  # by RFC-conformant libraries arrive with the former spelling.
+  @ed_algorithms ["Ed25519", "Ed448", "EdDSA"]
+  @ed_curves ["Ed25519", "Ed448"]
 
   @doc """
   Verify JWT token and validate claims
   """
-  @spec verify(binary(), binary(), binary() | nil) :: {:ok, map()} | {:error, any()}
+  @spec verify(binary(), binary() | nil, binary() | nil) ::
+          {:ok, map()}
+          | {:error, Joken.error_reason()}
+          | {:error, {:error_generating_signer, binary()}}
+          | {:error, :error_generating_signer}
   def verify(token, jwt_secret, jwt_jwks) when is_binary(token) do
     with {:ok, _claims} <- check_claims_format(token),
          {:ok, header} <- check_header_format(token),
@@ -94,7 +103,7 @@ defmodule RealtimeWeb.JwtVerification do
     jwk = Enum.find(keys, fn jwk -> jwk["kty"] == "RSA" and jwk["kid"] == kid end)
 
     case jwk do
-      nil -> {:error, :error_generating_signer}
+      nil -> {:error, {:error_generating_signer, kid}}
       _ -> {:ok, Joken.Signer.create(alg, jwk)}
     end
   end
@@ -104,7 +113,7 @@ defmodule RealtimeWeb.JwtVerification do
     jwk = Enum.find(keys, fn jwk -> jwk["kty"] == "EC" and jwk["kid"] == kid end)
 
     case jwk do
-      nil -> {:error, :error_generating_signer}
+      nil -> {:error, {:error_generating_signer, kid}}
       _ -> {:ok, Joken.Signer.create(alg, jwk)}
     end
   end
@@ -114,8 +123,9 @@ defmodule RealtimeWeb.JwtVerification do
     jwk = Enum.find(keys, fn jwk -> jwk["kty"] == "OKP" and jwk["kid"] == kid end)
 
     case jwk do
-      nil -> {:error, :error_generating_signer}
-      _ -> {:ok, Joken.Signer.create(alg, jwk)}
+      # Joken raises for OKP curves it cannot sign with, such as X25519.
+      %{"crv" => crv} when crv in @ed_curves -> {:ok, Joken.Signer.create(alg, jwk)}
+      _ -> {:error, {:error_generating_signer, kid}}
     end
   end
 
@@ -131,13 +141,19 @@ defmodule RealtimeWeb.JwtVerification do
     if jwk do
       case Base.url_decode64(jwk["k"], padding: false) do
         {:ok, secret} -> {:ok, Joken.Signer.create(alg, secret)}
-        _ -> {:error, :error_generating_signer}
+        _ -> {:error, {:error_generating_signer, kid}}
       end
     else
       # If there's no JWK, and HS* is being used, instead of erroring, try
       # the jwt_secret instead.
-      {:ok, Joken.Signer.create(alg, jwt_secret)}
+      if jwt_secret,
+        do: {:ok, Joken.Signer.create(alg, jwt_secret)},
+        else: {:error, {:error_generating_signer, kid}}
     end
+  end
+
+  defp generate_signer(%{"alg" => alg}, nil, _jwt_jwks) when alg in @hs_algorithms do
+    {:error, :error_generating_signer}
   end
 
   defp generate_signer(%{"alg" => alg}, jwt_secret, _jwt_jwks) when alg in @hs_algorithms do

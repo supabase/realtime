@@ -6,8 +6,11 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
 
   import Phoenix.Socket, only: [assign: 3]
 
+  alias Realtime.FeatureFlags
+  alias Realtime.Messages
   alias Realtime.Tenants
   alias RealtimeWeb.RealtimeChannel
+  alias RealtimeWeb.RequestMetrics
   alias RealtimeWeb.TenantBroadcaster
   alias Phoenix.Socket
   alias Realtime.GenCounter
@@ -15,107 +18,97 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
 
-  @type payload :: map | {String.t(), :json | :binary, binary}
+  @type payload :: map | {String.t(), :json | :binary, binary, map()}
+
+  @type ok_reply :: {:reply, :ok | {:ok, map()}, Socket.t()}
+  @type error_reply :: {:reply, {:error, %{error: atom()}}, Socket.t()}
+  @type noreply :: {:noreply, Socket.t()}
 
   @event_type "broadcast"
-  @spec handle(payload, Socket.t()) :: {:reply, :ok, Socket.t()} | {:noreply, Socket.t()}
+  @spec handle(payload, Socket.t()) :: {ok_reply() | error_reply() | noreply(), RequestMetrics.outcome()}
   def handle(payload, %{assigns: %{private?: false}} = socket), do: handle(payload, nil, socket)
 
-  @spec handle(payload, pid() | nil, Socket.t()) :: {:reply, :ok, Socket.t()} | {:noreply, Socket.t()}
+  @doc """
+  Handles an outgoing broadcast for a channel.
+
+  `db_conn` is `nil` for public channels, which don't run write authorization nor persist messages.
+  Otherwise must pass the tenant database conn used to run write authorization and persist the message.
+  """
+  @spec handle(payload, pid() | nil, Socket.t()) :: {ok_reply() | error_reply() | noreply(), RequestMetrics.outcome()}
   def handle(payload, db_conn, %{assigns: %{private?: true}} = socket) do
-    %{
-      assigns: %{
-        self_broadcast: self_broadcast,
-        tenant_topic: tenant_topic,
-        authorization_context: authorization_context,
-        policies: policies,
-        tenant: tenant_id
-      }
-    } = socket
+    with {:ok, socket} <- authorize_write(socket, db_conn),
+         socket = increment_rate_counter(socket),
+         :ok <- check_payload_size(socket, payload) do
+      %{
+        assigns: %{
+          policies: policies,
+          tenant_topic: tenant_topic,
+          self_broadcast: self_broadcast,
+          ack_broadcast: ack_broadcast,
+          tenant: tenant_id,
+          authorization_context: %{topic: topic}
+        }
+      } = socket
 
-    case run_authorization_check(policies || %Policies{}, db_conn, authorization_context) do
-      {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}} = policies} ->
-        socket =
-          socket
-          |> assign(:policies, policies)
-          |> increment_rate_counter()
+      # Broadcast first to prioritize throughput.
+      send_message(tenant_id, self_broadcast, tenant_topic, payload)
 
-        %{ack_broadcast: ack_broadcast} = socket.assigns
-
-        res =
-          case Tenants.validate_payload_size(tenant_id, payload) do
-            :ok -> send_message(tenant_id, self_broadcast, tenant_topic, payload)
-            {:error, error} -> {:error, error}
-          end
-
-        cond do
-          ack_broadcast && match?({:error, :payload_size_exceeded}, res) ->
-            {:reply, {:error, :payload_size_exceeded}, socket}
-
-          ack_broadcast ->
-            {:reply, :ok, socket}
-
-          true ->
-            {:noreply, socket}
-        end
-
-      {:ok, policies} ->
-        {:noreply, assign(socket, :policies, policies)}
-
-      {:error, :rls_policy_error, error} ->
-        log_error("RlsPolicyError", error)
-        {:noreply, socket}
-
-      {:error, :query_canceled, error} ->
-        log_error("QueryCanceled", error)
-        {:noreply, socket}
-
-      {:error, :missing_partition} ->
-        log_error("MissingPartition", "Realtime was unable to find the expected messages partition")
-        {:noreply, socket}
-
-      {:error, :tenant_database_unavailable} ->
-        log_error("UnableToConnectToProject", "Realtime was unable to connect to the project database")
-        {:noreply, socket}
-
-      {:error, :increase_connection_pool} ->
-        {:noreply, socket}
-
-      {:error, error} ->
-        log_error("UnableToSetPolicies", error)
-        {:noreply, socket}
+      # TODO: hard limits and buffering based on ack
+      result = maybe_persist(policies, db_conn, tenant_id, topic, payload, ack_broadcast)
+      reply_success(socket, result)
+    else
+      {:error, code, socket} -> maybe_reply_error(socket, code)
     end
   end
 
   def handle(payload, _db_conn, %{assigns: %{private?: false}} = socket) do
-    %{
-      assigns: %{
-        tenant_topic: tenant_topic,
-        self_broadcast: self_broadcast,
-        ack_broadcast: ack_broadcast,
-        tenant: tenant_id
-      }
-    } = socket
-
+    # The rate counter goes before the `with` because a public broadcast counts even when too large.
     socket = increment_rate_counter(socket)
 
-    res =
-      case Tenants.validate_payload_size(tenant_id, payload) do
-        :ok -> send_message(tenant_id, self_broadcast, tenant_topic, payload)
-        error -> error
-      end
+    with :ok <- check_payload_size(socket, payload) do
+      %{
+        assigns: %{
+          tenant_topic: tenant_topic,
+          self_broadcast: self_broadcast,
+          tenant: tenant_id
+        }
+      } = socket
 
-    cond do
-      ack_broadcast && match?({:error, :payload_size_exceeded}, res) ->
-        {:reply, {:error, :payload_size_exceeded}, socket}
-
-      ack_broadcast ->
-        {:reply, :ok, socket}
-
-      true ->
-        {:noreply, socket}
+      send_message(tenant_id, self_broadcast, tenant_topic, payload)
+      reply_success(socket, :ok)
+    else
+      {:error, code, socket} -> maybe_reply_error(socket, code)
     end
   end
+
+  @doc """
+  Replies with the error `code` when the channel acknowledges broadcasts.
+
+  Returns the outcome with the reply. The outcome is from
+  `RequestMetrics.classify_broadcast_error(code)`.
+  """
+  @spec maybe_reply_error(Socket.t(), atom()) :: {error_reply() | noreply(), RequestMetrics.outcome()}
+  def maybe_reply_error(socket, code) do
+    outcome = RequestMetrics.classify_broadcast_error(code)
+    result = error_reply(socket, code)
+    {result, outcome}
+  end
+
+  defp error_reply(%{assigns: %{ack_broadcast: true}} = socket, code),
+    do: {:reply, {:error, %{error: code}}, socket}
+
+  defp error_reply(socket, _code), do: {:noreply, socket}
+
+  @spec reply_success(Socket.t(), :ok | :skip | {:ok, map()}) :: {ok_reply() | noreply(), :success}
+  defp reply_success(%{assigns: %{ack_broadcast: true}} = socket, {:ok, _} = result) do
+    {{:reply, result, socket}, :success}
+  end
+
+  defp reply_success(%{assigns: %{ack_broadcast: true}} = socket, _result) do
+    {{:reply, :ok, socket}, :success}
+  end
+
+  defp reply_success(socket, _result), do: {{:noreply, socket}, :success}
 
   defp send_message(tenant_id, self_broadcast, tenant_topic, payload) do
     broadcast = build_broadcast(tenant_topic, payload)
@@ -158,13 +151,104 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
     %Phoenix.Socket.Broadcast{topic: topic, event: @event_type, payload: payload}
   end
 
+  @spec maybe_persist(Policies.t(), pid(), String.t(), String.t(), payload, ack_broadcast :: boolean()) ::
+          :ok | :skip | {:ok, map()}
+  defp maybe_persist(
+         %Policies{broadcast: %BroadcastPolicies{persist: true}},
+         db_conn,
+         tenant_id,
+         topic,
+         payload,
+         ack_broadcast
+       ) do
+    if FeatureFlags.enabled?("broadcast_persistence", tenant_id) do
+      if ack_broadcast do
+        persist(db_conn, tenant_id, topic, payload)
+      else
+        Task.Supervisor.start_child(Realtime.TaskSupervisor, fn ->
+          persist(db_conn, tenant_id, topic, payload)
+        end)
+
+        :ok
+      end
+    else
+      :skip
+    end
+  end
+
+  defp maybe_persist(_policies, _db_conn, _tenant_id, _topic, _payload, _ack_broadcast), do: :ok
+
+  defp persist(db_conn, tenant_id, topic, payload) do
+    with {:ok, event, event_payload} <- convert_to_persistable_fields(payload),
+         {:ok, id} <- Messages.persist(db_conn, tenant_id, topic, event, event_payload) do
+      {:ok, %{id: id}}
+    else
+      error ->
+        log_error("UnableToPersistMessage", error)
+        :ok
+    end
+  end
+
+  @spec convert_to_persistable_fields(payload) ::
+          {:ok, String.t(), map() | binary()} | {:error, :unsupported_payload}
+  defp convert_to_persistable_fields(%{"event" => event, "payload" => payload}), do: {:ok, event, payload}
+
+  # Already in JSON format, use Fragment to skip decode and re-encode
+  defp convert_to_persistable_fields({event, :json, user_payload, _metadata}),
+    do: {:ok, event, Jason.Fragment.new(user_payload)}
+
+  defp convert_to_persistable_fields({event, :binary, user_payload, _metadata}), do: {:ok, event, user_payload}
+
+  defp convert_to_persistable_fields(_payload), do: {:error, :unsupported_payload}
+
   defp increment_rate_counter(%{assigns: %{policies: %Policies{broadcast: %BroadcastPolicies{write: false}}}} = socket) do
     socket
   end
 
-  defp increment_rate_counter(%{assigns: %{rate_counter: counter}} = socket) do
-    GenCounter.add(counter.id)
+  defp increment_rate_counter(%{assigns: %{tenant: tenant_id}} = socket) do
+    GenCounter.add(Tenants.events_per_second_key(tenant_id))
     socket
+  end
+
+  @spec authorize_write(Socket.t(), pid() | nil) :: {:ok, Socket.t()} | {:error, atom(), Socket.t()}
+  defp authorize_write(socket, db_conn) do
+    %{
+      assigns: %{
+        policies: policies,
+        authorization_context: authorization_context
+      }
+    } = socket
+
+    case run_authorization_check(policies || %Policies{}, db_conn, authorization_context) do
+      {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}} = policies} ->
+        {:ok, assign(socket, :policies, policies)}
+
+      {:ok, policies} ->
+        {:error, :unauthorized, assign(socket, :policies, policies)}
+
+      {:error, :rls_policy_error, error} ->
+        log_error("RlsPolicyError", error)
+        {:error, :rls_policy_error, socket}
+
+      {:error, :query_canceled, error} ->
+        log_error("QueryCanceled", error)
+        {:error, :query_canceled, socket}
+
+      {:error, :missing_partition} ->
+        log_error("MissingPartition", "Realtime was unable to find the expected messages partition")
+        {:error, :missing_partition, socket}
+
+      {:error, :tenant_database_unavailable} ->
+        log_error("UnableToConnectToProject", "Realtime was unable to connect to the project database")
+        {:error, :unable_to_connect_to_project, socket}
+
+      {:error, :increase_connection_pool} ->
+        {:error, :increase_connection_pool, socket}
+
+      {:error, error} ->
+        log_error("UnableToSetPolicies", error)
+        {:error, :unable_to_set_policies, socket}
+    end
   end
 
   defp run_authorization_check(
@@ -172,10 +256,30 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
          db_conn,
          authorization_context
        ) do
-    Authorization.get_write_authorizations(policies, db_conn, authorization_context)
+    with {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}} = policies} <-
+           Authorization.get_write_authorizations(policies, db_conn, authorization_context, :broadcast) do
+      maybe_check_persistence(policies, db_conn, authorization_context)
+    end
   end
 
   defp run_authorization_check(socket, _db_conn, _authorization_context) do
     {:ok, socket}
+  end
+
+  @spec check_payload_size(Socket.t(), payload) :: :ok | {:error, :payload_size_exceeded, Socket.t()}
+  defp check_payload_size(%{assigns: %{tenant: tenant_id}} = socket, payload) do
+    case Tenants.validate_payload_size(tenant_id, payload) do
+      :ok -> :ok
+      {:error, :payload_size_exceeded} -> {:error, :payload_size_exceeded, socket}
+    end
+  end
+
+  # The persist policy needs its own probe, so only pay for it when the flag is on.
+  defp maybe_check_persistence(policies, db_conn, authorization_context) do
+    if FeatureFlags.enabled?("broadcast_persistence", authorization_context.tenant_id) do
+      Authorization.get_write_authorizations(policies, db_conn, authorization_context, :persistence)
+    else
+      {:ok, policies}
+    end
   end
 end

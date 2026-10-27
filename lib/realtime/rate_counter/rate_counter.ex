@@ -119,6 +119,14 @@ defmodule Realtime.RateCounter do
     end
   end
 
+  @doc """
+  Gets the state of the RateCounter without starting it.
+
+  Returns `{:error, :not_found}` if the RateCounter is not running.
+  """
+  @spec find(term()) :: {:ok, t} | {:error, :not_found}
+  def find(id), do: do_get(id)
+
   defp do_get(id) do
     case Cachex.get(@cache, id) do
       {:ok, nil} -> {:error, :not_found}
@@ -225,8 +233,6 @@ defmodule Realtime.RateCounter do
 
   def handle_info(:idle_shutdown, state) do
     if Enum.all?(state.bucket, &(&1 == 0)) do
-      # All the buckets are empty, so we can assume this RateCounter has not been useful recently
-      Logger.info("#{__MODULE__} idle_shutdown reached for: #{inspect(state.id)}")
       shutdown(state)
     else
       Process.cancel_timer(state.idle_shutdown_ref)

@@ -181,7 +181,8 @@ defmodule Realtime.Api do
 
   @spec get_tenant_by_external_id(String.t(), Keyword.t()) :: Tenant.t() | nil
   def get_tenant_by_external_id(external_id, opts \\ []) do
-    use_replica? = Keyword.get(opts, :use_replica?, true)
+    opts = Keyword.validate!(opts, use_replica?: true)
+    use_replica? = Keyword.fetch!(opts, :use_replica?)
 
     cond do
       use_replica? ->
@@ -192,6 +193,25 @@ defmodule Realtime.Api do
 
       true ->
         call(:get_tenant_by_external_id, [external_id, opts], tenant_id: external_id)
+    end
+  end
+
+  @doc """
+  Returns the subset of the given external ids that have a tenant row in this cluster.
+
+  Always reads the primary so a tenant that was just created is never reported as absent.
+  """
+  @spec list_existing_external_ids([String.t()]) :: [String.t()] | {:error, term()}
+  def list_existing_external_ids([]), do: []
+
+  def list_existing_external_ids(external_ids) when is_list(external_ids) do
+    if master_region?() do
+      Tenant
+      |> where([t], t.external_id in ^external_ids)
+      |> select([t], t.external_id)
+      |> Repo.all()
+    else
+      call(:list_existing_external_ids, [external_ids])
     end
   end
 
@@ -209,7 +229,11 @@ defmodule Realtime.Api do
     if master_region?() do
       %FeatureFlag{}
       |> FeatureFlag.changeset(attrs)
-      |> Repo.insert(on_conflict: {:replace, [:enabled, :updated_at]}, conflict_target: :name, returning: true)
+      |> Repo.insert(
+        on_conflict: {:replace, [:enabled, :rollout_percentage, :bucket_key, :updated_at]},
+        conflict_target: :name,
+        returning: true
+      )
       |> tap(fn
         {:ok, flag} -> FeatureFlags.Cache.global_update_cache(flag)
         _ -> :ok
@@ -234,7 +258,7 @@ defmodule Realtime.Api do
   end
 
   defp list_extensions(type) do
-    query = from(e in Extensions, where: e.type == ^type, select: e)
+    query = from(e in Extensions, where: e.type == ^type, select: struct(e, [:id, :settings]))
     replica = Replica.replica()
     replica.all(query)
   end
@@ -254,33 +278,79 @@ defmodule Realtime.Api do
     end
   end
 
-  @spec preload_counters(nil | Realtime.Api.Tenant.t(), any()) :: nil | Realtime.Api.Tenant.t()
   @doc """
   Updates the migrations_ran field for a tenant.
   """
   @spec update_migrations_ran(binary(), integer()) :: {:ok, Tenant.t()} | {:error, term()}
   def update_migrations_ran(external_id, count) do
     if master_region?() do
-      case get_tenant_by_external_id(external_id, use_replica?: false) do
-        nil ->
-          {:error, :tenant_not_found}
-
-        tenant ->
-          tenant
-          |> Tenant.changeset(%{migrations_ran: count})
-          |> Repo.update()
-          |> tap(fn result ->
-            case result do
-              {:ok, tenant} -> Cache.global_cache_update(tenant)
-              _ -> :ok
-            end
-          end)
-      end
+      update_and_cache_tenant(external_id, &Tenant.changeset(&1, %{migrations_ran: count}))
     else
       call(:update_migrations_ran, [external_id, count], tenant_id: external_id)
     end
   end
 
+  @doc """
+  Replaces a tenant's jwt_secret ciphertext in place, only if it still holds `expected`.
+
+  The backfill reads the tenant, re-encrypts asynchronously and writes back, so a rotation landing
+  in that window would otherwise be reverted to a re-encrypted copy of the old secret. Compare-and-set
+  makes the stale write a no-op instead.
+
+  Bypasses `update_tenant/2`'s disconnect/db-restart/rate-counter side effects: the plaintext
+  secret hasn't changed, only its ciphertext.
+  """
+  @spec reencrypt_tenant_jwt_secret(binary(), binary(), binary()) :: {:ok, Tenant.t()} | {:error, term()}
+  def reencrypt_tenant_jwt_secret(external_id, expected, jwt_secret) do
+    if master_region?() do
+      query = from(t in Tenant, where: t.external_id == ^external_id)
+
+      with {:ok, _} <-
+             compare_and_set(query, [jwt_secret: expected], [jwt_secret: jwt_secret],
+               changed: :jwt_secret_changed,
+               missing: :tenant_not_found
+             ),
+           do: reload_and_cache_tenant(external_id)
+    else
+      call(:reencrypt_tenant_jwt_secret, [external_id, expected, jwt_secret], tenant_id: external_id)
+    end
+  end
+
+  @doc """
+  Replaces an extension's settings in place with a re-encrypted copy, only if they still hold
+  `expected`. Compare-and-set for the same reason as `reencrypt_tenant_jwt_secret/3`.
+  """
+  @spec reencrypt_extension_settings(binary(), binary(), map(), map()) ::
+          {:ok, Ecto.Schema.t()} | {:error, term()}
+  def reencrypt_extension_settings(tenant_id, extension_id, expected, settings) do
+    if master_region?() do
+      query = from(e in Extensions, where: e.id == ^extension_id and e.tenant_external_id == ^tenant_id)
+
+      compare_and_set(query, [settings: expected], [settings: settings],
+        changed: :settings_changed,
+        missing: :extension_not_found
+      )
+    else
+      call(:reencrypt_extension_settings, [tenant_id, extension_id, expected, settings], tenant_id: tenant_id)
+    end
+  end
+
+  @doc """
+  Records when a tenant finished moving to GCM encryption. A null gcm_migrated_at means the tenant
+  still has values on the legacy cipher.
+  """
+  @spec update_tenant_gcm_migrated_at(binary()) :: {:ok, Tenant.t()} | {:error, term()}
+  def update_tenant_gcm_migrated_at(external_id) do
+    if master_region?() do
+      now = DateTime.utc_now()
+
+      update_and_cache_tenant(external_id, &Tenant.gcm_migrated_at_changeset(&1, %{gcm_migrated_at: now}))
+    else
+      call(:update_tenant_gcm_migrated_at, [external_id], tenant_id: external_id)
+    end
+  end
+
+  @spec preload_counters(nil | Realtime.Api.Tenant.t(), any()) :: nil | Realtime.Api.Tenant.t()
   def preload_counters(nil), do: nil
 
   def preload_counters(%Tenant{} = tenant) do
@@ -361,8 +431,48 @@ defmodule Realtime.Api do
 
   defp maybe_restart_db_connection(_changeset), do: nil
 
+  # Applies `changes` only while the row still holds `expected`, so a write racing with the caller's
+  # read is dropped instead of clobbered. `{0, _}` is ambiguous - lost the race or the row is gone -
+  # so `errors[:changed]` / `errors[:missing]` tell the caller which one it was.
+  defp compare_and_set(query, expected, changes, errors) do
+    query
+    |> where(^expected)
+    |> select([row], row)
+    |> Repo.update_all(set: changes)
+    |> case do
+      {1, [row]} -> {:ok, row}
+      {0, _} -> if Repo.exists?(query), do: {:error, errors[:changed]}, else: {:error, errors[:missing]}
+    end
+  end
+
+  # Single-field tenant updates that only need the cache refreshed: no disconnect, db restart or rate
+  # counter side effects, unlike `update_tenant/2`.
+  defp update_and_cache_tenant(external_id, changeset_fun) do
+    with %Tenant{} = tenant <- get_tenant_by_external_id(external_id, use_replica?: false),
+         {:ok, updated} <- tenant |> changeset_fun.() |> Repo.update() do
+      Cache.global_cache_update(updated)
+      {:ok, updated}
+    else
+      nil -> {:error, :tenant_not_found}
+      {:error, _} = error -> error
+    end
+  end
+
+  # Cached tenants carry their extensions, so the fresh copy has to come from a full read rather than
+  # from the writing query itself.
+  defp reload_and_cache_tenant(external_id) do
+    case get_tenant_by_external_id(external_id, use_replica?: false) do
+      nil ->
+        {:error, :tenant_not_found}
+
+      %Tenant{} = tenant ->
+        Cache.global_cache_update(tenant)
+        {:ok, tenant}
+    end
+  end
+
   defp master_region? do
-    region = Application.get_env(:realtime, :region)
+    region = Nodes.region()
     master_region = Application.get_env(:realtime, :master_region) || region
     region == master_region
   end

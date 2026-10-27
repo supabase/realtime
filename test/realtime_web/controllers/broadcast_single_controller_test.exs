@@ -2,24 +2,39 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
   use RealtimeWeb.ConnCase, async: true
   use Mimic
 
+  setup :set_mimic_from_context
+
+  import Ecto.Query, only: [from: 2]
+
+  alias Realtime.Api
+  alias Realtime.Api.Message
   alias Realtime.Crypto
+  alias Realtime.Database
+  alias Realtime.FeatureFlags
   alias Realtime.GenCounter
   alias Realtime.RateCounter
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Connect
+  alias Realtime.Tenants.ReplicationConnection
+  alias Realtime.Tenants.Repo
 
   alias RealtimeWeb.RealtimeChannel
   alias RealtimeWeb.Endpoint
 
-  setup %{conn: conn} do
-    tenant = Containers.checkout_tenant(run_migrations: true)
-    # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
+  setup_all do
+    tenant = TestTenantDb.checkout_tenant_unboxed(run_migrations: true)
+    %{tenant: tenant}
+  end
+
+  setup %{conn: conn, tenant: tenant} do
+    # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues.
+    # Kept per-test so the "suspended tenant" case can't leak suspend: true into later tests.
     Realtime.Tenants.Cache.update_cache(tenant)
 
     conn = generate_conn(conn, tenant)
 
-    {:ok, conn: conn, tenant: tenant}
+    {:ok, conn: conn}
   end
 
   defp subscribe(tenant_topic, topic, serializer \\ Phoenix.Socket.V1.JSONSerializer) do
@@ -222,6 +237,8 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
     end
 
     test "returns 422 when JSON payload exceeds size limit", %{conn: conn, tenant: tenant} do
+      # Drop deliveries counted by previous tests sharing this tenant
+      Realtime.GenCounter.reset(Tenants.events_per_second_key(tenant))
       request_events_key = Tenants.requests_per_second_key(tenant)
 
       expect(GenCounter, :add, fn ^request_events_key -> :ok end)
@@ -239,7 +256,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       assert Jason.decode!(conn.resp_body)["errors"]["payload"] == ["Payload size exceeds tenant limit"]
 
       {:ok, rate_counter} = RateCounterHelper.tick!(Tenants.events_per_second_rate(tenant))
-      assert rate_counter.avg == 0.0
+      assert [0 | _] = rate_counter.bucket
     end
 
     test "returns 401 when JWT is expired", %{conn: conn, tenant: tenant} do
@@ -342,6 +359,8 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
     end
 
     test "returns 422 when binary payload exceeds size limit", %{conn: conn, tenant: tenant} do
+      # Drop deliveries counted by previous tests sharing this tenant
+      Realtime.GenCounter.reset(Tenants.events_per_second_key(tenant))
       request_events_key = Tenants.requests_per_second_key(tenant)
 
       expect(GenCounter, :add, fn ^request_events_key -> :ok end)
@@ -359,7 +378,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       assert Jason.decode!(conn.resp_body)["errors"]["payload"] == ["Payload size exceeds tenant limit"]
 
       {:ok, rate_counter} = RateCounterHelper.tick!(Tenants.events_per_second_rate(tenant))
-      assert rate_counter.avg == 0.0
+      assert [0 | _] = rate_counter.bucket
     end
 
     test "returns 401 when JWT is expired for binary", %{conn: conn, tenant: tenant} do
@@ -409,6 +428,63 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
         |> post(Routes.broadcast_single_path(conn, :broadcast, sub_topic, event), %{"data" => "test"})
 
       assert conn.status == 202
+    end
+
+    test "returns 422 when the JSON body is not an object", %{conn: conn, tenant: tenant} do
+      sub_topic = "room:not-an-object"
+      subscribe(Tenants.tenant_topic(tenant, sub_topic), sub_topic)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(Routes.broadcast_single_path(conn, :broadcast, sub_topic, "message"), "[1,2,3]")
+
+      assert conn.status == 422
+      assert Jason.decode!(conn.resp_body)["message"] == "Payload must be a JSON object"
+      refute_receive {:socket_push, _, _}
+    end
+
+    test "broadcasts a JSON object with a _binary key as JSON", %{conn: conn, tenant: tenant} do
+      sub_topic = "room:binary-key"
+      subscribe(Tenants.tenant_topic(tenant, sub_topic), sub_topic)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(Routes.broadcast_single_path(conn, :broadcast, sub_topic, "message"), ~s({"_binary":"x"}))
+
+      assert conn.status == 202
+      assert %{"payload" => %{"payload" => %{"_binary" => "x"}}} = assert_receive_message()
+    end
+
+    test "ignores private and persist keys in the JSON body", %{conn: conn, tenant: tenant} do
+      sub_topic = "room:flags-in-body"
+      subscribe(Tenants.tenant_topic(tenant, sub_topic), sub_topic)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(
+          Routes.broadcast_single_path(conn, :broadcast, sub_topic, "message"),
+          ~s({"private":true,"persist":true,"text":"x"})
+        )
+
+      assert conn.status == 202
+
+      assert %{"payload" => %{"payload" => %{"private" => true, "persist" => true, "text" => "x"}}} =
+               assert_receive_message()
+    end
+  end
+
+  describe "missing content-type" do
+    test "returns 415 and does not broadcast", %{conn: conn, tenant: tenant} do
+      sub_topic = "room:no-content-type"
+      subscribe(Tenants.tenant_topic(tenant, sub_topic), sub_topic)
+
+      conn = post_without_content_type(conn, sub_topic, ~s({"text":"hi"}))
+
+      assert conn.status == 415
+      refute_receive {:socket_push, _, _}
     end
   end
 
@@ -503,7 +579,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       request_events_key = Tenants.requests_per_second_key(tenant)
       expect(GenCounter, :add, fn ^request_events_key -> :ok end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _ ->
+      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
         {:error, :query_canceled,
          %Postgrex.Error{postgres: %{code: :query_canceled, message: "canceling statement due to user request"}}}
       end)
@@ -521,7 +597,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       request_events_key = Tenants.requests_per_second_key(tenant)
       expect(GenCounter, :add, fn ^request_events_key -> :ok end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _ -> {:error, :missing_partition} end)
+      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast -> {:error, :missing_partition} end)
 
       conn =
         conn
@@ -536,7 +612,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       request_events_key = Tenants.requests_per_second_key(tenant)
       expect(GenCounter, :add, fn ^request_events_key -> :ok end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _ -> {:error, :increase_connection_pool} end)
+      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast -> {:error, :increase_connection_pool} end)
 
       conn =
         conn
@@ -551,7 +627,9 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       request_events_key = Tenants.requests_per_second_key(tenant)
       expect(GenCounter, :add, fn ^request_events_key -> :ok end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _ -> {:error, :tenant_database_unavailable} end)
+      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast ->
+        {:error, :tenant_database_unavailable}
+      end)
 
       conn =
         conn
@@ -566,7 +644,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       request_events_key = Tenants.requests_per_second_key(tenant)
       expect(GenCounter, :add, fn ^request_events_key -> :ok end)
 
-      expect(Authorization, :get_write_authorizations, fn _, _ -> {:error, "boom"} end)
+      expect(Authorization, :get_write_authorizations, fn _, _, :broadcast -> {:error, "boom"} end)
 
       conn =
         conn
@@ -651,6 +729,134 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       assert conn.status == 500
       assert Jason.decode!(conn.resp_body)["message"] == "RPC error"
     end
+  end
+
+  describe "broadcast persistence" do
+    setup %{conn: conn, tenant: tenant} do
+      enable_broadcast_persistence_flag!(tenant)
+      jwt_secret = Crypto.decrypt!(tenant.jwt_secret)
+
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+      clean_table(db_conn, "realtime", "messages")
+
+      claims = %{sub: random_string(), role: "authenticated", exp: Joken.current_time() + 1_000}
+      signer = Joken.Signer.create("HS256", jwt_secret)
+      jwt = Joken.generate_and_sign!(%{}, claims, signer)
+
+      conn =
+        conn
+        |> put_req_header("accept", "application/json")
+        |> put_req_header("authorization", "Bearer #{jwt}")
+        |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
+
+      {:ok, conn: conn, db_conn: db_conn}
+    end
+
+    test "persist=true stores the message and does not broadcast it again from the database", %{
+      conn: conn,
+      db_conn: db_conn,
+      tenant: tenant
+    } do
+      # Other tests in this module assert this tenant's events counter is 0.0
+      stub(GenCounter, :add, fn _ -> :ok end)
+
+      start_link_supervised!(
+        {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
+        restart: :transient
+      )
+
+      sub_topic = random_string()
+      event = random_string()
+
+      create_rls_policies(
+        db_conn,
+        [:authenticated_read_broadcast, :authenticated_write_broadcast, :authenticated_write_persistence],
+        %{topic: sub_topic}
+      )
+
+      subscribe(Tenants.tenant_topic(tenant.external_id, sub_topic, false), sub_topic)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(
+          Routes.broadcast_single_path(conn, :broadcast, sub_topic, event) <> "?private=true&persist=true",
+          %{"content" => "hello"}
+        )
+
+      assert conn.status == 202
+      assert_receive {:socket_push, :text, _data}, 500
+
+      assert_eventually(
+        {:ok, [%Message{topic: ^sub_topic, event: ^event, skip_broadcast: true}]} =
+          Repo.all(db_conn, messages_for(sub_topic), Message)
+      )
+
+      # The stored row reaches the replication stream but must not be delivered a second time
+      refute_receive {:socket_push, :text, _}, 500
+    end
+
+    test "does not store without persist=true", %{conn: conn, db_conn: db_conn} do
+      stub(GenCounter, :add, fn _ -> :ok end)
+
+      sub_topic = random_string()
+      event = random_string()
+
+      create_rls_policies(
+        db_conn,
+        [:authenticated_read_broadcast, :authenticated_write_broadcast, :authenticated_write_persistence],
+        %{topic: sub_topic}
+      )
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(
+          Routes.broadcast_single_path(conn, :broadcast, sub_topic, event) <> "?private=true",
+          %{"content" => "hello"}
+        )
+
+      assert conn.status == 202
+
+      refute_eventually match?({:ok, [_ | _]}, Repo.all(db_conn, messages_for(sub_topic), Message))
+    end
+
+    test "rejects persist=true on a public broadcast", %{conn: conn} do
+      stub(GenCounter, :add, fn _ -> :ok end)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(
+          Routes.broadcast_single_path(conn, :broadcast, random_string(), random_string()) <> "?persist=true",
+          %{"content" => "hello"}
+        )
+
+      assert conn.status == 422
+      assert Jason.decode!(conn.resp_body)["errors"]["persist"] == ["can only be used on private channels"]
+    end
+  end
+
+  # Enables the `broadcast_persistence` flag for real: the flag is created and pushed into the local
+  # FeatureFlags cache so the replication connection process reads it synchronously, and torn down
+  # afterwards so it does not leak into other tests via the shared in-memory cache.
+  defp enable_broadcast_persistence_flag!(tenant) do
+    {:ok, flag} = Api.upsert_feature_flag(%{name: "broadcast_persistence", enabled: false})
+    FeatureFlags.Cache.update_cache(flag)
+    {:ok, tenant} = FeatureFlags.set_tenant_flag("broadcast_persistence", tenant.external_id, true)
+    Realtime.Tenants.Cache.update_cache(tenant)
+    on_exit(fn -> FeatureFlags.Cache.invalidate_cache("broadcast_persistence") end)
+  end
+
+  defp messages_for(topic), do: from(m in Message, where: m.topic == ^topic)
+
+  # Phoenix.ConnTest refuses a binary body without a content-type, so dispatch directly
+  defp post_without_content_type(conn, sub_topic, body) do
+    path = Routes.broadcast_single_path(conn, :broadcast, sub_topic, "message")
+
+    conn
+    |> Plug.Adapters.Test.Conn.conn("POST", path, body)
+    |> Endpoint.call(Endpoint.init([]))
   end
 
   defp generate_conn(conn, tenant) do

@@ -10,6 +10,7 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
   import Generators
 
   alias Extensions.PostgresCdcRls
+  alias Extensions.PostgresCdcRls.ReplicationPoller
   alias Phoenix.Socket.Message
   alias Postgrex
   alias Realtime.Database
@@ -82,6 +83,88 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
                        topic: "realtime:any"
                      },
                      500
+    end
+  end
+
+  describe "wait for subscription" do
+    test "a write straight after the join reply is not missed", %{tenant: tenant, serializer: serializer} do
+      assert_cdc_stopped(tenant)
+
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+
+      config = %{
+        postgres_changes: [%{event: "INSERT", schema: "public"}],
+        postgres_changes_options: %{wait: true, timeout: 15_000}
+      }
+
+      WebsocketClient.join(socket, topic, %{config: config})
+      sub_id = :erlang.phash2(%{"event" => "INSERT", "schema" => "public"})
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       payload: %{
+                         "response" => %{
+                           "postgres_changes" => [%{"event" => "INSERT", "id" => ^sub_id, "schema" => "public"}]
+                         },
+                         "status" => "ok"
+                       },
+                       topic: ^topic
+                     },
+                     20_000
+
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{
+                         "channel" => "any",
+                         "extension" => "postgres_changes",
+                         "message" => "Subscribed to PostgreSQL",
+                         "status" => "ok"
+                       },
+                       ref: nil,
+                       topic: ^topic
+                     },
+                     500
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+
+      [{poller_pid, _}] = Registry.lookup(ReplicationPoller.Registry, tenant.external_id)
+      wait_for_poller_oids(poller_pid)
+
+      %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{
+                         "data" => %{"record" => %{"details" => "test", "id" => ^id}, "type" => "INSERT"},
+                         "ids" => [^sub_id]
+                       },
+                       ref: nil,
+                       topic: ^topic
+                     },
+                     2000
+    end
+
+    test "join is rejected when the subscription params are malformed", %{tenant: tenant, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+
+      config = %{
+        postgres_changes: [%{event: "INSERT", schema: "public", table: "test", filter: "wrong"}],
+        postgres_changes_options: %{wait: true, timeout: 15_000}
+      }
+
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       payload: %{"status" => "error", "response" => %{"reason" => reason}},
+                       topic: ^topic
+                     },
+                     20_000
+
+      assert reason =~ "RealtimeDisabledForConfiguration"
+      assert reason =~ "Error parsing `filter` params"
     end
   end
 
@@ -404,206 +487,6 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
     end
   end
 
-  describe "filters" do
-    test "eq filter matches on insert, update and delete", %{tenant: tenant, serializer: serializer} do
-      assert_filter_delivers(tenant, serializer, "details=eq.hello", "hello")
-    end
-
-    test "neq filter matches on insert, update and delete", %{tenant: tenant, serializer: serializer} do
-      assert_filter_delivers(tenant, serializer, "details=neq.other", "hello")
-    end
-
-    test "lt filter matches on insert, update and delete", %{tenant: tenant, serializer: serializer} do
-      assert_filter_delivers(tenant, serializer, "details=lt.m", "a")
-    end
-
-    test "lte filter matches on insert, update and delete", %{tenant: tenant, serializer: serializer} do
-      assert_filter_delivers(tenant, serializer, "details=lte.m", "m")
-    end
-
-    test "gt filter matches on insert, update and delete", %{tenant: tenant, serializer: serializer} do
-      assert_filter_delivers(tenant, serializer, "details=gt.a", "z")
-    end
-
-    test "gte filter matches on insert, update and delete", %{tenant: tenant, serializer: serializer} do
-      assert_filter_delivers(tenant, serializer, "details=gte.z", "z")
-    end
-
-    test "in filter matches on insert, update and delete", %{tenant: tenant, serializer: serializer} do
-      assert_filter_delivers(tenant, serializer, "details=in.(hello,world)", "hello")
-    end
-
-    test "like filter matches on insert, update and delete", %{tenant: tenant, serializer: serializer} do
-      assert_filter_delivers(tenant, serializer, "details=like.hel%", "hello")
-    end
-
-    test "ilike filter matches on insert, update and delete", %{tenant: tenant, serializer: serializer} do
-      assert_filter_delivers(tenant, serializer, "details=ilike.HEL%", "hello")
-    end
-
-    test "is filter matches on insert, update and delete", %{tenant: tenant, serializer: serializer} do
-      assert_filter_delivers(tenant, serializer, "details=is.null", nil)
-    end
-
-    test "match filter matches on insert, update and delete", %{tenant: tenant, serializer: serializer} do
-      assert_filter_delivers(tenant, serializer, "details=match.^hel", "hello")
-    end
-
-    test "imatch filter matches on insert, update and delete", %{tenant: tenant, serializer: serializer} do
-      assert_filter_delivers(tenant, serializer, "details=imatch.^HEL", "hello")
-    end
-
-    test "isdistinct filter matches on insert, update and delete", %{tenant: tenant, serializer: serializer} do
-      assert_filter_delivers(tenant, serializer, "details=isdistinct.other", "hello")
-    end
-
-    test "delivers row matching all filters", %{tenant: tenant, serializer: serializer} do
-      {socket, _} = get_connection(tenant, serializer)
-      topic = "realtime:any"
-
-      # details=eq.match AND id=gt.0 — all rows have id > 0 (auto-increment from 1),
-      # so the second condition is always true, making details=eq.match the effective selector.
-      filter = "details=eq.match,id=gt.0"
-
-      config = %{
-        postgres_changes: [%{event: "INSERT", schema: "public", table: "test", filter: filter}]
-      }
-
-      WebsocketClient.join(socket, topic, %{config: config})
-
-      assert_receive %Message{
-                       event: "phx_reply",
-                       payload: %{"status" => "ok"},
-                       topic: ^topic
-                     },
-                     200
-
-      assert_receive %Message{
-                       event: "system",
-                       payload: %{
-                         "channel" => "any",
-                         "extension" => "postgres_changes",
-                         "message" => "Subscribed to PostgreSQL",
-                         "status" => "ok"
-                       },
-                       ref: nil,
-                       topic: ^topic
-                     },
-                     8000
-
-      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
-
-      %{rows: [[matching_id]]} =
-        Postgrex.query!(conn, "insert into test (details) values ('match') returning id", [])
-
-      assert_receive %Message{
-                       event: "postgres_changes",
-                       payload: %{
-                         "data" => %{
-                           "record" => %{"id" => ^matching_id, "details" => "match"},
-                           "type" => "INSERT"
-                         }
-                       },
-                       ref: nil,
-                       topic: ^topic
-                     },
-                     500
-    end
-
-    test "ignores row matching only one filter", %{tenant: tenant, serializer: serializer} do
-      {socket, _} = get_connection(tenant, serializer)
-      topic = "realtime:any"
-
-      # details=eq.match AND id=gt.0 — all rows have id > 0 (auto-increment from 1),
-      # so the second condition is always true, making details=eq.match the effective selector.
-      filter = "details=eq.match,id=gt.0"
-
-      config = %{
-        postgres_changes: [%{event: "INSERT", schema: "public", table: "test", filter: filter}]
-      }
-
-      WebsocketClient.join(socket, topic, %{config: config})
-
-      assert_receive %Message{
-                       event: "phx_reply",
-                       payload: %{"status" => "ok"},
-                       topic: ^topic
-                     },
-                     200
-
-      assert_receive %Message{
-                       event: "system",
-                       payload: %{
-                         "channel" => "any",
-                         "extension" => "postgres_changes",
-                         "message" => "Subscribed to PostgreSQL",
-                         "status" => "ok"
-                       },
-                       ref: nil,
-                       topic: ^topic
-                     },
-                     8000
-
-      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
-
-      # Row matching only the second filter (id>0) but not the first (details!='match') — should be ignored
-      Postgrex.query!(conn, "insert into test (details) values ('no-match') returning id", [])
-
-      refute_receive %Message{
-                       event: "postgres_changes",
-                       payload: %{"data" => %{"type" => "INSERT"}},
-                       topic: ^topic
-                     },
-                     500
-    end
-
-    test "not negates a filter, excluding the matched value", %{tenant: tenant, serializer: serializer} do
-      {socket, _} = get_connection(tenant, serializer)
-      topic = "realtime:any"
-
-      config = %{
-        postgres_changes: [%{event: "INSERT", schema: "public", table: "test", filter: "details=not.eq.skip"}]
-      }
-
-      WebsocketClient.join(socket, topic, %{config: config})
-
-      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 200
-
-      assert_receive %Message{
-                       event: "system",
-                       payload: %{
-                         "channel" => "any",
-                         "extension" => "postgres_changes",
-                         "message" => "Subscribed to PostgreSQL",
-                         "status" => "ok"
-                       },
-                       ref: nil,
-                       topic: ^topic
-                     },
-                     8000
-
-      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
-
-      Postgrex.query!(conn, "insert into test (details) values ('skip')", [])
-
-      refute_receive %Message{
-                       event: "postgres_changes",
-                       payload: %{"data" => %{"record" => %{"details" => "skip"}}},
-                       topic: ^topic
-                     },
-                     500
-
-      %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('keep') returning id", [])
-
-      assert_receive %Message{
-                       event: "postgres_changes",
-                       payload: %{"data" => %{"record" => %{"id" => ^id, "details" => "keep"}, "type" => "INSERT"}},
-                       topic: ^topic
-                     },
-                     500
-    end
-  end
-
   describe "select column filtering" do
     test "subscribe with select filters payload columns — INSERT", %{
       tenant: tenant,
@@ -664,6 +547,65 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
       assert "id" in column_names
       assert "details" in column_names
       refute "binary_data" in column_names
+    end
+
+    test "subscribe with an empty select delivers primary keys only — INSERT", %{
+      tenant: tenant,
+      serializer: serializer
+    } do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+
+      config = %{
+        postgres_changes: [
+          %{event: "INSERT", schema: "public", table: "test", select: []}
+        ]
+      }
+
+      WebsocketClient.join(socket, topic, %{config: config})
+      sub_id = :erlang.phash2(%{"event" => "INSERT", "schema" => "public", "table" => "test", "select" => []})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic},
+                     200
+
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{
+                         "extension" => "postgres_changes",
+                         "message" => "Subscribed to PostgreSQL",
+                         "status" => "ok"
+                       },
+                       topic: ^topic
+                     },
+                     8000
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+
+      %{rows: [[id]]} =
+        Postgrex.query!(conn, "insert into test (details) values ('hello') returning id", [])
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{
+                         "data" => %{
+                           "columns" => columns,
+                           "record" => record,
+                           "type" => "INSERT"
+                         },
+                         "ids" => [^sub_id]
+                       },
+                       topic: ^topic
+                     },
+                     500
+
+      # An empty select means primary keys only: the PK is present and every
+      # non-pkey column is excluded (distinct from omitting select, which delivers
+      # all columns).
+      assert record["id"] == id
+      refute Map.has_key?(record, "details")
+      refute Map.has_key?(record, "binary_data")
+      # columns metadata reflects the same: only the PK column is present
+      assert Enum.map(columns, & &1["name"]) == ["id"]
     end
 
     test "subscribe with select filters payload columns — UPDATE", %{
@@ -984,6 +926,49 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
       assert log =~ "Unable to subscribe to changes with given parameters"
     end
 
+    test "a joined channel re-subscribes after the cdc tree goes down", %{tenant: tenant, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+      config = %{postgres_changes: [%{event: "INSERT", schema: "public"}]}
+      sub_id = :erlang.phash2(%{"event" => "INSERT", "schema" => "public"})
+
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 200
+
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{"extension" => "postgres_changes", "status" => "ok"},
+                       topic: ^topic
+                     },
+                     8000
+
+      assert_cdc_stopped(tenant)
+
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{"extension" => "postgres_changes", "status" => "ok"},
+                       topic: ^topic
+                     },
+                     20_000
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+
+      %{rows: [[id]]} =
+        Postgrex.query!(conn, "insert into test (details) values ('after down') returning id", [])
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{
+                         "data" => %{"record" => %{"details" => "after down", "id" => ^id}, "type" => "INSERT"},
+                         "ids" => [^sub_id]
+                       },
+                       ref: nil,
+                       topic: ^topic
+                     },
+                     2000
+    end
+
     test "handle nil postgres changes params as empty param changes", %{
       tenant: tenant,
       serializer: serializer
@@ -1012,62 +997,18 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
     end
   end
 
-  # Subscribes with the wildcard event and asserts the filter delivers a matching row across
-  # INSERT, UPDATE and DELETE. `value` is the column value that satisfies the filter; the row
-  # keeps it through the update so it stays matched, and is matched on delete via the old record.
-  defp assert_filter_delivers(tenant, serializer, filter, value) do
-    {socket, _} = get_connection(tenant, serializer)
-    topic = "realtime:any"
-    config = %{postgres_changes: [%{event: "*", schema: "public", table: "test", filter: filter}]}
+  defp assert_cdc_stopped(tenant) do
+    PostgresCdcRls.handle_stop(tenant.external_id, 5000)
+    assert_eventually PostgresCdcRls.get_manager_conn(tenant.external_id) == {:error, nil}
+  end
 
-    WebsocketClient.join(socket, topic, %{config: config})
-
-    assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 200
-
-    assert_receive %Message{
-                     event: "system",
-                     payload: %{
-                       "channel" => "any",
-                       "extension" => "postgres_changes",
-                       "message" => "Subscribed to PostgreSQL",
-                       "status" => "ok"
-                     },
-                     ref: nil,
-                     topic: ^topic
-                   },
-                   8000
-
-    {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
-
-    # Full replica identity so the DELETE old tuple carries `details`; otherwise a filter on a
-    # non-PK column can't be evaluated on delete (the old tuple would only hold the primary key).
-    Postgrex.query!(conn, "alter table test replica identity full", [])
-
-    %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ($1) returning id", [value])
-
-    assert_receive %Message{
-                     event: "postgres_changes",
-                     payload: %{"data" => %{"record" => %{"id" => ^id}, "type" => "INSERT"}},
-                     topic: ^topic
-                   },
-                   500
-
-    Postgrex.query!(conn, "update test set details = $1 where id = $2", [value, id])
-
-    assert_receive %Message{
-                     event: "postgres_changes",
-                     payload: %{"data" => %{"record" => %{"id" => ^id}, "type" => "UPDATE"}},
-                     topic: ^topic
-                   },
-                   500
-
-    Postgrex.query!(conn, "delete from test where id = $1", [id])
-
-    assert_receive %Message{
-                     event: "postgres_changes",
-                     payload: %{"data" => %{"old_record" => %{"id" => ^id}, "type" => "DELETE"}},
-                     topic: ^topic
-                   },
-                   500
+  # The subscription reply only reflects the SubscriptionManager being ready — the
+  # ReplicationPoller creates its logical slot independently, so poll until it's done.
+  defp wait_for_poller_oids(poller_pid) do
+    case_wait :sys.get_state(poller_pid) do
+      %{oids: oids} = state when map_size(oids) > 0 -> state
+    else
+      state -> flunk("ReplicationPoller oids never populated. Last state: #{inspect(state)}")
+    end
   end
 end

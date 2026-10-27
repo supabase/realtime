@@ -3,6 +3,8 @@ defmodule RealtimeWeb.TenantControllerTest do
   # Also using global otel_simple_processor
   use RealtimeWeb.ConnCase, async: false
 
+  use Mimic
+
   import ExUnit.CaptureLog
   require OpenTelemetry.Tracer, as: Tracer
 
@@ -33,7 +35,7 @@ defmodule RealtimeWeb.TenantControllerTest do
   end
 
   defp with_tenant(_context) do
-    tenant = Containers.checkout_tenant(run_migrations: true)
+    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
     %{tenant: tenant}
   end
 
@@ -75,7 +77,7 @@ defmodule RealtimeWeb.TenantControllerTest do
   describe "create tenant with post" do
     test "run migrations on creation and encrypts credentials", %{conn: conn} do
       external_id = random_string()
-      {:ok, port} = Containers.checkout()
+      {:ok, port} = TestTenantDb.checkout()
 
       assert nil == Tenants.get_tenant_by_external_id(external_id)
 
@@ -88,25 +90,24 @@ defmodule RealtimeWeb.TenantControllerTest do
 
       [%{"settings" => settings}] = json_response(conn, 201)["data"]["extensions"]
 
-      assert Crypto.encrypt!("127.0.0.1") == settings["db_host"]
-      assert Crypto.encrypt!("postgres") == settings["db_name"]
-      assert Crypto.encrypt!("supabase_realtime_admin") == settings["db_user"]
+      assert Crypto.decrypt!(settings["db_host"]) == "127.0.0.1"
+      assert Crypto.decrypt!(settings["db_name"]) == "postgres"
+      assert Crypto.decrypt!(settings["db_user"]) == "supabase_admin"
       refute settings["db_password"]
-      Process.sleep(100)
 
-      %{broadcast_adapter: :gen_rpc, extensions: [%{settings: settings}]} =
-        tenant = Tenants.get_tenant_by_external_id(external_id)
+      assert_eventually Tenants.get_tenant_by_external_id(external_id).migrations_ran > 0
 
-      assert Crypto.encrypt!("postgres") == settings["db_password"]
+      assert %{broadcast_adapter: :gen_rpc, extensions: [%{settings: settings}]} =
+               Tenants.get_tenant_by_external_id(external_id)
 
-      assert tenant.migrations_ran > 0
+      assert Crypto.decrypt!(settings["db_password"]) == "postgres"
     end
   end
 
   describe "create tenant with put" do
     test "run migrations on creation and encrypts credentials", %{conn: conn} do
       external_id = random_string()
-      {:ok, port} = Containers.checkout()
+      {:ok, port} = TestTenantDb.checkout()
 
       assert nil == Tenants.get_tenant_by_external_id(external_id)
 
@@ -117,15 +118,15 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert %{"id" => _id, "external_id" => ^external_id} = json_response(conn, 201)["data"]
       [%{"settings" => settings}] = json_response(conn, 201)["data"]["extensions"]
 
-      assert Crypto.encrypt!("127.0.0.1") == settings["db_host"]
-      assert Crypto.encrypt!("postgres") == settings["db_name"]
-      assert Crypto.encrypt!("supabase_realtime_admin") == settings["db_user"]
+      assert Crypto.decrypt!(settings["db_host"]) == "127.0.0.1"
+      assert Crypto.decrypt!(settings["db_name"]) == "postgres"
+      assert Crypto.decrypt!(settings["db_user"]) == "supabase_admin"
       refute settings["db_password"]
-      Process.sleep(100)
-      %{extensions: [%{settings: settings}]} = tenant = Tenants.get_tenant_by_external_id(external_id)
 
-      assert Crypto.encrypt!("postgres") == settings["db_password"]
-      assert tenant.migrations_ran > 0
+      assert_eventually Tenants.get_tenant_by_external_id(external_id).migrations_ran > 0
+
+      assert %{extensions: [%{settings: settings}]} = Tenants.get_tenant_by_external_id(external_id)
+      assert Crypto.decrypt!(settings["db_password"]) == "postgres"
     end
   end
 
@@ -251,6 +252,22 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert updated_tenant.presence_enabled == true
     end
 
+    test "postgres_changes_pool is stored as subcriber_pool_size and overrides it", %{tenant: tenant, conn: conn} do
+      external_id = tenant.external_id
+      port = tenant_db_port(tenant)
+      attrs = default_tenant_attrs(port) |> put_extension_setting("subcriber_pool_size", 3)
+
+      conn = put(conn, ~p"/api/tenants/#{external_id}", tenant: attrs)
+      assert [%{"settings" => %{"subcriber_pool_size" => 3}}] = json_response(conn, 200)["data"]["extensions"]
+
+      attrs = put_extension_setting(attrs, "postgres_changes_pool", 10)
+
+      conn = put(conn, ~p"/api/tenants/#{external_id}", tenant: attrs)
+      assert [%{"settings" => settings}] = json_response(conn, 200)["data"]["extensions"]
+      assert settings["subcriber_pool_size"] == 10
+      refute Map.has_key?(settings, "postgres_changes_pool")
+    end
+
     test "renders errors when data is invalid", %{conn: conn} do
       conn = put(conn, ~p"/api/tenants/#{random_string()}", tenant: @invalid_attrs)
       assert json_response(conn, 422)["errors"] != %{}
@@ -291,24 +308,48 @@ defmodule RealtimeWeb.TenantControllerTest do
       {:ok, _pid} = Connect.lookup_or_start_connection(tenant.external_id)
 
       assert Connect.ready?(tenant.external_id)
-      assert Realtime.Tenants.ReplicationConnection.ready?(tenant.external_id)
+
+      # `ReplicationConnection.ready?/1` already waits for up to 5s
+      # Give the outer wait enough headroom for a couple of attempts,
+      # since it's async and can take a while, especially in CI
+      assert_eventually Realtime.Tenants.ReplicationConnection.ready?(tenant.external_id), timeout: 15_000
 
       assert Cache.get_tenant_by_external_id(tenant.external_id)
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
 
-      %{rows: [rows]} =
-        Postgrex.query!(db_conn, "SELECT slot_name FROM pg_replication_slots", [])
+      slot_name = Realtime.Tenants.ReplicationConnection.replication_slot_name("realtime", "messages")
 
-      assert rows > 0
+      assert_eventually {:ok, %{rows: [_row]}} =
+                          Postgrex.query(
+                            db_conn,
+                            "SELECT slot_name FROM pg_replication_slots WHERE slot_name = $1",
+                            [slot_name]
+                          )
+
       conn = delete(conn, ~p"/api/tenants/#{tenant.external_id}")
       assert response(conn, 204)
 
       refute Cache.get_tenant_by_external_id(tenant.external_id)
       refute Tenants.get_tenant_by_external_id(tenant.external_id)
-      Process.sleep(500)
 
-      assert {:ok, %{rows: []}} =
-               Postgrex.query(db_conn, "SELECT slot_name FROM pg_replication_slots", [])
+      # Slot teardown happens after the delete responds.
+      assert_eventually {:ok, %{rows: []}} =
+                          Postgrex.query(
+                            db_conn,
+                            "SELECT slot_name FROM pg_replication_slots WHERE slot_name = $1",
+                            [slot_name]
+                          )
+    end
+
+    test "does not read the replica", %{conn: conn, tenant: tenant} do
+      # A tenant created moments ago may not have reached the replica yet. Reading it there would
+      # answer 204 without deleting anything, so the lookup has to hit the primary.
+      Mimic.reject(&Realtime.Repo.Replica.replica/0)
+
+      conn = delete(conn, ~p"/api/tenants/#{tenant.external_id}")
+      assert response(conn, 204)
+
+      refute Realtime.Api.get_tenant_by_external_id(tenant.external_id, use_replica?: false)
     end
 
     test "tenant doesn't exist", %{conn: conn} do
@@ -574,7 +615,7 @@ defmodule RealtimeWeb.TenantControllerTest do
     end
 
     test "triggers migrations without blocking and self heals eventually", %{conn: conn} do
-      tenant = Containers.checkout_tenant(run_migrations: false)
+      tenant = TestTenantDb.checkout_tenant(run_migrations: false)
 
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
       assert {:error, _} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
@@ -584,9 +625,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert %{"healthy" => false, "db_connected" => false, "replication_connected" => false, "connected_cluster" => 0} =
                json_response(conn, 200)["data"]
 
-      assert eventually(fn ->
-               match?({:ok, %{healthy: true}}, Realtime.Tenants.health_check(tenant.external_id))
-             end)
+      assert_eventually {:ok, %{healthy: true}} = Realtime.Tenants.health_check(tenant.external_id)
 
       assert {:ok, %{rows: []}} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
 
@@ -660,6 +699,91 @@ defmodule RealtimeWeb.TenantControllerTest do
     end
   end
 
+  describe "bulk health check" do
+    setup [:with_tenant]
+
+    test "partitions refs into present and missing", %{conn: conn, tenant: %Tenant{external_id: external_id}} do
+      conn = post(conn, ~p"/api/tenants/health", %{"refs" => [external_id, "nope"]})
+
+      assert %{"present" => [^external_id], "missing" => ["nope"]} = json_response(conn, 200)
+    end
+
+    test "all refs present", %{conn: conn, tenant: %Tenant{external_id: external_id}} do
+      conn = post(conn, ~p"/api/tenants/health", %{"refs" => [external_id]})
+
+      assert %{"present" => [^external_id], "missing" => []} = json_response(conn, 200)
+    end
+
+    test "all refs missing", %{conn: conn} do
+      conn = post(conn, ~p"/api/tenants/health", %{"refs" => ["nope", "also-nope"]})
+
+      assert %{"present" => [], "missing" => ["nope", "also-nope"]} = json_response(conn, 200)
+    end
+
+    test "empty refs", %{conn: conn} do
+      conn = post(conn, ~p"/api/tenants/health", %{"refs" => []})
+
+      assert %{"present" => [], "missing" => []} = json_response(conn, 200)
+    end
+
+    test "duplicate refs are deduplicated", %{conn: conn, tenant: %Tenant{external_id: external_id}} do
+      conn = post(conn, ~p"/api/tenants/health", %{"refs" => [external_id, external_id, "nope", "nope"]})
+
+      assert %{"present" => [^external_id], "missing" => ["nope"]} = json_response(conn, 200)
+    end
+
+    test "returns 422 when refs exceeds the maximum", %{conn: conn} do
+      refs = Enum.map(1..501, &"ref-#{&1}")
+      conn = post(conn, ~p"/api/tenants/health", %{"refs" => refs})
+
+      assert json_response(conn, 422) == %{"message" => "refs exceeds the maximum of 500"}
+    end
+
+    test "returns 422 when refs contains a non-string", %{conn: conn} do
+      conn = post(conn, ~p"/api/tenants/health", %{"refs" => ["ok", 1]})
+
+      assert json_response(conn, 422) == %{"message" => "refs must be a list of strings"}
+    end
+
+    test "returns 422 when refs is not a list", %{conn: conn} do
+      conn = post(conn, ~p"/api/tenants/health", %{"refs" => "nope"})
+
+      assert json_response(conn, 422) == %{"message" => "refs is required"}
+    end
+
+    test "returns 422 when refs is absent", %{conn: conn} do
+      conn = post(conn, ~p"/api/tenants/health", %{})
+
+      assert json_response(conn, 422) == %{"message" => "refs is required"}
+    end
+
+    test "returns 503 when the master region is unreachable", %{conn: conn, tenant: tenant} do
+      previous_region = Application.get_env(:realtime, :region)
+      previous_master_region = Application.get_env(:realtime, :master_region)
+      Application.put_env(:realtime, :region, "ap-southeast-2")
+      Application.put_env(:realtime, :master_region, "us-east-1")
+
+      on_exit(fn ->
+        Application.put_env(:realtime, :region, previous_region)
+        Application.put_env(:realtime, :master_region, previous_master_region)
+      end)
+
+      expect(Realtime.Nodes, :node_from_region, fn "us-east-1", _key -> {:ok, :"master@127.0.0.1"} end)
+      expect(Realtime.GenRpc, :call, fn _node, _mod, _fun, _args, _opts -> {:error, :rpc_error, :timeout} end)
+
+      conn = post(conn, ~p"/api/tenants/health", %{"refs" => [tenant.external_id]})
+
+      assert json_response(conn, 503) == %{"message" => "unable to reach the tenants database"}
+    end
+
+    test "returns 403 when jwt is invalid", %{conn: conn} do
+      conn = put_req_header(conn, "authorization", "Bearer potato")
+      conn = post(conn, ~p"/api/tenants/health", %{"refs" => []})
+
+      assert response(conn, 403) == ""
+    end
+  end
+
   defp default_tenant_attrs(port) do
     %{
       "extensions" => [
@@ -668,7 +792,7 @@ defmodule RealtimeWeb.TenantControllerTest do
           "settings" => %{
             "db_host" => "127.0.0.1",
             "db_name" => "postgres",
-            "db_user" => "supabase_realtime_admin",
+            "db_user" => "supabase_admin",
             "db_password" => "postgres",
             "db_port" => "#{port}",
             "poll_interval" => 100,
@@ -684,20 +808,17 @@ defmodule RealtimeWeb.TenantControllerTest do
     }
   end
 
-  defp wait_on_postgres_cdc_rls(external_id, attempt \\ 10)
-
-  defp wait_on_postgres_cdc_rls(external_id, 0) do
-    raise "Postgres CDC RLS manager connection not established for #{external_id} after multiple attempts"
+  defp put_extension_setting(%{"extensions" => [extension]} = attrs, key, value) do
+    %{attrs | "extensions" => [update_in(extension, ["settings"], &Map.put(&1, key, value))]}
   end
 
-  defp wait_on_postgres_cdc_rls(external_id, attempt) do
-    case Extensions.PostgresCdcRls.get_manager_conn(external_id) do
-      {:ok, _, _} ->
-        :ok
-
-      {:error, _} ->
-        Process.sleep(100)
-        wait_on_postgres_cdc_rls(external_id, attempt - 1)
+  defp wait_on_postgres_cdc_rls(external_id) do
+    case_wait Extensions.PostgresCdcRls.get_manager_conn(external_id), timeout: 1_000, interval: 100 do
+      {:ok, _, _} -> :ok
+    else
+      last ->
+        raise "Postgres CDC RLS manager connection not established for " <>
+                "#{external_id} within 1000ms. Last result: #{inspect(last)}"
     end
   end
 

@@ -5,7 +5,7 @@ defmodule Realtime.Tenants.Connect.GetTenantTest do
 
   describe "run/1" do
     test "returns tenant when found" do
-      tenant = Containers.checkout_tenant()
+      tenant = TestTenantDb.checkout_tenant()
       assert {:ok, %{tenant: %Realtime.Api.Tenant{}}} = GetTenant.run(%{tenant_id: tenant.external_id})
     end
 

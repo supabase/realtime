@@ -16,7 +16,10 @@ defmodule RealtimeWeb.TenantController do
   alias Realtime.Tenants.Migrations
   alias RealtimeWeb.OpenApiSchemas.EmptyResponse
   alias RealtimeWeb.OpenApiSchemas.ErrorResponse
+  alias RealtimeWeb.OpenApiSchemas.MessageResponse
   alias RealtimeWeb.OpenApiSchemas.NotFoundResponse
+  alias RealtimeWeb.OpenApiSchemas.TenantBulkHealthParams
+  alias RealtimeWeb.OpenApiSchemas.TenantBulkHealthResponse
   alias RealtimeWeb.OpenApiSchemas.TenantHealthResponse
   alias RealtimeWeb.OpenApiSchemas.TenantParams
   alias RealtimeWeb.OpenApiSchemas.TenantResponse
@@ -25,6 +28,7 @@ defmodule RealtimeWeb.TenantController do
   alias RealtimeWeb.UserSocket
 
   @stop_timeout 10_000
+  @max_refs 500
 
   action_fallback(RealtimeWeb.FallbackController)
 
@@ -132,6 +136,7 @@ defmodule RealtimeWeb.TenantController do
   )
 
   def update(conn, %{"tenant_id" => external_id, "tenant" => tenant_params}) do
+    tenant_params = translate_postgres_changes_pool(tenant_params)
     tenant = Api.get_tenant_by_external_id(external_id, use_replica?: false)
 
     case tenant do
@@ -187,7 +192,7 @@ defmodule RealtimeWeb.TenantController do
   def delete(conn, %{"tenant_id" => tenant_id}) do
     stop_all_timeout = Enum.count(PostgresCdc.available_drivers()) * 1_000
 
-    with %Tenant{} = tenant <- Api.get_tenant_by_external_id(tenant_id, use_replica: false),
+    with %Tenant{} = tenant <- Api.get_tenant_by_external_id(tenant_id, use_replica?: false),
          _ <- RealtimeWeb.UserSocket.disconnect(tenant_id),
          true <- Api.delete_tenant_by_external_id(tenant_id),
          :ok <- Cache.distributed_invalidate_tenant_cache(tenant_id),
@@ -296,6 +301,73 @@ defmodule RealtimeWeb.TenantController do
       {:error, :tenant_not_found} -> {:error, :not_found}
     end
   end
+
+  operation(:bulk_health,
+    summary: "Bulk tenant presence",
+    description: "Check if given references are present in our cluster",
+    parameters: [
+      token: [
+        in: :header,
+        name: "Authorization",
+        schema: %OpenApiSpex.Schema{type: :string},
+        required: true,
+        example:
+          "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY"
+      ]
+    ],
+    request_body: TenantBulkHealthParams.params(),
+    responses: %{
+      200 => TenantBulkHealthResponse.response(),
+      403 => EmptyResponse.response(),
+      422 => MessageResponse.response(),
+      503 => MessageResponse.response()
+    }
+  )
+
+  def bulk_health(conn, %{"refs" => refs}) when is_list(refs) do
+    with :ok <- all_binary?(refs),
+         :ok <- within_ref_limit?(refs),
+         refs = Enum.uniq(refs),
+         existing when is_list(existing) <- Api.list_existing_external_ids(refs) do
+      existing = MapSet.new(existing)
+      {present, missing} = Enum.split_with(refs, &MapSet.member?(existing, &1))
+      json(conn, %{present: present, missing: missing})
+    else
+      {:error, status, reason} ->
+        {:error, status, reason}
+
+      {:error, e} ->
+        log_error("BulkTenantHealthFailed", e)
+        {:error, :service_unavailable, "unable to reach the tenants database"}
+    end
+  end
+
+  def bulk_health(_conn, _params), do: {:error, :unprocessable_entity, "refs is required"}
+
+  defp all_binary?(refs) do
+    if Enum.all?(refs, &is_binary/1),
+      do: :ok,
+      else: {:error, :unprocessable_entity, "refs must be a list of strings"}
+  end
+
+  defp within_ref_limit?(refs) do
+    if length(refs) < @max_refs,
+      do: :ok,
+      else: {:error, :unprocessable_entity, "refs exceeds the maximum of #{@max_refs}"}
+  end
+
+  # `postgres_changes_pool` is the public facing name for this setting to make it more explicit on intent
+  defp translate_postgres_changes_pool(%{"extensions" => extensions} = params) when is_list(extensions),
+    do: %{params | "extensions" => Enum.map(extensions, &translate_extension_pool/1)}
+
+  defp translate_postgres_changes_pool(params), do: params
+
+  defp translate_extension_pool(%{"settings" => %{"postgres_changes_pool" => pool} = settings} = extension) do
+    settings = settings |> Map.delete("postgres_changes_pool") |> Map.put("subcriber_pool_size", pool)
+    %{extension | "settings" => settings}
+  end
+
+  defp translate_extension_pool(extension), do: extension
 
   defp set_observability_attributes(conn, _opts) do
     tenant_id = conn.path_params["tenant_id"]

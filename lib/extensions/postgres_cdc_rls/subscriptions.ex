@@ -4,7 +4,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   """
   use Realtime.Logs
 
-  import Postgrex, only: [transaction: 3, query: 3, rollback: 2]
+  import Postgrex, only: [transaction: 3, query: 3, query: 4, rollback: 2]
 
   @type conn() :: Postgrex.conn()
   # A filter written to realtime.subscription.filters: column, operator, value, and a `negate`
@@ -19,20 +19,38 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   # All supported filter operators.
   @filter_types ["eq", "neq", "lt", "lte", "gt", "gte", "in", "like", "ilike", "is", "match", "imatch", "isdistinct"]
 
+  # The subscribe path nests three timeouts, each strictly inside the next:
+  #
+  #   statement_timeout (5s, Postgres) < transaction deadline (10s, here) < RPC (15s)
+  @transaction_timeout 10_000
+
   @spec create(conn(), String.t(), subscription_list, pid(), pid()) ::
           {:ok, Postgrex.Result.t()}
-          | {:error, Exception.t() | {:exit, term} | {:subscription_insert_failed, String.t()}}
+          | {:error,
+             Exception.t()
+             | {:exit, term}
+             | {:database_timeout, Exception.t()}
+             | {:subscription_insert_failed, String.t()}}
 
   def create(conn, publication, subscription_list, manager, caller) do
-    opts = [timeout: 10_000]
+    # `send` is not transactional. Notifying the manager from inside the transaction records
+    # a subscriber for a row that a later failure in the same list rolls back.
+    with {:ok, results} <- insert_subscriptions(conn, publication, subscription_list) do
+      Enum.each(subscription_list, fn %{id: id} ->
+        send(manager, {:subscribed, {caller, id}})
+      end)
 
+      {:ok, results}
+    end
+  end
+
+  defp insert_subscriptions(conn, publication, subscription_list) do
     transaction(
       conn,
       fn conn ->
         Enum.map(subscription_list, fn %{id: id, claims: claims, subscription_params: params} ->
           case query(conn, publication, id, claims, params) do
             {:ok, %{num_rows: num} = result} when num > 0 ->
-              send(manager, {:subscribed, {caller, id}})
               result
 
             {:ok, _} ->
@@ -42,14 +60,18 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
               rollback(conn, {:subscription_insert_failed, msg})
 
             {:error, exception} ->
-              msg =
-                "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [#{params_to_log(params)}]. Exception: #{Exception.message(exception)}"
+              if database_timeout?(exception) do
+                rollback(conn, {:database_timeout, exception})
+              else
+                msg =
+                  "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [#{params_to_log(params)}]. Exception: #{Exception.message(exception)}"
 
-              rollback(conn, {:subscription_insert_failed, msg})
+                rollback(conn, {:subscription_insert_failed, msg})
+              end
           end
         end)
       end,
-      opts
+      timeout: @transaction_timeout
     )
   rescue
     e in DBConnection.ConnectionError -> {:error, e}
@@ -57,20 +79,34 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
     :exit, reason -> {:error, {:exit, reason}}
   end
 
+  # A statement cancelled by `statement_timeout` (57014), or a connection torn down under us by
+  # DBConnection's deadline, means the database is slow
+  defp database_timeout?(%DBConnection.ConnectionError{}), do: true
+  defp database_timeout?(%Postgrex.Error{postgres: %{code: :query_canceled}}), do: true
+  defp database_timeout?(_), do: false
+
   defp query(conn, publication, id, claims, subscription_params) do
-    sql = "with sub_tables as (
+    sql = "with candidates as (
         select
-        rr.entity
+        pub.schemaname,
+        pub.tablename
         from
-        pg_publication_tables pub,
-        lateral (
-        select
-        format('%I.%I', pub.schemaname, pub.tablename)::regclass entity
-        ) rr
+        pg_publication_tables pub
         where
         pub.pubname = $1
         and pub.schemaname like (case $2 when '*' then '%' else $2 end) escape ''
         and pub.tablename like (case $3 when '*' then '%' else $3 end) escape ''
+     ),
+     sub_tables as (
+        select
+        format('%I.%I', c.schemaname, c.tablename)::regclass entity
+        from
+        candidates c
+        where
+        -- A name that matches a published schema or table exactly selects only that one, so
+        -- `item_1` doesn't also pick up `items1`. Otherwise `_` and `%` stay LIKE wildcards.
+        ($2 = '*' or c.schemaname = $2 or not exists (select 1 from candidates e where e.schemaname = $2))
+        and ($3 = '*' or c.tablename = $3 or not exists (select 1 from candidates e where e.tablename = $3))
      )
      insert into realtime.subscription as x(
         subscription_id,
@@ -83,10 +119,22 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
       select
         $4::text::uuid,
         sub_tables.entity,
-        $6,
+        -- Build the realtime.user_defined_filter[] server-side from primitive type arrays
+        -- instead of binding a list of composite tuples. Postgrex caches the composite type's
+        -- field count per connection at bootstrap and never refreshes it, so a long-lived
+        -- connection whose cache predates an ALTER TYPE on user_defined_filter would otherwise
+        -- encode against a stale arity and crash with :badarg. Constructing the rows here keeps
+        -- the arity resolved by the server's current catalog.
+        (
+          select coalesce(
+            array_agg(row(c, o::realtime.equality_op, v, n)::realtime.user_defined_filter),
+            '{}'::realtime.user_defined_filter[]
+          )
+          from unnest($6::text[], $7::text[], $8::text[], $9::boolean[]) as f(c, o, v, n)
+        ),
         $5,
-        $7,
-        $8
+        $10,
+        $11
       from
         sub_tables
         on conflict
@@ -99,17 +147,29 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
          id"
 
     {action_filter, schema, table, filters, selected_columns} = subscription_params
+    columns = Enum.map(filters, &elem(&1, 0))
+    ops = Enum.map(filters, &elem(&1, 1))
+    values = Enum.map(filters, &elem(&1, 2))
+    negates = Enum.map(filters, &elem(&1, 3))
 
-    query(conn, sql, [
-      publication,
-      schema,
-      table,
-      id,
-      claims,
-      filters,
-      action_filter,
-      selected_columns
-    ])
+    query(
+      conn,
+      sql,
+      [
+        publication,
+        schema,
+        table,
+        id,
+        claims,
+        columns,
+        ops,
+        values,
+        negates,
+        action_filter,
+        selected_columns
+      ],
+      cache_statement: "realtime_subscription_insert"
+    )
   end
 
   defp params_to_log({action_filter, schema, table, filters, selected_columns}) do
@@ -117,12 +177,15 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
     |> Enum.map_join(", ", fn {k, v} -> "#{k}: #{to_log(v)}" end)
   end
 
-  @spec delete(conn(), String.t()) :: {:ok, Postgrex.Result.t()} | {:error, any()}
+  @spec delete(conn(), String.t()) :: :ok | {:ok, Postgrex.Result.t()} | {:error, any()}
   def delete(conn, id) do
     Logger.debug("Delete subscription")
     sql = "delete from realtime.subscription where subscription_id = $1"
 
     case query(conn, sql, [id]) do
+      {:error, %Postgrex.Error{postgres: %{code: :undefined_table}}} ->
+        :ok
+
       {:error, reason} ->
         log_error("SubscriptionDeletionFailed", reason)
         {:error, reason}
@@ -142,6 +205,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
     case query(conn, "delete from realtime.subscription;", []) do
       {:ok, _} -> :ok
+      {:error, %Postgrex.Error{postgres: %{code: :undefined_table}}} -> :ok
       {:error, reason} -> log_error("SubscriptionDeletionFailed", reason)
     end
   catch
@@ -328,10 +392,10 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   end
 
   defp parse_select(%{"select" => cols}) when is_list(cols) do
-    case Enum.filter(cols, &is_binary/1) do
-      [] -> {:ok, nil}
-      valid -> {:ok, valid}
-    end
+    # An empty select list means "primary keys only" (stored as '{}'), which is
+    # distinct from omitting select entirely (nil = all columns). Keep the empty
+    # list so it reaches the database as '{}' instead of collapsing to nil.
+    {:ok, Enum.filter(cols, &is_binary/1)}
   end
 
   defp parse_select(%{"select" => str}) when is_binary(str) do

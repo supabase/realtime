@@ -8,7 +8,7 @@ defmodule Integrations do
   alias Realtime.Tenants.Connect
 
   def checkout_tenant_and_connect(_context \\ %{}) do
-    tenant = Containers.checkout_tenant(run_migrations: true)
+    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
     {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
     assert Connect.ready?(tenant.external_id)
     %{db_conn: db_conn, tenant: tenant}
@@ -81,8 +81,7 @@ defmodule Integrations do
         "grant all on table public.test to anon;",
         "grant all on table public.test to supabase_realtime_admin;",
         "grant all on table public.test to authenticated;",
-        # `for all tables` requires superuser
-        "create publication #{publication} for table public.test",
+        "create publication #{publication} for all tables",
         """
         DO $$
         DECLARE

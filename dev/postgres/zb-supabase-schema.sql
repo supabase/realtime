@@ -3,7 +3,7 @@
 do $$
 begin
   if not exists (select from pg_roles where rolname = 'supabase_realtime_admin') then
-    create user supabase_realtime_admin noinherit createrole login replication password 'postgres';
+    create role supabase_realtime_admin with noinherit nologin noreplication;
   end if;
 end$$;
 
@@ -23,5 +23,5 @@ grant usage on schema extensions to supabase_realtime_admin;
 grant usage on schema auth to supabase_realtime_admin;
 grant execute on all functions in schema auth to supabase_realtime_admin;
 grant usage on schema realtime to postgres, anon, authenticated, service_role;
-grant all on schema realtime to supabase_realtime_admin with grant option;
+grant all on schema realtime to supabase_realtime_admin;
 grant create, usage on schema _realtime to supabase_realtime_admin;

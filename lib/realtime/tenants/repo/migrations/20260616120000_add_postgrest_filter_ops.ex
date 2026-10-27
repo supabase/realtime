@@ -30,6 +30,15 @@ defmodule Realtime.Tenants.Migrations.AddPostgrestFilterOps do
     # existing rows to rewrite and no old 3-field literals can linger.
     execute("truncate realtime.subscription;")
 
+    execute("""
+    do $$
+    begin
+        if exists (select 1 from pg_extension where extname = 'orioledb') then
+            execute 'drop index if exists realtime.subscription_subscription_id_entity_filters_action_filter_selected_columns_key';
+        end if;
+    end $$;
+    """)
+
     # Add `negate` to the single filter type. No IF NOT EXISTS for ADD ATTRIBUTE, so guard on
     # pg_attribute. CASCADE because the type backs the `filters` column.
     execute("""
@@ -47,6 +56,15 @@ defmodule Realtime.Tenants.Migrations.AddPostgrestFilterOps do
               and not a.attisdropped
         ) then
             alter type realtime.user_defined_filter add attribute negate boolean cascade;
+        end if;
+    end $$;
+    """)
+
+    execute("""
+    do $$
+    begin
+        if exists (select 1 from pg_extension where extname = 'orioledb') then
+            execute 'create unique index if not exists subscription_subscription_id_entity_filters_action_filter_selected_columns_key on realtime.subscription (subscription_id, entity, filters, action_filter, coalesce(selected_columns, ''{}''))';
         end if;
     end $$;
     """)
@@ -645,9 +663,8 @@ defmodule Realtime.Tenants.Migrations.AddPostgrestFilterOps do
     $$;
     """)
 
-    # The 5-arg check_equality_op is a new signature created after SetupSupabaseRealtimeAdmin ran,
-    # so its ownership reassignment is not covered there. Align its owner with the existing 4-arg
-    # overload so the realtime schema stays single-owner under the least-privilege setup.
+    # The 5-arg check_equality_op is a new signature, so align its owner with the existing 4-arg
+    # overload to keep the realtime schema single-owner under the least-privilege setup.
     execute("""
     do $$
     declare

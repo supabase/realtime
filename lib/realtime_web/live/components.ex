@@ -4,8 +4,23 @@ defmodule RealtimeWeb.Components do
   """
 
   use Phoenix.Component
-  alias Phoenix.HTML.Form
   alias Phoenix.LiveView.JS
+
+  @doc """
+  Renders a heroicon (see `deps/heroicons`) as a small inline mask, e.g. `<.icon name="hero-signal" />`.
+  Color follows `currentColor`, so wrap in a text-color utility or class to tint it.
+  ## Examples
+      <.icon name="hero-magnifying-glass" class="text-brand-600" />
+      <.icon name="hero-check-circle-mini" />
+  """
+  attr :name, :string, required: true
+  attr :class, :string, default: nil
+
+  def icon(assigns) do
+    ~H"""
+    <span class={[@name, @class]} />
+    """
+  end
 
   @doc """
   Renders an h1 tag.
@@ -53,12 +68,23 @@ defmodule RealtimeWeb.Components do
   end
 
   @doc """
-  Renders a button.
+  Renders a button, or a link/patch styled as a button. Pick the render shape by
+  supplying `href`/`patch`/`navigate`; color always comes from `variant`, never from
+  a caller-supplied `class`, so composing classes here is always additive, never an
+  override (stylesheet-order-safe).
   ## Examples
-      <.button>Send!</.button>
-      <.button phx-click="go" class="ml-2">Send!</.button>
+      <.button variant={:primary} type="submit">Connect</.button>
+      <.button variant={:secondary} href={@share_url} target="_blank">Share</.button>
+      <.button variant={:secondary} patch={~p"/"}>Back</.button>
+      <.button variant={:danger} phx-click="disconnect">Disconnect</.button>
   """
+  attr :variant, :atom, default: :primary, values: [:primary, :secondary, :danger]
   attr :type, :string, default: nil
+  attr :href, :string, default: nil
+  attr :patch, :string, default: nil
+  attr :navigate, :string, default: nil
+  attr :target, :string, default: nil
+  attr :replace, :boolean, default: true
   attr :class, :string, default: nil
   attr :rest, :global
 
@@ -66,12 +92,23 @@ defmodule RealtimeWeb.Components do
 
   def button(assigns) do
     ~H"""
+    <.link
+      :if={@href || @patch || @navigate}
+      role="button"
+      href={@href}
+      patch={@patch}
+      navigate={@navigate}
+      replace={@replace}
+      target={@target}
+      class={[button_base(), button_variant(@variant), @class]}
+      {@rest}
+    >
+      <%= render_slot(@inner_block) %>
+    </.link>
     <button
+      :if={!(@href || @patch || @navigate)}
       type={@type}
-      class={[
-        "bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded focus:outline-none",
-        @class
-      ]}
+      class={[button_base(), button_variant(@variant), @class]}
       {@rest}
     >
       <%= render_slot(@inner_block) %>
@@ -79,82 +116,10 @@ defmodule RealtimeWeb.Components do
     """
   end
 
-  @doc """
-  Renders a link as a button.
-  ## Examples
-      <.link_button>Send!</.link_button>
-  """
-  attr :href, :string, default: "#"
-  attr :target, :string, default: ""
-  attr :rest, :global
-
-  slot(:inner_block, required: true)
-
-  def link_button(assigns) do
-    ~H"""
-    <.link
-      role="button"
-      class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded focus:outline-none"
-      href={@href}
-      target={@target}
-      {@rest}
-    >
-      <%= render_slot(@inner_block) %>
-    </.link>
-    """
-  end
-
-  @doc """
-  Renders a link as a button.
-  ## Examples
-      <.link_button>Send!</.link_button>
-  """
-  attr :href, :string, default: "#"
-  attr :target, :string, default: ""
-  attr :rest, :global
-
-  slot(:inner_block, required: true)
-
-  def gray_link_button(assigns) do
-    ~H"""
-    <.link
-      role="button"
-      class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded focus:outline-none"
-      href={@href}
-      target={@target}
-      {@rest}
-    >
-      <%= render_slot(@inner_block) %>
-    </.link>
-    """
-  end
-
-  @doc """
-  Renders a link as a button, but optionally patches the browser history.
-  ## Examples
-      <.patch_button>Send!</.link_button>
-  """
-  attr :patch, :string, default: "#"
-  attr :replace, :boolean, default: true
-  attr :target, :string, default: ""
-  attr :rest, :global
-
-  slot(:inner_block, required: true)
-
-  def patch_button(assigns) do
-    ~H"""
-    <.link
-      role="button"
-      class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded focus:outline-none"
-      patch={@patch}
-      replace={@replace}
-      target={@target}
-      {@rest}
-    >
-      <%= render_slot(@inner_block) %>
-    </.link>
-    """
-  end
+  defp button_base, do: "font-bold py-2 px-4 rounded focus:outline-none focus:ring-2 focus:ring-offset-2"
+  defp button_variant(:primary), do: "bg-brand-600 hover:bg-brand-500 text-white focus:ring-brand-500"
+  defp button_variant(:secondary), do: "bg-neutral-600 hover:bg-neutral-500 text-white focus:ring-neutral-500"
+  defp button_variant(:danger), do: "bg-error-600 hover:bg-error-500 text-white focus:ring-error-500"
 
   @doc """
   Renders a modal.
@@ -186,7 +151,11 @@ defmodule RealtimeWeb.Components do
   def modal(assigns) do
     ~H"""
     <div id={@id} phx-mounted={@show && show_modal(@id)} class="relative z-50 hidden">
-      <div id={"#{@id}-bg"} class="fixed inset-0 bg-zinc-50/90 transition-opacity" aria-hidden="true" />
+      <div
+        id={"#{@id}-bg"}
+        class="fixed inset-0 bg-zinc-50/90 dark:bg-black/70 transition-opacity"
+        aria-hidden="true"
+      />
       <div
         class="fixed inset-0 overflow-y-auto"
         aria-labelledby={"#{@id}-title"}
@@ -203,13 +172,13 @@ defmodule RealtimeWeb.Components do
               phx-window-keydown={hide_modal(@on_cancel, @id)}
               phx-key="escape"
               phx-click-away={hide_modal(@on_cancel, @id)}
-              class="hidden relative rounded-2xl bg-white p-14 shadow-lg shadow-zinc-700/10 ring-1 ring-gray-700/10 transition"
+              class="hidden relative rounded-2xl bg-white dark:bg-neutral-900 p-14 shadow-lg shadow-zinc-700/10 ring-1 ring-gray-700/10 dark:ring-neutral-700 transition"
             >
               <div class="absolute top-6 right-5">
                 <button
                   phx-click={hide_modal(@on_cancel, @id)}
                   type="button"
-                  class="-m-3 flex-none p-3 opacity-20 hover:opacity-40"
+                  class="-m-3 flex-none p-3 opacity-20 hover:opacity-40 dark:text-neutral-100"
                   aria-label="Close"
                 >
                   x
@@ -217,10 +186,10 @@ defmodule RealtimeWeb.Components do
               </div>
               <div id={"#{@id}-content"}>
                 <header :if={@title != []}>
-                  <h1 id={"#{@id}-title"} class="text-lg font-semibold leading-8 text-zinc-800">
+                  <h1 id={"#{@id}-title"} class="text-lg font-semibold leading-8 text-zinc-800 dark:text-neutral-100">
                     <%= render_slot(@title) %>
                   </h1>
-                  <p :if={@subtitle != []} class="mt-2 text-sm leading-6 text-zinc-600">
+                  <p :if={@subtitle != []} class="mt-2 text-sm leading-6 text-zinc-600 dark:text-neutral-400">
                     <%= render_slot(@subtitle) %>
                   </p>
                 </header>
@@ -238,7 +207,7 @@ defmodule RealtimeWeb.Components do
                   <.link
                     :for={cancel <- @cancel}
                     phx-click={hide_modal(@on_cancel, @id)}
-                    class="text-sm font-semibold leading-6 text-zinc-900 hover:text-zinc-700"
+                    class="text-sm font-semibold leading-6 text-zinc-900 dark:text-neutral-100 hover:text-zinc-700 dark:hover:text-neutral-300"
                   >
                     <%= render_slot(cancel) %>
                   </.link>
@@ -252,92 +221,209 @@ defmodule RealtimeWeb.Components do
     """
   end
 
+  @doc """
+  Renders a small filled status indicator dot.
+  ## Examples
+      <.status_dot variant={:success} />
+      <.status_dot variant={:info} pulse />
+  """
+  attr :variant, :atom, required: true, values: [:success, :warning, :error, :info, :neutral]
+  attr :pulse, :boolean, default: false
+  attr :class, :string, default: nil
+  attr :rest, :global
+
+  def status_dot(assigns) do
+    ~H"""
+    <span
+      class={[
+        "inline-block h-2.5 w-2.5 rounded-full",
+        status_color(@variant),
+        @pulse && "animate-pulse-slow",
+        @class
+      ]}
+      {@rest}
+    />
+    """
+  end
+
+  defp status_color(:success), do: "bg-success-500 dark:bg-success-400"
+  defp status_color(:warning), do: "bg-warning-500 dark:bg-warning-400"
+  defp status_color(:error), do: "bg-error-500 dark:bg-error-400"
+  defp status_color(:info), do: "bg-info-500 dark:bg-info-400"
+  defp status_color(:neutral), do: "bg-neutral-400 dark:bg-neutral-500"
+
+  @doc """
+  Renders a semantic badge: a StatusDot plus a label.
+  ## Examples
+      <.badge variant={:success}>Subscribed</.badge>
+      <.badge variant={:warning} dot={false}>Loading...</.badge>
+  """
+  attr :variant, :atom, required: true, values: [:success, :warning, :error, :info, :neutral]
+  attr :dot, :boolean, default: true
+  attr :pulse, :boolean, default: false
+  attr :class, :string, default: nil
   attr :rest, :global
 
   slot(:inner_block, required: true)
 
   def badge(assigns) do
     ~H"""
-    <div>
-      <span class="text-xs font-semibold inline-block uppercase py-[3px] px-[5px] rounded bg-gray-100" {@rest}>
-        <%= render_slot(@inner_block) %>
-      </span>
-    </div>
+    <span
+      class={[
+        "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium",
+        badge_color(@variant),
+        @class
+      ]}
+      {@rest}
+    >
+      <.status_dot :if={@dot} variant={@variant} pulse={@pulse} />
+      <%= render_slot(@inner_block) %>
+    </span>
     """
   end
+
+  defp badge_color(:success), do: "bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-300"
+  defp badge_color(:warning), do: "bg-warning-100 text-warning-700 dark:bg-warning-900/30 dark:text-warning-300"
+  defp badge_color(:error), do: "bg-error-100 text-error-700 dark:bg-error-900/30 dark:text-error-300"
+  defp badge_color(:info), do: "bg-info-100 text-info-700 dark:bg-info-900/30 dark:text-info-300"
+  defp badge_color(:neutral), do: "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300"
 
   ## Forms
 
   @doc """
-  Renders a for field select dropdown.
+  Renders an input with label and error messages, driven by a `Phoenix.HTML.FormField`.
   ## Examples
-    <.select form={f} field={:order_by} list={@sort_fields} selected={:inserted_at}>
+      <.input field={@form[:channel]} label="Channel" placeholder="room_a" />
+      <.input field={@form[:log_level]} type="select" label="Log level" options={["debug", "info", "warning", "error"]} />
+      <.input field={@form[:enable_presence]} type="checkbox" label="Enable Presence" />
   """
+  attr :id, :any, default: nil
+  attr :name, :any
+  attr :label, :string, default: nil
+  attr :value, :any
 
-  attr :selected, :atom, required: true
-  attr :form, :atom, required: true
-  attr :field, :atom, required: true
-  attr :list, :list, required: true
+  attr :type, :string,
+    default: "text",
+    values: ~w(checkbox color date datetime-local email file hidden month number password range
+      radio search select tel text textarea time url week)
 
-  slot(:inner_block, required: false)
+  attr :field, Phoenix.HTML.FormField, doc: "a %Phoenix.HTML.FormField{} struct, for form fields"
+  attr :errors, :list, default: []
+  attr :checked, :boolean
+  attr :prompt, :string, default: nil
+  attr :options, :list, default: []
+  attr :multiple, :boolean, default: false
 
-  def select(assigns) do
+  attr :rest, :global, include: ~w(accept autocomplete disabled form max maxlength min minlength
+      pattern placeholder readonly required rows size step)
+
+  def input(%{field: %Phoenix.HTML.FormField{} = field} = assigns) do
+    assigns
+    |> assign(field: nil, id: assigns.id || field.id)
+    |> assign(:errors, Enum.map(field.errors, &translate_error/1))
+    |> assign_new(:name, fn -> if assigns.multiple, do: field.name <> "[]", else: field.name end)
+    |> assign_new(:value, fn -> field.value end)
+    |> input()
+  end
+
+  def input(%{type: "checkbox"} = assigns) do
+    assigns = assign_new(assigns, :checked, fn -> Phoenix.HTML.Form.normalize_value("checkbox", assigns.value) end)
+
     ~H"""
-    <%= Form.select(@form, @field, @list, selected: @selected, class: "
-      my-1
-      block
-      w-full
-      rounded-md
-      border-gray-300
-      shadow-sm
-      focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
-    ") %>
+    <div class="mb-4">
+      <label class="flex items-center gap-2 text-sm font-bold text-gray-700 dark:text-neutral-200">
+        <input type="hidden" name={@name} value="false" />
+        <input
+          type="checkbox"
+          id={@id}
+          name={@name}
+          value="true"
+          checked={@checked}
+          class="rounded border-gray-300 dark:border-neutral-600 dark:bg-neutral-800 text-brand-600 focus:ring-brand-500 disabled:opacity-50"
+          {@rest}
+        />
+        <%= @label %>
+      </label>
+      <.error :for={msg <- @errors}><%= msg %></.error>
+    </div>
     """
   end
 
-  @doc """
-  Renders a text_input for a form field
-  """
-
-  attr :form, :atom, required: true
-  attr :field, :atom, required: true
-  attr :opts, :list, required: true
-
-  slot(:inner_block, required: false)
-
-  def text_input(assigns) do
-    class = ~s(
-      my-1
-      block
-      w-full
-      rounded-md
-      border-gray-300
-      shadow-sm
-      focus:border-indigo-300
-      focus:ring
-      focus:ring-indigo-200
-      focus:ring-opacity-50)
-
-    assigns = assign(assigns, :opts, assigns.opts ++ [class: class])
-
+  def input(%{type: "select"} = assigns) do
     ~H"""
-    <%= Form.text_input(@form, @field, @opts) %>
+    <div class="mb-4">
+      <.label for={@id}><%= @label %></.label>
+      <select id={@id} name={@name} class={input_classes(@errors)} multiple={@multiple} {@rest}>
+        <option :if={@prompt} value=""><%= @prompt %></option>
+        <%= Phoenix.HTML.Form.options_for_select(@options, @value) %>
+      </select>
+      <.error :for={msg <- @errors}><%= msg %></.error>
+    </div>
     """
   end
 
+  def input(assigns) do
+    ~H"""
+    <div class="mb-4">
+      <.label for={@id}><%= @label %></.label>
+      <input
+        type={@type}
+        name={@name}
+        id={@id}
+        value={Phoenix.HTML.Form.normalize_value(@type, @value)}
+        class={input_classes(@errors)}
+        {@rest}
+      />
+      <.error :for={msg <- @errors}><%= msg %></.error>
+    </div>
+    """
+  end
+
+  defp input_classes(errors) do
+    [
+      "my-1 block w-full rounded-md shadow-sm bg-white dark:bg-neutral-800 dark:text-neutral-100",
+      if(errors == [],
+        do:
+          "border-gray-300 dark:border-neutral-600 focus:border-brand-500 focus:ring focus:ring-brand-200 dark:focus:ring-brand-900/40 focus:ring-opacity-50",
+        else:
+          "border-error-500 dark:border-error-500 focus:border-error-500 focus:ring focus:ring-error-200 dark:focus:ring-error-900/40 focus:ring-opacity-50"
+      )
+    ]
+  end
+
   @doc """
-  Renders a label for a form field
+  Renders a label for a form field.
   """
-
-  attr :form, :atom, required: true
-  attr :field, :atom, required: true
-
-  slot(:inner_block, required: false)
+  attr :for, :string, default: nil
+  slot(:inner_block, required: true)
 
   def label(assigns) do
     ~H"""
-    <%= Form.label(@form, @field, class: "block text-gray-700 text-sm font-bold mb-2") %>
+    <label for={@for} class="block text-gray-700 dark:text-neutral-200 text-sm font-bold mb-2">
+      <%= render_slot(@inner_block) %>
+    </label>
     """
+  end
+
+  @doc """
+  Renders an inline form-field error message.
+  """
+  slot(:inner_block, required: true)
+
+  def error(assigns) do
+    ~H"""
+    <p class="mt-1 flex items-center gap-1 text-xs text-error-600">
+      <%= render_slot(@inner_block) %>
+    </p>
+    """
+  end
+
+  defp translate_error({msg, opts}) do
+    if count = opts[:count] do
+      Gettext.dngettext(RealtimeWeb.Gettext, "errors", msg, msg, count, opts)
+    else
+      Gettext.dgettext(RealtimeWeb.Gettext, "errors", msg, opts)
+    end
   end
 
   ## JS Commands

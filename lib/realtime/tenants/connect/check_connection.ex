@@ -6,9 +6,13 @@ defmodule Realtime.Tenants.Connect.CheckConnection do
   @behaviour Realtime.Tenants.Connect.Piper
   @impl true
   def run(acc) do
-    %{tenant: tenant} = acc
+    %{tenant: tenant, tenant_id: tenant_id} = acc
 
-    case Realtime.Database.check_tenant_connection(tenant) do
+    # Piper runs in the Connect process, so `self()` is the Connect pid. Register it
+    # as a DBConnection listener (tagged with the tenant id) on the durable pool, so
+    # Connect receives {:connected, _, _} / {:disconnected, _, _} messages and can
+    # bound how long the pool may stay disconnected before giving up.
+    case Realtime.Database.check_tenant_connection(tenant, {[self()], tenant_id}) do
       {:ok, conn, migrations_ran} ->
         db_conn_reference = Process.monitor(conn)
 

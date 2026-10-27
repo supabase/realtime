@@ -2,6 +2,9 @@ defmodule RealtimeWeb.TenantRateLimitersTest do
   use Realtime.DataCase, async: true
 
   use Mimic
+
+  setup :set_mimic_from_context
+
   alias RealtimeWeb.TenantRateLimiters
   alias Realtime.Api.Tenant
 
