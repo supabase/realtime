@@ -13,7 +13,7 @@ Supabase Realtime: WebSocket connections, Broadcast, Presence, Postgres Changes,
 channel authorization, and the tenant management API that configures it. It
 runs on the hosted Supabase platform and is also run by people who self-host
 it. We accept reports for both, and we triage them differently (see "Hosted vs.
-self-hosted" below).
+self-hosted" below). For more information see the ARCHITECTURE.md file.
 
 ## What we consider a vulnerability
 
@@ -120,7 +120,8 @@ reporting.
 
 - **Private channels need public access disabled.** To enforce private
   channels, the "Allow public access" setting must be disabled. See the Realtime
-  Authorization documentation.
+  Authorization documentation here: 
+  https://supabase.com/docs/guides/realtime/authorization.
 - **Channel access is cached for the connection.** Policies are checked when a
   client connects and joins a channel, and the result is cached for the
   connection. It is refreshed when the client joins a channel or sends a new
