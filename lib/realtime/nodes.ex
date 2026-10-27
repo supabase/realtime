@@ -13,12 +13,20 @@ defmodule Realtime.Nodes do
   def get_node_for_tenant(nil), do: {:error, :tenant_not_found}
 
   def get_node_for_tenant(%Tenant{} = tenant) do
-    with region <- Tenants.region(tenant),
-         tenant_region <- platform_region_translator(region),
+    with tenant_region <- launch_region(tenant),
          node <- launch_node(tenant_region, node(), tenant.external_id) do
       {:ok, node, tenant_region}
     end
   end
+
+  @doc """
+  The region the Postgres connection for a tenant should run in
+
+  The tenant's region translated to the closest Realtime region.
+  Unlike `get_node_for_tenant/1` this doesn't pick a node.
+  """
+  @spec launch_region(Tenant.t()) :: binary() | nil
+  def launch_region(%Tenant{} = tenant), do: tenant |> Tenants.region() |> platform_region_translator()
 
   @doc """
   Translates a region from a platform to the closest Supabase tenant region.
@@ -40,26 +48,36 @@ defmodule Realtime.Nodes do
   defp default_region_mapping(tenant_region) do
     case tenant_region do
       "ap-east-1" -> "ap-southeast-1"
-      "ap-northeast-1" -> "ap-southeast-1"
-      "ap-northeast-2" -> "ap-southeast-1"
-      "ap-south-1" -> "ap-southeast-1"
+      "ap-northeast-1" -> "ap-northeast-1"
+      "ap-northeast-2" -> "ap-northeast-2"
+      "ap-south-1" -> "ap-south-1"
       "ap-southeast-1" -> "ap-southeast-1"
       "ap-southeast-2" -> "ap-southeast-2"
       "ca-central-1" -> "us-east-1"
-      "eu-central-1" -> "eu-west-2"
+      "eu-central-1" -> "eu-central-1"
       "eu-central-2" -> "eu-west-2"
-      "eu-north-1" -> "eu-west-2"
-      "eu-west-1" -> "eu-west-2"
+      "eu-north-1" -> "eu-north-1"
+      "eu-west-1" -> "eu-west-1"
       "eu-west-2" -> "eu-west-2"
       "eu-west-3" -> "eu-west-2"
-      "sa-east-1" -> "us-east-1"
+      "sa-east-1" -> "sa-east-1"
       "us-east-1" -> "us-east-1"
-      "us-east-2" -> "us-east-1"
+      "us-east-2" -> "us-east-2"
       "us-west-1" -> "us-west-1"
-      "us-west-2" -> "us-west-1"
+      "us-west-2" -> "us-west-2"
       _ -> nil
     end
   end
+
+  @doc """
+  The region this node registers under in the `RegionNodes` group.
+
+  `runtime.exs` defaults `REGION` to `"local"`, so deployments that leave it
+  unset (self-hosted, CLI) still form a cluster under one group name. Both the
+  `:syn.join` and every read of this node's region must go through here.
+  """
+  @spec region() :: String.t()
+  def region, do: Application.fetch_env!(:realtime, :region)
 
   @doc """
   Lists the nodes in a region. Sorts by node name in case the list order
@@ -252,7 +270,7 @@ defmodule Realtime.Nodes do
 
   @spec all_node_regions() :: [String.t()]
   @doc "List all the regions where nodes can be launched"
-  def all_node_regions(), do: :syn.group_names(RegionNodes)
+  def all_node_regions, do: :syn.group_names(RegionNodes)
 
   defp uptime_ms do
     start_time = :erlang.system_info(:start_time)

@@ -207,8 +207,15 @@ defmodule RealtimeWeb.InspectorLive.EventLogComponent do
       {_, "error"} -> "Channel error"
       {_, "broadcast"} -> "Broadcast"
       {_, "postgres_changes"} -> "Database change"
-      {_, "presence_state"} -> "Presence sync"
-      {_, "presence_diff"} -> "Presence change"
+      {_, "presence_state"} -> "Presence state"
+      {_, "presence_diff"} -> "Presence diff"
+      {_, "presence"} -> "Presence push"
+      {_, "presence_sync"} -> "Presence sync"
+      {_, "presence_join"} -> "Presence join"
+      {_, "presence_leave"} -> "Presence leave"
+      {_, "track"} -> "Track"
+      {_, "untrack"} -> "Untrack"
+      {_, "presenceState"} -> "Presence state (client)"
       {_, "system"} -> "Subscription confirmed"
       {_, nil} -> event
       {_, other} -> other

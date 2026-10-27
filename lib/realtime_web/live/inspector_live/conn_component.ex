@@ -1,7 +1,7 @@
 defmodule RealtimeWeb.InspectorLive.ConnComponent do
   use RealtimeWeb, :live_component
 
-  @url_params ~w(host project channel token schema table event filter select enable_presence enable_db_changes private_channel log_level)
+  @url_params ~w(host project channel token schema table event filter select enable_presence presence_key enable_db_changes private_channel log_level)
 
   defmodule Connection do
     use Ecto.Schema
@@ -21,11 +21,24 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
       field(:bearer, :string)
       field(:enable_broadcast, :boolean, default: true)
       field(:enable_presence, :boolean, default: false)
+      field(:presence_key, :string)
       field(:enable_db_changes, :boolean, default: false)
       field(:private_channel, :boolean, default: false)
     end
 
-    @text_fields [:log_level, :token, :host, :project, :channel, :schema, :table, :filter, :select, :bearer]
+    @text_fields [
+      :log_level,
+      :token,
+      :host,
+      :project,
+      :channel,
+      :schema,
+      :table,
+      :filter,
+      :select,
+      :bearer,
+      :presence_key
+    ]
 
     def changeset(form, params \\ %{}) do
       form
@@ -43,6 +56,7 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
         :bearer,
         :enable_broadcast,
         :enable_presence,
+        :presence_key,
         :enable_db_changes,
         :private_channel
       ])
@@ -461,7 +475,7 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
   defp connect_params(%Connection{} = connection) do
     connection
     |> Map.take(
-      ~w(channel token host log_level schema table event filter bearer enable_presence enable_db_changes private_channel)a
+      ~w(channel token host log_level schema table event filter bearer enable_presence presence_key enable_db_changes private_channel)a
     )
     |> Map.new(fn {key, value} -> {Atom.to_string(key), value} end)
     # A string is rejected by the server, so the comma separated URL form never reaches the wire.

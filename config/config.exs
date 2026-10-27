@@ -13,12 +13,13 @@ config :realtime,
   version: Mix.Project.config()[:version],
   replication_watchdog_interval: :timer.minutes(5),
   replication_watchdog_timeout: :timer.minutes(1),
-  replication_ready_timeout: :timer.minutes(1)
+  replication_ready_timeout: :timer.minutes(1),
+  # Blocks the transport process, so keep it under the client heartbeat interval (30s)
+  postgres_changes_wait_max_timeout: :timer.seconds(20)
 
 # Configures the endpoint
 config :realtime, RealtimeWeb.Endpoint,
   url: [host: "127.0.0.1"],
-  secret_key_base: "ktyW57usZxrivYdvLo9os7UGcUUZYKchOMHT3tzndmnHuxD09k+fQnPUmxlPMUI3",
   render_errors: [view: RealtimeWeb.ErrorView, accepts: ~w(html json), layout: false],
   pubsub_server: Realtime.PubSub,
   live_view: [signing_salt: "wUMBeR8j"]

@@ -10,6 +10,7 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
   import Generators
 
   alias Extensions.PostgresCdcRls
+  alias Extensions.PostgresCdcRls.ReplicationPoller
   alias Phoenix.Socket.Message
   alias Postgrex
   alias Realtime.Database
@@ -82,6 +83,88 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
                        topic: "realtime:any"
                      },
                      500
+    end
+  end
+
+  describe "wait for subscription" do
+    test "a write straight after the join reply is not missed", %{tenant: tenant, serializer: serializer} do
+      assert_cdc_stopped(tenant)
+
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+
+      config = %{
+        postgres_changes: [%{event: "INSERT", schema: "public"}],
+        postgres_changes_options: %{wait: true, timeout: 15_000}
+      }
+
+      WebsocketClient.join(socket, topic, %{config: config})
+      sub_id = :erlang.phash2(%{"event" => "INSERT", "schema" => "public"})
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       payload: %{
+                         "response" => %{
+                           "postgres_changes" => [%{"event" => "INSERT", "id" => ^sub_id, "schema" => "public"}]
+                         },
+                         "status" => "ok"
+                       },
+                       topic: ^topic
+                     },
+                     20_000
+
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{
+                         "channel" => "any",
+                         "extension" => "postgres_changes",
+                         "message" => "Subscribed to PostgreSQL",
+                         "status" => "ok"
+                       },
+                       ref: nil,
+                       topic: ^topic
+                     },
+                     500
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+
+      [{poller_pid, _}] = Registry.lookup(ReplicationPoller.Registry, tenant.external_id)
+      wait_for_poller_oids(poller_pid)
+
+      %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{
+                         "data" => %{"record" => %{"details" => "test", "id" => ^id}, "type" => "INSERT"},
+                         "ids" => [^sub_id]
+                       },
+                       ref: nil,
+                       topic: ^topic
+                     },
+                     2000
+    end
+
+    test "join is rejected when the subscription params are malformed", %{tenant: tenant, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+
+      config = %{
+        postgres_changes: [%{event: "INSERT", schema: "public", table: "test", filter: "wrong"}],
+        postgres_changes_options: %{wait: true, timeout: 15_000}
+      }
+
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       payload: %{"status" => "error", "response" => %{"reason" => reason}},
+                       topic: ^topic
+                     },
+                     20_000
+
+      assert reason =~ "RealtimeDisabledForConfiguration"
+      assert reason =~ "Error parsing `filter` params"
     end
   end
 
@@ -466,6 +549,65 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
       refute "binary_data" in column_names
     end
 
+    test "subscribe with an empty select delivers primary keys only — INSERT", %{
+      tenant: tenant,
+      serializer: serializer
+    } do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+
+      config = %{
+        postgres_changes: [
+          %{event: "INSERT", schema: "public", table: "test", select: []}
+        ]
+      }
+
+      WebsocketClient.join(socket, topic, %{config: config})
+      sub_id = :erlang.phash2(%{"event" => "INSERT", "schema" => "public", "table" => "test", "select" => []})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic},
+                     200
+
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{
+                         "extension" => "postgres_changes",
+                         "message" => "Subscribed to PostgreSQL",
+                         "status" => "ok"
+                       },
+                       topic: ^topic
+                     },
+                     8000
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+
+      %{rows: [[id]]} =
+        Postgrex.query!(conn, "insert into test (details) values ('hello') returning id", [])
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{
+                         "data" => %{
+                           "columns" => columns,
+                           "record" => record,
+                           "type" => "INSERT"
+                         },
+                         "ids" => [^sub_id]
+                       },
+                       topic: ^topic
+                     },
+                     500
+
+      # An empty select means primary keys only: the PK is present and every
+      # non-pkey column is excluded (distinct from omitting select, which delivers
+      # all columns).
+      assert record["id"] == id
+      refute Map.has_key?(record, "details")
+      refute Map.has_key?(record, "binary_data")
+      # columns metadata reflects the same: only the PK column is present
+      assert Enum.map(columns, & &1["name"]) == ["id"]
+    end
+
     test "subscribe with select filters payload columns — UPDATE", %{
       tenant: tenant,
       serializer: serializer
@@ -784,6 +926,49 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
       assert log =~ "Unable to subscribe to changes with given parameters"
     end
 
+    test "a joined channel re-subscribes after the cdc tree goes down", %{tenant: tenant, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+      config = %{postgres_changes: [%{event: "INSERT", schema: "public"}]}
+      sub_id = :erlang.phash2(%{"event" => "INSERT", "schema" => "public"})
+
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 200
+
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{"extension" => "postgres_changes", "status" => "ok"},
+                       topic: ^topic
+                     },
+                     8000
+
+      assert_cdc_stopped(tenant)
+
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{"extension" => "postgres_changes", "status" => "ok"},
+                       topic: ^topic
+                     },
+                     20_000
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+
+      %{rows: [[id]]} =
+        Postgrex.query!(conn, "insert into test (details) values ('after down') returning id", [])
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{
+                         "data" => %{"record" => %{"details" => "after down", "id" => ^id}, "type" => "INSERT"},
+                         "ids" => [^sub_id]
+                       },
+                       ref: nil,
+                       topic: ^topic
+                     },
+                     2000
+    end
+
     test "handle nil postgres changes params as empty param changes", %{
       tenant: tenant,
       serializer: serializer
@@ -809,6 +994,21 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
                        topic: ^topic
                      },
                      1000
+    end
+  end
+
+  defp assert_cdc_stopped(tenant) do
+    PostgresCdcRls.handle_stop(tenant.external_id, 5000)
+    assert_eventually PostgresCdcRls.get_manager_conn(tenant.external_id) == {:error, nil}
+  end
+
+  # The subscription reply only reflects the SubscriptionManager being ready — the
+  # ReplicationPoller creates its logical slot independently, so poll until it's done.
+  defp wait_for_poller_oids(poller_pid) do
+    case_wait :sys.get_state(poller_pid) do
+      %{oids: oids} = state when map_size(oids) > 0 -> state
+    else
+      state -> flunk("ReplicationPoller oids never populated. Last state: #{inspect(state)}")
     end
   end
 end

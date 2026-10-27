@@ -29,7 +29,7 @@ defmodule Realtime.Tenants.Janitor do
     start_after = Application.get_env(:realtime, :janitor_run_after_in_ms, 0)
     chunks = Application.get_env(:realtime, :janitor_chunk_size)
     randomize = Application.get_env(:realtime, :janitor_schedule_randomize)
-    region = Application.get_env(:realtime, :region)
+    region = Realtime.Nodes.region()
 
     state = %__MODULE__{
       timer: timer,
@@ -90,9 +90,8 @@ defmodule Realtime.Tenants.Janitor do
     {:noreply, %{state | tasks: tasks}}
   end
 
-  def handle_info({:DOWN, ref, _, _, :killed}, state) do
-    %{tasks: tasks} = state
-    tenants = Map.get(tasks, ref)
+  def handle_info({:DOWN, ref, _, _, _reason}, %{tasks: tasks} = state) when is_map_key(tasks, ref) do
+    {tenants, tasks} = Map.pop(tasks, ref)
 
     log_error(
       "JanitorFailedToDeleteOldMessages",

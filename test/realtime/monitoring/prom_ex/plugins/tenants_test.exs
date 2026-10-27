@@ -32,35 +32,26 @@ defmodule Realtime.PromEx.Plugins.TenantsTest do
 
     test "global success", %{tenant: tenant} do
       metric = "realtime_global_rpc_count"
-      # Enough time for the poll rate to be triggered at least once
-      Process.sleep(200)
-      previous_value = metric_value(metric, mechanism: "erpc", success: true) || 0
+      previous_value = wait(metric_value(metric, mechanism: "erpc", success: true), timeout: 200) || 0
       assert {:ok, "success"} = Rpc.enhanced_call(node(), Test, :success, [], tenant_id: tenant)
-      Process.sleep(200)
-      assert metric_value(metric, mechanism: "erpc", success: true) == previous_value + 1
+      assert_eventually metric_value(metric, mechanism: "erpc", success: true) == previous_value + 1
     end
 
     test "global failure", %{tenant: tenant} do
       metric = "realtime_global_rpc_count"
-      # Enough time for the poll rate to be triggered at least once
-      Process.sleep(200)
-      previous_value = metric_value(metric, mechanism: "erpc", success: false) || 0
+      previous_value = wait(metric_value(metric, mechanism: "erpc", success: false), timeout: 200) || 0
       assert {:error, "failure"} = Rpc.enhanced_call(node(), Test, :failure, [], tenant_id: tenant)
-      Process.sleep(200)
-      assert metric_value(metric, mechanism: "erpc", success: false) == previous_value + 1
+      assert_eventually metric_value(metric, mechanism: "erpc", success: false) == previous_value + 1
     end
 
     test "global exception", %{tenant: tenant} do
       metric = "realtime_global_rpc_count"
-      # Enough time for the poll rate to be triggered at least once
-      Process.sleep(200)
-      previous_value = metric_value(metric, mechanism: "erpc", success: false) || 0
+      previous_value = wait(metric_value(metric, mechanism: "erpc", success: false), timeout: 200) || 0
 
       assert {:error, :rpc_error, %RuntimeError{message: "runtime error"}} =
                Rpc.enhanced_call(node(), Test, :exception, [], tenant_id: tenant)
 
-      Process.sleep(200)
-      assert metric_value(metric, mechanism: "erpc", success: false) == previous_value + 1
+      assert_eventually metric_value(metric, mechanism: "erpc", success: false) == previous_value + 1
     end
   end
 
@@ -71,36 +62,27 @@ defmodule Realtime.PromEx.Plugins.TenantsTest do
 
     test "global success", %{tenant: tenant} do
       metric = "realtime_global_rpc_count"
-      # Enough time for the poll rate to be triggered at least once
-      Process.sleep(200)
-      previous_value = metric_value(metric, mechanism: "gen_rpc", success: true) || 0
+      previous_value = wait(metric_value(metric, mechanism: "gen_rpc", success: true), timeout: 200) || 0
       assert GenRpc.multicall(Test, :success, [], tenant_id: tenant) == [{node(), {:ok, "success"}}]
-      Process.sleep(200)
-      assert metric_value(metric, mechanism: "gen_rpc", success: true) == previous_value + 1
+      assert_eventually metric_value(metric, mechanism: "gen_rpc", success: true) == previous_value + 1
     end
 
     test "global failure", %{tenant: tenant} do
       metric = "realtime_global_rpc_count"
-      # Enough time for the poll rate to be triggered at least once
-      Process.sleep(200)
-      previous_value = metric_value(metric, mechanism: "gen_rpc", success: false) || 0
+      previous_value = wait(metric_value(metric, mechanism: "gen_rpc", success: false), timeout: 200) || 0
       assert GenRpc.multicall(Test, :failure, [], tenant_id: tenant) == [{node(), {:error, "failure"}}]
-      Process.sleep(200)
-      assert metric_value(metric, mechanism: "gen_rpc", success: false) == previous_value + 1
+      assert_eventually metric_value(metric, mechanism: "gen_rpc", success: false) == previous_value + 1
     end
 
     test "global exception", %{tenant: tenant} do
       metric = "realtime_global_rpc_count"
-      # Enough time for the poll rate to be triggered at least once
-      Process.sleep(200)
-      previous_value = metric_value(metric, mechanism: "gen_rpc", success: false) || 0
+      previous_value = wait(metric_value(metric, mechanism: "gen_rpc", success: false), timeout: 200) || 0
       node = node()
 
       assert assert [{^node, {:error, :rpc_error, {:EXIT, {%RuntimeError{message: "runtime error"}, _stacktrace}}}}] =
                       GenRpc.multicall(Test, :exception, [], tenant_id: tenant)
 
-      Process.sleep(200)
-      assert metric_value(metric, mechanism: "gen_rpc", success: false) == previous_value + 1
+      assert_eventually metric_value(metric, mechanism: "gen_rpc", success: false) == previous_value + 1
     end
   end
 
@@ -111,12 +93,9 @@ defmodule Realtime.PromEx.Plugins.TenantsTest do
     end
 
     test "conneted based on Connect module information for local node only", %{tenant: tenant} do
-      # Enough time for the poll rate to be triggered at least once
-      Process.sleep(200)
-      previous_value = metric_value("realtime_tenants_connected")
+      previous_value = wait!(metric_value("realtime_tenants_connected"), timeout: 1_000)
       {:ok, _} = Connect.lookup_or_start_connection(tenant.external_id)
-      Process.sleep(200)
-      assert metric_value("realtime_tenants_connected") == previous_value + 1
+      assert_eventually metric_value("realtime_tenants_connected") == previous_value + 1
     end
   end
 

@@ -4,8 +4,10 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
   import ExUnit.CaptureLog
 
+  alias Realtime.Api
   alias Realtime.Api.Message
   alias Realtime.Database
+  alias Realtime.FeatureFlags
   alias Realtime.GenCounter
   alias Realtime.RateCounter
   alias Realtime.Tenants
@@ -46,11 +48,9 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       Process.exit(pid, :kill)
       assert_process_down(pid)
       assert_process_down(conn)
-      # Wait to ensure that the process has not restarted
-      Process.sleep(1000)
 
-      # Temporary process should not be registered
-      refute ReplicationConnection.whereis(tenant.external_id)
+      # A temporary connection must stay unregistered after it dies.
+      assert_always is_nil(ReplicationConnection.whereis(tenant.external_id)), timeout: 1_000, interval: 50
     end
   end
 
@@ -273,6 +273,38 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
                  )
                end) == 1
       end
+    end
+
+    test "does not broadcast messages already sent over WebSocket", %{tenant: tenant} do
+      start_link_supervised!(
+        {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
+        restart: :transient
+      )
+
+      topic = random_string()
+      tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
+      subscribe(tenant_topic, topic)
+
+      message_fixture(tenant, %{
+        "topic" => topic,
+        "private" => true,
+        "event" => "INSERT",
+        "extension" => "broadcast",
+        "payload" => %{"value" => random_string()},
+        "skip_broadcast" => true
+      })
+
+      refute_receive {:socket_push, :text, _}, 500
+
+      message_fixture(tenant, %{
+        "topic" => topic,
+        "private" => true,
+        "event" => "INSERT",
+        "extension" => "broadcast",
+        "payload" => %{"value" => random_string()}
+      })
+
+      assert_receive {:socket_push, :text, _}, 2000
     end
 
     test "replicates binary with exactly 16 bytes to test UUID conversion error", %{tenant: tenant} do
@@ -678,7 +710,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
       name = @replication_slot_name
 
-      Postgrex.query!(db_conn, "SELECT pg_create_logical_replication_slot($1, 'test_decoding')", [name])
+      create_replication_slot(db_conn, name, plugin: "test_decoding")
 
       assert {:error, {:shutdown, :replication_slot_in_use}} =
                ReplicationConnection.start(tenant, self())
@@ -695,9 +727,16 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       opts = Database.opts(settings)
       parent = self()
 
-      # This creates a loop of errors that occupies all WAL senders and lets us test the error handling
+      {:ok, table_conn} = Database.connect(tenant, "realtime_test", :stop)
+
+      # Enough connections to occupy every WAL sender, read from the server
+      # rather than hardcoded: the budget differs per image, and a Multigres
+      # cluster spends some of it on its own replication.
+      %{rows: [[max_wal_senders]]} = Postgrex.query!(table_conn, "SELECT current_setting('max_wal_senders')::int", [])
+      GenServer.stop(table_conn)
+
       pids =
-        for i <- 0..5 do
+        for i <- 0..max_wal_senders do
           replication_slot_opts =
             %PostgresReplication{
               connection_opts: opts,
@@ -757,8 +796,9 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     test "if proper tables are included, starts replication", %{tenant: tenant, db_conn: db_conn} do
       publication_name = "supabase_realtime_messages_publication"
 
+      enable_broadcast_persistence_flag!(tenant)
       Postgrex.query!(db_conn, "DROP PUBLICATION IF EXISTS #{publication_name}", [])
-      Postgrex.query!(db_conn, "CREATE PUBLICATION #{publication_name} FOR TABLE realtime.messages", [])
+      create_messages_publication(db_conn, publication_name)
 
       logs =
         capture_log(fn ->
@@ -772,6 +812,92 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
         end)
 
       refute logs =~ "Recreating"
+    end
+
+    test "keeps publication untouched when broadcast persistence is disabled", %{tenant: tenant, db_conn: db_conn} do
+      publication_name = "supabase_realtime_messages_publication"
+
+      Postgrex.query!(db_conn, "DROP PUBLICATION IF EXISTS #{publication_name}", [])
+      Postgrex.query!(db_conn, "CREATE PUBLICATION #{publication_name} FOR TABLE realtime.messages", [])
+
+      logs =
+        capture_log(fn ->
+          {:ok, pid} = ReplicationConnection.start(tenant, self())
+
+          assert_replication_started(db_conn, @replication_slot_name)
+
+          assert %{rows: [[true, true, true, true, false]]} =
+                   Postgrex.query!(
+                     db_conn,
+                     "SELECT pubinsert, pubupdate, pubdelete, pubtruncate, pubviaroot FROM pg_publication WHERE pubname = $1",
+                     [publication_name]
+                   )
+
+          Process.exit(pid, :shutdown)
+        end)
+
+      refute logs =~ "Recreating"
+    end
+
+    @tag :requires_pg_150000
+    test "creates publication that filters out messages sent over WebSocket and still allows writes", %{
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      publication_name = "supabase_realtime_messages_publication"
+
+      enable_broadcast_persistence_flag!(tenant)
+      Postgrex.query!(db_conn, "DROP PUBLICATION IF EXISTS #{publication_name}", [])
+
+      capture_log(fn ->
+        {:ok, pid} = ReplicationConnection.start(tenant, self())
+
+        assert_replication_started(db_conn, @replication_slot_name)
+
+        assert %{rows: [["realtime", "messages", "(NOT skip_broadcast)", true, false, false, false, true]]} =
+                 publication_options(db_conn, publication_name)
+
+        message =
+          message_fixture(tenant, %{
+            "topic" => random_string(),
+            "private" => true,
+            "event" => "INSERT",
+            "payload" => %{"value" => random_string()}
+          })
+
+        assert {:ok, %{num_rows: 1}} =
+                 Postgrex.query(db_conn, "UPDATE realtime.messages SET event = 'UPDATE' WHERE id::text = $1", [
+                   message.id
+                 ])
+
+        assert {:ok, %{num_rows: 1}} =
+                 Postgrex.query(db_conn, "DELETE FROM realtime.messages WHERE id::text = $1", [message.id])
+
+        Process.exit(pid, :shutdown)
+      end)
+    end
+
+    @tag :requires_pg_150000
+    test "recreates publication without a row filter", %{tenant: tenant, db_conn: db_conn} do
+      publication_name = "supabase_realtime_messages_publication"
+
+      enable_broadcast_persistence_flag!(tenant)
+      Postgrex.query!(db_conn, "DROP PUBLICATION IF EXISTS #{publication_name}", [])
+      Postgrex.query!(db_conn, "CREATE PUBLICATION #{publication_name} FOR TABLE realtime.messages", [])
+
+      logs =
+        capture_log(fn ->
+          {:ok, pid} = ReplicationConnection.start(tenant, self())
+
+          assert_replication_started(db_conn, @replication_slot_name)
+
+          assert %{rows: [["realtime", "messages", "(NOT skip_broadcast)", true, false, false, false, true]]} =
+                   publication_options(db_conn, publication_name)
+
+          Process.exit(pid, :shutdown)
+        end)
+
+      assert logs =~ "Recreating"
     end
 
     test "disconnects when the publication cannot be created", %{tenant: tenant, db_conn: db_conn} do
@@ -1037,6 +1163,42 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     message
   end
 
+  # Enables the `broadcast_persistence` flag for real: the flag is created and pushed into the local
+  # FeatureFlags cache so the replication connection process reads it synchronously, and torn down
+  # afterwards so it does not leak into other tests via the shared in-memory cache.
+  defp enable_broadcast_persistence_flag!(tenant) do
+    {:ok, flag} = Api.upsert_feature_flag(%{name: "broadcast_persistence", enabled: false})
+    FeatureFlags.Cache.update_cache(flag)
+    {:ok, tenant} = FeatureFlags.set_tenant_flag("broadcast_persistence", tenant.external_id, true)
+    Realtime.Tenants.Cache.update_cache(tenant)
+    on_exit(fn -> FeatureFlags.Cache.invalidate_cache("broadcast_persistence") end)
+  end
+
+  defp create_messages_publication(db_conn, publication_name) do
+    %{rows: [[server_version_num]]} = Postgrex.query!(db_conn, "SELECT current_setting('server_version_num')::int", [])
+
+    row_filter = if server_version_num >= 150_000, do: " WHERE (NOT skip_broadcast)", else: ""
+
+    Postgrex.query!(
+      db_conn,
+      "CREATE PUBLICATION #{publication_name} FOR TABLE realtime.messages#{row_filter} WITH (publish = 'insert', publish_via_partition_root = true)",
+      []
+    )
+  end
+
+  defp publication_options(db_conn, publication_name) do
+    Postgrex.query!(
+      db_conn,
+      """
+      SELECT t.schemaname, t.tablename, t.rowfilter, p.pubinsert, p.pubupdate, p.pubdelete, p.pubtruncate, p.pubviaroot
+      FROM pg_publication_tables t
+      JOIN pg_publication p ON p.pubname = t.pubname
+      WHERE t.pubname = $1
+      """,
+      [publication_name]
+    )
+  end
+
   defp assert_publication_contains_only_messages(db_conn, publication_name) do
     %{rows: rows} =
       Postgrex.query!(
@@ -1053,26 +1215,15 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     assert valid_tables, "Expected only realtime.messages or its partitions, got: #{inspect(rows)}"
   end
 
-  defp assert_replication_started(db_conn, slot_name, retries \\ 10, interval_ms \\ 10) do
-    case check_replication_status(db_conn, slot_name, retries, interval_ms) do
-      :ok -> :ok
-      :error -> flunk("Replication slot #{slot_name} did not become active")
-    end
-  end
-
-  defp check_replication_status(_db_conn, _slot_name, 0, _interval_ms), do: :error
-
-  defp check_replication_status(db_conn, slot_name, retries_remaining, interval_ms) do
-    %{rows: rows} =
-      Postgrex.query!(db_conn, "SELECT active FROM pg_replication_slots WHERE slot_name = $1", [slot_name])
-
-    case rows do
-      [[true]] ->
-        :ok
-
-      _ ->
-        Process.sleep(interval_ms)
-        check_replication_status(db_conn, slot_name, retries_remaining - 1, interval_ms)
+  defp assert_replication_started(db_conn, slot_name, timeout_ms \\ 100, interval_ms \\ 10) do
+    case_wait Postgrex.query!(db_conn, "SELECT active FROM pg_replication_slots WHERE slot_name = $1", [
+                slot_name
+              ]),
+              timeout: timeout_ms,
+              interval: interval_ms do
+      %{rows: [[true]]} -> :ok
+    else
+      %{rows: rows} -> flunk("Replication slot #{slot_name} did not become active. Last rows: #{inspect(rows)}")
     end
   end
 end

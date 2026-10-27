@@ -7,7 +7,7 @@ defmodule Realtime.Tenants.Migrations.CreateRealtimeSubscriptionTable do
     execute("""
     DO $$
     BEGIN
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'equality_op') THEN
+        IF to_regtype('realtime.equality_op') IS NULL THEN
             CREATE TYPE realtime.equality_op AS ENUM(
               'eq', 'neq', 'lt', 'lte', 'gt', 'gte'
             );
@@ -18,7 +18,7 @@ defmodule Realtime.Tenants.Migrations.CreateRealtimeSubscriptionTable do
     execute("""
     DO $$
     BEGIN
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_defined_filter') THEN
+        IF to_regtype('realtime.user_defined_filter') IS NULL THEN
             CREATE TYPE realtime.user_defined_filter as (
               column_name text,
               op realtime.equality_op,

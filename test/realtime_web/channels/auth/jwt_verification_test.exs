@@ -16,7 +16,23 @@ defmodule RealtimeWeb.JwtVerificationTest do
 
   setup do
     start_supervised(Mock)
-    on_exit(fn -> Application.put_env(:realtime, :jwt_claim_validators, %{}) end)
+
+    # Route Joken's current_time/0 through the Mock so Mock.freeze/0 actually
+    # controls the clock the code under test sees. Without this the mock is a
+    # no-op and exp/iat assertions flake on second boundaries.
+    previous_adapter = Application.get_env(:joken, :current_time_adapter)
+    Application.put_env(:joken, :current_time_adapter, Mock)
+
+    on_exit(fn ->
+      Application.put_env(:realtime, :jwt_claim_validators, %{})
+
+      if previous_adapter do
+        Application.put_env(:joken, :current_time_adapter, previous_adapter)
+      else
+        Application.delete_env(:joken, :current_time_adapter)
+      end
+    end)
+
     :ok
   end
 
@@ -554,6 +570,45 @@ defmodule RealtimeWeb.JwtVerificationTest do
       jwks = %{"keys" => [%{"kty" => "oct", "kid" => "wrong-kid"}]}
 
       assert {:ok, _claims} = JwtVerification.verify(token, @jwt_secret, jwks)
+    end
+
+    test "returns error for HS256 when there is no jwt_secret" do
+      header = Base.url_encode64(Jason.encode!(%{"alg" => "HS256"}), padding: false)
+      claims = Base.url_encode64(Jason.encode!(%{"exp" => 9_999_999_999}), padding: false)
+      token = "#{header}.#{claims}.signature"
+
+      assert {:error, :error_generating_signer} = JwtVerification.verify(token, nil, nil)
+    end
+
+    test "returns error when HS256 kid has no matching JWK and there is no jwt_secret" do
+      header = Base.url_encode64(Jason.encode!(%{"alg" => "HS256", "kid" => "key-1"}), padding: false)
+      claims = Base.url_encode64(Jason.encode!(%{"exp" => 9_999_999_999}), padding: false)
+      token = "#{header}.#{claims}.signature"
+
+      jwks = %{"keys" => [%{"kty" => "oct", "kid" => "wrong-kid"}]}
+
+      assert {:error, {:error_generating_signer, "key-1"}} = JwtVerification.verify(token, nil, jwks)
+    end
+
+    test "verifies HS256 against a matching oct JWK when there is no jwt_secret" do
+      Mock.freeze()
+      current_time = Mock.current_time()
+
+      secret = "jwks-only-secret"
+      signer = Joken.Signer.create("HS256", secret, %{"kid" => "jwks-key"})
+
+      token =
+        Joken.generate_and_sign!(
+          %{"exp" => %Joken.Claim{generate: fn -> current_time + 100 end}},
+          %{},
+          signer
+        )
+
+      jwks = %{
+        "keys" => [%{"kty" => "oct", "kid" => "jwks-key", "k" => Base.url_encode64(secret, padding: false)}]
+      }
+
+      assert {:ok, _claims} = JwtVerification.verify(token, nil, jwks)
     end
   end
 end

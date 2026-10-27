@@ -117,10 +117,35 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
 
       assert Agent.get(TestSerializer, & &1) == 1
 
-      assert_receive {:subscriber, :update_rate_counter}
-      assert_receive {:subscriber, :update_rate_counter}
+      assert_receive {:subscriber, :check_rate_counter}
+      assert_receive {:subscriber, :check_rate_counter}
 
       refute_receive _any
+    end
+
+    test "skips a subscriber whose serializer cannot encode the message instead of crashing" do
+      parent = self()
+
+      other = spawn(fn -> receive do: (msg -> send(parent, {:other, msg})) end)
+
+      # 300 bytes is over V2Serializer's 255-byte user_event limit, so encoding it raises.
+      oversized = %UserBroadcast{
+        topic: "some:other:topic",
+        user_event: String.duplicate("e", 300),
+        user_payload: "payload",
+        user_payload_encoding: :binary
+      }
+
+      subscribers = [
+        {spawn(fn -> :ok end),
+         {:rc_fastlane, self(), V2Serializer, "realtime:binary", :warning, "tenant123", MapSet.new(), true, true}},
+        {spawn(fn -> :ok end),
+         {:rc_fastlane, other, TestSerializer, "realtime:text", :warning, "tenant123", MapSet.new(), true, true}}
+      ]
+
+      assert MessageDispatcher.dispatch(subscribers, self(), oversized) == :ok
+
+      assert_receive {:other, {:encoded, %UserBroadcast{topic: "realtime:text"}}}
     end
 
     test "does not dispatch broadcast messages to subscribers denied broadcast.read" do
@@ -161,7 +186,7 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
       assert MessageDispatcher.dispatch(subscribers, from_pid, system) == :ok
 
       assert_receive {:encoded, %Broadcast{event: "system", topic: "realtime:topic"}}
-      assert_receive {:subscriber, :update_rate_counter}
+      assert_receive {:subscriber, :check_rate_counter}
     end
 
     test "strips the {:tb, tenant_id, msg} tenant tag before dispatching to fastlane subscribers" do
@@ -196,7 +221,7 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
       assert_receive {:encoded, %Broadcast{event: "event", payload: %{data: "test"}, topic: "realtime:topic"}}
       assert Agent.get(TestSerializer, & &1) == 1
 
-      assert_receive {:subscriber, :update_rate_counter}
+      assert_receive {:subscriber, :check_rate_counter}
 
       # The {:tb, ...} wrapper never reaches subscribers
       refute_receive {:tb, _, _}
@@ -313,6 +338,152 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
       assert Realtime.GenCounter.get(Realtime.Tenants.presence_events_per_second_key("tenant789")) == 1
 
       refute_receive _any
+    end
+
+    test "records one latency observation per fastlane subscriber of a sampled presence_diff" do
+      tenant = "tenant-sampled-#{System.unique_integer([:positive])}"
+      attach_presence_telemetry(tenant)
+      from_pid = :erlang.list_to_pid(~c'<0.2.1>')
+      local_node = Realtime.Nodes.short_node_id_from_name(node())
+
+      subscribers = [
+        # the tracking client itself: skipped by the dispatcher
+        {from_pid, {:rc_fastlane, self(), TestSerializer, "realtime:topic", :error, tenant, MapSet.new(), true, true}},
+        # denied presence.read: withheld, so not notified and not measured
+        {self(), {:rc_fastlane, self(), TestSerializer, "realtime:topic", :error, tenant, MapSet.new(), false, true}},
+        # two subscribers that receive the frame
+        {self(), {:rc_fastlane, self(), TestSerializer, "realtime:topic", :error, tenant, MapSet.new(), true, true}},
+        {self(), {:rc_fastlane, self(), TestSerializer, "realtime:topic", :error, tenant, MapSet.new(), true, true}}
+      ]
+
+      stamped_at = System.system_time(:millisecond) - 7
+
+      msg = %Broadcast{
+        topic: "realtime:topic",
+        event: "presence_diff",
+        payload: %{
+          joins: %{
+            "alice" => %{metas: [%{"name" => "alice", :phx_ref => "a1", :_rt => %{ts: stamped_at, node: local_node}}]}
+          },
+          leaves: %{}
+        }
+      }
+
+      assert MessageDispatcher.dispatch(subscribers, from_pid, msg) == :ok
+
+      # Delivered frames carry no envelope.
+      assert_receive {:encoded, %Broadcast{event: "presence_diff", payload: %{joins: joins}}}
+      assert_receive {:encoded, %Broadcast{event: "presence_diff", payload: %{joins: ^joins}}}
+      assert %{"alice" => %{metas: [%{"name" => "alice", :phx_ref => "a1"}]}} == joins
+
+      # One observation per notified subscriber, measured on this node, over the fastlane.
+      for _ <- 1..2 do
+        assert_receive {:telemetry, [:realtime, :presence, :notify, :latency], %{latency: latency},
+                        %{tenant: ^tenant, action: :track, origin: :local, path: :fastlane, implementation: :phoenix}}
+
+        assert latency >= 7
+      end
+
+      refute_receive {:telemetry, _, _, _}
+      refute_receive {:encoded, _}
+    end
+
+    test "routes a sampled presence_diff to channel processes as received, unstripped and unrecorded" do
+      tenant = "tenant-channel-#{System.unique_integer([:positive])}"
+      attach_presence_telemetry(tenant)
+      from_pid = :erlang.list_to_pid(~c'<0.2.1>')
+
+      # presence.read not evaluated yet: the channel process decides, so it strips and records itself.
+      subscribers = [
+        {self(), {:rc_fastlane, self(), TestSerializer, "realtime:topic", :error, tenant, MapSet.new(), nil, true}}
+      ]
+
+      msg = %Broadcast{
+        topic: "realtime:topic",
+        event: "presence_diff",
+        payload: %{
+          joins: %{
+            "alice" => %{
+              metas: [
+                %{"name" => "alice", :phx_ref => "a1", :_rt => %{ts: System.system_time(:millisecond), node: "n1"}}
+              ]
+            }
+          },
+          leaves: %{}
+        }
+      }
+
+      assert MessageDispatcher.dispatch(subscribers, from_pid, msg) == :ok
+
+      assert_receive {:authorize_presence_diff, ^msg}
+
+      refute_receive {:telemetry, _, _, _}
+      refute_receive {:encoded, _}
+    end
+
+    test "records every envelope of a multi-join diff for every fastlane subscriber" do
+      tenant = "tenant-multi-#{System.unique_integer([:positive])}"
+      attach_presence_telemetry(tenant)
+      from_pid = :erlang.list_to_pid(~c'<0.2.1>')
+      now = System.system_time(:millisecond)
+      local_node = Realtime.Nodes.short_node_id_from_name(node())
+
+      subscribers = [
+        {self(), {:rc_fastlane, self(), TestSerializer, "realtime:topic", :error, tenant, MapSet.new(), true, true}},
+        {self(), {:rc_fastlane, self(), TestSerializer, "realtime:topic", :error, tenant, MapSet.new(), true, true}}
+      ]
+
+      # Two tracks collapsed into one diff, as a remote heartbeat delta would carry them.
+      msg = %Broadcast{
+        topic: "realtime:topic",
+        event: "presence_diff",
+        payload: %{
+          joins: %{
+            "alice" => %{metas: [%{"name" => "alice", :phx_ref => "a1", :_rt => %{ts: now - 10, node: local_node}}]},
+            "bob" => %{
+              metas: [
+                %{"name" => "bob", :phx_ref => "b2", :phx_ref_prev => "b1", :_rt => %{ts: now - 900, node: "other"}}
+              ]
+            }
+          },
+          leaves: %{}
+        }
+      }
+
+      assert MessageDispatcher.dispatch(subscribers, from_pid, msg) == :ok
+
+      events =
+        for _ <- 1..4 do
+          assert_receive {:telemetry, [:realtime, :presence, :notify, :latency], _, %{tenant: ^tenant} = metadata}
+          {metadata.action, metadata.origin}
+        end
+
+      assert Enum.sort(events) == [{:track, :local}, {:track, :local}, {:update, :remote}, {:update, :remote}]
+
+      refute_receive {:telemetry, _, _, _}
+      assert_receive {:encoded, _}
+      assert_receive {:encoded, _}
+    end
+
+    test "an unsampled presence_diff records nothing" do
+      tenant = "tenant-unsampled-#{System.unique_integer([:positive])}"
+      attach_presence_telemetry(tenant)
+      from_pid = :erlang.list_to_pid(~c'<0.2.1>')
+
+      subscribers = [
+        {self(), {:rc_fastlane, self(), TestSerializer, "realtime:topic", :error, tenant, MapSet.new(), true, true}}
+      ]
+
+      msg = %Broadcast{
+        topic: "realtime:topic",
+        event: "presence_diff",
+        payload: %{joins: %{"alice" => %{metas: [%{"name" => "alice", :phx_ref => "a1"}]}}, leaves: %{}}
+      }
+
+      assert MessageDispatcher.dispatch(subscribers, from_pid, msg) == :ok
+
+      assert_receive {:encoded, ^msg}
+      refute_receive {:telemetry, _, _, _}
     end
 
     test "does not dispatch messages to fastlane subscribers if they already replayed it" do
@@ -436,8 +607,8 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
 
       assert Agent.get(TestSerializer, & &1) == 1
 
-      assert_receive {:subscriber, :update_rate_counter}
-      assert_receive {:subscriber, :update_rate_counter}
+      assert_receive {:subscriber, :check_rate_counter}
+      assert_receive {:subscriber, :check_rate_counter}
 
       refute_receive _any
     end
@@ -491,10 +662,10 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
       assert_receive {:encoded, %Broadcast{event: "event", topic: "realtime:topic-b"}}
       assert_receive {:encoded, %Broadcast{event: "event", topic: "realtime:topic-b"}}
 
-      assert_receive {:subscriber, :update_rate_counter}
-      assert_receive {:subscriber, :update_rate_counter}
-      assert_receive {:subscriber, :update_rate_counter}
-      assert_receive {:subscriber, :update_rate_counter}
+      assert_receive {:subscriber, :check_rate_counter}
+      assert_receive {:subscriber, :check_rate_counter}
+      assert_receive {:subscriber, :check_rate_counter}
+      assert_receive {:subscriber, :check_rate_counter}
 
       refute_receive _any
     end
@@ -574,10 +745,10 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
       # V2 is an array format
       assert Jason.decode!(message_v2) == [nil, nil, "realtime:topic", "event", %{"data" => "test"}]
 
-      assert_receive {:subscriber, :update_rate_counter}
-      assert_receive {:subscriber, :update_rate_counter}
-      assert_receive {:subscriber, :update_rate_counter}
-      assert_receive {:subscriber, :update_rate_counter}
+      assert_receive {:subscriber, :check_rate_counter}
+      assert_receive {:subscriber, :check_rate_counter}
+      assert_receive {:subscriber, :check_rate_counter}
+      assert_receive {:subscriber, :check_rate_counter}
 
       refute_receive _any
     end
@@ -668,10 +839,10 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
                  "event123"
                >> <> encoded_metadata <> user_payload
 
-      assert_receive {:subscriber, :update_rate_counter}
-      assert_receive {:subscriber, :update_rate_counter}
-      assert_receive {:subscriber, :update_rate_counter}
-      assert_receive {:subscriber, :update_rate_counter}
+      assert_receive {:subscriber, :check_rate_counter}
+      assert_receive {:subscriber, :check_rate_counter}
+      assert_receive {:subscriber, :check_rate_counter}
+      assert_receive {:subscriber, :check_rate_counter}
 
       refute_receive _any
     end
@@ -753,12 +924,167 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
                  "event123"
                >> <> encoded_metadata <> user_payload
 
-      assert_receive {:subscriber, :update_rate_counter}
-      assert_receive {:subscriber, :update_rate_counter}
-      assert_receive {:subscriber, :update_rate_counter}
-      assert_receive {:subscriber, :update_rate_counter}
+      assert_receive {:subscriber, :check_rate_counter}
+      assert_receive {:subscriber, :check_rate_counter}
+      assert_receive {:subscriber, :check_rate_counter}
+      assert_receive {:subscriber, :check_rate_counter}
 
       refute_receive _any
     end
+  end
+
+  describe "dispatch/3 events rate counter" do
+    setup do
+      {:ok, _pid} =
+        start_supervised(%{
+          id: TestSerializer,
+          start: {Agent, :start_link, [fn -> 0 end, [name: TestSerializer]]}
+        })
+
+      tenant_id = Ecto.UUID.generate()
+      rate_args = Realtime.Tenants.events_per_second_rate(tenant_id, 100)
+      {:ok, counter_pid} = Realtime.RateCounter.new(rate_args)
+      # Wait for the immediate first tick so it does not reset the count mid-test
+      :sys.get_state(counter_pid)
+
+      subscriber_pid = spawn_subscriber(self())
+
+      subscribers = [
+        {subscriber_pid,
+         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :warning, tenant_id, MapSet.new(), true, true}},
+        {subscriber_pid,
+         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :warning, tenant_id, MapSet.new(), true, true}},
+        # denied broadcast.read: not delivered, not counted
+        {subscriber_pid,
+         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :warning, tenant_id, MapSet.new(), true, false}}
+      ]
+
+      %{tenant_id: tenant_id, rate_args: rate_args, subscribers: subscribers}
+    end
+
+    test "counts delivered messages in bulk without messaging channels", %{
+      rate_args: rate_args,
+      subscribers: subscribers
+    } do
+      msg = %Broadcast{topic: "some:other:topic", event: "broadcast", payload: %{data: "test"}}
+
+      assert MessageDispatcher.dispatch(subscribers, self(), msg) == :ok
+
+      assert_receive {:encoded, %Broadcast{event: "broadcast"}}
+      assert_receive {:encoded, %Broadcast{event: "broadcast"}}
+      assert Realtime.GenCounter.get(rate_args.id) == 2
+      refute_receive {:subscriber, _}
+    end
+
+    test "counts using the tenant tag", %{tenant_id: tenant_id, rate_args: rate_args, subscribers: subscribers} do
+      msg = %Broadcast{topic: "some:other:topic", event: "broadcast", payload: %{data: "test"}}
+
+      assert MessageDispatcher.dispatch([{self(), :not_fastlane} | subscribers], nil, {:tb, tenant_id, msg}) == :ok
+
+      assert_receive %Broadcast{event: "broadcast"}
+      assert Realtime.GenCounter.get(rate_args.id) == 2
+      refute_receive {:subscriber, _}
+    end
+
+    test "asks delivered channels to check the rate counter when the limit is triggered", %{
+      rate_args: rate_args,
+      subscribers: subscribers
+    } do
+      {:ok, state} = Realtime.RateCounter.find(rate_args.id)
+      Cachex.put!(Realtime.RateCounter, rate_args.id, %{state | limit: %{state.limit | triggered: true}})
+
+      msg = %Broadcast{topic: "some:other:topic", event: "broadcast", payload: %{data: "test"}}
+
+      assert MessageDispatcher.dispatch(subscribers, self(), msg) == :ok
+
+      assert_receive {:encoded, %Broadcast{event: "broadcast"}}
+      assert_receive {:encoded, %Broadcast{event: "broadcast"}}
+      assert Realtime.GenCounter.get(rate_args.id) == 2
+      assert_receive {:subscriber, :check_rate_counter}
+      assert_receive {:subscriber, :check_rate_counter}
+      refute_receive {:subscriber, _}
+    end
+  end
+
+  describe "dispatch/3 events rate counter not running" do
+    setup do
+      {:ok, _pid} =
+        start_supervised(%{
+          id: TestSerializer,
+          start: {Agent, :start_link, [fn -> 0 end, [name: TestSerializer]]}
+        })
+
+      tenant_id = Ecto.UUID.generate()
+
+      subscribers = [
+        {spawn_subscriber(self()),
+         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :warning, tenant_id, MapSet.new(), true, true}}
+      ]
+
+      %{tenant_id: tenant_id, subscribers: subscribers}
+    end
+
+    test "asks delivered channels to check the rate counter so it gets restarted", %{
+      tenant_id: tenant_id,
+      subscribers: subscribers
+    } do
+      key = Realtime.Tenants.events_per_second_key(tenant_id)
+      assert Realtime.RateCounter.find(key) == {:error, :not_found}
+
+      msg = %Broadcast{topic: "some:other:topic", event: "broadcast", payload: %{data: "test"}}
+
+      assert MessageDispatcher.dispatch(subscribers, self(), msg) == :ok
+
+      assert_receive {:encoded, %Broadcast{event: "broadcast"}}
+      assert_receive {:subscriber, :check_rate_counter}
+      assert Realtime.GenCounter.get(key) == 1
+      # The dispatcher never starts the counter itself
+      assert Realtime.RateCounter.find(key) == {:error, :not_found}
+    end
+
+    test "tagged presence_diff goes through the presence path and is not counted as an event", %{
+      tenant_id: tenant_id,
+      subscribers: subscribers
+    } do
+      msg = %Broadcast{topic: "some:other:topic", event: "presence_diff", payload: %{data: "test"}}
+
+      assert MessageDispatcher.dispatch(subscribers, self(), {:tb, tenant_id, msg}) == :ok
+
+      assert_receive {:encoded, %Broadcast{event: "presence_diff"}}
+      assert Realtime.GenCounter.get(Realtime.Tenants.presence_events_per_second_key(tenant_id)) == 1
+      assert Realtime.GenCounter.get(Realtime.Tenants.events_per_second_key(tenant_id)) == 0
+      refute_receive {:subscriber, _}
+    end
+  end
+
+  defp spawn_subscriber(parent) do
+    spawn(fn ->
+      loop = fn loop ->
+        receive do
+          msg ->
+            send(parent, {:subscriber, msg})
+            loop.(loop)
+        end
+      end
+
+      loop.(loop)
+    end)
+  end
+
+  defp attach_presence_telemetry(tenant) do
+    id = {__MODULE__, tenant}
+
+    :telemetry.attach_many(
+      id,
+      [[:realtime, :presence, :notify, :latency], [:realtime, :presence, :notify, :discarded]],
+      &__MODULE__.handle_presence_telemetry/4,
+      %{pid: self(), tenant: tenant}
+    )
+
+    on_exit(fn -> :telemetry.detach(id) end)
+  end
+
+  def handle_presence_telemetry(event, measurements, metadata, %{pid: pid, tenant: tenant}) do
+    if metadata[:tenant] == tenant, do: send(pid, {:telemetry, event, measurements, metadata})
   end
 end

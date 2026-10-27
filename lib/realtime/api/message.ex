@@ -12,11 +12,12 @@ defmodule Realtime.Api.Message do
   @timestamps_opts [type: :naive_datetime_usec]
   schema "messages" do
     field(:topic, :string)
-    field(:extension, Ecto.Enum, values: [:broadcast, :presence])
+    field(:extension, Ecto.Enum, values: [:broadcast, :presence, :persistence])
     field(:payload, :map)
     field(:binary_payload, :binary)
     field(:event, :string)
     field(:private, :boolean)
+    field(:skip_broadcast, :boolean)
 
     timestamps()
   end
@@ -30,6 +31,7 @@ defmodule Realtime.Api.Message do
       :binary_payload,
       :event,
       :private,
+      :skip_broadcast,
       :inserted_at,
       :updated_at
     ])

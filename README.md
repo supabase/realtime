@@ -63,18 +63,24 @@ Start with [DEVELOPERS.md](DEVELOPERS.md) for local setup, `mise` tasks, and exa
 
 Once your environment is up and running, check out the following docs to customize the server and troubleshooting:
 
+- [ARCHITECTURE.md](ARCHITECTURE.md) - how the cluster, broadcast fan-out and Postgres Changes fit together
 - [ENVS.md](ENVS.md) - detailed list of all environment variables
 - [ERROR_CODES.md](ERROR_CODES.md) - list of operational codes
 - [OBSERVABILITY_METRICS.md](OBSERVABILITY_METRICS.md) - monitoring information
 
 ## Postgres compatibility
 
-| `supabase/postgres` version       | Role                      | Status                                                                                                                                                                                                                                      |
-| --------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| < 14                              | -                         | Not officially supported.                                                                                                                                                                                                                   |
-| 14.x                              | `supabase_admin`          | Requires superuser: `log_min_messages` can only be set by a superuser; supautils doesn't expose per-parameter delegation on this version. On <= 14.5, `realtime.broadcast_changes(...)` called from a trigger via `PERFORM` is unsupported. |
-| 15.x < 15.14.1.018                | `supabase_admin`          | Requires superuser: `supautils.policy_grants` on `realtime.subscription` is missing until [supabase/postgres@1b916920](https://github.com/supabase/postgres/commit/1b916920).                                                               |
-| 15.x >= 15.14.1.018, 16.x, 17.x   | `supabase_admin`          | Requires superuser to run migrations, no superuser needed for tenant grants. Policies are managed by supautils.                                                                                                                             |
+Versions below refer to `supabase/postgres` releases unless stated otherwise.
+
+| Tenant database                 | Role             | Status                     | Notes                                                                                                                                                                                                                                               |
+| ------------------------------- | ---------------- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| < 14                            | -                | Not supported              | -                                                                                                                                                                                                                                                   |
+| 14.x                            | `supabase_admin` | Supported with limitations | Realtime needs a superuser. Only a superuser can set `log_min_messages`, and supautils can't hand it to another role on this version. On Postgres 14.5 and earlier, `realtime.broadcast_changes(...)` fails when a trigger calls it with `PERFORM`. |
+| 15.x < 15.14.1.018              | `supabase_admin` | Supported                  | Realtime needs a superuser. `supautils.policy_grants` doesn't cover `realtime.subscription` until [supabase/postgres@1b916920](https://github.com/supabase/postgres/commit/1b916920).                                                               |
+| 15.x >= 15.14.1.018, 16.x, 17.x | `supabase_admin` | Supported                  | Migrations need a superuser. Tenant grants don't. supautils manages the policies.                                                                                                                                                                   |
+| 17.x-orioledb < 17.11.0.004     | `supabase_admin` | Supported with limitations | Migrations need a superuser. With `REPLICA IDENTITY FULL`, Postgres Changes UPDATE and DELETE events can miss the old value of large (TOASTed) columns. Broadcast from Database can lose messages sent from a trigger.                              |
+| 17.x-orioledb >= 17.11.0.004    | `supabase_admin` | Supported                  | Migrations need a superuser.                                                                                                                                                                                                                        |
+| Multigres                       | `supabase_admin` | Supported                  | Only Postgres >= 17.x and every commit waits for a standby.                                                                                                                                                                                         |
 
 ## Contributing
 

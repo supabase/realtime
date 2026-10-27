@@ -15,6 +15,11 @@
         "audit": { "reasonCode": "realtime.keep-unknown-rls-policies", "classification": "acknowledged" }
       },
       {
+        "match": { "all": [{ "kind": "comment" }, { "target": { "kind": "policy" } }, { "verb": "remove" }] },
+        "action": "exclude",
+        "audit": { "reasonCode": "realtime.keep-unknown-rls-policy-comments", "classification": "acknowledged" }
+      },
+      {
         "match": { "all": [{ "kind": "table" }, { "schema": "realtime" }, { "name": "schema_migrations" }] },
         "action": "exclude",
         "audit": { "reasonCode": "realtime.schema-migrations-table", "classification": "acknowledged" }
@@ -39,6 +44,32 @@
         },
         "action": "exclude",
         "audit": { "reasonCode": "realtime.platform-managed-grantees", "classification": "acknowledged" }
+      },
+      {
+        "match": {
+          "all": [
+            { "kind": "acl" },
+            { "verb": "remove" },
+            {
+              "not": {
+                "idField": {
+                  "field": "grantee",
+                  "glob": [
+                    "anon",
+                    "authenticated",
+                    "service_role",
+                    "postgres",
+                    "dashboard_user",
+                    "supabase_admin",
+                    "supabase_realtime_admin"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "action": "exclude",
+        "audit": { "reasonCode": "realtime.keep-unknown-grants", "classification": "acknowledged" }
       },
       {
         "match": {

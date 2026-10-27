@@ -135,6 +135,21 @@ defmodule RealtimeWeb.InspectorLive.EventLogComponentTest do
       assert EventLogComponent.event_label("ok realtime:room_a system") == "Subscription confirmed"
     end
 
+    test "names raw presence frames and the events realtime-js derives from them" do
+      assert EventLogComponent.event_label("realtime:room_a presence_state (3)") == "Presence state"
+      assert EventLogComponent.event_label("realtime:room_a presence_diff") == "Presence diff"
+      assert EventLogComponent.event_label("realtime:room_a presence (4, 6)") == "Presence push"
+      assert EventLogComponent.event_label("presence_sync") == "Presence sync"
+      assert EventLogComponent.event_label("presence_join") == "Presence join"
+      assert EventLogComponent.event_label("presence_leave") == "Presence leave"
+    end
+
+    test "names the inspector's own presence actions" do
+      assert EventLogComponent.event_label("track") == "Track"
+      assert EventLogComponent.event_label("untrack") == "Untrack"
+      assert EventLogComponent.event_label("presenceState") == "Presence state (client)"
+    end
+
     test "never leaks the raw refs into the label" do
       refute EventLogComponent.event_label("realtime:room_a phx_join (6, 6)") =~ "("
       refute EventLogComponent.event_label("realtime:room_a phx_join (6, 6)") =~ "phx_"

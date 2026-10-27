@@ -88,7 +88,7 @@ defmodule Mix.Tasks.Realtime.ExportTenantSchema do
     Repo.with_dynamic_repo(config, fn repo ->
       Repo.query!(~s(CREATE SCHEMA realtime AUTHORIZATION "#{@schema_owner}"), [], dynamic_repo: repo)
 
-      Repo.query!(~s(GRANT ALL ON SCHEMA realtime TO "#{@realtime_admin}" WITH GRANT OPTION), [], dynamic_repo: repo)
+      Repo.query!(~s(GRANT ALL ON SCHEMA realtime TO "#{@realtime_admin}"), [], dynamic_repo: repo)
 
       applied =
         Ecto.Migrator.run(Repo, Migrations.migrations(), :up,

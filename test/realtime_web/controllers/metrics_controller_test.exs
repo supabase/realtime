@@ -72,6 +72,18 @@ defmodule RealtimeWeb.MetricsControllerTest do
     {"realtime_channel_error", "realtime_channel_error", [code: "TestError", tenant: "test_tenant"]}
   ]
 
+  # `beam_system_schedulers_online_info` (which we check for)
+  # is populated by a periodic poller under CI CPU contention a tick can be missed,
+  # so poll for a scrape that includes it.
+  defp text_response_when_ready(conn, path) do
+    fetch_scrape = fn -> conn |> get(path) |> text_response(200) end
+
+    assert_eventually(fetch_scrape.() =~ "# HELP beam_system_schedulers_online_info")
+
+    # we wastefully query again but it's not trivial to extract it from above and it's not _that_ expensive
+    fetch_scrape.()
+  end
+
   # Fires every telemetry event needed to populate all event-based metrics
   defp fire_all_tenant_events do
     tenant_meta = %{tenant: "test_tenant"}
@@ -121,16 +133,9 @@ defmodule RealtimeWeb.MetricsControllerTest do
   end
 
   setup_all do
-    metrics_tags = %{
-      region: "ap-southeast-2",
-      host: "anothernode@something.com",
-      id: "someid"
-    }
-
-    {:ok, _} =
-      Clustered.start(nil,
-        extra_config: [{:realtime, :region, "ap-southeast-2"}, {:realtime, :metrics_tags, metrics_tags}]
-      )
+    # The peer tags its own metrics from its own region, so setting the region is all it takes
+    # for the `region=` assertions below to tell the two nodes apart.
+    {:ok, _} = Clustered.start(nil, extra_config: [{:realtime, :region, "ap-southeast-2"}])
 
     :ok
   end
@@ -146,10 +151,7 @@ defmodule RealtimeWeb.MetricsControllerTest do
     test "contains both global and tenant metrics with values", %{conn: conn} do
       fire_all_tenant_events()
 
-      response =
-        conn
-        |> get(~p"/metrics")
-        |> text_response(200)
+      response = text_response_when_ready(conn, ~p"/metrics")
 
       for {help_metric, value_metric, tags} <- @global_metrics do
         assert response =~ "# HELP #{help_metric}", "expected global metric #{help_metric} to be present"
@@ -222,10 +224,7 @@ defmodule RealtimeWeb.MetricsControllerTest do
     test "returns both global and tenant metrics with values scoped to the given region", %{conn: conn} do
       fire_all_tenant_events()
 
-      response =
-        conn
-        |> get(~p"/metrics/us-east-1")
-        |> text_response(200)
+      response = text_response_when_ready(conn, ~p"/metrics/us-east-1")
 
       for {help_metric, value_metric, tags} <- @global_metrics do
         assert response =~ "# HELP #{help_metric}", "expected global metric #{help_metric} to be present"

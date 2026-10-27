@@ -18,7 +18,7 @@ defmodule Realtime.UsersCounter do
 
   @doc "List all local tenants with connected clients on this node."
   @spec local_tenants() :: [String.t()]
-  def local_tenants(), do: Census.local_groups(:users)
+  def local_tenants, do: Census.local_groups(:users)
 
   @doc """
   Returns the count of all connected clients for a tenant for the cluster.
@@ -36,11 +36,11 @@ defmodule Realtime.UsersCounter do
   Returns the counts of all connected clients for all tenants for the cluster.
   """
   @spec tenant_counts() :: %{String.t() => non_neg_integer()}
-  def tenant_counts(), do: Census.member_counts(:users)
+  def tenant_counts, do: Census.member_counts(:users)
 
   @doc """
   Returns the counts of all connected clients for all tenants for the local node.
   """
   @spec local_tenant_counts() :: %{String.t() => non_neg_integer()}
-  def local_tenant_counts(), do: Census.local_member_counts(:users)
+  def local_tenant_counts, do: Census.local_member_counts(:users)
 end

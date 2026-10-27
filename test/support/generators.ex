@@ -6,8 +6,10 @@ defmodule Generators do
   alias Realtime.Api.Tenant
   alias Realtime.Crypto
   alias Realtime.Database
+  alias Realtime.Env
+  alias Realtime.Extensions
   alias Realtime.Integration.WebsocketClient
-  def port(), do: TestTenantDb.port()
+  alias Realtime.Repo
 
   @spec tenant_fixture(map()) :: Realtime.Api.Tenant.t()
   def tenant_fixture(override \\ %{}) do
@@ -22,7 +24,7 @@ defmodule Generators do
             "db_name" => "postgres",
             "db_user" => System.get_env("DB_USER", "supabase_admin"),
             "db_password" => "postgres",
-            "db_port" => "#{override[:port] || port()}",
+            "db_port" => "#{override[:port] || Env.unused_port()}",
             "poll_interval_ms" => 10,
             "poll_max_changes" => 100,
             "poll_max_record_bytes" => 1_048_576,
@@ -210,6 +212,15 @@ defmodule Generators do
     """
   end
 
+  def policy_query(:authenticated_write_persistence, %{topic: name}) do
+    """
+    CREATE POLICY "authenticated_write_persistence_#{name}"
+    ON realtime.messages FOR INSERT
+    TO authenticated
+    WITH CHECK ( realtime.topic() = '#{name}' AND realtime.messages.extension = 'persistence');
+    """
+  end
+
   def policy_query(:authenticated_read_presence, %{topic: name}) do
     """
     CREATE POLICY "authenticated_read_presence_#{name}"
@@ -294,6 +305,26 @@ defmodule Generators do
     """
   end
 
+  # Restrictive, so it is evaluated on top of whatever permissive policy grants the read
+  def policy_query(:slow_read, _) do
+    """
+    CREATE POLICY "authenticated_slow_read"
+    ON realtime.messages AS RESTRICTIVE FOR SELECT
+    TO authenticated
+    USING ( (SELECT true FROM pg_sleep(1)) );
+    """
+  end
+
+  # Restrictive, so it is evaluated on top of whatever permissive policy grants the write
+  def policy_query(:slow_write, _) do
+    """
+    CREATE POLICY "authenticated_slow_write"
+    ON realtime.messages AS RESTRICTIVE FOR INSERT
+    TO authenticated
+    WITH CHECK ( (SELECT true FROM pg_sleep(1)) );
+    """
+  end
+
   def policy_query(:broken_write_presence, _) do
     """
     CREATE POLICY "authenticated_write_presence"
@@ -363,4 +394,43 @@ defmodule Generators do
 
     {:ok, generate_jwt_token(tenant, claims)}
   end
+
+  @doc """
+  The settings keys an extension type stores encrypted, read from the extension's own
+  `db_settings/0` so tests stay in step when a key is added or dropped.
+  """
+  @spec encrypted_settings_keys(binary()) :: [binary()]
+  def encrypted_settings_keys(type \\ "postgres_cdc_rls") do
+    for {field, _checker, true} <- Extensions.db_settings(type).required, do: field
+  end
+
+  @doc """
+  Rewrites a tenant's jwt_secret and every encrypted setting with the legacy AES-128-ECB cipher and
+  clears `gcm_migrated_at`, putting it back in the state it had before the GCM rollout. Returns the
+  tenant with its extensions reloaded.
+  """
+  @spec rewind_to_legacy_encryption(Tenant.t()) :: Tenant.t()
+  def rewind_to_legacy_encryption(tenant) do
+    {:ok, tenant} =
+      tenant
+      |> Ecto.Changeset.change(%{jwt_secret: to_legacy_cipher(tenant.jwt_secret), gcm_migrated_at: nil})
+      |> Repo.update()
+
+    %{tenant | extensions: Enum.map(tenant.extensions, &rewind_settings/1)}
+  end
+
+  defp rewind_settings(extension) do
+    settings =
+      for key <- encrypted_settings_keys(extension.type),
+          is_binary(extension.settings[key]),
+          reduce: extension.settings do
+        acc -> Map.put(acc, key, to_legacy_cipher(extension.settings[key]))
+      end
+
+    {:ok, extension} = extension |> Ecto.Changeset.change(%{settings: settings}) |> Repo.update()
+    extension
+  end
+
+  defp to_legacy_cipher(nil), do: nil
+  defp to_legacy_cipher(ciphertext), do: ciphertext |> Crypto.decrypt!() |> Crypto.encrypt!(cipher: :ecb)
 end

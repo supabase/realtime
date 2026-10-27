@@ -6,7 +6,7 @@ defmodule RealtimeWeb.ChannelsAuthorization do
   @doc """
   Authorize connection to access channel
   """
-  @spec authorize(binary(), binary(), binary() | nil) ::
+  @spec authorize(binary(), binary() | nil, binary() | nil) ::
           {:ok, map()} | {:error, any()} | {:error, :expired_token, String.t()}
   def authorize(token, jwt_secret, jwt_jwks) when is_binary(token) do
     token

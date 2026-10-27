@@ -51,6 +51,11 @@ defmodule Extensions.PostgresCdcRls do
           GenCounter.add(rate_counter.id)
           {:error, @database_timeout_reason}
 
+        # A `statement_timeout` cancellation or a connection dropped mid-transaction
+        {:error, {:database_timeout, _}} ->
+          GenCounter.add(rate_counter.id)
+          {:error, @database_timeout_reason}
+
         response ->
           response
       end

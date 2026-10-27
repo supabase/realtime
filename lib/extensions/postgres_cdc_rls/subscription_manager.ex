@@ -21,6 +21,9 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
   @check_no_users_interval 60_000
   @check_active_pids_interval 120_000
   @stop_after 60_000 * 10
+  @statement_timeout :timer.seconds(10)
+  @subs_pool_statement_timeout :timer.seconds(5)
+  @subs_pool_queue_target :timer.seconds(2)
 
   defmodule State do
     @moduledoc false
@@ -89,8 +92,13 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     with {:ok, subscription_manager_settings} <- Database.from_settings(extension, "realtime_subscription_manager"),
          {:ok, subscription_manager_pub_settings} <-
            Database.from_settings(extension, "realtime_subscription_manager_pub"),
-         {:ok, conn} <- Database.connect_db(subscription_manager_settings),
-         {:ok, conn_pub} <- Database.connect_db(subscription_manager_pub_settings),
+         {:ok, conn} <-
+           Database.connect_db(subscription_manager_settings, after_connect: after_connect(@statement_timeout)),
+         {:ok, conn_pub} <-
+           Database.connect_db(subscription_manager_pub_settings,
+             after_connect: after_connect(@subs_pool_statement_timeout),
+             queue_target: @subs_pool_queue_target
+           ),
          {:ok, oids} <- Subscriptions.fetch_publication_tables(conn, publication) do
       # The subscribers ETS tables are owned by the WorkerSupervisor, so they survive a
       # SubscriptionManager-only restart. An empty pids table means a cold start (fresh
@@ -253,7 +261,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     ts_new =
       case {subscribers, ts != nil && ts + @stop_after < now()} do
         {0, true} ->
-          Logger.info("Stop tenant #{state.id} because of no connected users")
+          Logger.info("Stopping Postgres Changes streaming for tenant due to no active subscriptions")
           Rls.handle_stop(state.id, 15_000)
           ts
 
@@ -296,7 +304,9 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
       |> pop_not_alive_pids(state.subscribers_pids_table, state.subscribers_nodes_table, id)
 
     new_delete_queue =
-      if length(ids) > 0 do
+      if Enum.empty?(ids) do
+        delete_queue
+      else
         q =
           Enum.reduce(ids, delete_queue.queue, fn id, acc ->
             if :queue.member(id, acc), do: acc, else: :queue.in(id, acc)
@@ -304,8 +314,6 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
 
         Helpers.cancel_timer(delete_queue.ref)
         %{ref: check_delete_queue(1_000), queue: q}
-      else
-        delete_queue
       end
 
     {:noreply, %{state | check_active_pids_ref: check_active_pids(), delete_queue: new_delete_queue}}
@@ -406,6 +414,8 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     Enum.reduce(pids, [], fn pid, acc -> if Process.alive?(pid), do: acc, else: [pid | acc] end)
   end
 
+  defp after_connect(statement_timeout), do: {Postgrex, :query!, ["SET statement_timeout = #{statement_timeout}", []]}
+
   defp check_oids, do: Process.send_after(self(), :check_oids, @check_oids_interval)
 
   defp check_active_pids, do: Process.send_after(self(), :check_active_pids, @check_active_pids_interval)
@@ -421,5 +431,5 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     Process.send_after(self(), {:check_region, MapSet.new(Node.list())}, check_region_interval)
   end
 
-  defp rebalance_check_interval_in_ms(), do: Application.fetch_env!(:realtime, :rebalance_check_interval_in_ms)
+  defp rebalance_check_interval_in_ms, do: Application.fetch_env!(:realtime, :rebalance_check_interval_in_ms)
 end

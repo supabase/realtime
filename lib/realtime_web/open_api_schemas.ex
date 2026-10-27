@@ -395,6 +395,65 @@ defmodule RealtimeWeb.OpenApiSchemas do
     def response, do: {"Tenant Response", "application/json", __MODULE__}
   end
 
+  defmodule MessageResponse do
+    @moduledoc false
+    require OpenApiSpex
+
+    OpenApiSpex.schema(%{
+      type: :object,
+      properties: %{message: %Schema{type: :string, description: "Reason the request was rejected"}},
+      required: [:message]
+    })
+
+    def response, do: {"Message", "application/json", __MODULE__}
+  end
+
+  defmodule TenantBulkHealthParams do
+    @moduledoc false
+    require OpenApiSpex
+
+    OpenApiSpex.schema(%{
+      type: :object,
+      properties: %{
+        refs: %Schema{
+          type: :array,
+          items: %Schema{type: :string},
+          maxItems: 500,
+          description: "Project references to look up"
+        }
+      },
+      required: [:refs],
+      example: %{refs: ["abcdefghijklmnopqrst", "tsrqponmlkjihgfedcba"]}
+    })
+
+    def params, do: {"Tenant Bulk Health Params", "application/json", __MODULE__}
+  end
+
+  defmodule TenantBulkHealthResponse do
+    @moduledoc false
+    require OpenApiSpex
+
+    OpenApiSpex.schema(%{
+      type: :object,
+      properties: %{
+        present: %Schema{
+          type: :array,
+          items: %Schema{type: :string},
+          description: "References that have a tenant on this cluster"
+        },
+        missing: %Schema{
+          type: :array,
+          items: %Schema{type: :string},
+          description: "References that do not have a tenant on this cluster"
+        }
+      },
+      required: [:present, :missing],
+      example: %{present: ["abcdefghijklmnopqrst"], missing: ["tsrqponmlkjihgfedcba"]}
+    })
+
+    def response, do: {"Tenant Bulk Health Response", "application/json", __MODULE__}
+  end
+
   defmodule TenantResponse do
     @moduledoc false
     require OpenApiSpex

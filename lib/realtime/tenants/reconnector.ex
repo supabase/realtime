@@ -41,12 +41,15 @@ defmodule Realtime.Tenants.Reconnector do
 
   def handle_info(_msg, state), do: {:noreply, state}
 
-  defp schedule_check(), do: Process.send_after(self(), :check, @check_interval_ms)
+  defp schedule_check, do: Process.send_after(self(), :check, @check_interval_ms)
 
   defp reconnect(tenant_id) do
     case Connect.lookup_or_start_connection(tenant_id) do
       {:ok, _} ->
         :ok
+
+      {:error, :rpc_error, reason} ->
+        Logger.warning("Reconnector could not restart connection for #{tenant_id}: #{inspect(reason)}")
 
       {:error, reason} ->
         Logger.warning("Reconnector could not restart connection for #{tenant_id}: #{inspect(reason)}")

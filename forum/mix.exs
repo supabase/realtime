@@ -8,7 +8,8 @@ defmodule Forum.MixProject do
       elixir: "~> 1.19",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
-      deps: deps()
+      deps: deps(),
+      aliases: aliases()
     ]
   end
 
@@ -28,11 +29,14 @@ defmodule Forum.MixProject do
     [
       {:telemetry, "~> 1.3"},
       {:ex_hash_ring, "~> 6.0"},
-      # Trace-based testing. The Elixir `Snabbkaffe` interface (lib/snabbkaffe.ex)
-      # wraps these Erlang macros so trace points are discarded in non-test builds.
-      {:snabbkaffe, "~> 1.0"},
-      {:mimic, "~> 1.0", only: :test},
+      {:snabbkaffex, "~> 0.1"},
+      {:mimic, "~> 2.0", only: :test},
       {:mix_test_watch, "~> 1.0", only: [:dev, :test], runtime: false}
     ]
+  end
+
+  defp aliases do
+    # Start distribution first
+    [test: ["cmd epmd -daemon", "test"]]
   end
 end

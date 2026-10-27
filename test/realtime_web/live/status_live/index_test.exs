@@ -32,8 +32,30 @@ defmodule RealtimeWeb.StatusLive.IndexTest do
 
       Endpoint.broadcast("admin:cluster", "ping", payload)
 
+      send(view.pid, :flush)
       html = render(view)
       assert html =~ "region: us-east-1"
+    end
+
+    test "renders are throttled until the flush timer fires", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/status")
+
+      payload = %Payload{
+        from_node: @self,
+        from_region: "us-east-1",
+        node: @self,
+        region: "us-east-1",
+        latency: 42.0,
+        response: {:ok, {:pong, "us-east-1"}},
+        timestamp: DateTime.utc_now()
+      }
+
+      Endpoint.broadcast("admin:cluster", "ping", payload)
+
+      refute render(view) =~ "region: us-east-1"
+
+      send(view.pid, :flush)
+      assert render(view) =~ "region: us-east-1"
     end
   end
 
