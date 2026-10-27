@@ -9,6 +9,8 @@ goes silent. There is no merge and no conflict resolution, because every entry h
 
 Realtime uses it for presence, with the tenant as the scope and the channel topic as the partition.
 
+[DESIGN.md](DESIGN.md) gives the protocol. The TLA+ model that produced it is in [tla](tla).
+
 ## Installation
 
 ```elixir
