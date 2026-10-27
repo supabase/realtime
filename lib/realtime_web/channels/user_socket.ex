@@ -228,6 +228,8 @@ defmodule RealtimeWeb.UserSocket do
   defp log_level(params) do
     case Map.get(params, "log_level") do
       level when level in ["info", "warning", "error"] -> String.to_existing_atom(level)
+      # realtime-js documents and sends "warn"
+      "warn" -> :warning
       _ -> @default_log_level
     end
   end
