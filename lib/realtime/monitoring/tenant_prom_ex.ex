@@ -1,6 +1,5 @@
 defmodule Realtime.TenantPromEx do
   alias Realtime.PromEx.Plugins.Channels
-  alias Realtime.PromEx.Plugins.SqlLogex
   alias Realtime.PromEx.Plugins.Tenant
 
   @moduledoc """
@@ -21,8 +20,7 @@ defmodule Realtime.TenantPromEx do
 
     [
       {Tenant, poll_rate: poll_rate},
-      {Channels, poll_rate: poll_rate},
-      {SqlLogex, poll_rate: poll_rate}
+      {Channels, poll_rate: poll_rate}
     ]
   end
 

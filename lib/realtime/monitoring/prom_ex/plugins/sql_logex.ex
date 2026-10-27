@@ -1,8 +1,13 @@
 defmodule Realtime.PromEx.Plugins.SqlLogex do
   @moduledoc """
   Metrics for `Realtime.Tenants.SqlLogexShadow`'s shadow-mode comparison: sql_logex's decision
-  against the real RLS check, per tenant. Off by default, behind the `"sql_logex_shadow"` feature
-  flag — expect these to read as zero/absent until it's enabled for a tenant.
+  against the real RLS check. Off by default, behind the `"sql_logex_shadow"` feature flag — expect
+  these to read as zero/absent until it's enabled for a tenant.
+
+  No `tenant` tag: shadow mode is meant to roll out to every tenant, and a per-tenant series for each
+  of these would multiply the metric count by the number of active tenants. The per-tenant detail
+  that matters is in the logs instead: `SqlLogexShadowMismatch`, `SqlLogexShadowException` and
+  `SqlLogexUnsupportedPolicies` all name the tenant in their message.
 
   `decisions_total` (counter): how often a decision matched, mismatched, fell back, or had no real
   answer to compare against (`outcome` and `extension` tags). The `reason` tag is the bounded category
@@ -38,13 +43,12 @@ defmodule Realtime.PromEx.Plugins.SqlLogex do
             event_name: event,
             description:
               "Count of sql_logex shadow #{operation} decisions, by outcome, extension and (for a fallback) reason category.",
-            tags: [:tenant, :outcome, :extension, :reason]
+            tags: [:outcome, :extension, :reason]
           ),
           counter(
             event ++ [:unavailable, :total],
             event_name: event ++ [:unavailable],
-            description: "Count of sql_logex shadow #{operation} checks that couldn't load a snapshot.",
-            tags: [:tenant]
+            description: "Count of sql_logex shadow #{operation} checks that couldn't load a snapshot."
           ),
           counter(
             event ++ [:exceptions, :total],
@@ -52,7 +56,7 @@ defmodule Realtime.PromEx.Plugins.SqlLogex do
             description:
               "Count of sql_logex shadow #{operation} checks that raised. Should stay at zero; everything " <>
                 "upstream of this is supposed to return a tagged result instead of raising.",
-            tags: [:tenant, :extension]
+            tags: [:extension]
           ),
           distribution(
             event ++ [:shadow_duration],
@@ -61,7 +65,6 @@ defmodule Realtime.PromEx.Plugins.SqlLogex do
             unit: {:native, :microsecond},
             description:
               "Latency, in microseconds, of the whole sql_logex shadow #{operation} pipeline (cache fetch included).",
-            tags: [:tenant],
             reporter_options: [peep_bucket_calculator: Latency.Buckets]
           )
         ]
