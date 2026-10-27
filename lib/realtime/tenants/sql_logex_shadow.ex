@@ -131,7 +131,15 @@ defmodule Realtime.Tenants.SqlLogexShadow do
           :ok
       end
     rescue
-      exception -> Telemetry.execute(check.event ++ [:exception], %{}, Map.merge(metadata, %{reason: exception}))
+      exception ->
+        # Only the exception's module: its message can hold policy or input content. The tenant id is
+        # in the message, not logger metadata, for the same reason as the mismatch log above.
+        log_warning(
+          "SqlLogexShadowException",
+          %{tenant_id: tenant_id, operation: check.operation, extension: extension, exception: exception.__struct__}
+        )
+
+        Telemetry.execute(check.event ++ [:exception], %{}, Map.merge(metadata, %{reason: exception}))
     end
   end
 

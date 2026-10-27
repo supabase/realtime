@@ -20,12 +20,14 @@ defmodule Realtime.Tenants.SqlLogexShadowTest do
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.SqlLogexCache
+  alias Realtime.Tenants.SqlLogexEnv
   alias Realtime.Tenants.SqlLogexShadow
 
   @flag "sql_logex_shadow"
   @read_decision [:realtime, :tenants, :sql_logex, :shadow, :read]
   @read_timing [:realtime, :tenants, :sql_logex, :shadow, :read, :timing]
   @read_unavailable [:realtime, :tenants, :sql_logex, :shadow, :read, :unavailable]
+  @read_exception [:realtime, :tenants, :sql_logex, :shadow, :read, :exception]
   @write_decision [:realtime, :tenants, :sql_logex, :shadow, :write]
   @write_timing [:realtime, :tenants, :sql_logex, :shadow, :write, :timing]
 
@@ -257,6 +259,37 @@ defmodule Realtime.Tenants.SqlLogexShadowTest do
       assert_receive {:telemetry, ^unavailable_ref, _event, _measurements, %{tenant: ^tenant_id} = metadata}, 2000
       assert metadata.reason =~ "boom"
       assert_receive {:telemetry, ^timing_ref, _event, _measurements, %{tenant: ^tenant_id}}, 2000
+    end
+
+    test "deciding raises: records :exception and logs the tenant id in the message, never the exception's message" do
+      tenant_id = unique_tenant_id()
+      expect(FeatureFlags, :enabled?, fn @flag, _tenant_id -> true end)
+      expect(SqlLogexCache, :fetch, fn :fake_conn, _tenant_id -> {:ok, always_allow_snapshot()} end)
+      expect(SqlLogexEnv, :build, fn _context, _extension -> raise "policy content" end)
+
+      exception_ref = attach(@read_exception)
+      timing_ref = attach(@read_timing)
+
+      log =
+        capture_log(fn ->
+          assert :ok = SqlLogexShadow.read(:fake_conn, context(tenant_id: tenant_id), [:broadcast], {:ok, %Policies{}})
+          assert_receive {:telemetry, ^timing_ref, _event, _measurements, %{tenant: ^tenant_id}}, 2000
+        end)
+
+      assert_received {:telemetry, ^exception_ref, _event, _measurements, %{tenant: ^tenant_id, extension: :broadcast}}
+      assert log =~ "SqlLogexShadowException"
+      assert log =~ ~s(tenant_id: "#{tenant_id}")
+      assert log =~ "RuntimeError"
+      refute log =~ "policy content"
+
+      header_lines = log |> String.split("\n") |> Enum.filter(&(&1 =~ "SqlLogexShadowException"))
+      assert header_lines != []
+
+      for line <- header_lines do
+        refute line =~ "project="
+        refute line =~ "external_id="
+        refute line =~ "tenant_id="
+      end
     end
   end
 
