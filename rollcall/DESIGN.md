@@ -1,9 +1,9 @@
 # Presence replication: design for implementation
 
-This document gives the protocol that the model in this directory
+This document gives the protocol that the model in the `tla` directory
 produced. It is written for the person who implements the protocol.
-NOTES.md gives the reasons and the model runs. This document gives only
-the result.
+`tla/NOTES.md` gives the reasons and the model runs. This document gives
+only the result.
 
 The terms are the terms of the model. A ref identifies one track call. An
 entry is a ref with its payload. A tracker is the process for one tenant on
@@ -97,30 +97,37 @@ kind for this case.
 
 ## Send messages
 
-In each heartbeat period, each tracker sends one message to each peer that
-is running. The message is a snapshot or a diff. The tracker chooses the
+In each heartbeat period, each tracker broadcasts one message to its scope.
+The transport delivers the message to each node that holds a tracker for
+the scope. The message is a snapshot or a diff. The tracker chooses the
 kind. The model shows that each choice is correct. After the tracker sends
 the message, it sets `sent` to the current `local` set and `version`.
 
+A tracker does not hold a list of peers. It creates a peer record when the
+first message from a node arrives.
+
 In the same period, the tracker sends a request to each peer that has the
-`behind` flag set. The tracker sends the request again in each period until
-the flag is clear. A lost request needs no extra state. The next period
-sends it again.
+`behind` flag set. The request is a call to the tracker for the scope on
+the peer node. The tracker does not block on the call. The reply is the
+result of the call. The tracker sends the request again in each period
+until the flag is clear. A lost request needs no extra state. The next
+period sends it again.
 
-When a tracker receives a request, it sends a snapshot to the requester
-immediately. It sends the snapshot to the requester only. It does not
-change `sent`, because a reply is not a heartbeat. If the requester is not
-running, the tracker does not reply.
+When a tracker receives a request, it replies with a snapshot immediately.
+It does not change `sent`, because a reply is not a heartbeat. If the
+requester is not running, the reply goes to a process that does not exist,
+and the VM discards it.
 
-When a tracker stops, it sends a snapshot with an empty set to each peer.
-This snapshot is the goodbye. When a tracker crashes, it sends nothing.
+When a tracker stops, it broadcasts a snapshot with an empty set. This
+snapshot is the goodbye. When a tracker crashes, it sends nothing.
 
-Do not send a message to a peer that is known to be down.
+The transport must not deliver a message to a node that is down.
 
 ## Receive messages
 
-When a message arrives from a peer, set `silent` for that peer to 0. Then
-apply one of these rules, by message kind:
+When a message arrives from a peer, create the peer record if it does not
+exist. Set `silent` for that peer to 0. Then apply one of these rules, by
+message kind:
 
 - The message is a snapshot and its stamp is newer than `mark`. Replace
   `replica` with the set in the message. Set `mark` to the stamp. Clear
@@ -138,11 +145,13 @@ messages in order.
 
 ## Detect a dead peer
 
-When `silent` for a peer reaches the threshold, purge the peer. Clear
-`replica`. Set `mark` to the initial value. Clear `behind`.
+When `silent` for a peer reaches the threshold, purge the peer. Delete the
+peer record. A peer with no record and a peer with the initial values are
+the same state.
 
-The purge must reset `mark`. If `mark` keeps its value, the next heartbeat
-from a live peer with no change is stale, and the replica never returns.
+The purge must delete or reset `mark`. If `mark` keeps its value, the next
+heartbeat from a live peer with no change is stale, and the replica never
+returns.
 
 The threshold must obey this rule: threshold > max_delay + 1. The value
 `max_delay` is the longest delivery delay, measured in heartbeat periods.
@@ -159,8 +168,7 @@ join for a live entry.
 ## Lifecycle
 
 When a tracker starts, `local` is empty, `version` is 0, `incarnation` is
-new, and each peer record has its initial value. A restart gives a new
-incarnation. The peers replace the old entries when they receive the first
+new, and it has no peer records. A restart gives a new incarnation. The peers replace the old entries when they receive the first
 heartbeat of the new incarnation.
 
 The tracker links to each channel that tracks an entry. The tracker traps
@@ -181,6 +189,17 @@ cause.
 The view of a node is `local` plus each `replica`. A client on a channel
 sees the view for the topic of the channel only. Authorisation for the
 topic occurs before the subscription. The tracker does not see it.
+
+A track call gives a topic, a key and a meta. The key and the meta are the
+payload of the entry. The ref is the identity of the entry. The tracker
+generates the ref and returns it. The ref must be unique across the
+cluster. A second track call from the same caller for the same topic and
+key is an update. The old entry leaves and a new entry with a new ref
+joins, in one diff. Two callers can track the same key.
+
+The encoding for the client groups entries by key. Each entry is one meta
+under its key, with the ref in `phx_ref`. On an update, the new meta
+carries the previous ref in `phx_ref_prev`.
 
 - Subscribe the channel to the change stream for its topic first. Then read
   the state and send it to the client. If you do these steps in the other
@@ -230,9 +249,11 @@ The design depends on these conditions:
    stays behind until it sends a request. The request path is mandatory.
    This is true also on a network that loses messages rarely.
 4. The purge must reset `mark`. See the section on dead peers.
-5. Do not reply to a requester that is down. A request can be in flight
-   when its sender crashes. The request still arrives. A reply to it goes
-   to a node that cannot receive it.
+5. A request can be in flight when its sender crashes. The request still
+   arrives. Because the request is a call, the reply goes to the dead
+   caller process, and the VM discards it. No rule is necessary. If the
+   implementation changes the request to a message, add a rule: do not
+   reply to a requester that is down.
 6. A requester can become behind two times. The reply carries the state at
    the time of the reply. The next diff starts from `sent`. If a change
    occurred between the two, the requester sees one more gap and sends one
@@ -254,13 +275,11 @@ The design depends on these conditions:
     interested peer. A node with many tenants sends many small messages.
     Put the heartbeats for all tenants between two nodes into one message.
     The content for each tenant stays independent.
-11. A new tracker has no replicas. The first message from a peer can be a
-    diff. The tracker is then behind, and the request goes out in the next
-    period. A client that joins in this time gets an empty state and then
-    diffs. To shorten this, set `behind` for each peer when the tracker
-    starts. The tracker then sends requests in its first period. The model
-    did not check this start state. It is the state the model reaches after
-    one diff arrives at a new tracker.
+11. A new tracker has no peers. It learns a peer from the first heartbeat
+    of that peer. If that heartbeat is a diff, the tracker is behind, and
+    it sends a request in the next period. The cold start takes one
+    heartbeat period and one request. A client that joins in this time
+    gets an empty state and then diffs.
 
 ## Decisions for the implementation
 
