@@ -10,6 +10,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   alias Realtime.Messages
   alias Realtime.Tenants
   alias RealtimeWeb.RealtimeChannel
+  alias RealtimeWeb.RequestMetrics
   alias RealtimeWeb.TenantBroadcaster
   alias Phoenix.Socket
   alias Realtime.GenCounter
@@ -19,8 +20,12 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
 
   @type payload :: map | {String.t(), :json | :binary, binary, map()}
 
+  @type ok_reply :: {:reply, :ok | {:ok, map()}, Socket.t()}
+  @type error_reply :: {:reply, {:error, %{error: atom()}}, Socket.t()}
+  @type noreply :: {:noreply, Socket.t()}
+
   @event_type "broadcast"
-  @spec handle(payload, Socket.t()) :: {:reply, :ok, Socket.t()} | {:noreply, Socket.t()}
+  @spec handle(payload, Socket.t()) :: {ok_reply() | error_reply() | noreply(), RequestMetrics.outcome()}
   def handle(payload, %{assigns: %{private?: false}} = socket), do: handle(payload, nil, socket)
 
   @doc """
@@ -29,8 +34,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   `db_conn` is `nil` for public channels, which don't run write authorization nor persist messages.
   Otherwise must pass the tenant database conn used to run write authorization and persist the message.
   """
-  @spec handle(payload, pid() | nil, Socket.t()) ::
-          {:reply, :ok | {:ok, map()} | {:error, any()}, Socket.t()} | {:noreply, Socket.t()}
+  @spec handle(payload, pid() | nil, Socket.t()) :: {ok_reply() | error_reply() | noreply(), RequestMetrics.outcome()}
   def handle(payload, db_conn, %{assigns: %{private?: true}} = socket) do
     with {:ok, persist} <- parse_persist(socket, payload),
          {:ok, socket} <- authorize_write(socket, db_conn, persist),
@@ -90,25 +94,32 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
 
   @doc """
   Replies with the error `code` when the channel acknowledges broadcasts.
+
+  Returns the outcome with the reply. The outcome is from
+  `RequestMetrics.classify_broadcast_error(code)`.
   """
-  @spec maybe_reply_error(Socket.t(), atom()) ::
-          {:reply, {:error, %{error: atom()}}, Socket.t()} | {:noreply, Socket.t()}
-  def maybe_reply_error(%{assigns: %{ack_broadcast: true}} = socket, code),
+  @spec maybe_reply_error(Socket.t(), atom()) :: {error_reply() | noreply(), RequestMetrics.outcome()}
+  def maybe_reply_error(socket, code) do
+    outcome = RequestMetrics.classify_broadcast_error(code)
+    result = error_reply(socket, code)
+    {result, outcome}
+  end
+
+  defp error_reply(%{assigns: %{ack_broadcast: true}} = socket, code),
     do: {:reply, {:error, %{error: code}}, socket}
 
-  def maybe_reply_error(socket, _code), do: {:noreply, socket}
+  defp error_reply(socket, _code), do: {:noreply, socket}
 
-  @spec reply_success(Socket.t(), :ok | {:ok, map()}) ::
-          {:reply, {:ok, map()} | :ok, Socket.t()} | {:noreply, Socket.t()}
+  @spec reply_success(Socket.t(), :ok | {:ok, map()}) :: {ok_reply() | noreply(), :success}
   defp reply_success(%{assigns: %{ack_broadcast: true}} = socket, {:ok, _} = result) do
-    {:reply, result, socket}
+    {{:reply, result, socket}, :success}
   end
 
   defp reply_success(%{assigns: %{ack_broadcast: true}} = socket, _result) do
-    {:reply, :ok, socket}
+    {{:reply, :ok, socket}, :success}
   end
 
-  defp reply_success(socket, _result), do: {:noreply, socket}
+  defp reply_success(socket, _result), do: {{:noreply, socket}, :success}
 
   defp send_message(tenant_id, self_broadcast, tenant_topic, payload) do
     broadcast = build_broadcast(tenant_topic, payload)

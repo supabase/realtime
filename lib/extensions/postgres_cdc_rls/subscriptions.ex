@@ -33,13 +33,24 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
              | {:subscription_insert_failed, String.t()}}
 
   def create(conn, publication, subscription_list, manager, caller) do
+    # `send` is not transactional. Notifying the manager from inside the transaction records
+    # a subscriber for a row that a later failure in the same list rolls back.
+    with {:ok, results} <- insert_subscriptions(conn, publication, subscription_list) do
+      Enum.each(subscription_list, fn %{id: id} ->
+        send(manager, {:subscribed, {caller, id}})
+      end)
+
+      {:ok, results}
+    end
+  end
+
+  defp insert_subscriptions(conn, publication, subscription_list) do
     transaction(
       conn,
       fn conn ->
         Enum.map(subscription_list, fn %{id: id, claims: claims, subscription_params: params} ->
           case query(conn, publication, id, claims, params) do
             {:ok, %{num_rows: num} = result} when num > 0 ->
-              send(manager, {:subscribed, {caller, id}})
               result
 
             {:ok, _} ->
@@ -75,19 +86,27 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   defp database_timeout?(_), do: false
 
   defp query(conn, publication, id, claims, subscription_params) do
-    sql = "with sub_tables as (
+    sql = "with candidates as (
         select
-        rr.entity
+        pub.schemaname,
+        pub.tablename
         from
-        pg_publication_tables pub,
-        lateral (
-        select
-        format('%I.%I', pub.schemaname, pub.tablename)::regclass entity
-        ) rr
+        pg_publication_tables pub
         where
         pub.pubname = $1
         and pub.schemaname like (case $2 when '*' then '%' else $2 end) escape ''
         and pub.tablename like (case $3 when '*' then '%' else $3 end) escape ''
+     ),
+     sub_tables as (
+        select
+        format('%I.%I', c.schemaname, c.tablename)::regclass entity
+        from
+        candidates c
+        where
+        -- A name that matches a published schema or table exactly selects only that one, so
+        -- `item_1` doesn't also pick up `items1`. Otherwise `_` and `%` stay LIKE wildcards.
+        ($2 = '*' or c.schemaname = $2 or not exists (select 1 from candidates e where e.schemaname = $2))
+        and ($3 = '*' or c.tablename = $3 or not exists (select 1 from candidates e where e.tablename = $3))
      )
      insert into realtime.subscription as x(
         subscription_id,

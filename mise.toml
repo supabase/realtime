@@ -15,7 +15,7 @@ TENANT = "{% if env.TENANT %}{{ env.TENANT }}{% else %}{% set dir = config_root 
 # The Postgres majors that get a committed tenant dump (priv/repo/tenant_db_dump_<major>.sql), and
 # the image each one is generated from — both `tenant-dumps` and the workflow that runs it read
 # this list. Keep the images in step with the ones the test workflows run against.
-TENANT_DUMP_IMAGES = "15=supabase/postgres:15.19.0.004 17=supabase/postgres:17.11.0.004"
+TENANT_DUMP_IMAGES = "15=supabase/postgres:15.19.0.007 17=supabase/postgres:17.11.0.007"
 REGION = "us-east-1"
 API_JWT_SECRET = "dev"
 DB_ENC_KEY = "1234567890123456"
@@ -267,6 +267,8 @@ arg "[args]..." help="Flags for realtime-check.ts, such as --test postgres-chang
 run = """
   supabase start
   eval "$(supabase status --output env)"
+  # Without node_modules, Bun auto-installs the newest versions in range, ignoring bun.lock.
+  bun install --frozen-lockfile
   bun run realtime-check.ts --env local \
     --publishable-key "$PUBLISHABLE_KEY" \
     --secret-key "$SECRET_KEY" \
@@ -336,8 +338,10 @@ run = """
   done
 
   # 5. Run the suite against the stack (Kong -> our realtime). Do NOT call `supabase start` again
-  #    here, or it would recreate realtime from the stock image.
+  #    here, or it would recreate realtime from the stock image. Install from bun.lock first:
+  #    without node_modules, Bun auto-installs the newest versions in range instead.
   eval "$(supabase status --output env)"
+  bun install --frozen-lockfile
   bun run realtime-check.ts --env local \
     --publishable-key "$PUBLISHABLE_KEY" \
     --secret-key "$SECRET_KEY" \
