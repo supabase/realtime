@@ -531,6 +531,44 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       %Postgrex.Result{rows: [[0]]} =
         Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
     end
+
+    test "an in filter holding the documented maximum of 100 values is accepted", %{conn: conn} do
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "test",
+          "filter" => "details=in.(#{uuid_list(100)})"
+        })
+
+      params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
+
+      assert {:ok, [%Postgrex.Result{}]} =
+               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+
+      assert %Postgrex.Result{rows: [[1]]} =
+               Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+    end
+
+    test "resubscribing with a large in filter updates the row instead of duplicating it", %{conn: conn} do
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "test",
+          "filter" => "details=in.(#{uuid_list(100)})"
+        })
+
+      id = UUID.uuid1()
+
+      for role <- ["anon", "authenticated"] do
+        params_list = [%{claims: %{"role" => role}, id: id, subscription_params: subscription_params}]
+
+        assert {:ok, [%Postgrex.Result{}]} =
+                 Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+      end
+
+      assert %Postgrex.Result{rows: [[1, "authenticated"]]} =
+               Postgrex.query!(conn, "select count(*), max(claims_role::text) from realtime.subscription", [])
+    end
   end
 
   describe "filters: gating rows end to end (apply_rls)" do
@@ -756,9 +794,13 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
           SELECT i.indexrelid::regclass::text, pg_get_indexdef(i.indexrelid)
           FROM pg_index i
           WHERE i.indrelid = 'realtime.subscription'::regclass
-            AND EXISTS (
-              SELECT 1 FROM pg_attribute a
-              WHERE a.attrelid = i.indrelid AND a.attname = 'filters' AND a.attnum = ANY(i.indkey)
+            AND (
+              EXISTS (
+                SELECT 1 FROM pg_attribute a
+                WHERE a.attrelid = i.indrelid AND a.attname = 'filters' AND a.attnum = ANY(i.indkey)
+              )
+              -- filters is indexed through realtime.filters_hash(filters), an expression column
+              OR pg_get_expr(i.indexprs, i.indrelid) ~ '\\mfilters\\M'
             )
           """,
           []
@@ -1835,6 +1877,10 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       ["supabase_realtime_test", slot_name]
     )
   end
+
+  # Values long enough that the filter array passes the btree tuple limit an
+  # index over `filters` would impose - a uuid column is the shape users hit.
+  defp uuid_list(count), do: Enum.map_join(1..count, ",", fn _ -> UUID.uuid4() end)
 
   defp create_subscriptions(conn, num, opts \\ []) do
     role = Keyword.get(opts, :role, "anon")
