@@ -1179,7 +1179,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       Realtime.Tenants.Cache.update_cache(%{tenant | max_channels_per_client: 1})
 
-      capture_log(fn -> subscribe_and_join(socket, "realtime:test", %{}) end)
+      # Phoenix.ChannelTest skips the transport, so set the count UserSocket.handle_in/2 would pass along
+      socket = Socket.assign(socket, :channels_count, 1)
 
       log =
         capture_log(fn ->
@@ -1187,7 +1188,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                    subscribe_and_join(socket, "realtime:test2", %{})
         end)
 
-      refute log =~ "ChannelRateLimitReached"
+      # capture_log also collects logs from concurrently running tests, so only look at this tenant's
+      refute log |> String.split("\n") |> Enum.any?(&(&1 =~ "ChannelRateLimitReached" and &1 =~ tenant.external_id))
     end
   end
 
