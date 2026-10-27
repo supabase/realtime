@@ -1,0 +1,10 @@
+[tools]
+java = "temurin-25"
+"github:tlaplus/tlaplus" = { version = "latest", asset_pattern = "tla2tools.jar" }
+
+[tasks.tlc]
+description = "Run the TLC model checker on a model in tla/: mise run tlc -- [-deadlock] -config Foo.cfg Foo.tla"
+# The models live in tla/. The task runs there, so the config and module names
+# need no path from any directory under rollcall/.
+dir = "{{config_root}}/tla"
+run = 'java -Djava.io.tmpdir="${TMPDIR:-/tmp}" -XX:+UseParallelGC -cp "$(mise where github:tlaplus/tlaplus)/tla2tools.jar" tlc2.TLC -workers auto'

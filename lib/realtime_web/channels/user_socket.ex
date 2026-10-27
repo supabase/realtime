@@ -1,7 +1,8 @@
 defmodule RealtimeWeb.UserSocket do
   # Raise Phoenix's built-in per-transport channel limit above its default of 100. Realtime
-  # enforces its own per-tenant `max_channels_per_client` limit (default 100) in RealtimeChannel
-  # with a dedicated error message, so we just bump to a very large number.
+  # enforces its own per-tenant `max_channels_per_client` limit (default 100) in RealtimeChannel,
+  # against the `channels_count` assign kept by handle_in/2, with a dedicated error message, so
+  # we just bump to a very large number.
   use Phoenix.Socket, max_channels_per_transport: 99_999
   use Realtime.Logs
 
@@ -36,8 +37,9 @@ defmodule RealtimeWeb.UserSocket do
   end
 
   @impl Phoenix.Socket.Transport
-  def handle_in(message, {%{channels: previous_channels}, socket} = full_state) do
-    case super(message, full_state) do
+  def handle_in(message, {%{channels: previous_channels} = state, socket} = full_state) do
+    # Phoenix starts a joining channel from within super, so the channel sees this count
+    case super(message, {state, put_channels_count(socket, map_size(previous_channels))}) do
       # A rejected duplicate join drops the existing channel without going through handle_info/2.
       # An already empty socket keeps its running timer, so rejected joins can't extend it.
       {:reply, :error, reply, {%{channels: channels} = state, socket}}
@@ -262,6 +264,11 @@ defmodule RealtimeWeb.UserSocket do
 
   defp put_no_channels_timer(socket, ref),
     do: %{socket | private: Map.put(socket.private, :no_channels_timer, ref)}
+
+  # Still includes the channel a duplicate join for the same topic is about to replace, so
+  # rejoining a topic on a socket that is exactly at the limit is rejected.
+  defp put_channels_count(%{assigns: %{channels_count: count}} = socket, count), do: socket
+  defp put_channels_count(socket, count), do: assign(socket, :channels_count, count)
 
   defp collect_traffic_telemetry(nil, _tenant_external_id, previous_recv, previous_send),
     do: %{latest_recv: previous_recv, latest_send: previous_send}
