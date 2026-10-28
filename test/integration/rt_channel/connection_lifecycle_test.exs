@@ -455,6 +455,59 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
                      },
                      500
     end
+
+    test "a channel that is left frees its slot", %{tenant: tenant, serializer: serializer} do
+      change_tenant_configuration(tenant, :max_channels_per_client, 1)
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+
+      topic = join_channel!(socket)
+      :ok = WebsocketClient.leave(socket, topic, %{})
+      assert_receive %Message{event: "phx_close", topic: ^topic}, 500
+
+      join_channel!(socket)
+    end
+
+    test "a channel that crashes frees its slot", %{tenant: tenant, serializer: serializer} do
+      change_tenant_configuration(tenant, :max_channels_per_client, 1)
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+
+      topic = join_channel!(socket)
+
+      [%{pid: transport}] =
+        Enum.filter(Phoenix.Debug.list_sockets(), &(&1.id == UserSocket.subscribers_id(tenant.external_id)))
+
+      {:ok, [%{pid: channel_pid}]} = Phoenix.Debug.list_channels(transport)
+      Process.exit(channel_pid, :kill)
+      assert_receive %Message{event: "phx_error", topic: ^topic}, 500
+
+      join_channel!(socket)
+    end
+
+    test "rejoining a topic replaces its channel instead of taking another slot", %{
+      tenant: tenant,
+      serializer: serializer
+    } do
+      change_tenant_configuration(tenant, :max_channels_per_client, 2)
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+
+      topic = join_channel!(socket)
+      ^topic = join_channel!(socket, topic)
+      join_channel!(socket)
+
+      assert_channel_limit_reached(socket)
+    end
+
+    test "each socket has its own limit", %{tenant: tenant, serializer: serializer} do
+      change_tenant_configuration(tenant, :max_channels_per_client, 1)
+      {socket1, _} = get_connection(tenant, serializer, role: "authenticated")
+      {socket2, _} = get_connection(tenant, serializer, role: "authenticated")
+
+      join_channel!(socket1)
+      join_channel!(socket2)
+
+      assert_channel_limit_reached(socket1)
+      assert_channel_limit_reached(socket2)
+    end
   end
 
   describe "rate limits - joins per second" do
@@ -512,14 +565,12 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
     end
   end
 
-  # Regression guard for REAL-981: Phoenix 1.8.3 started dropping any channel
-  # push whose join_ref didn't match the one recorded at join time
-  # (and didn't tolerate a missing one either)
-  #  We run a fork with that check reverted, these tests fail if the fork's fix regresses
-  # or Phoenix is ever bumped back to stock behavior without it.
-  # We can bump this again after REAL-984
+  # Regression guard for REAL-981: Phoenix 1.8.3 started dropping channel pushes
+  # without a join_ref, which broke SDK clients that omit it. Phoenix 1.8.12 fixed
+  # that (phoenixframework/phoenix#6800); pushes with a stale join_ref are still
+  # dropped by design.
   describe "join_ref leniency" do
-    test "presence track still gets a reply and diff with a stale or missing join_ref", %{
+    test "presence track still gets a reply and diff with a missing join_ref", %{
       tenant: tenant,
       serializer: serializer
     } do
@@ -531,12 +582,6 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
       assert_receive %Message{event: "presence_state", topic: ^topic}, 500
 
-      stale = %{type: "presence", event: "TRACK", payload: %{name: "stale-join-ref"}}
-      send_raw(socket, serializer, topic, "presence", stale, "1001", "some-other-join-ref")
-
-      assert_receive %Message{event: "phx_reply", ref: "1001", payload: %{"status" => "ok"}, topic: ^topic}, 500
-      assert_receive %Message{event: "presence_diff", topic: ^topic}, 500
-
       missing = %{type: "presence", event: "TRACK", payload: %{name: "missing-join-ref"}}
       send_raw(socket, serializer, topic, "presence", missing, "1002", nil)
 
@@ -544,7 +589,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
       assert_receive %Message{event: "presence_diff", topic: ^topic}, 500
     end
 
-    test "acknowledged broadcast still gets a reply with a stale or missing join_ref", %{
+    test "acknowledged broadcast still gets a reply with a missing join_ref", %{
       tenant: tenant,
       serializer: serializer
     } do
@@ -557,10 +602,6 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
 
       broadcast = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
 
-      send_raw(socket, serializer, topic, "broadcast", broadcast, "2001", "some-other-join-ref")
-      assert_receive %Message{event: "phx_reply", ref: "2001", payload: %{"status" => "ok"}, topic: ^topic}, 500
-      assert_receive %Message{event: "broadcast", payload: ^broadcast, topic: ^topic}, 500
-
       send_raw(socket, serializer, topic, "broadcast", broadcast, "2002", nil)
       assert_receive %Message{event: "phx_reply", ref: "2002", payload: %{"status" => "ok"}, topic: ^topic}, 500
       assert_receive %Message{event: "broadcast", payload: ^broadcast, topic: ^topic}, 500
@@ -568,10 +609,31 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
   end
 
   # Bypasses WebsocketClient's automatic join_ref tracking to simulate a client
-  # pushing with a stale or missing (nil) join_ref after a valid join.
+  # pushing with a missing (nil) join_ref after a valid join.
   defp send_raw(socket, serializer, topic, event, payload, ref, join_ref) do
     msg = %Message{topic: topic, event: event, payload: payload, ref: ref, join_ref: join_ref}
     {:socket_push, :text, chardata} = serializer.encode!(msg)
     WebsocketClient.send(socket, {:text, IO.chardata_to_string(chardata)})
+  end
+
+  defp join_channel!(socket, topic \\ "realtime:#{random_string()}") do
+    :ok = WebsocketClient.join(socket, topic, %{config: %{broadcast: %{self: true}, private: false}})
+    assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+    topic
+  end
+
+  defp assert_channel_limit_reached(socket) do
+    topic = "realtime:#{random_string()}"
+    :ok = WebsocketClient.join(socket, topic, %{config: %{broadcast: %{self: true}, private: false}})
+
+    assert_receive %Message{
+                     event: "phx_reply",
+                     payload: %{
+                       "status" => "error",
+                       "response" => %{"reason" => "ChannelRateLimitReached: Too many channels"}
+                     },
+                     topic: ^topic
+                   },
+                   500
   end
 end

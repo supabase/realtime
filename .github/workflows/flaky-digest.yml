@@ -258,4 +258,4 @@ jobs:
       status: "partial"
       details_blocks: ${{ needs.collect.outputs.blocks }}
     secrets:
-      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_ALERTS_WEBHOOK }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_NOTIFY_WEBHOOK }}

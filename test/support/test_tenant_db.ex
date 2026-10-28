@@ -84,19 +84,6 @@ defmodule TestTenantDb do
     {:noreply, state}
   end
 
-  @doc "Return a port for a pooled tenant DB that can be used"
-  def checkout() do
-    case acquire_tenant_db() do
-      {:ok, port, checkin} ->
-        # Automatically checkin at the end of the test
-        ExUnit.Callbacks.on_exit(fn -> checkin.() end)
-        {:ok, port}
-
-      :error ->
-        {:error, "failed to checkout a tenant database"}
-    end
-  end
-
   def checkout_tenant(opts \\ []), do: do_checkout_tenant(opts, :sandbox)
   def checkout_tenant_unboxed(opts \\ []), do: do_checkout_tenant(opts, :unboxed)
 
@@ -163,32 +150,33 @@ defmodule TestTenantDb do
 
   # Acquire a tenant database for one test — a pooled supabase/postgres
   # container, or (in external mode) one of the pre-configured external DBs.
-  # Either way it's a real pool checkout, released via the returned checkin
-  # function once the caller is done.
+  # Either way it's a real pool checkout, released by an on_exit callback. ExUnit
+  # runs those in reverse, so cleanup registered after the checkout runs first.
   #
   # A worker whose database fails the probe is discarded rather than handed on:
   # its resource is destroyed and the worker killed, which makes poolboy start a
   # replacement that claims a fresh one.
-  defp acquire_tenant_db(attempts \\ @checkout_attempts, failures \\ [])
+  @doc "Return a port for a pooled tenant DB that can be used"
+  def checkout(attempts \\ @checkout_attempts, failures \\ [])
 
-  defp acquire_tenant_db(0, failures) do
+  def checkout(0, failures) do
     raise UnhealthyDatabaseError,
       message:
         "no healthy tenant database after #{@checkout_attempts} checkout attempts.\n\n" <>
           Enum.join(Enum.reverse(failures), "\n\n")
   end
 
-  defp acquire_tenant_db(attempts, failures) do
-    case checkout_worker() do
+  def checkout(attempts, failures) do
+    case hold_worker() do
       {:ok, worker} ->
         port = Backend.current().worker_port(worker)
 
         case probe(port) do
           :ok ->
-            {:ok, port, fn -> :poolboy.checkin(TestTenantDb.Pool, worker) end}
+            {:ok, port}
 
           {:error, reason} ->
-            acquire_tenant_db(attempts - 1, [discard_worker(worker, port, reason) | failures])
+            checkout(attempts - 1, [discard_worker(worker, port, reason) | failures])
         end
 
       :full ->
@@ -200,10 +188,32 @@ defmodule TestTenantDb do
   # `GenServer.call` time out and re-raises, which reaches the test as a bare
   # `** (EXIT) time out` naming nothing. Translated here so pool exhaustion raises
   # like every other failure in this module.
-  defp checkout_worker do
-    {:ok, :poolboy.checkout(TestTenantDb.Pool, true, @worker_checkout_timeout_ms)}
-  catch
-    :exit, {:timeout, _} -> :full
+  defp hold_worker do
+    caller = self()
+
+    {holder, ref} =
+      spawn_monitor(fn ->
+        worker = :poolboy.checkout(TestTenantDb.Pool, true, @worker_checkout_timeout_ms)
+        send(caller, {:checked_out, self(), worker})
+
+        receive do
+          :release -> :ok
+        end
+      end)
+
+    ExUnit.Callbacks.on_exit(fn -> send(holder, :release) end)
+
+    receive do
+      {:checked_out, ^holder, worker} ->
+        Process.demonitor(ref, [:flush])
+        {:ok, worker}
+
+      {:DOWN, ^ref, :process, ^holder, {:timeout, _}} ->
+        :full
+
+      {:DOWN, ^ref, :process, ^holder, reason} ->
+        exit(reason)
+    end
   end
 
   # Poolboy gave up waiting for a free worker. If this checkout already condemned
@@ -269,7 +279,7 @@ defmodule TestTenantDb do
   end
 
   defp do_checkout_tenant(opts, mode) do
-    with {:ok, port, checkin} <- acquire_tenant_db() do
+    with {:ok, port} <- checkout() do
       tenant = repo_run(mode, fn -> Generators.tenant_fixture(%{port: port, migrations_ran: 0}) end)
 
       run_migrations? = Keyword.get(opts, :run_migrations, false)
@@ -300,8 +310,6 @@ defmodule TestTenantDb do
           if mode == :unboxed do
             repo_run(:unboxed, fn -> Realtime.Api.delete_tenant_by_external_id(tenant.external_id) end)
           end
-
-          checkin.()
         end)
 
         if run_migrations? do

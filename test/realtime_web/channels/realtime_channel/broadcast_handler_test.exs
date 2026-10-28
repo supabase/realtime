@@ -29,6 +29,13 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
   @payload %{"event" => "test", "payload" => %{"a" => "b"}}
 
+  # BroadcastHandler.handle/3 returns {channel_result, outcome}. Most tests here are about the
+  # channel result, so they go through this. The "outcome" tests call the handler directly.
+  defp handle(payload, db_conn, socket) do
+    {result, _outcome} = BroadcastHandler.handle(payload, db_conn, socket)
+    result
+  end
+
   describe "handle/3" do
     test "with write true policy, user is able to send message",
          %{topic: topic, tenant: tenant, db_conn: db_conn, serializer: serializer} do
@@ -36,7 +43,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:reply, :ok, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+          {:reply, :ok, socket} = handle(@payload, db_conn, socket)
           socket
       end
 
@@ -58,7 +65,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:reply, {:error, %{error: :unauthorized}}, socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+          {:reply, {:error, %{error: :unauthorized}}, socket} = handle(%{}, db_conn, socket)
           socket
       end
 
@@ -75,7 +82,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:reply, :ok, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+          {:reply, :ok, socket} = handle(@payload, db_conn, socket)
           socket
       end
 
@@ -102,7 +109,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:reply, :ok, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+          {:reply, :ok, socket} = handle(@payload, db_conn, socket)
           socket
       end
 
@@ -123,7 +130,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:reply, {:error, %{error: :unauthorized}}, socket} = BroadcastHandler.handle(%{"a" => "b"}, db_conn, socket)
+          {:reply, {:error, %{error: :unauthorized}}, socket} = handle(%{"a" => "b"}, db_conn, socket)
           socket
       end
 
@@ -141,7 +148,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:reply, :ok, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+          {:reply, :ok, socket} = handle(@payload, db_conn, socket)
           socket
       end
 
@@ -163,7 +170,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       for _ <- 1..100, reduce: socket do
         socket ->
           {:reply, {:error, %{error: :rls_policy_error}}, socket} =
-            BroadcastHandler.handle(%{"a" => "b"}, db_conn, socket)
+            handle(%{"a" => "b"}, db_conn, socket)
 
           socket
       end
@@ -176,7 +183,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:reply, {:error, %{error: :unauthorized}}, socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+          {:reply, {:error, %{error: :unauthorized}}, socket} = handle(%{}, db_conn, socket)
           socket
       end
 
@@ -201,7 +208,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       socket =
         for _ <- 1..100, reduce: socket do
           socket ->
-            {:reply, :ok, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+            {:reply, :ok, socket} = handle(@payload, db_conn, socket)
             socket
         end
 
@@ -227,7 +234,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:reply, {:error, %{error: :unauthorized}}, socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+          {:reply, {:error, %{error: :unauthorized}}, socket} = handle(%{}, db_conn, socket)
           socket
       end
 
@@ -243,7 +250,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:noreply, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+          {:noreply, socket} = handle(@payload, db_conn, socket)
           socket
       end
 
@@ -262,7 +269,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:reply, :ok, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+          {:reply, :ok, socket} = handle(@payload, db_conn, socket)
           socket
       end
 
@@ -284,7 +291,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:reply, :ok, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+          {:reply, :ok, socket} = handle(@payload, db_conn, socket)
           socket
       end
 
@@ -307,7 +314,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       json_encoded_user_broadcast_payload = Jason.encode!(user_broadcast_payload)
 
       {:reply, :ok, _socket} =
-        BroadcastHandler.handle({"event123", :json, json_encoded_user_broadcast_payload, %{}}, db_conn, socket)
+        handle({"event123", :json, json_encoded_user_broadcast_payload, %{}}, db_conn, socket)
 
       topic = "realtime:#{topic}"
       assert_receive {:socket_push, code, data}
@@ -348,7 +355,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       user_broadcast_payload = <<123, 456, 789>>
 
       {:reply, :ok, _socket} =
-        BroadcastHandler.handle({"event123", :binary, user_broadcast_payload, %{}}, db_conn, socket)
+        handle({"event123", :binary, user_broadcast_payload, %{}}, db_conn, socket)
 
       topic = "realtime:#{topic}"
 
@@ -385,7 +392,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       log =
         capture_log(fn ->
           {:reply, {:error, %{error: :increase_connection_pool}}, _socket} =
-            BroadcastHandler.handle(%{}, db_conn, socket)
+            handle(%{}, db_conn, socket)
         end)
 
       refute log =~ "UnableToSetPolicies"
@@ -397,7 +404,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       log =
         capture_log(fn ->
-          {:reply, {:error, %{error: :rls_policy_error}}, _socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+          {:reply, {:error, %{error: :rls_policy_error}}, _socket} = handle(%{}, db_conn, socket)
 
           {:ok, %{avg: avg}} = RateCounterHelper.tick!(Tenants.events_per_second_rate(tenant))
           assert avg == 0.0
@@ -418,7 +425,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       log =
         capture_log(fn ->
-          {:reply, {:error, %{error: :query_canceled}}, _socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+          {:reply, {:error, %{error: :query_canceled}}, _socket} = handle(%{}, db_conn, socket)
         end)
 
       assert log =~ "QueryCanceled"
@@ -432,7 +439,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       log =
         capture_log(fn ->
-          {:reply, {:error, %{error: :missing_partition}}, _socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+          {:reply, {:error, %{error: :missing_partition}}, _socket} = handle(%{}, db_conn, socket)
         end)
 
       assert log =~ "MissingPartition"
@@ -447,7 +454,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       log =
         capture_log(fn ->
           {:reply, {:error, %{error: :unable_to_connect_to_project}}, _socket} =
-            BroadcastHandler.handle(%{}, db_conn, socket)
+            handle(%{}, db_conn, socket)
         end)
 
       assert log =~ "UnableToConnectToProject"
@@ -461,7 +468,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       log =
         capture_log(fn ->
-          {:reply, {:error, %{error: :unable_to_set_policies}}, _socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+          {:reply, {:error, %{error: :unable_to_set_policies}}, _socket} = handle(%{}, db_conn, socket)
         end)
 
       assert log =~ "UnableToSetPolicies"
@@ -478,7 +485,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           ack_broadcast: false
         )
 
-      assert {:noreply, _socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+      assert {:noreply, _socket} = handle(%{}, db_conn, socket)
 
       refute_receive _, 100
     end
@@ -490,7 +497,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       log =
         capture_log(fn ->
-          assert {:noreply, _socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+          assert {:noreply, _socket} = handle(%{}, db_conn, socket)
         end)
 
       assert log =~ "UnableToSetPolicies"
@@ -504,7 +511,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         )
 
       assert {:noreply, _} =
-               BroadcastHandler.handle(
+               handle(
                  %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 1)},
                  db_conn,
                  socket
@@ -517,7 +524,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       socket = socket_fixture(tenant, topic, ack_broadcast: false, private?: false)
 
       assert {:noreply, _} =
-               BroadcastHandler.handle(
+               handle(
                  %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 1)},
                  db_conn,
                  socket
@@ -538,7 +545,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         )
 
       assert {:reply, {:error, %{error: :payload_size_exceeded}}, _} =
-               BroadcastHandler.handle(
+               handle(
                  %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 1)},
                  db_conn,
                  socket
@@ -555,7 +562,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       socket = socket_fixture(tenant, topic, ack_broadcast: true, private?: false)
 
       assert {:reply, {:error, %{error: :payload_size_exceeded}}, _} =
-               BroadcastHandler.handle(
+               handle(
                  %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 1)},
                  db_conn,
                  socket
@@ -575,7 +582,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       for _ <- 1..3, reduce: socket do
         socket ->
           {:reply, {:error, %{error: :payload_size_exceeded}}, socket} =
-            BroadcastHandler.handle(payload, db_conn, socket)
+            handle(payload, db_conn, socket)
 
           socket
       end
@@ -596,7 +603,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       for _ <- 1..3, reduce: socket do
         socket ->
           {:reply, {:error, %{error: :payload_size_exceeded}}, socket} =
-            BroadcastHandler.handle(payload, db_conn, socket)
+            handle(payload, db_conn, socket)
 
           socket
       end
@@ -620,9 +627,116 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..3, reduce: socket do
         socket ->
-          {:noreply, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+          {:noreply, socket} = handle(@payload, db_conn, socket)
           socket
       end
+    end
+  end
+
+  # handle/3 and maybe_reply_error/2 return {channel_result, outcome}. The outcome is :success or
+  # {kind, reason}, and it is the same with or without ack.
+  describe "outcome" do
+    test "a permitted private broadcast is a success",
+         %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      for {ack, reply} <- [{true, {:reply, :ok}}, {false, :noreply}] do
+        socket =
+          socket_fixture(tenant, topic,
+            ack_broadcast: ack,
+            policies: %Policies{broadcast: %BroadcastPolicies{write: true}}
+          )
+
+        assert {result, :success} = BroadcastHandler.handle(@payload, db_conn, socket)
+        assert match_reply?(result, reply)
+      end
+    end
+
+    test "a public broadcast is a success", %{topic: topic, tenant: tenant} do
+      socket = socket_fixture(tenant, topic, private?: false)
+
+      assert {{:reply, :ok, _}, :success} = BroadcastHandler.handle(@payload, nil, socket)
+    end
+
+    test "a policy deny is rejected and the reply is unchanged",
+         %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      socket = socket_fixture(tenant, topic, policies: %Policies{broadcast: %BroadcastPolicies{write: false}})
+
+      assert {{:reply, {:error, %{error: :unauthorized}}, _}, {:rejected, :unauthorized}} =
+               BroadcastHandler.handle(@payload, db_conn, socket)
+    end
+
+    # The reason an outcome can't ride on the reply: without ack, the reply is a bare noreply.
+    test "a policy deny without ack is rejected even though the reply says nothing",
+         %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      socket =
+        socket_fixture(tenant, topic,
+          ack_broadcast: false,
+          policies: %Policies{broadcast: %BroadcastPolicies{write: false}}
+        )
+
+      assert {{:noreply, _}, {:rejected, :unauthorized}} = BroadcastHandler.handle(@payload, db_conn, socket)
+    end
+
+    test "an oversized payload is rejected, in private and public channels, with and without ack",
+         %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      payload = %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 1)}
+
+      for ack <- [true, false], private? <- [true, false] do
+        socket =
+          socket_fixture(tenant, topic,
+            ack_broadcast: ack,
+            private?: private?,
+            policies: %Policies{broadcast: %BroadcastPolicies{write: true}}
+          )
+
+        assert {_, {:rejected, :payload_size_exceeded}} =
+                 BroadcastHandler.handle(payload, if(private?, do: db_conn), socket)
+      end
+    end
+
+    test "a failing authorization query is an upstream failure",
+         %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      expect(Authorization, :get_write_authorizations, fn _, _, _, _ ->
+        {:error, :query_canceled, %Postgrex.Error{postgres: %{code: :query_canceled}}}
+      end)
+
+      socket = socket_fixture(tenant, topic)
+
+      capture_log(fn ->
+        assert {{:reply, {:error, %{error: :query_canceled}}, _}, {:upstream_failure, :query_canceled}} =
+                 BroadcastHandler.handle(%{}, db_conn, socket)
+      end)
+    end
+
+    test "an unexpected authorization error is an internal failure",
+         %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      expect(Authorization, :get_write_authorizations, fn _, _, _, _ -> {:error, :something_unexpected} end)
+
+      socket = socket_fixture(tenant, topic, ack_broadcast: false)
+
+      capture_log(fn ->
+        assert {{:noreply, _}, {:internal_failure, :unable_to_set_policies}} =
+                 BroadcastHandler.handle(%{}, db_conn, socket)
+      end)
+    end
+  end
+
+  describe "maybe_reply_error/2" do
+    test "returns the reply and the classified outcome", %{topic: topic, tenant: tenant} do
+      socket = socket_fixture(tenant, topic, ack_broadcast: true)
+
+      assert {{:reply, {:error, %{error: :unable_to_connect_to_project}}, ^socket},
+              {:upstream_failure, :unable_to_connect_to_project}} =
+               BroadcastHandler.maybe_reply_error(socket, :unable_to_connect_to_project)
+    end
+
+    test "classifies the same way without ack", %{topic: topic, tenant: tenant} do
+      socket = socket_fixture(tenant, topic, ack_broadcast: false)
+
+      assert {{:noreply, ^socket}, {:upstream_failure, :unable_to_connect_to_project}} =
+               BroadcastHandler.maybe_reply_error(socket, :unable_to_connect_to_project)
+
+      assert {{:noreply, ^socket}, {:internal_failure, :unable_to_handle_broadcast}} =
+               BroadcastHandler.maybe_reply_error(socket, :unable_to_handle_broadcast)
     end
   end
 
@@ -649,7 +763,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           }
         )
 
-      assert {:reply, {:ok, %{id: id}}, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+      assert {:reply, {:ok, %{id: id}}, _socket} = handle(@payload, db_conn, socket)
       expected_payload = @payload["payload"]
 
       assert {:ok,
@@ -679,7 +793,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           }
         )
 
-      assert {:noreply, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+      assert {:noreply, _socket} = handle(@payload, db_conn, socket)
 
       assert_eventually(
         {:ok, [%Message{topic: ^topic, event: "test", skip_broadcast: true}]} =
@@ -702,7 +816,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       v2_payload = {"event123", :json, Jason.encode!(%{"a" => "b"}), %{}}
 
-      assert {:reply, {:ok, %{id: id}}, _socket} = BroadcastHandler.handle(v2_payload, db_conn, socket)
+      assert {:reply, {:ok, %{id: id}}, _socket} = handle(v2_payload, db_conn, socket)
 
       assert {:ok,
               [
@@ -736,7 +850,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       log =
         capture_log(fn ->
-          assert {:reply, :ok, _socket} = BroadcastHandler.handle(v2_payload, db_conn, socket)
+          assert {:reply, :ok, _socket} = handle(v2_payload, db_conn, socket)
         end)
 
       case serializer do
@@ -765,7 +879,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       binary = <<0, 1, 2, 3>>
 
       assert {:reply, {:ok, %{id: id}}, _socket} =
-               BroadcastHandler.handle({"event123", :binary, binary, %{}}, db_conn, socket)
+               handle({"event123", :binary, binary, %{}}, db_conn, socket)
 
       assert {:ok,
               [
@@ -796,7 +910,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       log =
         capture_log(fn ->
-          assert {:reply, :ok, _socket} = BroadcastHandler.handle(%{"no" => "event or payload"}, db_conn, socket)
+          assert {:reply, :ok, _socket} = handle(%{"no" => "event or payload"}, db_conn, socket)
         end)
 
       assert log =~ "UnableToPersistMessage"
@@ -820,7 +934,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       log =
         capture_log(fn ->
-          assert {:reply, :ok, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+          assert {:reply, :ok, _socket} = handle(@payload, db_conn, socket)
         end)
 
       assert_receive {:socket_push, :text, _data}
@@ -840,7 +954,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           }
         )
 
-      assert {:reply, :ok, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+      assert {:reply, :ok, _socket} = handle(@payload, db_conn, socket)
 
       assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
@@ -852,7 +966,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     } do
       socket = socket_fixture(tenant, topic, policies: %Policies{broadcast: %BroadcastPolicies{write: false}})
 
-      assert {:reply, {:error, %{error: :unauthorized}}, _socket} = BroadcastHandler.handle(@payload, db_conn, socket)
+      assert {:reply, {:error, %{error: :unauthorized}}, _socket} = handle(@payload, db_conn, socket)
 
       assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
@@ -864,7 +978,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     } do
       socket = socket_fixture(tenant, topic, private?: false, policies: nil)
 
-      assert {:reply, :ok, _socket} = BroadcastHandler.handle(@payload, nil, socket)
+      assert {:reply, :ok, _socket} = handle(@payload, nil, socket)
 
       assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
@@ -875,9 +989,13 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     } do
       socket = socket_fixture(tenant, topic, private?: false, policies: nil)
 
-      assert {:reply, :ok, _socket} = BroadcastHandler.handle(@payload, nil, socket)
+      assert {:reply, :ok, _socket} = handle(@payload, nil, socket)
     end
   end
+
+  defp match_reply?({:reply, :ok, _}, {:reply, :ok}), do: true
+  defp match_reply?({:noreply, _}, :noreply), do: true
+  defp match_reply?(_result, _expected), do: false
 
   defp initiate_tenant(context) do
     tenant = TestTenantDb.checkout_tenant(run_migrations: true)

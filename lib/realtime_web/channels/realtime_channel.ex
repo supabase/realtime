@@ -32,7 +32,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias RealtimeWeb.RealtimeChannel.BroadcastHandler
   alias RealtimeWeb.RealtimeChannel.MessageDispatcher
   alias RealtimeWeb.RealtimeChannel.PresenceHandler
-  alias RealtimeWeb.RealtimeChannel.Tracker
+  alias RealtimeWeb.RequestMetrics
 
   # A JWT `exp` can be arbitrarily far in the future and `Process.send_after/3` rejects delays past
   # Erlang's maximum supported time value, so the re-confirmation timer is capped at this interval.
@@ -47,11 +47,6 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @impl true
   def join("realtime:", _params, socket) do
-    # `terminate/2` untracks every channel process, including one whose join was rejected, so
-    # this clause has to track too. Otherwise the socket's other channels are untracked in its
-    # place and the Tracker reaps a transport that still has channels open.
-    Tracker.track(socket.transport_pid)
-
     socket
     |> log_error("TopicNameRequired", "You must provide a topic name")
     |> join_error()
@@ -67,7 +62,6 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     Process.flag(:max_heap_size, max_heap_size())
     Process.flag(:fullsweep_after, @fullsweep_after)
-    Tracker.track(socket.transport_pid)
     Logger.metadata(external_id: tenant_id, project: tenant_id)
     Logger.put_process_level(self(), log_level)
 
@@ -162,9 +156,13 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       socket = assign(socket, PresenceHandler.join_rate_limits(tenant))
 
-      # Start presence and add user if presence is enabled
-      presence_enabled? = socket.assigns.presence_enabled?
-      if presence_enabled?, do: send(self(), :sync_presence)
+      socket =
+        if socket.assigns.presence_enabled? do
+          send(self(), :sync_presence)
+          PresenceHandler.stamp_join_started_at(socket)
+        else
+          socket
+        end
 
       with :ok <- await_muster_join(muster_join_task, socket),
            :ok <- start_postgres_subscribe(socket, join, tenant, pg_change_params) do
@@ -433,7 +431,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   def handle_info(:sync_presence, %{assigns: %{presence_enabled?: true}} = socket) do
     case PresenceHandler.sync(socket) do
-      :ok ->
+      {:ok, socket} ->
         {:noreply, socket}
 
       {:error, :rate_limit_exceeded} ->
@@ -472,37 +470,39 @@ defmodule RealtimeWeb.RealtimeChannel do
   def handle_in("broadcast", payload, %{assigns: %{private?: true}} = socket) do
     %{tenant: tenant_id} = socket.assigns
 
-    with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id) do
-      BroadcastHandler.handle(payload, db_conn, socket)
-    else
-      {:error, :rpc_error, error} ->
-        log_error(socket, "UnableToHandleBroadcast", error)
-        BroadcastHandler.maybe_reply_error(socket, :unable_to_handle_broadcast)
+    RequestMetrics.track(:broadcast, :ws, tenant_id, fn ->
+      with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id) do
+        BroadcastHandler.handle(payload, db_conn, socket)
+      else
+        {:error, :rpc_error, error} ->
+          log_error(socket, "UnableToHandleBroadcast", error)
+          BroadcastHandler.maybe_reply_error(socket, :unable_to_handle_broadcast)
 
-      {:error, :tenant_database_unavailable} ->
-        log_error(socket, "UnableToConnectToProject", :tenant_database_unavailable)
-        BroadcastHandler.maybe_reply_error(socket, :unable_to_connect_to_project)
+        {:error, :tenant_database_unavailable} ->
+          log_error(socket, "UnableToConnectToProject", :tenant_database_unavailable)
+          BroadcastHandler.maybe_reply_error(socket, :unable_to_connect_to_project)
 
-      {:error, :tenant_db_too_many_connections} ->
-        log_error(socket, "DatabaseLackOfConnections", :tenant_db_too_many_connections)
-        BroadcastHandler.maybe_reply_error(socket, :database_lack_of_connections)
+        {:error, :tenant_db_too_many_connections} ->
+          log_error(socket, "DatabaseLackOfConnections", :tenant_db_too_many_connections)
+          BroadcastHandler.maybe_reply_error(socket, :database_lack_of_connections)
 
-      {:error, :connect_rate_limit_reached} ->
-        log_error(socket, "DatabaseConnectionRateLimitReached", :connect_rate_limit_reached)
-        BroadcastHandler.maybe_reply_error(socket, :database_connection_rate_limit_reached)
+        {:error, :connect_rate_limit_reached} ->
+          log_error(socket, "DatabaseConnectionRateLimitReached", :connect_rate_limit_reached)
+          BroadcastHandler.maybe_reply_error(socket, :database_connection_rate_limit_reached)
 
-      {:error, reason} when reason in [:initializing, :tenant_database_connection_initializing] ->
-        log_error(socket, "InitializingProjectConnection", reason)
-        BroadcastHandler.maybe_reply_error(socket, :initializing_project_connection)
+        {:error, reason} when reason in [:initializing, :tenant_database_connection_initializing] ->
+          log_error(socket, "InitializingProjectConnection", reason)
+          BroadcastHandler.maybe_reply_error(socket, :initializing_project_connection)
 
-      {:error, error} ->
-        log_error(socket, "UnableToHandleBroadcast", error)
-        BroadcastHandler.maybe_reply_error(socket, :unable_to_handle_broadcast)
-    end
+        {:error, error} ->
+          log_error(socket, "UnableToHandleBroadcast", error)
+          BroadcastHandler.maybe_reply_error(socket, :unable_to_handle_broadcast)
+      end
+    end)
   end
 
   def handle_in("broadcast", payload, %{assigns: %{private?: false}} = socket) do
-    BroadcastHandler.handle(payload, socket)
+    RequestMetrics.track(:broadcast, :ws, socket.assigns.tenant, fn -> BroadcastHandler.handle(payload, socket) end)
   end
 
   def handle_in("presence", payload, socket) do
@@ -685,10 +685,9 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   @impl true
-  def terminate(reason, %{transport_pid: transport_pid}) do
+  def terminate(reason, _socket) do
     Logger.debug("Channel terminated with reason: #{inspect(reason)}")
     :telemetry.execute([:prom_ex, :plugin, :realtime, :disconnected], %{})
-    Tracker.untrack(transport_pid)
     :ok
   end
 
@@ -720,21 +719,17 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  def limit_channels(tenant, %{transport_pid: pid} = socket) do
-    key = Tenants.channels_per_client_key(tenant)
-    count = Registry.count_match(Realtime.Registry, key, pid)
-
+  # channels_count is the number of channels the transport already holds, set by UserSocket
+  def limit_channels(tenant, %{assigns: %{channels_count: count}} = socket) do
     cond do
       count >= tenant.max_channels_per_client ->
         {:error, :too_many_channels}
 
       count + 1 == tenant.max_channels_per_client ->
-        Registry.register(Realtime.Registry, key, pid)
         log_error(socket, "ChannelRateLimitReached", "Too many channels")
         :ok
 
       true ->
-        Registry.register(Realtime.Registry, key, pid)
         :ok
     end
   end
