@@ -6,6 +6,7 @@ updates:
     directories:
       - "/"        # root app
       - "/forum"   # in-repo path dep
+      - "/sql_logex"   # in-repo path dep
     schedule:
       interval: "weekly"
       day: "monday"

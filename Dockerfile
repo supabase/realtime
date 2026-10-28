@@ -71,6 +71,7 @@ RUN mix local.hex --force && \
 # install mix dependencies
 COPY mix.exs mix.lock ./
 COPY forum forum
+COPY sql_logex sql_logex
 RUN mix deps.get --only $MIX_ENV
 RUN mkdir config
 
