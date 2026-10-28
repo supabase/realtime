@@ -17,8 +17,8 @@ defmodule Rollcall.Tracker do
   can untrack, so it would never stop. A crashed tracker does not restart. The
   next `track` for its scope starts a clean tracker.
 
-  `call/4` finds the tracker for a scope. It starts the tracker only when
-  `start` is true.
+  `track/5` finds the tracker for a scope, and starts one when none runs.
+  `untrack/4` and `get_state/1` do not start a tracker.
 
   ## Process monitoring
 
@@ -83,37 +83,69 @@ defmodule Rollcall.Tracker do
 
   @max_retries 3
 
+  # The exit reasons of a call when no tracker runs, or when the tracker stops
+  # before it replies.
+  @gone [:noproc, :normal, :shutdown]
+
   @doc """
-  Sends `msg` to the tracker for `scope` and returns the reply.
+  Tracks an entry in the tracker for `scope`, and returns the ref of the entry.
 
-  The tracker can be not running, or can stop before it replies. A tracker can
-  stop between the lookup and the call, for example when its grace period ends.
-  Then the result depends on `start`:
+  The function starts a tracker when none runs. A tracker can also stop between
+  the lookup and the call, for example when its grace period ends. A tracker
+  that stopped handled no part of the message, so the function starts a new
+  tracker and sends the message again.
 
-  * `start` is true: the function starts a tracker and sends `msg` again. A
-    tracker that stopped handled no part of the message, so the new tracker can
-    handle it. The function sends `msg` again at most `retries` times. The
-    limit stops an endless loop when a tracker exits without a reply. After the
-    limit, the function exits with the reason of the last failure.
-  * `start` is false: the function returns `:ok`. A tracker that starts only to
-    find nothing to remove would stop again after the grace period, so an
-    `untrack` does not start one.
+  The function sends the message again at most #{@max_retries} times. The limit
+  stops an endless loop when a tracker exits without a reply. After the limit,
+  the function exits with the reason of the last failure.
   """
-  def call(scope, msg, start \\ false, retries \\ @max_retries) do
-    GenServer.call(via(scope), msg)
+  @spec track(Rollcall.scope(), pid(), Rollcall.partition(), Rollcall.key(), Rollcall.meta()) :: {:ok, Rollcall.ref()}
+  def track(scope, pid, partition, key, meta) do
+    track_with_retries(scope, {:track, pid, partition, key, meta}, @max_retries)
+  end
+
+  defp track_with_retries(scope, message, retries) do
+    GenServer.call(via(scope), message)
   catch
-    :exit, {reason, _} = caught when reason in [:noproc, :normal, :shutdown] ->
+    :exit, {reason, _} = caught when reason in @gone ->
       if retries == 0, do: exit(caught)
 
-      if start do
-        start(scope)
-        call(scope, msg, start, retries - 1)
-      else
-        :ok
-      end
+      start(scope)
+      track_with_retries(scope, message, retries - 1)
+  end
+
+  @doc """
+  Removes the entry of `pid` for `key` in `partition` from the tracker for
+  `scope`.
+
+  Returns `:ok`. The function also returns `:ok` when no tracker runs, or when
+  the tracker stops before it replies. A tracker that stops takes its entries
+  with it, so a second attempt would find nothing to remove.
+
+  The function does not start a tracker. A tracker that starts only to find
+  nothing to remove would stop again after the grace period.
+  """
+  @spec untrack(Rollcall.scope(), pid(), Rollcall.partition(), Rollcall.key()) :: :ok
+  def untrack(scope, pid, partition, key) do
+    call_if_running(scope, {:untrack, pid, partition, key}, :ok)
+  end
+
+  # Calls the tracker for `scope`. Returns `default` when no tracker runs, or
+  # when the tracker stops before it replies.
+  defp call_if_running(scope, message, default) do
+    GenServer.call(via(scope), message)
+  catch
+    :exit, {reason, _} when reason in @gone -> default
   end
 
   @inspectable_keys [:incarnation, :scope, :version, :local]
+
+  @type inspected_state :: %{
+          scope: Rollcall.scope(),
+          version: non_neg_integer(),
+          incarnation: integer(),
+          local: Local.t()
+        }
 
   @doc """
   Returns the state of the tracker for `scope`, or `nil` when no tracker runs.
@@ -126,11 +158,9 @@ defmodule Rollcall.Tracker do
 
   The function does not start a tracker. Use it in tests and for debugging.
   """
+  @spec get_state(Rollcall.scope()) :: inspected_state() | nil
   def get_state(scope) do
-    case call(scope, :get_state) do
-      :ok -> nil
-      {:ok, state} -> Map.take(state, @inspectable_keys)
-    end
+    call_if_running(scope, :get_state, nil)
   end
 
   @doc """
