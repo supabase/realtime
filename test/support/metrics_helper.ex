@@ -4,7 +4,8 @@ defmodule MetricsHelper do
   def search(prometheus_metrics, metric_name, expected_tags \\ nil) do
     # Escape the metric_name to handle any special regex characters
     escaped_name = Regex.escape(metric_name)
-    regex = ~r/^(?<name>#{escaped_name})\{(?<tags>[^}]+)\}\s+(?<value>\d+(?:\.\d+)?)$/
+    # Tags are optional: a metric without any is exported as `name value`, no braces.
+    regex = ~r/^(?<name>#{escaped_name})(?:\{(?<tags>[^}]+)\})?\s+(?<value>\d+(?:\.\d+)?)$/
 
     prometheus_metrics
     |> IO.iodata_to_binary()
