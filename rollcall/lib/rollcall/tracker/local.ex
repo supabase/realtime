@@ -96,6 +96,16 @@ defmodule Rollcall.Tracker.Local do
       %{changes | joins: [entry | changes.joins]}
     end
 
+    @spec join_refs(t()) :: [Rollcall.Tracker.Local.ref()]
+    def join_refs(%__MODULE__{joins: joins}) do
+      Enum.map(joins, & &1.ref)
+    end
+
+    @spec leave_refs(t()) :: [Rollcall.Tracker.Local.ref()]
+    def leave_refs(%__MODULE__{leaves: leaves}) do
+      Enum.map(leaves, & &1.ref)
+    end
+
     @doc "Adds `entry` to the leaves."
     @spec leave(t(), Entry.t()) :: t()
     def leave(changes, entry) do

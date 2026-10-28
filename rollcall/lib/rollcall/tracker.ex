@@ -33,6 +33,7 @@ defmodule Rollcall.Tracker do
   use GenServer, restart: :temporary
   use Snabbkaffex, only: :trace
   alias Rollcall.Tracker.Local
+  alias Rollcall.Tracker.Local.Changes
 
   @max_retries 3
 
@@ -164,6 +165,16 @@ defmodule Rollcall.Tracker do
       |> cancel_empty_timer()
       |> watch_pid(pid)
 
+    tp(:rollcall_tracker_track, %{
+      scope: state.scope,
+      pid: pid,
+      partition: partition,
+      key: key,
+      version: state.version,
+      joins: Changes.join_refs(changes),
+      leaves: Changes.leave_refs(changes)
+    })
+
     {:reply, {:ok, ref}, state}
   end
 
@@ -176,6 +187,16 @@ defmodule Rollcall.Tracker do
       |> bump_version(changes)
       |> maybe_unwatch(pid)
       |> arm_empty_timer()
+
+    tp(:rollcall_tracker_untrack, %{
+      scope: state.scope,
+      pid: pid,
+      partition: partition,
+      key: key,
+      version: state.version,
+      joins: Changes.join_refs(changes),
+      leaves: Changes.leave_refs(changes)
+    })
 
     {:reply, :ok, state}
   end
