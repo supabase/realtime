@@ -54,3 +54,19 @@ jobs:
         run: mix compile --force --warnings-as-errors
       - name: Run format check
         run: mix format --check-formatted
+      - name: Credo checks
+        run: mix credo
+      - name: Retrieve PLT Cache
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        id: plt-cache
+        with:
+          path: rollcall/priv/plts
+          key: ${{ runner.os }}-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-rollcall-plts-${{ hashFiles('rollcall/mix.exs', 'rollcall/mix.lock') }}
+      - name: Create PLTs
+        if: steps.plt-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p priv/plts
+          MIX_ENV=dev mix dialyzer.build
+      - name: Run dialyzer
+        # dialyxir is a dev dependency, so this step does not use the job MIX_ENV (test).
+        run: MIX_ENV=dev mix dialyzer
