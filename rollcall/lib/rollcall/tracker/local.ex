@@ -18,11 +18,7 @@ defmodule Rollcall.Tracker.Local do
   not grow with the number of processes that tracked an entry in the past.
   """
 
-  @type partition :: String.t()
-  @type key :: String.t()
-  @type meta :: map()
-  @type ref :: String.t() | reference()
-  @type entry_id :: {pid(), partition(), key()}
+  @type entry_id :: {pid(), Rollcall.partition(), Rollcall.key()}
 
   defmodule Entry do
     @moduledoc """
@@ -37,20 +33,20 @@ defmodule Rollcall.Tracker.Local do
     defstruct [:partition, :pid, :key, :ref, :meta]
 
     @type t :: %__MODULE__{
-            partition: Local.partition(),
+            partition: Rollcall.partition(),
             pid: pid(),
-            key: Local.key(),
-            ref: Local.ref(),
-            meta: Local.meta()
+            key: Rollcall.key(),
+            ref: Rollcall.ref(),
+            meta: Rollcall.meta()
           }
 
     @doc "Returns an entry."
     @spec new(
             pid(),
-            Local.partition(),
-            Local.key(),
-            Local.meta(),
-            Local.ref()
+            Rollcall.partition(),
+            Rollcall.key(),
+            Rollcall.meta(),
+            Rollcall.ref()
           ) :: t()
     def new(pid, partition, key, meta, ref) do
       %__MODULE__{
@@ -69,7 +65,7 @@ defmodule Rollcall.Tracker.Local do
     end
 
     @doc "Returns the id of the entry of `pid` for `key` in `partition`."
-    @spec id(pid(), Local.partition(), Local.key()) ::
+    @spec id(pid(), Rollcall.partition(), Rollcall.key()) ::
             Local.entry_id()
     def id(pid, partition, key) do
       {pid, partition, key}
@@ -84,8 +80,6 @@ defmodule Rollcall.Tracker.Local do
     that the change removed. A replace has one leave and one join, so a
     subscriber sees the old entry leave and the new entry join in one diff.
     """
-
-    alias Rollcall.Tracker.Local
 
     defstruct joins: [], leaves: []
 
@@ -110,12 +104,12 @@ defmodule Rollcall.Tracker.Local do
       %{changes | joins: [entry | changes.joins]}
     end
 
-    @spec join_refs(t()) :: [Local.ref()]
+    @spec join_refs(t()) :: [Rollcall.ref()]
     def join_refs(%__MODULE__{joins: joins}) do
       Enum.map(joins, & &1.ref)
     end
 
-    @spec leave_refs(t()) :: [Local.ref()]
+    @spec leave_refs(t()) :: [Rollcall.ref()]
     def leave_refs(%__MODULE__{leaves: leaves}) do
       Enum.map(leaves, & &1.ref)
     end
@@ -131,7 +125,7 @@ defmodule Rollcall.Tracker.Local do
 
   @opaque t :: %__MODULE__{
             entries_by_id: %{entry_id() => Entry.t()},
-            partitions: %{partition() => MapSet.t(entry_id())},
+            partitions: %{Rollcall.partition() => MapSet.t(entry_id())},
             pids: %{pid() => MapSet.t(entry_id())}
           }
 
@@ -152,7 +146,7 @@ defmodule Rollcall.Tracker.Local do
 
   The order is not defined.
   """
-  @spec entries(t(), partition()) :: [Entry.t()]
+  @spec entries(t(), Rollcall.partition()) :: [Entry.t()]
   def entries(local, partition) do
     local.partitions
     |> Map.get(partition, MapSet.new())
@@ -166,7 +160,8 @@ defmodule Rollcall.Tracker.Local do
   replaces it. The old entry is a leave and the new entry is a join. The new
   entry has `ref` even when the meta is the same.
   """
-  @spec track(t(), pid(), partition(), key(), meta(), ref()) :: {Changes.t(), t()}
+  @spec track(t(), pid(), Rollcall.partition(), Rollcall.key(), Rollcall.meta(), Rollcall.ref()) ::
+          {Changes.t(), t()}
   def track(local, pid, partition, key, meta, ref) do
     entry = Entry.new(pid, partition, key, meta, ref)
 
@@ -187,7 +182,7 @@ defmodule Rollcall.Tracker.Local do
   The removed entry is a leave. When no entry matches, the changes are empty
   and the set does not change.
   """
-  @spec untrack(t(), pid(), partition(), key()) :: {Changes.t(), t()}
+  @spec untrack(t(), pid(), Rollcall.partition(), Rollcall.key()) :: {Changes.t(), t()}
   def untrack(local, pid, partition, key) do
     remove_entry({Changes.new(), local}, Entry.id(pid, partition, key))
   end

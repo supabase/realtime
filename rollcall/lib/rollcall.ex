@@ -28,12 +28,28 @@ defmodule Rollcall do
 
   alias Rollcall.Tracker
 
+  @typedoc "The name of a scope. In Realtime, the external id of a tenant."
+  @type scope :: String.t()
+
+  @typedoc "The name of a partition inside a scope. In Realtime, a channel topic."
+  @type partition :: String.t()
+
+  @typedoc "The key of an entry. A process has one entry for each partition and key."
+  @type key :: String.t()
+
+  @typedoc "The payload of an entry that belongs to the key."
+  @type meta :: map()
+
+  @typedoc "The identity of an entry."
+  @type ref :: String.t() | reference()
+
   @doc """
   Returns the names of the scopes that have a running tracker on this node.
 
   A tracker in its grace period is running, so a scope with no entry can be in
   the list for a short time.
   """
+  @spec scopes() :: [scope()]
   def scopes do
     Tracker.scopes()
   end
@@ -58,8 +74,9 @@ defmodule Rollcall do
 
   Starts the tracker for `scope` when no tracker runs.
   """
+  @spec track(pid(), scope(), partition(), key(), meta()) :: {:ok, ref()}
   def track(pid, scope, partition, key, meta) when is_pid(pid) do
-    Tracker.call(scope, {:track, pid, partition, key, meta}, true)
+    Tracker.track(scope, pid, partition, key, meta)
   end
 
   @doc """
@@ -72,7 +89,8 @@ defmodule Rollcall do
   Does not start a tracker. A tracker that starts only to find nothing to
   remove would stop again after the grace period.
   """
+  @spec untrack(pid(), scope(), partition(), key()) :: :ok
   def untrack(pid, scope, partition, key) when is_pid(pid) do
-    Tracker.call(scope, {:untrack, pid, partition, key})
+    Tracker.untrack(scope, pid, partition, key)
   end
 end
