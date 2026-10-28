@@ -51,8 +51,10 @@ defmodule Rollcall do
   entry from an update would need two calls.
 
   The call replaces the entry also when the meta is the same. The caller knows
-  which part of a meta changes on each call, for example a timestamp. A caller
-  that wants to skip an unchanged meta compares it before the call.
+  which part of a meta changes on each call, for example a timestamp, and the
+  tracker does not. A skip would also make the return value depend on the
+  earlier entry, because `track` would have to return the ref of that entry. A
+  caller that wants to skip an unchanged meta compares it before the call.
 
   Starts the tracker for `scope` when no tracker runs.
   """

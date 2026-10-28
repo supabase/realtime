@@ -28,7 +28,7 @@ defmodule Rollcall.Tracker do
   In link mode, the tracker also links to the process, so an entry never
   outlives its tracker. In monitor mode, a tracker crash leaves the process
   running and the entries of the node are lost until each process tracks again.
-  Phoenix.Presence uses a link, so the crash of a shard stops every channel in
+  `Phoenix.Presence` uses a link, so the crash of a shard stops every channel in
   the shard. Monitor mode lets a new tracker run next to the old one without
   that risk.
 
@@ -277,7 +277,7 @@ defmodule Rollcall.Tracker do
       state
       |> apply_changes(local, changes)
       |> maybe_unwatch(pid)
-      |> arm_empty_timer()
+      |> start_empty_timer()
 
     tp(
       :rollcall_tracker_untrack,
@@ -310,7 +310,7 @@ defmodule Rollcall.Tracker do
       state
       |> apply_changes(local, changes)
       |> remove_monitor(pid)
-      |> arm_empty_timer()
+      |> start_empty_timer()
 
     tp(:rollcall_tracker_pid_down, %{scope: state.scope, pid: pid})
 
@@ -327,7 +327,7 @@ defmodule Rollcall.Tracker do
     |> bump_version(changes)
   end
 
-  defp arm_empty_timer(%{empty_timer: nil} = state) do
+  defp start_empty_timer(%{empty_timer: nil} = state) do
     if Local.empty?(state.local) do
       tp(:rollcall_tracker_empty, %{scope: state.scope})
 
@@ -337,7 +337,7 @@ defmodule Rollcall.Tracker do
     end
   end
 
-  defp arm_empty_timer(state), do: state
+  defp start_empty_timer(state), do: state
 
   defp cancel_empty_timer(%{empty_timer: nil} = state), do: state
 

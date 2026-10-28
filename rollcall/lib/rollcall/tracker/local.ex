@@ -31,23 +31,26 @@ defmodule Rollcall.Tracker.Local do
     The `ref` identifies the entry. The `key` and the `meta` are the payload.
     """
 
+    alias Rollcall.Tracker.Local
+
+    @enforce_keys [:partition, :pid, :key, :ref, :meta]
     defstruct [:partition, :pid, :key, :ref, :meta]
 
     @type t :: %__MODULE__{
-            partition: Rollcall.Tracker.Local.partition(),
+            partition: Local.partition(),
             pid: pid(),
-            key: Rollcall.Tracker.Local.key(),
-            ref: Rollcall.Tracker.Local.ref(),
-            meta: Rollcall.Tracker.Local.meta()
+            key: Local.key(),
+            ref: Local.ref(),
+            meta: Local.meta()
           }
 
     @doc "Returns an entry."
     @spec new(
             pid(),
-            Rollcall.Tracker.Local.partition(),
-            Rollcall.Tracker.Local.key(),
-            Rollcall.Tracker.Local.meta(),
-            Rollcall.Tracker.Local.ref()
+            Local.partition(),
+            Local.key(),
+            Local.meta(),
+            Local.ref()
           ) :: t()
     def new(pid, partition, key, meta, ref) do
       %__MODULE__{
@@ -60,14 +63,14 @@ defmodule Rollcall.Tracker.Local do
     end
 
     @doc "Returns the id of `entry`."
-    @spec id(t()) :: Rollcall.Tracker.Local.entry_id()
-    def id(entry) do
+    @spec id(t()) :: Local.entry_id()
+    def id(%__MODULE__{} = entry) do
       id(entry.pid, entry.partition, entry.key)
     end
 
     @doc "Returns the id of the entry of `pid` for `key` in `partition`."
-    @spec id(pid(), Rollcall.Tracker.Local.partition(), Rollcall.Tracker.Local.key()) ::
-            Rollcall.Tracker.Local.entry_id()
+    @spec id(pid(), Local.partition(), Local.key()) ::
+            Local.entry_id()
     def id(pid, partition, key) do
       {pid, partition, key}
     end
@@ -81,6 +84,8 @@ defmodule Rollcall.Tracker.Local do
     that the change removed. A replace has one leave and one join, so a
     subscriber sees the old entry leave and the new entry join in one diff.
     """
+
+    alias Rollcall.Tracker.Local
 
     defstruct joins: [], leaves: []
 
@@ -101,23 +106,23 @@ defmodule Rollcall.Tracker.Local do
 
     @doc "Adds `entry` to the joins."
     @spec join(t(), Entry.t()) :: t()
-    def join(changes, entry) do
+    def join(%__MODULE__{} = changes, %Entry{} = entry) do
       %{changes | joins: [entry | changes.joins]}
     end
 
-    @spec join_refs(t()) :: [Rollcall.Tracker.Local.ref()]
+    @spec join_refs(t()) :: [Local.ref()]
     def join_refs(%__MODULE__{joins: joins}) do
       Enum.map(joins, & &1.ref)
     end
 
-    @spec leave_refs(t()) :: [Rollcall.Tracker.Local.ref()]
+    @spec leave_refs(t()) :: [Local.ref()]
     def leave_refs(%__MODULE__{leaves: leaves}) do
       Enum.map(leaves, & &1.ref)
     end
 
     @doc "Adds `entry` to the leaves."
     @spec leave(t(), Entry.t()) :: t()
-    def leave(changes, entry) do
+    def leave(%__MODULE__{} = changes, %Entry{} = entry) do
       %{changes | leaves: [entry | changes.leaves]}
     end
   end
