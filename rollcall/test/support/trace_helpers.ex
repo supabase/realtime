@@ -31,6 +31,29 @@ defmodule Rollcall.TraceHelpers do
   end
 
   @doc """
+  Returns the reference of the empty timer of `tracker`.
+
+  Raises when the tracker has no empty timer.
+  """
+  def empty_timer(tracker) do
+    case :sys.get_state(tracker) do
+      %{empty_timer: nil} -> raise "the tracker has no empty timer"
+      %{empty_timer: ref} -> ref
+    end
+  end
+
+  @doc """
+  Sends the timeout message of the empty timer to `tracker`, as if the timer
+  expired.
+
+  A test that uses this function does not wait for the grace period, so the
+  test does not depend on timing.
+  """
+  def expire_grace(tracker) do
+    send(tracker, {:timeout, empty_timer(tracker), :empty_timeout})
+  end
+
+  @doc """
   Runs the block, then waits for a trace event that matches `pattern`.
 
   Returns the value of the block. Fails the test when no matching event
@@ -66,35 +89,6 @@ defmodule Rollcall.TraceHelpers do
     end
   end
 
-  @doc """
-  Fails the test when a trace event that matches `pattern` exists, or arrives
-  within `timeout` milliseconds.
-
-  The check includes the events that the trace holds already.
-  """
-  defmacro refute_event(pattern, timeout) do
-    pattern_text = Macro.to_string(pattern)
-    pins = pins(pattern)
-
-    quote do
-      require Snabbkaffex
-
-      case Snabbkaffex.block_until(unquote(pattern), unquote(timeout)) do
-        :timeout ->
-          :ok
-
-        {:ok, event} ->
-          ExUnit.Assertions.flunk(
-            Rollcall.TraceHelpers.unexpected_message(
-              unquote(pattern_text),
-              unquote(pins),
-              event
-            )
-          )
-      end
-    end
-  end
-
   @doc false
   def timeout_message(pattern_text, pins, timeout, block_value) do
     """
@@ -106,19 +100,6 @@ defmodule Rollcall.TraceHelpers do
     The block returned: #{inspect(block_value)}
 
     snabbkaffe writes the events that arrived to a dump file. The log shows the path.
-    """
-  end
-
-  @doc false
-  def unexpected_message(pattern_text, pins, event) do
-    """
-    A trace event matched, and the test expects none.
-
-    Pattern:
-        #{pattern_text}
-    #{format_pins(pins)}
-    Event:
-        #{inspect(event)}
     """
   end
 
