@@ -149,6 +149,51 @@ defmodule Realtime.Api do
     end
   end
 
+  @doc """
+  Updates a single tenant feature flag while preserving concurrent changes to other flags.
+  """
+  @spec update_tenant_feature_flag(binary(), binary(), {:set, boolean()} | :clear) ::
+          {:ok, Tenant.t()} | {:error, term()}
+  def update_tenant_feature_flag(tenant_id, flag_name, operation)
+      when is_binary(tenant_id) and is_binary(flag_name) do
+    if master_region?() do
+      Repo.transaction(fn ->
+        tenant =
+          Tenant
+          |> where([t], t.external_id == ^tenant_id)
+          |> lock("FOR UPDATE")
+          |> Repo.one()
+          |> case do
+            nil -> Repo.rollback(:not_found)
+            tenant -> Repo.preload(tenant, :extensions)
+          end
+
+        flags =
+          case operation do
+            {:set, enabled} when is_boolean(enabled) -> Map.put(tenant.feature_flags, flag_name, enabled)
+            :clear -> Map.delete(tenant.feature_flags, flag_name)
+          end
+
+        changeset = Tenant.changeset(tenant, %{feature_flags: flags})
+
+        case Repo.update(changeset) do
+          {:ok, tenant} -> {tenant, changeset}
+          {:error, changeset} -> Repo.rollback(changeset)
+        end
+      end)
+      |> case do
+        {:ok, {tenant, changeset}} ->
+          maybe_update_cache(tenant, changeset)
+          {:ok, tenant}
+
+        error ->
+          error
+      end
+    else
+      call(:update_tenant_feature_flag, [tenant_id, flag_name, operation], tenant_id: tenant_id)
+    end
+  end
+
   defp update_tenant(%Tenant{} = tenant, attrs) do
     changeset = Tenant.changeset(tenant, attrs)
     updated = Repo.update(changeset)

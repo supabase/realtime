@@ -741,6 +741,39 @@ defmodule Realtime.ApiTest do
       assert {:ok, %Tenant{external_id: ^external_id}} = Api.create_tenant(attrs)
     end
 
+    test "update_tenant_feature_flag dispatches set to master with tenant_id opt", %{master_node: master_node} do
+      tenant_id = "rpc_tenant_flag"
+      tenant = %Tenant{external_id: tenant_id, feature_flags: %{"rpc_flag" => false}}
+
+      Mimic.expect(GenRpc, :call, fn ^master_node, Api, :update_tenant_feature_flag, args, opts ->
+        assert args == [tenant_id, "rpc_flag", {:set, false}]
+        assert opts == [tenant_id: tenant_id]
+        {:ok, tenant}
+      end)
+
+      assert {:ok, ^tenant} = Api.update_tenant_feature_flag(tenant_id, "rpc_flag", {:set, false})
+    end
+
+    test "update_tenant_feature_flag dispatches clear to master with tenant_id opt", %{master_node: master_node} do
+      tenant_id = "rpc_tenant_flag"
+
+      Mimic.expect(GenRpc, :call, fn ^master_node, Api, :update_tenant_feature_flag, args, opts ->
+        assert args == [tenant_id, "rpc_flag", :clear]
+        assert opts == [tenant_id: tenant_id]
+        {:error, :not_found}
+      end)
+
+      assert Api.update_tenant_feature_flag(tenant_id, "rpc_flag", :clear) == {:error, :not_found}
+    end
+
+    test "update_tenant_feature_flag surfaces an unreachable master", %{master_node: master_node} do
+      Mimic.expect(GenRpc, :call, fn ^master_node, Api, :update_tenant_feature_flag, _args, _opts ->
+        {:error, :rpc_error, :timeout}
+      end)
+
+      assert Api.update_tenant_feature_flag("rpc_tenant_flag", "rpc_flag", :clear) == {:error, :timeout}
+    end
+
     test "list_existing_external_ids dispatches to master with empty opts", %{master_node: master_node} do
       Mimic.expect(GenRpc, :call, fn ^master_node, Api, :list_existing_external_ids, args, opts ->
         assert args == [["abc", "def"]]

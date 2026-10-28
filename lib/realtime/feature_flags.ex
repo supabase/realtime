@@ -35,14 +35,7 @@ defmodule Realtime.FeatureFlags do
           {:ok, Realtime.Api.Tenant.t()} | {:error, :not_found | Ecto.Changeset.t()}
   def set_tenant_flag(flag_name, tenant_id, enabled)
       when is_binary(flag_name) and is_binary(tenant_id) and is_boolean(enabled) do
-    case Api.get_tenant_by_external_id(tenant_id, use_replica?: false) do
-      nil ->
-        {:error, :not_found}
-
-      tenant ->
-        updated_flags = Map.put(tenant.feature_flags, flag_name, enabled)
-        Api.update_tenant_by_external_id(tenant_id, %{feature_flags: updated_flags})
-    end
+    Api.update_tenant_feature_flag(tenant_id, flag_name, {:set, enabled})
   end
 
   @doc """
@@ -52,14 +45,7 @@ defmodule Realtime.FeatureFlags do
   @spec clear_tenant_flag(String.t(), String.t()) ::
           {:ok, Realtime.Api.Tenant.t()} | {:error, :not_found | Ecto.Changeset.t()}
   def clear_tenant_flag(flag_name, tenant_id) when is_binary(flag_name) and is_binary(tenant_id) do
-    case Api.get_tenant_by_external_id(tenant_id, use_replica?: false) do
-      nil ->
-        {:error, :not_found}
-
-      tenant ->
-        updated_flags = Map.delete(tenant.feature_flags, flag_name)
-        Api.update_tenant_by_external_id(tenant_id, %{feature_flags: updated_flags})
-    end
+    Api.update_tenant_feature_flag(tenant_id, flag_name, :clear)
   end
 
   @spec enabled?(String.t()) :: boolean()
