@@ -32,6 +32,9 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
     assert has_element?(view, "button[type=submit]", "Lookup")
   end
 
+  # Looking up a tenant starts pg-delta against its database, so those tests carry
+  # :requires_pgdelta_shadow_cleanup like the run_pgdelta/1 and apply_pgdelta/2 ones.
+  @tag :requires_pgdelta_shadow_cleanup
   test "shows schema_migrations for valid external_id via URL param", %{conn: conn, tenant: tenant} do
     {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_migrations?external_id=#{tenant.external_id}")
 
@@ -40,6 +43,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
     assert has_element?(view, "th", "inserted_at")
   end
 
+  @tag :requires_pgdelta_shadow_cleanup
   test "shows schema_migrations for valid external_id via form submit", %{conn: conn, tenant: tenant} do
     {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_migrations")
 
@@ -67,6 +71,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
     assert has_element?(view, "p.text-danger", "Tenant not found")
   end
 
+  @tag :requires_pgdelta_shadow_cleanup
   test "renders the pg-delta section header", %{conn: conn, tenant: tenant} do
     {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_migrations?external_id=#{tenant.external_id}")
 
@@ -76,6 +81,8 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
   @pgdelta_running ~s([data-test-id="pgdelta-running"])
 
   describe "shadow database provisioning" do
+    @describetag :requires_pgdelta_shadow_cleanup
+
     test "pg-delta starts on the live mount, not on the dead render", %{conn: conn, tenant: tenant} do
       conn = get(conn, "/admin/dashboard/tenant_migrations?external_id=#{tenant.external_id}")
 
@@ -107,6 +114,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
     Realtime.TaskSupervisor |> Task.Supervisor.children() |> length()
   end
 
+  @tag :requires_pgdelta_shadow_cleanup
   test "shows 0 rows instead of an error when realtime.schema_migrations is missing", %{conn: conn, tenant: tenant} do
     {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
     {:ok, admin_conn} = Database.connect_db(%{settings | username: "supabase_admin", pool_size: 1})
@@ -188,9 +196,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
   end
 
   describe "run_pgdelta/1" do
-    # The 15.1.0.1 image is excluded because its pg_net 0.6 worker never accepts the
-    # ProcSignalBarrier, so pg-delta's DROP DATABASE ... WITH (FORCE) shadow cleanup hangs.
-    @describetag :requires_supautils_policy_grants
+    @describetag :requires_pgdelta_shadow_cleanup
     setup %{tenant: tenant} do
       {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
       settings = %{settings | pool_size: 1}
@@ -346,9 +352,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
   end
 
   describe "apply_pgdelta/2" do
-    # The 15.1.0.1 image is excluded because its pg_net 0.6 worker never accepts the
-    # ProcSignalBarrier, so pg-delta's DROP DATABASE ... WITH (FORCE) shadow cleanup hangs.
-    @describetag :requires_supautils_policy_grants
+    @describetag :requires_pgdelta_shadow_cleanup
     setup %{tenant: tenant} do
       {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
       settings = %{settings | pool_size: 1}
