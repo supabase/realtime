@@ -1800,5 +1800,5 @@ INSERT INTO realtime."schema_migrations" (version) VALUES (20260928120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261002120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261008120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261009120000);
-INSERT INTO realtime."schema_migrations" (version) VALUES (20261010120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261027120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20261028120000);
