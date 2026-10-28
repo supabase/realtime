@@ -101,17 +101,19 @@ defmodule Rollcall.Tracker do
   """
   @spec track(Rollcall.scope(), pid(), Rollcall.partition(), Rollcall.key(), Rollcall.meta()) :: {:ok, Rollcall.ref()}
   def track(scope, pid, partition, key, meta) do
-    track_with_retries(scope, {:track, pid, partition, key, meta}, @max_retries)
+    call_or_start(scope, {:track, pid, partition, key, meta}, @max_retries)
   end
 
-  defp track_with_retries(scope, message, retries) do
+  # Calls the tracker for `scope`. Starts a tracker and sends the message again
+  # when none runs, at most `retries` times.
+  defp call_or_start(scope, message, retries) do
     GenServer.call(via(scope), message)
   catch
     :exit, {reason, _} = caught when reason in @gone ->
       if retries == 0, do: exit(caught)
 
       start(scope)
-      track_with_retries(scope, message, retries - 1)
+      call_or_start(scope, message, retries - 1)
   end
 
   @doc """
