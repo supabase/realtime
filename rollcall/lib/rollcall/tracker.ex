@@ -230,24 +230,38 @@ defmodule Rollcall.Tracker do
 
     alias Rollcall.Tracker.Local
 
-    @enforce_keys [:scope, :incarnation, :empty_grace]
+    # `local` has no default. A default runs `Local.new/0` at compile time, and
+    # the struct would then hold a literal value of the opaque type `Local.t()`.
+    @enforce_keys [:scope, :incarnation, :empty_grace, :local]
 
     defstruct [
       :scope,
       :incarnation,
       :empty_grace,
+      :local,
       empty_timer: nil,
-      local: Local.new(),
       version: 0,
       monitors: %{}
     ]
 
+    @type t :: %__MODULE__{
+            scope: Rollcall.scope(),
+            incarnation: integer(),
+            empty_grace: non_neg_integer(),
+            empty_timer: reference() | nil,
+            local: Local.t(),
+            version: non_neg_integer(),
+            monitors: %{pid() => reference()}
+          }
+
+    @spec bump_version(t()) :: t()
     def bump_version(%__MODULE__{version: version} = state) do
       %{state | version: version + 1}
     end
   end
 
   @impl true
+  @spec init(Rollcall.scope()) :: {:ok, State.t()}
   def init(scope) do
     Process.set_label({:rollcall_tracker, scope})
 
@@ -256,20 +270,24 @@ defmodule Rollcall.Tracker do
     state = %State{
       scope: scope,
       incarnation: System.os_time(:nanosecond),
-      empty_grace: Application.get_env(:rollcall, :empty_grace, :timer.seconds(5))
+      empty_grace: Application.get_env(:rollcall, :empty_grace, :timer.seconds(5)),
+      local: Local.new()
     }
 
     {:ok, state}
   end
 
-  # The messages that `call/4` sends:
-  #
-  #   :get_state
-  #   {:track, pid, partition, key, meta}
-  #   {:untrack, pid, partition, key}
+  # The messages that `track/5`, `untrack/4` and `get_state/1` send.
+  @typep call_message ::
+           :get_state
+           | {:track, pid(), Rollcall.partition(), Rollcall.key(), Rollcall.meta()}
+           | {:untrack, pid(), Rollcall.partition(), Rollcall.key()}
+
   @impl true
+  @spec handle_call(call_message(), GenServer.from(), State.t()) ::
+          {:reply, {:ok, Rollcall.ref()} | :ok | inspected_state(), State.t()}
   def handle_call(:get_state, _from, state) do
-    {:reply, {:ok, state}, state}
+    {:reply, Map.take(state, @inspectable_keys), state}
   end
 
   def handle_call({:track, pid, partition, key, meta}, _from, state) do
@@ -327,6 +345,7 @@ defmodule Rollcall.Tracker do
   end
 
   @impl true
+  @spec handle_info(term(), State.t()) :: {:noreply, State.t()} | {:stop, :normal, State.t()}
   def handle_info({:timeout, ref, :empty_timeout}, %{empty_timer: ref} = state) do
     tp(:rollcall_tracker_stopped, %{scope: state.scope})
 
