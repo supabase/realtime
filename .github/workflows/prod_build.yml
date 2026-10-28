@@ -44,6 +44,7 @@ jobs:
           extra_plugins: |
             @semantic-release/exec
             @semantic-release/git
+            conventional-changelog-conventionalcommits@9
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
 
