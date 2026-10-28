@@ -1,13 +1,21 @@
 defmodule Rollcall.Tracker.Local do
   @moduledoc """
-  The set of entries that the processes on this node tracks in one tracker.
+  The set of entries that the processes on this node track in one tracker.
 
-  `Local` is a pure data structure. Each function returns the new set. A
-  function that changes the set also returns the `Rollcall.Tracker.Local.Changes`
-  that the change made.
+  `Local` is a pure data structure. Each function returns the new set. A test
+  of the set needs no process.
+
+  A function that changes the set also returns the
+  `Rollcall.Tracker.Local.Changes` that the change made. The tracker publishes
+  these changes to subscribers and writes them to the view. 
 
   The set has an index by entry id, by partition and by pid. The id of an entry
   is `{pid, partition, key}`. A pid has one entry for each partition and key.
+  The indexes make `untrack_pid/2` and the read of a partition depend on the
+  entries of that pid or partition, and not on all entries.
+
+  A function removes an index key when its set becomes empty. The set then does
+  not grow with the number of processes that tracked an entry in the past.
   """
 
   @type partition :: String.t()
@@ -70,7 +78,8 @@ defmodule Rollcall.Tracker.Local do
     The entries that one change added and removed.
 
     `joins` holds the entries that the change added. `leaves` holds the entries
-    that the change removed. A replace has one leave and one join.
+    that the change removed. A replace has one leave and one join, so a
+    subscriber sees the old entry leave and the new entry join in one diff.
     """
 
     defstruct joins: [], leaves: []

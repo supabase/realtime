@@ -9,19 +9,43 @@ defmodule Rollcall.Tracker do
   ## Starting and Supervision
 
   `Rollcall.Registry` maps a scope to its tracker pid. The tracker has a
-  `:via` name. No atom exists for a scope.
+  `:via` name. No atom exists for a scope, because a scope is a tenant. The
+  number of tenants has no limit, and the VM never frees an atom.
 
   `Rollcall.TrackerSupervisor` supervises the trackers. The restart type is
-  `:temporary`. A crashed tracker does not restart. The next `track` for its
-  scope starts a new tracker.
+  `:temporary`. A restarted tracker would have no entries and no process that
+  can untrack, so it would never stop. A crashed tracker does not restart. The
+  next `track` for its scope starts a clean tracker.
 
   `call/4` finds the tracker for a scope. It starts the tracker only when
   `start` is true.
 
+  ## Process monitoring
+
+  The tracker always monitors a process that has an entry. The monitor tells
+  the tracker to remove the entries when the process exits.
+
+  In link mode, the tracker also links to the process, so an entry never
+  outlives its tracker. In monitor mode, a tracker crash leaves the process
+  running and the entries of the node are lost until each process tracks again.
+  Phoenix.Presence uses a link, so the crash of a shard stops every channel in
+  the shard. Monitor mode lets a new tracker run next to the old one without
+  that risk.
+
   ## Grace period
 
-  The tracker starts a timer when it holds no entry. A `track` cancels the
-  timer. When the timer expires, the tracker stops.
+  A stop of a tracker costs work on every node. The tracker sends a goodbye
+  snapshot. The next tracker has a new incarnation, so each peer replaces its
+  replica. The new tracker has no peers. It learns each peer from a heartbeat,
+  then asks for a snapshot. A scope that loses its last process and gets a new
+  process soon after pays this cost on each cycle.
+
+  The tracker waits for a grace period before it stops. It starts a timer when
+  it holds no entry. A `track` cancels the timer. When the timer expires, the
+  tracker stops.
+
+  The cost of the wait is an idle tracker. It still sends a heartbeat in each
+  period. The best length depends on the heartbeat period.
 
   Set the length of the period with the `:empty_grace` key of the `:rollcall`
   application environment, in milliseconds. The tracker reads the key when it
@@ -29,8 +53,9 @@ defmodule Rollcall.Tracker do
 
   ## Trace points
 
-  The tracker emits these trace points for tests and for operators. Each event
-  has the key `scope`.
+  The tracker emits these trace points. A test waits for an event, and does not
+  sleep. The events do nothing outside the test environment. Each event has the
+  key `scope`.
 
     * `:rollcall_tracker_started` - the tracker started.
     * `:rollcall_tracker_empty` - the tracker holds no entry, and the timer of
@@ -61,13 +86,18 @@ defmodule Rollcall.Tracker do
   @doc """
   Sends `msg` to the tracker for `scope` and returns the reply.
 
-  The tracker can be not running, or can stop before it replies. Then the
-  result depends on `start`:
+  The tracker can be not running, or can stop before it replies. A tracker can
+  stop between the lookup and the call, for example when its grace period ends.
+  Then the result depends on `start`:
 
-  * `start` is true: the function starts a tracker and sends `msg` again. It
-    sends `msg` again at most `retries` times. After that, it exits with the
-    reason of the last failure.
-  * `start` is false: the function returns `:ok`.
+  * `start` is true: the function starts a tracker and sends `msg` again. A
+    tracker that stopped handled no part of the message, so the new tracker can
+    handle it. The function sends `msg` again at most `retries` times. The
+    limit stops an endless loop when a tracker exits without a reply. After the
+    limit, the function exits with the reason of the last failure.
+  * `start` is false: the function returns `:ok`. A tracker that starts only to
+    find nothing to remove would stop again after the grace period, so an
+    `untrack` does not start one.
   """
   def call(scope, msg, start \\ false, retries \\ @max_retries) do
     GenServer.call(via(scope), msg)
@@ -91,6 +121,9 @@ defmodule Rollcall.Tracker do
   The state is a map with the keys `scope`, `version`, `incarnation` and
   `local`. The value of `local` is a `Rollcall.Tracker.Local` set.
 
+  The map holds the fields that have a meaning outside the process. The timer
+  and the monitors stay private, so a change to them does not break a caller.
+
   The function does not start a tracker. Use it in tests and for debugging.
   """
   def get_state(scope) do
@@ -102,6 +135,9 @@ defmodule Rollcall.Tracker do
 
   @doc """
   Returns the names of the scopes that have a running tracker on this node.
+
+  The function skips a tracker that has exited. The Registry removes the entry
+  of an exited process after a short delay.
   """
   def scopes do
     Rollcall.Registry
@@ -150,6 +186,10 @@ defmodule Rollcall.Tracker do
     counts the changes to `local`. `incarnation` is the time at which the
     tracker started. `sent` holds the `local` set and the `version` at the last
     heartbeat.
+
+    The `incarnation` and the `version` form the stamp of a message. A peer
+    compares stamps to order messages that arrive in any order. A tracker that
+    restarts gets a newer incarnation, so its peers replace its old entries.
 
     TODO: For each peer node, the state holds a `replica`, a `mark`, a `silent` count
     and a `behind` flag. The view of the tracker is `local` plus each replica.
