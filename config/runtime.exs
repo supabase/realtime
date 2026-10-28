@@ -142,6 +142,10 @@ request_id_baggage_key = System.get_env("REQUEST_ID_BAGGAGE_KEY", "request-id")
 rpc_timeout = Env.get_integer("RPC_TIMEOUT", to_timeout(second: 30))
 run_janitor = Env.get_boolean("RUN_JANITOR", false)
 slot_name_suffix = System.get_env("SLOT_NAME_SUFFIX")
+
+sql_logex_snapshot_cache_expiration_in_ms =
+  Env.get_integer("SQL_LOGEX_SNAPSHOT_CACHE_EXPIRATION_IN_MS", to_timeout(minute: 5))
+
 tenant_cache_expiration_in_ms = Env.get_integer("TENANT_CACHE_EXPIRATION_IN_MS", to_timeout(second: 30))
 tenant_max_bytes_per_second = Env.get_integer("TENANT_MAX_BYTES_PER_SECOND", 100_000)
 tenant_max_channels_per_client = Env.get_integer("TENANT_MAX_CHANNELS_PER_CLIENT", 100)
@@ -236,6 +240,7 @@ config :realtime,
   metrics_cleaner_schedule_timer_in_ms: metrics_cleaner_schedule_timer_in_ms,
   metrics_rpc_timeout: metrics_rpc_timeout_in_ms,
   tenant_cache_expiration: tenant_cache_expiration_in_ms,
+  sql_logex_snapshot_cache_expiration: sql_logex_snapshot_cache_expiration_in_ms,
   rpc_timeout: rpc_timeout,
   no_channel_timeout_in_ms: no_channel_timeout_in_ms,
   platform: platform,
