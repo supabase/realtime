@@ -53,6 +53,12 @@ requires_pg_140006 = if pg_version_num < 140_006, do: :requires_pg_140006
 
 requires_pg_150000 = if pg_version_num < 150_000, do: :requires_pg_150000
 
+# On the 15.1 image (supabase/postgres:15.1.0.1) the pg_net 0.6 worker never accepts the
+# ProcSignalBarrier that DROP DATABASE waits on, so pg-delta's shadow database cleanup hangs.
+# The stuck DROP holds an xid, which blocks logical replication slot creation for every later
+# test that draws the same pooled tenant database.
+requires_pgdelta_shadow_cleanup = if pg_version_num == 150_001, do: :requires_pgdelta_shadow_cleanup
+
 # Restriction assertions on the postgres role only when supautils.policy_grants includes
 # realtime.messages and realtime.subscription (supabase/postgres >= 15.14.1.018)
 requires_supautils_policy_grants = if !has_supautils_realtime_grants, do: :requires_supautils_policy_grants
@@ -77,6 +83,7 @@ exclude =
       :failing,
       requires_pg_140006,
       requires_pg_150000,
+      requires_pgdelta_shadow_cleanup,
       requires_supautils_policy_grants,
       requires_no_supautils_policy_grants,
       skip_orioledb,
