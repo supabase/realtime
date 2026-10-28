@@ -20,7 +20,7 @@
       schema: "auth",
       security_definer: false,
       source:
-        "\n      select coalesce(\n               nullif(current_setting('request.jwt.claim', true), ''),\n               nullif(current_setting('request.jwt.claims', true), '')\n             )::jsonb\n    ",
+        "\n  select coalesce(\n      nullif(current_setting('request.jwt.claim', true), ''),\n      nullif(current_setting('request.jwt.claims', true), '')\n  )::jsonb\n",
       volatility: "s"
     },
     %{
