@@ -7,9 +7,23 @@ defmodule Rollcall.MixProject do
       version: "0.1.0",
       elixir: "~> 1.19",
       start_permanent: Mix.env() == :prod,
+      elixirc_paths: elixirc_paths(Mix.env()),
+      dialyzer: dialyzer(),
       deps: deps()
     ]
   end
+
+  defp dialyzer do
+    [
+      plt_add_apps: [:mix],
+      plt_core_path: "priv/plts",
+      plt_file: {:no_warn, "priv/plts/dialyzer.plt"},
+      list_unused_filters: true
+    ]
+  end
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_env), do: ["lib"]
 
   # Run "mix help compile.app" to learn about applications.
   def application do
@@ -22,8 +36,9 @@ defmodule Rollcall.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      # {:dep_from_hexpm, "~> 0.3.0"},
-      # {:dep_from_git, git: "https://github.com/elixir-lang/my_dep.git", tag: "0.1.0"}
+      {:snabbkaffex, "~> 0.1.0", runtime: false},
+      {:dialyxir, "~> 1.4", only: :dev, runtime: false},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]
   end
 end
