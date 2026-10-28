@@ -20,11 +20,11 @@ Regenerate tenant schema whenever tenant migrations changes, see `mise.toml`.
 
 ## Pull requests
 
-The PR title becomes the squash commit that semantic-release reads.
+The PR title becomes the squash commit that semantic-release reads. It follows [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
 - Title format: `type(scope): summary`, scope optional, summary lowercase with no trailing period.
-- Types: `feat` (minor release), `fix` and `perf` (patch release), `build`, `ci`, `docs`, `refactor`, `test`, `revert`, `chore` (no release).
-- Do not use `!`; the title check rejects it. A breaking change needs a `BREAKING CHANGE:` footer added to the squash commit message at merge time.
+- Types: `feat` (minor release), `fix` and `perf` (patch release), `build`, `ci`, `docs`, `style`, `refactor`, `test`, `revert`, `chore` (no release).
+- Mark a breaking change with `!` before the colon, for example `feat(api)!: drop old endpoint`. It cuts a major release whatever the type.
 
 ## Security
 
