@@ -109,6 +109,78 @@ defmodule Realtime.GenRpcPubSub.RegionRingsTest do
     end
   end
 
+  describe "membership changes before reconciliation" do
+    test "reads a newly joined region before the cache reconciles" do
+      regions = start_supervised!({Agent, fn -> ["us-east-1"] end})
+      %{pid: pid, table: table} = start_region_rings!()
+
+      stub(Nodes, :all_node_regions, fn -> Agent.get(regions, & &1) end)
+      stub(Nodes, :region_nodes, fn _ -> members() end)
+      reconcile(pid)
+
+      :sys.suspend(pid)
+
+      try do
+        Agent.update(regions, fn _ -> ["us-east-1", @region] end)
+        :telemetry.execute([:syn, RegionNodes, :joined], %{}, %{name: @region})
+
+        assert RegionRings.all_node_regions(table) == ["us-east-1", @region]
+      after
+        :sys.resume(pid)
+      end
+    end
+
+    test "rejects a snapshot read before a concurrent membership event" do
+      parent = self()
+      regions = start_supervised!({Agent, fn -> ["us-east-1"] end})
+      %{pid: pid, table: table} = start_region_rings!()
+
+      stub(Nodes, :all_node_regions, fn ->
+        snapshot = Agent.get(regions, & &1)
+
+        if self() == pid do
+          send(parent, {:snapshot, snapshot})
+
+          receive do
+            :continue_reconcile -> :ok
+          after
+            5_000 -> raise "test did not release reconciliation"
+          end
+        end
+
+        snapshot
+      end)
+
+      stub(Nodes, :region_nodes, fn _ -> members() end)
+      send(pid, :syn_changed)
+      assert_receive {:snapshot, ["us-east-1"]}, 1_000
+
+      Agent.update(regions, fn _ -> ["us-east-1", @region] end)
+      :telemetry.execute([:syn, RegionNodes, :joined], %{}, %{name: @region})
+      send(pid, :continue_reconcile)
+      assert_receive {:snapshot, ["us-east-1", @region]}, 1_000
+
+      try do
+        assert RegionRings.all_node_regions(table) == ["us-east-1", @region]
+      after
+        send(pid, :continue_reconcile)
+      end
+    end
+
+    test "restores cached region reads when a join leaves region names unchanged" do
+      %{pid: pid, table: table} = start_region_rings!()
+      stub(Nodes, :all_node_regions, fn -> ["us-east-1", @region] end)
+      stub(Nodes, :region_nodes, fn _ -> members() end)
+      reconcile(pid)
+
+      :telemetry.execute([:syn, RegionNodes, :joined], %{}, %{name: "us-east-1"})
+      reconcile(pid)
+
+      stub(Nodes, :all_node_regions, fn -> flunk("reconciled regions must be cached") end)
+      assert RegionRings.all_node_regions(table) == ["us-east-1", @region]
+    end
+  end
+
   describe "ring process exit" do
     test "rebuilds a ring that exits and recovers expected_router" do
       members = members()
