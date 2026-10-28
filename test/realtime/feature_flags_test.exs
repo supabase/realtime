@@ -4,6 +4,7 @@ defmodule Realtime.FeatureFlagsTest do
 
   setup :set_mimic_from_context
 
+  alias Ecto.Adapters.SQL.Sandbox
   alias Realtime.Api
   alias Realtime.Api.FeatureFlag
   alias Realtime.FeatureFlags
@@ -280,6 +281,105 @@ defmodule Realtime.FeatureFlagsTest do
 
     test "returns {:error, :not_found} for an unknown tenant" do
       assert {:error, :not_found} = FeatureFlags.clear_tenant_flag("some_flag", "nonexistent_tenant")
+    end
+  end
+
+  describe "concurrent tenant overrides" do
+    test "preserves both overrides when setting different flags" do
+      assert concurrent_overrides(%{}, [
+               fn id -> FeatureFlags.set_tenant_flag("a", id, true) end,
+               fn id -> FeatureFlags.set_tenant_flag("b", id, false) end
+             ]) == %{"a" => true, "b" => false}
+    end
+
+    test "preserves a cleared override and a concurrently set flag" do
+      assert concurrent_overrides(%{"a" => true}, [
+               fn id -> FeatureFlags.clear_tenant_flag("a", id) end,
+               fn id -> FeatureFlags.set_tenant_flag("b", id, false) end
+             ]) == %{"b" => false}
+    end
+
+    test "preserves both removals when clearing different flags" do
+      assert concurrent_overrides(%{"a" => true, "b" => false, "c" => true}, [
+               fn id -> FeatureFlags.clear_tenant_flag("a", id) end,
+               fn id -> FeatureFlags.clear_tenant_flag("b", id) end
+             ]) == %{"c" => true}
+    end
+  end
+
+  defp concurrent_overrides(initial_flags, operations) do
+    tenant = Sandbox.unboxed_run(Repo, fn -> tenant_fixture(%{feature_flags: initial_flags}) end)
+
+    on_exit(fn ->
+      Sandbox.unboxed_run(Repo, fn -> Api.delete_tenant_by_external_id(tenant.external_id) end)
+    end)
+
+    config = Keyword.take(Repo.config(), [:username, :password, :database, :hostname, :port])
+    holder = start_supervised!({Postgrex, config}, id: :override_lock_holder)
+    observer = start_supervised!({Postgrex, config}, id: :override_lock_observer)
+    Postgrex.query!(holder, "BEGIN", [])
+
+    Postgrex.query!(holder, "SELECT external_id FROM public.tenants WHERE external_id = $1 FOR UPDATE", [
+      tenant.external_id
+    ])
+
+    parent = self()
+    ref = make_ref()
+
+    tasks =
+      for operation <- operations do
+        Task.async(fn ->
+          Sandbox.unboxed_run(Repo, fn ->
+            %{rows: [[backend]]} = Repo.query!("SELECT pg_backend_pid()")
+            send(parent, {ref, backend})
+            operation.(tenant.external_id)
+          end)
+        end)
+      end
+
+    try do
+      backends =
+        for _ <- operations do
+          assert_receive {^ref, backend}, 1000
+          backend
+        end
+
+      wait_for_override_locks(observer, backends, 200)
+      Postgrex.query!(holder, "COMMIT", [])
+      for task <- tasks, do: assert({:ok, _} = Task.await(task))
+
+      Sandbox.unboxed_run(Repo, fn ->
+        Api.get_tenant_by_external_id(tenant.external_id, use_replica?: false).feature_flags
+      end)
+    after
+      Postgrex.query!(holder, "ROLLBACK", [])
+      for task <- tasks, do: Task.shutdown(task, :brutal_kill)
+      stop_supervised(:override_lock_holder)
+      stop_supervised(:override_lock_observer)
+    end
+  end
+
+  defp wait_for_override_locks(observer, backends, attempts) do
+    %{rows: [[count]]} =
+      Postgrex.query!(
+        observer,
+        """
+        SELECT count(*)::int FROM pg_stat_activity
+        WHERE pid = ANY($1) AND wait_event_type = 'Lock'
+        """,
+        [backends]
+      )
+
+    cond do
+      count >= 2 ->
+        :ok
+
+      attempts == 0 ->
+        flunk("expected both tenant override calls to wait for database locks")
+
+      true ->
+        Process.sleep(10)
+        wait_for_override_locks(observer, backends, attempts - 1)
     end
   end
 
