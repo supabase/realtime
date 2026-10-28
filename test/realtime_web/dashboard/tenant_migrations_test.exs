@@ -197,6 +197,8 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
 
   describe "run_pgdelta/1" do
     @describetag :requires_pgdelta_shadow_cleanup
+    # pg-delta creates its shadow database with CREATE DATABASE, which poolers reject
+    @describetag :requires_direct_connection
     setup %{tenant: tenant} do
       {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
       settings = %{settings | pool_size: 1}
@@ -353,6 +355,8 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
 
   describe "apply_pgdelta/2" do
     @describetag :requires_pgdelta_shadow_cleanup
+    # pg-delta creates its shadow database with CREATE DATABASE, which poolers reject
+    @describetag :requires_direct_connection
     setup %{tenant: tenant} do
       {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
       settings = %{settings | pool_size: 1}
