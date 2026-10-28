@@ -7,4 +7,5 @@
   "jason": {:hex, :jason, "1.4.5", "2e3a008590b0b8d7388c20293e9dcc9cf3e5d642fd2a114e4cbbb52e595d940a", [:mix], [{:decimal, "~> 1.0 or ~> 2.0 or ~> 3.0", [hex: :decimal, repo: "hexpm", optional: true]}], "hexpm", "b0c823996102bcd0239b3c2444eb00409b72f6a140c1950bc8b457d836b30684"},
   "snabbkaffe": {:hex, :snabbkaffe, "1.0.10", "9be2f54f61fc6862391b666b2b5b76c3fa53598e2989a17cef1b48cf347a8a63", [:rebar3], [], "hexpm", "70a98df36ae756908d55b5770891d443d63c903833e3e87d544036e13d4fac26"},
   "snabbkaffex": {:hex, :snabbkaffex, "0.1.0", "141ac3e2c15ad48058a5076b75a032c47eaa880f0b25e95ec8754511e7979635", [:mix], [{:snabbkaffe, "~> 1.0", [hex: :snabbkaffe, repo: "hexpm", optional: false]}], "hexpm", "690700b398656531a10b08ebdeb35b331856def6dabe3bfe39a648b85bc5904e"},
+  "stream_data": {:hex, :stream_data, "1.4.0", "026f929db613aabea6208012ae9b8970d3fd5f88b3bdf26831bc536f98c42036", [:mix], [], "hexpm", "2b0ee3a340dcce1c8cf6302a763ee757d1e01c54d6e16d9069062509d68b1dc9"},
 }
