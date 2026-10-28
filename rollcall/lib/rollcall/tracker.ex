@@ -32,6 +32,7 @@ defmodule Rollcall.Tracker do
 
   use GenServer, restart: :temporary
   use Snabbkaffex, only: :trace
+  alias Rollcall.Tracker.Local
 
   @max_retries 3
 
@@ -58,6 +59,15 @@ defmodule Rollcall.Tracker do
       else
         :ok
       end
+  end
+
+  @inspectable_keys [:incarnation, :scope, :version, :local]
+
+  def get_state(scope) do
+    case call(scope, :get_state) do
+      :ok -> nil
+      {:ok, state} -> Map.take(state, @inspectable_keys)
+    end
   end
 
   @doc """
@@ -102,46 +112,70 @@ defmodule Rollcall.Tracker do
     {:via, Registry, {Rollcall.Registry, scope}}
   end
 
+  defmodule State do
+    alias Rollcall.Tracker.Local
+
+    @enforce_keys [:scope, :incarnation, :empty_grace]
+
+    defstruct [
+      :scope,
+      :incarnation,
+      :empty_grace,
+      empty_timer: nil,
+      local: Local.new(),
+      version: 0,
+      monitors: %{}
+    ]
+
+    def bump_version(%__MODULE__{version: version} = state) do
+      %{state | version: version + 1}
+    end
+  end
+
   @impl true
   def init(scope) do
     Process.set_label({:rollcall_tracker, scope})
 
     tp(:rollcall_tracker_started, %{scope: scope})
 
-    state = %{
+    state = %State{
       scope: scope,
-      empty_grace: Application.get_env(:rollcall, :empty_grace, :timer.seconds(5)),
-      empty_timer: nil,
-      local: []
+      incarnation: System.os_time(:nanosecond),
+      empty_grace: Application.get_env(:rollcall, :empty_grace, :timer.seconds(5))
     }
 
     {:ok, state}
   end
 
   @impl true
-  def handle_call({:track, pid, partition, key, meta}, _from, state) do
-    state = Map.put(state, :local, [{pid, partition, key, meta} | state.local])
-    state = cancel_empty_timer(state)
+  def handle_call(:get_state, _from, state) do
+    {:reply, {:ok, state}, state}
+  end
 
-    {:reply, {:ok, "ref"}, state}
+  def handle_call({:track, pid, partition, key, meta}, _from, state) do
+    ref = make_ref()
+
+    {changes, local} = Local.track(state.local, pid, partition, key, meta, ref)
+
+    state =
+      state
+      |> Map.put(:local, local)
+      |> bump_version(changes)
+      |> cancel_empty_timer()
+      |> watch_pid(pid)
+
+    {:reply, {:ok, ref}, state}
   end
 
   def handle_call({:untrack, pid, partition, key}, _from, state) do
-    state = %{
-      state
-      | local:
-          Enum.reject(state.local, fn
-            {^pid, ^partition, ^key, _} -> true
-            _ -> false
-          end)
-    }
+    {changes, local} = Local.untrack(state.local, pid, partition, key)
 
     state =
-      if Enum.empty?(state.local) do
-        arm_empty_timer(state)
-      else
-        state
-      end
+      state
+      |> Map.put(:local, local)
+      |> bump_version(changes)
+      |> maybe_unwatch(pid)
+      |> arm_empty_timer()
 
     {:reply, :ok, state}
   end
@@ -153,14 +187,33 @@ defmodule Rollcall.Tracker do
     {:stop, :normal, state}
   end
 
+  def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
+    {changes, local} = Local.untrack_pid(state.local, pid)
+
+    state =
+      state
+      |> Map.put(:local, local)
+      |> bump_version(changes)
+      |> remove_monitor(pid)
+      |> arm_empty_timer()
+
+    tp(:rollcall_tracker_pid_down, %{scope: state.scope, pid: pid})
+
+    {:noreply, state}
+  end
+
   def handle_info({:timeout, _stale_ref, :empty_timeout}, state) do
     {:noreply, state}
   end
 
   defp arm_empty_timer(%{empty_timer: nil} = state) do
-    tp(:rollcall_tracker_empty, %{scope: state.scope})
+    if Local.empty?(state.local) do
+      tp(:rollcall_tracker_empty, %{scope: state.scope})
 
-    %{state | empty_timer: :erlang.start_timer(state.empty_grace, self(), :empty_timeout)}
+      %{state | empty_timer: :erlang.start_timer(state.empty_grace, self(), :empty_timeout)}
+    else
+      state
+    end
   end
 
   defp arm_empty_timer(state), do: state
@@ -170,5 +223,47 @@ defmodule Rollcall.Tracker do
   defp cancel_empty_timer(%{empty_timer: ref} = state) do
     :erlang.cancel_timer(ref)
     %{state | empty_timer: nil}
+  end
+
+  defp bump_version(state, changes) do
+    if Local.Changes.empty?(changes) do
+      state
+    else
+      State.bump_version(state)
+    end
+  end
+
+  # Handles watching pids to update tracker state when a process ends
+  #
+  # We use monitor here because initially we don't want a tracker going down
+  # to take the channels down, which is actually what happens with Phoenix.Presence
+  # because it uses link. 
+  #
+  # When Rollcall goes to production we'll need to switch this to link.
+  defp watch_pid(state, pid) do
+    if Local.tracks?(state.local, pid) and !Map.has_key?(state.monitors, pid) do
+      %{state | monitors: Map.put(state.monitors, pid, Process.monitor(pid))}
+    else
+      state
+    end
+  end
+
+  defp maybe_unwatch(state, pid) do
+    if Local.tracks?(state.local, pid) do
+      state
+    else
+      remove_monitor(state, pid)
+    end
+  end
+
+  defp remove_monitor(state, pid) do
+    case Map.pop(state.monitors, pid) do
+      {nil, _monitors} ->
+        state
+
+      {ref, monitors} ->
+        Process.demonitor(ref, [:flush])
+        %{state | monitors: monitors}
+    end
   end
 end

@@ -1,6 +1,6 @@
 defmodule Rollcall.Tracker.Local do
   @moduledoc """
-  The set of entries that the processes on this node track in one tracker.
+  The set of entries that the processes on this node tracks in one tracker.
 
   `Local` is a pure data structure. Each function returns the new set. A
   function that changes the set also returns the `Rollcall.Tracker.Local.Changes`
@@ -86,6 +86,10 @@ defmodule Rollcall.Tracker.Local do
       %__MODULE__{}
     end
 
+    @doc "Returns true if changes are empty"
+    def empty?(%__MODULE__{joins: [], leaves: []}), do: true
+    def empty?(_changes), do: false
+
     @doc "Adds `entry` to the joins."
     @spec join(t(), Entry.t()) :: t()
     def join(changes, entry) do
@@ -119,7 +123,11 @@ defmodule Rollcall.Tracker.Local do
     map_size(local.entries_by_id) == 0
   end
 
-  @doc "Returns the entries in `partition`. The order is not defined."
+  @doc """
+  Returns the entries in `partition`. 
+
+  The order is not defined.
+  """
   @spec entries(t(), partition()) :: [Entry.t()]
   def entries(local, partition) do
     local.partitions
