@@ -41,7 +41,7 @@ defmodule Rollcall do
 
   Starts the tracker for `scope` when no tracker runs.
   """
-  def track(pid, scope, partition, key, meta) do
+  def track(pid, scope, partition, key, meta) when is_pid(pid) do
     Tracker.call(scope, {:track, pid, partition, key, meta}, true)
   end
 
@@ -53,7 +53,7 @@ defmodule Rollcall do
 
   Does not start a tracker.
   """
-  def untrack(pid, scope, partition, key) do
+  def untrack(pid, scope, partition, key) when is_pid(pid) do
     Tracker.call(scope, {:untrack, pid, partition, key})
   end
 end

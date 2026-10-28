@@ -27,6 +27,27 @@ defmodule Rollcall.Tracker do
   application environment, in milliseconds. The tracker reads the key when it
   starts. The default is 5000.
 
+  ## Trace points
+
+  The tracker emits these trace points for tests and for operators. Each event
+  has the key `scope`.
+
+    * `:rollcall_tracker_started` - the tracker started.
+    * `:rollcall_tracker_empty` - the tracker holds no entry, and the timer of
+      the grace period started.
+    * `:rollcall_tracker_stopped` - the timer expired. The tracker stops after
+      the event.
+    * `:rollcall_tracker_track` - a `track` call changed `local`. The event has
+      the keys `pid`, `partition`, `key`, `version`, `joins` and `leaves`. The
+      `version` is the version after the call. `joins` and `leaves` are lists of
+      refs.
+    * `:rollcall_tracker_untrack` - an `untrack` call. The event has the same
+      keys as the track event. When no entry matches, `joins` and `leaves` are
+      empty, and the `version` does not change.
+    * `:rollcall_tracker_pid_down` - a process that tracked entries exited. The
+      event has the key `pid`. The tracker emits the event after it removed the
+      entries of the process.
+
   Use the functions in `Rollcall`. Do not call this module directly.
   """
 
@@ -64,6 +85,14 @@ defmodule Rollcall.Tracker do
 
   @inspectable_keys [:incarnation, :scope, :version, :local]
 
+  @doc """
+  Returns the state of the tracker for `scope`, or `nil` when no tracker runs.
+
+  The state is a map with the keys `scope`, `version`, `incarnation` and
+  `local`. The value of `local` is a `Rollcall.Tracker.Local` set.
+
+  The function does not start a tracker. Use it in tests and for debugging.
+  """
   def get_state(scope) do
     case call(scope, :get_state) do
       :ok -> nil
@@ -114,6 +143,21 @@ defmodule Rollcall.Tracker do
   end
 
   defmodule State do
+    @moduledoc """
+    The state of a tracker process.
+
+    `local` holds the entries that processes on this node track. `version`
+    counts the changes to `local`. `incarnation` is the time at which the
+    tracker started. `sent` holds the `local` set and the `version` at the last
+    heartbeat.
+
+    TODO: For each peer node, the state holds a `replica`, a `mark`, a `silent` count
+    and a `behind` flag. The view of the tracker is `local` plus each replica.
+
+    `monitors` maps each process that has an entry to its monitor. `empty_grace`
+    and `empty_timer` control the stop of a tracker that holds no entry.
+    """
+
     alias Rollcall.Tracker.Local
 
     @enforce_keys [:scope, :incarnation, :empty_grace]
@@ -148,6 +192,11 @@ defmodule Rollcall.Tracker do
     {:ok, state}
   end
 
+  # The messages that `call/4` sends:
+  #
+  #   :get_state
+  #   {:track, pid, partition, key, meta}
+  #   {:untrack, pid, partition, key}
   @impl true
   def handle_call(:get_state, _from, state) do
     {:reply, {:ok, state}, state}
@@ -160,20 +209,23 @@ defmodule Rollcall.Tracker do
 
     state =
       state
-      |> Map.put(:local, local)
-      |> bump_version(changes)
+      |> apply_changes(local, changes)
       |> cancel_empty_timer()
       |> watch_pid(pid)
 
-    tp(:rollcall_tracker_track, %{
-      scope: state.scope,
-      pid: pid,
-      partition: partition,
-      key: key,
-      version: state.version,
-      joins: Changes.join_refs(changes),
-      leaves: Changes.leave_refs(changes)
-    })
+    tp(
+      :rollcall_tracker_track,
+      %{
+        scope: state.scope,
+        pid: pid,
+        partition: partition,
+        key: key,
+        version: state.version,
+        joins: Changes.join_refs(changes),
+        leaves: Changes.leave_refs(changes)
+      },
+      ignore_side_effects: true
+    )
 
     {:reply, {:ok, ref}, state}
   end
@@ -183,20 +235,23 @@ defmodule Rollcall.Tracker do
 
     state =
       state
-      |> Map.put(:local, local)
-      |> bump_version(changes)
+      |> apply_changes(local, changes)
       |> maybe_unwatch(pid)
       |> arm_empty_timer()
 
-    tp(:rollcall_tracker_untrack, %{
-      scope: state.scope,
-      pid: pid,
-      partition: partition,
-      key: key,
-      version: state.version,
-      joins: Changes.join_refs(changes),
-      leaves: Changes.leave_refs(changes)
-    })
+    tp(
+      :rollcall_tracker_untrack,
+      %{
+        scope: state.scope,
+        pid: pid,
+        partition: partition,
+        key: key,
+        version: state.version,
+        joins: Changes.join_refs(changes),
+        leaves: Changes.leave_refs(changes)
+      },
+      ignore_side_effects: true
+    )
 
     {:reply, :ok, state}
   end
@@ -213,8 +268,7 @@ defmodule Rollcall.Tracker do
 
     state =
       state
-      |> Map.put(:local, local)
-      |> bump_version(changes)
+      |> apply_changes(local, changes)
       |> remove_monitor(pid)
       |> arm_empty_timer()
 
@@ -223,8 +277,14 @@ defmodule Rollcall.Tracker do
     {:noreply, state}
   end
 
-  def handle_info({:timeout, _stale_ref, :empty_timeout}, state) do
+  def handle_info(_, state) do
     {:noreply, state}
+  end
+
+  defp apply_changes(state, local, changes) do
+    state
+    |> Map.put(:local, local)
+    |> bump_version(changes)
   end
 
   defp arm_empty_timer(%{empty_timer: nil} = state) do
@@ -258,7 +318,7 @@ defmodule Rollcall.Tracker do
   #
   # We use monitor here because initially we don't want a tracker going down
   # to take the channels down, which is actually what happens with Phoenix.Presence
-  # because it uses link. 
+  # because it uses link.
   #
   # When Rollcall goes to production we'll need to switch this to link.
   defp watch_pid(state, pid) do
