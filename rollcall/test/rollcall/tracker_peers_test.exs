@@ -25,6 +25,7 @@ defmodule Rollcall.TrackerPeersTest do
 
   @message :rollcall_tracker_peer_message
   @purged :rollcall_tracker_peer_purged
+  @dropped :rollcall_tracker_message_dropped
 
   describe "a message from an unknown node" do
     test "a snapshot creates the record for the node of the origin", %{scope: scope} do
@@ -87,7 +88,7 @@ defmodule Rollcall.TrackerPeersTest do
   end
 
   describe "a message from the local node" do
-    test "creates no record and emits no event", %{scope: scope} do
+    test "creates no record and emits a dropped event for each message", %{scope: scope} do
       origin = self()
 
       check_trace(
@@ -101,6 +102,9 @@ defmodule Rollcall.TrackerPeersTest do
         fn peers, trace ->
           assert peers == %{}
           expect_events(trace, @message, scope, 0)
+
+          dropped = expect_events(trace, @dropped, scope, 3)
+          assert Enum.all?(dropped, &(&1.reason == :local_origin and &1.message_scope == scope))
         end
       )
     end
@@ -119,6 +123,66 @@ defmodule Rollcall.TrackerPeersTest do
           assert Map.keys(peers) == [@node_a]
           assert refs(peers[@node_a]) == ["a"]
           expect_events(trace, @message, scope, 1)
+        end
+      )
+    end
+  end
+
+  describe "a message for another scope" do
+    test "creates no record and emits a dropped event", %{scope: scope} do
+      origin = remote_pid(@node_a, 1)
+
+      check_trace(
+        fn ->
+          tracker = start_tracker(scope, @threshold)
+          deliver(tracker, "other-scope", snapshot(origin, stamp(1, 3), entries(["a"])))
+          peers(scope)
+        end,
+        fn peers, trace ->
+          assert peers == %{}
+          expect_events(trace, @message, scope, 0)
+
+          assert [event] = expect_events(trace, @dropped, scope, 1)
+          assert %{message_scope: "other-scope", node: @node_a, reason: :wrong_scope} = event
+        end
+      )
+    end
+
+    test "does not change a record of the scope", %{scope: scope} do
+      origin = remote_pid(@node_a, 1)
+
+      check_trace(
+        fn ->
+          tracker = start_tracker(scope, @threshold)
+          deliver(tracker, snapshot(origin, stamp(1, 3), entries(["a"])))
+          deliver(tracker, "other-scope", snapshot(origin, stamp(1, 4), entries(["z"])))
+          deliver(tracker, "other-scope", request(origin))
+          peers(scope)
+        end,
+        fn peers, trace ->
+          assert refs(peers[@node_a]) == ["a"]
+          assert mark_tuple(peers[@node_a]) == {1, 3}
+          expect_events(trace, @message, scope, 1)
+          expect_events(trace, @dropped, scope, 2)
+        end
+      )
+    end
+
+    test "does not reset the silent count of the record", %{scope: scope} do
+      origin = remote_pid(@node_a, 1)
+
+      check_trace(
+        fn ->
+          tracker = start_tracker(scope, @threshold)
+          deliver(tracker, snapshot(origin, stamp(1, 3), entries(["a"])))
+          tick(tracker, @threshold - 1)
+          deliver(tracker, "other-scope", request(origin))
+          tick(tracker, 1)
+          peers(scope)
+        end,
+        fn peers, trace ->
+          assert peers == %{}
+          expect_events(trace, @purged, scope, 1)
         end
       )
     end
@@ -367,8 +431,13 @@ defmodule Rollcall.TrackerPeersTest do
     Enum.map(refs, &wire_entry("partition", "key", &1, %{}))
   end
 
+  # Delivers `message` with the scope of the tracker, as a sender does.
   defp deliver(tracker, message) do
-    GenServer.cast(tracker, {:deliver, message})
+    deliver(tracker, :sys.get_state(tracker).scope, message)
+  end
+
+  defp deliver(tracker, scope, message) do
+    GenServer.cast(tracker, {:deliver, scope, message})
     sync(tracker)
   end
 

@@ -54,7 +54,10 @@ defmodule Rollcall.Tracker do
   replaces the entries of its old run.
 
   The tracker drops a message from its own node. A record for this node would
-  repeat the local entries in the view.
+  repeat the local entries in the view. It also drops a message that carries
+  another scope. The sender writes the scope from its own state, so a mismatch
+  means that the transport misrouted the message. A crash would let a bug in the
+  transport take down this scope.
 
   A tick counts one quiet period for each record. A message from the peer, of
   any kind, resets the count. A record that reaches the silence threshold is
@@ -111,6 +114,9 @@ defmodule Rollcall.Tracker do
     * `:rollcall_tracker_peer_purged` - a tick deleted a peer record. The event
       has the keys `node`, `joins` and `leaves`. `joins` is empty. `leaves` holds
       the refs of the entries of the peer.
+    * `:rollcall_tracker_message_dropped` - the tracker dropped a message and
+      changed nothing. The event has the keys `message_scope`, `node` and
+      `reason`. The reason is `:wrong_scope` or `:local_origin`.
 
   Use the functions in `Rollcall`. Do not call this module directly.
   """
@@ -418,15 +424,24 @@ defmodule Rollcall.Tracker do
   end
 
   @impl true
-  @spec handle_cast({:deliver, Messages.t()}, State.t()) :: {:noreply, State.t()}
-  def handle_cast({:deliver, msg}, state) do
+  @spec handle_cast({:deliver, Rollcall.scope(), Messages.t()}, State.t()) :: {:noreply, State.t()}
+  def handle_cast({:deliver, scope, msg}, %State{scope: scope} = state) do
     node = node(Messages.origin(msg))
     {:noreply, deliver_message(state, node, Map.get(state.peers, node), msg)}
   end
 
+  # The sender writes the scope from its own state, so a mismatch means that the
+  # transport misrouted the message. A crash would let a bug in the transport
+  # take down this scope.
+  def handle_cast({:deliver, message_scope, msg}, %State{} = state) do
+    {:noreply, drop_message(state, :wrong_scope, message_scope, msg)}
+  end
+
   # The transport does not send a message to its own node. The clause makes a
   # tracker safe when it does.
-  defp deliver_message(state, node, _peer, _msg) when node == node(), do: state
+  defp deliver_message(state, node, _peer, msg) when node == node() do
+    drop_message(state, :local_origin, state.scope, msg)
+  end
 
   # A request carries no state, so a request from an unknown node creates no
   # record.
@@ -440,6 +455,17 @@ defmodule Rollcall.Tracker do
   defp deliver_message(state, node, %Peer{} = peer, msg) do
     {peer, changes} = Peer.deliver(peer, msg)
     put_peer(state, node, peer, changes)
+  end
+
+  defp drop_message(state, reason, message_scope, msg) do
+    tp(:rollcall_tracker_message_dropped, %{
+      scope: state.scope,
+      message_scope: message_scope,
+      node: node(Messages.origin(msg)),
+      reason: reason
+    })
+
+    state
   end
 
   defp put_peer(state, node, peer, changes) do
