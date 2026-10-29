@@ -21,7 +21,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
   @service_restart_close_code 1012
   @going_away_close_code 1001
 
-  setup [:checkout_tenant_and_connect]
+  setup [:checkout_tenant]
 
   describe "socket connect - tenant not found" do
     test "logs TenantNotFound and rejects connection for unknown external_id", %{serializer: serializer} do

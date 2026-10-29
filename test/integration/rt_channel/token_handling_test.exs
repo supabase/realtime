@@ -12,7 +12,7 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
 
   @moduletag :capture_log
 
-  setup [:checkout_tenant_and_connect]
+  setup [:checkout_tenant]
 
   describe "token validation" do
     setup [:rls_context]

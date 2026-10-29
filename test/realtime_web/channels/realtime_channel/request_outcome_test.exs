@@ -27,7 +27,6 @@ defmodule RealtimeWeb.RealtimeChannel.RequestOutcomeTest do
 
   setup context do
     tenant = TestTenantDb.checkout_tenant(run_migrations: true)
-    Realtime.Tenants.Cache.update_cache(tenant)
     RateCounter.new(Tenants.events_per_second_rate(tenant), tick: 100)
 
     {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
