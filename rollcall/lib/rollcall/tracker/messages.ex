@@ -23,8 +23,9 @@ defmodule Rollcall.Tracker.Messages do
   @typedoc """
   The incarnation and the version of the sender.
 
-  The incarnation is the time at which the tracker started. The version counts
-  the local changes since then.
+  The incarnation is the monotonic time at which the tracker started. It orders
+  the runs of one tracker on one node, and only that. The version counts the
+  local changes since then.
   """
   @type stamp :: {:stamp, integer(), non_neg_integer()}
 

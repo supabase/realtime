@@ -3,7 +3,7 @@ defmodule Rollcall.Tracker do
   The process that holds the entries of one scope on this node.
 
   The tracker holds the local entries, a monitor on each process that tracks an
-  entry, a version counter, an incarnation timestamp, a record for each peer
+  entry, a version counter, an incarnation, a record for each peer
   node and the view. It exchanges heartbeats with the trackers of the same scope
   on other nodes.
 
@@ -271,13 +271,19 @@ defmodule Rollcall.Tracker do
     The state of a tracker process.
 
     `local` holds the entries that processes on this node track. `version`
-    counts the changes to `local`. `incarnation` is the time at which the
-    tracker started. `sent` holds the `local` set and the `version` at the last
+    counts the changes to `local`. `incarnation` is the monotonic time at which
+    the tracker started. `sent` holds the `local` set and the `version` at the last
     heartbeat. The struct has no `sent` field yet.
 
     The `incarnation` and the `version` form the stamp of a message. A peer
     compares stamps to order messages that arrive in any order. A tracker that
     restarts gets a newer incarnation, so its peers replace its old entries.
+
+    Monotonic time orders the incarnations of one VM only. A peer keeps one
+    record for each node name, so a node that restarts under a new name gets a
+    new record, and no order between VMs is needed. A new VM that reuses a node
+    name can start with a lower incarnation. The peers then ignore its messages
+    until the silence threshold purges the old record.
 
     `peers` maps each peer node to its `Rollcall.Tracker.Peer`. The view of the
     tracker is `local` plus the replica of each peer. `silence_threshold` is the
@@ -334,7 +340,7 @@ defmodule Rollcall.Tracker do
 
     state = %State{
       scope: scope,
-      incarnation: System.os_time(:nanosecond),
+      incarnation: System.monotonic_time(:nanosecond),
       empty_grace: Application.get_env(:rollcall, :empty_grace, :timer.seconds(5)),
       local: Local.new(),
       # This default will get set to something less magic when we do the heartbeat timing.
