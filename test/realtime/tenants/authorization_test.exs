@@ -20,7 +20,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
 
-  setup [:checkout_tenant_and_connect, :rls_context, :use_authorize_function]
+  setup [:checkout_tenant, :rls_context, :use_authorize_function]
 
   describe "get_authorizations/3" do
     @tag role: "authenticated",

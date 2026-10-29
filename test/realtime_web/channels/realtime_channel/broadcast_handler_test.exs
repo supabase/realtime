@@ -1121,9 +1121,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
   defp initiate_tenant(context) do
     tenant = TestTenantDb.checkout_tenant(run_migrations: true)
 
-    # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
-    Realtime.Tenants.Cache.update_cache(tenant)
-
     rate = Tenants.events_per_second_rate(tenant)
     RateCounter.new(rate, tick: 100)
 

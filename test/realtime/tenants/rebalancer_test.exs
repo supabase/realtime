@@ -11,10 +11,7 @@ defmodule Realtime.Tenants.RebalancerTest do
   setup :set_mimic_from_context
 
   setup do
-    tenant = TestTenantDb.checkout_tenant(run_migrations: true)
-    # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
-    Realtime.Tenants.Cache.update_cache(tenant)
-    %{tenant: tenant}
+    %{tenant: TestTenantDb.checkout_tenant(run_migrations: true)}
   end
 
   describe "check/3" do

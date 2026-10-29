@@ -5,7 +5,8 @@
 --
 -- Beyond priv/repo/tenant_schema it also:
 --   - creates the supabase_realtime_admin role
---   - creates realtime.schema_migrations and records every applied version
+--   - creates realtime.schema_migrations, records every applied version and revokes every role
+--     but its owner from it
 --   - sets ALTER DEFAULT PRIVILEGES and the dashboard_user/postgres grants
 --
 -- See dev/scripts/export-tenant-db-dump.sh
@@ -1808,3 +1809,5 @@ INSERT INTO realtime."schema_migrations" (version) VALUES (20261008120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261009120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261022120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261027120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20261029120000);
+REVOKE ALL ON realtime.schema_migrations FROM postgres, dashboard_user, anon, authenticated, service_role, supabase_realtime_admin;

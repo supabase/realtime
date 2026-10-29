@@ -22,3 +22,8 @@ erl_crash.dump
 # Ignore package tarball (built via "mix hex.build").
 rollcall-*.tar
 
+# Trace dumps from failed snabbkaffe runs.
+/snabbkaffe/
+
+# Dialyzer PLT files.
+/priv/plts/*

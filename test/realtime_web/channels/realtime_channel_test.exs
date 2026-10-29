@@ -21,7 +21,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     {:ok, db_conn} = Realtime.Database.connect(tenant, "realtime_test", :stop)
     Integrations.setup_postgres_changes(db_conn)
     GenServer.stop(db_conn)
-    Realtime.Tenants.Cache.update_cache(tenant)
     {:ok, tenant: tenant}
   end
 

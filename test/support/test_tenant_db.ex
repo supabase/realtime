@@ -312,26 +312,30 @@ defmodule TestTenantDb do
           end
         end)
 
-        if run_migrations? do
-          case run_migrations(tenant) do
-            {:ok, count} ->
-              :ok = Realtime.Tenants.create_messages_partitions(conn)
+        tenant =
+          if run_migrations? do
+            case run_migrations(tenant) do
+              {:ok, count} ->
+                :ok = Realtime.Tenants.create_messages_partitions(conn)
 
-              {:ok, tenant} =
-                repo_run(mode, fn ->
-                  Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{migrations_ran: count})
-                end)
+                {:ok, tenant} =
+                  repo_run(mode, fn ->
+                    Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{migrations_ran: count})
+                  end)
 
-              if mode == :sandbox, do: Realtime.Tenants.Cache.invalidate_tenant_cache(tenant.external_id)
+                tenant
 
-              tenant
-
-            error ->
-              raise "Failed to run migrations: #{inspect(error)}"
+              error ->
+                raise "Failed to run migrations: #{inspect(error)}"
+            end
+          else
+            tenant
           end
-        else
-          tenant
-        end
+
+        # In async tests only the test process can read the sandboxed tenant row, so sockets, channels
+        # and Connect rely on this entry. Api's own cache updates are casts that can land late.
+        Realtime.Tenants.Cache.update_cache(tenant)
+        tenant
       after
         GenServer.stop(conn)
       end
