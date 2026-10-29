@@ -40,9 +40,7 @@ Channel topics look like `realtime:<sub_topic>` and are all handled by `Realtime
 
 `Realtime.Tenants.NodeJoinBudget` measures how fast each tenant joins channels on each node. The budget is the larger of two values, in joins per second. The first is `NODE_JOIN_BUDGET_FLOOR` (default 10). The second is `CLIENT_JOINS_PER_SECOND` (default 1) times the tenant's sockets on the node that `Realtime.UsersCounter` counts.
 
-A token bucket (a store of tokens that refills at the budget rate) holds `NODE_JOIN_BUDGET_BURST_SECONDS` (default 60) seconds of budget. A reconnect storm after a deploy fits in the bucket, but a tenant that rejoins without a stop empties it. Each node keeps its own buckets and does not share them with the cluster.
-
-The budget does not refuse joins yet. If the `node_join_budget` feature flag is on for the tenant, each join attempt takes one token. When the bucket is empty, Realtime accepts the join and increments two counters:
+A token bucket (a store of tokens that refills at the budget rate) holds `NODE_JOIN_BUDGET_BURST_SECONDS` (default 60) seconds of budget and a tenant that rejoins without a stop empties it
 
 | Metric | Endpoint | Label |
 | --- | --- | --- |
