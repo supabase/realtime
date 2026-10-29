@@ -80,6 +80,8 @@ defmodule Rollcall.Tracker do
   use Snabbkaffex, only: :trace
   alias Rollcall.Tracker.Local
   alias Rollcall.Tracker.Changes
+  alias Rollcall.Tracker.Messages
+  alias Rollcall.Tracker.Peer
 
   @max_retries 3
 
@@ -140,13 +142,14 @@ defmodule Rollcall.Tracker do
     :exit, {reason, _} when reason in @gone -> default
   end
 
-  @inspectable_keys [:incarnation, :scope, :version, :local]
+  @inspectable_keys [:incarnation, :scope, :version, :local, :peers]
 
   @type inspected_state :: %{
           scope: Rollcall.scope(),
           version: non_neg_integer(),
           incarnation: integer(),
-          local: Local.t()
+          local: Local.t(),
+          peers: %{node() => Peer.t()}
         }
 
   @doc """
@@ -191,8 +194,12 @@ defmodule Rollcall.Tracker do
   Returns `{:ok, pid}`. Returns `{:error, {:already_started, pid}}` when a
   tracker runs for `scope`. `Rollcall.TrackerSupervisor` calls this function.
   """
+  def start_link({scope, opts}) do
+    GenServer.start_link(__MODULE__, {scope, opts}, name: via(scope))
+  end
+
   def start_link(scope) do
-    GenServer.start_link(__MODULE__, scope, name: via(scope))
+    start_link({scope, []})
   end
 
   @doc """
@@ -223,27 +230,30 @@ defmodule Rollcall.Tracker do
     compares stamps to order messages that arrive in any order. A tracker that
     restarts gets a newer incarnation, so its peers replace its old entries.
 
-    TODO: For each peer node, the state holds a `replica`, a `mark`, a `silent` count
-    and a `behind` flag. The view of the tracker is `local` plus each replica.
+    For each peer node, the state holds a `Peer` entry in `peers.
+    The view of the tracker is `local` plus each replica.
 
     `monitors` maps each process that has an entry to its monitor. `empty_grace`
     and `empty_timer` control the stop of a tracker that holds no entry.
     """
 
     alias Rollcall.Tracker.Local
+    alias Rollcall.Tracker.Peer
 
     # `local` has no default. A default runs `Local.new/0` at compile time, and
     # the struct would then hold a literal value of the opaque type `Local.t()`.
-    @enforce_keys [:scope, :incarnation, :empty_grace, :local]
+    @enforce_keys [:scope, :incarnation, :empty_grace, :local, :silence_threshold]
 
     defstruct [
       :scope,
       :incarnation,
       :empty_grace,
       :local,
+      :silence_threshold,
       empty_timer: nil,
       version: 0,
-      monitors: %{}
+      monitors: %{},
+      peers: %{}
     ]
 
     @type t :: %__MODULE__{
@@ -253,7 +263,9 @@ defmodule Rollcall.Tracker do
             empty_timer: reference() | nil,
             local: Local.t(),
             version: non_neg_integer(),
-            monitors: %{pid() => reference()}
+            monitors: %{pid() => reference()},
+            peers: %{node() => Peer.t()},
+            silence_threshold: non_neg_integer()
           }
 
     @spec bump_version(t()) :: t()
@@ -264,7 +276,7 @@ defmodule Rollcall.Tracker do
 
   @impl true
   @spec init(Rollcall.scope()) :: {:ok, State.t()}
-  def init(scope) do
+  def init({scope, opts}) do
     Process.set_label({:rollcall_tracker, scope})
 
     tp(:rollcall_tracker_started, %{scope: scope})
@@ -273,7 +285,9 @@ defmodule Rollcall.Tracker do
       scope: scope,
       incarnation: System.os_time(:nanosecond),
       empty_grace: Application.get_env(:rollcall, :empty_grace, :timer.seconds(5)),
-      local: Local.new()
+      local: Local.new(),
+      # This default will get set to something less magic when we do the heartbeat timing.
+      silence_threshold: Keyword.get(opts, :silence_threshold, 10)
     }
 
     {:ok, state}
@@ -347,6 +361,36 @@ defmodule Rollcall.Tracker do
   end
 
   @impl true
+  def handle_cast({:deliver, msg}, state) do
+    node = node(Messages.origin(msg))
+    {:noreply, deliver_message(state, node, Map.get(state.peers, node), msg)}
+  end
+
+  defp deliver_message(state, _node, nil, {:request, _origin}), do: state
+
+  defp deliver_message(state, node, nil, msg) do
+    {peer, changes} = Peer.new(msg)
+    put_peer(state, node, peer, changes)
+  end
+
+  defp deliver_message(state, node, %Peer{} = peer, msg) do
+    {peer, changes} = Peer.deliver(peer, msg)
+    put_peer(state, node, peer, changes)
+  end
+
+  defp put_peer(state, node, peer, changes) do
+    tp(:rollcall_tracker_peer_message, %{
+      scope: state.scope,
+      node: node,
+      joins: Changes.join_refs(changes),
+      leaves: Changes.leave_refs(changes),
+      behind: Peer.behind?(peer)
+    })
+
+    %{state | peers: Map.put(state.peers, node, peer)}
+  end
+
+  @impl true
   @spec handle_info(term(), State.t()) :: {:noreply, State.t()} | {:stop, :normal, State.t()}
   def handle_info({:timeout, ref, :empty_timeout}, %{empty_timer: ref} = state) do
     tp(:rollcall_tracker_stopped, %{scope: state.scope})
@@ -366,6 +410,29 @@ defmodule Rollcall.Tracker do
     tp(:rollcall_tracker_pid_down, %{scope: state.scope, pid: pid})
 
     {:noreply, state}
+  end
+
+  def handle_info(:tick, state) do
+    peers =
+      Enum.reduce(state.peers, %{}, fn
+        {node, peer}, kept ->
+          case Peer.tick(peer, state.silence_threshold) do
+            {:keep, peer} ->
+              Map.put(kept, node, peer)
+
+            {:purge, changes} ->
+              tp(:rollcall_tracker_peer_purged, %{
+                scope: state.scope,
+                node: node,
+                joins: Changes.join_refs(changes),
+                leaves: Changes.leave_refs(changes)
+              })
+
+              kept
+          end
+      end)
+
+    {:noreply, %{state | peers: peers}}
   end
 
   def handle_info(_, state) do
