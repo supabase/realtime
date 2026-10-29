@@ -28,6 +28,7 @@ defmodule Rollcall.Tracker.Messages do
   """
   @type stamp :: {:stamp, integer(), non_neg_integer()}
 
+  @typedoc "An entry on the wire: the partition, the key, the ref and the meta."
   @type wire_entry :: {Rollcall.partition(), Rollcall.key(), Rollcall.ref(), Rollcall.meta()}
 
   @typedoc "The full `local` set of the sender."
@@ -44,6 +45,7 @@ defmodule Rollcall.Tracker.Messages do
   @typedoc "A request for a snapshot."
   @type request :: {:request, origin()}
 
+  @typedoc "A snapshot, a diff or a request."
   @type t :: snapshot() | diff() | request()
 
   @doc "Returns the stamp for `incarnation` and `version`."

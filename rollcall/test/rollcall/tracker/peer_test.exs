@@ -416,6 +416,25 @@ defmodule Rollcall.Tracker.PeerTest do
       assert {:purge, _changes} = Peer.tick(peer, 3)
     end
 
+    test "a stale diff resets the count", %{origin: origin} do
+      peer = snapshot_peer(origin, 1, 3, ["a"])
+      {:keep, peer} = tick_times(peer, 3, 2)
+      {peer, _changes} = Peer.deliver(peer, diff(origin, stamp(1, 2), 1, [], []))
+
+      assert {:keep, peer} = tick_times(peer, 3, 2)
+      assert {:purge, _changes} = Peer.tick(peer, 3)
+    end
+
+    test "a diff that sets behind resets the count", %{origin: origin} do
+      peer = snapshot_peer(origin, 1, 3, ["a"])
+      {:keep, peer} = tick_times(peer, 3, 2)
+      {peer, _changes} = Peer.deliver(peer, diff(origin, stamp(1, 6), 5, [], []))
+      assert Peer.behind?(peer)
+
+      assert {:keep, peer} = tick_times(peer, 3, 2)
+      assert {:purge, _changes} = Peer.tick(peer, 3)
+    end
+
     test "a purge returns every entry as a leave", %{origin: origin} do
       peer = snapshot_peer(origin, 1, 3, ["a", "b"])
 

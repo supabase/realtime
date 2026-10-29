@@ -103,7 +103,7 @@ defmodule Rollcall.Tracker.PeerPropertyTest do
   property "a peer is purged after exactly the threshold of quiet ticks" do
     check all(
             threshold <- integer(1..6),
-            events <- list_of(member_of([:tick, :stale, :request]), max_length: 30)
+            events <- list_of(member_of([:tick, :stale, :stale_diff, :gap_diff, :request]), max_length: 30)
           ) do
       origin = new_pid()
       {peer, _changes} = Peer.new(snapshot(origin, stamp(2, 5), entries(["a"])))
@@ -123,6 +123,14 @@ defmodule Rollcall.Tracker.PeerPropertyTest do
 
           :stale ->
             {peer, _changes} = Peer.deliver(peer, snapshot(origin, stamp(1, 0), []))
+            {:cont, {peer, 0}}
+
+          :stale_diff ->
+            {peer, _changes} = Peer.deliver(peer, diff(origin, stamp(1, 3), 2, [], []))
+            {:cont, {peer, 0}}
+
+          :gap_diff ->
+            {peer, _changes} = Peer.deliver(peer, diff(origin, stamp(2, 9), 8, [], []))
             {:cont, {peer, 0}}
 
           :request ->

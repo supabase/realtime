@@ -22,12 +22,14 @@ defmodule Rollcall.Tracker.Changes do
     %__MODULE__{}
   end
 
+  @doc "Returns changes with the given `joins` and `leaves`."
   @spec new([Entry.t()], [Entry.t()]) :: t()
   def new(joins, leaves) do
     %__MODULE__{joins: joins, leaves: leaves}
   end
 
-  @doc "Returns true if changes are empty"
+  @doc "Returns true when `changes` have no join and no leave."
+  @spec empty?(t()) :: boolean()
   def empty?(%__MODULE__{joins: [], leaves: []}), do: true
   def empty?(_changes), do: false
 
@@ -37,11 +39,13 @@ defmodule Rollcall.Tracker.Changes do
     %{changes | joins: [entry | changes.joins]}
   end
 
+  @doc "Returns the refs of the joins."
   @spec join_refs(t()) :: [Rollcall.ref()]
   def join_refs(%__MODULE__{joins: joins}) do
     Enum.map(joins, & &1.ref)
   end
 
+  @doc "Returns the refs of the leaves."
   @spec leave_refs(t()) :: [Rollcall.ref()]
   def leave_refs(%__MODULE__{leaves: leaves}) do
     Enum.map(leaves, & &1.ref)

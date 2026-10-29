@@ -3,6 +3,11 @@ defmodule Rollcall.Tracker.Entry do
   An entry that a process tracks.
 
   The `ref` identifies the entry. The `key` and the `meta` are the payload.
+
+  In a local entry, `pid` is the process that tracks the entry. In a replica
+  entry, `pid` is the origin: the tracker that sent the entry. Do not use `id/1`
+  on a replica entry. Two processes of one node with the same key get the same
+  id. Use the `ref`.
   """
   @enforce_keys [:partition, :pid, :key, :ref, :meta]
   defstruct [:partition, :pid, :key, :ref, :meta]

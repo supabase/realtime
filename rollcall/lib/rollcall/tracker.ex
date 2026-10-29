@@ -3,8 +3,22 @@ defmodule Rollcall.Tracker do
   The process that holds the entries of one scope on this node.
 
   The tracker holds the local entries, a monitor on each process that tracks an
-  entry, a version counter, an incarnation timestamp and the view. It exchanges
-  heartbeats with the trackers of the same scope on other nodes.
+  entry, a version counter, an incarnation timestamp, a record for each peer
+  node and the view. It exchanges heartbeats with the trackers of the same scope
+  on other nodes.
+
+  ## Not built yet
+
+  This module describes the finished design. The tracker does not yet do these
+  things:
+
+    * send a heartbeat, a goodbye or a request
+    * reply to a request with a snapshot
+    * hold `sent`, the state at the last heartbeat
+    * hold the view, or publish changes to subscribers
+
+  The tracker does receive the messages of its peers, and it keeps one record
+  for each peer node. Delete this section when the list is empty.
 
   ## Starting and Supervision
 
@@ -31,6 +45,21 @@ defmodule Rollcall.Tracker do
   `Phoenix.Presence` uses a link, so the crash of a shard stops every channel in
   the shard. Monitor mode lets a new tracker run next to the old one without
   that risk.
+
+  ## Peers
+
+  The tracker keeps one `Rollcall.Tracker.Peer` for each node that sent it a
+  message. The key is `node(origin)`, where `origin` is the pid of the sending
+  tracker. Two origins on one node share one record, so a restarted tracker
+  replaces the entries of its old run.
+
+  A tick counts one quiet period for each record. A message from the peer, of
+  any kind, resets the count. A record that reaches the silence threshold is
+  deleted, and its entries leave. A crashed peer sends no goodbye, and the
+  threshold is how the tracker finds out.
+
+  Set the threshold with the `:silence_threshold` option of `start_link/1`. The
+  value is a number of ticks. The default is 10.
 
   ## Grace period
 
@@ -72,6 +101,13 @@ defmodule Rollcall.Tracker do
     * `:rollcall_tracker_pid_down` - a process that tracked entries exited. The
       event has the key `pid`. The tracker emits the event after it removed the
       entries of the process.
+    * `:rollcall_tracker_peer_message` - a message reached a peer record. A
+      request from an unknown node emits no event. The event has the keys
+      `node`, `joins`, `leaves` and `behind`. `joins` and `leaves` are the refs
+      that the message added to the replica and removed from it.
+    * `:rollcall_tracker_peer_purged` - a tick deleted a peer record. The event
+      has the keys `node`, `joins` and `leaves`. `joins` is empty. `leaves` holds
+      the refs of the entries of the peer.
 
   Use the functions in `Rollcall`. Do not call this module directly.
   """
@@ -155,8 +191,9 @@ defmodule Rollcall.Tracker do
   @doc """
   Returns the state of the tracker for `scope`, or `nil` when no tracker runs.
 
-  The state is a map with the keys `scope`, `version`, `incarnation` and
-  `local`. The value of `local` is a `Rollcall.Tracker.Local` set.
+  The state is a map with the keys `scope`, `version`, `incarnation`, `local`
+  and `peers`. The value of `local` is a `Rollcall.Tracker.Local` set. The value
+  of `peers` maps each peer node to its `Rollcall.Tracker.Peer`.
 
   The map holds the fields that have a meaning outside the process. The timer
   and the monitors stay private, so a change to them does not break a caller.
@@ -174,6 +211,7 @@ defmodule Rollcall.Tracker do
   The function skips a tracker that has exited. The Registry removes the entry
   of an exited process after a short delay.
   """
+  @spec scopes() :: [Rollcall.scope()]
   def scopes do
     Rollcall.Registry
     |> Registry.select([{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
@@ -191,9 +229,15 @@ defmodule Rollcall.Tracker do
   @doc """
   Starts the tracker for `scope` and registers it in `Rollcall.Registry`.
 
+  The argument is `scope` or `{scope, opts}`. The option `:silence_threshold`
+  sets the number of ticks without a message after which the tracker deletes a
+  peer record. The default is 10.
+
   Returns `{:ok, pid}`. Returns `{:error, {:already_started, pid}}` when a
   tracker runs for `scope`. `Rollcall.TrackerSupervisor` calls this function.
   """
+  @spec start_link(Rollcall.scope() | {Rollcall.scope(), [silence_threshold: pos_integer()]}) ::
+          GenServer.on_start()
   def start_link({scope, opts}) do
     GenServer.start_link(__MODULE__, {scope, opts}, name: via(scope))
   end
@@ -205,6 +249,7 @@ defmodule Rollcall.Tracker do
   @doc """
   Returns the pid of the tracker for `scope`, or `nil` when no tracker runs.
   """
+  @spec whereis(Rollcall.scope()) :: pid() | nil
   def whereis(scope) do
     GenServer.whereis(via(scope))
   end
@@ -213,6 +258,7 @@ defmodule Rollcall.Tracker do
   Returns the `:via` name that registers the tracker for `scope` in
   `Rollcall.Registry`.
   """
+  @spec via(Rollcall.scope()) :: {:via, Registry, {Rollcall.Registry, Rollcall.scope()}}
   def via(scope) do
     {:via, Registry, {Rollcall.Registry, scope}}
   end
@@ -224,14 +270,16 @@ defmodule Rollcall.Tracker do
     `local` holds the entries that processes on this node track. `version`
     counts the changes to `local`. `incarnation` is the time at which the
     tracker started. `sent` holds the `local` set and the `version` at the last
-    heartbeat.
+    heartbeat. The struct has no `sent` field yet.
 
     The `incarnation` and the `version` form the stamp of a message. A peer
     compares stamps to order messages that arrive in any order. A tracker that
     restarts gets a newer incarnation, so its peers replace its old entries.
 
-    For each peer node, the state holds a `Peer` entry in `peers.
-    The view of the tracker is `local` plus each replica.
+    `peers` maps each peer node to its `Rollcall.Tracker.Peer`. The view of the
+    tracker is `local` plus the replica of each peer. `silence_threshold` is the
+    number of ticks without a message after which the tracker deletes a peer
+    record.
 
     `monitors` maps each process that has an entry to its monitor. `empty_grace`
     and `empty_timer` control the stop of a tracker that holds no entry.
@@ -265,7 +313,7 @@ defmodule Rollcall.Tracker do
             version: non_neg_integer(),
             monitors: %{pid() => reference()},
             peers: %{node() => Peer.t()},
-            silence_threshold: non_neg_integer()
+            silence_threshold: pos_integer()
           }
 
     @spec bump_version(t()) :: t()
@@ -275,7 +323,7 @@ defmodule Rollcall.Tracker do
   end
 
   @impl true
-  @spec init(Rollcall.scope()) :: {:ok, State.t()}
+  @spec init({Rollcall.scope(), keyword()}) :: {:ok, State.t()}
   def init({scope, opts}) do
     Process.set_label({:rollcall_tracker, scope})
 
@@ -361,11 +409,14 @@ defmodule Rollcall.Tracker do
   end
 
   @impl true
+  @spec handle_cast({:deliver, Messages.t()}, State.t()) :: {:noreply, State.t()}
   def handle_cast({:deliver, msg}, state) do
     node = node(Messages.origin(msg))
     {:noreply, deliver_message(state, node, Map.get(state.peers, node), msg)}
   end
 
+  # A request carries no state, so a request from an unknown node creates no
+  # record.
   defp deliver_message(state, _node, nil, {:request, _origin}), do: state
 
   defp deliver_message(state, node, nil, msg) do
