@@ -155,11 +155,14 @@ defmodule Realtime.LogFilterTest do
   defp request(port, path) do
     socket = connect(port)
 
+    # Generous timeouts: the first request in the VM lazily loads cowboy's modules, and at
+    # suite start the code server is busy loading test modules that are still being
+    # compiled, which can delay the response.
     :ok = :gen_tcp.send(socket, get(path))
-    {:ok, _dead_stream_response} = :gen_tcp.recv(socket, 0, 1000)
+    {:ok, _dead_stream_response} = :gen_tcp.recv(socket, 0, to_timeout(second: 5))
 
     :ok = :gen_tcp.send(socket, get("/ok"))
-    {:ok, _live_stream_response} = :gen_tcp.recv(socket, 0, 1000)
+    {:ok, _live_stream_response} = :gen_tcp.recv(socket, 0, to_timeout(second: 5))
 
     :gen_tcp.close(socket)
     Logger.flush()
