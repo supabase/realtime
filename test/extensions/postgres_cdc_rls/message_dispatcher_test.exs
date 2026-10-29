@@ -15,6 +15,13 @@ defmodule Extensions.PostgresCdcRls.MessageDispatcherTest do
     end
   end
 
+  defmodule RaisingSerializer do
+    def fastlane!(_msg) do
+      send(self(), :encode_attempted)
+      raise ArgumentError, "cannot encode"
+    end
+  end
+
   describe "dispatch/3" do
     test "uses each subscriber's serializer when the outgoing messages match" do
       parent = self()
@@ -31,9 +38,9 @@ defmodule Extensions.PostgresCdcRls.MessageDispatcherTest do
         subscriptions =
           Enum.map(serializers, fn serializer ->
             fastlane_pid =
-              spawn(fn ->
+              spawn_link(fn ->
                 receive do
-                  {:socket_push, :text, frame} -> send(parent, {serializer, Jason.decode!(IO.iodata_to_binary(frame))})
+                  msg -> send(parent, {serializer, msg})
                 end
               end)
 
@@ -46,10 +53,13 @@ defmodule Extensions.PostgresCdcRls.MessageDispatcherTest do
         event = if new_api?, do: "postgres_changes", else: "INSERT"
         expected_payload = if new_api?, do: %{"ids" => [1], "data" => data}, else: data
 
-        assert_receive {Phoenix.Socket.V1.JSONSerializer,
-                        %{"topic" => ^topic, "event" => ^event, "payload" => ^expected_payload, "ref" => nil}}
+        assert_receive {Phoenix.Socket.V1.JSONSerializer, {:socket_push, :text, v1_frame}}
 
-        assert_receive {RealtimeWeb.Socket.V2Serializer, [nil, nil, ^topic, ^event, ^expected_payload]}
+        assert %{"topic" => ^topic, "event" => ^event, "payload" => ^expected_payload, "ref" => nil} =
+                 decode!(v1_frame)
+
+        assert_receive {RealtimeWeb.Socket.V2Serializer, {:socket_push, :text, v2_frame}}
+        assert [nil, nil, ^topic, ^event, ^expected_payload] = decode!(v2_frame)
       end
     end
 
@@ -149,8 +159,47 @@ defmodule Extensions.PostgresCdcRls.MessageDispatcherTest do
 
       assert_receive {:received, {:encoded, %Broadcast{}}}
       assert_receive {:received, {:encoded, %Broadcast{}}}
-      assert_receive :encoded_message
-      refute_receive :encoded_message
+      assert_received :encoded_message
+      refute_received :encoded_message
+    end
+
+    test "shares an encoding between old api subscribers whatever their ids, not between new api ones" do
+      sub_ids = MapSet.new(["sub_1", "sub_2"])
+
+      subscriptions =
+        for new_api? <- [false, true], ids <- [[{"sub_1", 1}], [{"sub_2", 2}]] do
+          {self(), {:subscriber_fastlane, self(), CountingSerializer, ids, "realtime:topic", new_api?}}
+        end
+
+      assert :ok = MessageDispatcher.dispatch(subscriptions, self(), {"INSERT", "{}", sub_ids})
+
+      assert_received {:encoded, %Broadcast{event: "INSERT"}}
+      assert_received {:encoded, %Broadcast{event: "INSERT"}}
+      assert_received {:encoded, %Broadcast{event: "postgres_changes", payload: %{ids: [1]}}}
+      assert_received {:encoded, %Broadcast{event: "postgres_changes", payload: %{ids: [2]}}}
+
+      for _ <- 1..3, do: assert_received(:encoded_message)
+      refute_received :encoded_message
+    end
+
+    test "a serializer raising skips only the subscribers sharing that frame" do
+      sub_ids = MapSet.new(["sub_1"])
+      ids = [{"sub_1", 1}]
+
+      subscriptions = [
+        {self(), {:subscriber_fastlane, self(), RaisingSerializer, ids, "realtime:topic", true}},
+        {self(), {:subscriber_fastlane, self(), RaisingSerializer, ids, "realtime:topic", true}},
+        {self(), {:subscriber_fastlane, self(), FakeSerializer, ids, "realtime:topic", true}}
+      ]
+
+      assert :ok = MessageDispatcher.dispatch(subscriptions, self(), {"INSERT", "{}", sub_ids})
+
+      assert_received :encode_attempted
+      refute_received :encode_attempted
+      assert_received {:encoded, %Broadcast{topic: "realtime:topic"}}
+      refute_received {:encoded, _}
     end
   end
+
+  defp decode!(frame), do: frame |> IO.iodata_to_binary() |> Jason.decode!()
 end
