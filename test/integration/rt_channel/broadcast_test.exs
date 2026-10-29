@@ -573,6 +573,43 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
       assert replayed == [1, 2, 3, 4, 5]
     end
 
+    @tag policies: [:authenticated_read_broadcast_and_presence]
+    test "replays a payload that isn't an object", %{
+      tenant: tenant,
+      topic: topic,
+      db_conn: db_conn,
+      serializer: serializer
+    } do
+      values = [[1, 2, 3], "hello", 42, true, nil]
+
+      for value <- values do
+        Postgrex.query!(db_conn, "SELECT realtime.send($1::text::jsonb, 'event', $2::text, TRUE::bool)", [
+          Jason.encode!(value),
+          topic
+        ])
+      end
+
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, topic, %{config: %{private: true, broadcast: %{replay: %{limit: 10, since: 0}}}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+
+      replayed =
+        for _ <- values do
+          assert_receive %Message{
+                           event: "broadcast",
+                           topic: ^topic,
+                           payload: %{"payload" => payload, "meta" => %{"replayed" => true}}
+                         },
+                         1000
+
+          payload
+        end
+
+      assert replayed == values
+    end
+
     @tag policies: [:authenticated_read_broadcast_and_presence], serializer: RealtimeWeb.Socket.V2Serializer
     test "replays binary messages as binary frames", %{
       tenant: tenant,
@@ -1034,6 +1071,35 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
                        topic: ^full_topic
                      },
                      1000
+    end
+
+    test "broadcast event when function 'send' is called with a payload that isn't an object", %{
+      tenant: tenant,
+      topic: topic,
+      db_conn: db_conn,
+      serializer: serializer
+    } do
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      full_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, full_topic, %{config: %{broadcast: %{self: true}, private: false}})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
+      assert ReplicationConnection.ready?(tenant.external_id)
+
+      for value <- [[1, 2, 3], "hello", 42, true, nil] do
+        Postgrex.query!(db_conn, "SELECT realtime.send($1::text::jsonb, 'event', $2, FALSE)", [
+          Jason.encode!(value),
+          topic
+        ])
+
+        assert_receive %Message{
+                         event: "broadcast",
+                         payload: %{"event" => "event", "payload" => ^value, "type" => "broadcast"},
+                         topic: ^full_topic
+                       },
+                       1000
+      end
     end
   end
 
