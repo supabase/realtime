@@ -85,6 +85,44 @@ defmodule Rollcall.TrackerPeersTest do
     end
   end
 
+  describe "a message from the local node" do
+    test "creates no record and emits no event", %{scope: scope} do
+      origin = self()
+
+      check_trace(
+        fn ->
+          tracker = start_tracker(scope, @threshold)
+          deliver(tracker, snapshot(origin, stamp(1, 3), entries(["a"])))
+          deliver(tracker, diff(origin, stamp(1, 4), 3, entries(["b"]), []))
+          deliver(tracker, request(origin))
+          peers(scope)
+        end,
+        fn peers, trace ->
+          assert peers == %{}
+          expect_events(trace, @message, scope, 0)
+        end
+      )
+    end
+
+    test "does not change a record of another node", %{scope: scope} do
+      origin = remote_pid(@node_a, 1)
+
+      check_trace(
+        fn ->
+          tracker = start_tracker(scope, @threshold)
+          deliver(tracker, snapshot(origin, stamp(1, 3), entries(["a"])))
+          deliver(tracker, snapshot(self(), stamp(9, 9), entries(["z"])))
+          peers(scope)
+        end,
+        fn peers, trace ->
+          assert Map.keys(peers) == [@node_a]
+          assert refs(peers[@node_a]) == ["a"]
+          expect_events(trace, @message, scope, 1)
+        end
+      )
+    end
+  end
+
   describe "a message from a known node" do
     test "the event holds the joins and the leaves of the change", %{scope: scope} do
       origin = remote_pid(@node_a, 1)

@@ -53,6 +53,9 @@ defmodule Rollcall.Tracker do
   tracker. Two origins on one node share one record, so a restarted tracker
   replaces the entries of its old run.
 
+  The tracker drops a message from its own node. A record for this node would
+  repeat the local entries in the view.
+
   A tick counts one quiet period for each record. A message from the peer, of
   any kind, resets the count. A record that reaches the silence threshold is
   deleted, and its entries leave. A crashed peer sends no goodbye, and the
@@ -414,6 +417,10 @@ defmodule Rollcall.Tracker do
     node = node(Messages.origin(msg))
     {:noreply, deliver_message(state, node, Map.get(state.peers, node), msg)}
   end
+
+  # The transport does not send a message to its own node. The clause makes a
+  # tracker safe when it does.
+  defp deliver_message(state, node, _peer, _msg) when node == node(), do: state
 
   # A request carries no state, so a request from an unknown node creates no
   # record.
