@@ -1,0 +1,118 @@
+/*
+Tests that an RLS policy raising for one subscription's claims is contained to that subscription:
+- Two authenticated subscribers, one carrying app_metadata.app_id = "null", which the policy casts to uuid and raises
+- One anon subscriber on a policy that always passes
+- Expected: both healthy subscribers receive the record, the poisoned one gets an Error 500 row with no record
+*/
+select 1 from pg_create_logical_replication_slot('realtime', 'wal2json', false);
+ ?column? 
+----------
+        1
+(1 row)
+
+create table public.notes(
+    id int primary key,
+    body text
+);
+create policy rls_note_app_id
+on public.notes
+to authenticated
+using (
+    coalesce(
+        ((current_setting('request.jwt.claims', true)::jsonb -> 'app_metadata' ->> 'app_id')::uuid)::text,
+        'no-app-id'
+    ) is not null
+);
+create policy rls_note_anon
+on public.notes
+to anon
+using (true);
+alter table public.notes enable row level security;
+insert into realtime.subscription(subscription_id, entity, claims)
+values
+    (
+        seed_uuid(1),
+        'public.notes',
+        jsonb_build_object('role', 'authenticated', 'sub', seed_uuid(4)::text)
+    ),
+    (
+        seed_uuid(2),
+        'public.notes',
+        jsonb_build_object('role', 'authenticated', 'sub', seed_uuid(5)::text, 'app_metadata', jsonb_build_object('app_id', 'null'))
+    ),
+    (
+        seed_uuid(3),
+        'public.notes',
+        jsonb_build_object('role', 'anon')
+    );
+select clear_wal();
+ clear_wal 
+-----------
+ 
+(1 row)
+
+insert into public.notes(id, body) values (1, 'hello');
+select
+    rec,
+    is_rls_enabled,
+    subscription_ids,
+    errors
+from
+   walrus;
+                        rec                         | is_rls_enabled |            subscription_ids            |                               errors                               
+----------------------------------------------------+----------------+----------------------------------------+--------------------------------------------------------------------
+ {                                                 +| t              | {11955172-4e1d-5836-925f-2bcb7a287b87} | {}
+     "type": "INSERT",                             +|                |                                        | 
+     "table": "notes",                             +|                |                                        | 
+     "record": {                                   +|                |                                        | 
+         "id": 1,                                  +|                |                                        | 
+         "body": "hello"                           +|                |                                        | 
+     },                                            +|                |                                        | 
+     "schema": "public",                           +|                |                                        | 
+     "columns": [                                  +|                |                                        | 
+         {                                         +|                |                                        | 
+             "name": "id",                         +|                |                                        | 
+             "type": "int4"                        +|                |                                        | 
+         },                                        +|                |                                        | 
+         {                                         +|                |                                        | 
+             "name": "body",                       +|                |                                        | 
+             "type": "text"                        +|                |                                        | 
+         }                                         +|                |                                        | 
+     ],                                            +|                |                                        | 
+     "commit_timestamp": "2000-01-01T08:01:01.000Z"+|                |                                        | 
+ }                                                  |                |                                        | 
+ {                                                 +| t              | {f4539ebe-c779-5788-bbc1-2421ffaa8954} | {}
+     "type": "INSERT",                             +|                |                                        | 
+     "table": "notes",                             +|                |                                        | 
+     "record": {                                   +|                |                                        | 
+         "id": 1,                                  +|                |                                        | 
+         "body": "hello"                           +|                |                                        | 
+     },                                            +|                |                                        | 
+     "schema": "public",                           +|                |                                        | 
+     "columns": [                                  +|                |                                        | 
+         {                                         +|                |                                        | 
+             "name": "id",                         +|                |                                        | 
+             "type": "int4"                        +|                |                                        | 
+         },                                        +|                |                                        | 
+         {                                         +|                |                                        | 
+             "name": "body",                       +|                |                                        | 
+             "type": "text"                        +|                |                                        | 
+         }                                         +|                |                                        | 
+     ],                                            +|                |                                        | 
+     "commit_timestamp": "2000-01-01T08:01:01.000Z"+|                |                                        | 
+ }                                                  |                |                                        | 
+ {                                                 +| t              | {5211e8ec-8c25-5c7f-9b03-6ff1eac0159e} | {"Error 500: Internal Server Error, RLS policy evaluation failed"}
+     "type": "INSERT",                             +|                |                                        | 
+     "table": "notes",                             +|                |                                        | 
+     "schema": "public"                            +|                |                                        | 
+ }                                                  |                |                                        | 
+(3 rows)
+
+drop table public.notes;
+select pg_drop_replication_slot('realtime');
+ pg_drop_replication_slot 
+--------------------------
+ 
+(1 row)
+
+truncate table realtime.subscription;
