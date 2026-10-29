@@ -12,6 +12,7 @@ tenant_name = System.get_env("SELF_HOST_TENANT_NAME", "realtime-dev")
 default_db_host = "host.docker.internal"
 
 {:ok, _flag} = Api.upsert_feature_flag(%{name: "gcm_encryption_backfill", enabled: true})
+{:ok, _flag} = Api.upsert_feature_flag(%{name: "broadcast_persistence", enabled: true})
 
 {:ok, tenant} =
   Repo.transaction(fn ->
