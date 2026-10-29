@@ -15,6 +15,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
   alias Realtime.Tenants.Connect
 
   alias RealtimeWeb.RealtimeChannel
+  alias RealtimeWeb.RequestMetrics
   alias RealtimeWeb.TenantBroadcaster
 
   embedded_schema do
@@ -26,6 +27,15 @@ defmodule Realtime.Tenants.BatchBroadcast do
     end
   end
 
+  @type result :: :ok | {:error, term()} | {:error, atom(), String.t()}
+
+  @doc """
+  Broadcasts a batch of messages.
+
+  Returns `{result, outcomes}`. `result` is what the API answers with. `outcomes` has one outcome for
+  each message, because the API answers `:ok` even when it drops the messages of a private topic.
+  The messages of a topic whose authorization gives no answer are dropped without an outcome.
+  """
   @spec broadcast(
           auth_params :: map() | nil,
           tenant :: Tenant.t(),
@@ -33,7 +43,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
             messages: list(%{id: String.t(), topic: String.t(), payload: map(), event: String.t(), private: boolean()})
           },
           super_user :: boolean()
-        ) :: :ok | {:error, atom() | Ecto.Changeset.t()}
+        ) :: {result(), [RequestMetrics.outcome()]}
   def broadcast(auth_params, tenant, messages, super_user \\ false)
 
   def broadcast(%Plug.Conn{} = conn, %Tenant{} = tenant, messages, super_user) do
@@ -48,8 +58,8 @@ defmodule Realtime.Tenants.BatchBroadcast do
     broadcast(auth_params, %Tenant{} = tenant, messages, super_user)
   end
 
-  def broadcast(_auth_params, %Tenant{suspend: true}, _messages, _super_user) do
-    {:error, :forbidden, "Tenant is suspended"}
+  def broadcast(_auth_params, %Tenant{suspend: true}, messages, _super_user) do
+    with_outcome({:error, :forbidden, "Tenant is suspended"}, :tenant_suspended, messages)
   end
 
   def broadcast(auth_params, %Tenant{} = tenant, messages, super_user) do
@@ -63,38 +73,41 @@ defmodule Realtime.Tenants.BatchBroadcast do
         |> Enum.group_by(fn event -> Map.get(event, :private, false) end)
 
       # Handle events for public channel
-      events
-      |> Map.get(false, [])
-      |> Enum.each(fn message ->
-        send_message_and_count(tenant, events_per_second_rate, message, true)
-      end)
+      public_outcomes =
+        events
+        |> Map.get(false, [])
+        |> Enum.map(fn message ->
+          send_message_and_count(tenant, events_per_second_rate, message, true)
+          :success
+        end)
 
-      # Handle events for private channel
-      events
-      |> Map.get(true, [])
-      |> Enum.group_by(fn event -> Map.get(event, :topic) end)
-      |> Enum.each(fn {topic, events} ->
-        if super_user do
-          Enum.each(events, fn message -> send_message_and_count(tenant, events_per_second_rate, message, false) end)
-        else
-          case permissions_for_message(tenant, auth_params, topic) do
-            %Policies{broadcast: %BroadcastPolicies{write: true}} ->
-              Enum.each(events, fn message -> send_message_and_count(tenant, events_per_second_rate, message, false) end)
+      # Handle events for private channel. Each topic is authorized once, and all of its messages
+      # get the outcome of that check.
+      private_outcomes =
+        events
+        |> Map.get(true, [])
+        |> Enum.group_by(fn event -> Map.get(event, :topic) end)
+        |> Enum.flat_map(fn {topic, events} ->
+          outcome = authorize_topic(tenant, auth_params, topic, super_user)
 
-            _ ->
-              nil
+          if outcome == :success do
+            Enum.each(events, fn message -> send_message_and_count(tenant, events_per_second_rate, message, false) end)
           end
-        end
-      end)
 
-      :ok
+          outcome_per_message(outcome, events)
+        end)
+
+      {:ok, public_outcomes ++ private_outcomes}
     else
-      %Ecto.Changeset{valid?: false} = changeset -> {:error, changeset}
-      error -> error
+      %Ecto.Changeset{valid?: false} = changeset ->
+        {{:error, changeset}, changeset_outcomes(changeset, messages)}
+
+      {:error, :too_many_requests, _} = error ->
+        with_outcome(error, :rate_limit_exceeded, messages)
     end
   end
 
-  def broadcast(_, nil, _, _), do: {:error, :tenant_not_found}
+  def broadcast(_, nil, _, _), do: {{:error, :tenant_not_found}, []}
 
   defp changeset(payload, attrs, tenant) do
     payload
@@ -122,7 +135,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
 
     case Tenants.validate_payload_size(tenant, payload) do
       :ok -> changeset
-      _ -> add_error(changeset, :payload, "Payload size exceeds tenant limit")
+      _ -> add_error(changeset, :payload, "Payload size exceeds tenant limit", validation: :payload_size)
     end
   end
 
@@ -182,4 +195,72 @@ defmodule Realtime.Tenants.BatchBroadcast do
         :ok
     end
   end
+
+  # Every message gets the same outcome. `params` is what the client sent, so the count comes from it.
+  defp with_outcome(result, error_code, params) do
+    outcome = RequestMetrics.classify_broadcast_error(error_code)
+    {result, List.duplicate(outcome, message_count(params))}
+  end
+
+  defp message_count(%{"messages" => messages}), do: message_count(messages)
+  defp message_count(%{messages: messages}), do: message_count(messages)
+  defp message_count(messages) when is_list(messages), do: length(messages)
+  # No list of messages, so the whole request counts once
+  defp message_count(_params), do: 1
+
+  # Super users are not authorized per topic. A nil outcome means there is no answer to count, so the
+  # messages of that topic are dropped without an outcome.
+  defp authorize_topic(_tenant, _auth_params, _topic, true), do: :success
+
+  defp authorize_topic(tenant, auth_params, topic, false) do
+    case permissions_for_message(tenant, auth_params, topic) do
+      %Policies{broadcast: %BroadcastPolicies{write: true}} -> :success
+      %Policies{broadcast: %BroadcastPolicies{}} -> RequestMetrics.classify_broadcast_error(:unauthorized)
+      {:error, _} = error -> RequestMetrics.classify_broadcast_error(authorization_error_code(error))
+      {:error, _, _} = error -> RequestMetrics.classify_broadcast_error(authorization_error_code(error))
+      _ -> nil
+    end
+  end
+
+  defp outcome_per_message(nil, _events), do: []
+  defp outcome_per_message(outcome, events), do: List.duplicate(outcome, length(events))
+
+  defp authorization_error_code({:error, :tenant_database_unavailable}), do: :unable_to_connect_to_project
+
+  defp authorization_error_code({:error, reason})
+       when reason in [:initializing, :tenant_database_connection_initializing],
+       do: :initializing_project_connection
+
+  defp authorization_error_code({:error, :tenant_db_too_many_connections}), do: :database_lack_of_connections
+  defp authorization_error_code({:error, :connect_rate_limit_reached}), do: :database_connection_rate_limit_reached
+  defp authorization_error_code({:error, :increase_connection_pool}), do: :increase_connection_pool
+  defp authorization_error_code({:error, :missing_partition}), do: :missing_partition
+  defp authorization_error_code({:error, :rpc_error, _}), do: :unable_to_handle_broadcast
+  defp authorization_error_code({:error, :rls_policy_error, _}), do: :rls_policy_error
+  defp authorization_error_code({:error, :query_canceled, _}), do: :query_canceled
+  defp authorization_error_code(_error), do: :unable_to_set_policies
+
+  # An invalid message rejects the whole batch, but each message gets its own reason. When an entry is not
+  # an object, `cast_embed` keeps no message changesets, so every entry counts as invalid and the count comes
+  # from `params`, what the client sent.
+  defp changeset_outcomes(changeset, params) do
+    case get_change(changeset, :messages) do
+      [_ | _] = message_changesets -> Enum.map(message_changesets, &message_outcome/1)
+      _ -> List.duplicate(RequestMetrics.classify_broadcast_error(:invalid_request), message_count(params))
+    end
+  end
+
+  # A valid message is only dropped because of the others in its batch
+  defp message_outcome(%Ecto.Changeset{valid?: true}), do: RequestMetrics.classify_broadcast_error(:batch_rejected)
+
+  defp message_outcome(%Ecto.Changeset{errors: errors}) do
+    # A payload size error names the cause, even when the message has other errors
+    if Enum.any?(errors, &payload_size_error?/1) do
+      RequestMetrics.classify_broadcast_error(:payload_size_exceeded)
+    else
+      RequestMetrics.classify_broadcast_error(:invalid_request)
+    end
+  end
+
+  defp payload_size_error?({field, {_message, opts}}), do: field == :payload and opts[:validation] == :payload_size
 end
