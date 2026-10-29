@@ -454,6 +454,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     {msg, envelopes} = RealtimeWeb.Presence.Metrics.strip_diff(msg)
 
     push(socket, "presence_diff", msg.payload)
+    GenCounter.add(Tenants.presence_events_per_second_key(tenant_id))
 
     RealtimeWeb.Presence.Metrics.record(envelopes, context)
 
