@@ -53,22 +53,30 @@ defmodule Rollcall.Tracker.PeerPropertyTest do
     end
   end
 
-  property "the origin is the origin of the newest message that the peer accepted" do
+  # The first message of the highest incarnation that the peer has received is
+  # always accepted: a snapshot of a newer incarnation is newer than the mark,
+  # and a diff of a newer incarnation never applies and is newer than the mark.
+  # Later messages of older incarnations never move the origin back.
+  property "the origin is the origin of the highest incarnation delivered so far" do
     check all(
             ops <- operations(),
             sender = simulate(ops ++ [:snapshot]),
             schedule <- schedule(sender)
           ) do
-      Enum.reduce(schedule, nil, fn message, peer ->
+      Enum.reduce(schedule, {nil, nil}, fn message, {peer, newest} ->
         after_delivery = deliver(peer, message.message)
+        {incarnation, _version} = message.stamp
 
-        cond do
-          peer == nil -> assert Peer.origin(after_delivery) == message.origin
-          message.stamp <= mark_tuple(peer) -> assert Peer.origin(after_delivery) == Peer.origin(peer)
-          true -> assert Peer.origin(after_delivery) == message.origin
-        end
+        newest =
+          case newest do
+            {highest, _origin} when highest >= incarnation -> newest
+            _ -> {incarnation, message.origin}
+          end
 
-        after_delivery
+        {_incarnation, expected_origin} = newest
+        assert Peer.origin(after_delivery) == expected_origin
+
+        {after_delivery, newest}
       end)
     end
   end

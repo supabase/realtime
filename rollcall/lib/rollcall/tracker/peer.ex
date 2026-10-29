@@ -23,10 +23,11 @@ defmodule Rollcall.Tracker.Peer do
           mark: Messages.stamp() | nil,
           silent_ticks: non_neg_integer(),
           behind: boolean(),
-          origin: pid()
+          origin: pid() | nil,
+          origin_incarnation: integer() | nil
         }
 
-  defstruct origin: nil, mark: nil, silent_ticks: 0, behind: false, replica: %{}
+  defstruct origin: nil, origin_incarnation: nil, mark: nil, silent_ticks: 0, behind: false, replica: %{}
 
   def new(msg) do
     deliver(%__MODULE__{}, msg)
@@ -38,16 +39,9 @@ defmodule Rollcall.Tracker.Peer do
     if newer?(stamp, peer.mark) do
       {peer, changes} = apply_snapshot(peer, origin, entries)
 
-      {
-        %{
-          peer
-          | origin: origin,
-            mark: stamp,
-            behind: false,
-            silent_ticks: 0
-        },
-        changes
-      }
+      peer = %{peer | mark: stamp, behind: false, silent_ticks: 0}
+
+      {put_origin(peer, origin, stamp), changes}
     else
       {peer, Changes.new()}
     end
@@ -58,10 +52,10 @@ defmodule Rollcall.Tracker.Peer do
       :applicable ->
         {peer, changes} = apply_diff(peer, origin, joins, leaves)
 
-        {%{peer | origin: origin, mark: stamp, silent_ticks: 0}, changes}
+        {put_origin(%{peer | mark: stamp, silent_ticks: 0}, origin, stamp), changes}
 
       :behind ->
-        {%{peer | behind: true, origin: origin}, Changes.new()}
+        {put_origin(%{peer | behind: true}, origin, stamp), Changes.new()}
 
       :stale ->
         {peer, Changes.new()}
@@ -96,6 +90,16 @@ defmodule Rollcall.Tracker.Peer do
       {:purge, Changes.new([], Map.values(peer.replica))}
     end
   end
+
+  # The origin follows the newest incarnation. A message of an older run can
+  # still be accepted when it is newer than the mark, and must not point the
+  # origin back at that run.
+  defp put_origin(%{origin_incarnation: current} = peer, origin, {:stamp, incarnation, _version})
+       when is_nil(current) or incarnation >= current do
+    %{peer | origin: origin, origin_incarnation: incarnation}
+  end
+
+  defp put_origin(peer, _origin, _stamp), do: peer
 
   defp apply_snapshot(peer, origin, entries) do
     old = peer.replica

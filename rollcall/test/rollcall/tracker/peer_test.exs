@@ -314,6 +314,37 @@ defmodule Rollcall.Tracker.PeerTest do
 
       assert Peer.origin(peer) == origin
     end
+
+    # The origin follows the newest incarnation. The mark can stay on an older
+    # incarnation until a snapshot of the newer one arrives.
+    test "a diff of an old run that applies does not move the origin back", %{
+      origin: origin,
+      other_origin: other_origin
+    } do
+      peer = snapshot_peer(origin, 1, 3, ["a"])
+      {peer, _changes} = Peer.deliver(peer, diff(other_origin, stamp(2, 4), 3, [], []))
+      assert Peer.origin(peer) == other_origin
+
+      {peer, _changes} = Peer.deliver(peer, diff(origin, stamp(1, 4), 3, entries(["b"]), []))
+
+      assert refs(peer) == ["a", "b"]
+      assert mark_tuple(peer) == {1, 4}
+      assert Peer.origin(peer) == other_origin
+    end
+
+    test "a snapshot of an old run that is newer than the mark does not move the origin back", %{
+      origin: origin,
+      other_origin: other_origin
+    } do
+      peer = snapshot_peer(origin, 1, 3, ["a"])
+      {peer, _changes} = Peer.deliver(peer, diff(other_origin, stamp(2, 4), 3, [], []))
+
+      {peer, _changes} = Peer.deliver(peer, snapshot(origin, stamp(1, 5), entries(["b"])))
+
+      assert refs(peer) == ["b"]
+      assert mark_tuple(peer) == {1, 5}
+      assert Peer.origin(peer) == other_origin
+    end
   end
 
   describe "overtaking messages" do
