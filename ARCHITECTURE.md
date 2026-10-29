@@ -36,6 +36,19 @@ The process owning the WebSocket is the transport pid. It shows up everywhere be
 `Realtime.UsersCounter` counts a transport pid as one concurrent connection while it has at least one channel. Many channels on one socket still count once. The socket starts to count at its first successful channel join. When its last channel ends, the socket stops counting. Three events end a channel: the client leaves it, the channel crashes, or a rejected duplicate join replaces it. The socket stays open until the no-channels timer closes it (`NO_CHANNEL_TIMEOUT_IN_MS`, default 10 minutes). In that time the socket holds no `max_concurrent_users` slot. If the tenant is full, Realtime refuses its next join. A socket without channels does not count toward Realtime Peak Connections.
 Channel topics look like `realtime:<sub_topic>` and are all handled by `RealtimeWeb.RealtimeChannel`. One socket can hold many of them (`max_channels_per_client`, default 100).
 
+#### Join budget per node
+
+`Realtime.Tenants.NodeJoinBudget` measures how fast each tenant joins channels on each node. The budget is the larger of two values, in joins per second. The first is `NODE_JOIN_BUDGET_FLOOR` (default 10). The second is `CLIENT_JOINS_PER_SECOND` (default 1) times the tenant's sockets on the node that `Realtime.UsersCounter` counts.
+
+A token bucket (a store of tokens that refills at the budget rate) holds `NODE_JOIN_BUDGET_BURST_SECONDS` (default 60) seconds of budget. A reconnect storm after a deploy fits in the bucket, but a tenant that rejoins without a stop empties it. Each node keeps its own buckets and does not share them with the cluster.
+
+The budget does not refuse joins yet. If the `node_join_budget` feature flag is on for the tenant, each join attempt takes one token. When the bucket is empty, Realtime accepts the join and increments two counters:
+
+| Metric | Endpoint | Label |
+| --- | --- | --- |
+| `realtime_channel_node_join_budget_exceeded` | `/tenant-metrics` | `tenant` |
+| `realtime_channel_global_node_join_budget_exceeded` | `/metrics` | none |
+
 ### 2. What a channel carries
 
 | Feature | WebSocket Client sends | Produced by |
