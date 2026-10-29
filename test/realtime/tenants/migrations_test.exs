@@ -204,7 +204,7 @@ defmodule Realtime.Tenants.MigrationsTest do
       {:ok, conn} = Database.connect_db(%{settings | username: "supabase_admin"})
 
       Postgrex.query!(conn, "GRANT ALL ON realtime.schema_migrations TO postgres, dashboard_user", [])
-      Postgrex.query!(conn, "DELETE FROM realtime.schema_migrations WHERE version = 20261026120000", [])
+      Postgrex.query!(conn, "DELETE FROM realtime.schema_migrations WHERE version = 20261029120000", [])
 
       assert Migrations.run_migrations(%{tenant | migrations_ran: total - 1}) == :ok
 

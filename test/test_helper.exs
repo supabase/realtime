@@ -47,12 +47,20 @@ Postgrex.query!(pg_conn, "SELECT 1 AS #{probe_marker}", [])
     ["%#{probe_marker}%"]
   )
 
-# `realtime.broadcast_changes(..., NEW record, OLD record, ...)` (introduced in commit 2922658c) called from a trigger via `PERFORM` fails on PG <= 14.5
+# `realtime.broadcast_changes(..., NEW record, OLD record, ...)` (introduced in commit 2922658c)
+# called from a trigger via `PERFORM` fails on PG <= 14.5
 requires_pg_140006 = if pg_version_num < 140_006, do: :requires_pg_140006
 
 requires_pg_150000 = if pg_version_num < 150_000, do: :requires_pg_150000
 
-# Restriction assertions on the postgres role only when supautils.policy_grants includes realtime.messages and realtime.subscription (supabase/postgres >= 15.14.1.018)
+# On the 15.1 image (supabase/postgres:15.1.0.1) the pg_net 0.6 worker never accepts the
+# ProcSignalBarrier that DROP DATABASE waits on, so pg-delta's shadow database cleanup hangs.
+# The stuck DROP holds an xid, which blocks logical replication slot creation for every later
+# test that draws the same pooled tenant database.
+requires_pgdelta_shadow_cleanup = if pg_version_num == 150_001, do: :requires_pgdelta_shadow_cleanup
+
+# Restriction assertions on the postgres role only when supautils.policy_grants includes
+# realtime.messages and realtime.subscription (supabase/postgres >= 15.14.1.018)
 requires_supautils_policy_grants = if !has_supautils_realtime_grants, do: :requires_supautils_policy_grants
 requires_no_supautils_policy_grants = if has_supautils_realtime_grants, do: :requires_no_supautils_policy_grants
 
@@ -75,6 +83,7 @@ exclude =
       :failing,
       requires_pg_140006,
       requires_pg_150000,
+      requires_pgdelta_shadow_cleanup,
       requires_supautils_policy_grants,
       requires_no_supautils_policy_grants,
       skip_orioledb,
@@ -212,6 +221,9 @@ Mimic.copy(Realtime.Tenants.Connect)
 Mimic.copy(Realtime.Tenants.Migrations)
 Mimic.copy(Realtime.Tenants.Rebalancer)
 Mimic.copy(Realtime.Tenants.ReplicationConnection)
+Mimic.copy(Realtime.Tenants.SqlLogexCache)
+Mimic.copy(Realtime.Tenants.SqlLogexEnv)
+Mimic.copy(Realtime.Tenants.SqlLogexLoader)
 Mimic.copy(Realtime.UsersCounter)
 Mimic.copy(RealtimeWeb.ChannelsAuthorization)
 Mimic.copy(RealtimeWeb.Presence)

@@ -1,13 +1,15 @@
 defmodule RealtimeWeb.UserSocket do
   # Raise Phoenix's built-in per-transport channel limit above its default of 100. Realtime
-  # enforces its own per-tenant `max_channels_per_client` limit (default 100) in RealtimeChannel
-  # with a dedicated error message, so we just bump to a very large number.
+  # enforces its own per-tenant `max_channels_per_client` limit (default 100) in RealtimeChannel,
+  # against the `channels_count` assign kept by handle_in/2, with a dedicated error message, so
+  # we just bump to a very large number.
   use Phoenix.Socket, max_channels_per_transport: 99_999
   use Realtime.Logs
 
   alias Realtime.Api.Tenant
   alias Realtime.Database
   alias Realtime.Tenants
+  alias Realtime.UsersCounter
 
   alias RealtimeWeb.TenantRateLimiters
   alias RealtimeWeb.ChannelsAuthorization
@@ -36,13 +38,14 @@ defmodule RealtimeWeb.UserSocket do
   end
 
   @impl Phoenix.Socket.Transport
-  def handle_in(message, {%{channels: previous_channels}, socket} = full_state) do
-    case super(message, full_state) do
+  def handle_in(message, {%{channels: previous_channels} = state, socket} = full_state) do
+    # Phoenix starts a joining channel from within super, so the channel sees this count
+    case super(message, {state, put_channels_count(socket, map_size(previous_channels))}) do
       # A rejected duplicate join drops the existing channel without going through handle_info/2.
       # An already empty socket keeps its running timer, so rejected joins can't extend it.
       {:reply, :error, reply, {%{channels: channels} = state, socket}}
       when channels == %{} and previous_channels != %{} ->
-        {:reply, :error, reply, {state, start_no_channels_timer(socket, no_channel_timeout_in_ms())}}
+        {:reply, :error, reply, {state, left_last_channel(socket, no_channel_timeout_in_ms())}}
 
       result ->
         result
@@ -226,6 +229,8 @@ defmodule RealtimeWeb.UserSocket do
   defp log_level(params) do
     case Map.get(params, "log_level") do
       level when level in ["info", "warning", "error"] -> String.to_existing_atom(level)
+      # realtime-js documents and sends "warn"
+      "warn" -> :warning
       _ -> @default_log_level
     end
   end
@@ -243,6 +248,15 @@ defmodule RealtimeWeb.UserSocket do
   defp measure_traffic_interval_in_ms, do: :persistent_term.get({__MODULE__, :measure_traffic_interval_in_ms})
   defp no_channel_timeout_in_ms, do: :persistent_term.get({__MODULE__, :no_channel_timeout_in_ms})
 
+  # A socket without channels is no longer a connected user, so it frees its
+  # `max_concurrent_users` slot now instead of when the timer disconnects it. This process waits
+  # for every join to return, and `RealtimeChannel.join/3` counts the socket before it returns, so
+  # a join can't land between the empty check and the removal.
+  defp left_last_channel(socket, timeout) do
+    if tenant = socket.assigns[:tenant], do: UsersCounter.remove(socket.transport_pid, tenant)
+    start_no_channels_timer(socket, timeout)
+  end
+
   # The timer runs from the moment a socket is left without channels.
   defp start_no_channels_timer(socket, timeout) do
     if ref = socket.private[:no_channels_timer], do: :erlang.cancel_timer(ref, async: true, info: false)
@@ -256,12 +270,17 @@ defmodule RealtimeWeb.UserSocket do
   defp restart_if_no_channels(result, _timeout), do: result
 
   defp restart({%{channels: channels} = state, socket}, timeout) when channels == %{},
-    do: {state, start_no_channels_timer(socket, timeout)}
+    do: {state, left_last_channel(socket, timeout)}
 
   defp restart(state, _timeout), do: state
 
   defp put_no_channels_timer(socket, ref),
     do: %{socket | private: Map.put(socket.private, :no_channels_timer, ref)}
+
+  # Still includes the channel a duplicate join for the same topic is about to replace, so
+  # rejoining a topic on a socket that is exactly at the limit is rejected.
+  defp put_channels_count(%{assigns: %{channels_count: count}} = socket, count), do: socket
+  defp put_channels_count(socket, count), do: assign(socket, :channels_count, count)
 
   defp collect_traffic_telemetry(nil, _tenant_external_id, previous_recv, previous_send),
     do: %{latest_recv: previous_recv, latest_send: previous_send}

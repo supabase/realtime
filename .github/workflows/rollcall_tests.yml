@@ -1,0 +1,72 @@
+name: Rollcall Tests
+defaults:
+  run:
+    shell: bash
+    working-directory: ./rollcall
+on:
+  pull_request:
+    paths:
+      - "rollcall/**"
+      - ".github/workflows/rollcall_tests.yml"
+
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  MIX_ENV: test
+
+jobs:
+  tests:
+    name: Tests & Lint
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Setup elixir
+        id: beam
+        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1.24.0
+        with:
+          otp-version: 28.5.0.4 # Define the OTP version [required]
+          elixir-version: 1.19.5 # Define the elixir version [required]
+      - name: Cache Mix
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: |
+            rollcall/deps
+            rollcall/_build
+          key: ${{ github.workflow }}-${{ runner.os }}-mix-${{ steps.beam.outputs.elixir-version }}-${{ steps.beam.outputs.otp-version }}-${{ hashFiles('rollcall/mix.exs', 'rollcall/mix.lock') }}
+          restore-keys: |
+            ${{ github.workflow }}-${{ runner.os }}-mix-${{ steps.beam.outputs.elixir-version }}-${{ steps.beam.outputs.otp-version }}-
+      - name: Install dependencies
+        run: mix deps.get
+      - name: Start epmd
+        run: epmd -daemon
+      - name: Run tests
+        run: MIX_ENV='test' mix test
+      - name: Check for warnings
+        run: mix compile --force --warnings-as-errors
+      - name: Run format check
+        run: mix format --check-formatted
+      - name: Credo checks
+        run: mix credo
+      - name: Retrieve PLT Cache
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        id: plt-cache
+        with:
+          path: rollcall/priv/plts
+          key: ${{ runner.os }}-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-rollcall-plts-${{ hashFiles('rollcall/mix.exs', 'rollcall/mix.lock') }}
+      - name: Create PLTs
+        if: steps.plt-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p priv/plts
+          MIX_ENV=dev mix dialyzer.build
+      - name: Run dialyzer
+        # dialyxir is a dev dependency, so this step does not use the job MIX_ENV (test).
+        run: MIX_ENV=dev mix dialyzer

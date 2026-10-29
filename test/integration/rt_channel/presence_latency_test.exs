@@ -36,7 +36,7 @@ defmodule Realtime.Integration.RtChannel.PresenceLatencyTest do
     "score" => 42
   }
 
-  setup [:checkout_tenant_and_connect, :rls_context, :set_mimic_global]
+  setup [:checkout_tenant, :rls_context, :set_mimic_global]
 
   setup %{tenant: tenant} do
     stub(FeatureFlags, :enabled?, fn

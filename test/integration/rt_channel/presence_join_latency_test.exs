@@ -14,7 +14,7 @@ defmodule Realtime.Integration.RtChannel.PresenceJoinLatencyTest do
   @moduletag :capture_log
   @join_latency [:realtime, :presence, :join, :latency]
 
-  setup [:checkout_tenant_and_connect, :rls_context]
+  setup [:checkout_tenant, :rls_context]
 
   setup %{tenant: tenant} do
     id = {__MODULE__, tenant.external_id}
