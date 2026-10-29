@@ -22,6 +22,11 @@ defmodule Rollcall.Tracker.Changes do
     %__MODULE__{}
   end
 
+  @spec new([Entry.t()], [Entry.t()]) :: t()
+  def new(joins, leaves) do
+    %__MODULE__{joins: joins, leaves: leaves}
+  end
+
   @doc "Returns true if changes are empty"
   def empty?(%__MODULE__{joins: [], leaves: []}), do: true
   def empty?(_changes), do: false
