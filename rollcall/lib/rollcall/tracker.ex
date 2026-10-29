@@ -287,9 +287,12 @@ defmodule Rollcall.Tracker do
 
     Monotonic time orders the incarnations of one VM only. A peer keeps one
     record for each node name, so a node that restarts under a new name gets a
-    new record, and no order between VMs is needed. A new VM that reuses a node
-    name can start with a lower incarnation. The peers then ignore its messages
-    until the silence threshold purges the old record.
+    new record, and no order between VMs is needed.
+
+    This design assumes that a node restart does not reuse a node name. A new VM
+    that reuses a name can start with a lower incarnation. The peers then treat
+    its messages as stale. A stale message still resets the silent count, so the
+    silence threshold never purges the old record, and the old entries stay.
 
     `peers` maps each peer node to its `Rollcall.Tracker.Peer`. The view of the
     tracker is `local` plus the replica of each peer. `silence_threshold` is the
