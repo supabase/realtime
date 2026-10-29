@@ -22,7 +22,7 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
 
   @fanout_event [:realtime, :broadcast, :fanout, :node_delivery]
 
-  setup [:checkout_tenant_and_connect]
+  setup [:checkout_tenant]
 
   describe "public broadcast" do
     setup [:rls_context]
@@ -760,6 +760,8 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
       fanout_ref: ref
     } do
       external_id = tenant.external_id
+      # No join starts Connect here, and realtime.send needs its replication connection.
+      {:ok, _} = Connect.lookup_or_start_connection(external_id)
       assert ReplicationConnection.ready?(external_id)
 
       # No socket is connected for this tenant, so the publishing node holds no connection -> hit=false.

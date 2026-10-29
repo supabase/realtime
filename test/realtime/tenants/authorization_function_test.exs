@@ -23,7 +23,7 @@ defmodule Realtime.Tenants.AuthorizationFunctionTest do
     presence: %PresencePolicies{read: true, write: true}
   }
 
-  setup [:checkout_tenant_and_connect, :rls_context]
+  setup [:checkout_tenant, :rls_context]
 
   describe "feature flag" do
     test "checks policies in a transaction when the flag is off", context do

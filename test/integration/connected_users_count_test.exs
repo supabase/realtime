@@ -7,8 +7,7 @@ defmodule Integration.ConnectedUsersCountTest do
 
   @config %{broadcast: %{self: true}, private: false, presence: %{enabled: false}}
 
-  # Also caches the tenant from the test process, which owns the sandbox in async mode
-  setup [:checkout_tenant_and_connect]
+  setup [:checkout_tenant]
 
   test "a socket stops counting as a user when it leaves its last channel", %{tenant: tenant} do
     {socket, _} = get_connection(tenant)

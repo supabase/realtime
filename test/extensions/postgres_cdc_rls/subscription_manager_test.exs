@@ -21,7 +21,6 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManagerTest do
     {:ok, db_conn} = Realtime.Database.connect(tenant, "realtime_test", :stop)
     Integrations.setup_postgres_changes(db_conn)
     GenServer.stop(db_conn)
-    Realtime.Tenants.Cache.update_cache(tenant)
 
     subscribers_pids_table = :ets.new(__MODULE__, [:public, :bag])
     subscribers_nodes_table = :ets.new(__MODULE__, [:public, :set])

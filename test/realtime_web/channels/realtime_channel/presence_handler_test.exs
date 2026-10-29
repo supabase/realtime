@@ -1116,8 +1116,6 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
   defp initiate_tenant(context) do
     tenant = TestTenantDb.checkout_tenant(run_migrations: true)
-    # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
-    Realtime.Tenants.Cache.update_cache(tenant)
 
     {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
     assert Connect.ready?(tenant.external_id)

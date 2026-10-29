@@ -7,6 +7,10 @@ defmodule Integrations do
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Connect
 
+  def checkout_tenant(_context \\ %{}) do
+    %{tenant: TestTenantDb.checkout_tenant(run_migrations: true)}
+  end
+
   def checkout_tenant_and_connect(_context \\ %{}) do
     tenant = TestTenantDb.checkout_tenant(run_migrations: true)
     {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)

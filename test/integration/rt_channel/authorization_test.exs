@@ -14,7 +14,7 @@ defmodule Realtime.Integration.RtChannel.AuthorizationTest do
 
   @moduletag :capture_log
 
-  setup [:checkout_tenant_and_connect]
+  setup [:checkout_tenant]
 
   describe "private only channels" do
     setup [:rls_context]
