@@ -962,6 +962,9 @@ defmodule RealtimeWeb.RealtimeChannel do
     settings = PostgresCdc.filter_settings(tenant.postgres_cdc_default, tenant.extensions)
     args = %{"region" => settings["region"], "id" => tenant_id}
 
+    # Best effort: subscribe anyway if migrations haven't finished
+    _ = Connect.await_migrations(tenant)
+
     with {:ok, connection} <- PostgresCdc.connect(module, args),
          {:ok, response} <- PostgresCdc.after_connect(module, connection, settings, pg_change_params, tenant_id) do
       {:ok, response}

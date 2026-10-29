@@ -17,7 +17,8 @@ defmodule Realtime.SynHandler do
     Endpoint.local_broadcast(Connect.syn_topic(tenant_id), "ready", %{
       pid: pid,
       conn: conn,
-      replication_conn: meta[:replication_conn]
+      replication_conn: meta[:replication_conn],
+      migrations_ran: Map.get(meta, :migrations_ran, 0)
     })
   end
 
