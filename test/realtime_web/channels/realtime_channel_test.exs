@@ -804,6 +804,41 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   end
 
   describe "presence" do
+    @tag policies: [:authenticated_all_topic_read, :authenticated_all_topic_insert]
+    test "private presence enabled by track counts its delivered diff", %{tenant: tenant} do
+      {:ok, tenant} = Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{presence_enabled: false})
+      Realtime.Tenants.Cache.update_cache(tenant)
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      socket =
+        subscribe_and_join!(socket, "realtime:test", %{
+          "config" => %{"private" => true, "presence" => %{"key" => "alice"}}
+        })
+
+      assert socket.assigns.presence_enabled? == false
+      counter = socket.assigns.presence_rate_counter
+      [{counter_pid, _}] = Registry.lookup(Realtime.Registry.Unique, {RateCounter, :rate_counter, counter.id})
+      :sys.suspend(counter_pid)
+
+      try do
+        Realtime.GenCounter.reset(counter.id)
+        ref = push(socket, "presence", %{"event" => "track", "payload" => %{"user" => "alice"}})
+        assert_reply ref, :ok, %{}, 5000
+        assert_push "presence_state", %{"alice" => %{metas: [%{"user" => "alice", :phx_ref => phx_ref}]}}, 5000
+        assert is_binary(phx_ref)
+
+        assert_push "presence_diff",
+                    %{joins: %{"alice" => %{metas: [%{"user" => "alice", :phx_ref => ^phx_ref}]}}, leaves: %{}},
+                    5000
+
+        Server.socket(socket.channel_pid)
+        assert Realtime.GenCounter.get(counter.id) == 3
+      after
+        :sys.resume(counter_pid)
+      end
+    end
+
     test "presence state event is counted", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
@@ -2432,8 +2467,12 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       socket = presence_socket(tenant, true)
       diff = presence_diff(%{ts: System.system_time(:millisecond) - 5, node: "elsewhere"})
 
+      counter_key = Tenants.presence_events_per_second_key(tenant.external_id)
+      Realtime.GenCounter.reset(counter_key)
+
       assert {:noreply, _socket} = RealtimeChannel.handle_info({:authorize_presence_diff, diff}, socket)
 
+      assert Realtime.GenCounter.get(counter_key) == 1
       assert_receive {:socket_push, :text, json}
 
       assert %{"event" => "presence_diff", "payload" => %{"joins" => %{"alice" => %{"metas" => [meta]}}}} =
@@ -2449,22 +2488,33 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       refute_receive {:telemetry, _, _, _}
     end
 
-    test "drops the diff and records nothing when presence.read is denied", %{tenant: tenant} do
-      socket = presence_socket(tenant, false)
-      diff = presence_diff(%{ts: System.system_time(:millisecond), node: "elsewhere"})
+    for read? <- [false, nil] do
+      @tag read?: read?
+      test "drops the diff and records nothing when presence.read is #{inspect(read?)}", %{tenant: tenant, read?: read?} do
+        socket = presence_socket(tenant, read?)
+        diff = presence_diff(%{ts: System.system_time(:millisecond), node: "elsewhere"})
 
-      assert {:noreply, _socket} = RealtimeChannel.handle_info({:authorize_presence_diff, diff}, socket)
+        counter_key = Tenants.presence_events_per_second_key(tenant.external_id)
+        Realtime.GenCounter.reset(counter_key)
 
-      refute_receive {:socket_push, _, _}
-      refute_receive {:telemetry, _, _, _}
+        assert {:noreply, _socket} = RealtimeChannel.handle_info({:authorize_presence_diff, diff}, socket)
+
+        assert Realtime.GenCounter.get(counter_key) == 0
+        refute_receive {:socket_push, _, _}
+        refute_receive {:telemetry, _, _, _}
+      end
     end
 
     test "pushes an unsampled diff and records nothing", %{tenant: tenant} do
       socket = presence_socket(tenant, true)
       diff = presence_diff_with(%{"alice" => %{metas: [%{"name" => "alice", :phx_ref => "a1"}]}})
 
+      counter_key = Tenants.presence_events_per_second_key(tenant.external_id)
+      Realtime.GenCounter.reset(counter_key)
+
       assert {:noreply, _socket} = RealtimeChannel.handle_info({:authorize_presence_diff, diff}, socket)
 
+      assert Realtime.GenCounter.get(counter_key) == 1
       assert_receive {:socket_push, :text, json}
       assert %{"event" => "presence_diff", "payload" => %{"joins" => %{"alice" => _}}} = Jason.decode!(json)
       refute_receive {:telemetry, _, _, _}
@@ -2488,8 +2538,12 @@ defmodule RealtimeWeb.RealtimeChannelTest do
           }
         })
 
+      counter_key = Tenants.presence_events_per_second_key(tenant.external_id)
+      Realtime.GenCounter.reset(counter_key)
+
       assert {:noreply, _socket} = RealtimeChannel.handle_info({:authorize_presence_diff, diff}, socket)
 
+      assert Realtime.GenCounter.get(counter_key) == 1
       assert_receive {:socket_push, :text, json}
       refute json |> IO.iodata_to_binary() |> String.contains?("_rt")
 
