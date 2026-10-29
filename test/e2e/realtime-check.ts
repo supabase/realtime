@@ -17,6 +17,7 @@ import { broadcastChanges } from "./src/suites/broadcast-changes.ts";
 import { loadPostgresChanges } from "./src/suites/load-postgres-changes.ts";
 import { postgresChanges } from "./src/suites/postgres-changes.ts";
 import { broadcastReplay } from "./src/suites/broadcast-replay.ts";
+import { broadcastPersistence } from "./src/suites/broadcast-persistence.ts";
 import { postgresChangesFilters } from "./src/suites/postgres-changes-filters.ts";
 
 const descriptors: SuiteDescriptor[] = [
@@ -28,6 +29,7 @@ const descriptors: SuiteDescriptor[] = [
   loadBroadcastReplay,
   broadcast,
   broadcastReplay,
+  broadcastPersistence,
   presence,
   authorization,
   postgresChanges,
