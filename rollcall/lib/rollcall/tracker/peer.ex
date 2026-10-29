@@ -212,18 +212,22 @@ defmodule Rollcall.Tracker.Peer do
 
   @spec diff_status(Messages.stamp(), non_neg_integer(), Messages.stamp() | nil) ::
           :applicable | :behind | :stale
-  defp diff_status(
-         {:stamp, incarnation, _version},
-         base_version,
-         {:stamp, incarnation, base_version}
-       ),
-       do: :applicable
+  def diff_status(_diff_stamp, _diff_base_version, nil), do: :behind
 
-  defp diff_status(diff_stamp, _base, current_mark) do
-    if newer?(diff_stamp, current_mark) do
-      :behind
-    else
-      :stale
+  def diff_status(
+        {:stamp, diff_inc, _diff_version} = diff_stamp,
+        diff_base_version,
+        {:stamp, peer_inc, peer_version} = mark
+      ) do
+    cond do
+      diff_inc == peer_inc and diff_base_version == peer_version ->
+        :applicable
+
+      newer?(diff_stamp, mark) ->
+        :behind
+
+      true ->
+        :stale
     end
   end
 end
