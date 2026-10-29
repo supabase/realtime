@@ -4,6 +4,7 @@ defmodule Rollcall.TrackerPeersTest do
   use Rollcall.TraceHelpers
 
   import Rollcall.PeerHelpers
+  import Rollcall.TrackerHelpers
   import Rollcall.Tracker.Messages, only: [diff: 5, request: 1, snapshot: 3, stamp: 2, wire_entry: 4]
 
   alias Rollcall.Tracker
