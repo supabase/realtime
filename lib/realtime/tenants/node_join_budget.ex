@@ -8,13 +8,18 @@ defmodule Realtime.Tenants.NodeJoinBudget do
   successful join, so sockets that stay connected raise the budget, while sockets that churn (connect,
   join, disconnect, repeat) barely show up and mostly run into the floor.
 
-  Each tenant has a token bucket that refills at the budget and holds one second of it, so a tenant can
-  make `floor` joins at once on each node. Nothing is counted across the cluster.
+  Each tenant has a token bucket that refills at the budget and holds `burst_seconds` of it
+  (`NODE_JOIN_BUDGET_BURST_SECONDS`), so a tenant can make `floor * burst_seconds` joins at once on each node. The
+  burst decides how long a tenant can join faster than its budget, not how fast it can keep joining: a reconnect storm
+  after a deploy is over within seconds, while a tenant that keeps reconnecting runs the bucket dry and is held to the
+  budget. Nothing is counted across the cluster.
 
   A bucket is the time at which it is full again (the GCRA form of a token bucket), kept in a public ETS
   table so channel processes take tokens directly. Each take reads the current budget, so the refill rate
-  follows the socket count. A full bucket behaves exactly like a missing one, so this process
-  periodically deletes full buckets to keep the table to the tenants that are joining right now.
+  follows the socket count. The bucket holds time rather than joins, which is why the burst is set in seconds: when
+  the sockets of a reconnect storm raise the budget, the bucket stays as full as it was, whereas a fixed number of
+  joins would shrink to fewer seconds and refuse the rest of the storm. A full bucket behaves exactly like a missing
+  one, so this process periodically deletes full buckets to keep the table to the tenants that are joining right now.
   """
 
   use GenServer
@@ -35,8 +40,9 @@ defmodule Realtime.Tenants.NodeJoinBudget do
   def take(%Tenant{external_id: tenant_id}, now \\ now()) do
     budget = budget(tenant_id)
     interval = div(@microseconds_per_second, budget)
+    burst_seconds = Application.fetch_env!(:realtime, :node_join_budget_burst_seconds)
 
-    take(tenant_id, interval, (budget - 1) * interval, now)
+    take(tenant_id, interval, (budget * burst_seconds - 1) * interval, now)
   end
 
   # Joins per second the tenant can make on this node right now

@@ -14,46 +14,62 @@ defmodule Realtime.Tenants.NodeJoinBudgetTest do
     %{tenant: %Tenant{external_id: random_string()}, now: System.monotonic_time(:microsecond) + 3_600 * @second}
   end
 
-  # config/test.exs makes the budget max(10, 2 * sockets) joins per second. A full bucket holds one second of it, so the
-  # joins it allows at once are the budget.
+  # config/test.exs makes the budget max(10, 2 * sockets) joins per second and the burst 2 seconds. A full bucket holds
+  # the burst, so the joins it allows at once are twice the budget.
   describe "budget" do
     test "is the configured floor while the tenant has no sockets on this node", %{tenant: tenant, now: now} do
-      assert joins_at_once(tenant, now) == 10
+      assert joins_at_once(tenant, now) == 20
     end
 
     test "stays at the floor while the sockets' joins per second are below it", %{tenant: tenant, now: now} do
       add_sockets(tenant, 3)
 
-      assert joins_at_once(tenant, now) == 10
+      assert joins_at_once(tenant, now) == 20
     end
 
     test "grows by the configured joins per socket once above the floor", %{tenant: tenant, now: now} do
       add_sockets(tenant, 8)
 
-      assert joins_at_once(tenant, now) == 16
+      assert joins_at_once(tenant, now) == 32
     end
   end
 
   describe "take/2" do
-    test "allows the whole budget at once and then refuses", %{tenant: tenant, now: now} do
-      for _ <- 1..10, do: assert(NodeJoinBudget.take(tenant, now) == :ok)
+    test "allows the whole burst at once and then refuses", %{tenant: tenant, now: now} do
+      for _ <- 1..20, do: assert(NodeJoinBudget.take(tenant, now) == :ok)
 
       assert NodeJoinBudget.take(tenant, now) == :error
     end
 
     test "refills at the budget rate", %{tenant: tenant, now: now} do
-      for _ <- 1..10, do: NodeJoinBudget.take(tenant, now)
+      for _ <- 1..20, do: NodeJoinBudget.take(tenant, now)
 
       assert NodeJoinBudget.take(tenant, now + div(@second, 10) - 1) == :error
       assert NodeJoinBudget.take(tenant, now + div(@second, 10)) == :ok
       assert NodeJoinBudget.take(tenant, now + div(@second, 10)) == :error
 
-      for _ <- 1..10, do: assert(NodeJoinBudget.take(tenant, now + 2 * @second) == :ok)
-      assert NodeJoinBudget.take(tenant, now + 2 * @second) == :error
+      for _ <- 1..20, do: assert(NodeJoinBudget.take(tenant, now + 3 * @second) == :ok)
+      assert NodeJoinBudget.take(tenant, now + 3 * @second) == :error
+    end
+
+    test "holds a tenant joining faster than its budget to the budget once the burst is used up", %{
+      tenant: tenant,
+      now: now
+    } do
+      # 20 joins per second against a budget of 10: every join fits until the 2 second burst runs dry just before 2
+      # seconds in, and from then on only the budget does
+      allowed_per_second =
+        for second <- 0..5 do
+          Enum.count(0..19, fn i ->
+            NodeJoinBudget.take(tenant, now + second * @second + div(i * @second, 20)) == :ok
+          end)
+        end
+
+      assert allowed_per_second == [20, 19, 10, 10, 10, 10]
     end
 
     test "refills faster once the tenant has more sockets on this node", %{tenant: tenant, now: now} do
-      for _ <- 1..10, do: NodeJoinBudget.take(tenant, now)
+      for _ <- 1..20, do: NodeJoinBudget.take(tenant, now)
       assert NodeJoinBudget.take(tenant, now + div(@second, 20)) == :error
 
       # 15 sockets at 2 joins per socket make the budget 30 per second
@@ -62,10 +78,22 @@ defmodule Realtime.Tenants.NodeJoinBudgetTest do
       assert NodeJoinBudget.take(tenant, now + div(@second, 20)) == :ok
     end
 
+    # A burst of a fixed number of joins would hold fewer seconds once the budget grows, so the sockets a reconnect
+    # storm brings would shrink what is left of the burst instead of refilling it faster
+    test "keeps the bucket as full when the budget grows", %{tenant: tenant, now: now} do
+      for _ <- 1..20, do: NodeJoinBudget.take(tenant, now)
+
+      # Half refilled one second later, and 20 sockets at 2 joins per socket make the budget 40 per second, so half of
+      # the 80 joins the bucket now holds
+      add_sockets(tenant, 20)
+
+      assert joins_at_once(tenant, now + @second) == 40
+    end
+
     test "keeps a separate budget per tenant", %{tenant: tenant, now: now} do
       other = %{tenant | external_id: random_string()}
 
-      assert joins_at_once(tenant, now) == 10
+      assert joins_at_once(tenant, now) == 20
       assert NodeJoinBudget.take(tenant, now) == :error
       assert NodeJoinBudget.take(other, now) == :ok
     end
@@ -76,7 +104,7 @@ defmodule Realtime.Tenants.NodeJoinBudgetTest do
         |> Task.async_stream(fn _ -> NodeJoinBudget.take(tenant, now) end, max_concurrency: 100)
         |> Enum.map(fn {:ok, result} -> result end)
 
-      assert Enum.count(results, &(&1 == :ok)) == 10
+      assert Enum.count(results, &(&1 == :ok)) == 20
     end
   end
 
@@ -100,7 +128,7 @@ defmodule Realtime.Tenants.NodeJoinBudgetTest do
       refute :ets.member(NodeJoinBudget, full.external_id)
 
       # A deleted bucket is a full one
-      assert joins_at_once(full, System.monotonic_time(:microsecond)) == 10
+      assert joins_at_once(full, System.monotonic_time(:microsecond)) == 20
     end
   end
 

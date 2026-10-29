@@ -556,9 +556,9 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
         assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 5_000
       end
 
-      # config/test.exs makes the budget max(10, 2 * sockets) joins per second, so with one socket the first 10 joins
-      # always fit and the rest outrun the refill of 10 per second
-      assert node_join_budget_exceeded(tenant) in 1..40
+      # config/test.exs makes the budget max(10, 2 * sockets) joins per second with a 2 second burst, so with one socket
+      # the first 20 joins always fit and the rest outrun the refill of 10 per second
+      assert node_join_budget_exceeded(tenant) in 1..30
     end
   end
 
