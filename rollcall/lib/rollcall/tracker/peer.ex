@@ -174,7 +174,10 @@ defmodule Rollcall.Tracker.Peer do
 
     new = wire_entries_to_entries(entries, origin)
 
-    {%{peer | replica: new}, diff_replicas(old, new)}
+    joins = for {ref, entry} <- new, not is_map_key(old, ref), do: entry
+    leaves = for {ref, entry} <- old, not is_map_key(new, ref), do: entry
+
+    {%{peer | replica: new}, Changes.new(joins, leaves)}
   end
 
   @spec apply_diff(t(), pid(), [Messages.wire_entry()], [Rollcall.ref()]) :: {t(), Changes.t()}
@@ -183,32 +186,22 @@ defmodule Rollcall.Tracker.Peer do
 
     join_entries = wire_entries_to_entries(joins, origin)
 
+    # The changes come from the refs in the message, so a diff costs the size of
+    # the diff and not the size of the replica. A join wins over a leave of the
+    # same ref.
+    joined = for {ref, entry} <- join_entries, not is_map_key(old, ref), do: entry
+    left = old |> Map.take(leaves) |> Map.drop(Map.keys(join_entries)) |> Map.values()
+
     new = old |> Map.drop(leaves) |> Map.merge(join_entries)
 
-    {%{peer | replica: new}, diff_replicas(old, new)}
-  end
-
-  @spec diff_replicas(replica(), replica()) :: Changes.t()
-  defp diff_replicas(old, new) do
-    old_keys = MapSet.new(Map.keys(old))
-    new_keys = MapSet.new(Map.keys(new))
-
-    join_keys = MapSet.difference(new_keys, old_keys) |> MapSet.to_list()
-    left_keys = MapSet.difference(old_keys, new_keys) |> MapSet.to_list()
-
-    joins = new |> Map.take(join_keys) |> Map.values()
-    leaves = old |> Map.take(left_keys) |> Map.values()
-
-    Changes.new(joins, leaves)
+    {%{peer | replica: new}, Changes.new(joined, left)}
   end
 
   @spec wire_entries_to_entries([Messages.wire_entry()], pid()) :: replica()
   defp wire_entries_to_entries(wire_entries, origin) do
-    wire_entries
-    |> Enum.map(fn
-      {partition, key, ref, meta} -> Entry.new(origin, partition, key, meta, ref)
+    Map.new(wire_entries, fn {partition, key, ref, meta} ->
+      {ref, Entry.new(origin, partition, key, meta, ref)}
     end)
-    |> Enum.reduce(%{}, fn e, acc -> Map.put(acc, e.ref, e) end)
   end
 
   @spec newer?(Messages.stamp(), Messages.stamp() | nil) :: boolean()

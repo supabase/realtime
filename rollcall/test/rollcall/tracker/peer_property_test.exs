@@ -81,6 +81,31 @@ defmodule Rollcall.Tracker.PeerPropertyTest do
     end
   end
 
+  # A join is a ref that the replica did not hold. A leave is a ref that it held.
+  # Applying the changes to the previous refs gives the new refs.
+  property "the changes rebuild the replica after any delivery" do
+    check all(
+            ops <- operations(),
+            sender = simulate(ops ++ [:snapshot]),
+            schedule <- schedule(sender)
+          ) do
+      Enum.reduce(schedule, {nil, MapSet.new()}, fn message, {peer, view} ->
+        {peer, changes} = deliver_with_changes(peer, message.message)
+
+        joined = MapSet.new(joins(changes))
+        left = MapSet.new(leaves(changes))
+
+        assert MapSet.disjoint?(joined, view)
+        assert MapSet.subset?(left, view)
+
+        view = view |> MapSet.difference(left) |> MapSet.union(joined)
+        assert view == MapSet.new(refs(peer))
+
+        {peer, view}
+      end)
+    end
+  end
+
   property "a snapshot of the current state restores the replica after any delivery" do
     check all(
             ops <- operations(),
@@ -145,15 +170,13 @@ defmodule Rollcall.Tracker.PeerPropertyTest do
     Enum.map(refs, &wire_entry("partition", "key", &1, %{}))
   end
 
-  defp deliver(nil, message) do
-    {peer, _changes} = Peer.new(message)
+  defp deliver(peer, message) do
+    {peer, _changes} = deliver_with_changes(peer, message)
     peer
   end
 
-  defp deliver(peer, message) do
-    {peer, _changes} = Peer.deliver(peer, message)
-    peer
-  end
+  defp deliver_with_changes(nil, message), do: Peer.new(message)
+  defp deliver_with_changes(peer, message), do: Peer.deliver(peer, message)
 
   defp observe(peer) do
     %{
