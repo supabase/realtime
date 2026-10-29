@@ -66,7 +66,10 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
           persist: persist
         )
 
-      reply_success(socket, result)
+      case result do
+        {:error, code} -> maybe_reply_error(socket, code)
+        _ -> reply_success(socket, result)
+      end
     else
       {:error, code, socket} -> maybe_reply_error(socket, code)
     end
@@ -171,24 +174,31 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   #   * `:tenant_id` - the tenant the message belongs to
   #   * `:topic` - the channel topic, used as the row's topic
   #   * `:payload` - the broadcast frame
-  #   * `:ack_broadcast` - saves before replying when true, in a task when false
+  #   * `:ack_broadcast` - saves before replying when true, in a task when false. When true, a
+  #     message that was asked to be saved but was not returns an error
   #   * `:persist` - what the sender asked for, or `nil` to not save it
   #
   # All are required.
-  @spec maybe_persist(keyword()) :: :ok | {:ok, map()}
+  @spec maybe_persist(keyword()) :: :ok | {:ok, map()} | {:error, atom()}
   defp maybe_persist(opts) do
     policies = Keyword.fetch!(opts, :policies)
+    persist = Keyword.fetch!(opts, :persist)
+    ack_broadcast = Keyword.fetch!(opts, :ack_broadcast)
 
-    if persist?(policies, Keyword.fetch!(opts, :persist)) do
-      if Keyword.fetch!(opts, :ack_broadcast) do
+    cond do
+      persist?(policies, persist) and ack_broadcast ->
         persist(opts)
-      else
+
+      persist?(policies, persist) ->
         Task.Supervisor.start_child(Realtime.TaskSupervisor, fn -> persist(opts) end)
 
         :ok
-      end
-    else
-      :ok
+
+      not is_nil(persist) and ack_broadcast ->
+        {:error, :persistence_unauthorized}
+
+      true ->
+        :ok
     end
   end
 
@@ -206,7 +216,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
     else
       error ->
         log_error("UnableToPersistMessage", error)
-        :ok
+        {:error, :persistence_failed}
     end
   end
 

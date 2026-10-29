@@ -76,6 +76,7 @@ defmodule RealtimeWeb.RequestMetrics do
       :unauthorized -> {:rejected, code}
       :payload_size_exceeded -> {:rejected, code}
       :invalid_persist_ttl -> {:rejected, code}
+      :persistence_unauthorized -> {:rejected, code}
       :rls_policy_error -> {:upstream_failure, code}
       :query_canceled -> {:upstream_failure, code}
       :unable_to_connect_to_project -> {:upstream_failure, code}
@@ -83,6 +84,7 @@ defmodule RealtimeWeb.RequestMetrics do
       :database_connection_rate_limit_reached -> {:upstream_failure, code}
       :initializing_project_connection -> {:upstream_failure, code}
       :increase_connection_pool -> {:upstream_failure, code}
+      :persistence_failed -> {:upstream_failure, code}
       _ -> {:internal_failure, code}
     end
   end
