@@ -18,6 +18,7 @@ defmodule Realtime.Api.Message do
     field(:event, :string)
     field(:private, :boolean)
     field(:skip_broadcast, :boolean)
+    field(:expires_at, :naive_datetime_usec)
 
     timestamps()
   end
@@ -32,6 +33,7 @@ defmodule Realtime.Api.Message do
       :event,
       :private,
       :skip_broadcast,
+      :expires_at,
       :inserted_at,
       :updated_at
     ])
