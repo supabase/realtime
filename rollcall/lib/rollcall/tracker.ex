@@ -79,7 +79,7 @@ defmodule Rollcall.Tracker do
   use GenServer, restart: :temporary
   use Snabbkaffex, only: :trace
   alias Rollcall.Tracker.Local
-  alias Rollcall.Tracker.Local.Changes
+  alias Rollcall.Tracker.Changes
 
   @max_retries 3
 
@@ -398,7 +398,7 @@ defmodule Rollcall.Tracker do
   end
 
   defp bump_version(state, changes) do
-    if Local.Changes.empty?(changes) do
+    if Changes.empty?(changes) do
       state
     else
       State.bump_version(state)
