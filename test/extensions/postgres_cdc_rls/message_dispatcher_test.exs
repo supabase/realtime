@@ -8,7 +8,61 @@ defmodule Extensions.PostgresCdcRls.MessageDispatcherTest do
     def fastlane!(msg), do: {:encoded, msg}
   end
 
+  defmodule CountingSerializer do
+    def fastlane!(msg) do
+      send(self(), :encoded_message)
+      {:encoded, msg}
+    end
+  end
+
+  defmodule RaisingSerializer do
+    def fastlane!(_msg) do
+      send(self(), :encode_attempted)
+      raise ArgumentError, "cannot encode"
+    end
+  end
+
   describe "dispatch/3" do
+    test "uses each subscriber's serializer when the outgoing messages match" do
+      parent = self()
+      topic = "realtime:topic"
+      data = %{"schema" => "public", "table" => "todos", "type" => "INSERT", "record" => %{"id" => 1}}
+      payload = Jason.encode!(data)
+      sub_ids = MapSet.new(["sub_v1", "sub_v2"])
+
+      for serializers <- [
+            [Phoenix.Socket.V1.JSONSerializer, RealtimeWeb.Socket.V2Serializer],
+            [RealtimeWeb.Socket.V2Serializer, Phoenix.Socket.V1.JSONSerializer]
+          ],
+          new_api? <- [true, false] do
+        subscriptions =
+          Enum.map(serializers, fn serializer ->
+            fastlane_pid =
+              spawn_link(fn ->
+                receive do
+                  msg -> send(parent, {serializer, msg})
+                end
+              end)
+
+            sub_id = if serializer == Phoenix.Socket.V1.JSONSerializer, do: "sub_v1", else: "sub_v2"
+            {self(), {:subscriber_fastlane, fastlane_pid, serializer, [{sub_id, 1}], topic, new_api?}}
+          end)
+
+        assert :ok = MessageDispatcher.dispatch(subscriptions, self(), {"INSERT", payload, sub_ids})
+
+        event = if new_api?, do: "postgres_changes", else: "INSERT"
+        expected_payload = if new_api?, do: %{"ids" => [1], "data" => data}, else: data
+
+        assert_receive {Phoenix.Socket.V1.JSONSerializer, {:socket_push, :text, v1_frame}}
+
+        assert %{"topic" => ^topic, "event" => ^event, "payload" => ^expected_payload, "ref" => nil} =
+                 decode!(v1_frame)
+
+        assert_receive {RealtimeWeb.Socket.V2Serializer, {:socket_push, :text, v2_frame}}
+        assert [nil, nil, ^topic, ^event, ^expected_payload] = decode!(v2_frame)
+      end
+    end
+
     test "dispatches to fastlane subscribers with matching sub_ids using new api" do
       parent = self()
 
@@ -98,13 +152,54 @@ defmodule Extensions.PostgresCdcRls.MessageDispatcherTest do
 
       subscriptions =
         Enum.map(pids, fn pid ->
-          {self(), {:subscriber_fastlane, pid, FakeSerializer, ids, "realtime:topic", true}}
+          {self(), {:subscriber_fastlane, pid, CountingSerializer, ids, "realtime:topic", true}}
         end)
 
       assert :ok = MessageDispatcher.dispatch(subscriptions, self(), {"INSERT", "payload", sub_ids})
 
       assert_receive {:received, {:encoded, %Broadcast{}}}
       assert_receive {:received, {:encoded, %Broadcast{}}}
+      assert_received :encoded_message
+      refute_received :encoded_message
+    end
+
+    test "shares an encoding between old api subscribers whatever their ids, not between new api ones" do
+      sub_ids = MapSet.new(["sub_1", "sub_2"])
+
+      subscriptions =
+        for new_api? <- [false, true], ids <- [[{"sub_1", 1}], [{"sub_2", 2}]] do
+          {self(), {:subscriber_fastlane, self(), CountingSerializer, ids, "realtime:topic", new_api?}}
+        end
+
+      assert :ok = MessageDispatcher.dispatch(subscriptions, self(), {"INSERT", "{}", sub_ids})
+
+      assert_received {:encoded, %Broadcast{event: "INSERT"}}
+      assert_received {:encoded, %Broadcast{event: "INSERT"}}
+      assert_received {:encoded, %Broadcast{event: "postgres_changes", payload: %{ids: [1]}}}
+      assert_received {:encoded, %Broadcast{event: "postgres_changes", payload: %{ids: [2]}}}
+
+      for _ <- 1..3, do: assert_received(:encoded_message)
+      refute_received :encoded_message
+    end
+
+    test "a serializer raising skips only the subscribers sharing that frame" do
+      sub_ids = MapSet.new(["sub_1"])
+      ids = [{"sub_1", 1}]
+
+      subscriptions = [
+        {self(), {:subscriber_fastlane, self(), RaisingSerializer, ids, "realtime:topic", true}},
+        {self(), {:subscriber_fastlane, self(), RaisingSerializer, ids, "realtime:topic", true}},
+        {self(), {:subscriber_fastlane, self(), FakeSerializer, ids, "realtime:topic", true}}
+      ]
+
+      assert :ok = MessageDispatcher.dispatch(subscriptions, self(), {"INSERT", "{}", sub_ids})
+
+      assert_received :encode_attempted
+      refute_received :encode_attempted
+      assert_received {:encoded, %Broadcast{topic: "realtime:topic"}}
+      refute_received {:encoded, _}
     end
   end
+
+  defp decode!(frame), do: frame |> IO.iodata_to_binary() |> Jason.decode!()
 end
