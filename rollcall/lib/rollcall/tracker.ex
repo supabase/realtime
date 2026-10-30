@@ -449,7 +449,7 @@ defmodule Rollcall.Tracker do
   end
 
   defp deliver_message(state, node, %Peer{} = peer, msg) do
-    {peer, changes} = Peer.deliver(peer, msg)
+    {peer, changes} = Peer.apply(peer, msg)
     put_peer(state, node, peer, changes)
   end
 

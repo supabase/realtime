@@ -147,19 +147,19 @@ defmodule Rollcall.Tracker.PeerPropertyTest do
             end
 
           :stale ->
-            {peer, _changes} = Peer.deliver(peer, snapshot(origin, stamp(1, 0), []))
+            {peer, _changes} = Peer.apply(peer, snapshot(origin, stamp(1, 0), []))
             {:cont, {peer, 0}}
 
           :stale_diff ->
-            {peer, _changes} = Peer.deliver(peer, diff(origin, stamp(1, 3), 2, [], []))
+            {peer, _changes} = Peer.apply(peer, diff(origin, stamp(1, 3), 2, [], []))
             {:cont, {peer, 0}}
 
           :gap_diff ->
-            {peer, _changes} = Peer.deliver(peer, diff(origin, stamp(2, 9), 8, [], []))
+            {peer, _changes} = Peer.apply(peer, diff(origin, stamp(2, 9), 8, [], []))
             {:cont, {peer, 0}}
 
           :request ->
-            {peer, _changes} = Peer.deliver(peer, request(origin))
+            {peer, _changes} = Peer.apply(peer, request(origin))
             {:cont, {peer, 0}}
         end
       end)
@@ -176,7 +176,7 @@ defmodule Rollcall.Tracker.PeerPropertyTest do
   end
 
   defp deliver_with_changes(nil, message), do: Peer.new(message)
-  defp deliver_with_changes(peer, message), do: Peer.deliver(peer, message)
+  defp deliver_with_changes(peer, message), do: Peer.apply(peer, message)
 
   defp observe(peer) do
     %{

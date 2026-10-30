@@ -8,7 +8,7 @@ defmodule Rollcall.Tracker.Peer do
   no merge, because each entry has one owner. See DESIGN.md: Receive messages
   and Detect a dead peer.
 
-  `deliver/2` takes a message and returns the new peer and the
+  `apply/2` takes a message and returns the new peer and the
   `Rollcall.Tracker.Changes` that the message made to the replica. 
 
   ## Fields
@@ -66,8 +66,8 @@ defmodule Rollcall.Tracker.Peer do
   does not create a peer.
   """
   @spec new(Messages.snapshot() | Messages.diff()) :: {t(), Changes.t()}
-  def new({:snapshot, _origin, _stamp, _entries} = msg), do: deliver(%__MODULE__{}, msg)
-  def new({:diff, _origin, _stamp, _from, _joins, _leaves} = msg), do: deliver(%__MODULE__{}, msg)
+  def new({:snapshot, _origin, _stamp, _entries} = msg), do: __MODULE__.apply(%__MODULE__{}, msg)
+  def new({:diff, _origin, _stamp, _from, _joins, _leaves} = msg), do: __MODULE__.apply(%__MODULE__{}, msg)
 
   @doc """
   Applies `message` to `peer`. Returns the new peer and the changes that the
@@ -90,8 +90,8 @@ defmodule Rollcall.Tracker.Peer do
   The origin follows the newest incarnation. A message of an older run does not
   move it back.
   """
-  @spec deliver(t(), Messages.t()) :: {t(), Changes.t()}
-  def deliver(%__MODULE__{} = peer, message) do
+  @spec apply(t(), Messages.t()) :: {t(), Changes.t()}
+  def apply(%__MODULE__{} = peer, message) do
     peer = %{peer | silent_ticks: 0}
 
     case message do

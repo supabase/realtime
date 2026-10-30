@@ -62,7 +62,7 @@ defmodule Rollcall.Tracker.PeerTest do
       peer = snapshot_peer(origin, 1, 3, [])
       joined = wire_entry("partition_2", "key_1", "b", %{b: 2})
 
-      {peer, changes} = Peer.deliver(peer, diff(origin, stamp(1, 4), 3, [joined], []))
+      {peer, changes} = Peer.apply(peer, diff(origin, stamp(1, 4), 3, [joined], []))
 
       expected = Entry.new(origin, "partition_2", "key_1", %{b: 2}, "b")
       assert Enum.to_list(Peer.entries(peer)) == [expected]
@@ -75,7 +75,7 @@ defmodule Rollcall.Tracker.PeerTest do
       second = wire_entry("partition", "key", "b", %{a: 2})
       {peer, _changes} = Peer.new(snapshot(origin, stamp(1, 3), [first, second]))
 
-      {peer, changes} = Peer.deliver(peer, diff(origin, stamp(1, 4), 3, [], ["a"]))
+      {peer, changes} = Peer.apply(peer, diff(origin, stamp(1, 4), 3, [], ["a"]))
 
       kept = Entry.new(origin, "partition", "key", %{a: 2}, "b")
       assert Enum.to_list(Peer.entries(peer)) == [kept]
@@ -87,11 +87,11 @@ defmodule Rollcall.Tracker.PeerTest do
     end
   end
 
-  describe "deliver/2 with a snapshot" do
+  describe "apply/2 with a snapshot" do
     test "a newer version replaces the replica", %{origin: origin} do
       peer = snapshot_peer(origin, 1, 3, ["a", "b"])
 
-      {peer, changes} = Peer.deliver(peer, snapshot(origin, stamp(1, 4), entries(["b", "c"])))
+      {peer, changes} = Peer.apply(peer, snapshot(origin, stamp(1, 4), entries(["b", "c"])))
 
       assert refs(peer) == ["b", "c"]
       assert mark_tuple(peer) == {1, 4}
@@ -102,7 +102,7 @@ defmodule Rollcall.Tracker.PeerTest do
     test "a newer incarnation replaces the replica when its version is lower", %{origin: origin} do
       peer = snapshot_peer(origin, 1, 9, ["a"])
 
-      {peer, changes} = Peer.deliver(peer, snapshot(origin, stamp(2, 0), entries(["b"])))
+      {peer, changes} = Peer.apply(peer, snapshot(origin, stamp(2, 0), entries(["b"])))
 
       assert refs(peer) == ["b"]
       assert mark_tuple(peer) == {2, 0}
@@ -114,7 +114,7 @@ defmodule Rollcall.Tracker.PeerTest do
       {peer, _changes} = Peer.new(diff(origin, stamp(1, 4), 3, [], []))
       assert Peer.behind?(peer)
 
-      {peer, _changes} = Peer.deliver(peer, snapshot(origin, stamp(1, 4), entries(["a"])))
+      {peer, _changes} = Peer.apply(peer, snapshot(origin, stamp(1, 4), entries(["a"])))
 
       refute Peer.behind?(peer)
       assert refs(peer) == ["a"]
@@ -123,7 +123,7 @@ defmodule Rollcall.Tracker.PeerTest do
     test "an empty snapshot is a goodbye and removes every entry", %{origin: origin} do
       peer = snapshot_peer(origin, 1, 3, ["a", "b"])
 
-      {peer, changes} = Peer.deliver(peer, snapshot(origin, stamp(1, 4), []))
+      {peer, changes} = Peer.apply(peer, snapshot(origin, stamp(1, 4), []))
 
       assert refs(peer) == []
       assert joins(changes) == []
@@ -149,12 +149,12 @@ defmodule Rollcall.Tracker.PeerTest do
     end
   end
 
-  describe "deliver/2 with a diff that applies" do
+  describe "apply/2 with a diff that applies" do
     test "removes the leaves and adds the joins", %{origin: origin} do
       peer = snapshot_peer(origin, 1, 3, ["a", "b"])
 
       {peer, changes} =
-        Peer.deliver(peer, diff(origin, stamp(1, 5), 3, entries(["c"]), ["a"]))
+        Peer.apply(peer, diff(origin, stamp(1, 5), 3, entries(["c"]), ["a"]))
 
       assert refs(peer) == ["b", "c"]
       assert mark_tuple(peer) == {1, 5}
@@ -165,7 +165,7 @@ defmodule Rollcall.Tracker.PeerTest do
     test "sets the pid of a joined entry to the origin", %{origin: origin} do
       peer = snapshot_peer(origin, 1, 3, [])
 
-      {peer, _changes} = Peer.deliver(peer, diff(origin, stamp(1, 4), 3, entries(["a"]), []))
+      {peer, _changes} = Peer.apply(peer, diff(origin, stamp(1, 4), 3, entries(["a"]), []))
 
       assert origins(peer) == [origin]
     end
@@ -174,7 +174,7 @@ defmodule Rollcall.Tracker.PeerTest do
       peer = snapshot_peer(origin, 1, 3, ["a"])
 
       {peer, changes} =
-        Peer.deliver(peer, diff(origin, stamp(1, 4), 3, entries(["a"]), ["a"]))
+        Peer.apply(peer, diff(origin, stamp(1, 4), 3, entries(["a"]), ["a"]))
 
       assert refs(peer) == ["a"]
       assert mark_tuple(peer) == {1, 4}
@@ -184,7 +184,7 @@ defmodule Rollcall.Tracker.PeerTest do
     test "a leave of an entry that the replica lacks makes no change", %{origin: origin} do
       peer = snapshot_peer(origin, 1, 3, ["a"])
 
-      {peer, changes} = Peer.deliver(peer, diff(origin, stamp(1, 4), 3, [], ["z"]))
+      {peer, changes} = Peer.apply(peer, diff(origin, stamp(1, 4), 3, [], ["z"]))
 
       assert refs(peer) == ["a"]
       assert_no_changes(changes)
@@ -193,7 +193,7 @@ defmodule Rollcall.Tracker.PeerTest do
     test "a join of an entry that the replica holds makes no change", %{origin: origin} do
       peer = snapshot_peer(origin, 1, 3, ["a"])
 
-      {peer, changes} = Peer.deliver(peer, diff(origin, stamp(1, 4), 3, entries(["a"]), []))
+      {peer, changes} = Peer.apply(peer, diff(origin, stamp(1, 4), 3, entries(["a"]), []))
 
       assert refs(peer) == ["a"]
       assert_no_changes(changes)
@@ -202,7 +202,7 @@ defmodule Rollcall.Tracker.PeerTest do
     test "an empty diff keeps the mark and changes nothing", %{origin: origin} do
       peer = snapshot_peer(origin, 1, 3, ["a"])
 
-      {peer, changes} = Peer.deliver(peer, diff(origin, stamp(1, 3), 3, [], []))
+      {peer, changes} = Peer.apply(peer, diff(origin, stamp(1, 3), 3, [], []))
 
       assert refs(peer) == ["a"]
       assert mark_tuple(peer) == {1, 3}
@@ -212,21 +212,21 @@ defmodule Rollcall.Tracker.PeerTest do
 
     test "does not clear behind", %{origin: origin} do
       peer = snapshot_peer(origin, 1, 3, ["a"])
-      {peer, _changes} = Peer.deliver(peer, diff(origin, stamp(1, 6), 5, [], []))
+      {peer, _changes} = Peer.apply(peer, diff(origin, stamp(1, 6), 5, [], []))
       assert Peer.behind?(peer)
 
-      {peer, _changes} = Peer.deliver(peer, diff(origin, stamp(1, 5), 3, entries(["b"]), []))
+      {peer, _changes} = Peer.apply(peer, diff(origin, stamp(1, 5), 3, entries(["b"]), []))
 
       assert refs(peer) == ["a", "b"]
       assert Peer.behind?(peer)
     end
   end
 
-  describe "deliver/2 with a diff that does not apply" do
+  describe "apply/2 with a diff that does not apply" do
     test "a gap sets behind and changes nothing else", %{origin: origin} do
       peer = snapshot_peer(origin, 1, 3, ["a"])
 
-      {peer, changes} = Peer.deliver(peer, diff(origin, stamp(1, 6), 5, entries(["b"]), []))
+      {peer, changes} = Peer.apply(peer, diff(origin, stamp(1, 6), 5, entries(["b"]), []))
 
       assert Peer.behind?(peer)
       assert refs(peer) == ["a"]
@@ -238,7 +238,7 @@ defmodule Rollcall.Tracker.PeerTest do
          %{origin: origin} do
       peer = snapshot_peer(origin, 1, 3, ["a"])
 
-      {peer, changes} = Peer.deliver(peer, diff(origin, stamp(2, 4), 3, entries(["b"]), []))
+      {peer, changes} = Peer.apply(peer, diff(origin, stamp(2, 4), 3, entries(["b"]), []))
 
       assert Peer.behind?(peer)
       assert refs(peer) == ["a"]
@@ -248,9 +248,9 @@ defmodule Rollcall.Tracker.PeerTest do
 
     test "a delayed diff applies after a gap", %{origin: origin} do
       peer = snapshot_peer(origin, 1, 3, ["a"])
-      {peer, _changes} = Peer.deliver(peer, diff(origin, stamp(1, 6), 5, [], []))
+      {peer, _changes} = Peer.apply(peer, diff(origin, stamp(1, 6), 5, [], []))
 
-      {peer, changes} = Peer.deliver(peer, diff(origin, stamp(1, 5), 3, entries(["b"]), []))
+      {peer, changes} = Peer.apply(peer, diff(origin, stamp(1, 5), 3, entries(["b"]), []))
 
       assert refs(peer) == ["a", "b"]
       assert mark_tuple(peer) == {1, 5}
@@ -270,7 +270,7 @@ defmodule Rollcall.Tracker.PeerTest do
     end
   end
 
-  describe "deliver/2 with a request" do
+  describe "apply/2 with a request" do
     test "changes nothing", %{origin: origin} do
       peer = snapshot_peer(origin, 1, 3, ["a"])
 
@@ -278,14 +278,14 @@ defmodule Rollcall.Tracker.PeerTest do
     end
   end
 
-  describe "deliver/2 and the origin" do
+  describe "apply/2 and the origin" do
     test "a snapshot that replaces the replica sets the origin", %{
       origin: origin,
       other_origin: other_origin
     } do
       peer = snapshot_peer(origin, 1, 3, ["a"])
 
-      {peer, _changes} = Peer.deliver(peer, snapshot(other_origin, stamp(2, 0), entries(["b"])))
+      {peer, _changes} = Peer.apply(peer, snapshot(other_origin, stamp(2, 0), entries(["b"])))
 
       assert Peer.origin(peer) == other_origin
       assert origins(peer) == [other_origin]
@@ -294,7 +294,7 @@ defmodule Rollcall.Tracker.PeerTest do
     test "a diff that applies sets the origin", %{origin: origin, other_origin: other_origin} do
       peer = snapshot_peer(origin, 1, 3, ["a"])
 
-      {peer, _changes} = Peer.deliver(peer, diff(other_origin, stamp(1, 4), 3, [], []))
+      {peer, _changes} = Peer.apply(peer, diff(other_origin, stamp(1, 4), 3, [], []))
 
       assert Peer.origin(peer) == other_origin
     end
@@ -302,7 +302,7 @@ defmodule Rollcall.Tracker.PeerTest do
     test "a diff that sets behind sets the origin", %{origin: origin, other_origin: other_origin} do
       peer = snapshot_peer(origin, 1, 3, ["a"])
 
-      {peer, _changes} = Peer.deliver(peer, diff(other_origin, stamp(2, 4), 3, [], []))
+      {peer, _changes} = Peer.apply(peer, diff(other_origin, stamp(2, 4), 3, [], []))
 
       assert Peer.origin(peer) == other_origin
     end
@@ -310,7 +310,7 @@ defmodule Rollcall.Tracker.PeerTest do
     test "a stale message does not set the origin", %{origin: origin, other_origin: other_origin} do
       peer = snapshot_peer(origin, 2, 3, ["a"])
 
-      {peer, _changes} = Peer.deliver(peer, snapshot(other_origin, stamp(1, 9), entries(["b"])))
+      {peer, _changes} = Peer.apply(peer, snapshot(other_origin, stamp(1, 9), entries(["b"])))
 
       assert Peer.origin(peer) == origin
     end
@@ -322,10 +322,10 @@ defmodule Rollcall.Tracker.PeerTest do
       other_origin: other_origin
     } do
       peer = snapshot_peer(origin, 1, 3, ["a"])
-      {peer, _changes} = Peer.deliver(peer, diff(other_origin, stamp(2, 4), 3, [], []))
+      {peer, _changes} = Peer.apply(peer, diff(other_origin, stamp(2, 4), 3, [], []))
       assert Peer.origin(peer) == other_origin
 
-      {peer, _changes} = Peer.deliver(peer, diff(origin, stamp(1, 4), 3, entries(["b"]), []))
+      {peer, _changes} = Peer.apply(peer, diff(origin, stamp(1, 4), 3, entries(["b"]), []))
 
       assert refs(peer) == ["a", "b"]
       assert mark_tuple(peer) == {1, 4}
@@ -337,9 +337,9 @@ defmodule Rollcall.Tracker.PeerTest do
       other_origin: other_origin
     } do
       peer = snapshot_peer(origin, 1, 3, ["a"])
-      {peer, _changes} = Peer.deliver(peer, diff(other_origin, stamp(2, 4), 3, [], []))
+      {peer, _changes} = Peer.apply(peer, diff(other_origin, stamp(2, 4), 3, [], []))
 
-      {peer, _changes} = Peer.deliver(peer, snapshot(origin, stamp(1, 5), entries(["b"])))
+      {peer, _changes} = Peer.apply(peer, snapshot(origin, stamp(1, 5), entries(["b"])))
 
       assert refs(peer) == ["b"]
       assert mark_tuple(peer) == {1, 5}
@@ -351,7 +351,7 @@ defmodule Rollcall.Tracker.PeerTest do
     test "a goodbye of an old incarnation does not remove the entries of the new one",
          %{origin: origin, other_origin: other_origin} do
       peer = snapshot_peer(origin, 1, 2, ["a"])
-      {peer, _changes} = Peer.deliver(peer, snapshot(other_origin, stamp(2, 1), entries(["b"])))
+      {peer, _changes} = Peer.apply(peer, snapshot(other_origin, stamp(2, 1), entries(["b"])))
 
       assert_unchanged(peer, snapshot(origin, stamp(1, 2), []))
       assert refs(peer) == ["b"]
@@ -360,7 +360,7 @@ defmodule Rollcall.Tracker.PeerTest do
     test "a goodbye of the new incarnation removes the entries when the old one arrives later",
          %{origin: origin, other_origin: other_origin} do
       peer = snapshot_peer(origin, 1, 2, ["a"])
-      {peer, _changes} = Peer.deliver(peer, snapshot(other_origin, stamp(2, 1), []))
+      {peer, _changes} = Peer.apply(peer, snapshot(other_origin, stamp(2, 1), []))
 
       assert_unchanged(peer, snapshot(origin, stamp(1, 2), []))
       assert refs(peer) == []
@@ -392,7 +392,7 @@ defmodule Rollcall.Tracker.PeerTest do
     test "a snapshot resets the count", %{origin: origin} do
       peer = snapshot_peer(origin, 1, 3, ["a"])
       {:keep, peer} = tick_times(peer, 3, 2)
-      {peer, _changes} = Peer.deliver(peer, snapshot(origin, stamp(1, 4), entries(["a"])))
+      {peer, _changes} = Peer.apply(peer, snapshot(origin, stamp(1, 4), entries(["a"])))
 
       assert {:keep, peer} = tick_times(peer, 3, 2)
       assert {:purge, _changes} = Peer.tick(peer, 3)
@@ -401,7 +401,7 @@ defmodule Rollcall.Tracker.PeerTest do
     test "a stale message resets the count", %{origin: origin} do
       peer = snapshot_peer(origin, 1, 3, ["a"])
       {:keep, peer} = tick_times(peer, 3, 2)
-      {peer, _changes} = Peer.deliver(peer, snapshot(origin, stamp(1, 2), []))
+      {peer, _changes} = Peer.apply(peer, snapshot(origin, stamp(1, 2), []))
 
       assert {:keep, peer} = tick_times(peer, 3, 2)
       assert {:purge, _changes} = Peer.tick(peer, 3)
@@ -410,7 +410,7 @@ defmodule Rollcall.Tracker.PeerTest do
     test "a request resets the count", %{origin: origin} do
       peer = snapshot_peer(origin, 1, 3, ["a"])
       {:keep, peer} = tick_times(peer, 3, 2)
-      {peer, _changes} = Peer.deliver(peer, request(origin))
+      {peer, _changes} = Peer.apply(peer, request(origin))
 
       assert {:keep, peer} = tick_times(peer, 3, 2)
       assert {:purge, _changes} = Peer.tick(peer, 3)
@@ -419,7 +419,7 @@ defmodule Rollcall.Tracker.PeerTest do
     test "a stale diff resets the count", %{origin: origin} do
       peer = snapshot_peer(origin, 1, 3, ["a"])
       {:keep, peer} = tick_times(peer, 3, 2)
-      {peer, _changes} = Peer.deliver(peer, diff(origin, stamp(1, 2), 1, [], []))
+      {peer, _changes} = Peer.apply(peer, diff(origin, stamp(1, 2), 1, [], []))
 
       assert {:keep, peer} = tick_times(peer, 3, 2)
       assert {:purge, _changes} = Peer.tick(peer, 3)
@@ -428,7 +428,7 @@ defmodule Rollcall.Tracker.PeerTest do
     test "a diff that sets behind resets the count", %{origin: origin} do
       peer = snapshot_peer(origin, 1, 3, ["a"])
       {:keep, peer} = tick_times(peer, 3, 2)
-      {peer, _changes} = Peer.deliver(peer, diff(origin, stamp(1, 6), 5, [], []))
+      {peer, _changes} = Peer.apply(peer, diff(origin, stamp(1, 6), 5, [], []))
       assert Peer.behind?(peer)
 
       assert {:keep, peer} = tick_times(peer, 3, 2)
@@ -484,7 +484,7 @@ defmodule Rollcall.Tracker.PeerTest do
   end
 
   defp assert_unchanged(peer, message) do
-    {delivered, changes} = Peer.deliver(peer, message)
+    {delivered, changes} = Peer.apply(peer, message)
 
     assert observe(delivered) == observe(peer)
     assert_no_changes(changes)
