@@ -1,34 +1,32 @@
 import assert from "assert";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { ANON_KEY, EVENT_TIMEOUT_MS, PROJECT_URL, RATE_LIMIT_PAUSE_MS } from "../context.ts";
+import { EVENT_TIMEOUT_MS, RATE_LIMIT_PAUSE_MS } from "../context.ts";
 import { connectDb, type Db } from "../db.ts";
 import type { SuiteDescriptor } from "../runner.ts";
 import { sleep, randomTopic, waitFor, stopClient, openChannel } from "../helpers.ts";
 
 const MAX_TTL_SECONDS = 259200;
 
+type Channel = ReturnType<SupabaseClient["channel"]>;
+type Persist = Parameters<Channel["send"]>[0]["persist"];
 type Received = { event: string; payload: any; meta?: { replayed?: boolean } };
 type MessageRow = { extension: string; private: boolean; payload: unknown; ttl_seconds: number };
 
-// Over the REST API only: supabase-js can't send `persist` on the WebSocket until
-// supabase/supabase-js#2690 ships.
-async function send(supabase: SupabaseClient, topic: string, event: string, query: string, body?: Uint8Array<ArrayBuffer>) {
-  const { data } = await supabase.auth.getSession();
-  const url = `${PROJECT_URL}/realtime/v1/api/broadcast/${encodeURIComponent(topic)}/events/${encodeURIComponent(event)}?${query}`;
-  return fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": body ? "application/octet-stream" : "application/json",
-      Authorization: `Bearer ${data.session!.access_token}`,
-      apikey: ANON_KEY,
-    },
-    body: body ?? JSON.stringify({ message: crypto.randomUUID() }),
-  });
+// `ack` makes the server reply once the message is handled, so send() resolves "error" when it
+// rejects `persist` instead of dropping it silently.
+async function openSender(supabase: SupabaseClient, topic: string, config: { private?: boolean; self?: boolean } = {}) {
+  const { private: isPrivate = true, self = false } = config;
+  const channel = supabase.channel(topic, { config: { private: isPrivate, broadcast: { ack: true, self } } });
+  const subscribeMs = await openChannel(channel);
+  return { channel, subscribeMs };
 }
 
-async function sendAccepted(supabase: SupabaseClient, topic: string, event: string, query: string, body?: Uint8Array<ArrayBuffer>) {
-  const res = await send(supabase, topic, event, query, body);
-  assert.strictEqual(res.status, 202, `Broadcast API returned ${res.status}: ${await res.text()}`);
+const send = (channel: Channel, event: string, persist?: Persist, payload: unknown = { message: crypto.randomUUID() }) =>
+  channel.send({ type: "broadcast", event, payload, persist });
+
+async function sendOk(channel: Channel, event: string, persist?: Persist, payload?: unknown) {
+  const result = await send(channel, event, persist, payload);
+  assert.strictEqual(result, "ok", `send returned ${result}`);
 }
 
 const findRow = async (sql: Db, topic: string, event: string): Promise<MessageRow | undefined> =>
@@ -36,7 +34,7 @@ const findRow = async (sql: Db, topic: string, event: string): Promise<MessageRo
              FROM realtime.messages
              WHERE topic = ${topic} AND event = ${event}`)[0];
 
-// The API answers 202 before the message is saved, so wait for the row before joining to replay it.
+// Wait for the row before joining to replay it, and measure how long the insert took.
 async function waitForRow(sql: Db, topic: string, event: string) {
   const start = performance.now();
   while (performance.now() - start < EVENT_TIMEOUT_MS) {
@@ -70,11 +68,13 @@ export const broadcastPersistence: SuiteDescriptor = {
         const event = crypto.randomUUID();
         const since = Date.now() - 1000;
 
-        await sendAccepted(supabase, topic, event, "private=true&persist=true");
+        const { channel: sender } = await openSender(supabase, topic);
+        await sendOk(sender, event, true);
         const { row, latencyMs: persistMs } = await waitForRow(sql, topic, event);
         assert.strictEqual(row.extension, "broadcast");
         assert.strictEqual(row.private, true);
         assert.ok(Math.abs(row.ttl_seconds - MAX_TTL_SECONDS) < 5, `expected a ${MAX_TTL_SECONDS}s ttl, got ${row.ttl_seconds}s`);
+        await supabase.removeChannel(sender);
 
         const { received, subscribeMs } = await joinWithReplay(supabase, topic, since);
         const { value: msg, latencyMs: replayMs } = await waitFor(() => received.find((m) => m.event === event) ?? null, "replayed broadcast event");
@@ -102,8 +102,10 @@ export const broadcastPersistence: SuiteDescriptor = {
         const binary = new Uint8Array([0xde, 0xad, 0xbe, 0xef, 0x00, 0xff]);
         const since = Date.now() - 1000;
 
-        await sendAccepted(supabase, topic, event, "private=true&persist=true", binary);
+        const { channel: sender } = await openSender(supabase, topic);
+        await sendOk(sender, event, true, binary.buffer);
         await waitForRow(sql, topic, event);
+        await supabase.removeChannel(sender);
 
         const { received, subscribeMs } = await joinWithReplay(supabase, topic, since);
         const { value: msg, latencyMs: replayMs } = await waitFor(() => received.find((m) => m.event === event) ?? null, "replayed binary broadcast event");
@@ -128,10 +130,12 @@ export const broadcastPersistence: SuiteDescriptor = {
         const persisted = crypto.randomUUID();
         const since = Date.now() - 1000;
 
-        await sendAccepted(supabase, topic, notPersisted, "private=true");
-        await sendAccepted(supabase, topic, persisted, "private=true&persist=true");
+        const { channel: sender } = await openSender(supabase, topic);
+        await sendOk(sender, notPersisted);
+        await sendOk(sender, persisted, true);
         await waitForRow(sql, topic, persisted);
         assert.strictEqual(await findRow(sql, topic, notPersisted), undefined, "message without persist was stored");
+        await supabase.removeChannel(sender);
 
         const { received } = await joinWithReplay(supabase, topic, since);
         await waitFor(() => received.find((m) => m.event === persisted) ?? null, "replayed broadcast event");
@@ -153,13 +157,15 @@ export const broadcastPersistence: SuiteDescriptor = {
         const persisted = crypto.randomUUID();
         const since = Date.now() - 1000;
 
-        await sendAccepted(supabase, topic, expiring, "private=true&persist[ttl]=1");
+        const { channel: sender } = await openSender(supabase, topic);
+        await sendOk(sender, expiring, { ttl: 1 });
         const { row } = await waitForRow(sql, topic, expiring);
         assert.ok(Math.abs(row.ttl_seconds - 1) < 0.5, `expected a 1s ttl, got ${row.ttl_seconds}s`);
 
         await sleep(2000);
-        await sendAccepted(supabase, topic, persisted, "private=true&persist=true");
+        await sendOk(sender, persisted, true);
         await waitForRow(sql, topic, persisted);
+        await supabase.removeChannel(sender);
 
         const { received } = await joinWithReplay(supabase, topic, since);
         await waitFor(() => received.find((m) => m.event === persisted) ?? null, "replayed broadcast event");
@@ -174,29 +180,45 @@ export const broadcastPersistence: SuiteDescriptor = {
     await sleep(RATE_LIMIT_PAUSE_MS);
     await test("invalid persist ttl is rejected", async () => {
       const supabase = await authedClient();
+      const sql = connectDb();
       try {
-        for (const ttl of ["0", String(MAX_TTL_SECONDS + 1), "soon"]) {
-          const res = await send(supabase, randomTopic(), crypto.randomUUID(), `private=true&persist[ttl]=${ttl}`);
-          assert.strictEqual(res.status, 422, `ttl ${ttl}: expected 422, got ${res.status}`);
-          assert.deepStrictEqual(await res.json(), {
-            message: `persist ttl must be a positive integer of seconds from 1 to ${MAX_TTL_SECONDS}`,
-          });
+        const topic = randomTopic();
+        const { channel: sender } = await openSender(supabase, topic);
+
+        for (const ttl of [0, MAX_TTL_SECONDS + 1, "soon" as unknown as number]) {
+          const event = crypto.randomUUID();
+          const result = await send(sender, event, { ttl });
+          assert.strictEqual(result, "error", `ttl ${ttl}: expected error, got ${result}`);
+          assert.strictEqual(await findRow(sql, topic, event), undefined, `ttl ${ttl}: message was stored`);
         }
         return [];
       } finally {
+        await sql.end().catch(() => {});
         await stopClient(supabase);
       }
     });
 
     await sleep(RATE_LIMIT_PAUSE_MS);
-    await test("persist on a public channel is rejected", async () => {
+    await test("persist on a public channel is ignored", async () => {
       const supabase = await authedClient();
+      const sql = connectDb();
       try {
-        const res = await send(supabase, randomTopic(), crypto.randomUUID(), "persist=true");
-        assert.strictEqual(res.status, 422, `expected 422, got ${res.status}`);
-        assert.deepStrictEqual(await res.json(), { errors: { persist: ["can only be used on private channels"] } });
-        return [];
+        const topic = randomTopic();
+        const event = crypto.randomUUID();
+        let result: any = null;
+
+        const { channel, subscribeMs } = await openSender(supabase, topic, { private: false, self: true });
+        channel.on("broadcast", { event }, (msg) => (result = msg.payload));
+
+        await sendOk(channel, event, true);
+        const { latencyMs: eventMs } = await waitFor(() => result, "broadcast event");
+
+        // Nothing to wait on for a row that should never appear: an allowed one shows up within milliseconds.
+        await sleep(1000);
+        assert.strictEqual(await findRow(sql, topic, event), undefined, "message on a public channel was stored");
+        return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
       } finally {
+        await sql.end().catch(() => {});
         await stopClient(supabase);
       }
     });
@@ -210,10 +232,10 @@ export const broadcastPersistence: SuiteDescriptor = {
         const event = crypto.randomUUID();
         let result: any = null;
 
-        const channel = supabase.channel(topic, { config: { private: true } }).on("broadcast", { event }, (msg) => (result = msg.payload));
-        const subscribeMs = await openChannel(channel);
+        const { channel, subscribeMs } = await openSender(supabase, topic, { self: true });
+        channel.on("broadcast", { event }, (msg) => (result = msg.payload));
 
-        await sendAccepted(supabase, topic, event, "private=true&persist=true");
+        await sendOk(channel, event, true);
         const { latencyMs: eventMs } = await waitFor(() => result, "broadcast event");
 
         // Nothing to wait on for a row that should never appear: an allowed one shows up within milliseconds.
