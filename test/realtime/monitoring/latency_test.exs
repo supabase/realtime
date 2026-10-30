@@ -18,7 +18,7 @@ defmodule Realtime.LatencyTest do
 
   describe "handle_info/2" do
     test "unexpected message does not crash the server" do
-      pid = Process.whereis(Latency)
+      pid = start_supervised!(Latency)
       send(pid, :unexpected_message)
       assert Process.alive?(pid)
     end
@@ -26,7 +26,7 @@ defmodule Realtime.LatencyTest do
 
   describe "handle_cast/2" do
     test "ping cast triggers a ping and does not crash" do
-      pid = Process.whereis(Latency)
+      pid = start_supervised!(Latency)
       GenServer.cast(pid, {:ping, 0, 5_000, 5_000})
       assert Process.alive?(pid)
     end
