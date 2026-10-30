@@ -538,6 +538,30 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
     end
   end
 
+  describe "rate limits - node join budget" do
+    setup [:rls_context]
+
+    test "joins over the tenant's budget on the node are counted, not refused", %{
+      tenant: tenant,
+      serializer: serializer
+    } do
+      enable_node_join_budget_flag!(tenant)
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      config = %{broadcast: %{self: true}, private: false}
+      topics = for _ <- 1..50, do: "realtime:#{random_string()}"
+
+      for topic <- topics, do: WebsocketClient.join(socket, topic, %{config: config})
+
+      for topic <- topics do
+        assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 5_000
+      end
+
+      # config/test.exs makes the budget max(10, 2 * sockets) joins per second with a 2 second burst, so with one socket
+      # the first 20 joins always fit and the rest outrun the refill of 10 per second
+      assert node_join_budget_exceeded(tenant) in 1..30
+    end
+  end
+
   describe "Muster channel join" do
     setup [:rls_context]
 
@@ -635,5 +659,20 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
                      topic: ^topic
                    },
                    500
+  end
+
+  # The flag is created disabled and enabled only for this tenant, so it does not leak into other tests
+  defp enable_node_join_budget_flag!(tenant) do
+    {:ok, flag} = Realtime.Api.upsert_feature_flag(%{name: "node_join_budget", enabled: false})
+    Realtime.FeatureFlags.Cache.update_cache(flag)
+    {:ok, tenant} = Realtime.FeatureFlags.set_tenant_flag("node_join_budget", tenant.external_id, true)
+    Tenants.Cache.update_cache(tenant)
+    on_exit(fn -> Realtime.FeatureFlags.Cache.invalidate_cache("node_join_budget") end)
+  end
+
+  defp node_join_budget_exceeded(tenant) do
+    Realtime.TenantPromEx
+    |> PromEx.get_metrics()
+    |> MetricsHelper.search("realtime_channel_node_join_budget_exceeded", tenant: tenant.external_id)
   end
 end
