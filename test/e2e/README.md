@@ -38,6 +38,7 @@ Pass any combination to `--test` as a comma-separated list. Use `functional` to 
 | `postgres-changes` | postgres changes extension | Filtered INSERT, UPDATE, DELETE events; concurrent INSERT + UPDATE + DELETE |
 | `broadcast-changes` | broadcast changes | DB-triggered broadcast for INSERT, UPDATE, DELETE |
 | `broadcast-replay` | broadcast replay | Replayed messages delivered on join; `meta.replayed` flag set; messages before `since` not replayed |
+| `broadcast-persistence` | broadcast persistence | JSON and binary messages sent with `persist` over the WebSocket replayed on join; not stored without `persist`; delivered but not stored when the policy denies persistence, with `persistence_unauthorized` returned; not replayed after the ttl expires; invalid ttl refused with `invalid_persist_ttl`; `persist` on a public channel refused |
 
 ```bash
 # Run only connection and broadcast tests
