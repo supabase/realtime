@@ -12,8 +12,8 @@ type Persist = Parameters<Channel["send"]>[0]["persist"];
 type Received = { event: string; payload: any; meta?: { replayed?: boolean } };
 type MessageRow = { extension: string; private: boolean; payload: unknown; ttl_seconds: number };
 
-// `ack` makes the server reply once the message is handled, so send() resolves "error" when it
-// rejects `persist` instead of dropping it silently.
+// `ack` makes the server reply once the message is handled, so send() resolves the server's error
+// code when it refuses `persist` instead of dropping it silently.
 async function openSender(supabase: SupabaseClient, topic: string, config: { private?: boolean; self?: boolean } = {}) {
   const { private: isPrivate = true, self = false } = config;
   const channel = supabase.channel(topic, { config: { private: isPrivate, broadcast: { ack: true, self } } });
@@ -188,7 +188,7 @@ export const broadcastPersistence: SuiteDescriptor = {
         for (const ttl of [0, MAX_TTL_SECONDS + 1, "soon" as unknown as number]) {
           const event = crypto.randomUUID();
           const result = await send(sender, event, { ttl });
-          assert.strictEqual(result, "error", `ttl ${ttl}: expected error, got ${result}`);
+          assert.strictEqual(result, "invalid_persist_ttl", `ttl ${ttl}: got ${result}`);
           assert.strictEqual(await findRow(sql, topic, event), undefined, `ttl ${ttl}: message was stored`);
         }
         return [];
@@ -199,7 +199,7 @@ export const broadcastPersistence: SuiteDescriptor = {
     });
 
     await sleep(RATE_LIMIT_PAUSE_MS);
-    await test("persist on a public channel is ignored", async () => {
+    await test("persist on a public channel is refused", async () => {
       const supabase = await authedClient();
       const sql = connectDb();
       try {
@@ -210,13 +210,14 @@ export const broadcastPersistence: SuiteDescriptor = {
         const { channel, subscribeMs } = await openSender(supabase, topic, { private: false, self: true });
         channel.on("broadcast", { event }, (msg) => (result = msg.payload));
 
-        await sendOk(channel, event, true);
-        const { latencyMs: eventMs } = await waitFor(() => result, "broadcast event");
+        // supabase-js refuses before sending; the server ignores `persist` on a public channel.
+        assert.strictEqual(await send(channel, event, true), "error");
 
-        // Nothing to wait on for a row that should never appear: an allowed one shows up within milliseconds.
+        // Nothing to wait on for a message or row that should never appear.
         await sleep(1000);
+        assert.strictEqual(result, null, "message on a public channel was sent");
         assert.strictEqual(await findRow(sql, topic, event), undefined, "message on a public channel was stored");
-        return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
+        return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
       } finally {
         await sql.end().catch(() => {});
         await stopClient(supabase);
@@ -235,7 +236,7 @@ export const broadcastPersistence: SuiteDescriptor = {
         const { channel, subscribeMs } = await openSender(supabase, topic, { self: true });
         channel.on("broadcast", { event }, (msg) => (result = msg.payload));
 
-        await sendOk(channel, event, true);
+        assert.strictEqual(await send(channel, event, true), "persistence_unauthorized");
         const { latencyMs: eventMs } = await waitFor(() => result, "broadcast event");
 
         // Nothing to wait on for a row that should never appear: an allowed one shows up within milliseconds.
