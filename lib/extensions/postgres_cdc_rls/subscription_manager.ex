@@ -173,14 +173,14 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
 
           Subscriptions.delete_all(conn)
 
-          fn {pid, _id, ref, _node}, _acc ->
+          fn {_pid, _id, ref, _node}, _acc ->
             Process.demonitor(ref, [:flush])
-            send(pid, :postgres_subscribe)
           end
           |> :ets.foldl([], state.subscribers_pids_table)
 
           :ets.delete_all_objects(state.subscribers_pids_table)
           :ets.delete_all_objects(state.subscribers_nodes_table)
+          Phoenix.PubSub.broadcast(Realtime.PubSub, "realtime:postgres:" <> state.id, :postgres_subscribe)
 
           new_oids
 
