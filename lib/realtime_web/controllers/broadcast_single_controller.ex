@@ -52,19 +52,18 @@ defmodule RealtimeWeb.BroadcastSingleController do
         required: false,
         example: false,
         description: "Whether this is a private broadcast (requires RLS authorization). Defaults to false."
+      ],
+      persist: [
+        in: :query,
+        name: "persist",
+        schema: %OpenApiSpex.Schema{type: :string},
+        required: false,
+        example: "true",
+        description:
+          "Whether to store the broadcast in realtime.messages (requires private and RLS authorization). " <>
+            "`persist=true` keeps it for the maximum retention, `persist[ttl]=3600` for that many seconds. " <>
+            "Defaults to false."
       ]
-      # TODO: uncomment when broadcast persistence is public and ready
-      # persist: [
-      #   in: :query,
-      #   name: "persist",
-      #   schema: %OpenApiSpex.Schema{type: :string},
-      #   required: false,
-      #   example: "true",
-      #   description:
-      #     "Whether to store the broadcast in realtime.messages (requires private and RLS authorization).
-      # `persist=true` keeps it for the maximum retention, `persist[ttl]=3600` for that many seconds.
-      # Defaults to false."
-      # ]
     ],
     request_body: %OpenApiSpex.RequestBody{
       description: "Broadcast message payload. Supports both JSON and binary formats.",
