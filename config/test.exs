@@ -136,6 +136,7 @@ config :realtime,
   channel_error_backoff_ms: 100,
   access_token_throttle_ms: to_timeout(second: 1),
   connect_connection_ready_timeout: 2_000,
+  connect_migrations_wait_timeout: 2_000,
   max_gen_rpc_clients: 5,
   max_gen_rpc_call_clients: 1,
   # Its periodic GenRpc pings race tests asserting on RPC calls and metrics
