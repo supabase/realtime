@@ -103,6 +103,14 @@ defmodule RealtimeWeb.Router do
     get("/ping", PingController, :ping)
   end
 
+  # Pipelines only run once a route matches, so :open_cors never sees the browser's OPTIONS preflight
+  @preflight [origins: "*", allow_headers: :all, passthrough_non_cors_requests: true]
+
+  scope "/api" do
+    options("/broadcast", Corsica, @preflight)
+    options("/broadcast/:topic/events/:event", Corsica, @preflight)
+  end
+
   scope "/api", RealtimeWeb do
     pipe_through([:open_cors, :tenant_api, :secure_tenant_api])
 
