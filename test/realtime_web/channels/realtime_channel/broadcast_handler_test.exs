@@ -28,6 +28,9 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
   setup [:initiate_tenant]
 
   @payload %{"event" => "test", "payload" => %{"a" => "b"}}
+  # What the sender asks to persist travels in the frame metadata, so a persisting broadcast is
+  # always the V2 user_broadcast_push shape.
+  @persist_payload {"test", :json, ~s({"a":"b"}), %{"persist" => %{}}}
 
   # BroadcastHandler.handle/3 returns {channel_result, outcome}. Most tests here are about the
   # channel result, so they go through this. The "outcome" tests call the handler directly.
@@ -198,9 +201,9 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
          %{topic: topic, tenant: tenant, db_conn: db_conn, serializer: serializer} do
       socket = socket_fixture(tenant, topic)
 
-      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context, extension ->
-        assert extension == :broadcast
-        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context, extension])
+      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context, extensions ->
+        assert extensions == [:broadcast]
+        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context, extensions])
       end)
 
       reject(&Authorization.get_write_authorizations/4)
@@ -227,9 +230,9 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     test "validation only runs once on nil and blocking policies", %{topic: topic, tenant: tenant, db_conn: db_conn} do
       socket = socket_fixture(tenant, topic)
 
-      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context, extension ->
-        assert extension == :broadcast
-        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context, extension])
+      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context, extensions ->
+        assert extensions == [:broadcast]
+        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context, extensions])
       end)
 
       for _ <- 1..100, reduce: socket do
@@ -763,7 +766,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           }
         )
 
-      assert {:reply, {:ok, %{id: id}}, _socket} = handle(@payload, db_conn, socket)
+      assert {:reply, {:ok, %{id: id}}, _socket} = handle(@persist_payload, db_conn, socket)
       expected_payload = @payload["payload"]
 
       assert {:ok,
@@ -793,7 +796,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           }
         )
 
-      assert {:noreply, _socket} = handle(@payload, db_conn, socket)
+      assert {:noreply, _socket} = handle(@persist_payload, db_conn, socket)
 
       assert_eventually(
         {:ok, [%Message{topic: ^topic, event: "test", skip_broadcast: true}]} =
@@ -814,7 +817,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           }
         )
 
-      v2_payload = {"event123", :json, Jason.encode!(%{"a" => "b"}), %{}}
+      v2_payload = {"event123", :json, Jason.encode!(%{"a" => "b"}), %{"persist" => %{}}}
 
       assert {:reply, {:ok, %{id: id}}, _socket} = handle(v2_payload, db_conn, socket)
 
@@ -846,7 +849,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           }
         )
 
-      v2_payload = {"event123", :json, "not json at all", %{}}
+      v2_payload = {"event123", :json, "not json at all", %{"persist" => %{}}}
 
       log =
         capture_log(fn ->
@@ -879,7 +882,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       binary = <<0, 1, 2, 3>>
 
       assert {:reply, {:ok, %{id: id}}, _socket} =
-               handle({"event123", :binary, binary, %{}}, db_conn, socket)
+               handle({"event123", :binary, binary, %{"persist" => %{}}}, db_conn, socket)
 
       assert {:ok,
               [
@@ -913,7 +916,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           assert {:reply, :ok, _socket} = handle(%{"no" => "event or payload"}, db_conn, socket)
         end)
 
-      assert log =~ "UnableToPersistMessage"
+      # A map frame carries no metadata, so nothing asks to persist and it is never attempted.
+      refute log =~ "UnableToPersistMessage"
       assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
 
@@ -934,10 +938,10 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       log =
         capture_log(fn ->
-          assert {:reply, :ok, _socket} = handle(@payload, db_conn, socket)
+          assert {:reply, :ok, _socket} = handle(@persist_payload, db_conn, socket)
         end)
 
-      assert_receive {:socket_push, :text, _data}
+      assert_receive {:socket_push, _encoding, _data}
       assert log =~ "UnableToPersistMessage"
       assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
@@ -954,7 +958,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           }
         )
 
-      assert {:reply, :ok, _socket} = handle(@payload, db_conn, socket)
+      assert {:reply, :ok, _socket} = handle(@persist_payload, db_conn, socket)
 
       assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
@@ -966,7 +970,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     } do
       socket = socket_fixture(tenant, topic, policies: %Policies{broadcast: %BroadcastPolicies{write: false}})
 
-      assert {:reply, {:error, %{error: :unauthorized}}, _socket} = handle(@payload, db_conn, socket)
+      assert {:reply, {:error, %{error: :unauthorized}}, _socket} =
+               handle(@persist_payload, db_conn, socket)
 
       assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
@@ -993,15 +998,128 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     end
   end
 
+  describe "per-message persistence" do
+    setup do
+      stub(FeatureFlags, :enabled?, fn
+        "broadcast_persistence", _tenant_id -> true
+        flag, tenant_id -> call_original(FeatureFlags, :enabled?, [flag, tenant_id])
+      end)
+
+      :ok
+    end
+
+    @persist_off {"test", :json, ~s({"a":"b"}), %{}}
+
+    test "a later message can opt out after an earlier one opted in", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket =
+        socket_fixture(tenant, topic,
+          ack_broadcast: true,
+          policies: %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}}
+        )
+
+      assert {:reply, {:ok, %{id: id}}, socket} = handle(@persist_payload, db_conn, socket)
+      assert {:reply, :ok, _socket} = handle(@persist_off, db_conn, socket)
+
+      assert {:ok, [%Message{id: ^id}]} = Repo.all(db_conn, messages_for(topic), Message)
+    end
+
+    test "a later message can opt in after an earlier one opted out", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket =
+        socket_fixture(tenant, topic,
+          ack_broadcast: true,
+          policies: %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}}
+        )
+
+      assert {:reply, :ok, socket} = handle(@persist_off, db_conn, socket)
+      assert {:reply, {:ok, %{id: id}}, _socket} = handle(@persist_payload, db_conn, socket)
+
+      assert {:ok, [%Message{id: ^id}]} = Repo.all(db_conn, messages_for(topic), Message)
+    end
+
+    test "asking to persist without an authorizing policy stores nothing", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket =
+        socket_fixture(tenant, topic,
+          ack_broadcast: true,
+          policies: %Policies{broadcast: %BroadcastPolicies{write: true, persist: false}}
+        )
+
+      assert {:reply, :ok, _socket} = handle(@persist_payload, db_conn, socket)
+      assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
+    end
+  end
+
+  describe "extensions_to_probe/2" do
+    test "probes broadcast when the write policy is unchecked" do
+      assert [:broadcast] = BroadcastHandler.extensions_to_probe(%Policies{}, nil)
+    end
+
+    test "probes both when the message asks to persist and neither is checked" do
+      assert [:broadcast, :persistence] = BroadcastHandler.extensions_to_probe(%Policies{}, %{ttl: 3600})
+    end
+
+    test "does not probe persistence when the message does not ask" do
+      policies = %Policies{broadcast: %BroadcastPolicies{write: true}}
+      assert [] = BroadcastHandler.extensions_to_probe(policies, nil)
+    end
+
+    test "probes only persistence when write is already known" do
+      policies = %Policies{broadcast: %BroadcastPolicies{write: true}}
+      assert [:persistence] = BroadcastHandler.extensions_to_probe(policies, %{ttl: 3600})
+    end
+
+    test "a cached denial is not probed again" do
+      policies = %Policies{broadcast: %BroadcastPolicies{write: true, persist: false}}
+      assert [] = BroadcastHandler.extensions_to_probe(policies, %{ttl: 3600})
+    end
+  end
+
+  describe "persist_option/1" do
+    test "reads persist from the frame metadata" do
+      assert BroadcastHandler.persist_option({"e", :json, "{}", %{"persist" => true}}) == true
+      assert BroadcastHandler.persist_option({"e", :json, "{}", %{"persist" => %{"ttl" => 60}}}) == %{"ttl" => 60}
+    end
+
+    test "metadata without a persist key means nil" do
+      assert BroadcastHandler.persist_option({"e", :json, "{}", %{}}) == nil
+    end
+
+    test "the map form of a broadcast carries no metadata, so it means nil" do
+      assert BroadcastHandler.persist_option(%{"event" => "e", "payload" => %{}}) == nil
+    end
+  end
+
+  describe "persist?/2" do
+    test "requires both a request to save and an authorizing policy" do
+      allowed = %Policies{broadcast: %BroadcastPolicies{persist: true}}
+      denied = %Policies{broadcast: %BroadcastPolicies{persist: false}}
+      unchecked = %Policies{broadcast: %BroadcastPolicies{persist: nil}}
+      asked = %{ttl: 3600}
+
+      assert BroadcastHandler.persist?(allowed, asked)
+      refute BroadcastHandler.persist?(allowed, nil)
+      refute BroadcastHandler.persist?(denied, asked)
+      refute BroadcastHandler.persist?(unchecked, asked)
+    end
+  end
+
   defp match_reply?({:reply, :ok, _}, {:reply, :ok}), do: true
   defp match_reply?({:noreply, _}, :noreply), do: true
   defp match_reply?(_result, _expected), do: false
 
   defp initiate_tenant(context) do
     tenant = TestTenantDb.checkout_tenant(run_migrations: true)
-
-    # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
-    Realtime.Tenants.Cache.update_cache(tenant)
 
     rate = Tenants.events_per_second_rate(tenant)
     RateCounter.new(rate, tick: 100)

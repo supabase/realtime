@@ -52,7 +52,8 @@ cat <<SQL
 --
 -- Beyond priv/repo/tenant_schema it also:
 --   - creates the $role role
---   - creates realtime.schema_migrations and records every applied version
+--   - creates realtime.schema_migrations, records every applied version and revokes every role
+--     but its owner from it
 --   - sets ALTER DEFAULT PRIVILEGES and the dashboard_user/postgres grants
 --
 -- See dev/scripts/export-tenant-db-dump.sh
@@ -78,3 +79,4 @@ pg_dump --dbname "$PGDATABASE" --schema-only --schema realtime |
 echo 'ALTER TABLE realtime.schema_migrations ALTER COLUMN inserted_at SET DEFAULT now();'
 psql -tAXq -c 'SELECT version FROM realtime."schema_migrations" ORDER BY version' |
   sed 's/.*/INSERT INTO realtime."schema_migrations" (version) VALUES (&);/'
+echo 'REVOKE ALL ON realtime.schema_migrations FROM postgres, dashboard_user, anon, authenticated, service_role, supabase_realtime_admin;'

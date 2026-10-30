@@ -14,7 +14,7 @@ defmodule Realtime.Integration.RtChannel.WalBloatTest do
 
   @moduletag :capture_log
 
-  setup [:short_replication_watchdog, :checkout_tenant_and_connect]
+  setup [:short_replication_watchdog, :checkout_tenant]
 
   describe "WAL bloat handling" do
     setup %{tenant: tenant} do

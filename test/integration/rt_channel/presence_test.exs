@@ -15,7 +15,7 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
 
   @moduletag :capture_log
 
-  setup [:checkout_tenant_and_connect]
+  setup [:checkout_tenant]
 
   describe "public presence" do
     setup [:rls_context]

@@ -58,8 +58,8 @@ defmodule Realtime.Tenants.SqlLogexShadow do
   end
 
   @doc """
-  Shadow-checks every extension a write checked. In practice `Authorization.get_write_authorizations/4`
-  only ever checks one, but this takes a list anyway, for the same shape as `read/4`.
+  Shadow-checks every extension a write checked. `Authorization.get_write_authorizations/4` checks
+  `:persistence` in the same call as `:broadcast` when a message asks to persist.
   """
   @spec write(DBConnection.conn(), Authorization.t(), [Authorization.extension()], term()) :: :ok
   def write(db_conn, authorization_context, extensions, result) do
