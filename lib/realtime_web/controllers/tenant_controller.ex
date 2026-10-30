@@ -351,7 +351,7 @@ defmodule RealtimeWeb.TenantController do
   end
 
   defp within_ref_limit?(refs) do
-    if length(refs) < @max_refs,
+    if length(refs) <= @max_refs,
       do: :ok,
       else: {:error, :unprocessable_entity, "refs exceeds the maximum of #{@max_refs}"}
   end
