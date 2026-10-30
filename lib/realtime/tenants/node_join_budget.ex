@@ -2,24 +2,72 @@ defmodule Realtime.Tenants.NodeJoinBudget do
   @moduledoc """
   Limits how many channel joins per second a tenant gets on this node.
 
-  The budget is `max(floor, per_socket * local_sockets)` joins per second, where `floor` is
-  `NODE_JOIN_BUDGET_FLOOR`, `per_socket` is the joins per second each socket is allowed (`CLIENT_JOINS_PER_SECOND`)
-  and `local_sockets` is the tenant's sockets on this node as counted by Census. Census only counts a socket after its first
-  successful join, so sockets that stay connected raise the budget, while sockets that churn (connect,
-  join, disconnect, repeat) barely show up and mostly run into the floor.
+  ## Budget
 
-  Each tenant has a token bucket that refills at the budget and holds `burst_seconds` of it
-  (`NODE_JOIN_BUDGET_BURST_SECONDS`), so a tenant can make `floor * burst_seconds` joins at once on each node. The
-  burst decides how long a tenant can join faster than its budget, not how fast it can keep joining: a reconnect storm
-  after a deploy is over within seconds, while a tenant that keeps reconnecting runs the bucket dry and is held to the
-  budget. Nothing is counted across the cluster.
+  The budget is `max(NODE_JOIN_BUDGET_FLOOR, CLIENT_JOINS_PER_SECOND * clients)` joins per second. A client is one
+  WebSocket connection, and `clients` is the number of the tenant's clients on this node. With the defaults (a floor
+  of 10 and 1 join per second for each client):
 
-  A bucket is the time at which it is full again (the GCRA form of a token bucket), kept in a public ETS
-  table so channel processes take tokens directly. Each take reads the current budget, so the refill rate
-  follows the socket count. The bucket holds time rather than joins, which is why the burst is set in seconds: when
-  the sockets of a reconnect storm raise the budget, the bucket stays as full as it was, whereas a fixed number of
-  joins would shrink to fewer seconds and refuse the rest of the storm. A full bucket behaves exactly like a missing
-  one, so this process periodically deletes full buckets to keep the table to the tenants that are joining right now.
+    * 5 clients get 10 joins per second (the floor)
+    * 50 clients get 50 joins per second
+    * 1,000 clients get 1,000 joins per second
+
+  `Realtime.UsersCounter` counts a client from its first successful join until it disconnects. Clients that stay
+  connected raise the budget. Clients that connect, join and disconnect again and again add almost nothing, so they
+  mostly get the floor.
+
+  ## Burst
+
+  Each tenant has a bucket of joins on this node. Each join takes one join from the bucket. The bucket refills at the
+  budget rate and holds `NODE_JOIN_BUDGET_BURST_SECONDS` (default 60) seconds of budget.
+
+  A tenant with no clients on this node can make 600 joins at once (10 * 60). After that, it gets 10 joins per second.
+
+  A tenant that keeps rejoining empties the bucket. For example, a tenant with few clients makes 20 joins per second
+  against a budget of 10. The bucket loses 10 joins each second, so it is empty after 60 seconds. From then on, 10 of
+  its 20 joins each second are over budget.
+
+  The burst sets how long a tenant can join faster than its budget. The budget sets how fast it can join after that.
+  Nothing is counted across the cluster, because each node keeps its own buckets.
+
+  ## How the bucket works
+
+  The bucket uses GCRA (generic cell rate algorithm), a token bucket kept as one timestamp. It does not keep a count
+  of the joins left.
+
+  Each join costs one interval of time. The interval is `1 / budget` seconds, so 100 ms at a budget of 10. The bucket
+  keeps one timestamp, `full_at`. If no more joins come, the bucket is full again at `full_at`. Each join moves
+  `full_at` one interval later, and the time that passes refills the bucket. If a join moves `full_at` more than the
+  burst past now, the join is over budget.
+
+  For example, at a budget of 10 and a burst of 60 seconds:
+
+    1. A new bucket is full, so its `full_at` is now.
+    2. 600 joins at once move `full_at` to now + 60 seconds.
+    3. Join 601 moves `full_at` past now + 60 seconds, so it is over budget.
+    4. One second later, `full_at` is only 59 seconds ahead, so 10 more joins fit.
+
+  While `full_at` is ahead of now, the joins left are `(burst_seconds - (full_at - now)) / interval`.
+
+  The buckets are in a public ETS table, so channel processes take joins with one atomic update and do not call this
+  process.
+
+  ## Budget changes
+
+  The bucket size is a number of seconds, not a number of joins. Each take reads the current budget, so the interval
+  follows the client count. When the budget changes, the used seconds (`full_at - now`) stay the same. Each free
+  second then holds a different number of joins.
+
+  For example, a half-full bucket at 10 joins per second has 30 seconds left, which is 300 joins. The clients of a
+  reconnect storm raise the budget to 300 joins per second. The bucket still has 30 seconds left, which is now 9,000
+  joins. So the rest of the storm gets more room.
+
+  The reverse is also true. When clients leave and the budget falls, each free second holds fewer joins.
+
+  ## Cleanup
+
+  A full bucket acts the same as a missing one. Once a minute, this process deletes the full buckets, so the table
+  holds only the tenants that joined recently.
   """
 
   use GenServer
