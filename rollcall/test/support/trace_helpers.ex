@@ -31,6 +31,47 @@ defmodule Rollcall.TraceHelpers do
   end
 
   @doc """
+  Returns the events in `trace` that have one of `kinds` and the given `scope`.
+  Fails the test unless there are exactly `count` events.
+
+  The failure message lists the events of these kinds that have another scope,
+  and the number of events of each kind in the trace. A wrong scope or a
+  missing trace point is then visible at once.
+  """
+  @spec expect_events(list(), atom() | [atom()], term(), non_neg_integer()) :: [map()]
+  def expect_events(trace, kinds, scope, count) do
+    kinds = List.wrap(kinds)
+    {matching, other_scope} = trace |> Snabbkaffex.of_kind(kinds) |> Enum.split_with(&(&1.scope == scope))
+
+    if length(matching) == count do
+      matching
+    else
+      ExUnit.Assertions.flunk("""
+      Expected #{count} event(s) of #{inspect(kinds)} for the scope #{inspect(scope)}, found #{length(matching)}.
+
+      #{event_list("Events for this scope", matching)}
+      #{event_list("Events of these kinds for another scope", other_scope)}
+      #{kind_counts(trace)}
+      """)
+    end
+  end
+
+  defp event_list(title, []), do: "#{title}: none"
+
+  defp event_list(title, events) do
+    "#{title}:\n" <> Enum.map_join(events, "\n", &("  " <> inspect(Map.delete(&1, :"~meta"), limit: 10)))
+  end
+
+  defp kind_counts(trace) do
+    counts =
+      trace
+      |> Enum.frequencies_by(& &1[:"$kind"])
+      |> Enum.map_join(", ", fn {kind, count} -> "#{kind}: #{count}" end)
+
+    "Events in the trace by kind: #{counts}"
+  end
+
+  @doc """
   Returns the reference of the empty timer of `tracker`.
 
   Raises when the tracker has no empty timer.
