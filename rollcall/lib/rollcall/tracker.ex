@@ -53,12 +53,6 @@ defmodule Rollcall.Tracker do
   tracker. Two origins on one node share one record, so a restarted tracker
   replaces the entries of its old run.
 
-  The tracker drops a message from its own node. A record for this node would
-  repeat the local entries in the view. It also drops a message that carries
-  another scope. The sender writes the scope from its own state, so a mismatch
-  means that the transport misrouted the message. A crash would let a bug in the
-  transport take down this scope.
-
   A tick counts one quiet period for each record. A message from the peer, of
   any kind, resets the count. A record that reaches the silence threshold is
   deleted, and its entries leave. A crashed peer sends no goodbye, and the
@@ -88,9 +82,7 @@ defmodule Rollcall.Tracker do
 
   ## Trace points
 
-  The tracker emits these trace points. A test waits for an event, and does not
-  sleep. The events do nothing outside the test environment. Each event has the
-  key `scope`.
+  The tracker emits these trace points.
 
     * `:rollcall_tracker_started` - the tracker started.
     * `:rollcall_tracker_empty` - the tracker holds no entry, and the timer of
@@ -292,7 +284,8 @@ defmodule Rollcall.Tracker do
     This design assumes that a node restart does not reuse a node name. A new VM
     that reuses a name can start with a lower incarnation. The peers then treat
     its messages as stale. A stale message still resets the silent count, so the
-    silence threshold never purges the old record, and the old entries stay.
+    silence threshold never purges the old record, and the old entries stay, under
+    a very specific time drift that goes backwards during a node restart.
 
     `peers` maps each peer node to its `Rollcall.Tracker.Peer`. The view of the
     tracker is `local` plus the replica of each peer. `silence_threshold` is the
