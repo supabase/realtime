@@ -138,6 +138,8 @@ config :realtime,
   connect_connection_ready_timeout: 2_000,
   max_gen_rpc_clients: 5,
   max_gen_rpc_call_clients: 1,
+  # Its periodic GenRpc pings race tests asserting on RPC calls and metrics
+  run_latency_pinger: false,
   metrics_pusher_req_options: [
     adapter: Realtime.MetricsPusherReqAdapter
   ]

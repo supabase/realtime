@@ -79,8 +79,8 @@ defmodule Realtime.PromEx.Plugins.TenantsTest do
       previous_value = wait(metric_value(metric, mechanism: "gen_rpc", success: false), timeout: 200) || 0
       node = node()
 
-      assert assert [{^node, {:error, :rpc_error, {:EXIT, {%RuntimeError{message: "runtime error"}, _stacktrace}}}}] =
-                      GenRpc.multicall(Test, :exception, [], tenant_id: tenant)
+      assert [{^node, {:error, :rpc_error, {:EXIT, {%RuntimeError{message: "runtime error"}, _stacktrace}}}}] =
+               GenRpc.multicall(Test, :exception, [], tenant_id: tenant)
 
       assert_eventually metric_value(metric, mechanism: "gen_rpc", success: false) == previous_value + 1
     end
