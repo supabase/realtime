@@ -12,7 +12,7 @@ begin
   if type_::text = 'bytea' then
     return to_jsonb(val);
   end if;
-  execute format('select to_jsonb(%L::'|| type_::text || ')', val) into res;
+  execute format('select to_jsonb(%L::'|| pg_catalog.format_type(type_, -1) || ')', val) into res;
   return res;
 end
 $function$;
