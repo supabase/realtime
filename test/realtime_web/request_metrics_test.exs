@@ -115,6 +115,9 @@ defmodule RealtimeWeb.RequestMetricsTest do
       assert {:rejected, :unauthorized} = RequestMetrics.classify_broadcast_error(:unauthorized)
       assert {:rejected, :payload_size_exceeded} = RequestMetrics.classify_broadcast_error(:payload_size_exceeded)
       assert {:rejected, :invalid_persist_ttl} = RequestMetrics.classify_broadcast_error(:invalid_persist_ttl)
+
+      assert {:rejected, :persistence_unauthorized} =
+               RequestMetrics.classify_broadcast_error(:persistence_unauthorized)
     end
 
     test "dependency errors are upstream failures" do
@@ -125,7 +128,8 @@ defmodule RealtimeWeb.RequestMetricsTest do
             :database_lack_of_connections,
             :database_connection_rate_limit_reached,
             :initializing_project_connection,
-            :increase_connection_pool
+            :increase_connection_pool,
+            :persistence_failed
           ] do
         assert {:upstream_failure, ^code} = RequestMetrics.classify_broadcast_error(code)
       end

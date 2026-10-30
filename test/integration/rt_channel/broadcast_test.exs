@@ -521,7 +521,7 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
     end
 
     @tag serializer: RealtimeWeb.Socket.V2Serializer
-    test "asking to persist on a topic the policy denies is delivered but not stored", %{
+    test "asking to persist on a topic the policy denies is delivered, not stored, and acks the error", %{
       tenant: tenant,
       db_conn: db_conn,
       serializer: RealtimeWeb.Socket.V2Serializer = serializer
@@ -547,6 +547,12 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
                        event: "broadcast",
                        topic: ^full_topic,
                        payload: %{"event" => ^event, "payload" => ^user_payload}
+                     },
+                     500
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       payload: %{"status" => "error", "response" => %{"error" => "persistence_unauthorized"}}
                      },
                      500
 
@@ -628,7 +634,11 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
         metadata: %{"persist" => %{}}
       )
 
-      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
+      assert_receive %Message{
+                       event: "phx_reply",
+                       payload: %{"status" => "error", "response" => %{"error" => "persistence_unauthorized"}}
+                     },
+                     500
 
       assert {:ok, %Postgrex.Result{rows: [[1]]}} =
                Postgrex.query(db_conn, "SELECT count(*)::int FROM realtime.messages WHERE topic = $1", [topic])

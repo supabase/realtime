@@ -835,12 +835,13 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
               ]} = Repo.all(db_conn, messages_for(topic), Message)
     end
 
-    test "V2 json user broadcast with an invalid user payload is not persisted, and dropped for V1", %{
-      topic: topic,
-      tenant: tenant,
-      db_conn: db_conn,
-      serializer: serializer
-    } do
+    test "V2 json user broadcast with an invalid user payload is not persisted, acks the error, and dropped for V1",
+         %{
+           topic: topic,
+           tenant: tenant,
+           db_conn: db_conn,
+           serializer: serializer
+         } do
       socket =
         socket_fixture(tenant, topic,
           ack_broadcast: true,
@@ -853,7 +854,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       log =
         capture_log(fn ->
-          assert {:reply, :ok, _socket} = handle(v2_payload, db_conn, socket)
+          assert {:reply, {:error, %{error: :persistence_failed}}, _socket} =
+                   handle(v2_payload, db_conn, socket)
         end)
 
       case serializer do
@@ -921,7 +923,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
 
-    test "persistence failure still delivers the broadcast and acks ok", %{
+    test "persistence failure still delivers the broadcast and acks the error", %{
       topic: topic,
       tenant: tenant,
       db_conn: db_conn
@@ -938,7 +940,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       log =
         capture_log(fn ->
-          assert {:reply, :ok, _socket} = handle(@persist_payload, db_conn, socket)
+          assert {:reply, {:error, %{error: :persistence_failed}}, _socket} =
+                   handle(@persist_payload, db_conn, socket)
         end)
 
       assert_receive {:socket_push, _encoding, _data}
@@ -946,7 +949,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
 
-    test "broadcast without a persistence policy is sent but not stored", %{
+    test "broadcast without a persistence policy is sent, not stored, and acks the error", %{
       topic: topic,
       tenant: tenant,
       db_conn: db_conn
@@ -958,8 +961,29 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           }
         )
 
-      assert {:reply, :ok, _socket} = handle(@persist_payload, db_conn, socket)
+      assert {:reply, {:error, %{error: :persistence_unauthorized}}, _socket} =
+               handle(@persist_payload, db_conn, socket)
 
+      assert_receive {:socket_push, _encoding, _data}
+      assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
+    end
+
+    test "broadcast without a persistence policy and without ack is sent with no reply", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket =
+        socket_fixture(tenant, topic,
+          ack_broadcast: false,
+          policies: %Policies{
+            broadcast: %BroadcastPolicies{write: true, persist: false}
+          }
+        )
+
+      assert {{:noreply, _socket}, :success} = BroadcastHandler.handle(@persist_payload, db_conn, socket)
+
+      assert_receive {:socket_push, _encoding, _data}
       assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
 
@@ -1055,7 +1079,9 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           policies: %Policies{broadcast: %BroadcastPolicies{write: true, persist: false}}
         )
 
-      assert {:reply, :ok, _socket} = handle(@persist_payload, db_conn, socket)
+      assert {:reply, {:error, %{error: :persistence_unauthorized}}, _socket} =
+               handle(@persist_payload, db_conn, socket)
+
       assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
   end
