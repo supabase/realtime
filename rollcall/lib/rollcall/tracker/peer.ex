@@ -8,9 +8,8 @@ defmodule Rollcall.Tracker.Peer do
   no merge, because each entry has one owner. See DESIGN.md: Receive messages
   and Detect a dead peer.
 
-  `deliver/2` takes a message and returns the new peer and the `Rollcall.Tracker.Changes` 
-  that the message made to the replica. The tracker creates a peer from the first snapshot 
-  or diff of a node with `new/1`, and deletes the peer when `tick/2` purges it.
+  `deliver/2` takes a message and returns the new peer and the
+  `Rollcall.Tracker.Changes` that the message made to the replica. 
 
   ## Fields
 
@@ -29,7 +28,7 @@ defmodule Rollcall.Tracker.Peer do
 
   ## Order of messages
 
-  The transport can reorder, duplicate or loses messages. A stamp, the
+  The transport can reorder, duplicate or lose messages. A stamp, the
   incarnation and the version of the sender, orders them. A stamp is newer when
   its incarnation is higher, or when the incarnations are equal and its version
   is higher.
@@ -63,7 +62,8 @@ defmodule Rollcall.Tracker.Peer do
   that the message made.
 
   A snapshot gives the replica. A diff gives an empty replica that is behind,
-  because the diff applies to a state that the peer does not hold.
+  because the diff applies to a state that the peer does not hold. A request
+  does not create a peer.
   """
   @spec new(Messages.snapshot() | Messages.diff()) :: {t(), Changes.t()}
   def new({:snapshot, _origin, _stamp, _entries} = msg), do: deliver(%__MODULE__{}, msg)
@@ -73,25 +73,41 @@ defmodule Rollcall.Tracker.Peer do
   Applies `message` to `peer`. Returns the new peer and the changes that the
   message made to the replica.
 
-  Every message resets the silent count. The rules:
+  Every message resets the silent count, including a stale message and a
+  request. The peer is alive.
 
-    * A snapshot with a stamp newer than the mark replaces the replica and
-      clears `behind`.
-    * A diff that starts at the mark applies to the replica.
-    * A diff with a newer stamp that does not start at the mark sets `behind`.
-    * Any other snapshot or diff is stale and changes nothing.
-    * A request changes nothing.
+  A snapshot with a stamp newer than the mark replaces the replica, sets the
+  mark and clears `behind`. Any other snapshot is stale and changes nothing.
+
+  A diff that starts at the mark applies to the replica, and sets the mark. A
+  diff with a newer stamp that does not start at the mark sets `behind` and
+  changes nothing else. Any other diff is stale and changes nothing. An applied
+  diff does not clear `behind`.
+
+  A request carries no state, so it changes nothing. The tracker creates no peer
+  for a request.
 
   The origin follows the newest incarnation. A message of an older run does not
   move it back.
   """
   @spec deliver(t(), Messages.t()) :: {t(), Changes.t()}
-  def deliver(%__MODULE__{} = peer, msg) do
-    do_deliver(%{peer | silent_ticks: 0}, msg)
+  def deliver(%__MODULE__{} = peer, message) do
+    peer = %{peer | silent_ticks: 0}
+
+    case message do
+      {:snapshot, origin, stamp, entries} ->
+        handle_snapshot(peer, origin, stamp, entries)
+
+      {:diff, origin, stamp, from, joins, leaves} ->
+        handle_diff(peer, origin, stamp, from, joins, leaves)
+
+      {:request, _origin} ->
+        handle_request(peer)
+    end
   end
 
-  @spec do_deliver(t(), Messages.t()) :: {t(), Changes.t()}
-  defp do_deliver(%__MODULE__{} = peer, {:snapshot, origin, stamp, entries}) do
+  @spec handle_snapshot(t(), pid(), Messages.stamp(), [Messages.wire_entry()]) :: {t(), Changes.t()}
+  defp handle_snapshot(%__MODULE__{} = peer, origin, stamp, entries) do
     if newer?(stamp, peer.mark) do
       {peer, changes} = apply_snapshot(peer, origin, entries)
 
@@ -103,7 +119,15 @@ defmodule Rollcall.Tracker.Peer do
     end
   end
 
-  defp do_deliver(%__MODULE__{} = peer, {:diff, origin, stamp, from, joins, leaves}) do
+  @spec handle_diff(
+          t(),
+          pid(),
+          Messages.stamp(),
+          non_neg_integer(),
+          [Messages.wire_entry()],
+          [Rollcall.ref()]
+        ) :: {t(), Changes.t()}
+  defp handle_diff(%__MODULE__{} = peer, origin, stamp, from, joins, leaves) do
     case diff_status(stamp, from, peer.mark) do
       :applicable ->
         {peer, changes} = apply_diff(peer, origin, joins, leaves)
@@ -118,9 +142,8 @@ defmodule Rollcall.Tracker.Peer do
     end
   end
 
-  defp do_deliver(%__MODULE__{} = peer, {:request, _origin}) do
-    {peer, Changes.new()}
-  end
+  @spec handle_request(t()) :: {t(), Changes.t()}
+  defp handle_request(%__MODULE__{} = peer), do: {peer, Changes.new()}
 
   @doc "Returns the entries in the replica."
   @spec entries(t()) :: [Entry.t()]
