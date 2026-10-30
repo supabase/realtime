@@ -394,6 +394,30 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   describe "broadcast" do
     @describetag policies: [:authenticated_all_topic_read]
 
+    test "send-only broadcasts restart an idle events rate counter", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+      config = %{"broadcast" => %{"ack" => true, "self" => false}}
+      assert {:ok, _, socket} = subscribe_and_join(socket, "realtime:test", %{"config" => config})
+
+      args = Tenants.events_per_second_rate(tenant)
+      [{pid, _}] = Registry.lookup(Realtime.Registry.Unique, {RateCounter, :rate_counter, args.id})
+      assert {:ok, %RateCounter{sum: 0}} = RateCounterHelper.tick!(args)
+      monitor = Process.monitor(pid)
+      send(pid, :idle_shutdown)
+      assert_receive {:DOWN, ^monitor, :process, ^pid, :normal}
+      assert_eventually RateCounter.find(args.id) == {:error, :not_found}, timeout: 3_000
+
+      for value <- 1..3 do
+        ref = push(socket, "broadcast", %{"event" => "message", "payload" => %{"value" => value}})
+        assert_reply ref, :ok, %{}
+      end
+
+      Server.socket(socket.channel_pid)
+      assert {:ok, %RateCounter{}} = RateCounter.find(args.id)
+      assert {:ok, %RateCounter{sum: 3}} = RateCounterHelper.tick!(args)
+    end
+
     test "broadcast map payload", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
@@ -1224,7 +1248,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
-      assert {:ok, _, %Socket{} = socket} = subscribe_and_join(socket, "realtime:test", %{})
+      config = %{"broadcast" => %{"ack" => true, "self" => false}}
+      assert {:ok, _, %Socket{} = socket} = subscribe_and_join(socket, "realtime:test", %{"config" => config})
       rate_counter_id = Tenants.events_per_second_key(tenant)
 
       {:ok, _} = Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{max_events_per_second: 1_000})
@@ -1232,13 +1257,14 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       # The update stops the RateCounter; the next get/1 starts a new one once its cache entry expires
       wait!(Cachex.get(RateCounter, rate_counter_id) == {:ok, nil}, timeout: 3_000, interval: 50)
 
-      # The dispatcher sending :check_rate_counter is what gets the RateCounter again
-      send(socket.channel_pid, :check_rate_counter)
-      :sys.get_state(socket.channel_pid)
+      for _ <- 1..100 do
+        ref = push(socket, "broadcast", %{"event" => "message", "payload" => %{}})
+        assert_reply ref, :ok, %{}
+      end
 
-      Realtime.GenCounter.add(rate_counter_id, 100)
+      Server.socket(socket.channel_pid)
 
-      assert {:ok, %RateCounter{limit: %{value: 1_000, triggered: false}}} =
+      assert {:ok, %RateCounter{sum: 100, limit: %{value: 1_000, triggered: false}}} =
                RateCounterHelper.tick!(Tenants.events_per_second_rate(tenant.external_id, 1_000))
 
       send(socket.channel_pid, :check_rate_counter)
