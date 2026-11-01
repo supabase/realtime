@@ -739,6 +739,13 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert json_response(conn, 422) == %{"message" => "refs exceeds the maximum of 500"}
     end
 
+    test "accepts exactly the maximum number of refs", %{conn: conn, tenant: %Tenant{external_id: external_id}} do
+      missing = Enum.map(1..499, &"ref-#{&1}")
+      conn = post(conn, ~p"/api/tenants/health", %{"refs" => [external_id | missing]})
+
+      assert json_response(conn, 200) == %{"present" => [external_id], "missing" => missing}
+    end
+
     test "returns 422 when refs contains a non-string", %{conn: conn} do
       conn = post(conn, ~p"/api/tenants/health", %{"refs" => ["ok", 1]})
 
