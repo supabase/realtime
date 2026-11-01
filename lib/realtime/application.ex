@@ -114,6 +114,7 @@ defmodule Realtime.Application do
       [
         Realtime.ErlSysMon,
         Realtime.GenCounter,
+        Realtime.Tenants.NodeJoinBudget,
         Realtime.GenRpcMetrics,
         # Before Realtime.PromEx: its presence usage poller depends on this, and
         # :telemetry_poller's first tick fires near-instantly (init_delay defaults to 0), not

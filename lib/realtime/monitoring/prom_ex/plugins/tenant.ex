@@ -215,6 +215,13 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           description: "Sum of Realtime Channel joins.",
           tags: [:tenant]
         ),
+        counter(
+          [:realtime, :channel, :node_join_budget_exceeded],
+          event_name: [:realtime, :channel, :node_join_budget_exceeded],
+          measurement: :count,
+          description: "Count of Realtime Channel joins over the tenant's join budget on the node",
+          tags: [:tenant]
+        ),
         sum(
           [:realtime, :channel, :input_bytes],
           event_name: [:realtime, :channel, :input_bytes],
