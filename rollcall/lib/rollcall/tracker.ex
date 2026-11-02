@@ -400,6 +400,9 @@ defmodule Rollcall.Tracker do
 
     state = schedule_heartbeat(state)
 
+    # Trap exists in this process so we get terminate/2 callbacks and can send goodbye messages
+    Process.flag(:trap_exit, true)
+
     tp(:rollcall_tracker_started, %{scope: scope})
 
     {:ok, state}
@@ -578,6 +581,21 @@ defmodule Rollcall.Tracker do
       _ ->
         {:noreply, state}
     end
+  end
+
+  @impl true
+  def terminate(_reason, state) do
+    # When terminating we send a goodbye message, which is an empty snapshot.
+    # 
+    # We need to bump the version on a goodbye to make sure any peer holding our current 
+    # state applies the goodbye.
+    goodbye_version = state.version + 1
+    stamp = Messages.stamp(state.incarnation, goodbye_version)
+    snapshot = Messages.snapshot(self(), stamp, [])
+
+    :ok = state.transport_module.heartbeat(state.transport_state, snapshot)
+
+    tp(:rollcall_tracker_goodbye_sent, %{scope: state.scope, origin: self(), version: goodbye_version})
   end
 
   defp apply_changes(state, local, changes) do
