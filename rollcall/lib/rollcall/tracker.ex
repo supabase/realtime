@@ -68,7 +68,7 @@ defmodule Rollcall.Tracker do
   ## Heartbeat
 
   A tick sends one snapshot of `local` to the peers and counts one quiet period
-  for each peer record. The `:heartbeat_period` option of `start_link/1` sets the
+  for each peer record. The `:heartbeat_period_in_ms` option of `start_link/1` sets the
   time between ticks, in milliseconds. The default is 1500. 
 
   A tracker that stops sends a goodbye from `terminate/2`. The tracker traps
@@ -148,7 +148,7 @@ defmodule Rollcall.Tracker do
   @max_retries 3
   @default_grace_period :timer.seconds(5)
   # Default to sending a heartbeat every 1.5 seconds
-  @default_heartbeat_period 1500
+  @default_heartbeat_period_in_ms 1500
   # this how many heartbeat period before we assume a peer is dead
   @default_silence_threshold 10
   @default_transport {Rollcall.Transport.Null, []}
@@ -162,7 +162,7 @@ defmodule Rollcall.Tracker do
   @type init_options :: [
           silence_threshold: pos_integer(),
           transport: transport(),
-          heartbeat_period: pos_integer() | :manual
+          heartbeat_period_in_ms: pos_integer() | :manual
         ]
 
   @doc """
@@ -266,8 +266,8 @@ defmodule Rollcall.Tracker do
   The option `:transport` is `{module, opts}`. It sets the transport. The
   default is the Null transport.
 
-  The option `:heartbeat_period` is the time between ticks in milliseconds, or
-  `:manual`. The default is 1500.
+  The option `:heartbeat_period_in_ms` is the time between ticks in milliseconds,
+  or `:manual`. The default is 1500.
 
   Returns `{:ok, pid}`. Returns `{:error, {:already_started, pid}}` when a
   tracker runs for `scope`. `Rollcall.TrackerSupervisor` calls this function.
@@ -316,7 +316,7 @@ defmodule Rollcall.Tracker do
       local: Local.new(),
       # This default will get set to something less magic when we do the heartbeat timing.
       silence_threshold: Keyword.get(opts, :silence_threshold, @default_silence_threshold),
-      heartbeat_period: Keyword.get(opts, :heartbeat_period, @default_heartbeat_period),
+      heartbeat_period_in_ms: Keyword.get(opts, :heartbeat_period_in_ms, @default_heartbeat_period_in_ms),
       transport_module: transport_module,
       transport_state: transport_state
     }
@@ -552,10 +552,10 @@ defmodule Rollcall.Tracker do
     state
   end
 
-  defp schedule_heartbeat(%State{heartbeat_period: :manual} = state), do: state
+  defp schedule_heartbeat(%State{heartbeat_period_in_ms: :manual} = state), do: state
 
-  defp schedule_heartbeat(%State{heartbeat_period: heartbeat_period} = state) do
-    Process.send_after(self(), :tick, heartbeat_period)
+  defp schedule_heartbeat(%State{heartbeat_period_in_ms: heartbeat_period_in_ms} = state) do
+    Process.send_after(self(), :tick, heartbeat_period_in_ms)
 
     state
   end

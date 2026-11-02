@@ -16,7 +16,7 @@ defmodule Rollcall.Tracker.StateTest do
       empty_grace: 5_000,
       local: Local.new(),
       silence_threshold: 10,
-      heartbeat_period: :manual,
+      heartbeat_period_in_ms: :manual,
       transport_module: Rollcall.Transport.Null,
       transport_state: nil
     }

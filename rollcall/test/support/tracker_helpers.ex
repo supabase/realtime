@@ -20,7 +20,9 @@ defmodule Rollcall.TrackerHelpers do
     ExUnit.Callbacks.start_supervised!(
       {Rollcall.Tracker,
        {scope,
-        silence_threshold: silence_threshold, heartbeat_period: :manual, transport: {Rollcall.Transport.PassThrough, []}}}
+        silence_threshold: silence_threshold,
+        heartbeat_period_in_ms: :manual,
+        transport: {Rollcall.Transport.PassThrough, []}}}
     )
   end
 

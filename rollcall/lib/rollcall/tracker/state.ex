@@ -45,7 +45,7 @@ defmodule Rollcall.Tracker.State do
     :silence_threshold,
     :transport_module,
     :transport_state,
-    :heartbeat_period
+    :heartbeat_period_in_ms
   ]
 
   defstruct [
@@ -56,7 +56,7 @@ defmodule Rollcall.Tracker.State do
     :silence_threshold,
     :transport_module,
     :transport_state,
-    :heartbeat_period,
+    :heartbeat_period_in_ms,
     empty_timer: nil,
     version: 0,
     monitors: %{},
@@ -68,7 +68,7 @@ defmodule Rollcall.Tracker.State do
           incarnation: integer(),
           empty_grace: non_neg_integer(),
           empty_timer: reference() | nil,
-          heartbeat_period: pos_integer() | :manual,
+          heartbeat_period_in_ms: pos_integer() | :manual,
           local: Local.t(),
           version: non_neg_integer(),
           monitors: %{pid() => reference()},
