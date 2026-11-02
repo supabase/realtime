@@ -987,6 +987,31 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
 
+    test "broadcast with an invalid ttl is refused, not sent, not stored, and logged", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket =
+        socket_fixture(tenant, topic,
+          policies: %Policies{
+            broadcast: %BroadcastPolicies{write: true, persist: true}
+          }
+        )
+
+      payload = {"test", :json, ~s({"a":"b"}), %{"persist" => %{"ttl" => 0}}}
+
+      log =
+        capture_log(fn ->
+          assert {{:reply, {:error, %{error: :persistence_invalid_ttl}}, _socket},
+                  {:rejected, :persistence_invalid_ttl}} = BroadcastHandler.handle(payload, db_conn, socket)
+        end)
+
+      refute_receive {:socket_push, _encoding, _data}
+      assert log =~ "PersistenceInvalidTtl"
+      assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
+    end
+
     test "unauthorized private broadcast is not stored", %{
       topic: topic,
       tenant: tenant,

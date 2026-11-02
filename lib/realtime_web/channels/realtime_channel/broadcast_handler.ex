@@ -248,11 +248,11 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
 
       {:error, :invalid_ttl} ->
         log_error(
-          "InvalidPersistTtl",
+          "PersistenceInvalidTtl",
           "persist ttl must be a positive integer of seconds from 1 to #{Messages.max_ttl_seconds()}"
         )
 
-        {:error, :invalid_persist_ttl, socket}
+        {:error, :persistence_invalid_ttl, socket}
     end
   end
 
