@@ -61,6 +61,12 @@ defmodule Rollcall.Tracker do
   Set the threshold with the `:silence_threshold` option of `start_link/1`. The
   value is a number of ticks. The default is 10.
 
+  ## Transport
+
+  The tracker sends and receives through a transport. See `Rollcall.Transport`.
+  The `:transport` option of `start_link/1` is `{module, opts}`. The default is
+  `{Rollcall.Transport.Null, []}`.
+
   ## Grace period
 
   A stop of a tracker costs work on every node. The tracker sends a goodbye
@@ -84,6 +90,9 @@ defmodule Rollcall.Tracker do
 
   The tracker emits these trace points.
 
+    * `:rollcall_tracker_joined` - the tracker joined its scope through the
+      transport. The event has the keys `scope` and `origin`. The tracker emits
+      it before `:rollcall_tracker_started`.
     * `:rollcall_tracker_started` - the tracker started.
     * `:rollcall_tracker_empty` - the tracker holds no entry, and the timer of
       the grace period started.
@@ -121,6 +130,7 @@ defmodule Rollcall.Tracker do
   alias Rollcall.Tracker.Peer
 
   @max_retries 3
+  @default_transport {Rollcall.Transport.Null, []}
 
   # The exit reasons of a call when no tracker runs, or when the tracker stops
   # before it replies.
@@ -234,13 +244,16 @@ defmodule Rollcall.Tracker do
   sets the number of ticks without a message after which the tracker deletes a
   peer record. The default is 10.
 
+  The option `:transport` is `{module, opts}`. It sets the transport. The
+  default is the Null transport.
+
   Returns `{:ok, pid}`. Returns `{:error, {:already_started, pid}}` when a
   tracker runs for `scope`. `Rollcall.TrackerSupervisor` calls this function.
   """
-  @spec start_link(Rollcall.scope() | {Rollcall.scope(), [silence_threshold: pos_integer()]}) ::
-          GenServer.on_start()
+  @spec start_link(Rollcall.scope() | {Rollcall.scope(), init_options()}) :: GenServer.on_start()
   def start_link({scope, opts}) do
-    GenServer.start_link(__MODULE__, {scope, opts}, name: via(scope))
+    # :name option is test only, let's several trackers of the same scope be started in one VM
+    GenServer.start_link(__MODULE__, {scope, opts}, name: Keyword.get(opts, :name, via(scope)))
   end
 
   def start_link(scope) do
@@ -301,7 +314,7 @@ defmodule Rollcall.Tracker do
 
     # `local` has no default. A default runs `Local.new/0` at compile time, and
     # the struct would then hold a literal value of the opaque type `Local.t()`.
-    @enforce_keys [:scope, :incarnation, :empty_grace, :local, :silence_threshold]
+    @enforce_keys [:scope, :incarnation, :empty_grace, :local, :silence_threshold, :transport_module, :transport_state]
 
     defstruct [
       :scope,
@@ -309,6 +322,8 @@ defmodule Rollcall.Tracker do
       :empty_grace,
       :local,
       :silence_threshold,
+      :transport_module,
+      :transport_state,
       empty_timer: nil,
       version: 0,
       monitors: %{},
@@ -324,7 +339,9 @@ defmodule Rollcall.Tracker do
             version: non_neg_integer(),
             monitors: %{pid() => reference()},
             peers: %{node() => Peer.t()},
-            silence_threshold: pos_integer()
+            silence_threshold: pos_integer(),
+            transport_module: module(),
+            transport_state: any()
           }
 
     @spec bump_version(t()) :: t()
@@ -333,12 +350,19 @@ defmodule Rollcall.Tracker do
     end
   end
 
+  @type transport :: {module(), keyword()}
+
+  @type init_options :: [silence_threshold: pos_integer(), transport: transport()]
+
   @impl true
   @spec init({Rollcall.scope(), keyword()}) :: {:ok, State.t()}
   def init({scope, opts}) do
     Process.set_label({:rollcall_tracker, scope})
 
-    tp(:rollcall_tracker_started, %{scope: scope})
+    {transport_module, transport_opts} = Keyword.get(opts, :transport, @default_transport)
+    {:ok, transport_state} = transport_module.init(scope, transport_opts)
+
+    tp(:rollcall_tracker_joined, %{scope: scope, origin: self()})
 
     state = %State{
       scope: scope,
@@ -346,8 +370,12 @@ defmodule Rollcall.Tracker do
       empty_grace: Application.get_env(:rollcall, :empty_grace, :timer.seconds(5)),
       local: Local.new(),
       # This default will get set to something less magic when we do the heartbeat timing.
-      silence_threshold: Keyword.get(opts, :silence_threshold, 10)
+      silence_threshold: Keyword.get(opts, :silence_threshold, 10),
+      transport_module: transport_module,
+      transport_state: transport_state
     }
+
+    tp(:rollcall_tracker_started, %{scope: scope})
 
     {:ok, state}
   end
@@ -521,8 +549,23 @@ defmodule Rollcall.Tracker do
     {:noreply, %{state | peers: peers}}
   end
 
-  def handle_info(_, state) do
-    {:noreply, state}
+  # In this catch all handle_info, we see if the message was a message from one
+  # of the peers in the cluster. This is done by attempting to unwrap it using the
+  # the transport. If successful, we'll process it, otherwise we ignore it.
+  def handle_info(msg, state) do
+    case state.transport_module.unwrap(state.transport_state, msg) do
+      {:ok, scope, msg} when scope == state.scope ->
+        origin = node(Messages.origin(msg))
+        new_state = deliver_message(state, origin, Map.get(state.peers, origin), msg)
+
+        {:noreply, new_state}
+
+      {:ok, scope, msg} ->
+        {:noreply, drop_message(state, :wrong_scope, scope, msg)}
+
+      _ ->
+        {:noreply, state}
+    end
   end
 
   defp apply_changes(state, local, changes) do
