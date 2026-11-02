@@ -188,7 +188,7 @@ export const broadcastPersistence: SuiteDescriptor = {
         for (const ttl of [0, MAX_TTL_SECONDS + 1, "soon" as unknown as number]) {
           const event = crypto.randomUUID();
           const result = await send(sender, event, { ttl });
-          assert.strictEqual(result, "invalid_persist_ttl", `ttl ${ttl}: got ${result}`);
+          assert.strictEqual(result, "persistence_invalid_ttl", `ttl ${ttl}: got ${result}`);
           assert.strictEqual(await findRow(sql, topic, event), undefined, `ttl ${ttl}: message was stored`);
         }
         return [];
