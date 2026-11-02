@@ -8,6 +8,7 @@ defmodule RealtimeWeb.BroadcastController do
   alias RealtimeWeb.OpenApiSchemas.TenantBatchParams
   alias RealtimeWeb.OpenApiSchemas.TooManyRequestsResponse
   alias RealtimeWeb.OpenApiSchemas.UnprocessableEntityResponse
+  alias RealtimeWeb.RequestMetrics
 
   action_fallback(RealtimeWeb.FallbackController)
 
@@ -33,8 +34,11 @@ defmodule RealtimeWeb.BroadcastController do
   )
 
   def broadcast(%{assigns: %{tenant: tenant}} = conn, attrs) do
-    with :ok <- BatchBroadcast.broadcast(conn, tenant, attrs) do
-      send_resp(conn, :accepted, "")
-    end
+    result =
+      RequestMetrics.track(:broadcast, :http, tenant.external_id, fn ->
+        BatchBroadcast.broadcast(conn, tenant, attrs)
+      end)
+
+    with :ok <- result, do: send_resp(conn, :accepted, "")
   end
 end
