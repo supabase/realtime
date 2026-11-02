@@ -56,13 +56,23 @@ defmodule RealtimeWeb.BroadcastSingleController do
       persist: [
         in: :query,
         name: "persist",
-        schema: %OpenApiSpex.Schema{type: :string},
+        schema: %OpenApiSpex.Schema{type: :boolean, default: false},
         required: false,
-        example: "true",
+        example: true,
         description:
-          "Whether to store the broadcast in realtime.messages (requires private and RLS authorization). " <>
-            "`persist=true` keeps it for the maximum retention, `persist[ttl]=3600` for that many seconds. " <>
-            "Defaults to false."
+          "Store the broadcast in realtime.messages for #{Messages.max_ttl_seconds()} seconds " <>
+            "(requires private and RLS authorization). Defaults to false."
+      ],
+      "persist[ttl]": [
+        in: :query,
+        name: "persist[ttl]",
+        schema: %OpenApiSpex.Schema{type: :integer, minimum: 1, maximum: Messages.max_ttl_seconds()},
+        required: false,
+        example: 3600,
+        description:
+          "Seconds to keep the broadcast in realtime.messages, from 1 to #{Messages.max_ttl_seconds()}. " <>
+            "Setting it persists the broadcast, so `persist=true` isn't needed. Values outside the range return 422. " <>
+            "If both `persist` and `persist[ttl]` are sent, the one that comes last in the query string wins."
       ]
     ],
     request_body: %OpenApiSpex.RequestBody{
