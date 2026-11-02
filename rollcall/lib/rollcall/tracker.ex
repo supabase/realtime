@@ -157,6 +157,16 @@ defmodule Rollcall.Tracker do
   # before it replies.
   @gone [:noproc, :normal, :shutdown]
 
+  @type transport :: {module(), keyword()}
+
+  @type init_options :: [
+          silence_threshold: pos_integer(),
+          transport: transport(),
+          heartbeat_period: pos_integer() | :manual
+        ]
+
+  @type inspected_state :: State.view()
+
   @doc """
   Tracks an entry in the tracker for `scope`, and returns the ref of the entry.
 
@@ -186,6 +196,13 @@ defmodule Rollcall.Tracker do
       call_or_start(scope, message, retries - 1)
   end
 
+  defp start(scope) do
+    case DynamicSupervisor.start_child(Rollcall.TrackerSupervisor, {__MODULE__, scope}) do
+      {:ok, _pid} -> :ok
+      {:error, {:already_started, _pid}} -> :ok
+    end
+  end
+
   @doc """
   Removes the entry of `pid` for `key` in `partition` from the tracker for
   `scope`.
@@ -209,8 +226,6 @@ defmodule Rollcall.Tracker do
   catch
     :exit, {reason, _} when reason in @gone -> default
   end
-
-  @type inspected_state :: State.view()
 
   @doc """
   Returns the state of the tracker for `scope`, or `nil` when no tracker runs.
@@ -241,13 +256,6 @@ defmodule Rollcall.Tracker do
     |> Registry.select([{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
     |> Enum.filter(fn {_, pid} -> Process.alive?(pid) end)
     |> Enum.map(fn {scope, _} -> scope end)
-  end
-
-  defp start(scope) do
-    case DynamicSupervisor.start_child(Rollcall.TrackerSupervisor, {__MODULE__, scope}) do
-      {:ok, _pid} -> :ok
-      {:error, {:already_started, _pid}} -> :ok
-    end
   end
 
   @doc """
@@ -292,14 +300,6 @@ defmodule Rollcall.Tracker do
   def via(scope) do
     {:via, Registry, {Rollcall.Registry, scope}}
   end
-
-  @type transport :: {module(), keyword()}
-
-  @type init_options :: [
-          silence_threshold: pos_integer(),
-          transport: transport(),
-          heartbeat_period: pos_integer() | :manual
-        ]
 
   @impl true
   @spec init({Rollcall.scope(), keyword()}) :: {:ok, State.t()}
@@ -400,49 +400,6 @@ defmodule Rollcall.Tracker do
     {:reply, :ok, state}
   end
 
-  # The transport does not send a message to its own node. The clause makes a
-  # tracker safe when it does.
-  defp deliver_message(state, node, _peer, msg) when node == node() do
-    drop_message(state, :local_origin, state.scope, msg)
-  end
-
-  # A request carries no state, so a request from an unknown node creates no
-  # record.
-  defp deliver_message(state, _node, nil, {:request, _origin}), do: state
-
-  defp deliver_message(state, node, nil, msg) do
-    {peer, changes} = Peer.new(msg)
-    put_peer(state, node, peer, changes)
-  end
-
-  defp deliver_message(state, node, %Peer{} = peer, msg) do
-    {peer, changes} = Peer.apply(peer, msg)
-    put_peer(state, node, peer, changes)
-  end
-
-  defp drop_message(state, reason, message_scope, msg) do
-    tp(:rollcall_tracker_message_dropped, %{
-      scope: state.scope,
-      message_scope: message_scope,
-      node: node(Messages.origin(msg)),
-      reason: reason
-    })
-
-    state
-  end
-
-  defp put_peer(state, node, peer, changes) do
-    tp(:rollcall_tracker_peer_message, %{
-      scope: state.scope,
-      node: node,
-      joins: Changes.join_refs(changes),
-      leaves: Changes.leave_refs(changes),
-      behind: Peer.behind?(peer)
-    })
-
-    State.put_peer(state, node, peer)
-  end
-
   @impl true
   @spec handle_info(term(), State.t()) :: {:noreply, State.t()} | {:stop, :normal, State.t()}
   def handle_info({:timeout, ref, :empty_timeout}, %{empty_timer: ref} = state) do
@@ -510,6 +467,49 @@ defmodule Rollcall.Tracker do
     :ok = state.transport_module.heartbeat(state.transport_state, snapshot)
 
     tp(:rollcall_tracker_goodbye_sent, %{scope: state.scope, origin: self(), version: goodbye_version})
+  end
+
+  # The transport does not send a message to its own node. The clause makes a
+  # tracker safe when it does.
+  defp deliver_message(state, node, _peer, msg) when node == node() do
+    drop_message(state, :local_origin, state.scope, msg)
+  end
+
+  # A request carries no state, so a request from an unknown node creates no
+  # record.
+  defp deliver_message(state, _node, nil, {:request, _origin}), do: state
+
+  defp deliver_message(state, node, nil, msg) do
+    {peer, changes} = Peer.new(msg)
+    put_peer(state, node, peer, changes)
+  end
+
+  defp deliver_message(state, node, %Peer{} = peer, msg) do
+    {peer, changes} = Peer.apply(peer, msg)
+    put_peer(state, node, peer, changes)
+  end
+
+  defp drop_message(state, reason, message_scope, msg) do
+    tp(:rollcall_tracker_message_dropped, %{
+      scope: state.scope,
+      message_scope: message_scope,
+      node: node(Messages.origin(msg)),
+      reason: reason
+    })
+
+    state
+  end
+
+  defp put_peer(state, node, peer, changes) do
+    tp(:rollcall_tracker_peer_message, %{
+      scope: state.scope,
+      node: node,
+      joins: Changes.join_refs(changes),
+      leaves: Changes.leave_refs(changes),
+      behind: Peer.behind?(peer)
+    })
+
+    State.put_peer(state, node, peer)
   end
 
   defp tick_and_purge_peers(%State{} = state) do
