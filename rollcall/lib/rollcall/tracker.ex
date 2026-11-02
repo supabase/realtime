@@ -608,8 +608,8 @@ defmodule Rollcall.Tracker do
   @impl true
   def terminate(_reason, state) do
     # When terminating we send a goodbye message, which is an empty snapshot.
-    # 
-    # We need to bump the version on a goodbye to make sure any peer holding our current 
+    #
+    # We need to bump the version on a goodbye to make sure any peer holding our current
     # state applies the goodbye.
     goodbye_version = state.version + 1
     stamp = Messages.stamp(state.incarnation, goodbye_version)
