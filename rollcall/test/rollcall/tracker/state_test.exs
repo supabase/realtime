@@ -4,6 +4,7 @@ defmodule Rollcall.Tracker.StateTest do
   alias Rollcall.Tracker.Changes
   alias Rollcall.Tracker.Entry
   alias Rollcall.Tracker.Local
+  alias Rollcall.Tracker.Peer
   alias Rollcall.Tracker.State
 
   @incarnation 1_000
@@ -60,6 +61,43 @@ defmodule Rollcall.Tracker.StateTest do
       state = State.apply_changes(state, state.local, Changes.new([], [entry]))
 
       assert state.version == 1
+    end
+  end
+
+  describe "peer/2 and put_peer/3" do
+    test "peer/2 returns nil for a node that sent no message", %{state: state} do
+      assert State.peer(state, :a@host) == nil
+    end
+
+    test "peer/2 returns the record that put_peer/3 set", %{state: state} do
+      peer = %Peer{silent_ticks: 2}
+
+      state = State.put_peer(state, :a@host, peer)
+
+      assert State.peer(state, :a@host) == peer
+    end
+
+    test "put_peer/3 replaces the record of the node", %{state: state} do
+      state =
+        state
+        |> State.put_peer(:a@host, %Peer{silent_ticks: 2})
+        |> State.put_peer(:a@host, %Peer{silent_ticks: 0})
+
+      assert State.peer(state, :a@host) == %Peer{silent_ticks: 0}
+    end
+
+    test "put_peer/3 keeps the records of the other nodes", %{state: state} do
+      state =
+        state
+        |> State.put_peer(:a@host, %Peer{silent_ticks: 1})
+        |> State.put_peer(:b@host, %Peer{silent_ticks: 2})
+
+      assert State.peer(state, :a@host) == %Peer{silent_ticks: 1}
+      assert State.peer(state, :b@host) == %Peer{silent_ticks: 2}
+    end
+
+    test "put_peer/3 does not change the other fields", %{state: state} do
+      assert %{State.put_peer(state, :a@host, %Peer{}) | peers: %{}} == state
     end
   end
 

@@ -102,6 +102,18 @@ defmodule Rollcall.Tracker.State do
     Messages.stamp(incarnation, version)
   end
 
+  @doc "Returns the record of the peer on `node`, or `nil` when no message came from that node."
+  @spec peer(t(), node()) :: Peer.t() | nil
+  def peer(%__MODULE__{peers: peers}, node) do
+    Map.get(peers, node)
+  end
+
+  @doc "Sets the record of the peer on `node`."
+  @spec put_peer(t(), node(), Peer.t()) :: t()
+  def put_peer(%__MODULE__{peers: peers} = state, node, %Peer{} = peer) do
+    %{state | peers: Map.put(peers, node, peer)}
+  end
+
   @doc """
   Returns the stamp of the goodbye: the incarnation and the version plus one.
   """

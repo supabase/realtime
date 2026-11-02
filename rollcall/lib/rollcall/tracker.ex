@@ -412,7 +412,7 @@ defmodule Rollcall.Tracker do
   @spec handle_cast({:deliver, Rollcall.scope(), Messages.t()}, State.t()) :: {:noreply, State.t()}
   def handle_cast({:deliver, scope, msg}, %State{scope: scope} = state) do
     node = node(Messages.origin(msg))
-    {:noreply, deliver_message(state, node, Map.get(state.peers, node), msg)}
+    {:noreply, deliver_message(state, node, State.peer(state, node), msg)}
   end
 
   # The sender writes the scope from its own state, so a mismatch means that the
@@ -462,7 +462,7 @@ defmodule Rollcall.Tracker do
       behind: Peer.behind?(peer)
     })
 
-    %{state | peers: Map.put(state.peers, node, peer)}
+    State.put_peer(state, node, peer)
   end
 
   @impl true
@@ -504,7 +504,7 @@ defmodule Rollcall.Tracker do
     case state.transport_module.unwrap(state.transport_state, msg) do
       {:ok, scope, msg} when scope == state.scope ->
         origin = node(Messages.origin(msg))
-        new_state = deliver_message(state, origin, Map.get(state.peers, origin), msg)
+        new_state = deliver_message(state, origin, State.peer(state, origin), msg)
 
         {:noreply, new_state}
 
