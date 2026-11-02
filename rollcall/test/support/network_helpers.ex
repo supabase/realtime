@@ -15,6 +15,7 @@ defmodule Rollcall.NetworkHelpers do
   import ExUnit.Assertions
 
   alias Rollcall.Tracker
+  alias Rollcall.Tracker.State
   alias Rollcall.Transport.InMemory
   alias Rollcall.Transport.InMemory.Network
 
@@ -86,7 +87,7 @@ defmodule Rollcall.NetworkHelpers do
   end
 
   @doc "Returns the state of `tracker`, in the shape of `Rollcall.Tracker.get_state/1`."
-  @spec tracker_state(pid()) :: Tracker.inspected_state()
+  @spec tracker_state(pid()) :: State.view()
   def tracker_state(tracker), do: GenServer.call(tracker, :get_state)
 
   @doc "Returns the peer record of `tracker` for `node`, or `nil`."

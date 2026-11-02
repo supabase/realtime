@@ -165,8 +165,6 @@ defmodule Rollcall.Tracker do
           heartbeat_period: pos_integer() | :manual
         ]
 
-  @type inspected_state :: State.view()
-
   @doc """
   Tracks an entry in the tracker for `scope`, and returns the ref of the entry.
 
@@ -239,7 +237,7 @@ defmodule Rollcall.Tracker do
 
   The function does not start a tracker. Use it in tests and for debugging.
   """
-  @spec get_state(Rollcall.scope()) :: inspected_state() | nil
+  @spec get_state(Rollcall.scope()) :: State.view() | nil
   def get_state(scope) do
     call_if_running(scope, :get_state, nil)
   end
@@ -341,7 +339,7 @@ defmodule Rollcall.Tracker do
 
   @impl true
   @spec handle_call(call_message(), GenServer.from(), State.t()) ::
-          {:reply, {:ok, Rollcall.ref()} | :ok | inspected_state(), State.t()}
+          {:reply, {:ok, Rollcall.ref()} | :ok | State.view(), State.t()}
   def handle_call(:get_state, _from, state) do
     {:reply, State.inspect_view(state), state}
   end
