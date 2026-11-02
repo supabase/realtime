@@ -75,7 +75,7 @@ defmodule RealtimeWeb.RequestMetrics do
     case code do
       :unauthorized -> {:rejected, code}
       :payload_size_exceeded -> {:rejected, code}
-      :invalid_persist_ttl -> {:rejected, code}
+      :persistence_invalid_ttl -> {:rejected, code}
       :persistence_unauthorized -> {:rejected, code}
       :rls_policy_error -> {:upstream_failure, code}
       :query_canceled -> {:upstream_failure, code}

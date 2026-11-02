@@ -114,7 +114,7 @@ defmodule RealtimeWeb.RequestMetricsTest do
     test "client-caused errors are rejected" do
       assert {:rejected, :unauthorized} = RequestMetrics.classify_broadcast_error(:unauthorized)
       assert {:rejected, :payload_size_exceeded} = RequestMetrics.classify_broadcast_error(:payload_size_exceeded)
-      assert {:rejected, :invalid_persist_ttl} = RequestMetrics.classify_broadcast_error(:invalid_persist_ttl)
+      assert {:rejected, :persistence_invalid_ttl} = RequestMetrics.classify_broadcast_error(:persistence_invalid_ttl)
 
       assert {:rejected, :persistence_unauthorized} =
                RequestMetrics.classify_broadcast_error(:persistence_unauthorized)
