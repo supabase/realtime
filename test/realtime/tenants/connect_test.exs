@@ -1068,7 +1068,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
     defp register_fake_connect(tenant_id) do
       connect = spawn(fn -> Process.sleep(:infinity) end)
-      meta = %{conn: nil, region: "us-east-1", replication_conn: nil, migrations_ran: 0}
+      meta = %{conn: nil, region: "us-east-1", replication_conn: nil, migrations_ran: nil}
       :ok = :syn.register(Connect, tenant_id, connect, meta)
       connect
     end

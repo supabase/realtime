@@ -220,13 +220,13 @@ defmodule Realtime.Tenants.Connect do
     try do
       # Look up after subscribing so the count can't change unseen in between
       case :syn.lookup(__MODULE__, tenant_id) do
-        {_pid, %{migrations_ran: migrations_ran}} when migrations_ran >= expected ->
+        {_pid, %{migrations_ran: migrations_ran}} when is_integer(migrations_ran) and migrations_ran >= expected ->
           :ok
 
         _ ->
           receive do
             %Phoenix.Socket.Broadcast{topic: ^topic, event: "ready", payload: %{migrations_ran: migrations_ran}}
-            when migrations_ran >= expected ->
+            when is_integer(migrations_ran) and migrations_ran >= expected ->
               :ok
 
             %Phoenix.Socket.Broadcast{topic: ^topic, event: "connect_down"} ->
@@ -315,7 +315,7 @@ defmodule Realtime.Tenants.Connect do
 
     check_connect_region_interval = Keyword.get(opts, :check_connect_region_interval, rebalance_check_interval_in_ms())
 
-    name = {__MODULE__, tenant_id, %{conn: nil, region: region, replication_conn: nil, migrations_ran: 0}}
+    name = {__MODULE__, tenant_id, %{conn: nil, region: region, replication_conn: nil, migrations_ran: nil}}
 
     state = %__MODULE__{
       tenant_id: tenant_id,

@@ -18,7 +18,7 @@ defmodule Realtime.SynHandler do
       pid: pid,
       conn: conn,
       replication_conn: meta[:replication_conn],
-      migrations_ran: Map.get(meta, :migrations_ran, 0)
+      migrations_ran: Map.get(meta, :migrations_ran)
     })
   end
 
