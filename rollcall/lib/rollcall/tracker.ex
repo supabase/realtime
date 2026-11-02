@@ -360,7 +360,7 @@ defmodule Rollcall.Tracker do
     Process.set_label({:rollcall_tracker, scope})
 
     {transport_module, transport_opts} = Keyword.get(opts, :transport, @default_transport)
-    {:ok, transport_state} = transport_module.join(scope, transport_opts)
+    {:ok, transport_state} = transport_module.init(scope, transport_opts)
 
     tp(:rollcall_tracker_joined, %{scope: scope, origin: self()})
 

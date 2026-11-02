@@ -3,7 +3,7 @@ defmodule Rollcall.Transport.InMemory do
   A transport for tests. Trackers in one VM exchange messages through a
   `Rollcall.Transport.InMemory.Network` process.
 
-  The options of `join/2` are `:network`, the pid of the network, and `:node`,
+  The options of `init/2` are `:network`, the pid of the network, and `:node`,
   the node name of the joining tracker. All pids in one VM have the node
   `node()`. `unwrap/2` therefore rewrites the origin of a message to a pid on
   the node of the sender. The tracker then finds a separate peer record for
@@ -17,7 +17,7 @@ defmodule Rollcall.Transport.InMemory do
   alias Rollcall.Transport.InMemory.Network
 
   @impl true
-  def join(scope, opts) do
+  def init(scope, opts) do
     network = Keyword.fetch!(opts, :network)
     node = Keyword.fetch!(opts, :node)
 

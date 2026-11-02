@@ -11,12 +11,12 @@ defmodule Rollcall.Transport do
   @type heartbeat_message :: Messages.snapshot() | Messages.diff()
 
   @doc """
-  Join is called when a tracker starts.
+  init is called when a tracker starts.
 
   Implementations should perform any setup that's needed and return the value that will
   be passed into subsequent transport calls.
   """
-  @callback join(scope :: Rollcall.scope(), opts :: Keyword.t()) :: {:ok, t :: any}
+  @callback init(scope :: Rollcall.scope(), opts :: Keyword.t()) :: {:ok, t :: any}
   @doc """
   Called to send a heartbeat message.
   """

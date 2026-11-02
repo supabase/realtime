@@ -10,7 +10,7 @@ defmodule Rollcall.Transport.Null do
   @behaviour Rollcall.Transport
 
   @impl true
-  def join(scope, _opts) do
+  def init(scope, _opts) do
     {:ok, scope}
   end
 

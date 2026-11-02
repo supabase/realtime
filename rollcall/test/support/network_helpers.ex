@@ -110,7 +110,7 @@ defmodule Rollcall.NetworkHelpers do
   @doc "Joins the test process to `scope` on `network` as the fake node `node`. Returns the transport state."
   @spec join_probe(pid(), Rollcall.scope(), node()) :: term()
   def join_probe(network, scope, node) do
-    {:ok, transport} = InMemory.join(scope, network: network, node: node)
+    {:ok, transport} = InMemory.init(scope, network: network, node: node)
     transport
   end
 
