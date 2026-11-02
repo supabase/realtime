@@ -12,13 +12,10 @@ defmodule Rollcall.Tracker do
   This module describes the finished design. The tracker does not yet do these
   things:
 
-    * send a heartbeat, a goodbye or a request
+    * send a request
     * reply to a request with a snapshot
     * hold `sent`, the state at the last heartbeat
     * hold the view, or publish changes to subscribers
-
-  The tracker does receive the messages of its peers, and it keeps one record
-  for each peer node. Delete this section when the list is empty.
 
   ## Starting and Supervision
 
@@ -59,13 +56,24 @@ defmodule Rollcall.Tracker do
   threshold is how the tracker finds out.
 
   Set the threshold with the `:silence_threshold` option of `start_link/1`. The
-  value is a number of ticks. The default is 10.
+  value is a number of ticks. The default is 10. With the default heartbeat
+  period of 1500 ms, a silent peer is purged after 15 seconds.
 
   ## Transport
 
   The tracker sends and receives through a transport. See `Rollcall.Transport`.
   The `:transport` option of `start_link/1` is `{module, opts}`. The default is
   `{Rollcall.Transport.Null, []}`.
+
+  ## Heartbeat
+
+  A tick sends one snapshot of `local` to the peers and counts one quiet period
+  for each peer record. The `:heartbeat_period` option of `start_link/1` sets the
+  time between ticks, in milliseconds. The default is 1500. 
+
+  A tracker that stops sends a goodbye from `terminate/2`. The tracker traps
+  exits, so a supervisor shutdown also reaches `terminate/2`. The goodbye is a
+  snapshot with no entries, and a peer clears its replica when it arrives. 
 
   ## Grace period
 
@@ -98,6 +106,12 @@ defmodule Rollcall.Tracker do
       the grace period started.
     * `:rollcall_tracker_stopped` - the timer expired. The tracker stops after
       the event.
+    * `:rollcall_tracker_heartbeat_sent` - a tick sent a snapshot. The event has
+      the keys `scope`, `origin`, `kind`, `version` and `refs`. `kind` is
+      `:snapshot`. `refs` lists the refs of the entries in the message.
+    * `:rollcall_tracker_goodbye_sent` - the tracker sent the goodbye. The event
+      has the keys `scope`, `origin` and `version`. The `version` is the version
+      of the goodbye message.
     * `:rollcall_tracker_track` - a `track` call changed `local`. The event has
       the keys `pid`, `partition`, `key`, `version`, `joins` and `leaves`. The
       `version` is the version after the call. `joins` and `leaves` are lists of
@@ -252,6 +266,9 @@ defmodule Rollcall.Tracker do
 
   The option `:transport` is `{module, opts}`. It sets the transport. The
   default is the Null transport.
+
+  The option `:heartbeat_period` is the time between ticks in milliseconds, or
+  `:manual`. The default is 1500.
 
   Returns `{:ok, pid}`. Returns `{:error, {:already_started, pid}}` when a
   tracker runs for `scope`. `Rollcall.TrackerSupervisor` calls this function.
