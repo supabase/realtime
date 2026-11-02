@@ -102,6 +102,28 @@ defmodule Rollcall.Tracker.State do
     Messages.stamp(incarnation, version)
   end
 
+  @inspectable_keys [:incarnation, :scope, :version, :local, :peers]
+
+  @typedoc "The fields of the state that have a meaning outside the process."
+  @type view :: %{
+          scope: Rollcall.scope(),
+          version: non_neg_integer(),
+          incarnation: integer(),
+          local: Local.t(),
+          peers: %{node() => Peer.t()}
+        }
+
+  @doc """
+  Returns the fields of the state that have a meaning outside the process.
+
+  The timer, the monitors and the transport stay private, so a change to them
+  does not break a caller.
+  """
+  @spec inspect_view(t()) :: view()
+  def inspect_view(%__MODULE__{} = state) do
+    Map.take(state, @inspectable_keys)
+  end
+
   @doc "Returns the record of the peer on `node`, or `nil` when no message came from that node."
   @spec peer(t(), node()) :: Peer.t() | nil
   def peer(%__MODULE__{peers: peers}, node) do

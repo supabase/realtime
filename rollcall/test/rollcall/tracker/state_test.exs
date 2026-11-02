@@ -101,6 +101,30 @@ defmodule Rollcall.Tracker.StateTest do
     end
   end
 
+  describe "inspect_view/1" do
+    test "returns the fields that have a meaning outside the process", %{state: state} do
+      peer = %Peer{silent_ticks: 2}
+      state = %{state | version: 3} |> State.put_peer(:a@host, peer)
+
+      assert State.inspect_view(state) == %{
+               scope: "scope",
+               version: 3,
+               incarnation: @incarnation,
+               local: state.local,
+               peers: %{a@host: peer}
+             }
+    end
+
+    test "leaves out the timer, the monitors and the transport", %{state: state} do
+      view = State.inspect_view(state)
+
+      refute Map.has_key?(view, :empty_timer)
+      refute Map.has_key?(view, :monitors)
+      refute Map.has_key?(view, :transport_module)
+      refute Map.has_key?(view, :transport_state)
+    end
+  end
+
   describe "current_stamp/1" do
     test "has the incarnation and the version", %{state: state} do
       assert State.current_stamp(%{state | version: 4}) == {:stamp, @incarnation, 4}

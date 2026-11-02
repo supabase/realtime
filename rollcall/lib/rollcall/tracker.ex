@@ -210,15 +210,7 @@ defmodule Rollcall.Tracker do
     :exit, {reason, _} when reason in @gone -> default
   end
 
-  @inspectable_keys [:incarnation, :scope, :version, :local, :peers]
-
-  @type inspected_state :: %{
-          scope: Rollcall.scope(),
-          version: non_neg_integer(),
-          incarnation: integer(),
-          local: Local.t(),
-          peers: %{node() => Peer.t()}
-        }
+  @type inspected_state :: State.view()
 
   @doc """
   Returns the state of the tracker for `scope`, or `nil` when no tracker runs.
@@ -351,7 +343,7 @@ defmodule Rollcall.Tracker do
   @spec handle_call(call_message(), GenServer.from(), State.t()) ::
           {:reply, {:ok, Rollcall.ref()} | :ok | inspected_state(), State.t()}
   def handle_call(:get_state, _from, state) do
-    {:reply, Map.take(state, @inspectable_keys), state}
+    {:reply, State.inspect_view(state), state}
   end
 
   def handle_call({:track, pid, partition, key, meta}, _from, state) do
