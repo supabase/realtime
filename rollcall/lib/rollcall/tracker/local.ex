@@ -41,6 +41,10 @@ defmodule Rollcall.Tracker.Local do
     map_size(local.entries_by_id) == 0
   end
 
+  def entries(local) do
+    Map.values(local.entries_by_id)
+  end
+
   @doc """
   Returns the entries in `partition`. 
 

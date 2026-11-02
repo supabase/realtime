@@ -124,6 +124,7 @@ defmodule Rollcall.Tracker do
 
   use GenServer, restart: :temporary
   use Snabbkaffex, only: :trace
+  alias Rollcall.Tracker.Entry
   alias Rollcall.Tracker.Local
   alias Rollcall.Tracker.Changes
   alias Rollcall.Tracker.Messages
@@ -314,7 +315,16 @@ defmodule Rollcall.Tracker do
 
     # `local` has no default. A default runs `Local.new/0` at compile time, and
     # the struct would then hold a literal value of the opaque type `Local.t()`.
-    @enforce_keys [:scope, :incarnation, :empty_grace, :local, :silence_threshold, :transport_module, :transport_state]
+    @enforce_keys [
+      :scope,
+      :incarnation,
+      :empty_grace,
+      :local,
+      :silence_threshold,
+      :transport_module,
+      :transport_state,
+      :heartbeat_period
+    ]
 
     defstruct [
       :scope,
@@ -324,6 +334,7 @@ defmodule Rollcall.Tracker do
       :silence_threshold,
       :transport_module,
       :transport_state,
+      :heartbeat_period,
       empty_timer: nil,
       version: 0,
       monitors: %{},
@@ -335,6 +346,7 @@ defmodule Rollcall.Tracker do
             incarnation: integer(),
             empty_grace: non_neg_integer(),
             empty_timer: reference() | nil,
+            heartbeat_period: pos_integer() | :manual,
             local: Local.t(),
             version: non_neg_integer(),
             monitors: %{pid() => reference()},
@@ -348,11 +360,21 @@ defmodule Rollcall.Tracker do
     def bump_version(%__MODULE__{version: version} = state) do
       %{state | version: version + 1}
     end
+
+    @spec current_stamp(t()) :: Messages.stamp()
+
+    def current_stamp(%__MODULE__{incarnation: incarnation, version: version}) do
+      Messages.stamp(incarnation, version)
+    end
   end
 
   @type transport :: {module(), keyword()}
 
-  @type init_options :: [silence_threshold: pos_integer(), transport: transport()]
+  @type init_options :: [
+          silence_threshold: pos_integer(),
+          transport: transport(),
+          heartbeat_period: pos_integer() | :manual
+        ]
 
   @impl true
   @spec init({Rollcall.scope(), keyword()}) :: {:ok, State.t()}
@@ -371,9 +393,12 @@ defmodule Rollcall.Tracker do
       local: Local.new(),
       # This default will get set to something less magic when we do the heartbeat timing.
       silence_threshold: Keyword.get(opts, :silence_threshold, 10),
+      heartbeat_period: Keyword.get(opts, :heartbeat_period, :manual),
       transport_module: transport_module,
       transport_state: transport_state
     }
+
+    state = schedule_heartbeat(state)
 
     tp(:rollcall_tracker_started, %{scope: scope})
 
@@ -527,26 +552,13 @@ defmodule Rollcall.Tracker do
   end
 
   def handle_info(:tick, state) do
-    peers =
-      Enum.reduce(state.peers, %{}, fn
-        {node, peer}, kept ->
-          case Peer.tick(peer, state.silence_threshold) do
-            {:keep, peer} ->
-              Map.put(kept, node, peer)
+    state =
+      state
+      |> send_heartbeat()
+      |> tick_and_purge_peers()
+      |> schedule_heartbeat()
 
-            {:purge, changes} ->
-              tp(:rollcall_tracker_peer_purged, %{
-                scope: state.scope,
-                node: node,
-                joins: Changes.join_refs(changes),
-                leaves: Changes.leave_refs(changes)
-              })
-
-              kept
-          end
-      end)
-
-    {:noreply, %{state | peers: peers}}
+    {:noreply, state}
   end
 
   # In this catch all handle_info, we see if the message was a message from one
@@ -572,6 +584,56 @@ defmodule Rollcall.Tracker do
     state
     |> Map.put(:local, local)
     |> bump_version(changes)
+  end
+
+  defp tick_and_purge_peers(%State{} = state) do
+    peers =
+      Enum.reduce(state.peers, %{}, fn
+        {node, peer}, kept ->
+          case Peer.tick(peer, state.silence_threshold) do
+            {:keep, peer} ->
+              Map.put(kept, node, peer)
+
+            {:purge, changes} ->
+              tp(:rollcall_tracker_peer_purged, %{
+                scope: state.scope,
+                node: node,
+                joins: Changes.join_refs(changes),
+                leaves: Changes.leave_refs(changes)
+              })
+
+              kept
+          end
+      end)
+
+    %{state | peers: peers}
+  end
+
+  defp send_heartbeat(%State{} = state) do
+    local_entries = Local.entries(state.local)
+
+    snapshot_entries = Enum.map(local_entries, &Entry.to_wire_entry/1)
+    snapshot = Messages.snapshot(self(), State.current_stamp(state), snapshot_entries)
+
+    :ok = state.transport_module.heartbeat(state.transport_state, snapshot)
+
+    tp(:rollcall_tracker_heartbeat_sent, %{
+      scope: state.scope,
+      origin: self(),
+      kind: :snapshot,
+      version: state.version,
+      refs: Enum.map(local_entries, & &1.ref)
+    })
+
+    state
+  end
+
+  defp schedule_heartbeat(%State{heartbeat_period: :manual} = state), do: state
+
+  defp schedule_heartbeat(%State{heartbeat_period: heartbeat_period} = state) do
+    Process.send_after(self(), :tick, heartbeat_period)
+
+    state
   end
 
   defp start_empty_timer(%{empty_timer: nil} = state) do
