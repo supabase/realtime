@@ -361,7 +361,7 @@ defmodule Rollcall.Tracker do
 
     state =
       state
-      |> apply_changes(local, changes)
+      |> State.apply_changes(local, changes)
       |> cancel_empty_timer()
       |> watch_pid(pid)
 
@@ -387,7 +387,7 @@ defmodule Rollcall.Tracker do
 
     state =
       state
-      |> apply_changes(local, changes)
+      |> State.apply_changes(local, changes)
       |> maybe_unwatch(pid)
       |> start_empty_timer()
 
@@ -478,7 +478,7 @@ defmodule Rollcall.Tracker do
 
     state =
       state
-      |> apply_changes(local, changes)
+      |> State.apply_changes(local, changes)
       |> remove_monitor(pid)
       |> start_empty_timer()
 
@@ -522,19 +522,13 @@ defmodule Rollcall.Tracker do
     #
     # We need to bump the version on a goodbye to make sure any peer holding our current
     # state applies the goodbye.
-    goodbye_version = state.version + 1
-    stamp = Messages.stamp(state.incarnation, goodbye_version)
+    stamp = State.goodbye_stamp(state)
+    {:stamp, _incarnation, goodbye_version} = stamp
     snapshot = Messages.snapshot(self(), stamp, [])
 
     :ok = state.transport_module.heartbeat(state.transport_state, snapshot)
 
     tp(:rollcall_tracker_goodbye_sent, %{scope: state.scope, origin: self(), version: goodbye_version})
-  end
-
-  defp apply_changes(state, local, changes) do
-    state
-    |> Map.put(:local, local)
-    |> bump_version(changes)
   end
 
   defp tick_and_purge_peers(%State{} = state) do
@@ -604,14 +598,6 @@ defmodule Rollcall.Tracker do
   defp cancel_empty_timer(%{empty_timer: ref} = state) do
     :erlang.cancel_timer(ref)
     %{state | empty_timer: nil}
-  end
-
-  defp bump_version(state, changes) do
-    if Changes.empty?(changes) do
-      state
-    else
-      State.bump_version(state)
-    end
   end
 
   # Handles watching pids to update tracker state when a process ends

@@ -30,6 +30,7 @@ defmodule Rollcall.Tracker.State do
   and `empty_timer` control the stop of a tracker that holds no entry.
   """
 
+  alias Rollcall.Tracker.Changes
   alias Rollcall.Tracker.Local
   alias Rollcall.Tracker.Messages
   alias Rollcall.Tracker.Peer
@@ -77,13 +78,35 @@ defmodule Rollcall.Tracker.State do
           transport_state: any()
         }
 
+  @doc """
+  Sets `local`. The version increases by one when `changes` is not empty.
+  """
+  @spec apply_changes(t(), Local.t(), Changes.t()) :: t()
+  def apply_changes(%__MODULE__{} = state, local, changes) do
+    state = %{state | local: local}
+
+    if Changes.empty?(changes) do
+      state
+    else
+      bump_version(state)
+    end
+  end
+
   @spec bump_version(t()) :: t()
-  def bump_version(%__MODULE__{version: version} = state) do
+  defp bump_version(%__MODULE__{version: version} = state) do
     %{state | version: version + 1}
   end
 
   @spec current_stamp(t()) :: Messages.stamp()
   def current_stamp(%__MODULE__{incarnation: incarnation, version: version}) do
     Messages.stamp(incarnation, version)
+  end
+
+  @doc """
+  Returns the stamp of the goodbye: the incarnation and the version plus one.
+  """
+  @spec goodbye_stamp(t()) :: Messages.stamp()
+  def goodbye_stamp(%__MODULE__{incarnation: incarnation, version: version}) do
+    Messages.stamp(incarnation, version + 1)
   end
 end
