@@ -16,8 +16,10 @@ defmodule Rollcall.TrackerPeersTest do
   # record. A request does not. A tick counts a quiet period for each record,
   # and a record that reaches the threshold is deleted.
   #
-  # The tests send `{:deliver, message}` and `:tick` to the tracker, and wait
-  # for the tracker to handle them. The origins are pids on fake nodes.
+  # The tests send `{:deliver, scope, message}` and `:tick` to the tracker, and
+  # wait for the tracker to handle them. The tracker uses
+  # `Rollcall.Transport.PassThrough`, which unwraps the delivery as it is. The
+  # origins are pids on fake nodes.
 
   @node_a :a@host
   @node_b :b@host
@@ -437,7 +439,7 @@ defmodule Rollcall.TrackerPeersTest do
   end
 
   defp deliver(tracker, scope, message) do
-    GenServer.cast(tracker, {:deliver, scope, message})
+    send(tracker, {:deliver, scope, message})
     sync(tracker)
   end
 

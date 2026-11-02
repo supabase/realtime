@@ -400,20 +400,6 @@ defmodule Rollcall.Tracker do
     {:reply, :ok, state}
   end
 
-  @impl true
-  @spec handle_cast({:deliver, Rollcall.scope(), Messages.t()}, State.t()) :: {:noreply, State.t()}
-  def handle_cast({:deliver, scope, msg}, %State{scope: scope} = state) do
-    node = node(Messages.origin(msg))
-    {:noreply, deliver_message(state, node, State.peer(state, node), msg)}
-  end
-
-  # The sender writes the scope from its own state, so a mismatch means that the
-  # transport misrouted the message. A crash would let a bug in the transport
-  # take down this scope.
-  def handle_cast({:deliver, message_scope, msg}, %State{} = state) do
-    {:noreply, drop_message(state, :wrong_scope, message_scope, msg)}
-  end
-
   # The transport does not send a message to its own node. The clause makes a
   # tracker safe when it does.
   defp deliver_message(state, node, _peer, msg) when node == node() do
@@ -500,6 +486,9 @@ defmodule Rollcall.Tracker do
 
         {:noreply, new_state}
 
+      # The sender writes the scope from its own state, so a mismatch means that the
+      # transport misrouted the message. A crash would let a bug in the transport
+      # take down this scope.
       {:ok, scope, msg} ->
         {:noreply, drop_message(state, :wrong_scope, scope, msg)}
 
