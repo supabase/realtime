@@ -7,9 +7,10 @@ defmodule Realtime.Tenants.Connect.RegisterProcess do
 
   @impl true
   def run(acc) do
-    %{tenant_id: tenant_id, db_conn_pid: conn} = acc
+    %{tenant_id: tenant_id, db_conn_pid: conn, migrations_ran_on_database: migrations_ran} = acc
+    update = fn _pid, meta -> %{meta | conn: conn, migrations_ran: migrations_ran} end
 
-    with {:ok, _} <- :syn.update_registry(Connect, tenant_id, fn _pid, meta -> %{meta | conn: conn} end),
+    with {:ok, _} <- :syn.update_registry(Connect, tenant_id, update),
          {:ok, _} <- Registry.register(Connect.Registry, tenant_id, %{}) do
       {:ok, acc}
     else

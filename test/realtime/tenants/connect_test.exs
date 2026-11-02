@@ -1012,13 +1012,13 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "returns right away when the cached tenant has run every migration", %{tenant: tenant} do
-      tenant = %{tenant | migrations_ran: Enum.count(Realtime.Tenants.Migrations.migrations())}
+      tenant = %{tenant | migrations_ran: Realtime.Tenants.Migrations.migrations_count()}
       assert Connect.await_migrations(tenant, 0) == :ok
     end
 
     test "reports migrations_ran in syn once Connect has run migrations", %{stale_tenant: tenant} do
       %{external_id: tenant_id} = tenant
-      total = Enum.count(Realtime.Tenants.Migrations.migrations())
+      total = Realtime.Tenants.Migrations.migrations_count()
       assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant_id)
 
       assert_eventually match?({_, %{migrations_ran: ^total}}, :syn.lookup(Connect, tenant_id)), @local_wait
@@ -1028,25 +1028,20 @@ defmodule Realtime.Tenants.ConnectTest do
 
     test "waits for Connect to run every migration", %{stale_tenant: tenant} do
       %{external_id: tenant_id} = tenant
-      total_migrations = Enum.count(Realtime.Tenants.Migrations.migrations())
+      total_migrations = Realtime.Tenants.Migrations.migrations_count()
       connect = register_fake_connect(tenant_id)
       conn = spawn(fn -> Process.sleep(:infinity) end)
 
-      task =
-        Task.async(fn ->
-          result = Connect.await_migrations(tenant, 5_000)
-          # The earlier "ready" broadcasts must not reach the caller's handle_info
-          {result, Process.info(self(), :messages)}
-        end)
+      task = Task.async(fn -> Connect.await_migrations(tenant, 5_000) end)
 
-      assert_eventually subscribed?(task.pid, tenant_id), @local_wait
+      assert_eventually subscribed?(tenant_id), @local_wait
       update_fake_connect(tenant_id, connect, %{conn: conn})
       # A Connect on a node with fewer migrations doesn't count
       update_fake_connect(tenant_id, connect, %{migrations_ran: total_migrations - 1})
       assert_always is_nil(Task.yield(task, 0)), timeout: 200, interval: 20
 
       update_fake_connect(tenant_id, connect, %{migrations_ran: total_migrations})
-      assert Task.await(task) == {:ok, {:messages, []}}
+      assert Task.await(task) == :ok
     end
 
     test "gives up after the timeout and logs it", %{stale_tenant: tenant} do
@@ -1063,7 +1058,7 @@ defmodule Realtime.Tenants.ConnectTest do
       log =
         capture_log(fn ->
           task = Task.async(fn -> Connect.await_migrations(tenant, 5_000) end)
-          assert_eventually subscribed?(task.pid, tenant_id), @local_wait
+          assert_eventually subscribed?(tenant_id), @local_wait
           Process.exit(connect, :kill)
           assert Task.await(task) == {:error, :connect_down}
         end)
@@ -1081,11 +1076,7 @@ defmodule Realtime.Tenants.ConnectTest do
     defp update_fake_connect(tenant_id, connect, changes),
       do: {:ok, _} = :syn.update_registry(Connect, tenant_id, fn ^connect, meta -> Map.merge(meta, changes) end)
 
-    defp subscribed?(pid, tenant_id) do
-      Realtime.PubSub
-      |> Registry.lookup(Connect.syn_topic(tenant_id))
-      |> Enum.any?(fn {subscriber, _} -> subscriber == pid end)
-    end
+    defp subscribed?(tenant_id), do: Registry.lookup(Realtime.PubSub, Connect.syn_topic(tenant_id)) != []
   end
 
   describe "registers into local registry" do

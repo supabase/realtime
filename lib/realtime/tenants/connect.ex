@@ -214,43 +214,29 @@ defmodule Realtime.Tenants.Connect do
 
   defp wait_for_migrations(tenant_id, timeout) do
     topic = syn_topic(tenant_id)
+    expected = Migrations.migrations_count()
     RealtimeWeb.Endpoint.subscribe(topic)
 
     try do
-      expected = Enum.count(Migrations.migrations())
-
       # Look up after subscribing so the count can't change unseen in between
       case :syn.lookup(__MODULE__, tenant_id) do
-        {_pid, %{migrations_ran: migrations_ran}} when migrations_ran >= expected -> :ok
-        _ -> receive_migrated(topic, expected, System.monotonic_time(:millisecond) + timeout)
+        {_pid, %{migrations_ran: migrations_ran}} when migrations_ran >= expected ->
+          :ok
+
+        _ ->
+          receive do
+            %Phoenix.Socket.Broadcast{topic: ^topic, event: "ready", payload: %{migrations_ran: migrations_ran}}
+            when migrations_ran >= expected ->
+              :ok
+
+            %Phoenix.Socket.Broadcast{topic: ^topic, event: "connect_down"} ->
+              {:error, :connect_down}
+          after
+            timeout -> {:error, :timeout}
+          end
       end
     after
       RealtimeWeb.Endpoint.unsubscribe(topic)
-      flush_topic(topic)
-    end
-  end
-
-  defp receive_migrated(topic, expected, deadline) do
-    receive do
-      %Phoenix.Socket.Broadcast{topic: ^topic, event: "ready", payload: %{migrations_ran: ran}} when ran >= expected ->
-        :ok
-
-      %Phoenix.Socket.Broadcast{topic: ^topic, event: "connect_down"} ->
-        {:error, :connect_down}
-
-      %Phoenix.Socket.Broadcast{topic: ^topic} ->
-        receive_migrated(topic, expected, deadline)
-    after
-      max(deadline - System.monotonic_time(:millisecond), 0) -> {:error, :timeout}
-    end
-  end
-
-  # Drop events that arrived before the unsubscribe so they don't reach the caller's handle_info
-  defp flush_topic(topic) do
-    receive do
-      %Phoenix.Socket.Broadcast{topic: ^topic} -> flush_topic(topic)
-    after
-      0 -> :ok
     end
   end
 
@@ -382,7 +368,7 @@ defmodule Realtime.Tenants.Connect do
     Logger.info("Tenant #{tenant.external_id} is initializing: #{inspect(node())}")
 
     with res when res in [:ok, :noop] <- Migrations.run_migrations(tenant),
-         {:ok, _} <- update_syn_migrations_ran(tenant.external_id, Enum.count(Migrations.migrations())),
+         {:ok, _} <- update_syn_migrations_ran(tenant.external_id, Migrations.migrations_count()),
          :ok <- Tenants.create_messages_partitions(db_conn_pid) do
       {:noreply, state, {:continue, :start_replication}}
     else

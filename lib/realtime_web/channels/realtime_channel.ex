@@ -341,6 +341,10 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
+  # Connect.await_migrations/2 and Connect.get_status/1 subscribe to connect:<tenant> and can leave
+  # broadcasts in the mailbox. Drop them so the clause below doesn't push them to the client.
+  def handle_info(%Phoenix.Socket.Broadcast{topic: "connect:" <> _}, socket), do: {:noreply, socket}
+
   def handle_info(%{event: type, payload: payload} = msg, socket) do
     count(socket)
     maybe_log_info(socket, msg)
