@@ -131,6 +131,11 @@ defmodule Rollcall.Tracker do
   alias Rollcall.Tracker.Peer
 
   @max_retries 3
+  @default_grace_period :timer.seconds(5)
+  # Default to sending a heartbeat every 1.5 seconds
+  @default_heartbeat_period 1500
+  # this how many heartbeat period before we assume a peer is dead
+  @default_silence_threshold 10
   @default_transport {Rollcall.Transport.Null, []}
 
   # The exit reasons of a call when no tracker runs, or when the tracker stops
@@ -389,11 +394,11 @@ defmodule Rollcall.Tracker do
     state = %State{
       scope: scope,
       incarnation: System.monotonic_time(:nanosecond),
-      empty_grace: Application.get_env(:rollcall, :empty_grace, :timer.seconds(5)),
+      empty_grace: Application.get_env(:rollcall, :empty_grace, @default_grace_period),
       local: Local.new(),
       # This default will get set to something less magic when we do the heartbeat timing.
-      silence_threshold: Keyword.get(opts, :silence_threshold, 10),
-      heartbeat_period: Keyword.get(opts, :heartbeat_period, :manual),
+      silence_threshold: Keyword.get(opts, :silence_threshold, @default_silence_threshold),
+      heartbeat_period: Keyword.get(opts, :heartbeat_period, @default_heartbeat_period),
       transport_module: transport_module,
       transport_state: transport_state
     }
