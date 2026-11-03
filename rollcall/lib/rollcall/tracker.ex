@@ -23,6 +23,10 @@ defmodule Rollcall.Tracker do
   `:via` name. No atom exists for a scope, because a scope is a tenant. The
   number of tenants has no limit, and the VM never frees an atom.
 
+  `Rollcall.start_link/1` starts the registry. It stores its options in the
+  metadata of the registry, and `track/5` gives them to each tracker that it
+  starts.
+
   `Rollcall.TrackerSupervisor` supervises the trackers. The restart type is
   `:temporary`. A restarted tracker would have no entries and no process that
   can untrack, so it would never stop. A crashed tracker does not restart. The
@@ -90,9 +94,8 @@ defmodule Rollcall.Tracker do
   The cost of the wait is an idle tracker. It still sends a heartbeat in each
   period. The best length depends on the heartbeat period.
 
-  Set the length of the period with the `:empty_grace_in_ms` key of the
-  `:rollcall` application environment, in milliseconds. The tracker reads the key when it
-  starts. The default is 5000.
+  Set the length of the period with the `:empty_grace_in_ms` option of
+  `start_link/1`, in milliseconds. The default is 5000.
 
   ## Trace points
 
@@ -153,6 +156,8 @@ defmodule Rollcall.Tracker do
   @default_silence_threshold 10
   @default_transport {Rollcall.Transport.Null, []}
 
+  @init_options [:transport, :heartbeat_period_in_ms, :silence_threshold, :empty_grace_in_ms]
+
   # The exit reasons of a call when no tracker runs, or when the tracker stops
   # before it replies.
   @gone [:noproc, :normal, :shutdown]
@@ -162,7 +167,8 @@ defmodule Rollcall.Tracker do
   @type init_options :: [
           silence_threshold: pos_integer(),
           transport: transport(),
-          heartbeat_period_in_ms: pos_integer() | :manual
+          heartbeat_period_in_ms: pos_integer() | :manual,
+          empty_grace_in_ms: pos_integer()
         ]
 
   @doc """
@@ -195,7 +201,10 @@ defmodule Rollcall.Tracker do
   end
 
   defp start(scope) do
-    case DynamicSupervisor.start_child(Rollcall.TrackerSupervisor, {__MODULE__, scope}) do
+    # The options of the library, stored in the registry by `Rollcall.start_link/1`.
+    {:ok, opts} = Registry.meta(Rollcall.Registry, :tracker_options)
+
+    case DynamicSupervisor.start_child(Rollcall.TrackerSupervisor, {__MODULE__, {scope, opts}}) do
       {:ok, _pid} -> :ok
       {:error, {:already_started, _pid}} -> :ok
     end
@@ -269,6 +278,9 @@ defmodule Rollcall.Tracker do
   The option `:heartbeat_period_in_ms` is the time between ticks in milliseconds,
   or `:manual`. The default is 1500.
 
+  The option `:empty_grace_in_ms` is the time in milliseconds that the tracker
+  waits with no entry before it stops. The default is 5000.
+
   Returns `{:ok, pid}`. Returns `{:error, {:already_started, pid}}` when a
   tracker runs for `scope`. `Rollcall.TrackerSupervisor` calls this function.
   """
@@ -299,6 +311,11 @@ defmodule Rollcall.Tracker do
     {:via, Registry, {Rollcall.Registry, scope}}
   end
 
+  @doc "Gets the names of valid init options"
+  def init_options do
+    @init_options
+  end
+
   @impl true
   @spec init({Rollcall.scope(), keyword()}) :: {:ok, State.t()}
   def init({scope, opts}) do
@@ -312,9 +329,8 @@ defmodule Rollcall.Tracker do
     state = %State{
       scope: scope,
       incarnation: System.monotonic_time(:nanosecond),
-      empty_grace_in_ms: Application.get_env(:rollcall, :empty_grace_in_ms, @default_empty_grace_in_ms),
       local: Local.new(),
-      # This default will get set to something less magic when we do the heartbeat timing.
+      empty_grace_in_ms: Keyword.get(opts, :empty_grace_in_ms, @default_empty_grace_in_ms),
       silence_threshold: Keyword.get(opts, :silence_threshold, @default_silence_threshold),
       heartbeat_period_in_ms: Keyword.get(opts, :heartbeat_period_in_ms, @default_heartbeat_period_in_ms),
       transport_module: transport_module,

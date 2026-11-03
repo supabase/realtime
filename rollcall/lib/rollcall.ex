@@ -44,6 +44,43 @@ defmodule Rollcall do
   @type ref :: String.t() | reference()
 
   @doc """
+  Returns a supervisor child specification. The argument is the `opts` of
+  `start_link/1`.
+  """
+  @spec child_spec(keyword()) :: Supervisor.child_spec()
+  def child_spec(opts \\ []) do
+    %{
+      id: __MODULE__,
+      start: {__MODULE__, :start_link, [opts]},
+      type: :supervisor
+    }
+  end
+
+  @doc """
+  Starts the library: the registry of the trackers and the supervisor of the
+  trackers.
+
+  The options are the options of `Rollcall.Tracker.start_link/1`, except
+  `:name`. They are `:transport`, `:heartbeat_period_in_ms`,
+  `:silence_threshold` and `:empty_grace_in_ms`. Each tracker that `track/5`
+  starts gets these options. An option that you do not set has the default of
+  the tracker. Any other key raises an `ArgumentError`.
+
+  One library runs in a VM, because the processes have fixed names.
+  """
+  @spec start_link(keyword()) :: Supervisor.on_start()
+  def start_link(opts \\ []) do
+    tracker_options = Keyword.validate!(opts, Tracker.init_options())
+
+    children = [
+      {Registry, keys: :unique, name: Rollcall.Registry, meta: [tracker_options: tracker_options]},
+      {DynamicSupervisor, name: Rollcall.TrackerSupervisor}
+    ]
+
+    Supervisor.start_link(children, strategy: :rest_for_one, name: Rollcall.Supervisor)
+  end
+
+  @doc """
   Returns the names of the scopes that have a running tracker on this node.
 
   A tracker in its grace period is running, so a scope with no entry can be in
