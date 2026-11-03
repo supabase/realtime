@@ -16,7 +16,7 @@ defmodule Integration.ConnectedUsersCountTest do
 
     # Another channel is still open, so the socket stays counted.
     leave!(socket, topic1)
-    refute eventually(fn -> users(tenant) == 0 end, retries: 5)
+    refute_eventually users(tenant) == 0, timeout: 500, interval: 100
 
     # The last channel is gone: the slot is free while the socket stays open.
     leave!(socket, topic2)

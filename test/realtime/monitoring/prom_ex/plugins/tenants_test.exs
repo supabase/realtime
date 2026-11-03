@@ -32,21 +32,21 @@ defmodule Realtime.PromEx.Plugins.TenantsTest do
 
     test "global success", %{tenant: tenant} do
       metric = "realtime_global_rpc_count"
-      previous_value = wait(metric_value(metric, mechanism: "erpc", success: true), timeout: 200) || 0
+      previous_value = metric_value(metric, mechanism: "erpc", success: true) || 0
       assert {:ok, "success"} = Rpc.enhanced_call(node(), Test, :success, [], tenant_id: tenant)
       assert_eventually metric_value(metric, mechanism: "erpc", success: true) == previous_value + 1
     end
 
     test "global failure", %{tenant: tenant} do
       metric = "realtime_global_rpc_count"
-      previous_value = wait(metric_value(metric, mechanism: "erpc", success: false), timeout: 200) || 0
+      previous_value = metric_value(metric, mechanism: "erpc", success: false) || 0
       assert {:error, "failure"} = Rpc.enhanced_call(node(), Test, :failure, [], tenant_id: tenant)
       assert_eventually metric_value(metric, mechanism: "erpc", success: false) == previous_value + 1
     end
 
     test "global exception", %{tenant: tenant} do
       metric = "realtime_global_rpc_count"
-      previous_value = wait(metric_value(metric, mechanism: "erpc", success: false), timeout: 200) || 0
+      previous_value = metric_value(metric, mechanism: "erpc", success: false) || 0
 
       assert {:error, :rpc_error, %RuntimeError{message: "runtime error"}} =
                Rpc.enhanced_call(node(), Test, :exception, [], tenant_id: tenant)
@@ -62,21 +62,21 @@ defmodule Realtime.PromEx.Plugins.TenantsTest do
 
     test "global success", %{tenant: tenant} do
       metric = "realtime_global_rpc_count"
-      previous_value = wait(metric_value(metric, mechanism: "gen_rpc", success: true), timeout: 200) || 0
+      previous_value = metric_value(metric, mechanism: "gen_rpc", success: true) || 0
       assert GenRpc.multicall(Test, :success, [], tenant_id: tenant) == [{node(), {:ok, "success"}}]
       assert_eventually metric_value(metric, mechanism: "gen_rpc", success: true) == previous_value + 1
     end
 
     test "global failure", %{tenant: tenant} do
       metric = "realtime_global_rpc_count"
-      previous_value = wait(metric_value(metric, mechanism: "gen_rpc", success: false), timeout: 200) || 0
+      previous_value = metric_value(metric, mechanism: "gen_rpc", success: false) || 0
       assert GenRpc.multicall(Test, :failure, [], tenant_id: tenant) == [{node(), {:error, "failure"}}]
       assert_eventually metric_value(metric, mechanism: "gen_rpc", success: false) == previous_value + 1
     end
 
     test "global exception", %{tenant: tenant} do
       metric = "realtime_global_rpc_count"
-      previous_value = wait(metric_value(metric, mechanism: "gen_rpc", success: false), timeout: 200) || 0
+      previous_value = metric_value(metric, mechanism: "gen_rpc", success: false) || 0
       node = node()
 
       assert [{^node, {:error, :rpc_error, {:EXIT, {%RuntimeError{message: "runtime error"}, _stacktrace}}}}] =
