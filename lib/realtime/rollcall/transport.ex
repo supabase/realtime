@@ -4,14 +4,11 @@ defmodule Realtime.Rollcall.Transport do
   """
   @behaviour Rollcall.Transport
 
-  require Logger
-
   @impl true
   def init(scope, opts) do
     pubsub = Keyword.get(opts, :pubsub, Realtime.PubSub)
 
     :ok = Phoenix.PubSub.subscribe(pubsub, topic_for(scope))
-    join_muster(Keyword.get(opts, :muster_scope), scope)
 
     {:ok, %{scope: scope, pubsub: pubsub}}
   end
@@ -28,19 +25,6 @@ defmodule Realtime.Rollcall.Transport do
   end
 
   def unwrap(_transport, _message), do: :ignore
-
-  # The tracker joins the Muster group of its tenant, so the routing delivers
-  # heartbeats to this node. The join is temporary. The channel join registers
-  # the interest of the node when the channel hook exists. The join blocks the
-  # tracker until Muster replies.
-  defp join_muster(nil, _scope), do: :ok
-
-  defp join_muster(muster_scope, scope) do
-    case Forum.Muster.join(muster_scope, scope, self()) do
-      :ok -> :ok
-      {:error, reason} -> Logger.warning("Rollcall tracker could not join Muster for #{scope}: #{inspect(reason)}")
-    end
-  end
 
   defp wrap(scope, message), do: {:tb, scope, message}
 

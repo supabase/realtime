@@ -151,7 +151,7 @@ defmodule Realtime.Application do
          scope: muster_scope, drain_opts: Application.get_env(:realtime, :muster_drain_opts, [])},
         {Phoenix.PubSub,
          name: Realtime.PubSub, pool_size: 10, adapter: pubsub_adapter(), broadcast_pool_size: broadcast_pool_size},
-        {Rollcall, transport: {Realtime.Rollcall.Transport, pubsub: Realtime.PubSub, muster_scope: muster_scope}},
+        {Rollcall, transport: {Realtime.Rollcall.Transport, pubsub: Realtime.PubSub}},
         {Forum.Census,
          [
            :users,
