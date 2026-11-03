@@ -13,7 +13,7 @@ defmodule Rollcall.Tracker.StateTest do
     state = %State{
       scope: "scope",
       incarnation: @incarnation,
-      empty_grace: 5_000,
+      empty_grace_in_ms: 5_000,
       local: Local.new(),
       silence_threshold: 10,
       heartbeat_period_in_ms: :manual,

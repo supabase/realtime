@@ -26,8 +26,8 @@ defmodule Rollcall.Tracker.State do
   number of ticks without a message after which the tracker deletes a peer
   record.
 
-  `monitors` maps each process that has an entry to its monitor. `empty_grace`
-  and `empty_timer` control the stop of a tracker that holds no entry.
+  `monitors` maps each process that has an entry to its monitor.
+  `empty_grace_in_ms` and `empty_timer` control the stop of a tracker that holds no entry.
   """
 
   alias Rollcall.Tracker.Changes
@@ -40,7 +40,7 @@ defmodule Rollcall.Tracker.State do
   @enforce_keys [
     :scope,
     :incarnation,
-    :empty_grace,
+    :empty_grace_in_ms,
     :local,
     :silence_threshold,
     :transport_module,
@@ -51,7 +51,7 @@ defmodule Rollcall.Tracker.State do
   defstruct [
     :scope,
     :incarnation,
-    :empty_grace,
+    :empty_grace_in_ms,
     :local,
     :silence_threshold,
     :transport_module,
@@ -66,7 +66,7 @@ defmodule Rollcall.Tracker.State do
   @type t :: %__MODULE__{
           scope: Rollcall.scope(),
           incarnation: integer(),
-          empty_grace: non_neg_integer(),
+          empty_grace_in_ms: non_neg_integer(),
           empty_timer: reference() | nil,
           heartbeat_period_in_ms: pos_integer() | :manual,
           local: Local.t(),

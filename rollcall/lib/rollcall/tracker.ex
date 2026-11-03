@@ -90,8 +90,8 @@ defmodule Rollcall.Tracker do
   The cost of the wait is an idle tracker. It still sends a heartbeat in each
   period. The best length depends on the heartbeat period.
 
-  Set the length of the period with the `:empty_grace` key of the `:rollcall`
-  application environment, in milliseconds. The tracker reads the key when it
+  Set the length of the period with the `:empty_grace_in_ms` key of the
+  `:rollcall` application environment, in milliseconds. The tracker reads the key when it
   starts. The default is 5000.
 
   ## Trace points
@@ -146,7 +146,7 @@ defmodule Rollcall.Tracker do
   alias Rollcall.Tracker.State
 
   @max_retries 3
-  @default_grace_period :timer.seconds(5)
+  @default_empty_grace_in_ms :timer.seconds(5)
   # Default to sending a heartbeat every 1.5 seconds
   @default_heartbeat_period_in_ms 1500
   # this how many heartbeat period before we assume a peer is dead
@@ -312,7 +312,7 @@ defmodule Rollcall.Tracker do
     state = %State{
       scope: scope,
       incarnation: System.monotonic_time(:nanosecond),
-      empty_grace: Application.get_env(:rollcall, :empty_grace, @default_grace_period),
+      empty_grace_in_ms: Application.get_env(:rollcall, :empty_grace_in_ms, @default_empty_grace_in_ms),
       local: Local.new(),
       # This default will get set to something less magic when we do the heartbeat timing.
       silence_threshold: Keyword.get(opts, :silence_threshold, @default_silence_threshold),
@@ -564,7 +564,7 @@ defmodule Rollcall.Tracker do
     if Local.empty?(state.local) do
       tp(:rollcall_tracker_empty, %{scope: state.scope})
 
-      %{state | empty_timer: :erlang.start_timer(state.empty_grace, self(), :empty_timeout)}
+      %{state | empty_timer: :erlang.start_timer(state.empty_grace_in_ms, self(), :empty_timeout)}
     else
       state
     end
