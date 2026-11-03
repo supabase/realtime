@@ -194,16 +194,6 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     {:noreply, %{state | oids: oids, check_oid_ref: check_oids()}}
   end
 
-  # :noconnection means the subscriber's node dropped, not that the channel
-  # exited. The process may still be subscribed. check_active_pids/0 already
-  # leaves these rows alone when the remote node cannot be reached and removes
-  # them once the node is back and the pid is actually dead. Deleting here
-  # drops the realtime.subscription row, so Postgres Changes stop for that
-  # client until it subscribes again.
-  def handle_info({:DOWN, _ref, :process, _pid, :noconnection}, state) do
-    {:noreply, state}
-  end
-
   def handle_info(
         {:DOWN, _ref, :process, pid, _reason},
         %State{
@@ -239,6 +229,13 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
         q
       else
         {ids, q1} = Helpers.queue_take(q, @max_delete_records)
+
+        # A :noconnection :DOWN queues the ids of a subscriber that may still be alive. When its
+        # node reconnects, the channel subscribes again with the same ids, and {:subscribed} puts
+        # them back in the nodes table. Skip those ids, or the delete drops the rows that the
+        # resubscribe just wrote. The nodes table already records the resubscribe, so checking it
+        # here avoids a scan of the queue on every subscribe.
+        ids = Enum.reject(ids, &:ets.member(state.subscribers_nodes_table, &1))
         Logger.debug("delete sub id #{inspect(ids)}")
 
         case Subscriptions.delete_multi(state.conn, ids) do
