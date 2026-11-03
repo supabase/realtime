@@ -44,7 +44,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       expect(GenCounter, :add, 3, fn ^broadcast_events_key -> :ok end)
       expect(TenantBroadcaster, :pubsub_broadcast, 3, fn _, _, _, _, _ -> :ok end)
 
-      assert :ok = BatchBroadcast.broadcast(nil, tenant, messages, false)
+      assert :ok = broadcast(nil, tenant, messages, false)
     end
 
     test "public messages do not have private prefix in topic", %{tenant: tenant} do
@@ -61,7 +61,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
         refute String.contains?(topic, "-private")
       end)
 
-      assert :ok = BatchBroadcast.broadcast(nil, tenant, messages, false)
+      assert :ok = broadcast(nil, tenant, messages, false)
     end
   end
 
@@ -87,7 +87,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
                } = broadcast
       end)
 
-      assert :ok = BatchBroadcast.broadcast(nil, tenant, messages, false)
+      assert :ok = broadcast(nil, tenant, messages, false)
     end
   end
 
@@ -107,7 +107,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       expect(GenCounter, :add, 2, fn ^broadcast_events_key -> :ok end)
       expect(TenantBroadcaster, :pubsub_broadcast, 2, fn _, _, _, _, _ -> :ok end)
 
-      assert :ok = BatchBroadcast.broadcast(nil, tenant, messages, true)
+      assert :ok = broadcast(nil, tenant, messages, true)
     end
 
     test "private messages have private prefix in topic", %{tenant: tenant} do
@@ -124,7 +124,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
         assert String.contains?(topic, "-private")
       end)
 
-      assert :ok = BatchBroadcast.broadcast(nil, tenant, messages, true)
+      assert :ok = broadcast(nil, tenant, messages, true)
     end
   end
 
@@ -157,7 +157,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       expect(TenantBroadcaster, :pubsub_broadcast, 1, fn _, _, _, _, _ -> :ok end)
 
-      assert :ok = BatchBroadcast.broadcast(auth_params, tenant, messages, false)
+      assert :ok = broadcast(auth_params, tenant, messages, false)
     end
 
     test "skips private messages without authorization", %{tenant: tenant} do
@@ -186,7 +186,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
         messages: [%{topic: topic, payload: %{"data" => "test"}, event: "event1", private: true}]
       }
 
-      assert :ok = BatchBroadcast.broadcast(auth_params, tenant, messages, false)
+      assert :ok = broadcast(auth_params, tenant, messages, false)
 
       assert calls(&TenantBroadcaster.pubsub_broadcast/5) == []
     end
@@ -227,7 +227,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
         :ok
       end)
 
-      assert :ok = BatchBroadcast.broadcast(auth_params, tenant, messages, false)
+      assert :ok = broadcast(auth_params, tenant, messages, false)
     end
 
     test "groups messages by topic and checks authorization once per topic", %{tenant: tenant} do
@@ -264,7 +264,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       expect(TenantBroadcaster, :pubsub_broadcast, 3, fn _, _, _, _, _ -> :ok end)
 
-      assert :ok = BatchBroadcast.broadcast(auth_params, tenant, messages, false)
+      assert :ok = broadcast(auth_params, tenant, messages, false)
     end
 
     test "handles missing auth params for private messages", %{tenant: tenant} do
@@ -281,7 +281,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
         messages: [%{topic: "topic1", payload: %{"data" => "test"}, event: "event1", private: true}]
       }
 
-      assert :ok = BatchBroadcast.broadcast(nil, tenant, messages, false)
+      assert :ok = broadcast(nil, tenant, messages, false)
 
       assert calls(&TenantBroadcaster.pubsub_broadcast/5) == []
     end
@@ -345,7 +345,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
         ]
       }
 
-      assert :ok = BatchBroadcast.broadcast(auth_params, tenant, messages, false)
+      assert :ok = broadcast(auth_params, tenant, messages, false)
 
       broadcast_calls = calls(&TenantBroadcaster.pubsub_broadcast/5)
       assert length(broadcast_calls) == 3
@@ -370,7 +370,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
         })
         |> Map.put(:req_headers, [{"authorization", "Bearer token"}])
 
-      assert :ok = BatchBroadcast.broadcast(conn, tenant, messages, false)
+      assert :ok = broadcast(conn, tenant, messages, false)
     end
   end
 
@@ -380,7 +380,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       reject(&TenantBroadcaster.pubsub_broadcast/5)
 
-      result = BatchBroadcast.broadcast(nil, tenant, messages, false)
+      result = broadcast(nil, tenant, messages, false)
       assert {:error, %Ecto.Changeset{valid?: false}} = result
     end
 
@@ -390,7 +390,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       reject(&TenantBroadcaster.pubsub_broadcast/5)
 
-      result = BatchBroadcast.broadcast(nil, tenant, messages, false)
+      result = broadcast(nil, tenant, messages, false)
       assert {:error, %Ecto.Changeset{valid?: false}} = result
     end
 
@@ -399,14 +399,14 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       messages = %{messages: [%{topic: topic, payload: %{"data" => "test"}}]}
 
       reject(&TenantBroadcaster.pubsub_broadcast/5)
-      result = BatchBroadcast.broadcast(nil, tenant, messages, false)
+      result = broadcast(nil, tenant, messages, false)
       assert {:error, %Ecto.Changeset{valid?: false}} = result
     end
 
     test "returns changeset error when messages array is empty", %{tenant: tenant} do
       messages = %{messages: []}
       reject(&TenantBroadcaster.pubsub_broadcast/5)
-      result = BatchBroadcast.broadcast(nil, tenant, messages, false)
+      result = broadcast(nil, tenant, messages, false)
       assert {:error, %Ecto.Changeset{valid?: false}} = result
     end
   end
@@ -423,7 +423,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       reject(&TenantBroadcaster.pubsub_broadcast/5)
 
-      result = BatchBroadcast.broadcast(nil, tenant, messages, false)
+      result = broadcast(nil, tenant, messages, false)
       assert {:error, :too_many_requests, "You have exceeded your rate limit"} = result
     end
 
@@ -445,7 +445,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       reject(&TenantBroadcaster.pubsub_broadcast/5)
 
-      result = BatchBroadcast.broadcast(nil, tenant, messages, false)
+      result = broadcast(nil, tenant, messages, false)
 
       assert {:error, :too_many_requests, "Too many messages to broadcast, please reduce the batch size"} = result
     end
@@ -471,7 +471,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       expect(GenCounter, :add, 2, fn ^broadcast_events_key -> :ok end)
       expect(TenantBroadcaster, :pubsub_broadcast, 2, fn _, _, _, _, _ -> :ok end)
 
-      assert :ok = BatchBroadcast.broadcast(nil, tenant, messages, false)
+      assert :ok = broadcast(nil, tenant, messages, false)
     end
 
     test "rejects broadcast when payload size exceeds tenant limit", %{tenant: tenant} do
@@ -487,12 +487,14 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       reject(&TenantBroadcaster.pubsub_broadcast/5)
 
-      result = BatchBroadcast.broadcast(nil, tenant, messages, false)
+      result = broadcast(nil, tenant, messages, false)
 
       assert {:error,
               %Ecto.Changeset{
                 valid?: false,
-                changes: %{messages: [%{errors: [payload: {"Payload size exceeds tenant limit", []}]}]}
+                changes: %{
+                  messages: [%{errors: [payload: {"Payload size exceeds tenant limit", [validation: :payload_size]}]}]
+                }
               }} = result
     end
   end
@@ -539,7 +541,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}}}
       end)
 
-      assert :ok = BatchBroadcast.broadcast(auth_params, tenant, messages, false)
+      assert :ok = broadcast(auth_params, tenant, messages, false)
 
       refute_eventually match?({:ok, [_ | _]}, Repo.all(db_conn, messages_for(topic), Message))
     end
@@ -548,7 +550,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
   describe "error handling" do
     test "returns error when tenant is nil" do
       messages = %{messages: [%{topic: "topic1", payload: %{"data" => "test"}, event: "event1"}]}
-      assert {:error, :tenant_not_found} = BatchBroadcast.broadcast(nil, nil, messages, false)
+      assert {:error, :tenant_not_found} = broadcast(nil, nil, messages, false)
     end
 
     test "does not broadcast when tenant is suspended", %{tenant: tenant} do
@@ -557,7 +559,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       reject(&TenantBroadcaster.pubsub_broadcast/5)
 
-      assert {:error, :forbidden, "Tenant is suspended"} = BatchBroadcast.broadcast(nil, tenant, messages, false)
+      assert {:error, :forbidden, "Tenant is suspended"} = broadcast(nil, tenant, messages, false)
       assert calls(&TenantBroadcaster.pubsub_broadcast/5) == []
     end
 
@@ -588,10 +590,81 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
         messages: [%{topic: topic, payload: %{"data" => "test"}, event: "event1", private: true}]
       }
 
-      assert :ok = BatchBroadcast.broadcast(auth_params, tenant, messages, false)
+      assert :ok = broadcast(auth_params, tenant, messages, false)
 
       assert calls(&TenantBroadcaster.pubsub_broadcast/5) == []
     end
+  end
+
+  describe "outcomes" do
+    test "has one outcome for each message", %{tenant: tenant} do
+      expect(GenCounter, :add, 2, fn _ -> :ok end)
+      expect(TenantBroadcaster, :pubsub_broadcast, 2, fn _, _, _, _, _ -> :ok end)
+
+      messages = %{
+        messages: [
+          %{topic: random_string(), payload: %{"data" => "test1"}, event: "event1"},
+          %{topic: random_string(), payload: %{"data" => "test2"}, event: "event2"}
+        ]
+      }
+
+      assert {:ok, [:success, :success]} = BatchBroadcast.broadcast(nil, tenant, messages, false)
+    end
+
+    test "an invalid message gives its own reason and the valid ones are batch_rejected", %{tenant: tenant} do
+      messages = %{
+        messages: [
+          %{topic: random_string(), payload: %{"data" => "test"}, event: "event1"},
+          %{topic: random_string(), payload: %{"data" => "test"}},
+          %{
+            topic: random_string(),
+            payload: %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 1)},
+            event: "e"
+          }
+        ]
+      }
+
+      assert {{:error, %Ecto.Changeset{}},
+              [{:rejected, :batch_rejected}, {:rejected, :invalid_request}, {:rejected, :payload_size_exceeded}]} =
+               BatchBroadcast.broadcast(nil, tenant, messages, false)
+    end
+
+    test "a list with entries that are not objects gives one invalid_request per entry", %{tenant: tenant} do
+      messages = %{
+        messages: [
+          %{topic: random_string(), payload: %{"data" => "test"}, event: "event1"},
+          "oops",
+          %{topic: random_string(), payload: %{"data" => "test"}, event: "event2"}
+        ]
+      }
+
+      assert {{:error, %Ecto.Changeset{}}, outcomes} = BatchBroadcast.broadcast(nil, tenant, messages, false)
+      assert outcomes == List.duplicate({:rejected, :invalid_request}, 3)
+    end
+
+    test "a suspended tenant rejects every message", %{tenant: tenant} do
+      messages = %{
+        messages: [
+          %{topic: "topic1", payload: %{"data" => "test"}, event: "event1"},
+          %{topic: "topic2", payload: %{"data" => "test"}, event: "event2"}
+        ]
+      }
+
+      assert {{:error, :forbidden, "Tenant is suspended"},
+              [{:rejected, :tenant_suspended}, {:rejected, :tenant_suspended}]} =
+               BatchBroadcast.broadcast(nil, %{tenant | suspend: true}, messages, false)
+    end
+
+    test "a missing tenant has no outcomes" do
+      assert {{:error, :tenant_not_found}, []} = BatchBroadcast.broadcast(nil, nil, %{messages: []}, false)
+    end
+  end
+
+  # BatchBroadcast.broadcast/4 returns {result, outcomes}. Most tests here are about the result, so they
+  # go through this. The "outcomes" tests call BatchBroadcast directly.
+  defp broadcast(auth_params, tenant, messages, super_user) do
+    {result, _outcomes} = BatchBroadcast.broadcast(auth_params, tenant, messages, super_user)
+    result
   end
 
   defp messages_for(topic), do: from(m in Message, where: m.topic == ^topic)
