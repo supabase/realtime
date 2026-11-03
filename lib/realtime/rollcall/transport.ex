@@ -8,7 +8,7 @@ defmodule Realtime.Rollcall.Transport do
   def init(scope, opts) do
     pubsub = Keyword.get(opts, :pubsub, Realtime.PubSub)
 
-    :ok = Phoenix.PubSub.subscribe(pubsub, topic_for(scope))
+    Phoenix.PubSub.subscribe(pubsub, topic_for(scope))
 
     {:ok, %{scope: scope, pubsub: pubsub}}
   end
