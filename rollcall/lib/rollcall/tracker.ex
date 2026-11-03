@@ -168,7 +168,7 @@ defmodule Rollcall.Tracker do
           silence_threshold: pos_integer(),
           transport: transport(),
           heartbeat_period_in_ms: pos_integer() | :manual,
-          empty_grace_in_ms: pos_integer()
+          empty_grace_in_ms: non_neg_integer()
         ]
 
   @doc """
@@ -311,7 +311,10 @@ defmodule Rollcall.Tracker do
     {:via, Registry, {Rollcall.Registry, scope}}
   end
 
-  @doc "Gets the names of valid init options"
+  @doc """
+  Returns the option keys that `Rollcall.start_link/1` accepts.
+  """
+  @spec init_options() :: [atom()]
   def init_options do
     @init_options
   end

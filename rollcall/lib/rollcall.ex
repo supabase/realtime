@@ -63,14 +63,13 @@ defmodule Rollcall do
   The options are the options of `Rollcall.Tracker.start_link/1`, except
   `:name`. They are `:transport`, `:heartbeat_period_in_ms`,
   `:silence_threshold` and `:empty_grace_in_ms`. Each tracker that `track/5`
-  starts gets these options. An option that you do not set has the default of
-  the tracker. Any other key raises an `ArgumentError`.
-
-  One library runs in a VM, because the processes have fixed names.
+  starts gets these options. An option that you do not set has the defaults
+  defined in `Rollcall.Tracker`.
   """
   @spec start_link(keyword()) :: Supervisor.on_start()
   def start_link(opts \\ []) do
     tracker_options = Keyword.validate!(opts, Tracker.init_options())
+    Enum.each(tracker_options, fn {key, value} -> validate_option!(key, value) end)
 
     children = [
       {Registry, keys: :unique, name: Rollcall.Registry, meta: [tracker_options: tracker_options]},
@@ -78,6 +77,16 @@ defmodule Rollcall do
     ]
 
     Supervisor.start_link(children, strategy: :rest_for_one, name: Rollcall.Supervisor)
+  end
+
+  defp validate_option!(:transport, {module, opts}) when is_atom(module) and is_list(opts), do: :ok
+  defp validate_option!(:heartbeat_period_in_ms, :manual), do: :ok
+  defp validate_option!(:heartbeat_period_in_ms, value) when is_integer(value) and value > 0, do: :ok
+  defp validate_option!(:silence_threshold, value) when is_integer(value) and value > 0, do: :ok
+  defp validate_option!(:empty_grace_in_ms, value) when is_integer(value) and value >= 0, do: :ok
+
+  defp validate_option!(key, value) do
+    raise ArgumentError, "invalid value for the option #{inspect(key)}: #{inspect(value)}"
   end
 
   @doc """

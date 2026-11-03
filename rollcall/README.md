@@ -27,9 +27,9 @@ Rollcall does not start itself. Add it to the supervision tree of the host appli
 
 ```elixir
 children = [
-  {Rollcall, transport: {MyApp.RollcallTransport, []}, [...]}
+  {Rollcall, transport: {MyApp.RollcallTransport, []}}
 ]
 ```
 
-See `Rollcall.Tracker.start_link/1` for a list of options.
+See `Rollcall.start_link/1` for the list of options.
 

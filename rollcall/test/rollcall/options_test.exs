@@ -73,6 +73,36 @@ defmodule Rollcall.OptionsTest do
     end
   end
 
+  # The checks raise before the library starts a process, so these tests leave
+  # the default instance alone.
+  describe "start_link/1" do
+    test "raises for an unknown option" do
+      assert_raise ArgumentError, ~r/unknown/, fn -> Rollcall.start_link(unknown: 1) end
+    end
+
+    test "raises for the option :name" do
+      assert_raise ArgumentError, ~r/unknown/, fn -> Rollcall.start_link(name: :tracker) end
+    end
+
+    for {key, value} <- [
+          transport: :not_a_tuple,
+          transport: {"module", []},
+          transport: {Rollcall.Transport.Null, :not_a_list},
+          heartbeat_period_in_ms: 0,
+          heartbeat_period_in_ms: :auto,
+          silence_threshold: 0,
+          silence_threshold: :many,
+          empty_grace_in_ms: -1,
+          empty_grace_in_ms: "5000"
+        ] do
+      test "raises when #{key} is #{inspect(value)}" do
+        assert_raise ArgumentError, ~r/invalid value for the option #{inspect(unquote(key))}/, fn ->
+          Rollcall.start_link([{unquote(key), unquote(Macro.escape(value))}])
+        end
+      end
+    end
+  end
+
   describe "Tracker.start_link/1" do
     test "sets the grace period with the option :empty_grace_in_ms", %{scope: scope} do
       tracker = start_supervised!({Tracker, {scope, empty_grace_in_ms: 1_234}})
