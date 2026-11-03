@@ -11,7 +11,7 @@
         "@opentelemetry/resources": "^2.7.1",
         "@opentelemetry/sdk-trace-base": "^2.7.1",
         "@opentelemetry/semantic-conventions": "^1.41.1",
-        "@supabase/supabase-js": "https://pkg.pr.new/@supabase/supabase-js@2690",
+        "@supabase/supabase-js": "2.119.0-canary.5",
         "commander": "^14.0.3",
         "kleur": "^4.1.5",
         "postgres": "^3.4.9",
@@ -46,19 +46,19 @@
 
     "@opentelemetry/semantic-conventions": ["@opentelemetry/semantic-conventions@1.41.1", "", {}, "sha512-/UhIkaZgPutTFmQ7RnIJGgDXZmtEJ7Dvi86xNTFWcnRxVRNk/aotsqDJYeEvDP+FSMB2SdW+pQzNMcWP0rwuNA=="],
 
-    "@supabase/auth-js": ["@supabase/auth-js@https://pkg.pr.new/supabase/supabase-js/@supabase/auth-js@fcb4e71", { "dependencies": { "tslib": "2.8.1" } }, "sha512-ZTRYieUkL5T+eBAajpXUoU+LmajuHsbI54tx7NRoYregue1YxiDD42GU3is9viLZPU4GypWXktdhJoJFVmFJBw=="],
+    "@supabase/auth-js": ["@supabase/auth-js@2.119.0-canary.5", "", { "dependencies": { "tslib": "2.8.1" } }, "sha512-DBEsXleRHqRo87uoHs8VBEFxmsCUv9HyIZYZEs/OVXeyHFHTg0bs8Gp7zee4PQz5hV8Xz/vlSF4nnQrW41xqFg=="],
 
-    "@supabase/functions-js": ["@supabase/functions-js@https://pkg.pr.new/supabase/supabase-js/@supabase/functions-js@fcb4e71", { "dependencies": { "tslib": "2.8.1" } }, "sha512-F8faI69Jtyiz4RKPdal11tvVaWfJPaNPcr05NzwfENb8//j4bzGEfeWH4DnRZp3fK8k+/eTXvnS6XSYOJ1XlCw=="],
+    "@supabase/functions-js": ["@supabase/functions-js@2.119.0-canary.5", "", { "dependencies": { "tslib": "2.8.1" } }, "sha512-hJe2wbRkyjnYTWXk48cZhKwEbSsrfBVLYPLy7zBH+TS3A3pWxP1PjtXphpjtuVZin2K0UqLozTjEdgEZ4FpHJA=="],
 
     "@supabase/phoenix": ["@supabase/phoenix@0.4.5", "", {}, "sha512-aAn9H9ovVyeApKy11OWOrrOGq8DV68yWeH4ud2lN9fzn4aO8Zb5GLL9m1pUg9nLqIcT+ZDfAcsZe0E/nqdv2lw=="],
 
-    "@supabase/postgrest-js": ["@supabase/postgrest-js@https://pkg.pr.new/supabase/supabase-js/@supabase/postgrest-js@fcb4e71", { "dependencies": { "tslib": "2.8.1" } }, "sha512-OK0tFCumRnNWUCXIMoCcdLMG5klGv0oKIAiDX434JjlGjYnMdTzHK7Hy+ISFleJ95MyaRk/4D5JQJTWPpglCdQ=="],
+    "@supabase/postgrest-js": ["@supabase/postgrest-js@2.119.0-canary.5", "", { "dependencies": { "tslib": "2.8.1" } }, "sha512-y/ZS+ZINDL27aTykLl1USzoPdDdjsrYZy9Z0PkON7P6OIMac8RcGTddhk/gXhZE3QbasX9LNCRykrNiGGJeCig=="],
 
-    "@supabase/realtime-js": ["@supabase/realtime-js@https://pkg.pr.new/supabase/supabase-js/@supabase/realtime-js@fcb4e71", { "dependencies": { "@supabase/phoenix": "0.4.5", "tslib": "2.8.1" } }, "sha512-jX75dALqTjq/kVB/BYCjLw4Wr+ZFxHoxwwiqBwvXv21MZjXDNtPu94TI/o9hTDEfFXecbFWt3UxgMvyaQMNdIg=="],
+    "@supabase/realtime-js": ["@supabase/realtime-js@2.119.0-canary.5", "", { "dependencies": { "@supabase/phoenix": "0.4.5", "tslib": "2.8.1" } }, "sha512-2R8jRoO+da1ss/DT8fylGj+fHWMN/jdwXy0J3AA20aw5CSXJ8X53aPgVD6Gr/rksMMoQoXwe1Q8iGNLmxxcdQw=="],
 
-    "@supabase/storage-js": ["@supabase/storage-js@https://pkg.pr.new/supabase/supabase-js/@supabase/storage-js@fcb4e71", { "dependencies": { "iceberg-js": "^0.8.1", "tslib": "2.8.1" } }, "sha512-dCe5qEfo6kLGYycmAaSim+2HFi8wPEFyWMP3V66GOKaym0rW4j4LbL4b1zhRyZlul0/xESuZE5SBuekOohh7fg=="],
+    "@supabase/storage-js": ["@supabase/storage-js@2.119.0-canary.5", "", { "dependencies": { "iceberg-js": "^0.8.1", "tslib": "2.8.1" } }, "sha512-VB/I23eTC4U4U/2105vrm+tvavrfRFUvjAKFNGQUZ2bgMFTJs5u/+/wyTRISPjhVW36Q2r7HU7Wwz1y2wUsnwg=="],
 
-    "@supabase/supabase-js": ["@supabase/supabase-js@https://pkg.pr.new/@supabase/supabase-js@2690", { "dependencies": { "@supabase/auth-js": "https://pkg.pr.new/supabase/supabase-js/@supabase/auth-js@fcb4e71", "@supabase/functions-js": "https://pkg.pr.new/supabase/supabase-js/@supabase/functions-js@fcb4e71", "@supabase/postgrest-js": "https://pkg.pr.new/supabase/supabase-js/@supabase/postgrest-js@fcb4e71", "@supabase/realtime-js": "https://pkg.pr.new/supabase/supabase-js/@supabase/realtime-js@fcb4e71", "@supabase/storage-js": "https://pkg.pr.new/supabase/supabase-js/@supabase/storage-js@fcb4e71" }, "peerDependencies": { "@opentelemetry/api": ">=1.0.0" }, "optionalPeers": ["@opentelemetry/api"] }, "sha512-K1bO1N6jE3mRGGO9qzPr/nY/11lIubryRFp4Bf2SZtxRWeGSXkrmYPSDQM48PjySiXj3rpkw7CuNanCUMr5Hwg=="],
+    "@supabase/supabase-js": ["@supabase/supabase-js@2.119.0-canary.5", "", { "dependencies": { "@supabase/auth-js": "2.119.0-canary.5", "@supabase/functions-js": "2.119.0-canary.5", "@supabase/postgrest-js": "2.119.0-canary.5", "@supabase/realtime-js": "2.119.0-canary.5", "@supabase/storage-js": "2.119.0-canary.5" }, "peerDependencies": { "@opentelemetry/api": ">=1.0.0" }, "optionalPeers": ["@opentelemetry/api"] }, "sha512-uKFU5DWsstAP3NiDMJpf5vevMoLcDoHSfNLRhVuw/z2/xp5XUskHgBavfllDxFfDF6WFfi+NXDSjl5E7uoRAcA=="],
 
     "@types/bun": ["@types/bun@1.4.2", "", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
 
