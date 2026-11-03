@@ -51,4 +51,12 @@ defmodule Rollcall.Tracker.Entry do
   def id(pid, partition, key) do
     {pid, partition, key}
   end
+
+  @doc """
+  Returns the entry as a wire entry for sending in a message.
+  """
+  @spec to_wire_entry(t()) :: Rollcall.Tracker.Messages.wire_entry()
+  def to_wire_entry(%__MODULE__{} = entry) do
+    Rollcall.Tracker.Messages.wire_entry(entry.partition, entry.key, entry.ref, entry.meta)
+  end
 end

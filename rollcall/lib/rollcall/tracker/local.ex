@@ -41,6 +41,12 @@ defmodule Rollcall.Tracker.Local do
     map_size(local.entries_by_id) == 0
   end
 
+  @doc "Returns every entry in `local`. The order is not defined."
+  @spec entries(t()) :: [Entry.t()]
+  def entries(local) do
+    Map.values(local.entries_by_id)
+  end
+
   @doc """
   Returns the entries in `partition`. 
 
