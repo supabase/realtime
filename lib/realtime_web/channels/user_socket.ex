@@ -201,7 +201,10 @@ defmodule RealtimeWeb.UserSocket do
   defp error_response(:missing_claims), do: {401, "Fields `role` and `exp` are required in JWT"}
   defp error_response(:token_malformed), do: {401, "The token provided is not a valid JWT"}
   defp error_response(:invalid_token), do: {401, "The token provided is not a valid JWT"}
+  defp error_response(:expected_header_map), do: {401, "The token provided is not a valid JWT"}
+  defp error_response(:expected_claims_map), do: {401, "The token provided is not a valid JWT"}
   defp error_response(:signature_error), do: {401, "Failed to validate JWT signature"}
+  defp error_response(message: _, claim: claim, claim_val: _), do: {401, "JWT claim `#{claim}` is invalid"}
 
   defp error_response(:error_generating_signer),
     do: {401, "Failed to generate JWT signer, check your JWT secret or JWKS configuration"}
