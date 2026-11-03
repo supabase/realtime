@@ -148,7 +148,7 @@ export function isolated(tag: string) {
   };
 }
 
-type TableName = "pg_changes" | "dummy" | "authorization" | "broadcast_changes" | "wallet" | "replay_check";
+type TableName = "pg_changes" | "dummy" | "authorization" | "e2e_broadcast_changes" | "wallet" | "replay_check";
 
 export async function executeInsert(supabase: SupabaseClient, table: TableName, value?: string): Promise<number> {
   const { data, error } = await supabase.from(table).insert([{ value: value ?? crypto.randomUUID() }]).select("id");

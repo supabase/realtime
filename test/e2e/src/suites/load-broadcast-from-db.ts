@@ -27,12 +27,12 @@ export const loadBroadcastFromDb: SuiteDescriptor = {
         await Promise.all(Array.from({ length: LOAD_MESSAGES }, async () => {
           const id = crypto.randomUUID();
           sendTimes.set(id, performance.now());
-          await supabase.from("broadcast_changes").insert({ id, value: crypto.randomUUID(), topic: testTopic });
+          await supabase.from("e2e_broadcast_changes").insert({ id, value: crypto.randomUUID(), topic: testTopic });
         }));
 
         await settle(() => latencies.length, LOAD_MESSAGES, LOAD_SETTLE_MS);
 
-        await supabase.from("broadcast_changes").delete().in("id", [...sendTimes.keys()]);
+        await supabase.from("e2e_broadcast_changes").delete().in("id", [...sendTimes.keys()]);
 
         return measureThroughput(latencies, LOAD_MESSAGES, "broadcast-from-db events", LOAD_DELIVERY_SLO);
       } finally {

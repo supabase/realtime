@@ -7,7 +7,7 @@ import { sleep, randomTopic, waitFor, stopClient, openReplicationChannel, REPLIC
 // as a timeout waiting for the event.
 async function write(query: PromiseLike<{ error: { message: string } | null }>, label: string) {
   const { error } = await query;
-  if (error) throw new Error(`Error on broadcast_changes ${label}: ${error.message}`);
+  if (error) throw new Error(`Error on e2e_broadcast_changes ${label}: ${error.message}`);
 }
 
 export const broadcastChanges: SuiteDescriptor = {
@@ -29,7 +29,7 @@ export const broadcastChanges: SuiteDescriptor = {
           .on("broadcast", { event: "INSERT" }, (res) => (result = res));
 
         const { subscribeMs } = await openReplicationChannel(channel);
-        await write(supabase.from("broadcast_changes").insert({ value, id, topic: testTopic }), "insert");
+        await write(supabase.from("e2e_broadcast_changes").insert({ value, id, topic: testTopic }), "insert");
         const { latencyMs: eventMs } = await waitFor(() => result, "INSERT event");
 
         assert.strictEqual(result.payload.record.id, id);
@@ -37,7 +37,7 @@ export const broadcastChanges: SuiteDescriptor = {
         assert.strictEqual(result.payload.old_record, null);
         assert.strictEqual(result.payload.operation, "INSERT");
         assert.strictEqual(result.payload.schema, "public");
-        assert.strictEqual(result.payload.table, "broadcast_changes");
+        assert.strictEqual(result.payload.table, "e2e_broadcast_changes");
         return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
       } finally {
         await stopClient(supabase);
@@ -59,8 +59,8 @@ export const broadcastChanges: SuiteDescriptor = {
           .on("broadcast", { event: "UPDATE" }, (res) => (result = res));
 
         const { subscribeMs } = await openReplicationChannel(channel);
-        await write(supabase.from("broadcast_changes").insert({ value: originalValue, id, topic: testTopic }), "insert");
-        await write(supabase.from("broadcast_changes").update({ value: updatedValue }).eq("id", id), "update");
+        await write(supabase.from("e2e_broadcast_changes").insert({ value: originalValue, id, topic: testTopic }), "insert");
+        await write(supabase.from("e2e_broadcast_changes").update({ value: updatedValue }).eq("id", id), "update");
         const { latencyMs: eventMs } = await waitFor(() => result, "UPDATE event");
 
         assert.strictEqual(result.payload.record.id, id);
@@ -69,7 +69,7 @@ export const broadcastChanges: SuiteDescriptor = {
         assert.strictEqual(result.payload.old_record.value, originalValue);
         assert.strictEqual(result.payload.operation, "UPDATE");
         assert.strictEqual(result.payload.schema, "public");
-        assert.strictEqual(result.payload.table, "broadcast_changes");
+        assert.strictEqual(result.payload.table, "e2e_broadcast_changes");
         return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
       } finally {
         await stopClient(supabase);
@@ -90,8 +90,8 @@ export const broadcastChanges: SuiteDescriptor = {
           .on("broadcast", { event: "DELETE" }, (res) => (result = res));
 
         const { subscribeMs } = await openReplicationChannel(channel);
-        await write(supabase.from("broadcast_changes").insert({ value, id, topic: testTopic }), "insert");
-        await write(supabase.from("broadcast_changes").delete().eq("id", id), "delete");
+        await write(supabase.from("e2e_broadcast_changes").insert({ value, id, topic: testTopic }), "insert");
+        await write(supabase.from("e2e_broadcast_changes").delete().eq("id", id), "delete");
         const { latencyMs: eventMs } = await waitFor(() => result, "DELETE event");
 
         assert.strictEqual(result.payload.record, null);
@@ -99,7 +99,7 @@ export const broadcastChanges: SuiteDescriptor = {
         assert.strictEqual(result.payload.old_record.value, value);
         assert.strictEqual(result.payload.operation, "DELETE");
         assert.strictEqual(result.payload.schema, "public");
-        assert.strictEqual(result.payload.table, "broadcast_changes");
+        assert.strictEqual(result.payload.table, "e2e_broadcast_changes");
         return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
       } finally {
         await stopClient(supabase);
