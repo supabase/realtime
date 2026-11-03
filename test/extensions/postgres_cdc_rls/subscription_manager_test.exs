@@ -308,6 +308,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManagerTest do
 
   describe "message handling" do
     test "re-subscribes all subscribers when publication oids change", %{pid: pid, args: args} do
+      subscribe_to_retries(args["id"], UUID.uuid1())
       # Force state to have different oids so the new_oids branch is triggered when
       # fetch_publication_tables returns the real oids from the database
       :sys.replace_state(pid, fn state -> %{state | oids: %{fake: :oids_that_dont_match}} end)
@@ -322,7 +323,33 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManagerTest do
       assert :ets.tab2list(args["subscribers_nodes_table"]) == []
     end
 
+    test "retries an explicit subscription committed after publication changes", context do
+      assert_publication_refresh_retry(context, :after_ddl)
+    end
+
+    test "retries a wildcard subscription committed before publication changes", context do
+      assert_publication_refresh_retry(context, :before_ddl)
+    end
+
+    test "does not retry subscriptions when publication oids are unchanged", %{pid: pid, args: args} do
+      subscribe_to_retries(args["id"], UUID.uuid1())
+      send(pid, :check_oids)
+      :sys.get_state(pid)
+
+      refute_receive :postgres_subscribe, 200
+    end
+
+    test "does not retry subscriptions for another tenant", %{pid: pid, args: args} do
+      subscribe_to_retries(args["id"] <> "-other", UUID.uuid1())
+      :sys.replace_state(pid, fn state -> %{state | oids: %{fake: :oids_that_dont_match}} end)
+      send(pid, :check_oids)
+      :sys.get_state(pid)
+
+      refute_receive :postgres_subscribe, 200
+    end
+
     test "keeps subscribers and oids when :check_oids fetch errors", %{pid: pid, args: args} do
+      subscribe_to_retries(args["id"], UUID.uuid1())
       old_oids = :sys.get_state(pid).oids
       :ets.insert(args["subscribers_pids_table"], {self(), UUID.uuid1(), make_ref(), node()})
 
@@ -650,6 +677,70 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManagerTest do
       result = SubscriptionManager.not_alive_pids_dist(%{node() => MapSet.new([dead_pid])})
       assert dead_pid in result
     end
+  end
+
+  defp assert_publication_refresh_retry(%{pid: pid, args: args, publication: publication}, schedule) do
+    {:ok, ^pid, conn} = PostgresCdcRls.get_manager_conn(args["id"])
+    {uuid, bin_uuid, params} = pg_change_params()
+    subscribe_to_retries(args["id"], uuid)
+    send(pid, :check_oids)
+    :sys.get_state(pid)
+    table = "publication_refresh_#{System.unique_integer([:positive])}"
+
+    params =
+      if schedule == :before_ddl, do: params, else: %{params | subscription_params: {"*", "public", "test", [], nil}}
+
+    try do
+      :sys.suspend(pid)
+
+      try do
+        send(pid, :check_oids)
+
+        if schedule == :before_ddl do
+          assert {:ok, _} = Subscriptions.create(conn, publication, [params], pid, self())
+        end
+
+        Postgrex.query!(conn, "create table public.#{table} (id integer primary key)", [])
+        Postgrex.query!(conn, "grant select on public.#{table} to anon", [])
+
+        if schedule == :after_ddl do
+          assert {:ok, _} = Subscriptions.create(conn, publication, [params], pid, self())
+        end
+
+        assert subscription_tables(conn, bin_uuid) == ["test"]
+      after
+        :sys.resume(pid)
+      end
+
+      :sys.get_state(pid)
+      assert subscription_tables(conn, bin_uuid) == []
+      assert_receive :postgres_subscribe, 1_000
+
+      assert {:ok, _} = Subscriptions.create(conn, publication, [params], pid, self())
+      expected = if schedule == :before_ddl, do: Enum.sort(["test", table]), else: ["test"]
+      assert subscription_tables(conn, bin_uuid) == expected
+    after
+      Postgrex.query!(conn, "drop table if exists public.#{table}", [])
+    end
+  end
+
+  defp subscription_tables(conn, bin_uuid) do
+    %{rows: rows} =
+      Postgrex.query!(
+        conn,
+        "select c.relname from realtime.subscription s join pg_class c on c.oid = s.entity where s.subscription_id = $1::uuid order by c.relname",
+        [bin_uuid]
+      )
+
+    List.flatten(rows)
+  end
+
+  defp subscribe_to_retries(tenant_id, uuid) do
+    metadata =
+      {:subscriber_fastlane, self(), Phoenix.Socket.V1.JSONSerializer, [{UUID.string_to_binary!(uuid), 0}],
+       "realtime:test", true}
+
+    assert :ok = PostgresCdcRls.handle_subscribe(nil, tenant_id, metadata: metadata)
   end
 
   # Simulates a SubscriptionManager-only restart: the ETS tables in `args` are owned by the test
