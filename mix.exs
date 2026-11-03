@@ -97,6 +97,7 @@ defmodule Realtime.MixProject do
       {:syn, "~> 3.3"},
       {:forum, path: "./forum"},
       {:sql_logex, path: "./sql_logex"},
+      {:rollcall, path: "./rollcall"},
       {:cachex, "~> 4.0"},
       {:open_api_spex, "~> 3.16"},
       {:corsica, "~> 2.0"},
