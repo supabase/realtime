@@ -209,55 +209,45 @@ defmodule Realtime.Tenants.SingleBroadcast do
       {:ok, %Policies{}} ->
         with_outcome({:error, :forbidden, "Unauthorized"}, :unauthorized)
 
-      {:error, :rls_policy_error, error} ->
-        log_error("RlsPolicyError", error)
-        with_outcome({:error, :unprocessable_entity, "RLS policy error"}, :rls_policy_error)
+      {:error, :rls_policy_error, detail} = error ->
+        log_error("RlsPolicyError", detail)
+        authorization_failure(error, {:error, :unprocessable_entity, "RLS policy error"})
 
-      {:error, :query_canceled, error} ->
-        log_error("QueryCanceled", error)
-        with_outcome({:error, :unprocessable_entity, "Query canceled"}, :query_canceled)
+      {:error, :query_canceled, detail} = error ->
+        log_error("QueryCanceled", detail)
+        authorization_failure(error, {:error, :unprocessable_entity, "Query canceled"})
 
-      {:error, :rpc_error, error} ->
-        log_error("RpcError", error)
-        with_outcome({:error, :internal_server_error, "RPC error"}, :unable_to_handle_broadcast)
+      {:error, :rpc_error, detail} = error ->
+        log_error("RpcError", detail)
+        authorization_failure(error, {:error, :internal_server_error, "RPC error"})
 
-      {:error, :missing_partition} ->
+      {:error, :missing_partition} = error ->
         log_error("MissingPartition", "Realtime was unable to find the expected messages partition")
-        with_outcome({:error, :unprocessable_entity, "Missing messages partition"}, :missing_partition)
+        authorization_failure(error, {:error, :unprocessable_entity, "Missing messages partition"})
 
-      {:error, :increase_connection_pool} ->
-        with_outcome({:error, :too_many_requests, "Connection pool exhausted"}, :increase_connection_pool)
+      {:error, :increase_connection_pool} = error ->
+        authorization_failure(error, {:error, :too_many_requests, "Connection pool exhausted"})
 
-      {:error, :tenant_database_unavailable} ->
+      {:error, :tenant_database_unavailable} = error ->
         log_error("UnableToConnectToProject", "Realtime was unable to connect to the project database")
-        with_outcome({:error, :unprocessable_entity, "Tenant database unavailable"}, :unable_to_connect_to_project)
+        authorization_failure(error, {:error, :unprocessable_entity, "Tenant database unavailable"})
 
-      {:error, :initializing} ->
-        with_outcome({:error, :unprocessable_entity, "Tenant database initializing"}, :initializing_project_connection)
+      {:error, :initializing} = error ->
+        authorization_failure(error, {:error, :unprocessable_entity, "Tenant database initializing"})
 
-      {:error, :tenant_database_connection_initializing} ->
-        with_outcome(
-          {:error, :unprocessable_entity, "Tenant database connection initializing"},
-          :initializing_project_connection
-        )
+      {:error, :tenant_database_connection_initializing} = error ->
+        authorization_failure(error, {:error, :unprocessable_entity, "Tenant database connection initializing"})
 
-      {:error, :tenant_db_too_many_connections} ->
+      {:error, :tenant_db_too_many_connections} = error ->
         log_error("DatabaseLackOfConnections", "Database can't accept more connections, Realtime won't connect")
+        authorization_failure(error, {:error, :unprocessable_entity, "Tenant database has too many connections"})
 
-        with_outcome(
-          {:error, :unprocessable_entity, "Tenant database has too many connections"},
-          :database_lack_of_connections
-        )
+      {:error, :connect_rate_limit_reached} = error ->
+        authorization_failure(error, {:error, :unprocessable_entity, "Connect rate limit reached"})
 
-      {:error, :connect_rate_limit_reached} ->
-        with_outcome(
-          {:error, :unprocessable_entity, "Connect rate limit reached"},
-          :database_connection_rate_limit_reached
-        )
-
-      {:error, error} ->
-        log_error("UnableToSetPolicies", error)
-        with_outcome({:error, :internal_server_error, "Unable to authorize broadcast"}, :unable_to_set_policies)
+      {:error, reason} = error ->
+        log_error("UnableToSetPolicies", reason)
+        authorization_failure(error, {:error, :internal_server_error, "Unable to authorize broadcast"})
     end
   end
 
@@ -365,6 +355,9 @@ defmodule Realtime.Tenants.SingleBroadcast do
   end
 
   defp with_outcome(result, error_code), do: {result, RequestMetrics.classify_broadcast_error(error_code)}
+
+  # Each clause sets its own response. The outcome comes from the mapping that Batch shares.
+  defp authorization_failure(error, response), do: {response, RequestMetrics.classify_authorization_error(error)}
 
   # A payload size error names the cause, even when the changeset has other errors.
   defp changeset_error_code(changeset) do
