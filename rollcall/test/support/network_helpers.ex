@@ -15,6 +15,7 @@ defmodule Rollcall.NetworkHelpers do
   import ExUnit.Assertions
 
   alias Rollcall.Tracker
+  alias Rollcall.Tracker.State
   alias Rollcall.Transport.InMemory
   alias Rollcall.Transport.InMemory.Network
 
@@ -27,7 +28,7 @@ defmodule Rollcall.NetworkHelpers do
   supervisor.
 
   `opts` are options of `Rollcall.Tracker.start_link/1`. They replace the
-  defaults: the in-memory transport on `network`, `heartbeat_period: :manual` and
+  defaults: the in-memory transport on `network`, `heartbeat_period_in_ms: :manual` and
   a name that is unique for the scope and the node. The option `:id` sets the id
   of the child, for a test that starts a second tracker for one node.
   """
@@ -40,7 +41,7 @@ defmodule Rollcall.NetworkHelpers do
         [
           name: :"tracker-#{scope}-#{node}",
           transport: {InMemory, network: network, node: node},
-          heartbeat_period: :manual
+          heartbeat_period_in_ms: :manual
         ],
         opts
       )
@@ -86,7 +87,7 @@ defmodule Rollcall.NetworkHelpers do
   end
 
   @doc "Returns the state of `tracker`, in the shape of `Rollcall.Tracker.get_state/1`."
-  @spec tracker_state(pid()) :: Tracker.inspected_state()
+  @spec tracker_state(pid()) :: State.view()
   def tracker_state(tracker), do: GenServer.call(tracker, :get_state)
 
   @doc "Returns the peer record of `tracker` for `node`, or `nil`."

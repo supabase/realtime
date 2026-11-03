@@ -68,7 +68,7 @@ defmodule Rollcall.Tracker do
   ## Heartbeat
 
   A tick sends one snapshot of `local` to the peers and counts one quiet period
-  for each peer record. The `:heartbeat_period` option of `start_link/1` sets the
+  for each peer record. The `:heartbeat_period_in_ms` option of `start_link/1` sets the
   time between ticks, in milliseconds. The default is 1500. 
 
   A tracker that stops sends a goodbye from `terminate/2`. The tracker traps
@@ -143,11 +143,12 @@ defmodule Rollcall.Tracker do
   alias Rollcall.Tracker.Changes
   alias Rollcall.Tracker.Messages
   alias Rollcall.Tracker.Peer
+  alias Rollcall.Tracker.State
 
   @max_retries 3
   @default_grace_period :timer.seconds(5)
   # Default to sending a heartbeat every 1.5 seconds
-  @default_heartbeat_period 1500
+  @default_heartbeat_period_in_ms 1500
   # this how many heartbeat period before we assume a peer is dead
   @default_silence_threshold 10
   @default_transport {Rollcall.Transport.Null, []}
@@ -155,6 +156,14 @@ defmodule Rollcall.Tracker do
   # The exit reasons of a call when no tracker runs, or when the tracker stops
   # before it replies.
   @gone [:noproc, :normal, :shutdown]
+
+  @type transport :: {module(), keyword()}
+
+  @type init_options :: [
+          silence_threshold: pos_integer(),
+          transport: transport(),
+          heartbeat_period_in_ms: pos_integer() | :manual
+        ]
 
   @doc """
   Tracks an entry in the tracker for `scope`, and returns the ref of the entry.
@@ -185,6 +194,13 @@ defmodule Rollcall.Tracker do
       call_or_start(scope, message, retries - 1)
   end
 
+  defp start(scope) do
+    case DynamicSupervisor.start_child(Rollcall.TrackerSupervisor, {__MODULE__, scope}) do
+      {:ok, _pid} -> :ok
+      {:error, {:already_started, _pid}} -> :ok
+    end
+  end
+
   @doc """
   Removes the entry of `pid` for `key` in `partition` from the tracker for
   `scope`.
@@ -209,16 +225,6 @@ defmodule Rollcall.Tracker do
     :exit, {reason, _} when reason in @gone -> default
   end
 
-  @inspectable_keys [:incarnation, :scope, :version, :local, :peers]
-
-  @type inspected_state :: %{
-          scope: Rollcall.scope(),
-          version: non_neg_integer(),
-          incarnation: integer(),
-          local: Local.t(),
-          peers: %{node() => Peer.t()}
-        }
-
   @doc """
   Returns the state of the tracker for `scope`, or `nil` when no tracker runs.
 
@@ -231,7 +237,7 @@ defmodule Rollcall.Tracker do
 
   The function does not start a tracker. Use it in tests and for debugging.
   """
-  @spec get_state(Rollcall.scope()) :: inspected_state() | nil
+  @spec get_state(Rollcall.scope()) :: State.view() | nil
   def get_state(scope) do
     call_if_running(scope, :get_state, nil)
   end
@@ -250,13 +256,6 @@ defmodule Rollcall.Tracker do
     |> Enum.map(fn {scope, _} -> scope end)
   end
 
-  defp start(scope) do
-    case DynamicSupervisor.start_child(Rollcall.TrackerSupervisor, {__MODULE__, scope}) do
-      {:ok, _pid} -> :ok
-      {:error, {:already_started, _pid}} -> :ok
-    end
-  end
-
   @doc """
   Starts the tracker for `scope` and registers it in `Rollcall.Registry`.
 
@@ -267,8 +266,8 @@ defmodule Rollcall.Tracker do
   The option `:transport` is `{module, opts}`. It sets the transport. The
   default is the Null transport.
 
-  The option `:heartbeat_period` is the time between ticks in milliseconds, or
-  `:manual`. The default is 1500.
+  The option `:heartbeat_period_in_ms` is the time between ticks in milliseconds,
+  or `:manual`. The default is 1500.
 
   Returns `{:ok, pid}`. Returns `{:error, {:already_started, pid}}` when a
   tracker runs for `scope`. `Rollcall.TrackerSupervisor` calls this function.
@@ -300,104 +299,6 @@ defmodule Rollcall.Tracker do
     {:via, Registry, {Rollcall.Registry, scope}}
   end
 
-  defmodule State do
-    @moduledoc """
-    The state of a tracker process.
-
-    `local` holds the entries that processes on this node track. `version`
-    counts the changes to `local`. `incarnation` is the monotonic time at which
-    the tracker started. `sent` holds the `local` set and the `version` at the last
-    heartbeat. The struct has no `sent` field yet.
-
-    The `incarnation` and the `version` form the stamp of a message. A peer
-    compares stamps to order messages that arrive in any order. A tracker that
-    restarts gets a newer incarnation, so its peers replace its old entries.
-
-    Monotonic time orders the incarnations of one VM only. A peer keeps one
-    record for each node name, so a node that restarts under a new name gets a
-    new record, and no order between VMs is needed.
-
-    This design assumes that a node restart does not reuse a node name. A new VM
-    that reuses a name can start with a lower incarnation. The peers then treat
-    its messages as stale. A stale message still resets the silent count, so the
-    silence threshold never purges the old record, and the old entries stay, under
-    a very specific time drift that goes backwards during a node restart.
-
-    `peers` maps each peer node to its `Rollcall.Tracker.Peer`. The view of the
-    tracker is `local` plus the replica of each peer. `silence_threshold` is the
-    number of ticks without a message after which the tracker deletes a peer
-    record.
-
-    `monitors` maps each process that has an entry to its monitor. `empty_grace`
-    and `empty_timer` control the stop of a tracker that holds no entry.
-    """
-
-    alias Rollcall.Tracker.Local
-    alias Rollcall.Tracker.Peer
-
-    # `local` has no default. A default runs `Local.new/0` at compile time, and
-    # the struct would then hold a literal value of the opaque type `Local.t()`.
-    @enforce_keys [
-      :scope,
-      :incarnation,
-      :empty_grace,
-      :local,
-      :silence_threshold,
-      :transport_module,
-      :transport_state,
-      :heartbeat_period
-    ]
-
-    defstruct [
-      :scope,
-      :incarnation,
-      :empty_grace,
-      :local,
-      :silence_threshold,
-      :transport_module,
-      :transport_state,
-      :heartbeat_period,
-      empty_timer: nil,
-      version: 0,
-      monitors: %{},
-      peers: %{}
-    ]
-
-    @type t :: %__MODULE__{
-            scope: Rollcall.scope(),
-            incarnation: integer(),
-            empty_grace: non_neg_integer(),
-            empty_timer: reference() | nil,
-            heartbeat_period: pos_integer() | :manual,
-            local: Local.t(),
-            version: non_neg_integer(),
-            monitors: %{pid() => reference()},
-            peers: %{node() => Peer.t()},
-            silence_threshold: pos_integer(),
-            transport_module: module(),
-            transport_state: any()
-          }
-
-    @spec bump_version(t()) :: t()
-    def bump_version(%__MODULE__{version: version} = state) do
-      %{state | version: version + 1}
-    end
-
-    @spec current_stamp(t()) :: Messages.stamp()
-
-    def current_stamp(%__MODULE__{incarnation: incarnation, version: version}) do
-      Messages.stamp(incarnation, version)
-    end
-  end
-
-  @type transport :: {module(), keyword()}
-
-  @type init_options :: [
-          silence_threshold: pos_integer(),
-          transport: transport(),
-          heartbeat_period: pos_integer() | :manual
-        ]
-
   @impl true
   @spec init({Rollcall.scope(), keyword()}) :: {:ok, State.t()}
   def init({scope, opts}) do
@@ -415,7 +316,7 @@ defmodule Rollcall.Tracker do
       local: Local.new(),
       # This default will get set to something less magic when we do the heartbeat timing.
       silence_threshold: Keyword.get(opts, :silence_threshold, @default_silence_threshold),
-      heartbeat_period: Keyword.get(opts, :heartbeat_period, @default_heartbeat_period),
+      heartbeat_period_in_ms: Keyword.get(opts, :heartbeat_period_in_ms, @default_heartbeat_period_in_ms),
       transport_module: transport_module,
       transport_state: transport_state
     }
@@ -438,9 +339,9 @@ defmodule Rollcall.Tracker do
 
   @impl true
   @spec handle_call(call_message(), GenServer.from(), State.t()) ::
-          {:reply, {:ok, Rollcall.ref()} | :ok | inspected_state(), State.t()}
+          {:reply, {:ok, Rollcall.ref()} | :ok | State.view(), State.t()}
   def handle_call(:get_state, _from, state) do
-    {:reply, Map.take(state, @inspectable_keys), state}
+    {:reply, State.inspect_view(state), state}
   end
 
   def handle_call({:track, pid, partition, key, meta}, _from, state) do
@@ -450,7 +351,7 @@ defmodule Rollcall.Tracker do
 
     state =
       state
-      |> apply_changes(local, changes)
+      |> State.apply_changes(local, changes)
       |> cancel_empty_timer()
       |> watch_pid(pid)
 
@@ -476,7 +377,7 @@ defmodule Rollcall.Tracker do
 
     state =
       state
-      |> apply_changes(local, changes)
+      |> State.apply_changes(local, changes)
       |> maybe_unwatch(pid)
       |> start_empty_timer()
 
@@ -498,17 +399,72 @@ defmodule Rollcall.Tracker do
   end
 
   @impl true
-  @spec handle_cast({:deliver, Rollcall.scope(), Messages.t()}, State.t()) :: {:noreply, State.t()}
-  def handle_cast({:deliver, scope, msg}, %State{scope: scope} = state) do
-    node = node(Messages.origin(msg))
-    {:noreply, deliver_message(state, node, Map.get(state.peers, node), msg)}
+  @spec handle_info(term(), State.t()) :: {:noreply, State.t()} | {:stop, :normal, State.t()}
+  def handle_info({:timeout, ref, :empty_timeout}, %{empty_timer: ref} = state) do
+    tp(:rollcall_tracker_stopped, %{scope: state.scope})
+
+    {:stop, :normal, state}
   end
 
-  # The sender writes the scope from its own state, so a mismatch means that the
-  # transport misrouted the message. A crash would let a bug in the transport
-  # take down this scope.
-  def handle_cast({:deliver, message_scope, msg}, %State{} = state) do
-    {:noreply, drop_message(state, :wrong_scope, message_scope, msg)}
+  def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
+    {changes, local} = Local.untrack_pid(state.local, pid)
+
+    state =
+      state
+      |> State.apply_changes(local, changes)
+      |> remove_monitor(pid)
+      |> start_empty_timer()
+
+    tp(:rollcall_tracker_pid_down, %{scope: state.scope, pid: pid})
+
+    {:noreply, state}
+  end
+
+  def handle_info(:tick, state) do
+    state =
+      state
+      |> send_heartbeat()
+      |> tick_and_purge_peers()
+      |> schedule_heartbeat()
+
+    {:noreply, state}
+  end
+
+  # In this catch all handle_info, we see if the message was a message from one
+  # of the peers in the cluster. This is done by attempting to unwrap it using the
+  # the transport. If successful, we'll process it, otherwise we ignore it.
+  def handle_info(msg, state) do
+    case state.transport_module.unwrap(state.transport_state, msg) do
+      {:ok, scope, msg} when scope == state.scope ->
+        origin = node(Messages.origin(msg))
+        new_state = deliver_message(state, origin, State.peer(state, origin), msg)
+
+        {:noreply, new_state}
+
+      # The sender writes the scope from its own state, so a mismatch means that the
+      # transport misrouted the message. A crash would let a bug in the transport
+      # take down this scope.
+      {:ok, scope, msg} ->
+        {:noreply, drop_message(state, :wrong_scope, scope, msg)}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  @impl true
+  def terminate(_reason, state) do
+    # When terminating we send a goodbye message, which is an empty snapshot.
+    #
+    # We need to bump the version on a goodbye to make sure any peer holding our current
+    # state applies the goodbye.
+    stamp = State.goodbye_stamp(state)
+    {:stamp, _incarnation, goodbye_version} = stamp
+    snapshot = Messages.snapshot(self(), stamp, [])
+
+    :ok = state.transport_module.heartbeat(state.transport_state, snapshot)
+
+    tp(:rollcall_tracker_goodbye_sent, %{scope: state.scope, origin: self(), version: goodbye_version})
   end
 
   # The transport does not send a message to its own node. The clause makes a
@@ -551,79 +507,7 @@ defmodule Rollcall.Tracker do
       behind: Peer.behind?(peer)
     })
 
-    %{state | peers: Map.put(state.peers, node, peer)}
-  end
-
-  @impl true
-  @spec handle_info(term(), State.t()) :: {:noreply, State.t()} | {:stop, :normal, State.t()}
-  def handle_info({:timeout, ref, :empty_timeout}, %{empty_timer: ref} = state) do
-    tp(:rollcall_tracker_stopped, %{scope: state.scope})
-
-    {:stop, :normal, state}
-  end
-
-  def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
-    {changes, local} = Local.untrack_pid(state.local, pid)
-
-    state =
-      state
-      |> apply_changes(local, changes)
-      |> remove_monitor(pid)
-      |> start_empty_timer()
-
-    tp(:rollcall_tracker_pid_down, %{scope: state.scope, pid: pid})
-
-    {:noreply, state}
-  end
-
-  def handle_info(:tick, state) do
-    state =
-      state
-      |> send_heartbeat()
-      |> tick_and_purge_peers()
-      |> schedule_heartbeat()
-
-    {:noreply, state}
-  end
-
-  # In this catch all handle_info, we see if the message was a message from one
-  # of the peers in the cluster. This is done by attempting to unwrap it using the
-  # the transport. If successful, we'll process it, otherwise we ignore it.
-  def handle_info(msg, state) do
-    case state.transport_module.unwrap(state.transport_state, msg) do
-      {:ok, scope, msg} when scope == state.scope ->
-        origin = node(Messages.origin(msg))
-        new_state = deliver_message(state, origin, Map.get(state.peers, origin), msg)
-
-        {:noreply, new_state}
-
-      {:ok, scope, msg} ->
-        {:noreply, drop_message(state, :wrong_scope, scope, msg)}
-
-      _ ->
-        {:noreply, state}
-    end
-  end
-
-  @impl true
-  def terminate(_reason, state) do
-    # When terminating we send a goodbye message, which is an empty snapshot.
-    #
-    # We need to bump the version on a goodbye to make sure any peer holding our current
-    # state applies the goodbye.
-    goodbye_version = state.version + 1
-    stamp = Messages.stamp(state.incarnation, goodbye_version)
-    snapshot = Messages.snapshot(self(), stamp, [])
-
-    :ok = state.transport_module.heartbeat(state.transport_state, snapshot)
-
-    tp(:rollcall_tracker_goodbye_sent, %{scope: state.scope, origin: self(), version: goodbye_version})
-  end
-
-  defp apply_changes(state, local, changes) do
-    state
-    |> Map.put(:local, local)
-    |> bump_version(changes)
+    State.put_peer(state, node, peer)
   end
 
   defp tick_and_purge_peers(%State{} = state) do
@@ -668,10 +552,10 @@ defmodule Rollcall.Tracker do
     state
   end
 
-  defp schedule_heartbeat(%State{heartbeat_period: :manual} = state), do: state
+  defp schedule_heartbeat(%State{heartbeat_period_in_ms: :manual} = state), do: state
 
-  defp schedule_heartbeat(%State{heartbeat_period: heartbeat_period} = state) do
-    Process.send_after(self(), :tick, heartbeat_period)
+  defp schedule_heartbeat(%State{heartbeat_period_in_ms: heartbeat_period_in_ms} = state) do
+    Process.send_after(self(), :tick, heartbeat_period_in_ms)
 
     state
   end
@@ -693,14 +577,6 @@ defmodule Rollcall.Tracker do
   defp cancel_empty_timer(%{empty_timer: ref} = state) do
     :erlang.cancel_timer(ref)
     %{state | empty_timer: nil}
-  end
-
-  defp bump_version(state, changes) do
-    if Changes.empty?(changes) do
-      state
-    else
-      State.bump_version(state)
-    end
   end
 
   # Handles watching pids to update tracker state when a process ends

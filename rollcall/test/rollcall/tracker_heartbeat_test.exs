@@ -130,7 +130,7 @@ defmodule Rollcall.TrackerHeartbeatTest do
       network: network,
       probe: probe
     } do
-      start_node(scope, network, @node_a, heartbeat_period: 20)
+      start_node(scope, network, @node_a, heartbeat_period_in_ms: 20)
 
       assert {:snapshot, _, _, []} = receive_message(probe)
       assert {:snapshot, _, _, []} = receive_message(probe)
