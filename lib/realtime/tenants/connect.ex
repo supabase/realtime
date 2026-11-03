@@ -157,7 +157,11 @@ defmodule Realtime.Tenants.Connect do
     end
   end
 
-  def syn_topic(tenant_id), do: "connect:#{tenant_id}"
+  @doc "Prefix of `syn_topic/1`."
+  @spec syn_topic_prefix() :: String.t()
+  def syn_topic_prefix, do: "connect:"
+
+  def syn_topic(tenant_id), do: syn_topic_prefix() <> tenant_id
 
   defp wait_for_connection(pid, tenant_id) do
     RealtimeWeb.Endpoint.subscribe(syn_topic(tenant_id))
@@ -192,7 +196,7 @@ defmodule Realtime.Tenants.Connect do
   defp connection_ready_timeout, do: Application.get_env(:realtime, :connect_connection_ready_timeout, 15_000)
 
   # How long a caller waits for migrations to run before giving up.
-  defp migrations_wait_timeout, do: Application.get_env(:realtime, :connect_migrations_wait_timeout, 5_000)
+  defp migrations_wait_timeout, do: Application.get_env(:realtime, :connect_migrations_wait_timeout, 2_000)
 
   @doc """
   Waits up to `timeout` for the tenant to run every migration this node knows. Connect registers its
@@ -309,13 +313,14 @@ defmodule Realtime.Tenants.Connect do
   def start_link(opts) do
     tenant_id = Keyword.get(opts, :tenant_id)
     region = Keyword.get(opts, :region)
+    migrations_ran = Keyword.get(opts, :migrations_ran)
 
     check_connected_user_interval =
       Keyword.get(opts, :check_connected_user_interval, @check_connected_user_interval_default)
 
     check_connect_region_interval = Keyword.get(opts, :check_connect_region_interval, rebalance_check_interval_in_ms())
 
-    name = {__MODULE__, tenant_id, %{conn: nil, region: region, replication_conn: nil, migrations_ran: nil}}
+    name = {__MODULE__, tenant_id, %{conn: nil, region: region, replication_conn: nil, migrations_ran: migrations_ran}}
 
     state = %__MODULE__{
       tenant_id: tenant_id,
@@ -591,6 +596,9 @@ defmodule Realtime.Tenants.Connect do
     with tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
          :ok <- tenant_suspended?(tenant),
          {:ok, node, region} <- Realtime.Nodes.get_node_for_tenant(tenant) do
+      # Start from the cached count, RegisterProcess replaces it with the database's
+      opts = Keyword.put(opts, :migrations_ran, tenant.migrations_ran)
+
       Rpc.enhanced_call(node, __MODULE__, :connect, [tenant_id, region, opts],
         timeout: rpc_timeout,
         tenant_id: tenant_id

@@ -2535,14 +2535,4 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   def handle_presence_telemetry(event, measurements, metadata, %{pid: pid, tenant: tenant}) do
     if metadata[:tenant] == tenant, do: send(pid, {:telemetry, event, measurements, metadata})
   end
-
-  describe "handle_info connect broadcasts" do
-    test "ignores connect:<tenant> broadcasts left behind by Connect waits" do
-      socket = %Socket{}
-      msg = %Phoenix.Socket.Broadcast{topic: "connect:tenant", event: "ready", payload: %{pid: self()}}
-
-      assert {:noreply, ^socket} = RealtimeWeb.RealtimeChannel.handle_info(msg, socket)
-      refute_received {:socket_push, _, _}
-    end
-  end
 end

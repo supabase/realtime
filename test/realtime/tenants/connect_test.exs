@@ -726,11 +726,12 @@ defmodule Realtime.Tenants.ConnectTest do
       assert log =~ "ReplicationMaxWalSendersReached"
     end
 
-    test "handle rpc errors gracefully" do
+    test "handle rpc errors gracefully", %{tenant: tenant} do
       expect(Realtime.Nodes, :get_node_for_tenant, fn _ -> {:ok, :potato@nohost, "us-east-1"} end)
 
-      assert capture_log(fn -> assert {:error, :rpc_error, _} = Connect.lookup_or_start_connection("tenant") end) =~
-               "project=tenant external_id=tenant [error] ErrorOnRpcCall"
+      assert capture_log(fn ->
+               assert {:error, :rpc_error, _} = Connect.lookup_or_start_connection(tenant.external_id)
+             end) =~ "project=#{tenant.external_id} external_id=#{tenant.external_id} [error] ErrorOnRpcCall"
     end
 
     test "rate limit connect when too many connections against bad database", %{tenant: tenant} do
@@ -1003,6 +1004,27 @@ defmodule Realtime.Tenants.ConnectTest do
       assert is_pid(conn)
 
       Connect.shutdown(tenant_id)
+    end
+  end
+
+  describe "migrations_ran in syn" do
+    test "starts from the cached tenant's count", %{tenant: tenant} do
+      %{external_id: tenant_id} = tenant
+      {:ok, _} = Realtime.Api.update_tenant_by_external_id(tenant_id, %{migrations_ran: 3})
+      Tenants.Cache.invalidate_tenant_cache(tenant_id)
+      parent = self()
+
+      # Hold Connect before RegisterProcess replaces the count with the database's
+      stub(Database, :check_tenant_connection, fn _tenant, _connection_listeners ->
+        send(parent, :checking_connection)
+        Process.sleep(:infinity)
+      end)
+
+      spawn(fn -> Connect.lookup_or_start_connection(tenant_id) end)
+
+      assert_receive :checking_connection, 5_000
+      assert {connect, %{conn: nil, migrations_ran: 3}} = :syn.lookup(Connect, tenant_id)
+      Process.exit(connect, :kill)
     end
   end
 

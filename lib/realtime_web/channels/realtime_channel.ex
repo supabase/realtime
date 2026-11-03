@@ -341,10 +341,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
-  # Connect.await_migrations/2 and Connect.get_status/1 subscribe to connect:<tenant> and can leave
-  # broadcasts in the mailbox. Drop them so the clause below doesn't push them to the client.
-  def handle_info(%Phoenix.Socket.Broadcast{topic: "connect:" <> _}, socket), do: {:noreply, socket}
-
   def handle_info(%{event: type, payload: payload} = msg, socket) do
     count(socket)
     maybe_log_info(socket, msg)
@@ -965,9 +961,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:ok, module} = PostgresCdc.driver(tenant.postgres_cdc_default)
     settings = PostgresCdc.filter_settings(tenant.postgres_cdc_default, tenant.extensions)
     args = %{"region" => settings["region"], "id" => tenant_id}
-
-    # Best effort: subscribe anyway if migrations haven't finished
-    _ = Connect.await_migrations(tenant)
 
     with {:ok, connection} <- PostgresCdc.connect(module, args),
          {:ok, response} <- PostgresCdc.after_connect(module, connection, settings, pg_change_params, tenant_id) do
