@@ -44,6 +44,52 @@ defmodule Rollcall do
   @type ref :: String.t() | reference()
 
   @doc """
+  Returns a supervisor child specification. The argument is the `opts` of
+  `start_link/1`.
+  """
+  @spec child_spec(keyword()) :: Supervisor.child_spec()
+  def child_spec(opts \\ []) do
+    %{
+      id: __MODULE__,
+      start: {__MODULE__, :start_link, [opts]},
+      type: :supervisor
+    }
+  end
+
+  @doc """
+  Starts the library: the registry of the trackers and the supervisor of the
+  trackers.
+
+  The options are the options of `Rollcall.Tracker.start_link/1`, except
+  `:name`. They are `:transport`, `:heartbeat_period_in_ms`,
+  `:silence_threshold` and `:empty_grace_in_ms`. Each tracker that `track/5`
+  starts gets these options. An option that you do not set has the defaults
+  defined in `Rollcall.Tracker`.
+  """
+  @spec start_link(keyword()) :: Supervisor.on_start()
+  def start_link(opts \\ []) do
+    tracker_options = Keyword.validate!(opts, Tracker.init_options())
+    Enum.each(tracker_options, fn {key, value} -> validate_option!(key, value) end)
+
+    children = [
+      {Registry, keys: :unique, name: Rollcall.Registry, meta: [tracker_options: tracker_options]},
+      {DynamicSupervisor, name: Rollcall.TrackerSupervisor}
+    ]
+
+    Supervisor.start_link(children, strategy: :rest_for_one, name: Rollcall.Supervisor)
+  end
+
+  defp validate_option!(:transport, {module, opts}) when is_atom(module) and is_list(opts), do: :ok
+  defp validate_option!(:heartbeat_period_in_ms, :manual), do: :ok
+  defp validate_option!(:heartbeat_period_in_ms, value) when is_integer(value) and value > 0, do: :ok
+  defp validate_option!(:silence_threshold, value) when is_integer(value) and value > 0, do: :ok
+  defp validate_option!(:empty_grace_in_ms, value) when is_integer(value) and value >= 0, do: :ok
+
+  defp validate_option!(key, value) do
+    raise ArgumentError, "invalid value for the option #{inspect(key)}: #{inspect(value)}"
+  end
+
+  @doc """
   Returns the names of the scopes that have a running tracker on this node.
 
   A tracker in its grace period is running, so a scope with no entry can be in

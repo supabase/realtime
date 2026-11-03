@@ -21,3 +21,15 @@ def deps do
 end
 ```
 
+## Starting
+
+Rollcall does not start itself. Add it to the supervision tree of the host application.
+
+```elixir
+children = [
+  {Rollcall, transport: {MyApp.RollcallTransport, []}}
+]
+```
+
+See `Rollcall.start_link/1` for the list of options.
+
