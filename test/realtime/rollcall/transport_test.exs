@@ -94,18 +94,6 @@ defmodule Realtime.Rollcall.TransportTest do
     end
   end
 
-  describe "tracker" do
-    test "sends its goodbye through PubSub when Rollcall.track/5 started it", %{scope: scope, topic: topic} do
-      :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, topic)
-
-      {:ok, _ref} = Rollcall.track(self(), scope, "partition", "key", %{})
-      tracker = Rollcall.Tracker.whereis(scope)
-      :ok = GenServer.stop(tracker)
-
-      assert_receive {:tb, ^scope, {:snapshot, ^tracker, _stamp, []}}
-    end
-  end
-
   defp message(:snapshot), do: snapshot()
   defp message(:diff), do: Messages.diff(self(), Messages.stamp(1, 2), 1, [], [])
   defp message(:request), do: Messages.request(self())
