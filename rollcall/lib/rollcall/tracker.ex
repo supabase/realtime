@@ -469,9 +469,6 @@ defmodule Rollcall.Tracker do
           not Messages.message?(msg) ->
             {:noreply, drop_message(state, :malformed, scope, nil)}
 
-          # The sender writes the scope from its own state, so a mismatch means that the
-          # transport misrouted the message. A crash would let a bug in the transport
-          # take down this scope.
           scope != state.scope ->
             {:noreply, drop_message(state, :wrong_scope, scope, Messages.origin_node(msg))}
 
