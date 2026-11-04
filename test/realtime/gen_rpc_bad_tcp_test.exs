@@ -6,7 +6,6 @@ defmodule Realtime.GenRpcBadTcpTest do
   # exactly this one (broken) node, so they cannot share a good node with the rest of the
   # gen_rpc suite — hence they live in their own module with a per-test isolated node.
   use ExUnit.Case, async: false
-  use TestHelpers
 
   import ExUnit.CaptureLog
 
@@ -27,16 +26,14 @@ defmodule Realtime.GenRpcBadTcpTest do
     test "bad tcp error", %{node: node} do
       current_node = node()
 
-      # A call can reach the gen_rpc client while it is exiting after a failed connect and
-      # get `:noproc`. The next call starts a new client and gets `:econnrefused`.
       log =
         capture_log(fn ->
-          assert_eventually GenRpc.call(node, Map, :fetch, [%{a: 1}, :a], tenant_id: 123) ==
-                              {:error, :rpc_error, :econnrefused}
+          assert {:error, :rpc_error, reason} = GenRpc.call(node, Map, :fetch, [%{a: 1}, :a], tenant_id: 123)
+          assert_connect_failure(reason)
         end)
 
       assert log =~
-               ~r/project=123 external_id=123 \[error\] ErrorOnRpcCall: %{\s+error: :econnrefused,\s+mod: Map,\s+func: :fetch,\s+target:\s+:"#{node}"/
+               ~r/project=123 external_id=123 \[error\] ErrorOnRpcCall: %{\s+error: .+?,\s+mod: Map,\s+func: :fetch,\s+target:\s+:"#{node}"/s
 
       assert_receive {[:realtime, :rpc], %{latency: _},
                       %{
@@ -111,17 +108,18 @@ defmodule Realtime.GenRpcBadTcpTest do
     test "partial results with bad tcp error", %{node: node} do
       current_node = node()
 
-      # Same `:noproc` race as in call/5.
       log =
         capture_log(fn ->
-          assert_eventually GenRpc.multicall(Map, :fetch, [%{a: 1}, :a], tenant_id: 123) == [
-                              {node(), {:ok, 1}},
-                              {node, {:error, :rpc_error, :econnrefused}}
-                            ]
+          assert [{local, {:ok, 1}}, {remote, {:error, :rpc_error, reason}}] =
+                   GenRpc.multicall(Map, :fetch, [%{a: 1}, :a], tenant_id: 123)
+
+          assert local == current_node
+          assert remote == node
+          assert_connect_failure(reason)
         end)
 
       assert log =~
-               ~r/project=123 external_id=123 \[error\] ErrorOnRpcCall: %{\s+error: :econnrefused,\s+mod: Map,\s+func: :fetch,\s+target:\s+:"#{node}"/
+               ~r/project=123 external_id=123 \[error\] ErrorOnRpcCall: %{\s+error: .+?,\s+mod: Map,\s+func: :fetch,\s+target:\s+:"#{node}"/s
 
       assert_receive {[:realtime, :rpc], %{latency: _},
                       %{
@@ -139,6 +137,15 @@ defmodule Realtime.GenRpcBadTcpTest do
                         mechanism: :gen_rpc
                       }}
     end
+  end
+
+  # gen_rpc starts the client for a node and connects in handle_continue. The connect to a closed
+  # port fails in about 1ms. When the client has exited before the caller's gen_server:call
+  # arrives, or its registry entry is stale, gen_rpc reports `:noproc` and not the connect error.
+  # Both reasons are a failed connection, so both pass.
+  defp assert_connect_failure(reason) do
+    assert reason == :econnrefused or match?({:unknown_error, {:noproc, _}}, reason),
+           "expected a connection failure, got: #{inspect(reason)}"
   end
 
   def handle_telemetry(event, measurements, metadata, pid: pid), do: send(pid, {event, measurements, metadata})
