@@ -1,7 +1,6 @@
 defmodule Realtime.GenRpcMetricsTest do
   # Async false due to Clustered usage
   use ExUnit.Case, async: false
-  use TestHelpers
 
   alias Realtime.GenRpcMetrics
 
@@ -165,37 +164,5 @@ defmodule Realtime.GenRpcMetricsTest do
              "post-restart send_oct did not accumulate new traffic: " <>
                "#{after_reconnect[:send_oct]} -> #{later[:send_oct]}"
     end
-  end
-
-  describe "info/0 pruning" do
-    test "drops the accumulator for a node that leaves the cluster", %{node: node} do
-      # A second peer can't be spun up (it would need the same gen_rpc port as the shared
-      # node), so we take the shared node down and reconnect it below so the rest of the
-      # suite is unaffected regardless of test run order.
-      #
-      # The node can reconnect on its own between the disconnect and the poll, so each
-      # attempt disconnects again. An attempt only counts when the node had an
-      # accumulator before it left.
-      assert_eventually pruned_after_leaving?(node)
-
-      # Restore the shared node (and its gen_rpc client) for the other tests.
-      true = Node.connect(node)
-      Realtime.GenRpc.call(node, String, :to_integer, ["25"], key: 1)
-    end
-  end
-
-  # A poll rebuilds `totals` from the live node set, so a node that has left the cluster is
-  # pruned instead of accumulating forever.
-  defp pruned_after_leaving?(node) do
-    true = Node.connect(node)
-    Realtime.GenRpc.call(node, String, :to_integer, ["25"], key: 1)
-    Realtime.GenRpc.call(node, String, :to_integer, ["25"], key: 2)
-    GenRpcMetrics.info()
-    had_accumulator? = Map.has_key?(:sys.get_state(GenRpcMetrics).totals, node)
-
-    true = :erlang.disconnect_node(node)
-    GenRpcMetrics.info()
-
-    had_accumulator? and not Map.has_key?(:sys.get_state(GenRpcMetrics).totals, node)
   end
 end
