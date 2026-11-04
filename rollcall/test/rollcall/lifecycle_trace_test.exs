@@ -30,8 +30,12 @@ defmodule Rollcall.LifecycleTraceTest do
           refute scope in Rollcall.scopes()
         end,
         fn trace ->
-          assert [%{"$kind": :rollcall_tracker_empty}, %{"$kind": :rollcall_tracker_stopped}] =
-                   events(trace, [:rollcall_tracker_empty, :rollcall_tracker_stopped], scope)
+          # The first empty event is from the start of the tracker. The second is from the untrack.
+          assert [
+                   %{"$kind": :rollcall_tracker_empty},
+                   %{"$kind": :rollcall_tracker_empty},
+                   %{"$kind": :rollcall_tracker_stopped}
+                 ] = events(trace, [:rollcall_tracker_empty, :rollcall_tracker_stopped], scope)
         end
       )
     end
@@ -61,7 +65,9 @@ defmodule Rollcall.LifecycleTraceTest do
             :rollcall_tracker_stopped
           ]
 
+          # The first empty event is from the start of the tracker.
           assert [
+                   %{"$kind": :rollcall_tracker_empty},
                    %{"$kind": :test_first_untrack_done},
                    %{"$kind": :rollcall_tracker_empty},
                    %{"$kind": :rollcall_tracker_stopped}
@@ -222,6 +228,115 @@ defmodule Rollcall.LifecycleTraceTest do
         end
       )
     end
+
+    # `track` clears the timer, so no call should reach the state that these tests
+    # need: an entry in `local` and a timer ref in `empty_timer`. The tests set
+    # `empty_timer` with `:sys.replace_state/2`, for some extra paranoia
+
+    test "keeps the tracker running when the timeout arrives with an entry", %{scope: scope} do
+      check_trace(
+        fn ->
+          {:ok, ref} = Rollcall.track(self(), scope, "partition", "key", %{})
+          tracker = Tracker.whereis(scope)
+          timer = set_empty_timer(tracker)
+
+          wait_for_event %{"$kind": :rollcall_tracker_stop_skipped, scope: ^scope} do
+            send(tracker, {:timeout, timer, :empty_timeout})
+          end
+
+          assert Process.alive?(tracker)
+          assert Tracker.whereis(scope) == tracker
+          assert [%{ref: ^ref}] = Local.entries(Tracker.get_state(scope).local, "partition")
+        end,
+        fn trace ->
+          assert [_] = expect_events(trace, :rollcall_tracker_stop_skipped, scope, 1)
+          assert [] = events(trace, :rollcall_tracker_stopped, scope)
+          assert [] = events(trace, :rollcall_tracker_goodbye_sent, scope)
+        end
+      )
+    end
+
+    test "clears the timer when the timeout arrives with an entry", %{scope: scope} do
+      check_trace(
+        fn ->
+          {:ok, _ref} = Rollcall.track(self(), scope, "partition", "key", %{})
+          tracker = Tracker.whereis(scope)
+          timer = set_empty_timer(tracker)
+
+          wait_for_event %{"$kind": :rollcall_tracker_stop_skipped, scope: ^scope} do
+            send(tracker, {:timeout, timer, :empty_timeout})
+          end
+
+          assert :sys.get_state(tracker).empty_timer == nil
+        end,
+        fn _trace -> :ok end
+      )
+    end
+
+    test "starts a new grace period after a skipped stop", %{scope: scope} do
+      check_trace(
+        fn ->
+          {:ok, _ref} = Rollcall.track(self(), scope, "partition", "key", %{})
+          tracker = Tracker.whereis(scope)
+          monitor = Process.monitor(tracker)
+          timer = set_empty_timer(tracker)
+
+          wait_for_event %{"$kind": :rollcall_tracker_stop_skipped, scope: ^scope} do
+            send(tracker, {:timeout, timer, :empty_timeout})
+          end
+
+          wait_for_event %{"$kind": :rollcall_tracker_empty, scope: ^scope} do
+            :ok = Rollcall.untrack(self(), scope, "partition", "key")
+          end
+
+          wait_for_event %{"$kind": :rollcall_tracker_stopped, scope: ^scope} do
+            expire_grace(tracker)
+          end
+
+          assert_receive {:DOWN, ^monitor, :process, ^tracker, :normal}
+        end,
+        fn trace ->
+          assert [_] = events(trace, :rollcall_tracker_stopped, scope)
+        end
+      )
+    end
+  end
+
+  # `track/5` starts a tracker and then sends the message. When the caller exits
+  # between the two steps, the tracker starts and gets no `track`. The test
+  # starts a tracker directly and sends no `track`.
+  describe "start with no entry" do
+    test "starts the empty timer and stops the tracker when the grace period ends", %{scope: scope} do
+      check_trace(
+        fn ->
+          tracker =
+            wait_for_event %{"$kind": :rollcall_tracker_empty, scope: ^scope} do
+              start_supervised!({Tracker, {scope, []}})
+            end
+
+          monitor = Process.monitor(tracker)
+
+          wait_for_event %{"$kind": :rollcall_tracker_stopped, scope: ^scope} do
+            expire_grace(tracker)
+          end
+
+          assert_receive {:DOWN, ^monitor, :process, ^tracker, :normal}
+          refute scope in Rollcall.scopes()
+        end,
+        fn trace ->
+          assert [
+                   %{"$kind": :rollcall_tracker_started},
+                   %{"$kind": :rollcall_tracker_empty},
+                   %{"$kind": :rollcall_tracker_stopped}
+                 ] =
+                   events(
+                     trace,
+                     [:rollcall_tracker_started, :rollcall_tracker_empty, :rollcall_tracker_stopped],
+                     scope
+                   )
+        end
+      )
+    end
   end
 
   describe "monitors" do
@@ -307,7 +422,9 @@ defmodule Rollcall.LifecycleTraceTest do
           assert monitor_count(Tracker.whereis(scope), other) == 1
         end,
         fn trace ->
-          assert [] = events(trace, :rollcall_tracker_empty, scope)
+          # The only empty event is from the start of the tracker. The exit of a pid
+          # that leaves an entry behind emits none.
+          assert [_] = events(trace, :rollcall_tracker_empty, scope)
         end
       )
     end
@@ -349,6 +466,13 @@ defmodule Rollcall.LifecycleTraceTest do
     pid = spawn(fn -> Process.sleep(:infinity) end)
     on_exit(fn -> Process.exit(pid, :kill) end)
     pid
+  end
+
+  # Sets `empty_timer` of the tracker to a new ref and returns the ref.
+  defp set_empty_timer(tracker) do
+    timer = make_ref()
+    :sys.replace_state(tracker, &%{&1 | empty_timer: timer})
+    timer
   end
 
   defp monitor_count(tracker, pid) do
