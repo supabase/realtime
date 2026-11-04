@@ -6,6 +6,7 @@ defmodule Realtime.GenRpcBadTcpTest do
   # exactly this one (broken) node, so they cannot share a good node with the rest of the
   # gen_rpc suite — hence they live in their own module with a per-test isolated node.
   use ExUnit.Case, async: false
+  use TestHelpers
 
   import ExUnit.CaptureLog
 
@@ -26,9 +27,12 @@ defmodule Realtime.GenRpcBadTcpTest do
     test "bad tcp error", %{node: node} do
       current_node = node()
 
+      # A call can reach the gen_rpc client while it is exiting after a failed connect and
+      # get `:noproc`. The next call starts a new client and gets `:econnrefused`.
       log =
         capture_log(fn ->
-          assert GenRpc.call(node, Map, :fetch, [%{a: 1}, :a], tenant_id: 123) == {:error, :rpc_error, :econnrefused}
+          assert_eventually GenRpc.call(node, Map, :fetch, [%{a: 1}, :a], tenant_id: 123) ==
+                              {:error, :rpc_error, :econnrefused}
         end)
 
       assert log =~
@@ -107,12 +111,13 @@ defmodule Realtime.GenRpcBadTcpTest do
     test "partial results with bad tcp error", %{node: node} do
       current_node = node()
 
+      # Same `:noproc` race as in call/5.
       log =
         capture_log(fn ->
-          assert GenRpc.multicall(Map, :fetch, [%{a: 1}, :a], tenant_id: 123) == [
-                   {node(), {:ok, 1}},
-                   {node, {:error, :rpc_error, :econnrefused}}
-                 ]
+          assert_eventually GenRpc.multicall(Map, :fetch, [%{a: 1}, :a], tenant_id: 123) == [
+                              {node(), {:ok, 1}},
+                              {node, {:error, :rpc_error, :econnrefused}}
+                            ]
         end)
 
       assert log =~
