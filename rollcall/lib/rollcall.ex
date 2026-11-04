@@ -41,7 +41,7 @@ defmodule Rollcall do
   @type meta :: map()
 
   @typedoc "The identity of an entry."
-  @type ref :: String.t() | reference()
+  @type ref :: String.t()
 
   @doc """
   Returns a supervisor child specification. The argument is the `opts` of
