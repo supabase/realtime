@@ -463,17 +463,22 @@ defmodule Rollcall.Tracker do
   # the transport. If successful, we'll process it, otherwise we ignore it.
   def handle_info(msg, state) do
     case state.transport_module.unwrap(state.transport_state, msg) do
-      {:ok, scope, msg} when scope == state.scope ->
-        origin = node(Messages.origin(msg))
-        new_state = deliver_message(state, origin, State.peer(state, origin), msg)
-
-        {:noreply, new_state}
-
-      # The sender writes the scope from its own state, so a mismatch means that the
-      # transport misrouted the message. A crash would let a bug in the transport
-      # take down this scope.
       {:ok, scope, msg} ->
-        {:noreply, drop_message(state, :wrong_scope, scope, msg)}
+        cond do
+          # Drop invalid messages
+          not Messages.message?(msg) ->
+            {:noreply, drop_message(state, :malformed, scope, nil)}
+
+          scope != state.scope ->
+            {:noreply, drop_message(state, :wrong_scope, scope, Messages.origin_node(msg))}
+
+          # Valid message from the same scope
+          true ->
+            origin = node(Messages.origin(msg))
+            new_state = deliver_message(state, origin, State.peer(state, origin), msg)
+
+            {:noreply, new_state}
+        end
 
       _ ->
         {:noreply, state}
@@ -497,8 +502,8 @@ defmodule Rollcall.Tracker do
 
   # The transport does not send a message to its own node. The clause makes a
   # tracker safe when it does.
-  defp deliver_message(state, node, _peer, msg) when node == node() do
-    drop_message(state, :local_origin, state.scope, msg)
+  defp deliver_message(state, node, _peer, _msg) when node == node() do
+    drop_message(state, :local_origin, state.scope, node)
   end
 
   # A request carries no state, so a request from an unknown node creates no
@@ -515,11 +520,11 @@ defmodule Rollcall.Tracker do
     put_peer(state, node, peer, changes)
   end
 
-  defp drop_message(state, reason, message_scope, msg) do
+  defp drop_message(state, reason, message_scope, origin_node) do
     tp(:rollcall_tracker_message_dropped, %{
       scope: state.scope,
       message_scope: message_scope,
-      node: node(Messages.origin(msg)),
+      node: origin_node,
       reason: reason
     })
 

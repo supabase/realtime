@@ -106,7 +106,7 @@ defmodule Rollcall.TrackerPeersTest do
           expect_events(trace, @message, scope, 0)
 
           dropped = expect_events(trace, @dropped, scope, 3)
-          assert Enum.all?(dropped, &(&1.reason == :local_origin and &1.message_scope == scope))
+          assert Enum.all?(dropped, &(&1.reason == :local_origin and &1.message_scope == scope and &1.node == node()))
         end
       )
     end
@@ -185,6 +185,47 @@ defmodule Rollcall.TrackerPeersTest do
         fn peers, trace ->
           assert peers == %{}
           expect_events(trace, @purged, scope, 1)
+        end
+      )
+    end
+  end
+
+  # A malformed message has no origin, so the event has no node.
+  describe "a malformed message" do
+    test "emits a dropped event and changes no state", %{scope: scope} do
+      origin = remote_pid(@node_a, 1)
+
+      check_trace(
+        fn ->
+          tracker = start_tracker(scope, @threshold)
+          deliver(tracker, snapshot(origin, stamp(1, 3), entries(["a"])))
+          state = Tracker.get_state(scope)
+
+          deliver(tracker, :not_a_message)
+          deliver(tracker, {:snapshot, :not_a_pid, stamp(1, 4), entries(["z"])})
+
+          {state, Tracker.get_state(scope)}
+        end,
+        fn {state, new_state}, trace ->
+          assert new_state == state
+          expect_events(trace, @message, scope, 1)
+
+          dropped = expect_events(trace, @dropped, scope, 2)
+          assert Enum.all?(dropped, &(&1.reason == :malformed and &1.message_scope == scope and &1.node == nil))
+        end
+      )
+    end
+
+    test "emits a malformed event, not a wrong scope event, when the scope is also wrong", %{scope: scope} do
+      check_trace(
+        fn ->
+          tracker = start_tracker(scope, @threshold)
+          deliver(tracker, "other-scope", :not_a_message)
+          assert Process.alive?(tracker)
+        end,
+        fn trace ->
+          assert [event] = expect_events(trace, @dropped, scope, 1)
+          assert %{message_scope: "other-scope", node: nil, reason: :malformed} = event
         end
       )
     end
