@@ -49,6 +49,19 @@ defmodule Rollcall.Tracker.Messages do
   @typedoc "A snapshot, a diff or a request."
   @type t :: snapshot() | diff() | request()
 
+  @doc "Checks if a parameter is a valid message"
+  @spec message?(term()) :: boolean()
+  def message?({:snapshot, origin, {:stamp, incarnation, version}, entries})
+      when is_pid(origin) and is_list(entries) and is_integer(incarnation) and is_integer(version),
+      do: true
+
+  def message?({:diff, origin, {:stamp, incarnation, version}, _from, joins, leaves})
+      when is_pid(origin) and is_integer(incarnation) and is_integer(version) and is_list(joins) and is_list(leaves),
+      do: true
+
+  def message?({:request, origin}) when is_pid(origin), do: true
+  def message?(_msg), do: false
+
   @doc "Returns the stamp for `incarnation` and `version`."
   @spec stamp(integer(), non_neg_integer()) :: stamp()
   def stamp(incarnation, version), do: {:stamp, incarnation, version}
@@ -70,8 +83,14 @@ defmodule Rollcall.Tracker.Messages do
   def request(origin), do: {:request, origin}
 
   @doc "Returns the origin of `message`."
-  @spec origin(t()) :: origin()
+  @spec origin(t()) :: origin() | nil
   def origin({:snapshot, origin, _stamp, _entries}), do: origin
   def origin({:diff, origin, _stamp, _from, _joins, _leaves}), do: origin
   def origin({:request, origin}), do: origin
+
+  @doc "Gets the node a message came from"
+  @spec origin_node(t()) :: node()
+  def origin_node(msg) do
+    msg |> origin() |> node()
+  end
 end
