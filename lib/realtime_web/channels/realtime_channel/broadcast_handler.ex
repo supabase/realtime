@@ -8,6 +8,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
 
   alias Realtime.FeatureFlags
   alias Realtime.Messages
+  alias Realtime.RateCounter
   alias Realtime.Tenants
   alias RealtimeWeb.RealtimeChannel
   alias RealtimeWeb.RequestMetrics
@@ -236,7 +237,14 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   end
 
   defp increment_rate_counter(%{assigns: %{tenant: tenant_id}} = socket) do
-    GenCounter.add(Tenants.events_per_second_key(tenant_id))
+    key = Tenants.events_per_second_key(tenant_id)
+
+    if RateCounter.find(key) == {:error, :not_found} do
+      tenant = Tenants.Cache.get_tenant_by_external_id(tenant_id)
+      RateCounter.get(Tenants.events_per_second_rate(tenant))
+    end
+
+    GenCounter.add(key)
     socket
   end
 

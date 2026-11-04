@@ -16,6 +16,7 @@ defmodule RealtimeWeb.BroadcastSingleController do
   alias RealtimeWeb.OpenApiSchemas.BroadcastSingleBinaryParams
   alias RealtimeWeb.OpenApiSchemas.TooManyRequestsResponse
   alias RealtimeWeb.OpenApiSchemas.UnprocessableEntityResponse
+  alias RealtimeWeb.RequestMetrics
 
   action_fallback(RealtimeWeb.FallbackController)
 
@@ -103,15 +104,21 @@ defmodule RealtimeWeb.BroadcastSingleController do
     private = parse_boolean(conn.query_params["private"])
     auth_params = build_auth_params(conn, tenant)
 
-    with {:ok, persist} <- parse_persist(conn.query_params),
-         {:ok, payload, content_type} <- payload(conn),
-         :ok <-
-           SingleBroadcast.broadcast(auth_params, tenant, topic, event, payload, content_type,
-             private: private,
-             persist: persist
-           ) do
-      send_resp(conn, :accepted, "")
-    end
+    result =
+      RequestMetrics.track(:broadcast, :http, tenant.external_id, fn ->
+        with {:ok, persist} <- parse_persist(conn.query_params),
+             {:ok, payload, content_type} <- payload(conn) do
+          SingleBroadcast.broadcast(auth_params, tenant, topic, event, payload, content_type,
+            private: private,
+            persist: persist
+          )
+        else
+          {:error, :unprocessable_entity, _} = error ->
+            {error, RequestMetrics.classify_broadcast_error(:invalid_request)}
+        end
+      end)
+
+    with :ok <- result, do: send_resp(conn, :accepted, "")
   end
 
   defp payload(%{private: %{realtime_binary_body: body}}), do: {:ok, body, :binary}
