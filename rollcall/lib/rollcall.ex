@@ -109,8 +109,8 @@ defmodule Rollcall do
 
   When `pid` already tracks `key` in `partition`, the new entry replaces the
   old entry. The entry gets a new ref, so a subscriber sees one diff with a
-  leave and a join. The replace takes one call. A caller that must tell a new
-  entry from an update would need two calls.
+  leave and a join. The new meta has the key `:rc_prev_ref` with the ref of the
+  old entry. 
 
   The call replaces the entry also when the meta is the same. The caller knows
   which part of a meta changes on each call, for example a timestamp, and the
@@ -120,8 +120,8 @@ defmodule Rollcall do
 
   Starts the tracker for `scope` when no tracker runs.
   """
-  @spec track(pid(), scope(), partition(), key(), meta()) :: {:ok, ref()}
-  def track(pid, scope, partition, key, meta) when is_pid(pid) do
+  @spec track(pid(), scope(), partition(), key(), meta()) :: {:ok, ref()} | {:error, term()}
+  def track(pid, scope, partition, key, meta) when is_pid(pid) and is_map(meta) do
     Tracker.track(scope, pid, partition, key, meta)
   end
 

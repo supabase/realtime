@@ -185,7 +185,7 @@ defmodule Rollcall.Tracker do
   """
   @spec track(Rollcall.scope(), pid(), Rollcall.partition(), Rollcall.key(), Rollcall.meta()) ::
           {:ok, Rollcall.ref()} | {:error, term()}
-  def track(scope, pid, partition, key, meta) do
+  def track(scope, pid, partition, key, meta) when is_pid(pid) and is_map(meta) do
     call_or_start(scope, {:track, pid, partition, key, meta}, @max_retries)
   end
 

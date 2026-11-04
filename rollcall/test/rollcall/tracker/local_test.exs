@@ -19,7 +19,8 @@ defmodule Rollcall.Tracker.LocalTest do
       assert {%{joins: [entry], leaves: []}, _local} =
                Local.track(Local.new(), pid, "partition", "key", %{a: 1}, ref)
 
-      assert %{ref: ^ref, pid: ^pid, partition: "partition", key: "key", meta: %{a: 1}} = entry
+      assert %{ref: ^ref, pid: ^pid, partition: "partition", key: "key"} = entry
+      assert entry.meta == %{a: 1}
     end
 
     test "adds the entry to its partition" do
@@ -69,13 +70,22 @@ defmodule Rollcall.Tracker.LocalTest do
     } do
       for meta <- [%{a: 2}, %{a: 1}] do
         ref = unique_ref()
+        expected_meta = Map.put(meta, :rc_prev_ref, old.ref)
 
         assert {%{joins: [new], leaves: [^old]}, _local} =
                  Local.track(local, pid, "partition", "key", meta, ref)
 
-        assert %{ref: ^ref, pid: ^pid, partition: "partition", key: "key", meta: ^meta} = new
+        assert %{ref: ^ref, pid: ^pid, partition: "partition", key: "key", meta: ^expected_meta} = new
         refute new.ref == old.ref
       end
+    end
+
+    test "overwrites :rc_prev_ref in the meta of the caller", %{pid: pid, entry: old, local: local} do
+      meta = %{a: 2, rc_prev_ref: "from-the-caller"}
+
+      {%{joins: [new]}, _local} = Local.track(local, pid, "partition", "key", meta, unique_ref())
+
+      assert new.meta.rc_prev_ref == old.ref
     end
 
     test "replaces the entry", %{pid: pid, local: local} do
