@@ -87,8 +87,14 @@ defmodule Realtime.DatabaseTest do
     test "counts only the client backends holding a connection slot", %{tenant: tenant} do
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
 
-      # Other tests open and close connections on the same server, so the count can change
-      # between our query and the check. Each attempt counts again.
+      # The count of client backends can change between our query and the check's query.
+      # Each attempt counts again.
+      #
+      # This test failed only on the multigres backend, with the check reporting one more
+      # connection than the test counted. Each test has its own database on the other
+      # backends, and no other process connects to it. The cause on multigres is not
+      # confirmed. The probable cause is a connection that the cluster opens or closes itself.
+      # Any comparison of two counts is exact only while the count does not change.
       assert_eventually check_reports_available_connections?(tenant, conn)
     end
 
