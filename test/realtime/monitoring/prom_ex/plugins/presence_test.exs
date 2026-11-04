@@ -11,7 +11,8 @@ defmodule Realtime.PromEx.Plugins.PresenceTest do
   defmodule MetricsTest do
     use PromEx, otp_app: :realtime_test_presence
     @impl true
-    def plugins, do: [{Presence, poll_rate: 5_000}]
+    # No polling. A poll scans RealtimeWeb.Presence and overwrites the usage values the tests set.
+    def plugins, do: [{Presence, poll_rate: :timer.hours(1)}]
   end
 
   setup_all do
@@ -113,6 +114,13 @@ defmodule Realtime.PromEx.Plugins.PresenceTest do
     @buckets [5, 10, 25, 50, 100, 200, 500, :infinity]
 
     setup do
+      # Realtime.PromEx polls the same usage event. Its scan of the empty RealtimeWeb.Presence
+      # would overwrite the values between a test's scan and its reads.
+      poll_rate = Application.fetch_env!(:realtime, :presence_usage_poll_rate)
+      poller = Module.concat([Realtime.PromEx, Poller, :"#{poll_rate}"])
+      :ok = :sys.suspend(poller)
+      on_exit(fn -> :sys.resume(poller) end)
+
       start_supervised!({Tracker, pool_size: 1})
       :ok
     end
