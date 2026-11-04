@@ -9,6 +9,7 @@ defmodule Rollcall.OptionsTest do
   import Rollcall.Tracker.Messages, only: [snapshot: 3, stamp: 2]
 
   alias Rollcall.Tracker
+  alias Rollcall.Transport.FailInit
   alias Rollcall.Transport.InMemory
 
   @probe :probe@host
@@ -25,6 +26,24 @@ defmodule Rollcall.OptionsTest do
       :ok = GenServer.stop(tracker)
 
       assert {:snapshot, _origin, _stamp, []} = receive_message(probe)
+    end
+
+    # The transport fails once. A retry of the start would hide the error.
+    test "track/5 returns the error when init/2 of the transport fails", %{scope: scope} do
+      start_library(transport: failing_transport(1))
+
+      assert {:error, {%RuntimeError{message: "transport init failed"}, _stacktrace}} =
+               Rollcall.track(self(), scope, "partition", "key", %{})
+
+      assert Tracker.whereis(scope) == nil
+    end
+
+    test "track/5 starts a tracker after a start error", %{scope: scope} do
+      start_library(transport: failing_transport(1))
+
+      assert {:error, _reason} = Rollcall.track(self(), scope, "partition", "key", %{})
+      assert {:ok, _ref} = Rollcall.track(self(), scope, "partition", "key", %{})
+      assert scope in Rollcall.scopes()
     end
   end
 
@@ -126,6 +145,14 @@ defmodule Rollcall.OptionsTest do
   end
 
   defp in_memory(network), do: {InMemory, network: network, node: :a@host}
+
+  # A transport whose `init/2` raises for the first `failures` starts.
+  defp failing_transport(failures) do
+    counter = :atomics.new(1, [])
+    :atomics.put(counter, 1, failures)
+
+    {FailInit, failures: counter}
+  end
 
   # The tracker starts the timer when its last entry leaves. The default length
   # is 5000 ms, so a value up to `length` shows that the option is in use.

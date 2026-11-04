@@ -183,7 +183,8 @@ defmodule Rollcall.Tracker do
   stops an endless loop when a tracker exits without a reply. After the limit,
   the function exits with the reason of the last failure.
   """
-  @spec track(Rollcall.scope(), pid(), Rollcall.partition(), Rollcall.key(), Rollcall.meta()) :: {:ok, Rollcall.ref()}
+  @spec track(Rollcall.scope(), pid(), Rollcall.partition(), Rollcall.key(), Rollcall.meta()) ::
+          {:ok, Rollcall.ref()} | {:error, term()}
   def track(scope, pid, partition, key, meta) do
     call_or_start(scope, {:track, pid, partition, key, meta}, @max_retries)
   end
@@ -196,8 +197,10 @@ defmodule Rollcall.Tracker do
     :exit, {reason, _} = caught when reason in @gone ->
       if retries == 0, do: exit(caught)
 
-      start(scope)
-      call_or_start(scope, message, retries - 1)
+      case start(scope) do
+        :ok -> call_or_start(scope, message, retries - 1)
+        error -> error
+      end
   end
 
   defp start(scope) do
@@ -207,6 +210,7 @@ defmodule Rollcall.Tracker do
     case DynamicSupervisor.start_child(Rollcall.TrackerSupervisor, {__MODULE__, {scope, opts}}) do
       {:ok, _pid} -> :ok
       {:error, {:already_started, _pid}} -> :ok
+      {:error, reason} -> {:error, reason}
     end
   end
 

@@ -105,7 +105,7 @@ defmodule Rollcall do
 
   The `key` and the `meta` are the payload of the entry.
 
-  Returns `{:ok, ref}`. The ref identifies the entry.
+  Returns `{:ok, ref}` or `{:error, reason}`. The ref identifies the entry.
 
   When `pid` already tracks `key` in `partition`, the new entry replaces the
   old entry. The entry gets a new ref, so a subscriber sees one diff with a
