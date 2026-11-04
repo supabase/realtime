@@ -157,7 +157,11 @@ defmodule Realtime.Tenants.Connect do
     end
   end
 
-  def syn_topic(tenant_id), do: "connect:#{tenant_id}"
+  @doc "Prefix of `syn_topic/1`."
+  @spec syn_topic_prefix() :: String.t()
+  def syn_topic_prefix, do: "connect:"
+
+  def syn_topic(tenant_id), do: syn_topic_prefix() <> tenant_id
 
   defp wait_for_connection(pid, tenant_id) do
     RealtimeWeb.Endpoint.subscribe(syn_topic(tenant_id))
@@ -190,6 +194,60 @@ defmodule Realtime.Tenants.Connect do
 
   # How long a caller waits for a tenant connection to become ready before giving up.
   defp connection_ready_timeout, do: Application.get_env(:realtime, :connect_connection_ready_timeout, 15_000)
+
+  # How long a caller waits for migrations to run before giving up.
+  defp migrations_wait_timeout, do: Application.get_env(:realtime, :connect_migrations_wait_timeout, 2_000)
+
+  @doc """
+  Waits up to `timeout` for the tenant to run every migration this node knows. Connect registers its
+  connection before it runs migrations, so a ready connection doesn't mean a migrated schema.
+
+  Best effort: callers should carry on after an error, so a failed migration doesn't block features
+  that don't depend on it.
+  """
+  @spec await_migrations(Tenant.t(), timeout()) :: :ok | {:error, :timeout | :connect_down}
+  def await_migrations(%Tenant{} = tenant, timeout \\ migrations_wait_timeout()) do
+    if Migrations.run_migrations?(tenant) do
+      tenant.external_id
+      |> wait_for_migrations(timeout)
+      |> tap(&log_migrations_wait/1)
+    else
+      :ok
+    end
+  end
+
+  defp wait_for_migrations(tenant_id, timeout) do
+    topic = syn_topic(tenant_id)
+    expected = Migrations.migrations_count()
+    RealtimeWeb.Endpoint.subscribe(topic)
+
+    try do
+      # Look up after subscribing so the count can't change unseen in between
+      case :syn.lookup(__MODULE__, tenant_id) do
+        {_pid, %{migrations_ran: migrations_ran}} when is_integer(migrations_ran) and migrations_ran >= expected ->
+          :ok
+
+        _ ->
+          receive do
+            %Phoenix.Socket.Broadcast{topic: ^topic, event: "ready", payload: %{migrations_ran: migrations_ran}}
+            when is_integer(migrations_ran) and migrations_ran >= expected ->
+              :ok
+
+            %Phoenix.Socket.Broadcast{topic: ^topic, event: "connect_down"} ->
+              {:error, :connect_down}
+          after
+            timeout -> {:error, :timeout}
+          end
+      end
+    after
+      RealtimeWeb.Endpoint.unsubscribe(topic)
+    end
+  end
+
+  defp log_migrations_wait(:ok), do: :ok
+
+  defp log_migrations_wait({:error, reason}),
+    do: log_warning("TenantMigrationsNotReady", "Proceeding before tenant migrations ran: #{inspect(reason)}")
 
   @doc """
   Connects to a tenant's database and stores the DBConnection in the process :syn metadata
@@ -255,13 +313,14 @@ defmodule Realtime.Tenants.Connect do
   def start_link(opts) do
     tenant_id = Keyword.get(opts, :tenant_id)
     region = Keyword.get(opts, :region)
+    migrations_ran = Keyword.get(opts, :migrations_ran)
 
     check_connected_user_interval =
       Keyword.get(opts, :check_connected_user_interval, @check_connected_user_interval_default)
 
     check_connect_region_interval = Keyword.get(opts, :check_connect_region_interval, rebalance_check_interval_in_ms())
 
-    name = {__MODULE__, tenant_id, %{conn: nil, region: region, replication_conn: nil}}
+    name = {__MODULE__, tenant_id, %{conn: nil, region: region, replication_conn: nil, migrations_ran: migrations_ran}}
 
     state = %__MODULE__{
       tenant_id: tenant_id,
@@ -314,6 +373,7 @@ defmodule Realtime.Tenants.Connect do
     Logger.info("Tenant #{tenant.external_id} is initializing: #{inspect(node())}")
 
     with res when res in [:ok, :noop] <- Migrations.run_migrations(tenant),
+         {:ok, _} <- update_syn_migrations_ran(tenant.external_id, Migrations.migrations_count()),
          :ok <- Tenants.create_messages_partitions(db_conn_pid) do
       {:noreply, state, {:continue, :start_replication}}
     else
@@ -536,6 +596,9 @@ defmodule Realtime.Tenants.Connect do
     with tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
          :ok <- tenant_suspended?(tenant),
          {:ok, node, region} <- Realtime.Nodes.get_node_for_tenant(tenant) do
+      # Start from the cached count, RegisterProcess replaces it with the database's
+      opts = Keyword.put(opts, :migrations_ran, tenant.migrations_ran)
+
       Rpc.enhanced_call(node, __MODULE__, :connect, [tenant_id, region, opts],
         timeout: rpc_timeout,
         tenant_id: tenant_id
@@ -599,6 +662,10 @@ defmodule Realtime.Tenants.Connect do
     {timeout, backoff} = Backoff.backoff(backoff)
     Process.send_after(self(), :recover_replication_connection, timeout)
     %{state | backoff: backoff}
+  end
+
+  defp update_syn_migrations_ran(tenant_id, migrations_ran) do
+    :syn.update_registry(__MODULE__, tenant_id, fn _pid, meta -> %{meta | migrations_ran: migrations_ran} end)
   end
 
   defp update_syn_replication_conn(tenant_id, pid) do
