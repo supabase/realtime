@@ -340,12 +340,15 @@ defmodule Rollcall.Tracker do
       transport_state: transport_state
     }
 
-    state = schedule_heartbeat(state)
-
     # Trap exists in this process so we get terminate/2 callbacks and can send goodbye messages
     Process.flag(:trap_exit, true)
 
     tp(:rollcall_tracker_started, %{scope: scope})
+
+    state =
+      state
+      |> schedule_heartbeat()
+      |> start_empty_timer()
 
     {:ok, state}
   end

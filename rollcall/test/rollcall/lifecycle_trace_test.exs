@@ -30,8 +30,12 @@ defmodule Rollcall.LifecycleTraceTest do
           refute scope in Rollcall.scopes()
         end,
         fn trace ->
-          assert [%{"$kind": :rollcall_tracker_empty}, %{"$kind": :rollcall_tracker_stopped}] =
-                   events(trace, [:rollcall_tracker_empty, :rollcall_tracker_stopped], scope)
+          # The first empty event is from the start of the tracker. The second is from the untrack.
+          assert [
+                   %{"$kind": :rollcall_tracker_empty},
+                   %{"$kind": :rollcall_tracker_empty},
+                   %{"$kind": :rollcall_tracker_stopped}
+                 ] = events(trace, [:rollcall_tracker_empty, :rollcall_tracker_stopped], scope)
         end
       )
     end
@@ -61,7 +65,9 @@ defmodule Rollcall.LifecycleTraceTest do
             :rollcall_tracker_stopped
           ]
 
+          # The first empty event is from the start of the tracker.
           assert [
+                   %{"$kind": :rollcall_tracker_empty},
                    %{"$kind": :test_first_untrack_done},
                    %{"$kind": :rollcall_tracker_empty},
                    %{"$kind": :rollcall_tracker_stopped}
@@ -296,6 +302,43 @@ defmodule Rollcall.LifecycleTraceTest do
     end
   end
 
+  # `track/5` starts a tracker and then sends the message. When the caller exits
+  # between the two steps, the tracker starts and gets no `track`. The test
+  # starts a tracker directly and sends no `track`.
+  describe "start with no entry" do
+    test "starts the empty timer and stops the tracker when the grace period ends", %{scope: scope} do
+      check_trace(
+        fn ->
+          tracker =
+            wait_for_event %{"$kind": :rollcall_tracker_empty, scope: ^scope} do
+              start_supervised!({Tracker, {scope, []}})
+            end
+
+          monitor = Process.monitor(tracker)
+
+          wait_for_event %{"$kind": :rollcall_tracker_stopped, scope: ^scope} do
+            expire_grace(tracker)
+          end
+
+          assert_receive {:DOWN, ^monitor, :process, ^tracker, :normal}
+          refute scope in Rollcall.scopes()
+        end,
+        fn trace ->
+          assert [
+                   %{"$kind": :rollcall_tracker_started},
+                   %{"$kind": :rollcall_tracker_empty},
+                   %{"$kind": :rollcall_tracker_stopped}
+                 ] =
+                   events(
+                     trace,
+                     [:rollcall_tracker_started, :rollcall_tracker_empty, :rollcall_tracker_stopped],
+                     scope
+                   )
+        end
+      )
+    end
+  end
+
   describe "monitors" do
     test "monitors a pid that tracks an entry", %{scope: scope} do
       pid = start_process()
@@ -379,7 +422,9 @@ defmodule Rollcall.LifecycleTraceTest do
           assert monitor_count(Tracker.whereis(scope), other) == 1
         end,
         fn trace ->
-          assert [] = events(trace, :rollcall_tracker_empty, scope)
+          # The only empty event is from the start of the tracker. The exit of a pid
+          # that leaves an entry behind emits none.
+          assert [_] = events(trace, :rollcall_tracker_empty, scope)
         end
       )
     end
