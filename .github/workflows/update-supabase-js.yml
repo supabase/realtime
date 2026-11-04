@@ -36,12 +36,12 @@ jobs:
           cache: "npm"
           cache-dependency-path: assets/package-lock.json
 
-      - name: Update @supabase/supabase-js in assets
+      - name: Update @supabase/realtime-js in assets
         working-directory: assets
         env:
           VERSION: ${{ inputs.version }}
         run: |
-          npm pkg set "dependencies.@supabase/supabase-js=${VERSION}"
+          npm pkg set "dependencies.@supabase/realtime-js=${VERSION}"
           npm install --package-lock-only --ignore-scripts
 
       - name: Update @supabase/supabase-js in test/e2e
@@ -66,7 +66,11 @@ jobs:
           VERSION: ${{ inputs.version }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          CURRENT_FULL=$(git show HEAD:assets/package.json | jq -r '.dependencies["@supabase/supabase-js"] // ""' | grep -oP '[\d]+\.[\d]+\.[\d]+(-[\w.]+)?')
+          CURRENT_FULL=$(git show HEAD:assets/package.json | jq -r '.dependencies["@supabase/realtime-js"] // ""' | grep -oP '[\d]+\.[\d]+\.[\d]+(-[\w.]+)?' || true)
+          if [ -z "$CURRENT_FULL" ]; then
+            echo "::error::Could not read the current @supabase/realtime-js version from assets/package.json"
+            exit 1
+          fi
           CURRENT_BASE=$(echo "$CURRENT_FULL" | grep -oP '[\d]+\.[\d]+\.[\d]+')
           [[ "$CURRENT_FULL" == *"-"* ]] && INCLUDE_CURRENT=true || INCLUDE_CURRENT=false
           [[ "$VERSION" == *"-"* ]] && STABLE_ONLY=false || STABLE_ONLY=true
@@ -101,10 +105,10 @@ jobs:
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           token: ${{ steps.app-token.outputs.token }}
-          commit-message: "chore: update @supabase/supabase-js to v${{ inputs.version }}"
-          title: "chore: update @supabase/supabase-js to v${{ inputs.version }}"
+          commit-message: "chore: update @supabase/realtime-js and @supabase/supabase-js to v${{ inputs.version }}"
+          title: "chore: update @supabase/realtime-js and @supabase/supabase-js to v${{ inputs.version }}"
           body: |
-            This PR updates `@supabase/supabase-js` to v${{ inputs.version }}.
+            This PR updates `@supabase/realtime-js` in `assets` and `@supabase/supabase-js` in `test/e2e` to v${{ inputs.version }}.
 
             **Source**: ${{ inputs.source }}
 
