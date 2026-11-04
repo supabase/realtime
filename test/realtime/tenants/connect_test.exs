@@ -726,11 +726,12 @@ defmodule Realtime.Tenants.ConnectTest do
       assert log =~ "ReplicationMaxWalSendersReached"
     end
 
-    test "handle rpc errors gracefully" do
+    test "handle rpc errors gracefully", %{tenant: tenant} do
       expect(Realtime.Nodes, :get_node_for_tenant, fn _ -> {:ok, :potato@nohost, "us-east-1"} end)
 
-      assert capture_log(fn -> assert {:error, :rpc_error, _} = Connect.lookup_or_start_connection("tenant") end) =~
-               "project=tenant external_id=tenant [error] ErrorOnRpcCall"
+      assert capture_log(fn ->
+               assert {:error, :rpc_error, _} = Connect.lookup_or_start_connection(tenant.external_id)
+             end) =~ "project=#{tenant.external_id} external_id=#{tenant.external_id} [error] ErrorOnRpcCall"
     end
 
     test "rate limit connect when too many connections against bad database", %{tenant: tenant} do
@@ -1004,6 +1005,100 @@ defmodule Realtime.Tenants.ConnectTest do
 
       Connect.shutdown(tenant_id)
     end
+  end
+
+  describe "migrations_ran in syn" do
+    test "starts from the cached tenant's count", %{tenant: tenant} do
+      %{external_id: tenant_id} = tenant
+      {:ok, _} = Realtime.Api.update_tenant_by_external_id(tenant_id, %{migrations_ran: 3})
+      Tenants.Cache.invalidate_tenant_cache(tenant_id)
+      parent = self()
+
+      # Hold Connect before RegisterProcess replaces the count with the database's
+      stub(Database, :check_tenant_connection, fn _tenant, _connection_listeners ->
+        send(parent, :checking_connection)
+        Process.sleep(:infinity)
+      end)
+
+      spawn(fn -> Connect.lookup_or_start_connection(tenant_id) end)
+
+      assert_receive :checking_connection, 5_000
+      assert {connect, %{conn: nil, migrations_ran: 3}} = :syn.lookup(Connect, tenant_id)
+      Process.exit(connect, :kill)
+    end
+  end
+
+  describe "await_migrations/2" do
+    setup %{tenant: tenant} do
+      %{stale_tenant: %{tenant | migrations_ran: 0}}
+    end
+
+    test "returns right away when the cached tenant has run every migration", %{tenant: tenant} do
+      tenant = %{tenant | migrations_ran: Realtime.Tenants.Migrations.migrations_count()}
+      assert Connect.await_migrations(tenant, 0) == :ok
+    end
+
+    test "reports migrations_ran in syn once Connect has run migrations", %{stale_tenant: tenant} do
+      %{external_id: tenant_id} = tenant
+      total = Realtime.Tenants.Migrations.migrations_count()
+      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant_id)
+
+      assert_eventually match?({_, %{migrations_ran: ^total}}, :syn.lookup(Connect, tenant_id)), @local_wait
+
+      assert Connect.await_migrations(tenant, 0) == :ok
+    end
+
+    test "waits for Connect to run every migration", %{stale_tenant: tenant} do
+      %{external_id: tenant_id} = tenant
+      total_migrations = Realtime.Tenants.Migrations.migrations_count()
+      connect = register_fake_connect(tenant_id)
+      conn = spawn(fn -> Process.sleep(:infinity) end)
+
+      task = Task.async(fn -> Connect.await_migrations(tenant, 5_000) end)
+
+      assert_eventually subscribed?(tenant_id), @local_wait
+      update_fake_connect(tenant_id, connect, %{conn: conn})
+      # A Connect on a node with fewer migrations doesn't count
+      update_fake_connect(tenant_id, connect, %{migrations_ran: total_migrations - 1})
+      assert_always is_nil(Task.yield(task, 0)), timeout: 200, interval: 20
+
+      update_fake_connect(tenant_id, connect, %{migrations_ran: total_migrations})
+      assert Task.await(task) == :ok
+    end
+
+    test "gives up after the timeout and logs it", %{stale_tenant: tenant} do
+      register_fake_connect(tenant.external_id)
+
+      log = capture_log(fn -> assert Connect.await_migrations(tenant, 100) == {:error, :timeout} end)
+      assert log =~ "TenantMigrationsNotReady"
+    end
+
+    test "stops waiting when Connect goes down", %{stale_tenant: tenant} do
+      %{external_id: tenant_id} = tenant
+      connect = register_fake_connect(tenant_id)
+
+      log =
+        capture_log(fn ->
+          task = Task.async(fn -> Connect.await_migrations(tenant, 5_000) end)
+          assert_eventually subscribed?(tenant_id), @local_wait
+          Process.exit(connect, :kill)
+          assert Task.await(task) == {:error, :connect_down}
+        end)
+
+      assert log =~ "TenantMigrationsNotReady"
+    end
+
+    defp register_fake_connect(tenant_id) do
+      connect = spawn(fn -> Process.sleep(:infinity) end)
+      meta = %{conn: nil, region: "us-east-1", replication_conn: nil, migrations_ran: nil}
+      :ok = :syn.register(Connect, tenant_id, connect, meta)
+      connect
+    end
+
+    defp update_fake_connect(tenant_id, connect, changes),
+      do: {:ok, _} = :syn.update_registry(Connect, tenant_id, fn ^connect, meta -> Map.merge(meta, changes) end)
+
+    defp subscribed?(tenant_id), do: Registry.lookup(Realtime.PubSub, Connect.syn_topic(tenant_id)) != []
   end
 
   describe "registers into local registry" do
