@@ -104,6 +104,13 @@ defmodule Rollcall.Tracker.LocalPropertyTest do
   defp apply_to_model(model, pids, {:track, index, partition, key, meta}, ref) do
     pid = Enum.at(pids, index)
     {replaced, kept} = Enum.split_with(model, &same_id?(&1, pid, partition, key))
+
+    meta =
+      case replaced do
+        [{_pid, _partition, _key, _meta, old_ref}] -> Map.put(meta, :rc_prev_ref, old_ref)
+        [] -> meta
+      end
+
     entry = {pid, partition, key, meta, ref}
 
     {{[entry], Enum.sort(replaced)}, [entry | kept]}

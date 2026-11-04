@@ -31,6 +31,14 @@ defmodule Rollcall.LifecycleTest do
       assert other_scope in Rollcall.scopes()
     end
 
+    test "does not start a tracker for a meta that is not a map", %{scope: scope} do
+      assert_raise FunctionClauseError, fn ->
+        Rollcall.track(self(), scope, "partition", "key", :not_a_map)
+      end
+
+      assert Tracker.whereis(scope) == nil
+    end
+
     test "does not list a scope with no track", %{scope: scope} do
       {:ok, _ref} = Rollcall.track(self(), unique_scope(), "partition", "key", %{})
 
