@@ -371,7 +371,7 @@ defmodule Rollcall.Tracker do
   end
 
   def handle_call({:track, pid, partition, key, meta}, _from, state) do
-    ref = make_ref()
+    ref = random_ref()
 
     {changes, local} = Local.track(state.local, pid, partition, key, meta, ref)
 
@@ -648,5 +648,15 @@ defmodule Rollcall.Tracker do
         Process.demonitor(ref, [:flush])
         %{state | monitors: monitors}
     end
+  end
+
+  defp random_ref do
+    binary = <<
+      System.system_time(:nanosecond)::64,
+      :erlang.phash2({node(), self()})::16,
+      :erlang.unique_integer()::16
+    >>
+
+    Base.url_encode64(binary)
   end
 end

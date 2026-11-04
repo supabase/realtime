@@ -1,6 +1,8 @@
 defmodule Rollcall.Tracker.StateTest do
   use ExUnit.Case, async: true
 
+  import Rollcall.RefHelpers
+
   alias Rollcall.Tracker.Changes
   alias Rollcall.Tracker.Entry
   alias Rollcall.Tracker.Local
@@ -26,7 +28,7 @@ defmodule Rollcall.Tracker.StateTest do
 
   describe "apply_changes/3" do
     test "sets local and increases the version when the changes are not empty", %{state: state} do
-      {changes, local} = Local.track(state.local, self(), "partition", "key", %{}, make_ref())
+      {changes, local} = Local.track(state.local, self(), "partition", "key", %{}, unique_ref())
 
       state = State.apply_changes(state, local, changes)
 
@@ -35,8 +37,8 @@ defmodule Rollcall.Tracker.StateTest do
     end
 
     test "increases the version by one for each change", %{state: state} do
-      {changes_1, local_1} = Local.track(state.local, self(), "partition", "key_1", %{}, make_ref())
-      {changes_2, local_2} = Local.track(local_1, self(), "partition", "key_2", %{}, make_ref())
+      {changes_1, local_1} = Local.track(state.local, self(), "partition", "key_1", %{}, unique_ref())
+      {changes_2, local_2} = Local.track(local_1, self(), "partition", "key_2", %{}, unique_ref())
 
       state =
         state
@@ -47,7 +49,7 @@ defmodule Rollcall.Tracker.StateTest do
     end
 
     test "sets local and keeps the version when the changes are empty", %{state: state} do
-      {_changes, local} = Local.track(state.local, self(), "partition", "key", %{}, make_ref())
+      {_changes, local} = Local.track(state.local, self(), "partition", "key", %{}, unique_ref())
 
       state = State.apply_changes(state, local, Changes.new())
 
@@ -56,7 +58,7 @@ defmodule Rollcall.Tracker.StateTest do
     end
 
     test "counts a change that only has leaves", %{state: state} do
-      entry = Entry.new(self(), "partition", "key", %{}, make_ref())
+      entry = Entry.new(self(), "partition", "key", %{}, unique_ref())
 
       state = State.apply_changes(state, state.local, Changes.new([], [entry]))
 

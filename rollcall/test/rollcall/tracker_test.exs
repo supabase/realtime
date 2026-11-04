@@ -15,6 +15,19 @@ defmodule Rollcall.TrackerTest do
     end
   end
 
+  describe "track/5" do
+    test "returns a different string ref for each track", %{scope: scope} do
+      refs =
+        for n <- 1..1000 do
+          {:ok, ref} = Rollcall.track(self(), scope, "partition", "key_#{n}", %{})
+          ref
+        end
+
+      assert Enum.all?(refs, &is_binary/1)
+      assert refs |> Enum.uniq() |> length() == 1000
+    end
+  end
+
   describe "start_link/1" do
     test "returns an error when a tracker runs for the scope", %{scope: scope} do
       pid = start_supervised!({Tracker, scope})
