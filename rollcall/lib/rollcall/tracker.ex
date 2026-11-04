@@ -420,9 +420,15 @@ defmodule Rollcall.Tracker do
   @impl true
   @spec handle_info(term(), State.t()) :: {:noreply, State.t()} | {:stop, :normal, State.t()}
   def handle_info({:timeout, ref, :empty_timeout}, %{empty_timer: ref} = state) do
-    tp(:rollcall_tracker_stopped, %{scope: state.scope})
+    if Local.empty?(state.local) do
+      tp(:rollcall_tracker_stopped, %{scope: state.scope})
 
-    {:stop, :normal, state}
+      {:stop, :normal, state}
+    else
+      tp(:rollcall_tracker_stop_skipped, %{scope: state.scope})
+
+      {:noreply, %{state | empty_timer: nil}}
+    end
   end
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
