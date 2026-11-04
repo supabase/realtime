@@ -87,6 +87,12 @@ defmodule Realtime.DatabaseTest do
     test "counts only the client backends holding a connection slot", %{tenant: tenant} do
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
 
+      # Other tests open and close connections on the same server, so the count can change
+      # between our query and the check. Each attempt counts again.
+      assert_eventually check_reports_available_connections?(tenant, conn)
+    end
+
+    defp check_reports_available_connections?(tenant, conn) do
       %{rows: [[available_connections]]} =
         Postgrex.query!(
           conn,
@@ -99,9 +105,12 @@ defmodule Realtime.DatabaseTest do
           []
         )
 
-      assert capture_log(fn ->
-               assert {:error, :tenant_db_too_many_connections} = Database.check_tenant_connection(tenant)
-             end) =~ "Only #{available_connections} available connections"
+      log =
+        capture_log(fn ->
+          assert {:error, :tenant_db_too_many_connections} = Database.check_tenant_connection(tenant)
+        end)
+
+      log =~ "Only #{available_connections} available connections"
     end
 
     @tag db_pool: 3
