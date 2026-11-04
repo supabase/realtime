@@ -66,7 +66,9 @@ defmodule RealtimeWeb.RealtimeChannel do
         join_topic(topic, params, socket)
 
       :error ->
-        maybe_log_error(socket, "SocketJoinRateLimitReached", "Too many joins on this socket")
+        socket
+        |> maybe_log_error("SocketJoinRateLimitReached", "Too many joins on this socket")
+        |> join_error()
     end
   end
 
