@@ -17,24 +17,6 @@ defmodule Rollcall.Tracker do
     * hold `sent`, the state at the last heartbeat
     * hold the view, or publish changes to subscribers
 
-  ## Starting and Supervision
-
-  `Rollcall.Registry` maps a scope to its tracker pid. The tracker has a
-  `:via` name. No atom exists for a scope, because a scope is a tenant. The
-  number of tenants has no limit, and the VM never frees an atom.
-
-  `Rollcall.start_link/1` starts the registry. It stores its options in the
-  metadata of the registry, and `track/5` gives them to each tracker that it
-  starts.
-
-  `Rollcall.TrackerSupervisor` supervises the trackers. The restart type is
-  `:temporary`. A restarted tracker would have no entries and no process that
-  can untrack, so it would never stop. A crashed tracker does not restart. The
-  next `track` for its scope starts a clean tracker.
-
-  `track/5` finds the tracker for a scope, and starts one when none runs.
-  `untrack/4` and `get_state/1` do not start a tracker.
-
   ## Process monitoring
 
   The tracker always monitors a process that has an entry. The monitor tells
@@ -168,7 +150,8 @@ defmodule Rollcall.Tracker do
           silence_threshold: pos_integer(),
           transport: transport(),
           heartbeat_period_in_ms: pos_integer() | :manual,
-          empty_grace_in_ms: non_neg_integer()
+          empty_grace_in_ms: non_neg_integer(),
+          name: Rollcall.name()
         ]
 
   @doc """
@@ -183,31 +166,32 @@ defmodule Rollcall.Tracker do
   stops an endless loop when a tracker exits without a reply. After the limit,
   the function exits with the reason of the last failure.
   """
-  @spec track(Rollcall.scope(), pid(), Rollcall.partition(), Rollcall.key(), Rollcall.meta()) ::
+  @spec track(Rollcall.name(), Rollcall.scope(), pid(), Rollcall.partition(), Rollcall.key(), Rollcall.meta()) ::
           {:ok, Rollcall.ref()} | {:error, term()}
-  def track(scope, pid, partition, key, meta) when is_pid(pid) and is_map(meta) do
-    call_or_start(scope, {:track, pid, partition, key, meta}, @max_retries)
+  def track(name, scope, pid, partition, key, meta) when is_pid(pid) and is_map(meta) do
+    call_or_start(name, scope, {:track, pid, partition, key, meta}, @max_retries)
   end
 
   # Calls the tracker for `scope`. Starts a tracker and sends the message again
   # when none runs, at most `retries` times.
-  defp call_or_start(scope, message, retries) do
-    GenServer.call(via(scope), message)
+  defp call_or_start(name, scope, message, retries) do
+    GenServer.call(via(name, scope), message)
   catch
     :exit, {reason, _} = caught when reason in @gone ->
       if retries == 0, do: exit(caught)
 
-      case start(scope) do
-        :ok -> call_or_start(scope, message, retries - 1)
+      case start(name, scope) do
+        :ok -> call_or_start(name, scope, message, retries - 1)
         error -> error
       end
   end
 
-  defp start(scope) do
+  defp start(name, scope) do
     # The options of the library, stored in the registry by `Rollcall.start_link/1`.
-    {:ok, opts} = Registry.meta(Rollcall.Registry, :tracker_options)
+    {:ok, opts} = Registry.meta(name, :tracker_options)
+    {:ok, tracker_supervisor} = Registry.meta(name, :tracker_supervisor)
 
-    case DynamicSupervisor.start_child(Rollcall.TrackerSupervisor, {__MODULE__, {scope, opts}}) do
+    case DynamicSupervisor.start_child(tracker_supervisor, {__MODULE__, {scope, Keyword.put(opts, :name, name)}}) do
       {:ok, _pid} -> :ok
       {:error, {:already_started, _pid}} -> :ok
       {:error, reason} -> {:error, reason}
@@ -225,15 +209,18 @@ defmodule Rollcall.Tracker do
   The function does not start a tracker. A tracker that starts only to find
   nothing to remove would stop again after the grace period.
   """
-  @spec untrack(Rollcall.scope(), pid(), Rollcall.partition(), Rollcall.key()) :: :ok
-  def untrack(scope, pid, partition, key) do
-    call_if_running(scope, {:untrack, pid, partition, key}, :ok)
+  @spec untrack(Rollcall.name(), Rollcall.scope(), pid(), Rollcall.partition(), Rollcall.key()) :: :ok
+  def untrack(name, scope, pid, partition, key) do
+    call_if_running(name, scope, {:untrack, pid, partition, key}, :ok)
   end
 
   # Calls the tracker for `scope`. Returns `default` when no tracker runs, or
   # when the tracker stops before it replies.
-  defp call_if_running(scope, message, default) do
-    GenServer.call(via(scope), message)
+  defp call_if_running(name, scope, message, default) do
+    case Process.whereis(name) do
+      nil -> default
+      _ -> GenServer.call(via(name, scope), message)
+    end
   catch
     :exit, {reason, _} when reason in @gone -> default
   end
@@ -250,9 +237,9 @@ defmodule Rollcall.Tracker do
 
   The function does not start a tracker. Use it in tests and for debugging.
   """
-  @spec get_state(Rollcall.scope()) :: State.view() | nil
-  def get_state(scope) do
-    call_if_running(scope, :get_state, nil)
+  @spec get_state(Rollcall.name(), Rollcall.scope()) :: State.view() | nil
+  def get_state(name, scope) do
+    call_if_running(name, scope, :get_state, nil)
   end
 
   @doc """
@@ -261,16 +248,16 @@ defmodule Rollcall.Tracker do
   The function skips a tracker that has exited. The Registry removes the entry
   of an exited process after a short delay.
   """
-  @spec scopes() :: [Rollcall.scope()]
-  def scopes do
-    Rollcall.Registry
+  @spec scopes(Rollcall.name()) :: [Rollcall.scope()]
+  def scopes(name) do
+    name
     |> Registry.select([{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
     |> Enum.filter(fn {_, pid} -> Process.alive?(pid) end)
     |> Enum.map(fn {scope, _} -> scope end)
   end
 
   @doc """
-  Starts the tracker for `scope` and registers it in `Rollcall.Registry`.
+  Starts the tracker for `scope` and registers it in the instance's registry.
 
   The argument is `scope` or `{scope, opts}`. The option `:silence_threshold`
   sets the number of ticks without a message after which the tracker deletes a
@@ -286,33 +273,27 @@ defmodule Rollcall.Tracker do
   waits with no entry before it stops. The default is 5000.
 
   Returns `{:ok, pid}`. Returns `{:error, {:already_started, pid}}` when a
-  tracker runs for `scope`. `Rollcall.TrackerSupervisor` calls this function.
+  tracker runs for `scope`. 
   """
   @spec start_link(Rollcall.scope() | {Rollcall.scope(), init_options()}) :: GenServer.on_start()
   def start_link({scope, opts}) do
-    # :name option is test only, let's several trackers of the same scope be started in one VM
-    GenServer.start_link(__MODULE__, {scope, opts}, name: Keyword.get(opts, :name, via(scope)))
-  end
-
-  def start_link(scope) do
-    start_link({scope, []})
+    GenServer.start_link(__MODULE__, {scope, opts}, name: via(Keyword.fetch!(opts, :name), scope))
   end
 
   @doc """
   Returns the pid of the tracker for `scope`, or `nil` when no tracker runs.
   """
-  @spec whereis(Rollcall.scope()) :: pid() | nil
-  def whereis(scope) do
-    GenServer.whereis(via(scope))
+  @spec whereis(Rollcall.name(), Rollcall.scope()) :: pid() | nil
+  def whereis(name, scope) do
+    GenServer.whereis(via(name, scope))
   end
 
   @doc """
-  Returns the `:via` name that registers the tracker for `scope` in
-  `Rollcall.Registry`.
+  Returns the `:via` name that registers the tracker for `scope`.
   """
-  @spec via(Rollcall.scope()) :: {:via, Registry, {Rollcall.Registry, Rollcall.scope()}}
-  def via(scope) do
-    {:via, Registry, {Rollcall.Registry, scope}}
+  @spec via(Rollcall.name(), Rollcall.scope()) :: {:via, Registry, {Rollcall.name(), Rollcall.scope()}}
+  def via(name, scope) do
+    {:via, Registry, {name, scope}}
   end
 
   @doc """

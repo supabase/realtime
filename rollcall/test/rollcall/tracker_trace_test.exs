@@ -7,12 +7,12 @@ defmodule Rollcall.TrackerTraceTest do
   # joins and the leaves of the change, and the version after the change.
 
   describe "track" do
-    test "emits an event with the new entry as a join", %{scope: scope} do
+    test "emits an event with the new entry as a join", %{scope: scope, rollcall: rollcall} do
       pid = self()
 
       check_trace(
         fn ->
-          {:ok, ref} = Rollcall.track(pid, scope, "partition", "key", %{})
+          {:ok, ref} = Rollcall.track(rollcall, pid, scope, "partition", "key", %{})
           ref
         end,
         fn ref, trace ->
@@ -31,12 +31,13 @@ defmodule Rollcall.TrackerTraceTest do
     end
 
     test "emits an event with the old entry as a leave when the key is tracked again", %{
-      scope: scope
+      scope: scope,
+      rollcall: rollcall
     } do
       check_trace(
         fn ->
-          {:ok, ref_1} = Rollcall.track(self(), scope, "partition", "key", %{a: 1})
-          {:ok, ref_2} = Rollcall.track(self(), scope, "partition", "key", %{a: 2})
+          {:ok, ref_1} = Rollcall.track(rollcall, self(), scope, "partition", "key", %{a: 1})
+          {:ok, ref_2} = Rollcall.track(rollcall, self(), scope, "partition", "key", %{a: 2})
           {ref_1, ref_2}
         end,
         fn {ref_1, ref_2}, trace ->
@@ -46,11 +47,11 @@ defmodule Rollcall.TrackerTraceTest do
       )
     end
 
-    test "emits an event with a leave when the meta is the same", %{scope: scope} do
+    test "emits an event with a leave when the meta is the same", %{scope: scope, rollcall: rollcall} do
       check_trace(
         fn ->
-          {:ok, ref_1} = Rollcall.track(self(), scope, "partition", "key", %{a: 1})
-          {:ok, ref_2} = Rollcall.track(self(), scope, "partition", "key", %{a: 1})
+          {:ok, ref_1} = Rollcall.track(rollcall, self(), scope, "partition", "key", %{a: 1})
+          {:ok, ref_2} = Rollcall.track(rollcall, self(), scope, "partition", "key", %{a: 1})
           {ref_1, ref_2}
         end,
         fn {ref_1, ref_2}, trace ->
@@ -60,11 +61,11 @@ defmodule Rollcall.TrackerTraceTest do
       )
     end
 
-    test "emits one event for each track, in order", %{scope: scope} do
+    test "emits one event for each track, in order", %{scope: scope, rollcall: rollcall} do
       check_trace(
         fn ->
           for n <- 1..3 do
-            {:ok, ref} = Rollcall.track(self(), scope, "partition", "key_#{n}", %{})
+            {:ok, ref} = Rollcall.track(rollcall, self(), scope, "partition", "key_#{n}", %{})
             ref
           end
         end,
@@ -79,13 +80,13 @@ defmodule Rollcall.TrackerTraceTest do
   end
 
   describe "untrack" do
-    test "emits an event with the removed entry as a leave", %{scope: scope} do
+    test "emits an event with the removed entry as a leave", %{scope: scope, rollcall: rollcall} do
       pid = self()
 
       check_trace(
         fn ->
-          {:ok, ref} = Rollcall.track(pid, scope, "partition", "key", %{})
-          :ok = Rollcall.untrack(pid, scope, "partition", "key")
+          {:ok, ref} = Rollcall.track(rollcall, pid, scope, "partition", "key", %{})
+          :ok = Rollcall.untrack(rollcall, pid, scope, "partition", "key")
           ref
         end,
         fn ref, trace ->
@@ -104,12 +105,13 @@ defmodule Rollcall.TrackerTraceTest do
     end
 
     test "emits an event with no leave and an unchanged version when no entry matches", %{
-      scope: scope
+      scope: scope,
+      rollcall: rollcall
     } do
       check_trace(
         fn ->
-          {:ok, _ref} = Rollcall.track(self(), scope, "partition", "key", %{})
-          :ok = Rollcall.untrack(self(), scope, "partition", "other_key")
+          {:ok, _ref} = Rollcall.track(rollcall, self(), scope, "partition", "key", %{})
+          :ok = Rollcall.untrack(rollcall, self(), scope, "partition", "other_key")
         end,
         fn _result, trace ->
           assert [%{joins: [], leaves: [], version: 1}] =
@@ -118,11 +120,11 @@ defmodule Rollcall.TrackerTraceTest do
       )
     end
 
-    test "emits its event after the event of the track", %{scope: scope} do
+    test "emits its event after the event of the track", %{scope: scope, rollcall: rollcall} do
       check_trace(
         fn ->
-          {:ok, _ref} = Rollcall.track(self(), scope, "partition", "key", %{})
-          :ok = Rollcall.untrack(self(), scope, "partition", "key")
+          {:ok, _ref} = Rollcall.track(rollcall, self(), scope, "partition", "key", %{})
+          :ok = Rollcall.untrack(rollcall, self(), scope, "partition", "key")
         end,
         fn _result, trace ->
           kinds = [:rollcall_tracker_track, :rollcall_tracker_untrack]
@@ -133,9 +135,9 @@ defmodule Rollcall.TrackerTraceTest do
       )
     end
 
-    test "emits no event when no tracker runs", %{scope: scope} do
+    test "emits no event when no tracker runs", %{scope: scope, rollcall: rollcall} do
       check_trace(
-        fn -> :ok = Rollcall.untrack(self(), scope, "partition", "key") end,
+        fn -> :ok = Rollcall.untrack(rollcall, self(), scope, "partition", "key") end,
         fn _result, trace ->
           assert [] = events(trace, :rollcall_tracker_untrack, scope)
         end
