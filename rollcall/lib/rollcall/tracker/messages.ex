@@ -83,7 +83,7 @@ defmodule Rollcall.Tracker.Messages do
   def request(origin), do: {:request, origin}
 
   @doc "Returns the origin of `message`."
-  @spec origin(t()) :: origin() | nil
+  @spec origin(t()) :: origin()
   def origin({:snapshot, origin, _stamp, _entries}), do: origin
   def origin({:diff, origin, _stamp, _from, _joins, _leaves}), do: origin
   def origin({:request, origin}), do: origin
