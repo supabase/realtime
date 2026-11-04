@@ -121,30 +121,26 @@ defmodule Realtime.PromEx.Plugins.PresenceTest do
       {:ok, _ref} = Tracker.track(self(), Tenants.tenant_topic("tenant1", "room"), "key1", %{})
       {:ok, _ref} = Tracker.track(self(), Tenants.tenant_topic("tenant2", "room"), "key1", %{})
 
-      Presence.execute_usage_metrics(Tracker)
-
-      assert metric_value("realtime_presence_usage_tenants", []) == 2
-      assert metric_value("realtime_presence_usage_topics", []) == 2
+      assert_eventually scanned_value("realtime_presence_usage_tenants", []) == 2
+      assert_eventually scanned_value("realtime_presence_usage_topics", []) == 2
 
       for bucket <- @buckets do
         expected = if bucket == 5, do: 2, else: 0
-        assert metric_value("realtime_presence_usage_topics_by_bucket", bucket: bucket) == expected
+        assert_eventually scanned_value("realtime_presence_usage_topics_by_bucket", bucket: bucket) == expected
       end
     end
 
     test "re-scanning overwrites stale values, including buckets dropping back to zero" do
       topic = Tenants.tenant_topic("tenant1", "room")
       {:ok, _ref} = Tracker.track(self(), topic, "key1", %{})
-      Presence.execute_usage_metrics(Tracker)
 
-      assert metric_value("realtime_presence_usage_tenants", []) == 1
-      assert metric_value("realtime_presence_usage_topics_by_bucket", bucket: 5) == 1
+      assert_eventually scanned_value("realtime_presence_usage_tenants", []) == 1
+      assert_eventually scanned_value("realtime_presence_usage_topics_by_bucket", bucket: 5) == 1
 
       :ok = Tracker.untrack(self(), topic, "key1")
-      Presence.execute_usage_metrics(Tracker)
 
-      assert metric_value("realtime_presence_usage_tenants", []) == 0
-      assert metric_value("realtime_presence_usage_topics_by_bucket", bucket: 5) == 0
+      assert_eventually scanned_value("realtime_presence_usage_tenants", []) == 0
+      assert_eventually scanned_value("realtime_presence_usage_topics_by_bucket", bucket: 5) == 0
     end
 
     test "records a scan duration observation" do
@@ -152,7 +148,8 @@ defmodule Realtime.PromEx.Plugins.PresenceTest do
 
       Presence.execute_usage_metrics(Tracker)
 
-      assert metric_value("realtime_presence_usage_scan_duration_milliseconds_count", []) == count_before + 1
+      # Realtime.PromEx scans on its own schedule too, so the count can grow by more than one.
+      assert metric_value("realtime_presence_usage_scan_duration_milliseconds_count", []) >= count_before + 1
     end
 
     test "a crash in the scan is caught, logged, and does not propagate or record metrics" do
@@ -165,6 +162,14 @@ defmodule Realtime.PromEx.Plugins.PresenceTest do
 
       assert log =~ "PresenceUsageScanCrashed"
       assert (metric_value("realtime_presence_usage_tenants", []) || 0) == tenants_before
+    end
+
+    # The usage values are last-value metrics. Realtime.PromEx also scans every 5 seconds, and its
+    # scan of the empty RealtimeWeb.Presence can land between a scan and a read. Scan again on
+    # every attempt so that such a read is retried instead of failing the test.
+    defp scanned_value(metric, tags) do
+      Presence.execute_usage_metrics(Tracker)
+      metric_value(metric, tags)
     end
   end
 
