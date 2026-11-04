@@ -73,6 +73,29 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManagerNodeDisconnectTest do
     assert [{^bin_uuid, ^remote_node}] = :ets.lookup(nodes_table, bin_uuid)
   end
 
+  test "a subscriber node that reconnects after the delete runs gets its subscription back", ctx do
+    %{manager: manager, conn: conn, nodes_table: nodes_table, remote_node: remote_node} = ctx
+    subscriber = Node.spawn(remote_node, Process, :sleep, [:infinity])
+    {uuid, bin_uuid, params} = pg_change_params()
+
+    subscribe(conn, manager, params, subscriber)
+    reconnect(manager, subscriber, remote_node)
+
+    # The delete timer fires before the channel's resubscribe backoff ends.
+    send(manager, :check_delete_queue)
+    :sys.get_state(manager)
+    assert subscription_rows(conn, uuid) == 0
+
+    subscribe(conn, manager, params, subscriber)
+    assert monitoring?(manager, subscriber)
+
+    send(manager, :check_delete_queue)
+    :sys.get_state(manager)
+
+    assert subscription_rows(conn, uuid) > 0, "the resubscribe did not restore the realtime.subscription rows"
+    assert [{^bin_uuid, ^remote_node}] = :ets.lookup(nodes_table, bin_uuid)
+  end
+
   test "a subscriber that leaves after its node reconnects is cleaned up", ctx do
     %{manager: manager, conn: conn, pids_table: pids_table, remote_node: remote_node} = ctx
     subscriber = Node.spawn(remote_node, Process, :sleep, [:infinity])
