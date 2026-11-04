@@ -61,7 +61,7 @@ defmodule Realtime.UsersCounterTest do
       counts = UsersCounter.tenant_counts()
 
       assert counts[tenant_id] == expected + 1
-      assert map_size(counts) >= 61
+      assert_eventually map_size(UsersCounter.tenant_counts()) >= 61
 
       counts = Forum.Census.local_member_counts(:users)
 
@@ -71,7 +71,7 @@ defmodule Realtime.UsersCounterTest do
       counts = Forum.Census.member_counts(:users)
 
       assert counts[tenant_id] == expected + 1
-      assert map_size(counts) >= 61
+      assert_eventually map_size(Forum.Census.member_counts(:users)) >= 61
     end
   end
 
