@@ -373,12 +373,38 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManagerTest do
       assert log =~ "SubscriptionDeletionFailed"
     end
 
-    test "schedules next region check when rebalancer returns ok", %{pid: pid} do
-      # In a single-node test environment, nodes are equal → Rebalancer returns :ok
-      current_nodes = MapSet.new(Node.list())
-      send(pid, {:check_region, current_nodes})
+    @tag start_manager: false
+    test "schedules next region check when rebalancer returns :retry", %{args: args} do
+      parent = self()
+
+      stub(Rebalancer, :check, fn _prev, _curr, _id ->
+        send(parent, :region_checked)
+        :retry
+      end)
+
+      {:ok, pid} = SubscriptionManager.start_link(Map.put(args, :check_region_interval, 100))
       :sys.get_state(pid)
 
+      assert_receive :region_checked, 1000
+      assert_receive :region_checked, 1000
+      assert Process.alive?(pid)
+    end
+
+    @tag start_manager: false
+    test "stops checking the region when rebalancer returns :ok", %{args: args} do
+      parent = self()
+
+      stub(Rebalancer, :check, fn _prev, _curr, _id ->
+        send(parent, :region_checked)
+        :ok
+      end)
+
+      {:ok, pid} = SubscriptionManager.start_link(Map.put(args, :check_region_interval, 100))
+      :sys.get_state(pid)
+
+      assert_receive :region_checked, 1000
+      # The interval is 100ms, a rescheduled check would arrive well within this window
+      refute_receive :region_checked, 500
       assert Process.alive?(pid)
     end
 

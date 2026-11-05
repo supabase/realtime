@@ -292,6 +292,9 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
 
     case Rebalancer.check(previous_nodes_set, current_nodes_set, state.id) do
       :ok ->
+        {:noreply, state}
+
+      :retry ->
         # Let's check again in the future
         send_region_check_message(state.check_region_interval)
         {:noreply, state}

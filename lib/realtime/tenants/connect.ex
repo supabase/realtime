@@ -4,7 +4,7 @@ defmodule Realtime.Tenants.Connect do
 
   ## Options
   * `:check_connected_user_interval` - The interval in milliseconds to check if there are any connected users to a tenant channel. If there are no connected users, the connection will be stopped.
-  * `:check_connect_region_interval` - The interval in milliseconds to check if this process is in the correct region. If the region is not correct it stops the connection.
+  * `:check_connect_region_interval` - The interval in milliseconds to check if this process is in the correct region. If the region is not correct it stops the connection. Once a check finds the correct region, the checks stop.
   * `:erpc_timeout` - The timeout in milliseconds for the `:erpc` calls to the tenant's database.
   """
   use GenServer, restart: :temporary
@@ -430,6 +430,9 @@ defmodule Realtime.Tenants.Connect do
 
     case Rebalancer.check(previous_nodes_set, current_nodes_set, state.tenant_id) do
       :ok ->
+        {:noreply, state}
+
+      :retry ->
         # Let's check again in the future
         send_connect_region_check_message(state.check_connect_region_interval)
         {:noreply, state}

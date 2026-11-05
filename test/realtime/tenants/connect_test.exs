@@ -305,12 +305,36 @@ defmodule Realtime.Tenants.ConnectTest do
       assert log =~ "Rebalancing Tenant database connection"
     end
 
-    test "rebalancing not needed process stays up", %{tenant: tenant} do
+    test "rebalancing retry keeps checking", %{tenant: tenant} do
       external_id = tenant.external_id
+      parent = self()
+
+      stub(Rebalancer, :check, fn _, _, ^external_id ->
+        send(parent, :region_checked)
+        :retry
+      end)
+
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(external_id, check_connect_region_interval: 100)
 
-      stub(Rebalancer, :check, fn _, _, ^external_id -> :ok end)
+      assert_receive :region_checked, 1000
+      assert_receive :region_checked, 1000
+      refute_process_down(db_conn)
+    end
 
+    test "rebalancing not needed stops checking and process stays up", %{tenant: tenant} do
+      external_id = tenant.external_id
+      parent = self()
+
+      stub(Rebalancer, :check, fn _, _, ^external_id ->
+        send(parent, :region_checked)
+        :ok
+      end)
+
+      assert {:ok, db_conn} = Connect.lookup_or_start_connection(external_id, check_connect_region_interval: 100)
+
+      assert_receive :region_checked, 1000
+      # The interval is 100ms, a rescheduled check would arrive well within this window
+      refute_receive :region_checked, 500
       refute_process_down(db_conn)
     end
   end
