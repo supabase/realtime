@@ -98,6 +98,10 @@ defmodule Realtime.RateCounter do
   @spec publish_update(term()) :: :ok
   def publish_update(id), do: Phoenix.PubSub.broadcast(Realtime.PubSub, update_topic(id), :update)
 
+  @doc "Publish an update to the RateCounter with the given id on the local node"
+  @spec publish_local_update(term()) :: :ok
+  def publish_local_update(id), do: Phoenix.PubSub.local_broadcast(Realtime.PubSub, update_topic(id), :update)
+
   @doc """
   Gets the state of the RateCounter.
 
