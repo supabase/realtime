@@ -23,6 +23,8 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   #
   #   statement_timeout (5s, Postgres) < transaction deadline (10s, here) < RPC (15s)
   @transaction_timeout 10_000
+  @max_transaction_attempts 3
+  @transaction_retry_delays_ms [50, 150]
 
   @spec create(conn(), String.t(), subscription_list, pid(), pid()) ::
           {:ok, Postgrex.Result.t()}
@@ -33,9 +35,12 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
              | {:subscription_insert_failed, String.t()}}
 
   def create(conn, publication, subscription_list, manager, caller) do
+    deadline_ms = System.monotonic_time(:millisecond) + @transaction_timeout
+
     # `send` is not transactional. Notifying the manager from inside the transaction records
     # a subscriber for a row that a later failure in the same list rolls back.
-    with {:ok, results} <- insert_subscriptions(conn, publication, subscription_list) do
+    with {:ok, results} <-
+           insert_subscriptions(conn, publication, subscription_list, 1, deadline_ms) do
       Enum.each(subscription_list, fn %{id: id} ->
         send(manager, {:subscribed, {caller, id}})
       end)
@@ -44,7 +49,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
     end
   end
 
-  defp insert_subscriptions(conn, publication, subscription_list) do
+  defp insert_subscriptions(conn, publication, subscription_list, attempt, deadline_ms) do
     transaction(
       conn,
       fn conn ->
@@ -71,12 +76,55 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
           end
         end)
       end,
-      timeout: @transaction_timeout
+      timeout: remaining_timeout_ms(deadline_ms)
     )
   rescue
-    e in DBConnection.ConnectionError -> {:error, e}
+    e in DBConnection.ConnectionError ->
+      {:error, e}
+
+    e in Postgrex.Error ->
+      delay_ms = Enum.at(@transaction_retry_delays_ms, attempt - 1)
+      remaining_ms = deadline_ms - System.monotonic_time(:millisecond)
+
+      if serialization_failure?(e) and attempt < @max_transaction_attempts and
+           remaining_ms > delay_ms do
+        log_warning(
+          "SubscriptionTransactionRetry",
+          "retrying transaction after serialization failure",
+          attempt: attempt,
+          max_attempts: @max_transaction_attempts,
+          sqlstate: "40001",
+          retry_delay_ms: delay_ms
+        )
+
+        Process.sleep(delay_ms)
+
+        if deadline_ms > System.monotonic_time(:millisecond) do
+          insert_subscriptions(
+            conn,
+            publication,
+            subscription_list,
+            attempt + 1,
+            deadline_ms
+          )
+        else
+          reraise e, __STACKTRACE__
+        end
+      else
+        reraise e, __STACKTRACE__
+      end
   catch
     :exit, reason -> {:error, {:exit, reason}}
+  end
+
+  defp serialization_failure?(%Postgrex.Error{postgres: postgres}) when is_map(postgres) do
+    Map.get(postgres, :pg_code) == "40001"
+  end
+
+  defp serialization_failure?(_), do: false
+
+  defp remaining_timeout_ms(deadline_ms) do
+    max(deadline_ms - System.monotonic_time(:millisecond), 1)
   end
 
   # A statement cancelled by `statement_timeout` (57014), or a connection torn down under us by

@@ -1136,6 +1136,209 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
     end
   end
 
+  describe "transaction retries" do
+    setup %{conn: conn} do
+      Postgrex.query!(
+        conn,
+        """
+        CREATE TABLE realtime.subscription_commit_test_control (
+          failures integer NOT NULL,
+          pg_code text NOT NULL
+        )
+        """,
+        []
+      )
+
+      Postgrex.query!(
+        conn,
+        "ALTER TABLE realtime.subscription_commit_test_control REPLICA IDENTITY FULL",
+        []
+      )
+
+      Postgrex.query!(
+        conn,
+        "INSERT INTO realtime.subscription_commit_test_control VALUES (0, '40001')",
+        []
+      )
+
+      Postgrex.query!(
+        conn,
+        "CREATE SEQUENCE realtime.subscription_commit_test_attempts",
+        []
+      )
+
+      Postgrex.query!(
+        conn,
+        """
+        CREATE FUNCTION realtime.subscription_commit_test_failure()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        DECLARE
+          attempt bigint;
+          failure_count integer;
+          failure_code text;
+        BEGIN
+          attempt := nextval('realtime.subscription_commit_test_attempts');
+          SELECT failures, pg_code
+            INTO failure_count, failure_code
+            FROM realtime.subscription_commit_test_control;
+
+          IF attempt <= failure_count THEN
+            RAISE EXCEPTION 'simulated subscription commit failure'
+              USING ERRCODE = failure_code;
+          END IF;
+
+          RETURN NULL;
+        END;
+        $$
+        """,
+        []
+      )
+
+      Postgrex.query!(
+        conn,
+        """
+        CREATE CONSTRAINT TRIGGER subscription_commit_test_failure
+        AFTER INSERT OR UPDATE ON realtime.subscription
+        DEFERRABLE INITIALLY DEFERRED
+        FOR EACH ROW
+        EXECUTE FUNCTION realtime.subscription_commit_test_failure()
+        """,
+        []
+      )
+
+      :ok
+    end
+
+    test "retries a transaction when COMMIT gets a serialization failure", %{conn: conn} do
+      Postgrex.query!(
+        conn,
+        "UPDATE realtime.subscription_commit_test_control SET failures = 1",
+        []
+      )
+
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test"})
+
+      subscription_id = UUID.uuid1()
+
+      subscription_list = [
+        %{claims: %{"role" => "anon"}, id: subscription_id, subscription_params: subscription_params}
+      ]
+
+      log =
+        capture_log(fn ->
+          assert {:ok, [%Postgrex.Result{num_rows: 1}]} =
+                   Subscriptions.create(
+                     conn,
+                     "supabase_realtime_test",
+                     subscription_list,
+                     self(),
+                     self()
+                   )
+        end)
+
+      assert log =~ "SubscriptionTransactionRetry"
+
+      assert %Postgrex.Result{rows: [[1]]} =
+               Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+
+      assert %Postgrex.Result{rows: [[2]]} =
+               Postgrex.query!(
+                 conn,
+                 "select last_value from realtime.subscription_commit_test_attempts",
+                 []
+               )
+
+      assert_receive {:subscribed, {caller, ^subscription_id}}
+      assert caller == self()
+      refute_receive {:subscribed, _}, 200
+    end
+
+    test "stops after three serialization failures", %{conn: conn} do
+      Postgrex.query!(
+        conn,
+        "UPDATE realtime.subscription_commit_test_control SET failures = 3",
+        []
+      )
+
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test"})
+
+      subscription_list = [
+        %{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}
+      ]
+
+      assert_raise Postgrex.Error, fn ->
+        Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+      end
+
+      assert %Postgrex.Result{rows: [[0]]} =
+               Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+
+      assert %Postgrex.Result{rows: [[3]]} =
+               Postgrex.query!(
+                 conn,
+                 "select last_value from realtime.subscription_commit_test_attempts",
+                 []
+               )
+
+      refute_receive {:subscribed, _}, 200
+    end
+
+    test "does not retry non-serialization commit failures", %{conn: conn} do
+      Postgrex.query!(
+        conn,
+        "UPDATE realtime.subscription_commit_test_control SET failures = 1, pg_code = '23505'",
+        []
+      )
+
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test"})
+
+      subscription_list = [
+        %{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}
+      ]
+
+      assert_raise Postgrex.Error, fn ->
+        Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+      end
+
+      assert %Postgrex.Result{rows: [[1]]} =
+               Postgrex.query!(
+                 conn,
+                 "select last_value from realtime.subscription_commit_test_attempts",
+                 []
+               )
+
+      refute_receive {:subscribed, _}, 200
+    end
+
+    test "does not retry errors mapped to subscription_insert_failed", %{conn: conn} do
+      Postgrex.query!(conn, "drop publication if exists supabase_realtime_test", [])
+
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test"})
+
+      subscription_list = [
+        %{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}
+      ]
+
+      assert {:error, {:subscription_insert_failed, _}} =
+               Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+
+      assert %Postgrex.Result{rows: [[1, false]]} =
+               Postgrex.query!(
+                 conn,
+                 "select last_value, is_called from realtime.subscription_commit_test_attempts",
+                 []
+               )
+
+      refute_receive {:subscribed, _}, 200
+    end
+  end
+
   describe "database timeouts" do
     test "an insert cancelled by a statement timeout is retryable, not a parameter error", %{conn: conn} do
       Postgrex.query!(conn, "SET statement_timeout = 200", [])
