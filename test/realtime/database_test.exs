@@ -87,6 +87,25 @@ defmodule Realtime.DatabaseTest do
     test "counts only the client backends holding a connection slot", %{tenant: tenant} do
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
 
+      # The count of client backends can change between our query and the check's query.
+      # Each attempt counts again.
+      #
+      # The cause is the container healthcheck. It runs pg_isready, which holds one client
+      # backend for about 3 ms. The Docker backend runs it every 2 seconds. A multigres cluster
+      # runs it every 5 seconds, and runs a second pg_isready about every 7 seconds. When a probe
+      # starts or ends between the two counts, the numbers differ by one. Two probes can
+      # overlap, so the difference can be two.
+      #
+      # A loop of this check gave 1 mismatch in 10,922 checks on the Docker backend and 2 in
+      # 22,370 on multigres. The check reported one more available connection each time.
+      # The digest listed this failure only on multigres. The reason is not known.
+      #
+      # A filter on the application name does not remove the probes. A connection has an empty
+      # application name until its startup packet is processed.
+      assert_eventually check_reports_available_connections?(tenant, conn)
+    end
+
+    defp check_reports_available_connections?(tenant, conn) do
       %{rows: [[available_connections]]} =
         Postgrex.query!(
           conn,
@@ -99,9 +118,12 @@ defmodule Realtime.DatabaseTest do
           []
         )
 
-      assert capture_log(fn ->
-               assert {:error, :tenant_db_too_many_connections} = Database.check_tenant_connection(tenant)
-             end) =~ "Only #{available_connections} available connections"
+      log =
+        capture_log(fn ->
+          assert {:error, :tenant_db_too_many_connections} = Database.check_tenant_connection(tenant)
+        end)
+
+      log =~ "Only #{available_connections} available connections"
     end
 
     @tag db_pool: 3

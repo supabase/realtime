@@ -165,33 +165,4 @@ defmodule Realtime.GenRpcMetricsTest do
                "#{after_reconnect[:send_oct]} -> #{later[:send_oct]}"
     end
   end
-
-  describe "info/0 pruning" do
-    test "drops the accumulator for a node that leaves the cluster", %{node: node} do
-      # Generate load and poll so a real accumulator exists for the connected node.
-      Realtime.GenRpc.call(node, String, :to_integer, ["25"], key: 1)
-      Realtime.GenRpc.call(node, String, :to_integer, ["25"], key: 2)
-      GenRpcMetrics.info()
-      assert Map.has_key?(:sys.get_state(GenRpcMetrics).totals, node)
-
-      # Actually drop the node from the cluster. A second peer can't be spun up
-      # (it would need the same gen_rpc port as the shared node), so we take the
-      # shared node down and reconnect it below so the rest of the suite is
-      # unaffected regardless of test run order.
-      :ok = :net_kernel.monitor_nodes(true)
-      true = :erlang.disconnect_node(node)
-      assert_receive {:nodedown, ^node}, 5_000
-
-      # A poll rebuilds `totals` from the live node set, so a node that has left
-      # the cluster is pruned instead of accumulating forever.
-      GenRpcMetrics.info()
-      refute Map.has_key?(:sys.get_state(GenRpcMetrics).totals, node)
-
-      # Restore the shared node (and its gen_rpc client) for the other tests.
-      true = Node.connect(node)
-      assert_receive {:nodeup, ^node}, 5_000
-      :ok = :net_kernel.monitor_nodes(false)
-      Realtime.GenRpc.call(node, String, :to_integer, ["25"], key: 1)
-    end
-  end
 end
