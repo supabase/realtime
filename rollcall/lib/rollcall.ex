@@ -47,6 +47,50 @@ defmodule Rollcall do
   @type ref :: String.t()
 
   @doc """
+  Defines an instance of Rollcall named after the module that calls `use`.
+
+  The module gets `child_spec/1`, `start_link/1`, `track/5`, `untrack/4` and
+  `scopes/0`. Each function calls the function of `Rollcall` with the same name
+  and passes the module as the name of the instance. A caller then writes
+  `MyApp.Rollcall.track(...)` and never handles the name.
+
+      defmodule MyApp.Rollcall do
+        use Rollcall, transport: {MyApp.Transport, []}
+      end
+
+  The options of `use` are the options of `start_link/1`. See
+  `Rollcall.start_link/1` for the list. They are the defaults of the instance.
+  An option that you pass to the `start_link/1` of the module replaces the same
+  option of `use`.
+  """
+  defmacro __using__(opts) do
+    opts = Keyword.validate!(opts, Rollcall.Tracker.init_options())
+
+    quote do
+      @spec child_spec(keyword()) :: Supervisor.child_spec()
+      def child_spec(opts \\ []) do
+        %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}, type: :supervisor}
+      end
+
+      @spec start_link(keyword()) :: Supervisor.on_start()
+      def start_link(opts \\ []) do
+        opts = Keyword.validate!(opts, Rollcall.Tracker.init_options())
+        Rollcall.start_link([name: __MODULE__] ++ Keyword.merge(unquote(opts), opts))
+      end
+
+      @spec track(pid(), Rollcall.scope(), Rollcall.partition(), Rollcall.key(), Rollcall.meta()) ::
+              {:ok, Rollcall.ref()} | {:error, term()}
+      def track(pid, scope, partition, key, meta), do: Rollcall.track(__MODULE__, pid, scope, partition, key, meta)
+
+      @spec untrack(pid(), Rollcall.scope(), Rollcall.partition(), Rollcall.key()) :: :ok
+      def untrack(pid, scope, partition, key), do: Rollcall.untrack(__MODULE__, pid, scope, partition, key)
+
+      @spec scopes() :: [Rollcall.scope()]
+      def scopes, do: Rollcall.scopes(__MODULE__)
+    end
+  end
+
+  @doc """
   Returns a supervisor child specification. The argument is the `opts` of
   `start_link/1`.
   """
