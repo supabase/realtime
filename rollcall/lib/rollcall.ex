@@ -55,16 +55,14 @@ defmodule Rollcall do
   @type scope_entry :: {partition(), ref(), key(), meta()}
 
   @typedoc """
-  A set of changes to a partition. 
+  A set of changes to a partition.
 
-  Elements are:
+  The elements are:
 
-  1. :diff
-  2. a list of `entry()`s that have joined the partition.
-  3. a list of `entry()`s that have left the partition.
-   
+  1. a list of `entry()`s that have joined the partition.
+  2. a list of `entry()`s that have left the partition.
   """
-  @type partition_diff :: {:diff, [entry()], [entry()]}
+  @type partition_diff :: {[entry()], [entry()]}
 
   @doc """
   Defines an instance of Rollcall named after the module that calls `use`.

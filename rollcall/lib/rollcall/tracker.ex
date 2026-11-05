@@ -611,7 +611,7 @@ defmodule Rollcall.Tracker do
   end
 
   defp publish_changes(state, changes) do
-    for {partition, {:diff, joins, leaves} = diff} <- Changes.partition_diffs(changes) do
+    for {partition, {joins, leaves} = diff} <- Changes.partition_diffs(changes) do
       :ok = state.transport_module.publish(state.transport_state, partition, diff)
 
       tp(:rollcall_tracker_published, %{
