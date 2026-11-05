@@ -56,4 +56,40 @@ defmodule Rollcall.Tracker.Changes do
   def leave(%__MODULE__{} = changes, %Entry{} = entry) do
     %{changes | leaves: [entry | changes.leaves]}
   end
+
+  @doc """
+  Returns one diff for each partition that has a join or a leave.
+
+  A diff is `{:diff, joins, leaves}`. Each side is a list of `{ref, key, meta}`
+  tuples. The order of the diffs and of the entries in a diff is not defined.
+  Changes with no join and no leave return `[]`, so the tracker never publishes
+  an empty diff.
+  """
+  @spec partition_diffs(t()) :: [{Rollcall.partition(), Rollcall.partition_diff()}]
+  def partition_diffs(%__MODULE__{joins: joins, leaves: leaves}) do
+    join_groups =
+      Enum.group_by(
+        joins,
+        fn e -> e.partition end,
+        fn e -> {e.ref, e.key, e.meta} end
+      )
+
+    leave_groups =
+      Enum.group_by(
+        leaves,
+        fn e -> e.partition end,
+        fn e -> {e.ref, e.key, e.meta} end
+      )
+
+    join_groups
+    |> Map.keys()
+    |> Enum.concat(Map.keys(leave_groups))
+    |> Enum.uniq()
+    |> Enum.map(fn partition ->
+      {
+        partition,
+        {:diff, Map.get(join_groups, partition, []), Map.get(leave_groups, partition, [])}
+      }
+    end)
+  end
 end

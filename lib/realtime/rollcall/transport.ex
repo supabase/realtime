@@ -20,6 +20,12 @@ defmodule Realtime.Rollcall.Transport do
   end
 
   @impl true
+  def publish(_, _, _) do
+    # TODO Implement Rollcall publish/3 for Realtime
+    :ok
+  end
+
+  @impl true
   def unwrap(_transport, {:tb, scope, message}) do
     {:ok, scope, message}
   end

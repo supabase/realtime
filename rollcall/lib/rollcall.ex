@@ -54,6 +54,18 @@ defmodule Rollcall do
   @typedoc "An entry in a scope: its partition, its ref, its key and its meta."
   @type scope_entry :: {partition(), ref(), key(), meta()}
 
+  @typedoc """
+  A set of changes to a partition. 
+
+  Elements are:
+
+  1. :diff
+  2. a list of `entry()`s that have joined the partition.
+  3. a list of `entry()`s that have left the partition.
+   
+  """
+  @type partition_diff :: {:diff, [entry()], [entry()]}
+
   @doc """
   Defines an instance of Rollcall named after the module that calls `use`.
 
@@ -196,6 +208,10 @@ defmodule Rollcall do
 
   The entries are the local entries plus the replica of each peer. The cost of
   the read does not depend on the other partitions of the scope.
+
+  Subscribe to the diffs of the partition before you read the state. A change
+  that happens between the two steps then reaches you in a diff. See
+  `Rollcall.Transport.publish/3`.
 
   Returns `[]` when no tracker runs for `scope`, or when the instance does not
   run. The function reads a table of the tracker. It sends no message to the
