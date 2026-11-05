@@ -26,7 +26,7 @@ defmodule Rollcall.Tracker.View do
   """
   @spec new() :: t()
   def new do
-    :ets.new(:view, [:ordered_set, :protected, read_concurrency: true])
+    :ets.new(:view, [:ordered_set, :protected, read_concurrency: true, write_concurrency: :auto])
   end
 
   @doc """
