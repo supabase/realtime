@@ -594,6 +594,44 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       assert Jason.decode!(conn.resp_body)["message"] == "Unauthorized"
     end
 
+    test "reads private=True as a private broadcast", %{conn: conn, tenant: tenant} do
+      request_events_key = Tenants.requests_per_second_key(tenant)
+      expect(GenCounter, :add, fn ^request_events_key -> :ok end)
+
+      sub_topic = "private:room"
+      subscribe(Tenants.tenant_topic(tenant, sub_topic), sub_topic)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(Routes.broadcast_single_path(conn, :broadcast, sub_topic, "secret") <> "?private=True", %{
+          "secret" => "data"
+        })
+
+      assert conn.status == 403
+      assert Jason.decode!(conn.resp_body)["message"] == "Unauthorized"
+      refute_receive {:socket_push, _, _}
+    end
+
+    test "returns 422 when private is not a boolean", %{conn: conn, tenant: tenant} do
+      request_events_key = Tenants.requests_per_second_key(tenant)
+      expect(GenCounter, :add, fn ^request_events_key -> :ok end)
+
+      sub_topic = "private:room"
+      subscribe(Tenants.tenant_topic(tenant, sub_topic), sub_topic)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(Routes.broadcast_single_path(conn, :broadcast, sub_topic, "secret") <> "?private=1", %{
+          "secret" => "data"
+        })
+
+      assert conn.status == 422
+      assert Jason.decode!(conn.resp_body)["message"] == "private must be true or false"
+      refute_receive {:socket_push, _, _}
+    end
+
     test "returns 422 when authorization query is canceled", %{conn: conn, tenant: tenant} do
       request_events_key = Tenants.requests_per_second_key(tenant)
       expect(GenCounter, :add, fn ^request_events_key -> :ok end)
