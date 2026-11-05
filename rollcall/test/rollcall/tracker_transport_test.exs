@@ -30,12 +30,6 @@ defmodule Rollcall.TrackerTransportTest do
       )
     end
 
-    test "registers the tracker under the option :name", %{scope: scope, network: network} do
-      tracker = start_node(scope, network, @node_a, name: :named_tracker)
-
-      assert Process.whereis(:named_tracker) == tracker
-    end
-
     test "runs two trackers for one scope", %{scope: scope, network: network} do
       a = start_node(scope, network, @node_a)
       b = start_node(scope, network, :b@host)

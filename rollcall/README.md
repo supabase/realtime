@@ -23,13 +23,23 @@ end
 
 ## Starting
 
-Rollcall does not start itself. Add it to the supervision tree of the host application.
+Rollcall does not start itself. Define an instance and add it to the supervision tree of the host application.
 
 ```elixir
+defmodule MyApp.Rollcall do
+  use Rollcall, transport: {MyApp.RollcallTransport, []}
+end
+
 children = [
-  {Rollcall, transport: {MyApp.RollcallTransport, []}}
+  MyApp.Rollcall
 ]
 ```
 
+The name of the module is the name of the instance. Call the instance with the functions that `use` defines.
+
+```elixir
+{:ok, ref} = MyApp.Rollcall.track(pid, scope, partition, key, %{})
+:ok = MyApp.Rollcall.untrack(pid, scope, partition, key)
+```
 See `Rollcall.start_link/1` for the list of options.
 

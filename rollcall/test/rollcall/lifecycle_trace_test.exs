@@ -11,15 +11,15 @@ defmodule Rollcall.LifecycleTraceTest do
   # `expire_grace/1`, or they check the timer with `:erlang.read_timer/1`.
 
   describe "stop" do
-    test "stops the tracker when the grace period ends", %{scope: scope} do
+    test "stops the tracker when the grace period ends", %{scope: scope, rollcall: rollcall} do
       check_trace(
         fn ->
-          {:ok, _ref} = Rollcall.track(self(), scope, "partition", "key", %{})
-          tracker = Tracker.whereis(scope)
+          {:ok, _ref} = Rollcall.track(rollcall, self(), scope, "partition", "key", %{})
+          tracker = Tracker.whereis(rollcall, scope)
           monitor = Process.monitor(tracker)
 
           wait_for_event %{"$kind": :rollcall_tracker_empty, scope: ^scope} do
-            :ok = Rollcall.untrack(self(), scope, "partition", "key")
+            :ok = Rollcall.untrack(rollcall, self(), scope, "partition", "key")
           end
 
           wait_for_event %{"$kind": :rollcall_tracker_stopped, scope: ^scope} do
@@ -27,7 +27,7 @@ defmodule Rollcall.LifecycleTraceTest do
           end
 
           assert_receive {:DOWN, ^monitor, :process, ^tracker, :normal}
-          refute scope in Rollcall.scopes()
+          refute scope in Rollcall.scopes(rollcall)
         end,
         fn trace ->
           # The first empty event is from the start of the tracker. The second is from the untrack.
@@ -40,18 +40,18 @@ defmodule Rollcall.LifecycleTraceTest do
       )
     end
 
-    test "keeps the tracker while an entry remains", %{scope: scope} do
+    test "keeps the tracker while an entry remains", %{scope: scope, rollcall: rollcall} do
       check_trace(
         fn ->
-          {:ok, _ref} = Rollcall.track(self(), scope, "partition", "key_1", %{})
-          {:ok, _ref} = Rollcall.track(self(), scope, "partition", "key_2", %{})
-          tracker = Tracker.whereis(scope)
+          {:ok, _ref} = Rollcall.track(rollcall, self(), scope, "partition", "key_1", %{})
+          {:ok, _ref} = Rollcall.track(rollcall, self(), scope, "partition", "key_2", %{})
+          tracker = Tracker.whereis(rollcall, scope)
 
-          :ok = Rollcall.untrack(self(), scope, "partition", "key_1")
+          :ok = Rollcall.untrack(rollcall, self(), scope, "partition", "key_1")
           tp(:test_first_untrack_done, %{scope: scope})
 
           wait_for_event %{"$kind": :rollcall_tracker_empty, scope: ^scope} do
-            :ok = Rollcall.untrack(self(), scope, "partition", "key_2")
+            :ok = Rollcall.untrack(rollcall, self(), scope, "partition", "key_2")
           end
 
           wait_for_event %{"$kind": :rollcall_tracker_stopped, scope: ^scope} do
@@ -77,20 +77,21 @@ defmodule Rollcall.LifecycleTraceTest do
     end
 
     test "starts a new tracker with a greater incarnation for a track after the stop", %{
-      scope: scope
+      scope: scope,
+      rollcall: rollcall
     } do
       check_trace(
         fn ->
-          {:ok, _ref} = Rollcall.track(self(), scope, "partition", "key_1", %{})
-          {:ok, _ref} = Rollcall.track(self(), scope, "partition", "key_2", %{})
-          old_tracker = Tracker.whereis(scope)
-          old_incarnation = Tracker.get_state(scope).incarnation
+          {:ok, _ref} = Rollcall.track(rollcall, self(), scope, "partition", "key_1", %{})
+          {:ok, _ref} = Rollcall.track(rollcall, self(), scope, "partition", "key_2", %{})
+          old_tracker = Tracker.whereis(rollcall, scope)
+          old_incarnation = Tracker.get_state(rollcall, scope).incarnation
           monitor = Process.monitor(old_tracker)
 
-          :ok = Rollcall.untrack(self(), scope, "partition", "key_1")
+          :ok = Rollcall.untrack(rollcall, self(), scope, "partition", "key_1")
 
           wait_for_event %{"$kind": :rollcall_tracker_empty, scope: ^scope} do
-            :ok = Rollcall.untrack(self(), scope, "partition", "key_2")
+            :ok = Rollcall.untrack(rollcall, self(), scope, "partition", "key_2")
           end
 
           wait_for_event %{"$kind": :rollcall_tracker_stopped, scope: ^scope} do
@@ -99,10 +100,10 @@ defmodule Rollcall.LifecycleTraceTest do
 
           assert_receive {:DOWN, ^monitor, :process, ^old_tracker, :normal}
 
-          {:ok, _ref} = Rollcall.track(self(), scope, "partition", "key", %{})
+          {:ok, _ref} = Rollcall.track(rollcall, self(), scope, "partition", "key", %{})
 
-          new_tracker = Tracker.whereis(scope)
-          state = Tracker.get_state(scope)
+          new_tracker = Tracker.whereis(rollcall, scope)
+          state = Tracker.get_state(rollcall, scope)
 
           assert is_pid(new_tracker)
           refute new_tracker == old_tracker
@@ -117,19 +118,19 @@ defmodule Rollcall.LifecycleTraceTest do
   end
 
   describe "grace period" do
-    test "keeps the empty tracker running", %{scope: scope} do
+    test "keeps the empty tracker running", %{scope: scope, rollcall: rollcall} do
       check_trace(
         fn ->
-          {:ok, _ref} = Rollcall.track(self(), scope, "partition", "key", %{})
-          tracker = Tracker.whereis(scope)
+          {:ok, _ref} = Rollcall.track(rollcall, self(), scope, "partition", "key", %{})
+          tracker = Tracker.whereis(rollcall, scope)
 
           wait_for_event %{"$kind": :rollcall_tracker_empty, scope: ^scope} do
-            :ok = Rollcall.untrack(self(), scope, "partition", "key")
+            :ok = Rollcall.untrack(rollcall, self(), scope, "partition", "key")
           end
 
           assert Process.alive?(tracker)
-          assert Tracker.whereis(scope) == tracker
-          assert scope in Rollcall.scopes()
+          assert Tracker.whereis(rollcall, scope) == tracker
+          assert scope in Rollcall.scopes(rollcall)
         end,
         fn trace ->
           assert [] = events(trace, :rollcall_tracker_stopped, scope)
@@ -137,12 +138,12 @@ defmodule Rollcall.LifecycleTraceTest do
       )
     end
 
-    test "starts when the last process exits", %{scope: scope} do
+    test "starts when the last process exits", %{scope: scope, rollcall: rollcall} do
       check_trace(
         fn ->
           pid = start_process()
-          {:ok, _ref} = Rollcall.track(pid, scope, "partition", "key", %{})
-          tracker = Tracker.whereis(scope)
+          {:ok, _ref} = Rollcall.track(rollcall, pid, scope, "partition", "key", %{})
+          tracker = Tracker.whereis(rollcall, scope)
 
           wait_for_event %{"$kind": :rollcall_tracker_empty, scope: ^scope} do
             Process.exit(pid, :kill)
@@ -156,14 +157,14 @@ defmodule Rollcall.LifecycleTraceTest do
       )
     end
 
-    test "starts a timer with the length of the grace period", %{scope: scope} do
+    test "starts a timer with the length of the grace period", %{scope: scope, rollcall: rollcall} do
       check_trace(
         fn ->
-          {:ok, _ref} = Rollcall.track(self(), scope, "partition", "key", %{})
-          tracker = Tracker.whereis(scope)
+          {:ok, _ref} = Rollcall.track(rollcall, self(), scope, "partition", "key", %{})
+          tracker = Tracker.whereis(rollcall, scope)
 
           wait_for_event %{"$kind": :rollcall_tracker_empty, scope: ^scope} do
-            :ok = Rollcall.untrack(self(), scope, "partition", "key")
+            :ok = Rollcall.untrack(rollcall, self(), scope, "partition", "key")
           end
 
           # The default grace period is 5000 ms.
@@ -177,23 +178,23 @@ defmodule Rollcall.LifecycleTraceTest do
       )
     end
 
-    test "cancels the timer when a track arrives", %{scope: scope} do
+    test "cancels the timer when a track arrives", %{scope: scope, rollcall: rollcall} do
       check_trace(
         fn ->
-          {:ok, _ref} = Rollcall.track(self(), scope, "partition", "key_1", %{})
-          tracker = Tracker.whereis(scope)
+          {:ok, _ref} = Rollcall.track(rollcall, self(), scope, "partition", "key_1", %{})
+          tracker = Tracker.whereis(rollcall, scope)
 
           wait_for_event %{"$kind": :rollcall_tracker_empty, scope: ^scope} do
-            :ok = Rollcall.untrack(self(), scope, "partition", "key_1")
+            :ok = Rollcall.untrack(rollcall, self(), scope, "partition", "key_1")
           end
 
           timer = empty_timer(tracker)
 
-          {:ok, _ref} = Rollcall.track(self(), scope, "partition", "key_2", %{})
+          {:ok, _ref} = Rollcall.track(rollcall, self(), scope, "partition", "key_2", %{})
 
           # `read_timer/1` returns false for a timer that is cancelled.
           assert :erlang.read_timer(timer) == false
-          assert Tracker.whereis(scope) == tracker
+          assert Tracker.whereis(rollcall, scope) == tracker
         end,
         fn trace ->
           assert [] = events(trace, :rollcall_tracker_stopped, scope)
@@ -202,26 +203,26 @@ defmodule Rollcall.LifecycleTraceTest do
       )
     end
 
-    test "ignores the timeout message of a cancelled timer", %{scope: scope} do
+    test "ignores the timeout message of a cancelled timer", %{scope: scope, rollcall: rollcall} do
       check_trace(
         fn ->
-          {:ok, _ref} = Rollcall.track(self(), scope, "partition", "key_1", %{})
-          tracker = Tracker.whereis(scope)
+          {:ok, _ref} = Rollcall.track(rollcall, self(), scope, "partition", "key_1", %{})
+          tracker = Tracker.whereis(rollcall, scope)
 
           wait_for_event %{"$kind": :rollcall_tracker_empty, scope: ^scope} do
-            :ok = Rollcall.untrack(self(), scope, "partition", "key_1")
+            :ok = Rollcall.untrack(rollcall, self(), scope, "partition", "key_1")
           end
 
           timer = empty_timer(tracker)
-          {:ok, _ref} = Rollcall.track(self(), scope, "partition", "key_2", %{})
+          {:ok, _ref} = Rollcall.track(rollcall, self(), scope, "partition", "key_2", %{})
 
           # The timer fired before the track cancelled it, so its message is in the mailbox.
           send(tracker, {:timeout, timer, :empty_timeout})
 
           # The tracker handles a call after the message that came before it.
-          assert %{scope: ^scope} = Tracker.get_state(scope)
+          assert %{scope: ^scope} = Tracker.get_state(rollcall, scope)
           assert Process.alive?(tracker)
-          assert Tracker.whereis(scope) == tracker
+          assert Tracker.whereis(rollcall, scope) == tracker
         end,
         fn trace ->
           assert [] = events(trace, :rollcall_tracker_stopped, scope)
@@ -233,11 +234,11 @@ defmodule Rollcall.LifecycleTraceTest do
     # need: an entry in `local` and a timer ref in `empty_timer`. The tests set
     # `empty_timer` with `:sys.replace_state/2`, for some extra paranoia
 
-    test "keeps the tracker running when the timeout arrives with an entry", %{scope: scope} do
+    test "keeps the tracker running when the timeout arrives with an entry", %{scope: scope, rollcall: rollcall} do
       check_trace(
         fn ->
-          {:ok, ref} = Rollcall.track(self(), scope, "partition", "key", %{})
-          tracker = Tracker.whereis(scope)
+          {:ok, ref} = Rollcall.track(rollcall, self(), scope, "partition", "key", %{})
+          tracker = Tracker.whereis(rollcall, scope)
           timer = set_empty_timer(tracker)
 
           wait_for_event %{"$kind": :rollcall_tracker_stop_skipped, scope: ^scope} do
@@ -245,8 +246,8 @@ defmodule Rollcall.LifecycleTraceTest do
           end
 
           assert Process.alive?(tracker)
-          assert Tracker.whereis(scope) == tracker
-          assert [%{ref: ^ref}] = Local.entries(Tracker.get_state(scope).local, "partition")
+          assert Tracker.whereis(rollcall, scope) == tracker
+          assert [%{ref: ^ref}] = Local.entries(Tracker.get_state(rollcall, scope).local, "partition")
         end,
         fn trace ->
           assert [_] = expect_events(trace, :rollcall_tracker_stop_skipped, scope, 1)
@@ -256,11 +257,11 @@ defmodule Rollcall.LifecycleTraceTest do
       )
     end
 
-    test "clears the timer when the timeout arrives with an entry", %{scope: scope} do
+    test "clears the timer when the timeout arrives with an entry", %{scope: scope, rollcall: rollcall} do
       check_trace(
         fn ->
-          {:ok, _ref} = Rollcall.track(self(), scope, "partition", "key", %{})
-          tracker = Tracker.whereis(scope)
+          {:ok, _ref} = Rollcall.track(rollcall, self(), scope, "partition", "key", %{})
+          tracker = Tracker.whereis(rollcall, scope)
           timer = set_empty_timer(tracker)
 
           wait_for_event %{"$kind": :rollcall_tracker_stop_skipped, scope: ^scope} do
@@ -273,11 +274,11 @@ defmodule Rollcall.LifecycleTraceTest do
       )
     end
 
-    test "starts a new grace period after a skipped stop", %{scope: scope} do
+    test "starts a new grace period after a skipped stop", %{scope: scope, rollcall: rollcall} do
       check_trace(
         fn ->
-          {:ok, _ref} = Rollcall.track(self(), scope, "partition", "key", %{})
-          tracker = Tracker.whereis(scope)
+          {:ok, _ref} = Rollcall.track(rollcall, self(), scope, "partition", "key", %{})
+          tracker = Tracker.whereis(rollcall, scope)
           monitor = Process.monitor(tracker)
           timer = set_empty_timer(tracker)
 
@@ -286,7 +287,7 @@ defmodule Rollcall.LifecycleTraceTest do
           end
 
           wait_for_event %{"$kind": :rollcall_tracker_empty, scope: ^scope} do
-            :ok = Rollcall.untrack(self(), scope, "partition", "key")
+            :ok = Rollcall.untrack(rollcall, self(), scope, "partition", "key")
           end
 
           wait_for_event %{"$kind": :rollcall_tracker_stopped, scope: ^scope} do
@@ -306,12 +307,12 @@ defmodule Rollcall.LifecycleTraceTest do
   # between the two steps, the tracker starts and gets no `track`. The test
   # starts a tracker directly and sends no `track`.
   describe "start with no entry" do
-    test "starts the empty timer and stops the tracker when the grace period ends", %{scope: scope} do
+    test "starts the empty timer and stops the tracker when the grace period ends", %{scope: scope, rollcall: rollcall} do
       check_trace(
         fn ->
           tracker =
             wait_for_event %{"$kind": :rollcall_tracker_empty, scope: ^scope} do
-              start_supervised!({Tracker, {scope, []}})
+              start_supervised!({Tracker, {scope, name: rollcall}})
             end
 
           monitor = Process.monitor(tracker)
@@ -321,7 +322,7 @@ defmodule Rollcall.LifecycleTraceTest do
           end
 
           assert_receive {:DOWN, ^monitor, :process, ^tracker, :normal}
-          refute scope in Rollcall.scopes()
+          refute scope in Rollcall.scopes(rollcall)
         end,
         fn trace ->
           assert [
@@ -340,65 +341,65 @@ defmodule Rollcall.LifecycleTraceTest do
   end
 
   describe "monitors" do
-    test "monitors a pid that tracks an entry", %{scope: scope} do
+    test "monitors a pid that tracks an entry", %{scope: scope, rollcall: rollcall} do
       pid = start_process()
-      {:ok, _ref} = Rollcall.track(pid, scope, "partition", "key", %{})
+      {:ok, _ref} = Rollcall.track(rollcall, pid, scope, "partition", "key", %{})
 
-      assert monitor_count(Tracker.whereis(scope), pid) == 1
+      assert monitor_count(Tracker.whereis(rollcall, scope), pid) == 1
     end
 
-    test "monitors a pid once for several entries", %{scope: scope} do
+    test "monitors a pid once for several entries", %{scope: scope, rollcall: rollcall} do
       pid = start_process()
-      {:ok, _ref} = Rollcall.track(pid, scope, "partition", "key_1", %{})
-      {:ok, _ref} = Rollcall.track(pid, scope, "partition", "key_2", %{})
-      {:ok, _ref} = Rollcall.track(pid, scope, "other_partition", "key_1", %{})
+      {:ok, _ref} = Rollcall.track(rollcall, pid, scope, "partition", "key_1", %{})
+      {:ok, _ref} = Rollcall.track(rollcall, pid, scope, "partition", "key_2", %{})
+      {:ok, _ref} = Rollcall.track(rollcall, pid, scope, "other_partition", "key_1", %{})
 
-      assert monitor_count(Tracker.whereis(scope), pid) == 1
+      assert monitor_count(Tracker.whereis(rollcall, scope), pid) == 1
     end
 
-    test "monitors a pid once when the same key is tracked again", %{scope: scope} do
+    test "monitors a pid once when the same key is tracked again", %{scope: scope, rollcall: rollcall} do
       pid = start_process()
-      {:ok, _ref} = Rollcall.track(pid, scope, "partition", "key", %{a: 1})
-      {:ok, _ref} = Rollcall.track(pid, scope, "partition", "key", %{a: 2})
+      {:ok, _ref} = Rollcall.track(rollcall, pid, scope, "partition", "key", %{a: 1})
+      {:ok, _ref} = Rollcall.track(rollcall, pid, scope, "partition", "key", %{a: 2})
 
-      assert monitor_count(Tracker.whereis(scope), pid) == 1
+      assert monitor_count(Tracker.whereis(rollcall, scope), pid) == 1
     end
 
-    test "keeps the monitor while the pid has another entry", %{scope: scope} do
+    test "keeps the monitor while the pid has another entry", %{scope: scope, rollcall: rollcall} do
       pid = start_process()
-      {:ok, _ref} = Rollcall.track(pid, scope, "partition", "key_1", %{})
-      {:ok, _ref} = Rollcall.track(pid, scope, "partition", "key_2", %{})
+      {:ok, _ref} = Rollcall.track(rollcall, pid, scope, "partition", "key_1", %{})
+      {:ok, _ref} = Rollcall.track(rollcall, pid, scope, "partition", "key_2", %{})
 
-      :ok = Rollcall.untrack(pid, scope, "partition", "key_1")
+      :ok = Rollcall.untrack(rollcall, pid, scope, "partition", "key_1")
 
-      assert monitor_count(Tracker.whereis(scope), pid) == 1
+      assert monitor_count(Tracker.whereis(rollcall, scope), pid) == 1
     end
 
-    test "removes the monitor after the last untrack of the pid", %{scope: scope} do
+    test "removes the monitor after the last untrack of the pid", %{scope: scope, rollcall: rollcall} do
       pid = start_process()
       other = start_process()
-      {:ok, _ref} = Rollcall.track(pid, scope, "partition", "key", %{})
-      {:ok, _ref} = Rollcall.track(other, scope, "partition", "key", %{})
+      {:ok, _ref} = Rollcall.track(rollcall, pid, scope, "partition", "key", %{})
+      {:ok, _ref} = Rollcall.track(rollcall, other, scope, "partition", "key", %{})
 
-      :ok = Rollcall.untrack(pid, scope, "partition", "key")
+      :ok = Rollcall.untrack(rollcall, pid, scope, "partition", "key")
 
-      tracker = Tracker.whereis(scope)
+      tracker = Tracker.whereis(rollcall, scope)
       assert monitor_count(tracker, pid) == 0
       assert monitor_count(tracker, other) == 1
     end
 
-    test "removes the entries of a pid that exits", %{scope: scope} do
+    test "removes the entries of a pid that exits", %{scope: scope, rollcall: rollcall} do
       check_trace(
         fn ->
           pid = start_process()
-          {:ok, _ref} = Rollcall.track(pid, scope, "partition_1", "key_1", %{})
-          {:ok, _ref} = Rollcall.track(pid, scope, "partition_2", "key_2", %{})
+          {:ok, _ref} = Rollcall.track(rollcall, pid, scope, "partition_1", "key_1", %{})
+          {:ok, _ref} = Rollcall.track(rollcall, pid, scope, "partition_2", "key_2", %{})
 
           wait_for_event %{"$kind": :rollcall_tracker_pid_down, scope: ^scope, pid: ^pid} do
             Process.exit(pid, :kill)
           end
 
-          local = Tracker.get_state(scope).local
+          local = Tracker.get_state(rollcall, scope).local
           assert Local.entries(local, "partition_1") == []
           assert Local.entries(local, "partition_2") == []
         end,
@@ -406,20 +407,20 @@ defmodule Rollcall.LifecycleTraceTest do
       )
     end
 
-    test "keeps the entries of other pids when a pid exits", %{scope: scope} do
+    test "keeps the entries of other pids when a pid exits", %{scope: scope, rollcall: rollcall} do
       check_trace(
         fn ->
           pid = start_process()
           other = start_process()
-          {:ok, _ref} = Rollcall.track(pid, scope, "partition", "key", %{})
-          {:ok, other_ref} = Rollcall.track(other, scope, "partition", "key", %{})
+          {:ok, _ref} = Rollcall.track(rollcall, pid, scope, "partition", "key", %{})
+          {:ok, other_ref} = Rollcall.track(rollcall, other, scope, "partition", "key", %{})
 
           wait_for_event %{"$kind": :rollcall_tracker_pid_down, scope: ^scope, pid: ^pid} do
             Process.exit(pid, :kill)
           end
 
-          assert [%{ref: ^other_ref}] = Local.entries(Tracker.get_state(scope).local, "partition")
-          assert monitor_count(Tracker.whereis(scope), other) == 1
+          assert [%{ref: ^other_ref}] = Local.entries(Tracker.get_state(rollcall, scope).local, "partition")
+          assert monitor_count(Tracker.whereis(rollcall, scope), other) == 1
         end,
         fn trace ->
           # The only empty event is from the start of the tracker. The exit of a pid
@@ -429,18 +430,18 @@ defmodule Rollcall.LifecycleTraceTest do
       )
     end
 
-    test "increments the version for each pid that exits", %{scope: scope} do
+    test "increments the version for each pid that exits", %{scope: scope, rollcall: rollcall} do
       check_trace(
         fn ->
           pid = start_process()
-          {:ok, _ref} = Rollcall.track(pid, scope, "partition", "key", %{})
-          version = Tracker.get_state(scope).version
+          {:ok, _ref} = Rollcall.track(rollcall, pid, scope, "partition", "key", %{})
+          version = Tracker.get_state(rollcall, scope).version
 
           wait_for_event %{"$kind": :rollcall_tracker_pid_down, scope: ^scope, pid: ^pid} do
             Process.exit(pid, :kill)
           end
 
-          assert Tracker.get_state(scope).version == version + 1
+          assert Tracker.get_state(rollcall, scope).version == version + 1
         end,
         fn _trace -> :ok end
       )
@@ -448,14 +449,14 @@ defmodule Rollcall.LifecycleTraceTest do
   end
 
   describe "untrack on a scope with no tracker" do
-    test "returns :ok and does not start a tracker", %{scope: scope} do
+    test "returns :ok and does not start a tracker", %{scope: scope, rollcall: rollcall} do
       check_trace(
         fn ->
-          assert :ok = Rollcall.untrack(self(), scope, "partition", "key")
+          assert :ok = Rollcall.untrack(rollcall, self(), scope, "partition", "key")
         end,
         fn trace ->
           assert [] = events(trace, :rollcall_tracker_started, scope)
-          refute scope in Rollcall.scopes()
+          refute scope in Rollcall.scopes(rollcall)
         end
       )
     end
