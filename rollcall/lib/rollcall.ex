@@ -95,7 +95,7 @@ defmodule Rollcall do
   `start_link/1`.
   """
   @spec child_spec(keyword()) :: Supervisor.child_spec()
-  def child_spec(opts \\ []) do
+  def child_spec(opts) do
     %{
       id: Keyword.fetch!(opts, :name),
       start: {__MODULE__, :start_link, [opts]},

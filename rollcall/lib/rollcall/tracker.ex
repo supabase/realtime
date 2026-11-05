@@ -214,15 +214,22 @@ defmodule Rollcall.Tracker do
     call_if_running(name, scope, {:untrack, pid, partition, key}, :ok)
   end
 
-  # Calls the tracker for `scope`. Returns `default` when no tracker runs, or
-  # when the tracker stops before it replies.
+  # Calls the tracker for `scope`. Returns `default` when no tracker runs, when
+  # the tracker stops before it replies, or when the instance does not run.
   defp call_if_running(name, scope, message, default) do
-    case Process.whereis(name) do
-      nil -> default
-      _ -> GenServer.call(via(name, scope), message)
+    case lookup(name, scope) do
+      [{pid, _}] -> GenServer.call(pid, message)
+      [] -> default
     end
   catch
     :exit, {reason, _} when reason in @gone -> default
+  end
+
+  # `Registry.lookup/2` raises `ArgumentError` when the Registry does not exist.
+  defp lookup(name, scope) do
+    Registry.lookup(name, scope)
+  rescue
+    ArgumentError -> []
   end
 
   @doc """
@@ -259,9 +266,12 @@ defmodule Rollcall.Tracker do
   @doc """
   Starts the tracker for `scope` and registers it in the instance's registry.
 
-  The argument is `scope` or `{scope, opts}`. The option `:silence_threshold`
-  sets the number of ticks without a message after which the tracker deletes a
-  peer record. The default is 10.
+  The argument is `{scope, opts}`. The option `:name` is required. It is the
+  name of the instance of Rollcall, and the tracker registers in the registry
+  of that instance.
+
+  The option `:silence_threshold` sets the number of ticks without a message
+  after which the tracker deletes a peer record. The default is 10.
 
   The option `:transport` is `{module, opts}`. It sets the transport. The
   default is the Null transport.
@@ -275,7 +285,7 @@ defmodule Rollcall.Tracker do
   Returns `{:ok, pid}`. Returns `{:error, {:already_started, pid}}` when a
   tracker runs for `scope`. 
   """
-  @spec start_link(Rollcall.scope() | {Rollcall.scope(), init_options()}) :: GenServer.on_start()
+  @spec start_link({Rollcall.scope(), init_options()}) :: GenServer.on_start()
   def start_link({scope, opts}) do
     GenServer.start_link(__MODULE__, {scope, opts}, name: via(Keyword.fetch!(opts, :name), scope))
   end
@@ -297,7 +307,7 @@ defmodule Rollcall.Tracker do
   end
 
   @doc """
-  Returns the option keys that `Rollcall.start_link/1` accepts.
+  Returns the option keys that `Rollcall.start_link/1` accepts, except `:name`.
   """
   @spec init_options() :: [atom()]
   def init_options do
@@ -338,7 +348,7 @@ defmodule Rollcall.Tracker do
     {:ok, state}
   end
 
-  # The messages that `track/5`, `untrack/4` and `get_state/1` send.
+  # The messages that `track/6`, `untrack/5` and `get_state/2` send.
   @typep call_message ::
            :get_state
            | {:track, pid(), Rollcall.partition(), Rollcall.key(), Rollcall.meta()}
