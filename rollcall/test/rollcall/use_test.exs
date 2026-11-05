@@ -22,6 +22,8 @@ defmodule Rollcall.UseTest do
 
       assert scope in Instance.scopes()
       assert [%{ref: ^ref}] = Local.entries(Tracker.get_state(Instance, scope).local, "partition")
+      assert Instance.state(scope, "partition") == [{ref, "key", %{}}]
+      assert Instance.state(scope) == [{"partition", ref, "key", %{}}]
 
       assert :ok = Instance.untrack(self(), scope, "partition", "key")
       assert Local.entries(Tracker.get_state(Instance, scope).local, "partition") == []

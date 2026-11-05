@@ -15,7 +15,7 @@ defmodule Rollcall.Tracker do
     * send a request
     * reply to a request with a snapshot
     * hold `sent`, the state at the last heartbeat
-    * hold the view, or publish changes to subscribers
+    * publish changes to subscribers
 
   ## Process monitoring
 
@@ -129,6 +129,7 @@ defmodule Rollcall.Tracker do
   alias Rollcall.Tracker.Messages
   alias Rollcall.Tracker.Peer
   alias Rollcall.Tracker.State
+  alias Rollcall.Tracker.View
 
   @max_retries 3
   @default_empty_grace_in_ms :timer.seconds(5)
@@ -264,6 +265,31 @@ defmodule Rollcall.Tracker do
   end
 
   @doc """
+  Returns every entry in the view of `scope`. See `Rollcall.state/2`.
+  """
+  @spec state(Rollcall.name(), Rollcall.scope()) :: [Rollcall.scope_entry()]
+  def state(name, scope) do
+    with_view(name, scope, fn view -> View.entries(view) end)
+  end
+
+  @doc """
+  Returns the entries in `partition` of the view of `scope`. See
+  `Rollcall.state/3`.
+  """
+  @spec state(Rollcall.name(), Rollcall.scope(), Rollcall.partition()) :: [Rollcall.entry()]
+  def state(name, scope, partition) do
+    with_view(name, scope, fn view -> View.entries(view, partition) end)
+  end
+
+  defp with_view(name, scope, fun) do
+    case lookup(name, scope) do
+      [{_tracker, nil}] -> []
+      [{_tracker, view}] -> fun.(view)
+      _ -> []
+    end
+  end
+
+  @doc """
   Starts the tracker for `scope` and registers it in the instance's registry.
 
   The argument is `{scope, opts}`. The option `:name` is required. It is the
@@ -324,10 +350,15 @@ defmodule Rollcall.Tracker do
 
     tp(:rollcall_tracker_joined, %{scope: scope, origin: self()})
 
+    view = View.new()
+
+    {_new, _old} = Registry.update_value(Keyword.fetch!(opts, :name), scope, fn _ -> view end)
+
     state = %State{
       scope: scope,
       incarnation: System.monotonic_time(:nanosecond),
       local: Local.new(),
+      view: view,
       empty_grace_in_ms: Keyword.get(opts, :empty_grace_in_ms, @default_empty_grace_in_ms),
       silence_threshold: Keyword.get(opts, :silence_threshold, @default_silence_threshold),
       heartbeat_period_in_ms: Keyword.get(opts, :heartbeat_period_in_ms, @default_heartbeat_period_in_ms),
@@ -369,6 +400,7 @@ defmodule Rollcall.Tracker do
     state =
       state
       |> State.apply_changes(local, changes)
+      |> update_view(changes)
       |> cancel_empty_timer()
       |> watch_pid(pid)
 
@@ -395,6 +427,7 @@ defmodule Rollcall.Tracker do
     state =
       state
       |> State.apply_changes(local, changes)
+      |> update_view(changes)
       |> maybe_unwatch(pid)
       |> start_empty_timer()
 
@@ -435,6 +468,7 @@ defmodule Rollcall.Tracker do
     state =
       state
       |> State.apply_changes(local, changes)
+      |> update_view(changes)
       |> remove_monitor(pid)
       |> start_empty_timer()
 
@@ -535,7 +569,9 @@ defmodule Rollcall.Tracker do
       behind: Peer.behind?(peer)
     })
 
-    State.put_peer(state, node, peer)
+    state
+    |> State.put_peer(node, peer)
+    |> update_view(changes)
   end
 
   defp tick_and_purge_peers(%State{} = state) do
@@ -547,6 +583,8 @@ defmodule Rollcall.Tracker do
               Map.put(kept, node, peer)
 
             {:purge, changes} ->
+              update_view(state, changes)
+
               tp(:rollcall_tracker_peer_purged, %{
                 scope: state.scope,
                 node: node,
@@ -559,6 +597,12 @@ defmodule Rollcall.Tracker do
       end)
 
     %{state | peers: peers}
+  end
+
+  defp update_view(state, changes) do
+    View.write(state.view, changes)
+
+    state
   end
 
   defp send_heartbeat(%State{} = state) do

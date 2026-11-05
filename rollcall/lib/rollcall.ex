@@ -23,6 +23,8 @@ defmodule Rollcall do
   scope gets a new process soon after it lost its last process. See
   `Rollcall.Tracker`.
 
+  A client reads the entries of a partition with `state/3`. 
+
   Use the functions in this module. Do not call `Rollcall.Tracker` directly.
   """
 
@@ -46,11 +48,17 @@ defmodule Rollcall do
   @typedoc "The identity of an entry."
   @type ref :: String.t()
 
+  @typedoc "An entry in one partition: its ref, its key and its meta."
+  @type entry :: {ref(), key(), meta()}
+
+  @typedoc "An entry in a scope: its partition, its ref, its key and its meta."
+  @type scope_entry :: {partition(), ref(), key(), meta()}
+
   @doc """
   Defines an instance of Rollcall named after the module that calls `use`.
 
-  The module gets `child_spec/1`, `start_link/1`, `track/5`, `untrack/4` and
-  `scopes/0`. Each function calls the function of `Rollcall` with the same name
+  The module gets `child_spec/1`, `start_link/1`, `track/5`, `untrack/4`,
+  `scopes/0`, `state/1` and `state/2`. Each function calls the function of `Rollcall` with the same name
   and passes the module as the name of the instance. A caller then writes
   `MyApp.Rollcall.track(...)` and never handles the name.
 
@@ -87,6 +95,12 @@ defmodule Rollcall do
 
       @spec scopes() :: [Rollcall.scope()]
       def scopes, do: Rollcall.scopes(__MODULE__)
+
+      @spec state(Rollcall.scope(), Rollcall.partition()) :: [Rollcall.entry()]
+      def state(scope, partition), do: Rollcall.state(__MODULE__, scope, partition)
+
+      @spec state(Rollcall.scope()) :: [Rollcall.scope_entry()]
+      def state(scope), do: Rollcall.state(__MODULE__, scope)
     end
   end
 
@@ -154,6 +168,42 @@ defmodule Rollcall do
   @spec scopes(name()) :: [scope()]
   def scopes(name) do
     Tracker.scopes(name)
+  end
+
+  @doc """
+  Returns every entry in `scope`: the partition, the ref, the key and the meta
+  of each entry. The order is not defined.
+
+  The entries are the local entries plus the replica of each peer. Use
+  `state/3` to read one partition. 
+
+  Returns `[]` when no tracker runs for `scope`, or when the instance does not
+  run. The function reads a table of the tracker. It sends no message to the
+  tracker and it does not start a tracker.
+
+  Note: this function returns the entire scope, all partitions. In real use cases
+  you probably don't want this and should use `state/3` instead, which returns
+  a single partition, but it's here for ergonomics when testing.
+  """
+  @spec state(name(), scope()) :: [scope_entry()]
+  def state(name, scope) do
+    Tracker.state(name, scope)
+  end
+
+  @doc """
+  Returns the entries in `partition` of `scope`: the ref, the key and the meta
+  of each entry. The order is not defined.
+
+  The entries are the local entries plus the replica of each peer. The cost of
+  the read does not depend on the other partitions of the scope.
+
+  Returns `[]` when no tracker runs for `scope`, or when the instance does not
+  run. The function reads a table of the tracker. It sends no message to the
+  tracker and it does not start a tracker.
+  """
+  @spec state(name(), scope(), partition()) :: [entry()]
+  def state(name, scope, partition) do
+    Tracker.state(name, scope, partition)
   end
 
   @doc """
