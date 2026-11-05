@@ -175,6 +175,86 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
       assert_receive {:DOWN, ^ref, :process, ^pid, {:shutdown, :max_retries_reached}}, 1000
     end
 
+    test "stops after seven consecutive poll failures across successful preparations", %{args: args} do
+      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> {:ok, %{}} end)
+      stub(Replications, :prepare_replication, fn _, _ -> {:ok, %Postgrex.Result{}} end)
+      test_pid = self()
+
+      expect(Replications, :list_changes, 7, fn _, _ ->
+        send(test_pid, :poll_failed)
+        {:error, %Postgrex.Error{message: "boom"}}
+      end)
+
+      pid = start_supervised!({Poller, args}, restart: :temporary)
+      ref = Process.monitor(pid)
+
+      :sys.replace_state(pid, fn state ->
+        %{state | backoff: DBConnection.Backoff.new(backoff_min: 60_000, backoff_max: 120_000, backoff_type: :exp)}
+      end)
+
+      for attempt <- 1..7 do
+        send(pid, :retry)
+        assert_receive :poll_failed
+
+        if attempt < 7 do
+          state = :sys.get_state(pid)
+          if attempt > 1, do: assert(Process.read_timer(state.retry_ref) > 60_000)
+        end
+      end
+
+      assert_receive {:DOWN, ^ref, :process, ^pid, {:shutdown, :max_retries_reached}}, 1000
+    end
+
+    test "terminates a busy slot on the fifth failure and resets retries after recovery", %{args: args} do
+      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> {:ok, %{}} end)
+      stub(Replications, :prepare_replication, fn _, _ -> {:ok, %Postgrex.Result{}} end)
+      stub(Replications, :get_pg_stat_activity_diff, fn _, 12345 -> {:ok, 42} end)
+      test_pid = self()
+
+      expect(Replications, :list_changes, 5, fn _, _ ->
+        send(test_pid, :poll_failed)
+
+        {:error,
+         %Postgrex.Error{
+           postgres: %{code: :object_in_use, message: "replication slot is active for PID 12345"}
+         }}
+      end)
+
+      expect(Replications, :list_changes, fn _, opts ->
+        send(test_pid, {:poll_succeeded, opts[:slot_name]})
+        {:ok, %Postgrex.Result{rows: [], num_rows: 0}}
+      end)
+
+      expect(Replications, :terminate_backend, fn _, slot_name ->
+        send(test_pid, {:backend_terminated, slot_name})
+        {:ok, :terminated}
+      end)
+
+      pid = start_supervised!({Poller, args}, restart: :temporary)
+
+      :sys.replace_state(pid, fn state ->
+        %{state | backoff: DBConnection.Backoff.new(backoff_min: 60_000, backoff_max: 60_000, backoff_type: :exp)}
+      end)
+
+      slot_name = :sys.get_state(pid).slot_name
+
+      for _ <- 1..4 do
+        send(pid, :retry)
+        assert_receive :poll_failed
+        :sys.get_state(pid)
+        refute_received {:backend_terminated, _}
+      end
+
+      send(pid, :retry)
+      assert_receive :poll_failed
+      assert_receive {:backend_terminated, ^slot_name}
+      assert %{retry_count: 5} = :sys.get_state(pid)
+
+      send(pid, :retry)
+      assert_receive {:poll_succeeded, ^slot_name}
+      assert %{retry_count: 0} = :sys.get_state(pid)
+    end
+
     test "handles no new changes", %{args: args, tenant: tenant} do
       tenant_id = args["id"]
       reject(&TenantBroadcaster.pubsub_direct_broadcast/6)
