@@ -11,6 +11,7 @@ defmodule RealtimeWeb.BroadcastSingleController do
   alias Realtime.Messages
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.SingleBroadcast
+  alias RealtimeWeb.Channels.Payloads.FlexibleBoolean
   alias RealtimeWeb.OpenApiSchemas.EmptyResponse
   alias RealtimeWeb.OpenApiSchemas.BroadcastSingleJsonParams
   alias RealtimeWeb.OpenApiSchemas.BroadcastSingleBinaryParams
@@ -52,7 +53,9 @@ defmodule RealtimeWeb.BroadcastSingleController do
         schema: %OpenApiSpex.Schema{type: :boolean},
         required: false,
         example: false,
-        description: "Whether this is a private broadcast (requires RLS authorization). Defaults to false."
+        description:
+          "Whether this is a private broadcast (requires RLS authorization). Defaults to false. " <>
+            "`true` and `false` are read in any case, and any other value returns 422."
       ],
       persist: [
         in: :query,
@@ -101,12 +104,12 @@ defmodule RealtimeWeb.BroadcastSingleController do
   def broadcast(%{assigns: %{tenant: tenant}} = conn, %{"topic" => topic, "event" => event}) do
     # Read from the query string only: Plug merges JSON body keys into params, so a payload
     # with a "private" or "persist" key would otherwise change how it is broadcast
-    private = parse_boolean(conn.query_params["private"])
     auth_params = build_auth_params(conn, tenant)
 
     result =
       RequestMetrics.track(:broadcast, :http, tenant.external_id, fn ->
-        with {:ok, persist} <- parse_persist(conn.query_params),
+        with {:ok, private} <- parse_private(conn.query_params),
+             {:ok, persist} <- parse_persist(conn.query_params),
              {:ok, payload, content_type} <- payload(conn) do
           SingleBroadcast.broadcast(auth_params, tenant, topic, event, payload, content_type,
             private: private,
@@ -153,6 +156,14 @@ defmodule RealtimeWeb.BroadcastSingleController do
     })
   end
 
-  defp parse_boolean("true"), do: true
-  defp parse_boolean(_), do: false
+  # Read like `config.private` on a channel join. Reading an unknown value as false would send a
+  # message meant for a private channel to the public one.
+  defp parse_private(%{"private" => private}) do
+    case FlexibleBoolean.cast(private) do
+      {:ok, private} -> {:ok, private}
+      :error -> {:error, :unprocessable_entity, "private must be true or false"}
+    end
+  end
+
+  defp parse_private(_params), do: {:ok, false}
 end
