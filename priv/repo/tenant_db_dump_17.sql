@@ -662,7 +662,7 @@ begin
   if type_::text = 'bytea' then
     return to_jsonb(val);
   end if;
-  execute format('select to_jsonb(%L::'|| type_::text || ')', val) into res;
+  execute format('select to_jsonb(%L::'|| pg_catalog.format_type(type_, -1) || ')', val) into res;
   return res;
 end
 $$;
@@ -681,6 +681,7 @@ CREATE FUNCTION realtime.check_equality_op(op realtime.equality_op, type_ regtyp
 Casts *val_1* and *val_2* as type *type_* and check the *op* condition for truthiness
 */
 declare
+    type_name text = pg_catalog.format_type(type_, -1);
     op_symbol text = (
         case
             when op = 'eq' then '='
@@ -696,12 +697,12 @@ declare
     res boolean;
 begin
     execute format(
-        'select %L::'|| type_::text || ' ' || op_symbol
+        'select %L::'|| type_name || ' ' || op_symbol
         || ' ( %L::'
         || (
             case
-                when op = 'in' then type_::text || '[]'
-                else type_::text end
+                when op = 'in' then type_name || '[]'
+                else type_name end
         )
         || ')', val_1, val_2) into res;
     return res;
@@ -719,6 +720,7 @@ CREATE FUNCTION realtime.check_equality_op(op realtime.equality_op, type_ regtyp
     LANGUAGE plpgsql STABLE
     AS $$
 declare
+    type_name text = pg_catalog.format_type(type_, -1);
     op_symbol text;
     res boolean;
 begin
@@ -727,10 +729,10 @@ begin
         execute format(
             'select %L::%s %s %L::%s',
             val_1,
-            type_::text,
+            type_name,
             case when negate then 'IS NOT DISTINCT FROM' else 'IS DISTINCT FROM' end,
             val_2,
-            type_::text
+            type_name
         ) into res;
         return res;
     end if;
@@ -743,7 +745,7 @@ begin
         execute format(
             'select %L::%s %s %s',
             val_1,
-            type_::text,
+            type_name,
             case when negate then 'IS NOT' else 'IS' end,
             upper(val_2)
         ) into res;
@@ -772,10 +774,10 @@ begin
     execute format(
         'select %L::%s %s (%L::%s)',
         val_1,
-        type_::text,
+        type_name,
         op_symbol,
         val_2,
-        case when op = 'in' then type_::text || '[]' else type_::text end
+        case when op = 'in' then type_name || '[]' else type_name end
     ) into res;
 
     return case when negate then not res else res end;
@@ -1810,4 +1812,5 @@ INSERT INTO realtime."schema_migrations" (version) VALUES (20261009120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261022120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261027120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261029120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20261030120000);
 REVOKE ALL ON realtime.schema_migrations FROM postgres, dashboard_user, anon, authenticated, service_role, supabase_realtime_admin;
