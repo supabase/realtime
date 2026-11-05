@@ -222,6 +222,13 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           description: "Count of Realtime Channel joins over the tenant's join budget on the node",
           tags: [:tenant]
         ),
+        counter(
+          [:realtime, :channel, :socket_broadcast_limit_exceeded],
+          event_name: [:realtime, :channel, :socket_broadcast_limit_exceeded],
+          measurement: :count,
+          description: "Count of Realtime Channel broadcasts over their socket's broadcast limit",
+          tags: [:tenant]
+        ),
         sum(
           [:realtime, :channel, :input_bytes],
           event_name: [:realtime, :channel, :input_bytes],

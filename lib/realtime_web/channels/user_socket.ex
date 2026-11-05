@@ -139,7 +139,7 @@ defmodule RealtimeWeb.UserSocket do
 
       assigns = Map.from_struct(assigns)
 
-      {:ok, socket |> assign(assigns) |> put_join_bucket(tenant)}
+      {:ok, socket |> assign(assigns) |> put_join_bucket(tenant) |> put_broadcast_bucket()}
     else
       {:error, :tenant_not_found} ->
         log_error("TenantNotFound", "Tenant not found: #{external_id}")
@@ -252,6 +252,13 @@ defmodule RealtimeWeb.UserSocket do
     bucket = TokenBucket.new(per_second, max(max_channels, 1))
 
     %{socket | private: Map.put(socket.private, :join_bucket, bucket)}
+  end
+
+  defp put_broadcast_bucket(socket) do
+    config = Application.fetch_env!(:realtime, :client_broadcast_rate_limit)
+    bucket = TokenBucket.new(config[:per_second], config[:burst])
+
+    %{socket | private: Map.put(socket.private, :broadcast_bucket, bucket)}
   end
 
   defp connect_error(reason) do

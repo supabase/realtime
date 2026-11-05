@@ -51,6 +51,8 @@ defmodule RealtimeWeb.RealtimeChannel do
   @node_join_budget_flag "node_join_budget"
   @node_join_budget_exceeded_event [:realtime, :channel, :node_join_budget_exceeded]
   @socket_join_limit_flag "socket_join_limit"
+  @socket_broadcast_limit_flag "socket_broadcast_limit"
+  @socket_broadcast_limit_exceeded_event [:realtime, :channel, :socket_broadcast_limit_exceeded]
 
   @impl true
   def join("realtime:", _params, socket) do
@@ -495,6 +497,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   @impl true
   def handle_in("broadcast", payload, %{assigns: %{private?: true}} = socket) do
     %{tenant: tenant_id} = socket.assigns
+    measure_socket_broadcasts(socket)
 
     RequestMetrics.track(:broadcast, :ws, tenant_id, fn ->
       with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id) do
@@ -528,6 +531,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_in("broadcast", payload, %{assigns: %{private?: false}} = socket) do
+    measure_socket_broadcasts(socket)
     RequestMetrics.track(:broadcast, :ws, socket.assigns.tenant, fn -> BroadcastHandler.handle(payload, socket) end)
   end
 
@@ -750,6 +754,14 @@ defmodule RealtimeWeb.RealtimeChannel do
   defp measure_node_joins(tenant) do
     if FeatureFlags.enabled?(@node_join_budget_flag, tenant.external_id) and NodeJoinBudget.take(tenant) == :error do
       Telemetry.execute(@node_join_budget_exceeded_event, %{count: 1}, %{tenant: tenant.external_id})
+    end
+
+    :ok
+  end
+
+  defp measure_socket_broadcasts(%{assigns: %{tenant: tenant_id}, private: %{broadcast_bucket: bucket}}) do
+    if FeatureFlags.enabled?(@socket_broadcast_limit_flag, tenant_id) and TokenBucket.take(bucket) == :error do
+      Telemetry.execute(@socket_broadcast_limit_exceeded_event, %{count: 1}, %{tenant: tenant_id})
     end
 
     :ok
