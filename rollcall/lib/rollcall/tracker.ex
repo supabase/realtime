@@ -15,7 +15,6 @@ defmodule Rollcall.Tracker do
     * send a request
     * reply to a request with a snapshot
     * hold `sent`, the state at the last heartbeat
-    * publish changes to subscribers
 
   ## Process monitoring
 
@@ -401,6 +400,7 @@ defmodule Rollcall.Tracker do
       state
       |> State.apply_changes(local, changes)
       |> update_view(changes)
+      |> publish_changes(changes)
       |> cancel_empty_timer()
       |> watch_pid(pid)
 
@@ -428,6 +428,7 @@ defmodule Rollcall.Tracker do
       state
       |> State.apply_changes(local, changes)
       |> update_view(changes)
+      |> publish_changes(changes)
       |> maybe_unwatch(pid)
       |> start_empty_timer()
 
@@ -469,6 +470,7 @@ defmodule Rollcall.Tracker do
       state
       |> State.apply_changes(local, changes)
       |> update_view(changes)
+      |> publish_changes(changes)
       |> remove_monitor(pid)
       |> start_empty_timer()
 
@@ -572,6 +574,7 @@ defmodule Rollcall.Tracker do
     state
     |> State.put_peer(node, peer)
     |> update_view(changes)
+    |> publish_changes(changes)
   end
 
   defp tick_and_purge_peers(%State{} = state) do
@@ -583,7 +586,9 @@ defmodule Rollcall.Tracker do
               Map.put(kept, node, peer)
 
             {:purge, changes} ->
-              update_view(state, changes)
+              state
+              |> update_view(changes)
+              |> publish_changes(changes)
 
               tp(:rollcall_tracker_peer_purged, %{
                 scope: state.scope,
@@ -601,6 +606,25 @@ defmodule Rollcall.Tracker do
 
   defp update_view(state, changes) do
     View.write(state.view, changes)
+
+    state
+  end
+
+  defp publish_changes(state, changes) do
+    for {partition, {joins, leaves} = diff} <- Changes.partition_diffs(changes) do
+      :ok = state.transport_module.publish(state.transport_state, partition, diff)
+
+      tp(
+        :rollcall_tracker_published,
+        %{
+          scope: state.scope,
+          partition: partition,
+          joins: Enum.map(joins, &elem(&1, 0)),
+          leaves: Enum.map(leaves, &elem(&1, 0))
+        },
+        ignore_side_effects: true
+      )
+    end
 
     state
   end

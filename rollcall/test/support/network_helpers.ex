@@ -118,6 +118,28 @@ defmodule Rollcall.NetworkHelpers do
     transport
   end
 
+  @doc """
+  Subscribes the test process to the diffs that the tracker on `node` publishes
+  for `partition` of `scope`.
+  """
+  @spec subscribe(pid(), Rollcall.scope(), node(), Rollcall.partition()) :: :ok
+  def subscribe(network, scope, node, partition) do
+    Network.subscribe(network, node, scope, partition, self())
+  end
+
+  @doc """
+  Returns the next diff that a tracker published for `partition`. Fails the test
+  after `timeout` milliseconds.
+  """
+  @spec receive_diff(Rollcall.partition(), timeout()) :: Rollcall.partition_diff()
+  def receive_diff(partition, timeout \\ 1_000) do
+    receive do
+      {:rollcall_diff, _scope, ^partition, diff} -> diff
+    after
+      timeout -> flunk("No diff for the partition #{inspect(partition)} within #{timeout} ms")
+    end
+  end
+
   @doc "Sends `message` from the probe to the trackers of its scope."
   @spec send_from_probe(term(), term()) :: :ok
   def send_from_probe(probe, message), do: InMemory.heartbeat(probe, message)
