@@ -41,19 +41,6 @@ defmodule Realtime.Presence.Encoder do
     }
   end
 
-  defp map_meta(meta, reference) do
-    meta
-    |> Map.put(:phx_ref, reference)
-    |> replace_prev_ref()
-  end
-
-  defp replace_prev_ref(meta) do
-    case Map.pop(meta, :rc_prev_ref) do
-      {nil, meta} -> meta
-      {prev_ref, meta} -> Map.put(meta, :phx_ref_prev, prev_ref)
-    end
-  end
-
   defp map_entries(rollcall_state) do
     rollcall_state
     |> Enum.reduce(
@@ -66,5 +53,18 @@ defmodule Realtime.Presence.Encoder do
         end)
       end
     )
+  end
+
+  defp map_meta(meta, reference) do
+    meta
+    |> Map.put(:phx_ref, reference)
+    |> replace_prev_ref()
+  end
+
+  defp replace_prev_ref(meta) do
+    case Map.pop(meta, :rc_prev_ref) do
+      {nil, meta} -> meta
+      {prev_ref, meta} -> Map.put(meta, :phx_ref_prev, prev_ref)
+    end
   end
 end
