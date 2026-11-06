@@ -63,6 +63,8 @@ export async function setup(): Promise<{ userId: string; testUser: { email: stri
     await runSql("pg_changes details column", sql`ALTER TABLE public.pg_changes ADD COLUMN IF NOT EXISTS details text`);
     await runSql("pg_changes nullable_value column", sql`ALTER TABLE public.pg_changes ADD COLUMN IF NOT EXISTS nullable_value text`);
     await runSql("pg_changes run_id column", sql`ALTER TABLE public.pg_changes ADD COLUMN IF NOT EXISTS run_id text`);
+    await runSql("pg_changes json_value column", sql`ALTER TABLE public.pg_changes ADD COLUMN IF NOT EXISTS json_value jsonb`);
+    await runSql("pg_changes tags column", sql`ALTER TABLE public.pg_changes ADD COLUMN IF NOT EXISTS tags text[]`);
     await runSql("pg_changes replica identity", sql`ALTER TABLE public.pg_changes REPLICA IDENTITY FULL`);
     await runSql("replay_check binary_payload column", sql`ALTER TABLE public.replay_check ADD COLUMN IF NOT EXISTS binary_payload bytea`);
     log(kleur.dim(`setup: tables done (${(performance.now() - stepStart).toFixed(0)}ms)`));

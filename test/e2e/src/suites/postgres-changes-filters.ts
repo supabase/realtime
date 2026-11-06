@@ -1,8 +1,15 @@
 import assert from "assert";
-import { postgresChangesFilter } from "@supabase/supabase-js";
+import { postgresChangesFilter, type SupabaseClient } from "@supabase/supabase-js";
 import { POSTGRES_CHANGES_CONFIG, RATE_LIMIT_PAUSE_MS } from "../context.ts";
 import type { SuiteDescriptor } from "../runner.ts";
 import { sleep, randomTopic, waitFor, stopClient, openPostgresChannel, executeInsert, isolated } from "../helpers.ts";
+
+// Inserts the rows in one statement, so they share one transaction, and returns their ids.
+async function insertRows(supabase: SupabaseClient, rows: Record<string, unknown>[]): Promise<number[]> {
+  const { data, error } = await supabase.from("pg_changes").insert(rows).select("id");
+  if (error) throw new Error(`Error inserting into pg_changes: ${error.message}`);
+  return (data as { id: number }[]).map((r) => r.id);
+}
 
 export const postgresChangesFilters: SuiteDescriptor = {
   name: "postgres-changes-filters",
@@ -634,6 +641,137 @@ export const postgresChangesFilters: SuiteDescriptor = {
         assert.deepStrictEqual(Object.keys(result.new).sort(), ["id", "value"], "payload must only contain the selected columns");
         assert.ok(!("details" in result.new), "unselected details column must be absent");
         assert.ok(!("nullable_value" in result.new), "unselected nullable_value column must be absent");
+        return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
+      } finally {
+        await stopClient(supabase);
+      }
+    });
+
+    // Filters on jsonb and array columns (issue #2361, fixed by #2362). Before the fix, the
+    // filter check read these values back from their jsonb form: a JSON string lost its quotes
+    // and an array became ["a", "b"] instead of {a,b}. The check then raised, and the raise
+    // dropped every change in that poll, for every subscriber of the project.
+
+    await sleep(RATE_LIMIT_PAUSE_MS);
+
+    await test("not.is.null: delivers row whose jsonb column holds a JSON string", async () => {
+      const supabase = await authedClient();
+      try {
+        const tag = crypto.randomUUID().replace(/-/g, "");
+        const value = `jsonstr_${tag}`;
+        let result: any = null;
+
+        // value = jsonstr_tag  AND  json_value IS NOT NULL, the filter from issue #2361
+        const filter = postgresChangesFilter().eq("value", value).not("json_value", "is", null);
+        const channel = supabase
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
+          .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter }, (p) => { if (p.new.value === value) result = p; });
+
+        const { subscribeMs } = await openPostgresChannel(channel);
+        await insertRows(supabase, [{ value, json_value: "matched" }]); // a JS string is a JSON string in jsonb
+        await waitFor(() => result, "jsonb string not.is.null event");
+
+        assert.strictEqual(result.new.json_value, "matched");
+        return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
+      } finally {
+        await stopClient(supabase);
+      }
+    });
+
+    await sleep(RATE_LIMIT_PAUSE_MS);
+
+    await test("eq: delivers row whose jsonb column equals a JSON string", async () => {
+      const supabase = await authedClient();
+      try {
+        const tag = crypto.randomUUID().replace(/-/g, "");
+        const doc = `doc_${tag}`;
+        let result: any = null;
+
+        // The filter value is JSON text, so the string keeps its quotes: json_value = '"doc_tag"'::jsonb
+        const channel = supabase
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
+          .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: postgresChangesFilter().eq("json_value", JSON.stringify(doc)) }, (p) => { if (p.new.json_value === doc) result = p; });
+
+        const { subscribeMs } = await openPostgresChannel(channel);
+        await insertRows(supabase, [{ json_value: doc }]);
+        await waitFor(() => result, "jsonb string eq event");
+
+        assert.strictEqual(result.new.json_value, doc);
+        return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
+      } finally {
+        await stopClient(supabase);
+      }
+    });
+
+    await sleep(RATE_LIMIT_PAUSE_MS);
+
+    await test("eq: delivers insert, update and delete of a row whose array column equals the value", async () => {
+      const supabase = await authedClient();
+      try {
+        const tag = crypto.randomUUID().replace(/-/g, "");
+        const tags = [tag, "b"];
+        const seen: any[] = [];
+
+        // tags = '{tag,b}'::text[]. The builder quotes the value, because a bare comma
+        // would split the filter in two. DELETE runs the filter on the old row.
+        const channel = supabase
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
+          .on("postgres_changes", { event: "*", schema: "public", table: "pg_changes", filter: postgresChangesFilter().eq("tags", `{${tags.join(",")}}`) }, (p) => { seen.push(p); });
+        const seenEvent = (eventType: string) => seen.find((p) => p.eventType === eventType) ?? null;
+
+        const { subscribeMs } = await openPostgresChannel(channel);
+        const [id] = await insertRows(supabase, [{ tags }]);
+        const { value: inserted } = await waitFor(() => seenEvent("INSERT"), "array INSERT event");
+
+        const { error: updateError } = await supabase.from("pg_changes").update({ value: `updated_${tag}` }).eq("id", id);
+        if (updateError) throw new Error(`Error updating pg_changes: ${updateError.message}`);
+        const { value: updated } = await waitFor(() => seenEvent("UPDATE"), "array UPDATE event");
+
+        const { error: deleteError } = await supabase.from("pg_changes").delete().eq("id", id);
+        if (deleteError) throw new Error(`Error deleting from pg_changes: ${deleteError.message}`);
+        const { value: deleted } = await waitFor(() => seenEvent("DELETE"), "array DELETE event");
+
+        assert.deepStrictEqual(inserted.new.tags, tags);
+        assert.strictEqual(updated.new.value, `updated_${tag}`);
+        // pg_changes has RLS enabled, so the old record of a DELETE carries only the primary key.
+        assert.strictEqual(deleted.old.id, id);
+        return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
+      } finally {
+        await stopClient(supabase);
+      }
+    });
+
+    await sleep(RATE_LIMIT_PAUSE_MS);
+
+    await test("a filter on an array column does not drop changes for other subscribers", async () => {
+      const supabase = await authedClient();
+      try {
+        const tag = crypto.randomUUID().replace(/-/g, "");
+        const plain = `plain_${tag}`;
+        const other = `other_${tag}`;
+        let delivered: any = null;
+        const arraySeen: string[] = [];
+
+        // A plain subscriber, and a second subscriber that filters on the array column.
+        // No row of this test matches the array filter, but Realtime still runs that
+        // filter on every row of the table.
+        const plainChannel = supabase
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
+          .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: postgresChangesFilter().eq("value", plain) }, (p) => { if (p.new.value === plain) delivered = p; });
+        const arrayChannel = supabase
+          .channel(randomTopic(), POSTGRES_CHANGES_CONFIG)
+          .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: postgresChangesFilter().eq("tags", `{${tag}}`) }, (p) => { arraySeen.push(p.new.value); });
+
+        const { subscribeMs } = await openPostgresChannel(plainChannel);
+        await openPostgresChannel(arrayChannel);
+        // One statement is one transaction, and Realtime reads a transaction in a single
+        // poll. Before the fix, the array row made the poll fail and the plain row was lost.
+        await insertRows(supabase, [{ value: plain }, { value: other, tags: [other] }]);
+        await waitFor(() => delivered, "plain event next to an array row");
+        await sleep(1000); // give the array row a chance to arrive if the array filter were ignored
+
+        assert.strictEqual(delivered.new.value, plain);
+        assert.deepStrictEqual(arraySeen, [], "row whose array differs from the filter must be excluded");
         return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
       } finally {
         await stopClient(supabase);
