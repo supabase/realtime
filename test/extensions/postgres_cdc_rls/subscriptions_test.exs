@@ -39,6 +39,31 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
   describe "filters: parsing" do
     @describetag without_db: true
 
+    for operator <- ["in", "not.in"],
+        {value, expected} <- [
+          {"(NULL,null,NuLl)", ~s|{"NULL","null","NuLl"}|},
+          {"({tag},a{b},a}b)", ~s|{"{tag}","a{b}","a}b"}|},
+          {"(,hello,)", ~s|{"",hello,""}|},
+          {~s|("",NULL,"{tag}")|, ~s|{"","NULL","{tag}"}|},
+          {~S|("a,b","say \"hi\"","C:\\tmp",NULL)|, ~S|{"a,b","say \"hi\"","C:\\tmp","NULL"}|},
+          {~s|(foo,"a,{b}")|, ~s|{foo,"a,{b}"}|},
+          {~s|(foo,"a(b",NULL)|, ~s|{foo,"a(b","NULL"}|},
+          {~s|( "a,{b}")|, ~s|{ "a,{b}"}|},
+          {~s|("")|, ~s|{""}|},
+          {"(1,2,3)", "{1,2,3}"},
+          {"()", "{}"}
+        ] do
+      test "#{operator} preserves array elements in #{value}" do
+        assert {:ok,
+                {"*", "public", "test", [{"details", "in", unquote(expected), unquote(operator == "not.in")}], nil}} =
+                 Subscriptions.parse_subscription_params(%{
+                   "schema" => "public",
+                   "table" => "test",
+                   "filter" => "details=#{unquote(operator)}.#{unquote(value)}"
+                 })
+      end
+    end
+
     test "user can combine two range conditions to create a bounded filter" do
       assert {:ok, {"*", "public", "test", filters, _}} =
                Subscriptions.parse_subscription_params(%{
@@ -572,6 +597,54 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
   end
 
   describe "filters: gating rows end to end (apply_rls)" do
+    test "in and not.in preserve special string values through subscription creation and row matching", %{conn: conn} do
+      values = ["", "NULL", "null", "NuLl", "{tag}", "a{b}", "a}b", "a,b", ~s|say "hi"|, ~S|C:\tmp|]
+      filter_values = ~S|(,NULL,null,NuLl,{tag},a{b},a}b,"a,b","say \"hi\"","C:\\tmp")|
+      in_id = UUID.uuid1()
+      not_in_id = UUID.uuid1()
+      slot_name = "test_apply_rls_in_strings_#{:rand.uniform(999_999)}"
+
+      for {id, operator} <- [{in_id, "in"}, {not_in_id, "not.in"}] do
+        {:ok, subscription_params} =
+          Subscriptions.parse_subscription_params(%{
+            "schema" => "public",
+            "table" => "test",
+            "filter" => "details=#{operator}.#{filter_values}"
+          })
+
+        params = [%{claims: %{"role" => "anon"}, id: id, subscription_params: subscription_params}]
+
+        assert {:ok, [%Postgrex.Result{}]} =
+                 Subscriptions.create(conn, "supabase_realtime_test", params, self(), self())
+
+        assert %{rows: [[^values]]} =
+                 Postgrex.query!(
+                   conn,
+                   "select (filters[1]).value::text[] from realtime.subscription where subscription_id = $1",
+                   [UUID.string_to_binary!(id)]
+                 )
+      end
+
+      create_replication_slot(conn, slot_name, plugin: "wal2json")
+
+      try do
+        for value <- values ++ ["not-in-list"] do
+          Postgrex.query!(conn, "insert into test (details) values ($1)", [value])
+
+          %{rows: rows} =
+            Postgrex.query!(conn, "select subscription_ids from realtime.list_changes($1, $2, 100, 1048576)", [
+              "supabase_realtime_test",
+              slot_name
+            ])
+
+          expected_id = if value == "not-in-list", do: not_in_id, else: in_id
+          assert rows == [[[UUID.string_to_binary!(expected_id)]]]
+        end
+      after
+        drop_replication_slot(conn, slot_name)
+      end
+    end
+
     test "apply_rls honours a like filter end to end", %{conn: conn} do
       visible_id = UUID.uuid1()
       hidden_id = UUID.uuid1()
