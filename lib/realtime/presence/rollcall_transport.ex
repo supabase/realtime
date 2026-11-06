@@ -1,4 +1,4 @@
-defmodule Realtime.Rollcall.Transport do
+defmodule Realtime.Presence.RollcallTransport do
   @moduledoc """
   Implements Rollcall.Transport for use in Realtime.
   """
@@ -19,10 +19,17 @@ defmodule Realtime.Rollcall.Transport do
     :ok
   end
 
+  # TODO: Check the feature flag before the broadcast. A later PR adds the check.
+  # The function is safe until then, because nothing calls it.
   @impl true
-  def publish(_, _, _) do
-    # TODO Implement Rollcall publish/3 for Realtime
-    :ok
+  def publish(%{pubsub: pubsub}, partition, diff) do
+    broadcast = %Phoenix.Socket.Broadcast{
+      topic: partition,
+      event: "presence_diff",
+      payload: Realtime.Presence.Encoder.diff(diff)
+    }
+
+    Phoenix.PubSub.local_broadcast(pubsub, partition, broadcast, RealtimeWeb.RealtimeChannel.MessageDispatcher)
   end
 
   @impl true

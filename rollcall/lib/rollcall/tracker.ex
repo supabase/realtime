@@ -611,7 +611,7 @@ defmodule Rollcall.Tracker do
   end
 
   defp publish_changes(state, changes) do
-    for {partition, {joins, leaves} = diff} <- Changes.partition_diffs(changes) do
+    for {partition, diff} <- Changes.partition_diffs(changes) do
       :ok = state.transport_module.publish(state.transport_state, partition, diff)
 
       tp(
@@ -619,8 +619,8 @@ defmodule Rollcall.Tracker do
         %{
           scope: state.scope,
           partition: partition,
-          joins: Enum.map(joins, &elem(&1, 0)),
-          leaves: Enum.map(leaves, &elem(&1, 0))
+          joins: diff |> elem(0) |> Enum.map(&elem(&1, 0)),
+          leaves: diff |> elem(1) |> Enum.map(&elem(&1, 0))
         },
         ignore_side_effects: true
       )
