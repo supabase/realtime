@@ -621,7 +621,9 @@ defmodule Rollcall.Tracker do
           partition: partition,
           joins: Enum.map(joins, &elem(&1, 0)),
           leaves: Enum.map(leaves, &elem(&1, 0))
-        }, ignore_side_effects: true)
+        },
+        ignore_side_effects: true
+      )
     end
 
     state
