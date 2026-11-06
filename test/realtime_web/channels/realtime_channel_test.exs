@@ -1818,6 +1818,31 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert_receive {:socket_close, ^channel_pid, :normal}
     end
 
+    test "new JWT with a claim that fails validation", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      assert %Socket{channel_pid: channel_pid} = socket = subscribe_and_join!(socket, "realtime:test", %{})
+
+      exp = System.system_time(:second) + 10_000
+      new_token = Generators.generate_jwt_token(tenant, %{role: "authenticated", exp: exp, iat: "yesterday"})
+
+      push(socket, "access_token", %{"access_token" => new_token})
+
+      assert_process_down(channel_pid)
+
+      assert_receive %Socket.Message{
+        topic: "realtime:test",
+        event: "system",
+        payload: %{
+          message: "JWT claim `iat` is invalid",
+          status: "error",
+          extension: "system",
+          channel: "test"
+        }
+      }
+    end
+
     test "new JWT missing role claim", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
@@ -2154,6 +2179,29 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert {:ok, socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, api_key))
 
       assert {:error, %{reason: "InvalidJWTToken: Fields `role` and `exp` are required in JWT"}} =
+               subscribe_and_join(socket, "realtime:test", %{"access_token" => jwt})
+    end
+
+    test "access_token with a claim that fails validation on join", %{tenant: tenant} do
+      api_key = Generators.generate_jwt_token(tenant)
+      exp = System.system_time(:second) + 1000
+      jwt = Generators.generate_jwt_token(tenant, %{role: "authenticated", exp: exp, iat: "yesterday"})
+
+      assert {:ok, socket} = connect(UserSocket, %{}, conn_opts(tenant, api_key))
+
+      assert {:error, %{reason: "InvalidJWTToken: JWT claim `iat` is invalid"}} =
+               subscribe_and_join(socket, "realtime:test", %{"access_token" => jwt})
+    end
+
+    test "access_token with a header that is not a JSON object on join", %{tenant: tenant} do
+      api_key = Generators.generate_jwt_token(tenant)
+      jwt = Generators.generate_jwt_token(tenant, %{role: "authenticated", exp: System.system_time(:second) + 1000})
+      [_header, claims, signature] = String.split(jwt, ".")
+      jwt = Enum.join([Base.url_encode64("[]", padding: false), claims, signature], ".")
+
+      assert {:ok, socket} = connect(UserSocket, %{}, conn_opts(tenant, api_key))
+
+      assert {:error, %{reason: "MalformedJWT: The token provided is not a valid JWT"}} =
                subscribe_and_join(socket, "realtime:test", %{"access_token" => jwt})
     end
 

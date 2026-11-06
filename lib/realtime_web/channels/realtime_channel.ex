@@ -196,7 +196,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         {:ok, state, assign(socket, assigns)}
       end
     else
-      {:error, :expired_token, msg} ->
+      {:error, reason, msg} when reason in [:expired_token, :invalid_jwt_claim] ->
         maybe_log_warning(socket, "InvalidJWTToken", msg)
 
       {:error, :missing_claims} ->
@@ -435,7 +435,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, :missing_claims} ->
         shutdown_response(socket, "Fields `role` and `exp` are required in JWT")
 
-      {:error, :expired_token, msg} ->
+      {:error, reason, msg} when reason in [:expired_token, :invalid_jwt_claim] ->
         shutdown_response(socket, msg)
 
       {:error, {:error_generating_signer, kid}} ->
@@ -664,7 +664,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       {:noreply, assign(socket, assigns)}
     else
-      {:error, reason, msg} when reason in ~w(unauthorized expired_token token_malformed)a ->
+      {:error, reason, msg} when reason in ~w(unauthorized expired_token token_malformed invalid_jwt_claim)a ->
         shutdown_response(socket, msg)
 
       {:error, :read_permissions_revoked} ->
@@ -870,8 +870,11 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       {:ok, claims, ref}
     else
-      {:error, :token_malformed} ->
+      {:error, reason} when reason in [:token_malformed, :expected_header_map, :expected_claims_map] ->
         {:error, :token_malformed, "The token provided is not a valid JWT"}
+
+      {:error, [message: _, claim: claim, claim_val: _]} ->
+        {:error, :invalid_jwt_claim, "JWT claim `#{claim}` is invalid"}
 
       {:error, error} ->
         {:error, error}
