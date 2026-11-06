@@ -68,6 +68,55 @@ defmodule Realtime.Rollcall.TransportTest do
     end
   end
 
+  describe "publish/3" do
+    setup %{scope: scope} do
+      {:ok, state} = Transport.init(scope, pubsub: Realtime.PubSub)
+      {:ok, state: state, partition: "realtime:partition-#{scope}"}
+    end
+
+    test "sends a presence_diff with the encoded diff to the subscribers of the partition", %{
+      state: state,
+      partition: partition
+    } do
+      Phoenix.PubSub.subscribe(Realtime.PubSub, partition)
+      diff = {[{"r2", "alice", %{"n" => 2, rc_prev_ref: "r1"}}], [{"r1", "alice", %{"n" => 1}}]}
+
+      assert :ok = Transport.publish(state, partition, diff)
+
+      assert_receive %Phoenix.Socket.Broadcast{topic: ^partition, event: "presence_diff", payload: payload}
+
+      assert payload == %{
+               joins: %{"alice" => %{metas: [%{"n" => 2, phx_ref: "r2", phx_ref_prev: "r1"}]}},
+               leaves: %{"alice" => %{metas: [%{"n" => 1, phx_ref: "r1"}]}}
+             }
+    end
+
+    test "sends the diff to the subscribers of other processes", %{state: state, partition: partition} do
+      subscribe_from_other_process(partition)
+
+      assert :ok = Transport.publish(state, partition, {[{"r1", "alice", %{}}], []})
+
+      assert_receive {:relayed, %Phoenix.Socket.Broadcast{topic: ^partition, event: "presence_diff"}}
+    end
+
+    test "does not send the diff to the subscribers of another partition", %{state: state, partition: partition} do
+      Phoenix.PubSub.subscribe(Realtime.PubSub, partition <> "-other")
+
+      :ok = Transport.publish(state, partition, {[{"r1", "alice", %{}}], []})
+
+      refute_receive %Phoenix.Socket.Broadcast{}, 100
+    end
+
+    test "sends the diff once to a subscriber", %{state: state, partition: partition} do
+      Phoenix.PubSub.subscribe(Realtime.PubSub, partition)
+
+      :ok = Transport.publish(state, partition, {[{"r1", "alice", %{}}], []})
+
+      assert_receive %Phoenix.Socket.Broadcast{topic: ^partition}
+      refute_receive %Phoenix.Socket.Broadcast{topic: ^partition}, 100
+    end
+  end
+
   describe "unwrap/2" do
     setup %{scope: scope} do
       {:ok, state} = Transport.init(scope, pubsub: Realtime.PubSub)
