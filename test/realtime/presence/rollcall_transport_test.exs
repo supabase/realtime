@@ -1,7 +1,7 @@
-defmodule Realtime.Rollcall.TransportTest do
+defmodule Realtime.Presence.RollcallTransportTest do
   use ExUnit.Case, async: true
 
-  alias Realtime.Rollcall.Transport
+  alias Realtime.Presence.RollcallTransport
   alias Rollcall.Tracker.Messages
 
   setup do
@@ -11,7 +11,7 @@ defmodule Realtime.Rollcall.TransportTest do
 
   describe "init/2" do
     test "subscribes the caller to the topic of the scope", %{scope: scope, topic: topic} do
-      assert {:ok, _state} = Transport.init(scope, pubsub: Realtime.PubSub)
+      assert {:ok, _state} = RollcallTransport.init(scope, pubsub: Realtime.PubSub)
 
       :ok = Phoenix.PubSub.broadcast(Realtime.PubSub, topic, :ping)
 
@@ -19,7 +19,7 @@ defmodule Realtime.Rollcall.TransportTest do
     end
 
     test "does not subscribe the caller to the topic of another scope", %{scope: scope} do
-      assert {:ok, _state} = Transport.init(scope, pubsub: Realtime.PubSub)
+      assert {:ok, _state} = RollcallTransport.init(scope, pubsub: Realtime.PubSub)
 
       :ok = Phoenix.PubSub.broadcast(Realtime.PubSub, "rollcall:other-#{scope}", :ping)
 
@@ -29,7 +29,7 @@ defmodule Realtime.Rollcall.TransportTest do
 
   describe "heartbeat/2" do
     setup %{scope: scope} do
-      {:ok, state} = Transport.init(scope, pubsub: Realtime.PubSub)
+      {:ok, state} = RollcallTransport.init(scope, pubsub: Realtime.PubSub)
       {:ok, state: state}
     end
 
@@ -41,7 +41,7 @@ defmodule Realtime.Rollcall.TransportTest do
       subscribe_from_other_process(topic)
       message = snapshot()
 
-      assert :ok = Transport.heartbeat(state, message)
+      assert :ok = RollcallTransport.heartbeat(state, message)
 
       assert_receive {:relayed, {:tb, ^scope, ^message}}
     end
@@ -49,7 +49,7 @@ defmodule Realtime.Rollcall.TransportTest do
     test "does not deliver the message to the sender", %{state: state, topic: topic} do
       subscribe_from_other_process(topic)
 
-      :ok = Transport.heartbeat(state, snapshot())
+      :ok = RollcallTransport.heartbeat(state, snapshot())
 
       # The other subscriber got the message, so the broadcast is complete.
       assert_receive {:relayed, {:tb, _scope, _message}}
@@ -60,7 +60,7 @@ defmodule Realtime.Rollcall.TransportTest do
       subscribe_from_other_process("rollcall:other-#{scope}")
       subscribe_from_other_process("rollcall:" <> scope)
 
-      :ok = Transport.heartbeat(state, snapshot())
+      :ok = RollcallTransport.heartbeat(state, snapshot())
 
       # One subscriber relays the message. The subscriber of the other scope relays nothing.
       assert_receive {:relayed, {:tb, ^scope, _message}}
@@ -70,7 +70,7 @@ defmodule Realtime.Rollcall.TransportTest do
 
   describe "publish/3" do
     setup %{scope: scope} do
-      {:ok, state} = Transport.init(scope, pubsub: Realtime.PubSub)
+      {:ok, state} = RollcallTransport.init(scope, pubsub: Realtime.PubSub)
       {:ok, state: state, partition: "realtime:partition-#{scope}"}
     end
 
@@ -81,7 +81,7 @@ defmodule Realtime.Rollcall.TransportTest do
       Phoenix.PubSub.subscribe(Realtime.PubSub, partition)
       diff = {[{"r2", "alice", %{"n" => 2, rc_prev_ref: "r1"}}], [{"r1", "alice", %{"n" => 1}}]}
 
-      assert :ok = Transport.publish(state, partition, diff)
+      assert :ok = RollcallTransport.publish(state, partition, diff)
 
       assert_receive %Phoenix.Socket.Broadcast{topic: ^partition, event: "presence_diff", payload: payload}
 
@@ -94,7 +94,7 @@ defmodule Realtime.Rollcall.TransportTest do
     test "sends the diff to the subscribers of other processes", %{state: state, partition: partition} do
       subscribe_from_other_process(partition)
 
-      assert :ok = Transport.publish(state, partition, {[{"r1", "alice", %{}}], []})
+      assert :ok = RollcallTransport.publish(state, partition, {[{"r1", "alice", %{}}], []})
 
       assert_receive {:relayed, %Phoenix.Socket.Broadcast{topic: ^partition, event: "presence_diff"}}
     end
@@ -102,7 +102,7 @@ defmodule Realtime.Rollcall.TransportTest do
     test "does not send the diff to the subscribers of another partition", %{state: state, partition: partition} do
       Phoenix.PubSub.subscribe(Realtime.PubSub, partition <> "-other")
 
-      :ok = Transport.publish(state, partition, {[{"r1", "alice", %{}}], []})
+      :ok = RollcallTransport.publish(state, partition, {[{"r1", "alice", %{}}], []})
 
       refute_receive %Phoenix.Socket.Broadcast{}, 100
     end
@@ -110,7 +110,7 @@ defmodule Realtime.Rollcall.TransportTest do
     test "sends the diff once to a subscriber", %{state: state, partition: partition} do
       Phoenix.PubSub.subscribe(Realtime.PubSub, partition)
 
-      :ok = Transport.publish(state, partition, {[{"r1", "alice", %{}}], []})
+      :ok = RollcallTransport.publish(state, partition, {[{"r1", "alice", %{}}], []})
 
       assert_receive %Phoenix.Socket.Broadcast{topic: ^partition}
       refute_receive %Phoenix.Socket.Broadcast{topic: ^partition}, 100
@@ -119,7 +119,7 @@ defmodule Realtime.Rollcall.TransportTest do
 
   describe "unwrap/2" do
     setup %{scope: scope} do
-      {:ok, state} = Transport.init(scope, pubsub: Realtime.PubSub)
+      {:ok, state} = RollcallTransport.init(scope, pubsub: Realtime.PubSub)
       {:ok, state: state}
     end
 
@@ -127,19 +127,19 @@ defmodule Realtime.Rollcall.TransportTest do
       test "returns the scope and the message for a tagged #{kind}", %{state: state, scope: scope} do
         message = message(unquote(kind))
 
-        assert {:ok, ^scope, ^message} = Transport.unwrap(state, {:tb, scope, message})
+        assert {:ok, ^scope, ^message} = RollcallTransport.unwrap(state, {:tb, scope, message})
       end
     end
 
     test "ignores a message without the tag", %{state: state, scope: scope} do
-      assert :ignore = Transport.unwrap(state, snapshot())
-      assert :ignore = Transport.unwrap(state, {:rc, scope, snapshot()})
+      assert :ignore = RollcallTransport.unwrap(state, snapshot())
+      assert :ignore = RollcallTransport.unwrap(state, {:rc, scope, snapshot()})
     end
 
     test "ignores other messages of the tracker mailbox", %{state: state} do
-      assert :ignore = Transport.unwrap(state, :tick)
-      assert :ignore = Transport.unwrap(state, {:DOWN, make_ref(), :process, self(), :normal})
-      assert :ignore = Transport.unwrap(state, "binary")
+      assert :ignore = RollcallTransport.unwrap(state, :tick)
+      assert :ignore = RollcallTransport.unwrap(state, {:DOWN, make_ref(), :process, self(), :normal})
+      assert :ignore = RollcallTransport.unwrap(state, "binary")
     end
   end
 

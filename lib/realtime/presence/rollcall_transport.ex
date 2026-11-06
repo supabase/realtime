@@ -1,4 +1,4 @@
-defmodule Realtime.Rollcall.Transport do
+defmodule Realtime.Presence.RollcallTransport do
   @moduledoc """
   Implements Rollcall.Transport for use in Realtime.
   """
