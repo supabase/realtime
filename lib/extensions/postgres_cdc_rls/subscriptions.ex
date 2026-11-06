@@ -304,6 +304,9 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
       iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "subject=in.(hidee,ho)"})
       {:ok, {"*", "public", "messages", [{"subject", "in", "{hidee,ho}", false}], nil}}
 
+  List elements such as `NULL`, braces, and empty strings are preserved as literal strings.
+  `in.()` remains an empty list; use `in.("")` for a single empty string and `is.null` for SQL null checks.
+
   negation with the `not.` prefix:
 
       iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "subject=not.like.hey%"})
@@ -440,33 +443,37 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
     end
   end
 
-  defp split_top_level(filter), do: split_top_level(filter, 0, false, 0, "", [])
+  defp split_top_level(filter), do: split_top_level(filter, 0, false, 0, "", [], 0)
 
-  defp split_top_level(<<>>, _depth, _quoted, _prev, current, acc), do: Enum.reverse([current | acc])
+  defp split_top_level(<<>>, _depth, _quoted, _prev, current, acc, _separator), do: Enum.reverse([current | acc])
 
-  defp split_top_level(<<"\\", next, rest::binary>>, depth, true, _prev, current, acc),
-    do: split_top_level(rest, depth, true, next, current <> "\\" <> <<next>>, acc)
+  defp split_top_level(<<"\\", next, rest::binary>>, depth, true, _prev, current, acc, separator),
+    do: split_top_level(rest, depth, true, next, current <> "\\" <> <<next>>, acc, separator)
 
-  defp split_top_level(<<"\"", rest::binary>>, depth, true, _prev, current, acc),
-    do: split_top_level(rest, depth, false, ?", current <> "\"", acc)
+  defp split_top_level(<<"\"", rest::binary>>, depth, true, _prev, current, acc, separator),
+    do: split_top_level(rest, depth, false, ?", current <> "\"", acc, separator)
 
-  defp split_top_level(<<char, rest::binary>>, depth, true, _prev, current, acc),
-    do: split_top_level(rest, depth, true, char, current <> <<char>>, acc)
+  defp split_top_level(<<char, rest::binary>>, depth, true, _prev, current, acc, separator),
+    do: split_top_level(rest, depth, true, char, current <> <<char>>, acc, separator)
 
-  defp split_top_level(<<"\"", rest::binary>>, depth, false, prev, current, acc) when prev in [?., ?(, ?,],
-    do: split_top_level(rest, depth, true, ?", current <> "\"", acc)
+  defp split_top_level(<<"\"", rest::binary>>, depth, false, prev, current, acc, separator) when prev in [?., ?(, ?,],
+    do: split_top_level(rest, depth, true, ?", current <> "\"", acc, separator)
 
-  defp split_top_level(<<"(", rest::binary>>, depth, false, _prev, current, acc),
-    do: split_top_level(rest, depth + 1, false, ?(, current <> "(", acc)
+  defp split_top_level(<<"(", rest::binary>>, depth, false, _prev, current, acc, separator),
+    do: split_top_level(rest, depth + 1, false, ?(, current <> "(", acc, separator)
 
-  defp split_top_level(<<")", rest::binary>>, depth, false, _prev, current, acc),
-    do: split_top_level(rest, max(0, depth - 1), false, ?), current <> ")", acc)
+  defp split_top_level(<<")", rest::binary>>, depth, false, _prev, current, acc, separator),
+    do: split_top_level(rest, max(0, depth - 1), false, ?), current <> ")", acc, separator)
 
-  defp split_top_level(<<",", rest::binary>>, 0, false, _prev, current, acc),
-    do: split_top_level(rest, 0, false, 0, "", [current | acc])
+  defp split_top_level(<<",", rest::binary>>, 0, false, _prev, current, acc, separator),
+    do: split_top_level(rest, 0, false, separator, "", [current | acc], separator)
 
-  defp split_top_level(<<char, rest::binary>>, depth, false, _prev, current, acc),
-    do: split_top_level(rest, depth, false, char, current <> <<char>>, acc)
+  defp split_top_level(<<char, rest::binary>>, depth, false, prev, current, acc, ?,)
+       when char in [32, 9, 10, 13] and prev in [?(, ?,],
+       do: split_top_level(rest, depth, false, prev, current <> <<char>>, acc, ?,)
+
+  defp split_top_level(<<char, rest::binary>>, depth, false, _prev, current, acc, separator),
+    do: split_top_level(rest, depth, false, char, current <> <<char>>, acc, separator)
 
   # Parse each segment, short-circuiting on the first error.
   defp parse_segments(segments) do
@@ -511,13 +518,36 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
     size = byte_size(value)
 
     if size >= 2 and binary_part(value, 0, 1) == "(" and binary_part(value, size - 1, 1) == ")" do
-      {:ok, "{" <> binary_part(value, 1, size - 2) <> "}"}
+      {:ok, "{" <> format_in_values(binary_part(value, 1, size - 2)) <> "}"}
     else
       {:error, "`in` filter value must be wrapped by parentheses"}
     end
   end
 
   defp format_filter_value(_filter, value), do: {:ok, unquote_value(value)}
+
+  # Keep an empty list distinct from an explicitly quoted empty string.
+  defp format_in_values(""), do: ""
+
+  defp format_in_values(values) do
+    values
+    |> split_top_level(0, false, ?(, "", [], ?,)
+    |> Enum.map_join(",", &quote_array_element/1)
+  end
+
+  defp quote_array_element(value) do
+    cond do
+      String.starts_with?(String.trim_leading(value), "\"") ->
+        value
+
+      value == "" or String.downcase(value) == "null" or String.contains?(value, ["{", "}"]) ->
+        escaped = String.replace(value, ["\\", "\""], fn char -> "\\" <> char end)
+        "\"" <> escaped <> "\""
+
+      true ->
+        value
+    end
+  end
 
   defp unquote_value(<<"\"", rest::binary>> = original) do
     case take_quoted(rest, "") do
