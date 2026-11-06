@@ -12,7 +12,7 @@ defmodule SqlLogex.IR do
 
   The IR knows the types, so `=` on two texts is `texteq` and `||` on text and uuid is
   `textanycat`. The cast of a literal is already done, and both functions are replaced by
-  their bodies (here the ones of the supabase/postgres image):
+  their bodies (here the known bodies of a profile):
 
       {:apply, Value, :text_eq, [
         {:apply, Value, :nullif, [{:setting, "realtime.topic"}, {:lit, {:text, ""}}]},
@@ -32,7 +32,7 @@ defmodule SqlLogex.IR do
   What makes this the substitution mechanism is that only two nodes read the outside world:
 
     * `{:setting, name}`: `current_setting(name, true)`, looked up in `SqlLogex.Env` settings,
-      which hold the exact strings Realtime passes to `set_config`
+      which hold the exact strings the caller passes to `set_config`
     * `{:column, name}`: a column of the row the policy is checked against, looked up in
       `SqlLogex.Env` row
 

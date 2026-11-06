@@ -120,13 +120,14 @@ defmodule SqlLogex.Value do
   @doc """
   `current_setting(name, true)` (`show_config_by_name_missing_ok`, src/backend/utils/misc/guc_funcs.c).
 
-  `settings` maps lowercase GUC names to the string Realtime passed to `set_config`, or `nil` for
+  `settings` maps lowercase GUC names to the string the caller passed to `set_config`, or `nil` for
   `set_config(name, NULL)`. That is a RESET, after which Postgres returns `''` for a custom
   setting, never NULL (`ShowGUCOption`, src/backend/utils/misc/guc.c).
 
   The lookup folds ASCII case like `guc_name_compare`. A name missing from `settings` is
   unsupported: in Postgres it would be NULL only if nothing ever set it in the session, which this
-  library can't know.
+  library can't know. The reason holds the name as the policy wrote it, and `SqlLogex.decide/3`
+  keeps it only if it is a platform setting (`SqlLogex.Profile`).
   """
   @spec current_setting(%{optional(binary()) => binary() | nil}, binary() | nil | {:unsupported, term()}) ::
           result
@@ -137,12 +138,9 @@ defmodule SqlLogex.Value do
     case Map.fetch(settings, ascii_downcase(name)) do
       {:ok, nil} -> {:text, ""}
       {:ok, value} when is_binary(value) -> {:text, value}
-      :error -> {:unsupported, {:unknown_setting, known_setting(name)}}
+      :error -> {:unsupported, {:unknown_setting, name}}
     end
   end
-
-  # The name is the tenant's choice unless it is one Supabase sets, and the reason gets logged.
-  defp known_setting(name), do: if(String.starts_with?(name, ["request.", "realtime."]), do: name, else: :other)
 
   ## Null tests
 

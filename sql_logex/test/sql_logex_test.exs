@@ -12,6 +12,9 @@ defmodule SqlLogexTest do
   alias SqlLogex.Eval
   alias SqlLogex.Parser
   alias SqlLogex.Resolver
+  alias SqlLogex.Test.RealtimeProfile
+
+  @profile RealtimeProfile.profile()
 
   @uid "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
   @other_uid "b1ffcd00-8d1c-4ff9-cc7e-7cc0ce491b22"
@@ -36,7 +39,7 @@ defmodule SqlLogexTest do
   # role, sub and claims, and the probe row with this topic and extension. A nil sub is a JWT
   # without one.
   defp evaluate(sql, opts) do
-    {ir, _type} = sql |> Parser.parse() |> Resolver.resolve(Keyword.get(opts, :functions, @functions))
+    {ir, _type} = sql |> Parser.parse() |> Resolver.resolve(Keyword.get(opts, :functions, @functions), @profile)
     Eval.eval(ir, env(opts))
   end
 

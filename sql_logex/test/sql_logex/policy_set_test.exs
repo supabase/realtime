@@ -4,6 +4,9 @@ defmodule SqlLogex.PolicySetTest do
   alias SqlLogex.Env
   alias SqlLogex.Policy
   alias SqlLogex.Snapshot
+  alias SqlLogex.Test.RealtimeProfile
+
+  @profile RealtimeProfile.profile()
 
   @versions ["pg17", "pg15"]
 
@@ -58,7 +61,7 @@ defmodule SqlLogex.PolicySetTest do
 
   ## Helpers
 
-  # The settings Realtime sets (see SqlLogex.Env), for a JWT with this role and sub. A nil sub is
+  # The settings Realtime sets (see Realtime.Tenants.SqlLogexProfile in Realtime), for a JWT with this role and sub. A nil sub is
   # a token without one: set_config(..., NULL) for the setting, no key in the claims.
   defp env(opts) do
     role = Keyword.get(opts, :role, "authenticated")
@@ -99,7 +102,8 @@ defmodule SqlLogex.PolicySetTest do
       Map.merge(
         %{rls_enabled: true, rls_forced: false, roles: @roles, policies: policies, functions: functions},
         overrides
-      )
+      ),
+      @profile
     )
   end
 
@@ -374,7 +378,7 @@ defmodule SqlLogex.PolicySetTest do
       assert SqlLogex.decide(snapshot, env(topic: "user:#{@uid}", sub: @uid), :read) == @allow
     end
 
-    # The reason names a role only if it is a Supabase one, the others are the tenant's to name.
+    # The reason names a role only if it is a platform one, the others are the policy author's to name.
     for {role, named} <- [
           {"service_role", "service_role"},
           {"postgres", "postgres"},
@@ -556,7 +560,32 @@ defmodule SqlLogex.PolicySetTest do
       assert SqlLogex.decide(%Snapshot{snapshot | roles: roles}, env, :read) ==
                {:fallback, {:missing_grant, "authenticated", :select}}
 
-      assert SqlLogex.decide(%Snapshot{}, env, :read) == {:fallback, :rls_disabled}
+      assert SqlLogex.decide(%Snapshot{profile: @profile}, env, :read) == {:fallback, :rls_disabled}
+      # a snapshot without a profile can't be decided
+      assert {:fallback, {:exception, _module}} = SqlLogex.decide(%Snapshot{}, env, :read)
+    end
+  end
+
+  describe "a setting the env lacks" do
+    # Evaluation keeps the name of the setting, and decide/3 keeps it only for a platform setting of
+    # the profile. The others are the policy author's to name.
+    for {setting, named} <- [
+          {"request.jwt.claim.exp", "request.jwt.claim.exp"},
+          {"realtime.other", "realtime.other"},
+          {"Request.jwt.claim.exp", :other},
+          {"app.settings.secret", :other}
+        ] do
+      test "#{setting} in a read, in a write and in a SELECT policy of a write" do
+        check = "(current_setting('#{unquote(setting)}'::text, true) = 'x'::text)"
+        want = {:fallback, {:unsupported, {:unknown_setting, unquote(named)}}}
+        env = env(topic: "t", sub: @uid)
+
+        assert SqlLogex.decide(snapshot([policy("p", qual: check)], []), env, :read) == want
+        assert SqlLogex.decide(snapshot([policy("p", cmd: "a", qual: nil, with_check: check)], []), env, :write) == want
+
+        select_and_insert = [policy("s", qual: check), policy("i", cmd: "a", qual: nil, with_check: "true")]
+        assert SqlLogex.decide(snapshot(select_and_insert, []), env, :write) == want
+      end
     end
   end
 

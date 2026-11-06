@@ -8,25 +8,27 @@ defmodule SqlLogex.Reason do
   The categories, grouped by what made the evaluator fall back:
 
     * the role, and the table with its policies as a whole (see `SqlLogex.PolicySet`)
-      * `:role`: the role isn't `anon` or `authenticated`
+      * `:role`: the role isn't one the profile decides for (`SqlLogex.Profile`)
       * `:setup`: RLS is off or forced; the role bypasses RLS, lacks a grant or isn't in the
-        snapshot; or a policy names a role other than `public`, `anon`, `authenticated` or
-        `service_role`, or lacks the expression to evaluate
+        snapshot; or a policy names a role other than `public` and the profile's policy roles, or
+        lacks the expression to evaluate
       * `:select_policy`: a write, where a `SELECT` or `ALL` policy that might apply to the role
-        has no `USING` or something in it the evaluator can't model. `realtime.authorize` plans
-        its read for a write too, so that policy might make the write fail. It doesn't say what
+        has no `USING` or something in it the evaluator can't model. When the profile's
+        `write_plans_select` is true, a write also plans a `SELECT`, so that policy might make the
+        write fail. It doesn't say what
         the construct is: a write blocked by a subquery in a `SELECT` policy lands here, not in
         `:subquery`
-    * the input of the join
+    * the input
       * `:raises`: Postgres raises on it too, like a sub that isn't a uuid
       * `:input`: something about it the evaluator can't model, like non-ASCII text in a regex
     * a construct in a policy that the evaluator doesn't model (see `SqlLogex.Resolver`)
-      * `:function`: a function in `auth` or `realtime` the evaluator doesn't know or whose
-        definition isn't a known one, a Postgres built-in, or one of the tenant's own
+      * `:function`: a function in a platform schema of the profile that the evaluator doesn't
+        know or whose definition isn't a known one, a Postgres built-in, or one that the policy
+        author created
       * `:operator`: an operator for these types, `ANY`/`ALL`, or a regex that isn't a literal
       * `:type`: a cast or a combination of types
-      * `:column`: a column other than `topic` and `extension`
-      * `:setting`: a setting Realtime doesn't set
+      * `:column`: a column that is not in the profile
+      * `:setting`: a setting the caller doesn't set
       * `:subquery`: `EXISTS`, `IN (SELECT ...)` or `(SELECT ... FROM ...)`. It reads another
         table, which only the database can do, so its share of fallbacks is what no addition here
         can win back. For writes, some of that share is in `:select_policy`

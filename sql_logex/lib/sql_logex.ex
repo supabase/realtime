@@ -6,7 +6,10 @@ defmodule SqlLogex do
   hand. Every answer either matches what Postgres would decide or is a fallback, in which case the
   caller asks the database instead.
 
-  This library has no Realtime, Ecto or Postgrex dependencies: plain data in, plain result out.
+  This library has no runtime dependencies: plain data in, plain result out.
+
+  What the library knows about the table it decides for, and about the platform around it, is in
+  one place, the profile (`SqlLogex.Profile`). The caller builds it.
 
   ## Unsupported parts make a decision a fallback
 
@@ -17,8 +20,9 @@ defmodule SqlLogex do
   The pipeline, each stage pure:
 
     1. `SqlLogex.Parser` turns the text of a policy expression into an `SqlLogex.AST`
-    2. `SqlLogex.Resolver` binds it into `SqlLogex.IR`, inlining the function definitions
-       `SqlLogex.Catalog` recognises. `SqlLogex.Snapshot.new/1` does 1 and 2 once per policy
+    2. `SqlLogex.Resolver` binds it into `SqlLogex.IR`, inlining the function definitions of the
+       profile that `SqlLogex.Catalog` recognises. `SqlLogex.Snapshot.new/2` does 1 and 2 once per
+       policy
     3. `SqlLogex.Eval` evaluates the IR against an `SqlLogex.Env` of session settings and row,
        using the primitives in `SqlLogex.Value` and `SqlLogex.Jsonb`
     4. `SqlLogex.PolicySet` picks the policies that apply and combines them, which is `decide/3`

@@ -7,11 +7,16 @@ defmodule SqlLogex.MixProject do
       version: "0.1.0",
       elixir: "~> 1.19",
       start_permanent: Mix.env() == :prod,
+      elixirc_paths: elixirc_paths(Mix.env()),
       # Captured Postgres output, loaded by the tests rather than run
       test_ignore_filters: [&String.starts_with?(&1, "test/fixtures/")],
       deps: deps()
     ]
   end
+
+  # The tests share a profile in test/support (SqlLogex.Test.RealtimeProfile).
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
 
   # Run "mix help compile.app" to learn about applications.
   def application do

@@ -28,6 +28,7 @@ defmodule Realtime.Tenants.SqlLogexDifferentialTest do
 
   alias Realtime.Database
   alias Realtime.Tenants.SqlLogexLoader
+  alias Realtime.Tenants.SqlLogexProfile
   alias SqlLogex.Eval
   alias SqlLogex.Parser
   alias SqlLogex.Reason
@@ -41,6 +42,7 @@ defmodule Realtime.Tenants.SqlLogexDifferentialTest do
 
   # What realtime.authorize is called with by Authorization.authorize/5, for reads and writes
   @extensions ["broadcast", "presence"]
+  @profile SqlLogexProfile.profile()
 
   @headers ~s({"x-client-info":"supabase-js/2.0"})
 
@@ -545,7 +547,7 @@ defmodule Realtime.Tenants.SqlLogexDifferentialTest do
   end
 
   defp evaluate(deparsed, env, functions) do
-    {ir, _type} = deparsed |> Parser.parse() |> Resolver.resolve(functions)
+    {ir, _type} = deparsed |> Parser.parse() |> Resolver.resolve(functions, @profile)
 
     case Eval.eval(ir, logex_env(env, env.extension)) do
       {:unsupported, reason} -> {:unsupported, reason}
@@ -662,7 +664,7 @@ defmodule Realtime.Tenants.SqlLogexDifferentialTest do
     end
   end
 
-  defp build_snapshot(input), do: Snapshot.new(input)
+  defp build_snapshot(input), do: Snapshot.new(input, @profile)
 
   defp decide(snapshot, env, operation) do
     case SqlLogex.decide(snapshot, env, operation) do

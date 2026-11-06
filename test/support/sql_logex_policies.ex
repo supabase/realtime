@@ -64,7 +64,7 @@ defmodule SqlLogexPolicies do
   claims when the `request.jwt.claim.sub`/`.role` setting is empty, where the ones of the
   supabase/postgres image only read the setting.
 
-  Whitespace aside, these are the bodies `SqlLogex.Catalog` knows. Run it in a transaction that is
+  Whitespace aside, these are the bodies `Realtime.Tenants.SqlLogexProfile` knows. Run it in a transaction that is
   rolled back.
   """
   @spec supabase_auth_functions_statement() :: String.t()
