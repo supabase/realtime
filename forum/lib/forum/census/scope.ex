@@ -224,7 +224,14 @@ defmodule Forum.Census.Scope do
         {:noreply, state}
 
       {^ref, new_peers} ->
-        :ets.delete(state.peer_counts_table, node(peer))
+        # The counts table is keyed by node while liveness is per scope
+        # process, so only drop the node's counts when no other scope
+        # process on that node is still registered (e.g. a replacement
+        # scope that already re-synced its counts).
+        unless Enum.any?(new_peers, fn {pid, _ref} -> node(pid) == node(peer) end) do
+          :ets.delete(state.peer_counts_table, node(peer))
+        end
+
         :telemetry.execute([:census, state.scope, :node, :down], %{}, %{node: node(peer)})
         {:noreply, %State{state | peers: new_peers}}
     end

@@ -1,3 +1,31 @@
+defmodule Forum.CensusTest.NoopAdapter do
+  @moduledoc false
+  # Test adapter that drops all outbound messages, so driving a scope process
+  # with fake peers never echoes discovers/syncs back at itself.
+  @behaviour Forum.Adapter
+
+  @impl true
+  def register(scope) do
+    if Process.whereis(Forum.Supervisor.name(scope)) == nil do
+      Process.register(self(), Forum.Supervisor.name(scope))
+    end
+
+    :ok
+  end
+
+  @impl true
+  def broadcast(_scope, _message), do: :ok
+
+  @impl true
+  def broadcast(_scope, _nodes, _message), do: :ok
+
+  @impl true
+  def send(_scope, _node, _message), do: :ok
+
+  @impl true
+  def call(_scope, _node, _module, _function, _args, _timeout), do: {:error, :noop}
+end
+
 defmodule Forum.CensusTest do
   use ExUnit.Case, async: true
   alias Forum.Census
@@ -409,6 +437,69 @@ defmodule Forum.CensusTest do
       _ = :sys.get_state(scope_proc)
 
       assert Forum.Census.Scope.member_counts(scope) == %{}
+    end
+  end
+
+  describe "replacement peer on the same node" do
+    setup %{scope: scope} do
+      start_supervised!(spec(scope, partitions: 2, message_module: Forum.CensusTest.NoopAdapter))
+
+      ref =
+        :telemetry_test.attach_event_handlers(self(), [[:census, scope, :node, :down]])
+
+      %{telemetry_ref: ref}
+    end
+
+    test "a replacement peer's counts survive the old scope process going down", %{
+      scope: scope,
+      telemetry_ref: telemetry_ref
+    } do
+      scope_proc = Process.whereis(Forum.Supervisor.name(scope))
+      assert is_pid(scope_proc)
+
+      # Two scope processes on the same node: the old one and its replacement.
+      old_peer = spawn(fn -> Process.sleep(:infinity) end)
+      new_peer = spawn(fn -> Process.sleep(:infinity) end)
+
+      send(scope_proc, {:discover, old_peer})
+      send(scope_proc, {:sync, old_peer, %{group1: 4}})
+      send(scope_proc, {:discover, new_peer})
+      send(scope_proc, {:sync, new_peer, %{group1: 7}})
+
+      # Flush the mailbox so both peers are registered and counted.
+      _ = :sys.get_state(scope_proc)
+      assert Forum.Census.Scope.member_count(scope, :group1) == 7
+
+      # The old scope process goes down; the replacement is still registered.
+      Process.exit(old_peer, :kill)
+
+      node = node()
+      assert_receive {[:census, ^scope, :node, :down], ^telemetry_ref, %{}, %{node: ^node}}
+
+      assert Forum.Census.Scope.member_count(scope, :group1) == 7
+    end
+
+    test "removes a node's counts when its last scope process goes down", %{
+      scope: scope,
+      telemetry_ref: telemetry_ref
+    } do
+      scope_proc = Process.whereis(Forum.Supervisor.name(scope))
+      assert is_pid(scope_proc)
+
+      peer = spawn(fn -> Process.sleep(:infinity) end)
+
+      send(scope_proc, {:discover, peer})
+      send(scope_proc, {:sync, peer, %{group1: 4}})
+
+      _ = :sys.get_state(scope_proc)
+      assert Forum.Census.Scope.member_count(scope, :group1) == 4
+
+      Process.exit(peer, :kill)
+
+      node = node()
+      assert_receive {[:census, ^scope, :node, :down], ^telemetry_ref, %{}, %{node: ^node}}
+
+      assert Forum.Census.Scope.member_count(scope, :group1) == 0
     end
   end
 
