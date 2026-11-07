@@ -6,7 +6,7 @@ defmodule Rollcall.Transport.PassThrough do
   the scope and the message as they are, so the origin stays the pid that the
   test chose. `Rollcall.Transport.InMemory` rewrites the origin.
 
-  The tracker sends no message through this transport.
+  The tracker sends no message and publishes no diff through this transport.
   """
 
   @behaviour Rollcall.Transport
@@ -16,6 +16,9 @@ defmodule Rollcall.Transport.PassThrough do
 
   @impl true
   def heartbeat(_scope, _message), do: :ok
+
+  @impl true
+  def publish(_scope, _partition, _diff), do: :ok
 
   @impl true
   def unwrap(_scope, {:deliver, scope, message}), do: {:ok, scope, message}

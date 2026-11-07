@@ -2,6 +2,8 @@ defmodule Rollcall.Tracker.LocalPropertyTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
+  import Rollcall.RefHelpers
+
   alias Rollcall.Tracker.Local
 
   # The generators draw from small pools. Operations then hit the same pid,
@@ -22,7 +24,7 @@ defmodule Rollcall.Tracker.LocalPropertyTest do
   property "agrees with a list of entries after any sequence of operations", %{pids: pids} do
     check all(operations <- operation_list()) do
       Enum.reduce(operations, {Local.new(), []}, fn operation, {local, model} ->
-        ref = make_ref()
+        ref = unique_ref()
         {changes, local} = apply_to_local(local, pids, operation, ref)
         {expected, model} = apply_to_model(model, pids, operation, ref)
 
@@ -37,7 +39,7 @@ defmodule Rollcall.Tracker.LocalPropertyTest do
   property "the changes rebuild the set", %{pids: pids} do
     check all(operations <- operation_list()) do
       Enum.reduce(operations, {Local.new(), MapSet.new()}, fn operation, {local, view} ->
-        {changes, local} = apply_to_local(local, pids, operation, make_ref())
+        {changes, local} = apply_to_local(local, pids, operation, unique_ref())
         {joins, leaves} = change_tuples(changes)
 
         view =
@@ -56,7 +58,7 @@ defmodule Rollcall.Tracker.LocalPropertyTest do
     check all(operations <- operation_list()) do
       local =
         Enum.reduce(operations, Local.new(), fn operation, local ->
-          {_changes, local} = apply_to_local(local, pids, operation, make_ref())
+          {_changes, local} = apply_to_local(local, pids, operation, unique_ref())
           local
         end)
 
@@ -102,6 +104,13 @@ defmodule Rollcall.Tracker.LocalPropertyTest do
   defp apply_to_model(model, pids, {:track, index, partition, key, meta}, ref) do
     pid = Enum.at(pids, index)
     {replaced, kept} = Enum.split_with(model, &same_id?(&1, pid, partition, key))
+
+    meta =
+      case replaced do
+        [{_pid, _partition, _key, _meta, old_ref}] -> Map.put(meta, :rc_prev_ref, old_ref)
+        [] -> meta
+      end
+
     entry = {pid, partition, key, meta, ref}
 
     {{[entry], Enum.sort(replaced)}, [entry | kept]}

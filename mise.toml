@@ -3,7 +3,7 @@ elixir = "1.19.5-otp-28"
 erlang = "28.5.0.4"
 node = "24"
 supabase = "latest"
-"npm:@supabase/pg-delta" = "1.0.0-alpha.48"
+"npm:@supabase/pg-delta" = "1.0.0-alpha.60"
 
 [env]
 # TENANT names a whole environment, not just the db tasks below: the tenant's database and row,

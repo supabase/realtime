@@ -73,7 +73,8 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
           assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
         end)
 
-      refute log =~ "MalformedJWT: The token provided is not a valid JWT"
+      # capture_log also collects logs from concurrent tests, so only match this test's tenant.
+      refute log =~ ~r/project=#{tenant.external_id}.*MalformedJWT: The token provided is not a valid JWT/
     end
 
     test "missing claims close connection", %{tenant: tenant, topic: topic, serializer: serializer} do

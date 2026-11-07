@@ -113,6 +113,7 @@ defmodule Realtime.Tenants.Migrations do
     {20_261_022_120_000, Migrations.MessagesReplayIndex},
     {20_261_027_120_000, Migrations.HashSubscriptionFiltersIndex},
     {20_261_029_120_000, Migrations.RevokeSchemaMigrationsGrants},
+    {20_261_103_130_000, Migrations.FilterOnRawWalValues},
     {20_261_103_140_000, Migrations.ListChangesFromPartitionLeaves}
   ]
 
@@ -128,11 +129,11 @@ defmodule Realtime.Tenants.Migrations do
   """
   @spec run_migrations?(Tenant.t() | integer()) :: boolean()
   def run_migrations?(%Tenant{} = tenant) do
-    tenant.migrations_ran < Enum.count(migrations())
+    tenant.migrations_ran < migrations_count()
   end
 
   def run_migrations?(migrations_ran) when is_integer(migrations_ran),
-    do: migrations_ran < Enum.count(migrations())
+    do: migrations_ran < migrations_count()
 
   @doc """
   Run migrations for the given tenant, blocking until they complete.
@@ -279,7 +280,7 @@ defmodule Realtime.Tenants.Migrations do
 
   defp load_db_dump(repo) do
     with {:ok, _} <- do_load_dump(repo) do
-      {:ok, Enum.count(migrations())}
+      {:ok, migrations_count()}
     else
       {:error, reason} = e ->
         log_error("TenantMigrationsDumpSkipped", reason)
@@ -290,7 +291,7 @@ defmodule Realtime.Tenants.Migrations do
   defp run_pending_migrations(repo) do
     opts = [all: true, prefix: "realtime", dynamic_repo: repo]
     result = Ecto.Migrator.run(Repo, migrations(), :up, opts)
-    {Enum.count(migrations()), length(result), :migrator}
+    {migrations_count(), length(result), :migrator}
   end
 
   # Best-effort checking to find if it should load the DB dump or fallback to sequential migrations.
@@ -351,6 +352,14 @@ defmodule Realtime.Tenants.Migrations do
   """
   @spec migrations() :: [{pos_integer(), module()}]
   def migrations, do: @migrations
+
+  @migrations_count length(@migrations)
+
+  @doc """
+  Returns the number of migrations to run.
+  """
+  @spec migrations_count() :: pos_integer()
+  def migrations_count, do: @migrations_count
 
   @doc """
   `after_connect` for the connection these migrations run on.

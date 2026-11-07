@@ -49,6 +49,9 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       assert_process_down(pid)
       assert_process_down(conn)
 
+      # The Registry removes the entry when it handles the EXIT, which can come after the :DOWN above.
+      assert_eventually is_nil(ReplicationConnection.whereis(tenant.external_id))
+
       # A temporary connection must stay unregistered after it dies.
       assert_always is_nil(ReplicationConnection.whereis(tenant.external_id)), timeout: 1_000, interval: 50
     end

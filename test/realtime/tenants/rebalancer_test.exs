@@ -15,13 +15,13 @@ defmodule Realtime.Tenants.RebalancerTest do
   end
 
   describe "check/3" do
-    test "different node set returns :ok", %{tenant: tenant} do
+    test "different node set returns :retry", %{tenant: tenant} do
       external_id = tenant.external_id
 
       # Don't even try to look for the region
       reject(&Nodes.launch_region/1)
 
-      assert Rebalancer.check(MapSet.new([node()]), MapSet.new([node(), :other_node]), external_id) == :ok
+      assert Rebalancer.check(MapSet.new([node()]), MapSet.new([node(), :other_node]), external_id) == :retry
     end
 
     test "same node set correct region set returns :ok", %{tenant: tenant} do
@@ -34,7 +34,7 @@ defmodule Realtime.Tenants.RebalancerTest do
       assert Rebalancer.check(MapSet.new([node(), :some_node]), MapSet.new([node(), :some_node]), external_id) == :ok
     end
 
-    test "same node set different region set returns :ok", %{tenant: tenant} do
+    test "same node set different region set returns {:error, :wrong_region}", %{tenant: tenant} do
       external_id = tenant.external_id
 
       expect(Nodes, :launch_region, fn ^tenant -> "ap-southeast-1" end)
@@ -45,7 +45,7 @@ defmodule Realtime.Tenants.RebalancerTest do
                {:error, :wrong_region}
     end
 
-    test "same node set different region set without nodes in that region returns :ok", %{tenant: tenant} do
+    test "same node set different region set without nodes in that region returns :retry", %{tenant: tenant} do
       external_id = tenant.external_id
       [%{settings: settings} = extension] = tenant.extensions
 
@@ -62,7 +62,7 @@ defmodule Realtime.Tenants.RebalancerTest do
 
       log =
         capture_log([format: "$metadata$message\n", metadata: [:external_id]], fn ->
-          assert Rebalancer.check(MapSet.new([node()]), MapSet.new([node()]), external_id) == :ok
+          assert Rebalancer.check(MapSet.new([node()]), MapSet.new([node()]), external_id) == :retry
         end)
 
       # The check only needs the region, picking a node would warn on every check

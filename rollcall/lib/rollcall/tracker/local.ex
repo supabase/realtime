@@ -23,6 +23,8 @@ defmodule Rollcall.Tracker.Local do
 
   defstruct entries_by_id: %{}, partitions: %{}, pids: %{}
 
+  @prev_ref_key :rc_prev_ref
+
   @opaque t :: %__MODULE__{
             entries_by_id: %{Entry.id() => Entry.t()},
             partitions: %{Rollcall.partition() => MapSet.t(Entry.id())},
@@ -65,10 +67,16 @@ defmodule Rollcall.Tracker.Local do
   When `pid` already has an entry for `key` in `partition`, the new entry
   replaces it. The old entry is a leave and the new entry is a join. The new
   entry has `ref` even when the meta is the same.
+
+  A replacement adds the key `:rc_prev_ref` to the new meta. Its value is the
+  ref of the replaced entry. The function overwrites a `:rc_prev_ref` key that
+  the caller put in the meta. A first track does not add the key. The key stays
+  in the meta until the entry is replaced or removed.
   """
   @spec track(t(), pid(), Rollcall.partition(), Rollcall.key(), Rollcall.meta(), Rollcall.ref()) ::
           {Changes.t(), t()}
   def track(local, pid, partition, key, meta, ref) do
+    meta = with_prev_ref(meta, local, Entry.id(pid, partition, key))
     entry = Entry.new(pid, partition, key, meta, ref)
 
     {Changes.new(), local}
@@ -167,5 +175,12 @@ defmodule Rollcall.Tracker.Local do
       end)
 
     new_map
+  end
+
+  defp with_prev_ref(meta, local, id) do
+    case Map.get(local.entries_by_id, id) do
+      %Entry{ref: ref} -> Map.put(meta, @prev_ref_key, ref)
+      nil -> meta
+    end
   end
 end

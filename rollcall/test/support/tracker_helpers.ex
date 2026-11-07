@@ -4,8 +4,8 @@ defmodule Rollcall.TrackerHelpers do
   """
 
   @doc """
-  Starts a tracker for `scope` under the test supervisor. The tracker uses
-  `silence_threshold` as its silence threshold.
+  Starts a tracker for `scope` in the instance `rollcall`, under the test
+  supervisor. The tracker uses `silence_threshold` as its silence threshold.
 
   The heartbeat timer is off. The tests that use this function send each tick
   and count the ticks, so a timer tick would change the count.
@@ -15,11 +15,12 @@ defmodule Rollcall.TrackerHelpers do
 
   This function is the only place that passes the init parameter.
   """
-  @spec start_tracker(Rollcall.scope(), pos_integer()) :: pid()
-  def start_tracker(scope, silence_threshold) do
+  @spec start_tracker(atom(), Rollcall.scope(), pos_integer()) :: pid()
+  def start_tracker(rollcall, scope, silence_threshold) do
     ExUnit.Callbacks.start_supervised!(
       {Rollcall.Tracker,
        {scope,
+        name: rollcall,
         silence_threshold: silence_threshold,
         heartbeat_period_in_ms: :manual,
         transport: {Rollcall.Transport.PassThrough, []}}}
