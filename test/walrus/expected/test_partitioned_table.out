@@ -1,0 +1,191 @@
+/*
+    Tests that list_changes delivers changes to a partitioned table.
+
+    wal2json reports them under the leaf partition holding the row. With publish_via_partition_root
+    they must come out as the partitioned table, which is the only one the publication lists.
+    Without it the publication lists the leaves, which are reported as themselves.
+*/
+select 1 from pg_create_logical_replication_slot('realtime', 'wal2json', false);
+ ?column? 
+----------
+        1
+(1 row)
+
+create table public.measurements(
+    id int,
+    taken_on date,
+    user_id uuid,
+    primary key (id, taken_on)
+) partition by range (taken_on);
+create table public.measurements_2026
+partition of public.measurements
+for values from ('2026-01-01') to ('2027-01-01');
+create policy rls_measurement_select
+on public.measurements
+to authenticated
+using (user_id = auth.uid());
+alter table public.measurements enable row level security;
+create publication
+    partitioned_pub
+for table
+    public.measurements
+with (
+    publish = 'insert,update,delete',
+    publish_via_partition_root = true
+);
+select pubname, schemaname, tablename from pg_publication_tables where pubname = 'partitioned_pub';
+     pubname     | schemaname |  tablename   
+-----------------+------------+--------------
+ partitioned_pub | public     | measurements
+(1 row)
+
+insert into realtime.subscription(subscription_id, entity, claims)
+select
+    seed_uuid(1),
+    'public.measurements',
+    jsonb_build_object(
+        'role', 'authenticated',
+        'email', 'example@example.com',
+        'sub', seed_uuid(1)::text  -- should see result according to RLS
+    );
+insert into realtime.subscription(subscription_id, entity, claims)
+select
+    seed_uuid(2),
+    'public.measurements',
+    jsonb_build_object(
+        'role', 'authenticated',
+        'email', 'example@example.com',
+        'sub', seed_uuid(2)::text  -- should NOT see result
+    );
+select clear_wal();
+ clear_wal 
+-----------
+ 
+(1 row)
+
+insert into public.measurements(id, taken_on, user_id) values (1, '2026-05-01', seed_uuid(1));
+-- Expect the change as public.measurements, for seed_uuid(1) only
+select
+    jsonb_pretty(wal - 'commit_timestamp'),
+    is_rls_enabled,
+    subscription_ids,
+    errors
+from
+    realtime.list_changes('partitioned_pub', 'realtime', 100, 1048576);
+                        jsonb_pretty                        | is_rls_enabled |            subscription_ids            | errors 
+------------------------------------------------------------+----------------+----------------------------------------+--------
+ {                                                         +| t              | {f4539ebe-c779-5788-bbc1-2421ffaa8954} | {}
+     "type": "INSERT",                                     +|                |                                        | 
+     "table": "measurements",                              +|                |                                        | 
+     "record": {                                           +|                |                                        | 
+         "id": 1,                                          +|                |                                        | 
+         "user_id": "f4539ebe-c779-5788-bbc1-2421ffaa8954",+|                |                                        | 
+         "taken_on": "2026-05-01"                          +|                |                                        | 
+     },                                                    +|                |                                        | 
+     "schema": "public",                                   +|                |                                        | 
+     "columns": [                                          +|                |                                        | 
+         {                                                 +|                |                                        | 
+             "name": "id",                                 +|                |                                        | 
+             "type": "int4"                                +|                |                                        | 
+         },                                                +|                |                                        | 
+         {                                                 +|                |                                        | 
+             "name": "taken_on",                           +|                |                                        | 
+             "type": "date"                                +|                |                                        | 
+         },                                                +|                |                                        | 
+         {                                                 +|                |                                        | 
+             "name": "user_id",                            +|                |                                        | 
+             "type": "uuid"                                +|                |                                        | 
+         }                                                 +|                |                                        | 
+     ]                                                     +|                |                                        | 
+ }                                                          |                |                                        | 
+(1 row)
+
+select clear_wal();
+ clear_wal 
+-----------
+ 
+(1 row)
+
+insert into public.measurements(id, taken_on, user_id) values (3, '2026-07-01', seed_uuid(1));
+-- Same through list_changes_sync
+select
+    wal ->> 'schema' as schema,
+    wal ->> 'table' as table,
+    wal -> 'record' as record,
+    subscription_ids
+from
+    realtime.list_changes_sync('partitioned_pub', 'realtime', 100, 1048576);
+ schema |    table     |                                         record                                         |            subscription_ids            
+--------+--------------+----------------------------------------------------------------------------------------+----------------------------------------
+ public | measurements | {"id": 3, "user_id": "f4539ebe-c779-5788-bbc1-2421ffaa8954", "taken_on": "2026-07-01"} | {f4539ebe-c779-5788-bbc1-2421ffaa8954}
+(1 row)
+
+alter publication partitioned_pub set (publish_via_partition_root = false);
+select pubname, schemaname, tablename from pg_publication_tables where pubname = 'partitioned_pub';
+     pubname     | schemaname |     tablename     
+-----------------+------------+-------------------
+ partitioned_pub | public     | measurements_2026
+(1 row)
+
+truncate table realtime.subscription;
+insert into realtime.subscription(subscription_id, entity, claims)
+select
+    seed_uuid(1),
+    'public.measurements_2026',
+    jsonb_build_object(
+        'role', 'authenticated',
+        'email', 'example@example.com',
+        'sub', seed_uuid(1)::text
+    );
+select clear_wal();
+ clear_wal 
+-----------
+ 
+(1 row)
+
+insert into public.measurements(id, taken_on, user_id) values (2, '2026-06-01', seed_uuid(1));
+-- Expect the change as public.measurements_2026
+select
+    jsonb_pretty(wal - 'commit_timestamp'),
+    is_rls_enabled,
+    subscription_ids,
+    errors
+from
+    realtime.list_changes('partitioned_pub', 'realtime', 100, 1048576);
+                        jsonb_pretty                        | is_rls_enabled |            subscription_ids            | errors 
+------------------------------------------------------------+----------------+----------------------------------------+--------
+ {                                                         +| f              | {f4539ebe-c779-5788-bbc1-2421ffaa8954} | {}
+     "type": "INSERT",                                     +|                |                                        | 
+     "table": "measurements_2026",                         +|                |                                        | 
+     "record": {                                           +|                |                                        | 
+         "id": 2,                                          +|                |                                        | 
+         "user_id": "f4539ebe-c779-5788-bbc1-2421ffaa8954",+|                |                                        | 
+         "taken_on": "2026-06-01"                          +|                |                                        | 
+     },                                                    +|                |                                        | 
+     "schema": "public",                                   +|                |                                        | 
+     "columns": [                                          +|                |                                        | 
+         {                                                 +|                |                                        | 
+             "name": "id",                                 +|                |                                        | 
+             "type": "int4"                                +|                |                                        | 
+         },                                                +|                |                                        | 
+         {                                                 +|                |                                        | 
+             "name": "taken_on",                           +|                |                                        | 
+             "type": "date"                                +|                |                                        | 
+         },                                                +|                |                                        | 
+         {                                                 +|                |                                        | 
+             "name": "user_id",                            +|                |                                        | 
+             "type": "uuid"                                +|                |                                        | 
+         }                                                 +|                |                                        | 
+     ]                                                     +|                |                                        | 
+ }                                                          |                |                                        | 
+(1 row)
+
+drop publication partitioned_pub;
+drop table public.measurements;
+select pg_drop_replication_slot('realtime');
+ pg_drop_replication_slot 
+--------------------------
+ 
+(1 row)
+
+truncate table realtime.subscription;

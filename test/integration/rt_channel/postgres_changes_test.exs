@@ -890,6 +890,125 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
     end
   end
 
+  describe "partitioned table" do
+    test "delivers changes as the partitioned table when it is published via the partition root", %{
+      tenant: tenant,
+      serializer: serializer,
+      db_conn: db_conn
+    } do
+      setup_partitioned_table(db_conn, true)
+
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+      config = %{postgres_changes: [%{event: "*", schema: "public", table: "events"}]}
+
+      WebsocketClient.join(socket, topic, %{config: config})
+      sub_id = :erlang.phash2(%{"event" => "*", "schema" => "public", "table" => "events"})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 200
+
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{"message" => "Subscribed to PostgreSQL", "status" => "ok"},
+                       topic: ^topic
+                     },
+                     8000
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+
+      Postgrex.query!(conn, "insert into events (id, at, details) values (1, '2026-05-01', 'test')", [])
+      Postgrex.query!(conn, "update events set details = 'updated' where id = 1", [])
+      Postgrex.query!(conn, "delete from events where id = 1", [])
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{
+                         "data" => %{
+                           "record" => %{"id" => 1, "at" => "2026-05-01", "details" => "test"},
+                           "schema" => "public",
+                           "table" => "events",
+                           "type" => "INSERT"
+                         },
+                         "ids" => [^sub_id]
+                       },
+                       topic: ^topic
+                     },
+                     500
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{
+                         "data" => %{
+                           "record" => %{"id" => 1, "at" => "2026-05-01", "details" => "updated"},
+                           "schema" => "public",
+                           "table" => "events",
+                           "type" => "UPDATE"
+                         },
+                         "ids" => [^sub_id]
+                       },
+                       topic: ^topic
+                     },
+                     500
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{
+                         "data" => %{
+                           "old_record" => %{"id" => 1, "at" => "2026-05-01"},
+                           "schema" => "public",
+                           "table" => "events",
+                           "type" => "DELETE"
+                         },
+                         "ids" => [^sub_id]
+                       },
+                       topic: ^topic
+                     },
+                     500
+    end
+
+    test "delivers changes as the partition when it is published on its own", %{
+      tenant: tenant,
+      serializer: serializer,
+      db_conn: db_conn
+    } do
+      setup_partitioned_table(db_conn, false)
+
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+      config = %{postgres_changes: [%{event: "INSERT", schema: "public", table: "events_2026"}]}
+
+      WebsocketClient.join(socket, topic, %{config: config})
+      sub_id = :erlang.phash2(%{"event" => "INSERT", "schema" => "public", "table" => "events_2026"})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 200
+
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{"message" => "Subscribed to PostgreSQL", "status" => "ok"},
+                       topic: ^topic
+                     },
+                     8000
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+      Postgrex.query!(conn, "insert into events (id, at, details) values (1, '2026-05-01', 'test')", [])
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{
+                         "data" => %{
+                           "record" => %{"id" => 1, "at" => "2026-05-01", "details" => "test"},
+                           "schema" => "public",
+                           "table" => "events_2026",
+                           "type" => "INSERT"
+                         },
+                         "ids" => [^sub_id]
+                       },
+                       topic: ^topic
+                     },
+                     500
+    end
+  end
+
   describe "error handling" do
     test "error subscribing", %{tenant: tenant, serializer: serializer} do
       {:ok, conn} = Database.connect(tenant, "realtime_test")
@@ -995,6 +1114,30 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
                      },
                      1000
     end
+  end
+
+  defp setup_partitioned_table(db_conn, publish_via_partition_root) do
+    Postgrex.query!(db_conn, "drop table if exists public.events", [])
+
+    Postgrex.query!(
+      db_conn,
+      "create table public.events (id int, at date, details text, primary key (id, at)) partition by range (at)",
+      []
+    )
+
+    Postgrex.query!(
+      db_conn,
+      "create table public.events_2026 partition of public.events for values from ('2026-01-01') to ('2027-01-01')",
+      []
+    )
+
+    Postgrex.query!(db_conn, "grant all on table public.events, public.events_2026 to anon", [])
+
+    Postgrex.query!(
+      db_conn,
+      "alter publication supabase_realtime_test set (publish_via_partition_root = #{publish_via_partition_root})",
+      []
+    )
   end
 
   defp assert_cdc_stopped(tenant) do
