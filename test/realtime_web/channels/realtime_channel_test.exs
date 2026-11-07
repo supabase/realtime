@@ -1363,6 +1363,118 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
   end
 
+  @socket_broadcast_limit_exceeded_event [:realtime, :channel, :socket_broadcast_limit_exceeded]
+  @broadcast_ack_config %{"broadcast" => %{"ack" => true, "self" => false}}
+
+  describe "broadcasts per socket" do
+    @describetag policies: [:authenticated_all_topic_read]
+
+    setup %{tenant: tenant} do
+      stub_socket_broadcast_limit_flag(true)
+      telemetry_ref = :telemetry_test.attach_event_handlers(self(), [@socket_broadcast_limit_exceeded_event])
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      {:ok, socket: socket, telemetry_ref: telemetry_ref, tenant_id: tenant.external_id}
+    end
+
+    test "the bucket holds the configured burst and refills at the configured rate", %{socket: socket} do
+      config = Application.fetch_env!(:realtime, :client_broadcast_rate_limit)
+      interval = div(1_000_000, config[:per_second])
+      tolerance = (config[:burst] - 1) * interval
+
+      assert %TokenBucket{interval: ^interval, tolerance: ^tolerance} = socket.private.broadcast_bucket
+    end
+
+    test "counts nothing for broadcasts within the bucket", context do
+      %{socket: socket, telemetry_ref: telemetry_ref, tenant_id: tenant_id} = context
+      socket = put_broadcast_bucket(socket, 1, 2)
+      assert {:ok, _, socket} = subscribe_and_join(socket, "realtime:test", %{"config" => @broadcast_ack_config})
+
+      for _ <- 1..2 do
+        ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{}})
+        assert_reply ref, :ok, %{}
+      end
+
+      refute_received {@socket_broadcast_limit_exceeded_event, ^telemetry_ref, _, %{tenant: ^tenant_id}}
+    end
+
+    test "sends a broadcast over the limit and counts it", context do
+      %{socket: socket, telemetry_ref: telemetry_ref, tenant_id: tenant_id} = context
+      config = %{"broadcast" => %{"ack" => true, "self" => true}}
+      assert {:ok, _, socket} = subscribe_and_join(socket, "realtime:test", %{"config" => config})
+      empty_broadcast_bucket(socket)
+
+      ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{"hello" => "world"}})
+
+      assert_reply ref, :ok, %{}
+      assert_receive %Socket.Message{event: "broadcast", payload: %{"payload" => %{"hello" => "world"}}}
+      assert_received {@socket_broadcast_limit_exceeded_event, ^telemetry_ref, %{count: 1}, %{tenant: ^tenant_id}}
+    end
+
+    test "counts a private broadcast before it reaches the tenant database", context do
+      %{socket: socket, telemetry_ref: telemetry_ref, tenant_id: tenant_id} = context
+      config = %{"private" => true, "broadcast" => %{"ack" => true}}
+
+      assert %Socket{channel_pid: channel_pid} =
+               socket = subscribe_and_join!(socket, "realtime:test", %{"config" => config})
+
+      empty_broadcast_bucket(socket)
+
+      log =
+        capture_log(fn ->
+          expect(Connect, :lookup_or_start_connection, fn _ -> {:error, :rpc_error, :timeout} end)
+          allow(Connect, self(), channel_pid)
+
+          ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{}})
+          assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{error: :unable_to_handle_broadcast}}, 500
+        end)
+
+      assert log =~ "UnableToHandleBroadcast"
+      assert_received {@socket_broadcast_limit_exceeded_event, ^telemetry_ref, %{count: 1}, %{tenant: ^tenant_id}}
+    end
+
+    test "all channels of a socket share its bucket", context do
+      %{socket: socket, telemetry_ref: telemetry_ref, tenant_id: tenant_id} = context
+      empty_broadcast_bucket(socket)
+
+      for topic <- ["realtime:test1", "realtime:test2"] do
+        assert {:ok, _, socket} = subscribe_and_join(socket, topic, %{"config" => @broadcast_ack_config})
+        ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{}})
+        assert_reply ref, :ok, %{}
+        assert_received {@socket_broadcast_limit_exceeded_event, ^telemetry_ref, %{count: 1}, %{tenant: ^tenant_id}}
+      end
+    end
+
+    test "each socket has its own bucket", %{tenant: tenant} = context do
+      %{socket: socket_1, telemetry_ref: telemetry_ref, tenant_id: tenant_id} = context
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket_2} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+      empty_broadcast_bucket(socket_1)
+
+      assert {:ok, _, socket_2} = subscribe_and_join(socket_2, "realtime:test", %{"config" => @broadcast_ack_config})
+      ref = push(socket_2, "broadcast", %{"event" => "my_event", "payload" => %{}})
+
+      assert_reply ref, :ok, %{}
+      refute_received {@socket_broadcast_limit_exceeded_event, ^telemetry_ref, _, %{tenant: ^tenant_id}}
+    end
+
+    test "counts nothing and takes no token while the flag is off", context do
+      %{socket: socket, telemetry_ref: telemetry_ref, tenant_id: tenant_id} = context
+      stub_socket_broadcast_limit_flag(false)
+      socket = put_broadcast_bucket(socket, 1, 1)
+      assert {:ok, _, socket} = subscribe_and_join(socket, "realtime:test", %{"config" => @broadcast_ack_config})
+
+      for _ <- 1..3 do
+        ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{}})
+        assert_reply ref, :ok, %{}
+      end
+
+      refute_received {@socket_broadcast_limit_exceeded_event, ^telemetry_ref, _, %{tenant: ^tenant_id}}
+      assert TokenBucket.take(socket.private.broadcast_bucket) == :ok
+    end
+  end
+
   describe "concurrent connection counting" do
     test "a connected socket is not counted until it joins a channel", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
@@ -2572,6 +2684,23 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
   defp drain_join_bucket(%Socket{private: %{join_bucket: bucket}}) do
     Stream.repeatedly(fn -> TokenBucket.take(bucket) end) |> Enum.find(&(&1 == :error))
+  end
+
+  defp put_broadcast_bucket(%Socket{} = socket, per_second, burst) do
+    %{socket | private: Map.put(socket.private, :broadcast_bucket, TokenBucket.new(per_second, burst))}
+  end
+
+  # Takes every token a minute ahead, so the bucket stays empty for the rest of the test
+  defp empty_broadcast_bucket(%Socket{private: %{broadcast_bucket: bucket}}) do
+    future = System.monotonic_time(:microsecond) + 60_000_000
+    Stream.repeatedly(fn -> TokenBucket.take(bucket, future) end) |> Enum.find(&(&1 == :error))
+  end
+
+  defp stub_socket_broadcast_limit_flag(enabled) do
+    stub(Realtime.FeatureFlags, :enabled?, fn
+      "socket_broadcast_limit", _tenant_id -> enabled
+      flag, tenant_id -> Mimic.call_original(Realtime.FeatureFlags, :enabled?, [flag, tenant_id])
+    end)
   end
 
   defp stub_socket_join_limit_flag(enabled) do

@@ -10,6 +10,8 @@ api_token_blocklist = Env.get_list("API_TOKEN_BLOCKLIST", [])
 app_name = System.get_env("APP_NAME", "")
 broadcast_pool_size = Env.get_integer("BROADCAST_POOL_SIZE", 10)
 channel_error_backoff_ms = Env.get_integer("CHANNEL_ERROR_BACKOFF_MS", to_timeout(second: 5))
+client_broadcasts_burst = Env.get_integer("CLIENT_BROADCASTS_BURST", 1_000)
+client_broadcasts_per_second = Env.get_integer("CLIENT_BROADCASTS_PER_SECOND", 100)
 client_joins_per_second = Env.get_integer("CLIENT_JOINS_PER_SECOND", 1)
 client_presence_max_calls = Env.get_integer("CLIENT_PRESENCE_MAX_CALLS", 5)
 client_presence_window_ms = Env.get_integer("CLIENT_PRESENCE_WINDOW_MS", 30_000)
@@ -195,6 +197,10 @@ if !(db_ip_version in [nil, "ipv6", "ipv4"]),
 
 if client_joins_per_second < 1 or node_join_budget_floor < 1 or node_join_budget_burst_seconds < 1 do
   raise "CLIENT_JOINS_PER_SECOND, NODE_JOIN_BUDGET_FLOOR and NODE_JOIN_BUDGET_BURST_SECONDS must be positive integers"
+end
+
+if client_broadcasts_per_second < 1 or client_broadcasts_burst < 1 do
+  raise "CLIENT_BROADCASTS_PER_SECOND and CLIENT_BROADCASTS_BURST must be positive integers"
 end
 
 if db_enc_key_gcm && byte_size(db_enc_key_gcm) != 32,
@@ -452,6 +458,7 @@ if config_env() != :test do
     connect_error_backoff_ms: connect_error_backoff_ms,
     channel_error_backoff_ms: channel_error_backoff_ms,
     client_join_rate_limit: [per_second: client_joins_per_second],
+    client_broadcast_rate_limit: [per_second: client_broadcasts_per_second, burst: client_broadcasts_burst],
     node_join_budget_floor: node_join_budget_floor,
     node_join_budget_burst_seconds: node_join_budget_burst_seconds
 end
