@@ -235,6 +235,31 @@ defmodule RealtimeWeb.UserSocketTest do
                }
     end
 
+    test "maps a JWT claim that fails validation to a 401 JSON response" do
+      secret = "user-socket-test-secret-long-enough-for-hs256"
+      exp = System.system_time(:second) + 1000
+      jwt = Generators.generate_jwt_token(secret, %{role: "authenticated", exp: exp, iat: "yesterday"})
+      error = RealtimeWeb.ChannelsAuthorization.authorize_conn(jwt, secret, nil)
+
+      conn = UserSocket.handle_error(conn(:get, "/socket/websocket"), error)
+
+      assert conn.status == 401
+      assert Jason.decode!(conn.resp_body) == %{"error" => "JWT claim `iat` is invalid"}
+    end
+
+    test "maps a JWT header that is not a JSON object to a 401 JSON response" do
+      secret = "user-socket-test-secret-long-enough-for-hs256"
+      jwt = Generators.generate_jwt_token(secret, %{role: "authenticated", exp: System.system_time(:second) + 1000})
+      [_header, claims, signature] = String.split(jwt, ".")
+      jwt = Enum.join([Base.url_encode64("[]", padding: false), claims, signature], ".")
+      error = RealtimeWeb.ChannelsAuthorization.authorize_conn(jwt, secret, nil)
+
+      conn = UserSocket.handle_error(conn(:get, "/socket/websocket"), error)
+
+      assert conn.status == 401
+      assert Jason.decode!(conn.resp_body) == %{"error" => "The token provided is not a valid JWT"}
+    end
+
     test "maps unknown reasons to a generic 500 JSON response" do
       conn = UserSocket.handle_error(conn(:get, "/socket/websocket"), {:error, :some_weird_reason})
 

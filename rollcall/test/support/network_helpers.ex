@@ -3,8 +3,9 @@ defmodule Rollcall.NetworkHelpers do
   Starts trackers that exchange messages through `Rollcall.Transport.InMemory`.
 
   `start_node/4` starts a tracker on a fake node. Its timer is off, so a test
-  sends the ticks. The tests talk to a tracker by pid, because several trackers
-  of one scope run in one VM and `Rollcall.Tracker.via/1` allows one.
+  sends the ticks. Each fake node has its own instance of the library, so
+  several trackers of one scope run in one VM. The tests talk to a tracker by
+  pid.
 
   A test can also act as a peer. `join_probe/3` joins the test process to the
   network. `receive_message/2` returns the next message that a tracker sent to
@@ -24,28 +25,30 @@ defmodule Rollcall.NetworkHelpers do
   def start_network, do: ExUnit.Callbacks.start_supervised!(Network)
 
   @doc """
-  Starts a tracker for `scope` on the fake node `node`, under the test
-  supervisor.
+  Starts an instance of the library and a tracker for `scope` in it, on the
+  fake node `node`, under the test supervisor. Each call starts a new instance.
 
   `opts` are options of `Rollcall.Tracker.start_link/1`. They replace the
-  defaults: the in-memory transport on `network`, `heartbeat_period_in_ms: :manual` and
-  a name that is unique for the scope and the node. The option `:id` sets the id
-  of the child, for a test that starts a second tracker for one node.
+  defaults: the in-memory transport on `network` and `heartbeat_period_in_ms: :manual`.
+  The option `:id` sets the id of the tracker child, for a test that starts a
+  second tracker for one node.
   """
   @spec start_node(Rollcall.scope(), pid(), node(), keyword()) :: pid()
   def start_node(scope, network, node, opts \\ []) do
     {id, opts} = Keyword.pop(opts, :id, {scope, node})
+    name = Rollcall.Case.unique_name()
 
     opts =
       Keyword.merge(
         [
-          name: :"tracker-#{scope}-#{node}",
+          name: name,
           transport: {InMemory, network: network, node: node},
           heartbeat_period_in_ms: :manual
         ],
         opts
       )
 
+    ExUnit.Callbacks.start_supervised!(Supervisor.child_spec({Rollcall, name: name}, id: {:instance, id}))
     ExUnit.Callbacks.start_supervised!(Supervisor.child_spec({Tracker, {scope, opts}}, id: id))
   end
 
@@ -86,7 +89,7 @@ defmodule Rollcall.NetworkHelpers do
     :ok = GenServer.call(tracker, {:untrack, client, partition, key})
   end
 
-  @doc "Returns the state of `tracker`, in the shape of `Rollcall.Tracker.get_state/1`."
+  @doc "Returns the state of `tracker`, in the shape of `Rollcall.Tracker.get_state/2`."
   @spec tracker_state(pid()) :: State.view()
   def tracker_state(tracker), do: GenServer.call(tracker, :get_state)
 
@@ -113,6 +116,28 @@ defmodule Rollcall.NetworkHelpers do
   def join_probe(network, scope, node) do
     {:ok, transport} = InMemory.init(scope, network: network, node: node)
     transport
+  end
+
+  @doc """
+  Subscribes the test process to the diffs that the tracker on `node` publishes
+  for `partition` of `scope`.
+  """
+  @spec subscribe(pid(), Rollcall.scope(), node(), Rollcall.partition()) :: :ok
+  def subscribe(network, scope, node, partition) do
+    Network.subscribe(network, node, scope, partition, self())
+  end
+
+  @doc """
+  Returns the next diff that a tracker published for `partition`. Fails the test
+  after `timeout` milliseconds.
+  """
+  @spec receive_diff(Rollcall.partition(), timeout()) :: Rollcall.partition_diff()
+  def receive_diff(partition, timeout \\ 1_000) do
+    receive do
+      {:rollcall_diff, _scope, ^partition, diff} -> diff
+    after
+      timeout -> flunk("No diff for the partition #{inspect(partition)} within #{timeout} ms")
+    end
   end
 
   @doc "Sends `message` from the probe to the trackers of its scope."

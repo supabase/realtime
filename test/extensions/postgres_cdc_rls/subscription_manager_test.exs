@@ -1,5 +1,5 @@
 defmodule Extensions.PostgresCdcRls.SubscriptionManagerTest do
-  # async: false due to global Mimic stubs
+  # async: false due to global Mimic stubs and Application env changes
   use Realtime.DataCase, async: false
   use Mimic
 
@@ -11,12 +11,14 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManagerTest do
   alias Realtime.Database
   alias Realtime.GenRpc
   alias Realtime.PostgresCdc
+  alias Realtime.Tenants.Connect
+  alias Realtime.Tenants.Migrations
   alias Realtime.Tenants.Rebalancer
 
   import ExUnit.CaptureLog
   import UUID, only: [uuid1: 0, string_to_binary!: 1]
 
-  setup do
+  setup context do
     tenant = TestTenantDb.checkout_tenant(run_migrations: true)
     {:ok, db_conn} = Realtime.Database.connect(tenant, "realtime_test", :stop)
     Integrations.setup_postgres_changes(db_conn)
@@ -38,10 +40,17 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManagerTest do
     scope = Realtime.Syn.PostgresCdc.scope(tenant.external_id)
     :syn.register(scope, tenant.external_id, self(), %{region: "us-east-1", manager: nil, subs_pool: nil})
 
-    {:ok, pid} = SubscriptionManager.start_link(args)
-    # This serves so that we know that handle_continue has finished
-    :sys.get_state(pid)
-    %{args: args, pid: pid, publication: publication, tenant: tenant}
+    setup = %{args: args, publication: publication, tenant: tenant}
+
+    # Tests tagged with start_manager: false start it themselves
+    if Map.get(context, :start_manager, true) do
+      {:ok, pid} = SubscriptionManager.start_link(args)
+      # This serves so that we know that handle_continue has finished
+      :sys.get_state(pid)
+      Map.put(setup, :pid, pid)
+    else
+      setup
+    end
   end
 
   describe "subscription" do
@@ -364,12 +373,38 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManagerTest do
       assert log =~ "SubscriptionDeletionFailed"
     end
 
-    test "schedules next region check when rebalancer returns ok", %{pid: pid} do
-      # In a single-node test environment, nodes are equal → Rebalancer returns :ok
-      current_nodes = MapSet.new(Node.list())
-      send(pid, {:check_region, current_nodes})
+    @tag start_manager: false
+    test "schedules next region check when rebalancer returns :retry", %{args: args} do
+      parent = self()
+
+      stub(Rebalancer, :check, fn _prev, _curr, _id ->
+        send(parent, :region_checked)
+        :retry
+      end)
+
+      {:ok, pid} = SubscriptionManager.start_link(Map.put(args, :check_region_interval, 100))
       :sys.get_state(pid)
 
+      assert_receive :region_checked, 1000
+      assert_receive :region_checked, 1000
+      assert Process.alive?(pid)
+    end
+
+    @tag start_manager: false
+    test "stops checking the region when rebalancer returns :ok", %{args: args} do
+      parent = self()
+
+      stub(Rebalancer, :check, fn _prev, _curr, _id ->
+        send(parent, :region_checked)
+        :ok
+      end)
+
+      {:ok, pid} = SubscriptionManager.start_link(Map.put(args, :check_region_interval, 100))
+      :sys.get_state(pid)
+
+      assert_receive :region_checked, 1000
+      # The interval is 100ms, a rescheduled check would arrive well within this window
+      refute_receive :region_checked, 500
       assert Process.alive?(pid)
     end
 
@@ -649,6 +684,64 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManagerTest do
 
       result = SubscriptionManager.not_alive_pids_dist(%{node() => MapSet.new([dead_pid])})
       assert dead_pid in result
+    end
+  end
+
+  describe "tenant migrations" do
+    @describetag start_manager: false
+
+    setup %{tenant: tenant} do
+      %{external_id: tenant_id} = tenant
+      {:ok, _} = Realtime.Api.update_tenant_by_external_id(tenant_id, %{migrations_ran: 0})
+      Realtime.Tenants.Cache.invalidate_tenant_cache(tenant_id)
+
+      connect = spawn(fn -> Process.sleep(:infinity) end)
+      meta = %{conn: nil, region: "us-east-1", replication_conn: nil, migrations_ran: nil}
+      :ok = :syn.register(Connect, tenant_id, connect, meta)
+
+      %{connect: connect}
+    end
+
+    test "publishes the manager once Connect has run every migration", %{args: args, tenant: tenant, connect: connect} do
+      %{external_id: tenant_id} = tenant
+      {:ok, pid} = SubscriptionManager.start_link(args)
+
+      assert_eventually Registry.lookup(Realtime.PubSub, Connect.syn_topic(tenant_id)) != []
+      assert_always PostgresCdcRls.get_manager_conn(tenant_id) == {:error, :wait}, timeout: 200, interval: 20
+
+      total = Migrations.migrations_count()
+      {:ok, _} = :syn.update_registry(Connect, tenant_id, fn ^connect, meta -> %{meta | migrations_ran: total} end)
+
+      assert_eventually match?({:ok, ^pid, _conn}, PostgresCdcRls.get_manager_conn(tenant_id))
+    end
+
+    test "publishes the manager anyway after the timeout", %{args: args, tenant: tenant} do
+      Application.put_env(:realtime, :connect_migrations_wait_timeout, 100)
+      on_exit(fn -> Application.delete_env(:realtime, :connect_migrations_wait_timeout) end)
+
+      log =
+        capture_log(fn ->
+          {:ok, pid} = SubscriptionManager.start_link(args)
+          :sys.get_state(pid)
+          assert {:ok, ^pid, _conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+        end)
+
+      assert log =~ "TenantMigrationsNotReady"
+    end
+
+    test "ignores connect broadcasts left behind by the wait", %{args: args, tenant: tenant, connect: connect} do
+      %{external_id: tenant_id} = tenant
+      total = Migrations.migrations_count()
+      {:ok, _} = :syn.update_registry(Connect, tenant_id, fn ^connect, meta -> %{meta | migrations_ran: total} end)
+      {:ok, pid} = SubscriptionManager.start_link(args)
+
+      log =
+        capture_log(fn ->
+          send(pid, %Phoenix.Socket.Broadcast{topic: Connect.syn_topic(tenant_id), event: "ready", payload: %{}})
+          :sys.get_state(pid)
+        end)
+
+      refute log =~ "UnhandledProcessMessage"
     end
   end
 

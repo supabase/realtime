@@ -1,40 +1,56 @@
 defmodule Rollcall.OptionsTest do
-  # The library has fixed process names, so one instance runs in the VM. The
-  # test helper starts the default instance under `Rollcall.TestSupervisor`.
-  # A test that needs options replaces that instance. These tests cannot run
-  # concurrently with other tests.
-  use Rollcall.Case, async: false
+  # A test that needs options starts its own instance with `start_instance/1`.
+  use Rollcall.Case, async: true
 
   import Rollcall.NetworkHelpers
   import Rollcall.Tracker.Messages, only: [snapshot: 3, stamp: 2]
 
   alias Rollcall.Tracker
+  alias Rollcall.Transport.FailInit
   alias Rollcall.Transport.InMemory
 
   @probe :probe@host
 
   describe "transport" do
-    test "gives the transport to a tracker that track/5 starts", %{scope: scope} do
+    test "gives the transport to a tracker that track/6 starts", %{scope: scope} do
       network = start_network()
-      start_library(transport: in_memory(network))
+      rollcall = start_instance(transport: in_memory(network))
       probe = join_probe(network, scope, @probe)
 
-      {:ok, _ref} = Rollcall.track(self(), scope, "partition", "key", %{})
-      tracker = Tracker.whereis(scope)
+      {:ok, _ref} = Rollcall.track(rollcall, self(), scope, "partition", "key", %{})
+      tracker = Tracker.whereis(rollcall, scope)
       # The goodbye is the first message that a stopped tracker sends.
       :ok = GenServer.stop(tracker)
 
       assert {:snapshot, _origin, _stamp, []} = receive_message(probe)
     end
+
+    # The transport fails once. A retry of the start would hide the error.
+    test "track/6 returns the error when init/2 of the transport fails", %{scope: scope} do
+      rollcall = start_instance(transport: failing_transport(1))
+
+      assert {:error, {%RuntimeError{message: "transport init failed"}, _stacktrace}} =
+               Rollcall.track(rollcall, self(), scope, "partition", "key", %{})
+
+      assert Tracker.whereis(rollcall, scope) == nil
+    end
+
+    test "track/6 starts a tracker after a start error", %{scope: scope} do
+      rollcall = start_instance(transport: failing_transport(1))
+
+      assert {:error, _reason} = Rollcall.track(rollcall, self(), scope, "partition", "key", %{})
+      assert {:ok, _ref} = Rollcall.track(rollcall, self(), scope, "partition", "key", %{})
+      assert scope in Rollcall.scopes(rollcall)
+    end
   end
 
   describe "heartbeat_period_in_ms" do
-    test "gives the period to a tracker that track/5 starts", %{scope: scope} do
+    test "gives the period to a tracker that track/6 starts", %{scope: scope} do
       network = start_network()
-      start_library(transport: in_memory(network), heartbeat_period_in_ms: 20)
+      rollcall = start_instance(transport: in_memory(network), heartbeat_period_in_ms: 20)
       probe = join_probe(network, scope, @probe)
 
-      {:ok, _ref} = Rollcall.track(self(), scope, "partition", "key", %{})
+      {:ok, _ref} = Rollcall.track(rollcall, self(), scope, "partition", "key", %{})
 
       # The default period is 1500 ms. A tick inside 500 ms shows that the option is in use.
       assert {:snapshot, _origin, _stamp, _entries} = receive_message(probe, 500)
@@ -42,13 +58,16 @@ defmodule Rollcall.OptionsTest do
   end
 
   describe "silence_threshold" do
-    test "gives the threshold to a tracker that track/5 starts", %{scope: scope} do
+    test "gives the threshold to a tracker that track/6 starts", %{scope: scope} do
       network = start_network()
-      start_library(transport: in_memory(network), heartbeat_period_in_ms: :manual, silence_threshold: 2)
+
+      rollcall =
+        start_instance(transport: in_memory(network), heartbeat_period_in_ms: :manual, silence_threshold: 2)
+
       probe = join_probe(network, scope, @probe)
 
-      {:ok, _ref} = Rollcall.track(self(), scope, "partition", "key", %{})
-      tracker = Tracker.whereis(scope)
+      {:ok, _ref} = Rollcall.track(rollcall, self(), scope, "partition", "key", %{})
+      tracker = Tracker.whereis(rollcall, scope)
       send_from_probe(probe, snapshot(self(), stamp(1, 1), []))
       sync(tracker)
 
@@ -62,26 +81,32 @@ defmodule Rollcall.OptionsTest do
   end
 
   describe "empty_grace_in_ms" do
-    test "gives the grace period to a tracker that track/5 starts", %{scope: scope} do
-      start_library(empty_grace_in_ms: 1_234)
+    test "gives the grace period to a tracker that track/6 starts", %{scope: scope} do
+      rollcall = start_instance(empty_grace_in_ms: 1_234)
 
-      {:ok, _ref} = Rollcall.track(self(), scope, "partition", "key", %{})
-      tracker = Tracker.whereis(scope)
-      :ok = Rollcall.untrack(self(), scope, "partition", "key")
+      {:ok, _ref} = Rollcall.track(rollcall, self(), scope, "partition", "key", %{})
+      tracker = Tracker.whereis(rollcall, scope)
+      :ok = Rollcall.untrack(rollcall, self(), scope, "partition", "key")
 
       assert_timer_within(tracker, 1_234)
     end
   end
 
-  # The checks raise before the library starts a process, so these tests leave
-  # the default instance alone.
+  # The checks raise before the library starts a process, so these tests start
+  # no instance.
   describe "start_link/1" do
     test "raises for an unknown option" do
-      assert_raise ArgumentError, ~r/unknown/, fn -> Rollcall.start_link(unknown: 1) end
+      assert_raise ArgumentError, ~r/unknown/, fn -> Rollcall.start_link(name: :options_test, unknown: 1) end
     end
 
-    test "raises for the option :name" do
-      assert_raise ArgumentError, ~r/unknown/, fn -> Rollcall.start_link(name: :tracker) end
+    test "raises when the option :name is missing" do
+      assert_raise ArgumentError, ~r/name/, fn -> Rollcall.start_link([]) end
+    end
+
+    test "raises when the option :name is not an atom" do
+      assert_raise ArgumentError, ~r/invalid value for the option :name/, fn ->
+        Rollcall.start_link(name: "options_test")
+      end
     end
 
     for {key, value} <- [
@@ -97,35 +122,41 @@ defmodule Rollcall.OptionsTest do
         ] do
       test "raises when #{key} is #{inspect(value)}" do
         assert_raise ArgumentError, ~r/invalid value for the option #{inspect(unquote(key))}/, fn ->
-          Rollcall.start_link([{unquote(key), unquote(Macro.escape(value))}])
+          Rollcall.start_link([{:name, :options_test}, {unquote(key), unquote(Macro.escape(value))}])
         end
       end
     end
   end
 
   describe "Tracker.start_link/1" do
-    test "sets the grace period with the option :empty_grace_in_ms", %{scope: scope} do
-      tracker = start_supervised!({Tracker, {scope, empty_grace_in_ms: 1_234}})
+    test "sets the grace period with the option :empty_grace_in_ms", %{scope: scope, rollcall: rollcall} do
+      tracker = start_supervised!({Tracker, {scope, name: rollcall, empty_grace_in_ms: 1_234}})
 
-      {:ok, _ref} = Rollcall.track(self(), scope, "partition", "key", %{})
-      :ok = Rollcall.untrack(self(), scope, "partition", "key")
+      {:ok, _ref} = Rollcall.track(rollcall, self(), scope, "partition", "key", %{})
+      :ok = Rollcall.untrack(rollcall, self(), scope, "partition", "key")
 
       assert_timer_within(tracker, 1_234)
     end
   end
 
-  # Replaces the default library instance with one that has `opts`. The test
-  # supervisor stops the new instance when the test ends, and the callback
-  # restores the default instance. Start the network before the library. The
-  # trackers send their goodbye through the network when they stop.
-  defp start_library(opts) do
-    :ok = Supervisor.terminate_child(Rollcall.TestSupervisor, Rollcall)
-    on_exit(fn -> {:ok, _pid} = Supervisor.restart_child(Rollcall.TestSupervisor, Rollcall) end)
-
-    start_supervised!({Rollcall, opts})
+  # Starts an instance with `opts` and returns its name. The test supervisor
+  # stops the instance when the test ends. Start the network before the
+  # instance. The trackers send their goodbye through the network when they stop.
+  defp start_instance(opts) do
+    name = unique_name()
+    start_supervised!({Rollcall, [name: name] ++ opts})
+    name
   end
 
   defp in_memory(network), do: {InMemory, network: network, node: :a@host}
+
+  # A transport whose `init/2` raises for the first `failures` starts.
+  defp failing_transport(failures) do
+    counter = :atomics.new(1, [])
+    :atomics.put(counter, 1, failures)
+
+    {FailInit, failures: counter}
+  end
 
   # The tracker starts the timer when its last entry leaves. The default length
   # is 5000 ms, so a value up to `length` shows that the option is in use.

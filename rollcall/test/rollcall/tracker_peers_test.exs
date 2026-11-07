@@ -30,14 +30,14 @@ defmodule Rollcall.TrackerPeersTest do
   @dropped :rollcall_tracker_message_dropped
 
   describe "a message from an unknown node" do
-    test "a snapshot creates the record for the node of the origin", %{scope: scope} do
+    test "a snapshot creates the record for the node of the origin", %{scope: scope, rollcall: rollcall} do
       origin = remote_pid(@node_a, 1)
 
       check_trace(
         fn ->
-          tracker = start_tracker(scope, @threshold)
+          tracker = start_tracker(rollcall, scope, @threshold)
           deliver(tracker, snapshot(origin, stamp(1, 3), entries(["a", "b"])))
-          peers(scope)
+          peers(rollcall, scope)
         end,
         fn peers, trace ->
           assert Map.keys(peers) == [@node_a]
@@ -51,14 +51,14 @@ defmodule Rollcall.TrackerPeersTest do
       )
     end
 
-    test "a diff creates a record that is behind", %{scope: scope} do
+    test "a diff creates a record that is behind", %{scope: scope, rollcall: rollcall} do
       origin = remote_pid(@node_a, 1)
 
       check_trace(
         fn ->
-          tracker = start_tracker(scope, @threshold)
+          tracker = start_tracker(rollcall, scope, @threshold)
           deliver(tracker, diff(origin, stamp(1, 4), 3, entries(["a"]), []))
-          peers(scope)
+          peers(rollcall, scope)
         end,
         fn peers, trace ->
           assert Map.keys(peers) == [@node_a]
@@ -71,15 +71,15 @@ defmodule Rollcall.TrackerPeersTest do
       )
     end
 
-    test "a request creates no record", %{scope: scope} do
+    test "a request creates no record", %{scope: scope, rollcall: rollcall} do
       origin = remote_pid(@node_a, 1)
 
       check_trace(
         fn ->
-          tracker = start_tracker(scope, @threshold)
+          tracker = start_tracker(rollcall, scope, @threshold)
           deliver(tracker, request(origin))
           tick(tracker, @threshold)
-          peers(scope)
+          peers(rollcall, scope)
         end,
         fn peers, trace ->
           assert peers == %{}
@@ -90,36 +90,36 @@ defmodule Rollcall.TrackerPeersTest do
   end
 
   describe "a message from the local node" do
-    test "creates no record and emits a dropped event for each message", %{scope: scope} do
+    test "creates no record and emits a dropped event for each message", %{scope: scope, rollcall: rollcall} do
       origin = self()
 
       check_trace(
         fn ->
-          tracker = start_tracker(scope, @threshold)
+          tracker = start_tracker(rollcall, scope, @threshold)
           deliver(tracker, snapshot(origin, stamp(1, 3), entries(["a"])))
           deliver(tracker, diff(origin, stamp(1, 4), 3, entries(["b"]), []))
           deliver(tracker, request(origin))
-          peers(scope)
+          peers(rollcall, scope)
         end,
         fn peers, trace ->
           assert peers == %{}
           expect_events(trace, @message, scope, 0)
 
           dropped = expect_events(trace, @dropped, scope, 3)
-          assert Enum.all?(dropped, &(&1.reason == :local_origin and &1.message_scope == scope))
+          assert Enum.all?(dropped, &(&1.reason == :local_origin and &1.message_scope == scope and &1.node == node()))
         end
       )
     end
 
-    test "does not change a record of another node", %{scope: scope} do
+    test "does not change a record of another node", %{scope: scope, rollcall: rollcall} do
       origin = remote_pid(@node_a, 1)
 
       check_trace(
         fn ->
-          tracker = start_tracker(scope, @threshold)
+          tracker = start_tracker(rollcall, scope, @threshold)
           deliver(tracker, snapshot(origin, stamp(1, 3), entries(["a"])))
           deliver(tracker, snapshot(self(), stamp(9, 9), entries(["z"])))
-          peers(scope)
+          peers(rollcall, scope)
         end,
         fn peers, trace ->
           assert Map.keys(peers) == [@node_a]
@@ -131,14 +131,14 @@ defmodule Rollcall.TrackerPeersTest do
   end
 
   describe "a message for another scope" do
-    test "creates no record and emits a dropped event", %{scope: scope} do
+    test "creates no record and emits a dropped event", %{scope: scope, rollcall: rollcall} do
       origin = remote_pid(@node_a, 1)
 
       check_trace(
         fn ->
-          tracker = start_tracker(scope, @threshold)
+          tracker = start_tracker(rollcall, scope, @threshold)
           deliver(tracker, "other-scope", snapshot(origin, stamp(1, 3), entries(["a"])))
-          peers(scope)
+          peers(rollcall, scope)
         end,
         fn peers, trace ->
           assert peers == %{}
@@ -150,16 +150,16 @@ defmodule Rollcall.TrackerPeersTest do
       )
     end
 
-    test "does not change a record of the scope", %{scope: scope} do
+    test "does not change a record of the scope", %{scope: scope, rollcall: rollcall} do
       origin = remote_pid(@node_a, 1)
 
       check_trace(
         fn ->
-          tracker = start_tracker(scope, @threshold)
+          tracker = start_tracker(rollcall, scope, @threshold)
           deliver(tracker, snapshot(origin, stamp(1, 3), entries(["a"])))
           deliver(tracker, "other-scope", snapshot(origin, stamp(1, 4), entries(["z"])))
           deliver(tracker, "other-scope", request(origin))
-          peers(scope)
+          peers(rollcall, scope)
         end,
         fn peers, trace ->
           assert refs(peers[@node_a]) == ["a"]
@@ -170,17 +170,17 @@ defmodule Rollcall.TrackerPeersTest do
       )
     end
 
-    test "does not reset the silent count of the record", %{scope: scope} do
+    test "does not reset the silent count of the record", %{scope: scope, rollcall: rollcall} do
       origin = remote_pid(@node_a, 1)
 
       check_trace(
         fn ->
-          tracker = start_tracker(scope, @threshold)
+          tracker = start_tracker(rollcall, scope, @threshold)
           deliver(tracker, snapshot(origin, stamp(1, 3), entries(["a"])))
           tick(tracker, @threshold - 1)
           deliver(tracker, "other-scope", request(origin))
           tick(tracker, 1)
-          peers(scope)
+          peers(rollcall, scope)
         end,
         fn peers, trace ->
           assert peers == %{}
@@ -190,16 +190,60 @@ defmodule Rollcall.TrackerPeersTest do
     end
   end
 
-  describe "a message from a known node" do
-    test "the event holds the joins and the leaves of the change", %{scope: scope} do
+  # A malformed message has no origin, so the event has no node.
+  describe "a malformed message" do
+    test "emits a dropped event and changes no state", %{scope: scope, rollcall: rollcall} do
       origin = remote_pid(@node_a, 1)
 
       check_trace(
         fn ->
-          tracker = start_tracker(scope, @threshold)
+          tracker = start_tracker(rollcall, scope, @threshold)
+          deliver(tracker, snapshot(origin, stamp(1, 3), entries(["a"])))
+          state = Tracker.get_state(rollcall, scope)
+
+          deliver(tracker, :not_a_message)
+          deliver(tracker, {:snapshot, :not_a_pid, stamp(1, 4), entries(["z"])})
+
+          {state, Tracker.get_state(rollcall, scope)}
+        end,
+        fn {state, new_state}, trace ->
+          assert new_state == state
+          expect_events(trace, @message, scope, 1)
+
+          dropped = expect_events(trace, @dropped, scope, 2)
+          assert Enum.all?(dropped, &(&1.reason == :malformed and &1.message_scope == scope and &1.node == nil))
+        end
+      )
+    end
+
+    test "emits a malformed event, not a wrong scope event, when the scope is also wrong", %{
+      scope: scope,
+      rollcall: rollcall
+    } do
+      check_trace(
+        fn ->
+          tracker = start_tracker(rollcall, scope, @threshold)
+          deliver(tracker, "other-scope", :not_a_message)
+          assert Process.alive?(tracker)
+        end,
+        fn trace ->
+          assert [event] = expect_events(trace, @dropped, scope, 1)
+          assert %{message_scope: "other-scope", node: nil, reason: :malformed} = event
+        end
+      )
+    end
+  end
+
+  describe "a message from a known node" do
+    test "the event holds the joins and the leaves of the change", %{scope: scope, rollcall: rollcall} do
+      origin = remote_pid(@node_a, 1)
+
+      check_trace(
+        fn ->
+          tracker = start_tracker(rollcall, scope, @threshold)
           deliver(tracker, snapshot(origin, stamp(1, 3), entries(["a", "b"])))
           deliver(tracker, diff(origin, stamp(1, 4), 3, entries(["c"]), ["a"]))
-          peers(scope)
+          peers(rollcall, scope)
         end,
         fn peers, trace ->
           assert refs(peers[@node_a]) == ["b", "c"]
@@ -210,15 +254,15 @@ defmodule Rollcall.TrackerPeersTest do
       )
     end
 
-    test "the event shows behind after a gap", %{scope: scope} do
+    test "the event shows behind after a gap", %{scope: scope, rollcall: rollcall} do
       origin = remote_pid(@node_a, 1)
 
       check_trace(
         fn ->
-          tracker = start_tracker(scope, @threshold)
+          tracker = start_tracker(rollcall, scope, @threshold)
           deliver(tracker, snapshot(origin, stamp(1, 3), entries(["a"])))
           deliver(tracker, diff(origin, stamp(1, 6), 5, entries(["b"]), []))
-          peers(scope)
+          peers(rollcall, scope)
         end,
         fn peers, trace ->
           assert Peer.behind?(peers[@node_a])
@@ -230,16 +274,16 @@ defmodule Rollcall.TrackerPeersTest do
       )
     end
 
-    test "two origins on one node share one record", %{scope: scope} do
+    test "two origins on one node share one record", %{scope: scope, rollcall: rollcall} do
       old_origin = remote_pid(@node_a, 1)
       new_origin = remote_pid(@node_a, 2)
 
       check_trace(
         fn ->
-          tracker = start_tracker(scope, @threshold)
+          tracker = start_tracker(rollcall, scope, @threshold)
           deliver(tracker, snapshot(old_origin, stamp(1, 3), entries(["a"])))
           deliver(tracker, snapshot(new_origin, stamp(2, 0), entries(["b"])))
-          peers(scope)
+          peers(rollcall, scope)
         end,
         fn peers, trace ->
           assert Map.keys(peers) == [@node_a]
@@ -252,16 +296,16 @@ defmodule Rollcall.TrackerPeersTest do
       )
     end
 
-    test "a stale message from an old origin does not change the origin", %{scope: scope} do
+    test "a stale message from an old origin does not change the origin", %{scope: scope, rollcall: rollcall} do
       old_origin = remote_pid(@node_a, 1)
       new_origin = remote_pid(@node_a, 2)
 
       check_trace(
         fn ->
-          tracker = start_tracker(scope, @threshold)
+          tracker = start_tracker(rollcall, scope, @threshold)
           deliver(tracker, snapshot(new_origin, stamp(2, 0), entries(["b"])))
           deliver(tracker, snapshot(old_origin, stamp(1, 3), entries(["a"])))
-          peers(scope)
+          peers(rollcall, scope)
         end,
         fn peers, trace ->
           assert refs(peers[@node_a]) == ["b"]
@@ -273,16 +317,16 @@ defmodule Rollcall.TrackerPeersTest do
       )
     end
 
-    test "origins on two nodes get separate records", %{scope: scope} do
+    test "origins on two nodes get separate records", %{scope: scope, rollcall: rollcall} do
       origin_a = remote_pid(@node_a, 1)
       origin_b = remote_pid(@node_b, 1)
 
       check_trace(
         fn ->
-          tracker = start_tracker(scope, @threshold)
+          tracker = start_tracker(rollcall, scope, @threshold)
           deliver(tracker, snapshot(origin_a, stamp(1, 3), entries(["a"])))
           deliver(tracker, snapshot(origin_b, stamp(1, 3), entries(["b"])))
-          peers(scope)
+          peers(rollcall, scope)
         end,
         fn peers, _trace ->
           assert peers |> Map.keys() |> Enum.sort() == [@node_a, @node_b]
@@ -294,10 +338,10 @@ defmodule Rollcall.TrackerPeersTest do
   end
 
   describe "tick" do
-    test "does nothing when the tracker has no peers", %{scope: scope} do
+    test "does nothing when the tracker has no peers", %{scope: scope, rollcall: rollcall} do
       check_trace(
         fn ->
-          tracker = start_tracker(scope, @threshold)
+          tracker = start_tracker(rollcall, scope, @threshold)
           tick(tracker, @threshold)
           Process.alive?(tracker)
         end,
@@ -308,17 +352,17 @@ defmodule Rollcall.TrackerPeersTest do
       )
     end
 
-    test "deletes the record after the threshold and emits the leaves", %{scope: scope} do
+    test "deletes the record after the threshold and emits the leaves", %{scope: scope, rollcall: rollcall} do
       origin = remote_pid(@node_a, 1)
 
       check_trace(
         fn ->
-          tracker = start_tracker(scope, @threshold)
+          tracker = start_tracker(rollcall, scope, @threshold)
           deliver(tracker, snapshot(origin, stamp(1, 3), entries(["a", "b"])))
           tick(tracker, @threshold - 1)
-          kept = peers(scope)
+          kept = peers(rollcall, scope)
           tick(tracker, 1)
-          {kept, peers(scope)}
+          {kept, peers(rollcall, scope)}
         end,
         fn {kept, peers}, trace ->
           assert Map.keys(kept) == [@node_a]
@@ -331,17 +375,17 @@ defmodule Rollcall.TrackerPeersTest do
       )
     end
 
-    test "a message restarts the count", %{scope: scope} do
+    test "a message restarts the count", %{scope: scope, rollcall: rollcall} do
       origin = remote_pid(@node_a, 1)
 
       check_trace(
         fn ->
-          tracker = start_tracker(scope, @threshold)
+          tracker = start_tracker(rollcall, scope, @threshold)
           deliver(tracker, snapshot(origin, stamp(1, 3), entries(["a"])))
           tick(tracker, @threshold - 1)
           deliver(tracker, snapshot(origin, stamp(1, 2), []))
           tick(tracker, @threshold - 1)
-          peers(scope)
+          peers(rollcall, scope)
         end,
         fn peers, trace ->
           assert Map.keys(peers) == [@node_a]
@@ -350,17 +394,17 @@ defmodule Rollcall.TrackerPeersTest do
       )
     end
 
-    test "a request from a known node restarts the count", %{scope: scope} do
+    test "a request from a known node restarts the count", %{scope: scope, rollcall: rollcall} do
       origin = remote_pid(@node_a, 1)
 
       check_trace(
         fn ->
-          tracker = start_tracker(scope, @threshold)
+          tracker = start_tracker(rollcall, scope, @threshold)
           deliver(tracker, snapshot(origin, stamp(1, 3), entries(["a"])))
           tick(tracker, @threshold - 1)
           deliver(tracker, request(origin))
           tick(tracker, @threshold - 1)
-          peers(scope)
+          peers(rollcall, scope)
         end,
         fn peers, trace ->
           assert Map.keys(peers) == [@node_a]
@@ -369,18 +413,18 @@ defmodule Rollcall.TrackerPeersTest do
       )
     end
 
-    test "counts each node on its own", %{scope: scope} do
+    test "counts each node on its own", %{scope: scope, rollcall: rollcall} do
       origin_a = remote_pid(@node_a, 1)
       origin_b = remote_pid(@node_b, 1)
 
       check_trace(
         fn ->
-          tracker = start_tracker(scope, @threshold)
+          tracker = start_tracker(rollcall, scope, @threshold)
           deliver(tracker, snapshot(origin_a, stamp(1, 3), entries(["a"])))
           tick(tracker, @threshold - 1)
           deliver(tracker, snapshot(origin_b, stamp(1, 3), entries(["b"])))
           tick(tracker, 1)
-          peers(scope)
+          peers(rollcall, scope)
         end,
         fn peers, trace ->
           assert Map.keys(peers) == [@node_b]
@@ -389,16 +433,16 @@ defmodule Rollcall.TrackerPeersTest do
       )
     end
 
-    test "a snapshot after a purge creates a new record even with the old stamp", %{scope: scope} do
+    test "a snapshot after a purge creates a new record even with the old stamp", %{scope: scope, rollcall: rollcall} do
       origin = remote_pid(@node_a, 1)
 
       check_trace(
         fn ->
-          tracker = start_tracker(scope, @threshold)
+          tracker = start_tracker(rollcall, scope, @threshold)
           deliver(tracker, snapshot(origin, stamp(1, 3), entries(["a"])))
           tick(tracker, @threshold)
           deliver(tracker, snapshot(origin, stamp(1, 3), entries(["a"])))
-          peers(scope)
+          peers(rollcall, scope)
         end,
         fn peers, trace ->
           assert refs(peers[@node_a]) == ["a"]
@@ -409,16 +453,16 @@ defmodule Rollcall.TrackerPeersTest do
       )
     end
 
-    test "a purge does not change the local entries or the version", %{scope: scope} do
+    test "a purge does not change the local entries or the version", %{scope: scope, rollcall: rollcall} do
       origin = remote_pid(@node_a, 1)
 
       check_trace(
         fn ->
-          tracker = start_tracker(scope, @threshold)
-          {:ok, ref} = Rollcall.track(self(), scope, "partition", "key", %{})
+          tracker = start_tracker(rollcall, scope, @threshold)
+          {:ok, ref} = Rollcall.track(rollcall, self(), scope, "partition", "key", %{})
           deliver(tracker, snapshot(origin, stamp(1, 3), entries(["a"])))
           tick(tracker, @threshold)
-          {ref, Tracker.get_state(scope)}
+          {ref, Tracker.get_state(rollcall, scope)}
         end,
         fn {ref, state}, _trace ->
           assert state.version == 1
@@ -454,5 +498,5 @@ defmodule Rollcall.TrackerPeersTest do
     :ok
   end
 
-  defp peers(scope), do: Tracker.get_state(scope).peers
+  defp peers(rollcall, scope), do: Tracker.get_state(rollcall, scope).peers
 end

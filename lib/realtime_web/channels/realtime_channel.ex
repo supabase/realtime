@@ -27,6 +27,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Realtime.Tenants.Cache
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.NodeJoinBudget
+  alias Realtime.TokenBucket
   alias Realtime.UsersCounter
 
   alias RealtimeWeb.Channels.Payloads.Broadcast.Replay
@@ -49,6 +50,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   @fullsweep_after Application.compile_env!(:realtime, :websocket_fullsweep_after)
   @node_join_budget_flag "node_join_budget"
   @node_join_budget_exceeded_event [:realtime, :channel, :node_join_budget_exceeded]
+  @socket_join_limit_flag "socket_join_limit"
 
   @impl true
   def join("realtime:", _params, socket) do
@@ -57,7 +59,25 @@ defmodule RealtimeWeb.RealtimeChannel do
     |> join_error()
   end
 
-  def join("realtime:" <> sub_topic = topic, params, socket) do
+  # The socket's join bucket is checked before anything else
+  def join("realtime:" <> _ = topic, params, socket) do
+    case take_join_token(socket) do
+      :ok ->
+        join_topic(topic, params, socket)
+
+      :error ->
+        socket
+        |> maybe_log_error("SocketJoinRateLimitReached", "Too many joins on this socket")
+        |> join_error()
+    end
+  end
+
+  # The flag is read on every join so switching it off takes effect without sockets reconnecting
+  defp take_join_token(%{assigns: %{tenant: tenant_id}, private: %{join_bucket: join_bucket}}) do
+    if FeatureFlags.enabled?(@socket_join_limit_flag, tenant_id), do: TokenBucket.take(join_bucket), else: :ok
+  end
+
+  defp join_topic("realtime:" <> sub_topic = topic, params, socket) do
     %{
       assigns: %{tenant: tenant_id, log_level: log_level},
       channel_pid: channel_pid,

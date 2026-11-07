@@ -26,6 +26,9 @@ defmodule Rollcall.Tracker.State do
   number of ticks without a message after which the tracker deletes a peer
   record.
 
+  `view` is the ETS table that holds the view for readers. See
+  `Rollcall.Tracker.View`. The tracker writes each change to the table.
+
   `monitors` maps each process that has an entry to its monitor.
   `empty_grace_in_ms` and `empty_timer` control the stop of a tracker that holds no entry.
   """
@@ -34,6 +37,7 @@ defmodule Rollcall.Tracker.State do
   alias Rollcall.Tracker.Local
   alias Rollcall.Tracker.Messages
   alias Rollcall.Tracker.Peer
+  alias Rollcall.Tracker.View
 
   # `local` has no default. A default runs `Local.new/0` at compile time, and
   # the struct would then hold a literal value of the opaque type `Local.t()`.
@@ -53,6 +57,7 @@ defmodule Rollcall.Tracker.State do
     :incarnation,
     :empty_grace_in_ms,
     :local,
+    :view,
     :silence_threshold,
     :transport_module,
     :transport_state,
@@ -70,6 +75,7 @@ defmodule Rollcall.Tracker.State do
           empty_timer: reference() | nil,
           heartbeat_period_in_ms: pos_integer() | :manual,
           local: Local.t(),
+          view: View.t(),
           version: non_neg_integer(),
           monitors: %{pid() => reference()},
           peers: %{node() => Peer.t()},

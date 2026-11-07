@@ -12,6 +12,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
   alias Realtime.Helpers
   alias Realtime.GenRpc
   alias Realtime.Telemetry
+  alias Realtime.Tenants.Connect
 
   alias Rls.Subscriptions
 
@@ -24,6 +25,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
   @statement_timeout :timer.seconds(10)
   @subs_pool_statement_timeout :timer.seconds(5)
   @subs_pool_queue_target :timer.seconds(2)
+  @connect_topic_prefix Connect.syn_topic_prefix()
 
   defmodule State do
     @moduledoc false
@@ -113,6 +115,9 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
         _ ->
           readopt_monitors(subscribers_pids_table)
       end
+
+      # Best effort: continue anyway if migrations haven't finished
+      Connect.await_migrations(tenant)
 
       Rls.update_meta(id, self(), conn_pub)
 
@@ -229,6 +234,13 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
         q
       else
         {ids, q1} = Helpers.queue_take(q, @max_delete_records)
+
+        # A :noconnection :DOWN queues the ids of a subscriber that may still be alive. When its
+        # node reconnects, the channel subscribes again with the same ids, and {:subscribed} puts
+        # them back in the nodes table. Skip those ids, or the delete drops the rows that the
+        # resubscribe just wrote. The nodes table already records the resubscribe, so checking it
+        # here avoids a scan of the queue on every subscribe.
+        ids = Enum.reject(ids, &:ets.member(state.subscribers_nodes_table, &1))
         Logger.debug("delete sub id #{inspect(ids)}")
 
         case Subscriptions.delete_multi(state.conn, ids) do
@@ -280,6 +292,9 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
 
     case Rebalancer.check(previous_nodes_set, current_nodes_set, state.id) do
       :ok ->
+        {:noreply, state}
+
+      :retry ->
         # Let's check again in the future
         send_region_check_message(state.check_region_interval)
         {:noreply, state}
@@ -318,6 +333,9 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
 
     {:noreply, %{state | check_active_pids_ref: check_active_pids(), delete_queue: new_delete_queue}}
   end
+
+  # Drop connect:<tenant> broadcasts still in the mailbox after Connect.await_migrations/2 unsubscribes
+  def handle_info(%Phoenix.Socket.Broadcast{topic: @connect_topic_prefix <> _}, state), do: {:noreply, state}
 
   def handle_info(msg, state) do
     log_error("UnhandledProcessMessage", msg)

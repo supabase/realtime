@@ -4,7 +4,7 @@ defmodule Realtime.MixProject do
   def project do
     [
       app: :realtime,
-      version: "2.152.0",
+      version: "2.153.5",
       elixir: "~> 1.19",
       elixirc_paths: elixirc_paths(Mix.env()),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
@@ -97,6 +97,7 @@ defmodule Realtime.MixProject do
       {:syn, "~> 3.3"},
       {:forum, path: "./forum"},
       {:sql_logex, path: "./sql_logex"},
+      {:rollcall, path: "./rollcall"},
       {:cachex, "~> 4.0"},
       {:open_api_spex, "~> 3.16"},
       {:corsica, "~> 2.0"},
