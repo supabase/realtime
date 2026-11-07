@@ -24,6 +24,30 @@ defmodule RealtimeWeb.RequestMetrics do
 
   @event [:realtime, :client_request]
 
+  # Error codes of the broadcast endpoints, by the kind of outcome they give. A code that's not
+  # in either list is an internal failure.
+  @rejected [
+    :unauthorized,
+    :invalid_request,
+    :tenant_suspended,
+    :rate_limit_exceeded,
+    :payload_size_exceeded,
+    :persistence_invalid_ttl,
+    :persistence_unauthorized,
+    :batch_rejected
+  ]
+
+  @upstream_failures [
+    :rls_policy_error,
+    :query_canceled,
+    :unable_to_connect_to_project,
+    :database_lack_of_connections,
+    :database_connection_rate_limit_reached,
+    :initializing_project_connection,
+    :increase_connection_pool,
+    :persistence_failed
+  ]
+
   @doc """
   Returns the telemetry event name, [:realtime, :client_request].
 
@@ -71,30 +95,44 @@ defmodule RealtimeWeb.RequestMetrics do
   end
 
   @doc """
-  Maps a `BroadcastHandler` error code to an outcome.
+  Maps a broadcast error code to an outcome.
+
+  A code that is not in `broadcast_error_codes/0` is an internal failure.
   """
   @spec classify_broadcast_error(atom()) :: {kind(), atom()}
-  def classify_broadcast_error(code) do
-    case code do
-      :unauthorized -> {:rejected, code}
-      :invalid_request -> {:rejected, code}
-      :tenant_suspended -> {:rejected, code}
-      :rate_limit_exceeded -> {:rejected, code}
-      :payload_size_exceeded -> {:rejected, code}
-      :persistence_invalid_ttl -> {:rejected, code}
-      :persistence_unauthorized -> {:rejected, code}
-      :batch_rejected -> {:rejected, code}
-      :rls_policy_error -> {:upstream_failure, code}
-      :query_canceled -> {:upstream_failure, code}
-      :unable_to_connect_to_project -> {:upstream_failure, code}
-      :database_lack_of_connections -> {:upstream_failure, code}
-      :database_connection_rate_limit_reached -> {:upstream_failure, code}
-      :initializing_project_connection -> {:upstream_failure, code}
-      :increase_connection_pool -> {:upstream_failure, code}
-      :persistence_failed -> {:upstream_failure, code}
-      _ -> {:internal_failure, code}
-    end
-  end
+  def classify_broadcast_error(code) when code in @rejected, do: {:rejected, code}
+  def classify_broadcast_error(code) when code in @upstream_failures, do: {:upstream_failure, code}
+  def classify_broadcast_error(code), do: {:internal_failure, code}
+
+  @doc """
+  Returns the error codes that are not internal failures, by the kind of outcome they give.
+  """
+  @spec broadcast_error_codes() :: %{rejected: [atom()], upstream_failure: [atom()]}
+  def broadcast_error_codes, do: %{rejected: @rejected, upstream_failure: @upstream_failures}
+
+  @doc """
+  Maps an error from the tenant database or from the authorization check to an outcome.
+
+  Both HTTP broadcast endpoints use this function. `error` is the value that `Connect` or
+  `Authorization.get_write_authorizations/3` returns, in either of its two error shapes.
+  """
+  @spec classify_authorization_error(term()) :: {kind(), atom()}
+  def classify_authorization_error(error), do: error |> authorization_error_code() |> classify_broadcast_error()
+
+  defp authorization_error_code({:error, :tenant_database_unavailable}), do: :unable_to_connect_to_project
+
+  defp authorization_error_code({:error, reason})
+       when reason in [:initializing, :tenant_database_connection_initializing],
+       do: :initializing_project_connection
+
+  defp authorization_error_code({:error, :tenant_db_too_many_connections}), do: :database_lack_of_connections
+  defp authorization_error_code({:error, :connect_rate_limit_reached}), do: :database_connection_rate_limit_reached
+  defp authorization_error_code({:error, :increase_connection_pool}), do: :increase_connection_pool
+  defp authorization_error_code({:error, :missing_partition}), do: :missing_partition
+  defp authorization_error_code({:error, :rpc_error, _}), do: :unable_to_handle_broadcast
+  defp authorization_error_code({:error, :rls_policy_error, _}), do: :rls_policy_error
+  defp authorization_error_code({:error, :query_canceled, _}), do: :query_canceled
+  defp authorization_error_code(_error), do: :unable_to_set_policies
 
   defp emit(request, transport, tenant, outcome, reason) do
     :telemetry.execute(@event, %{count: 1}, %{
