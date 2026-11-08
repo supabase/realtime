@@ -2696,6 +2696,17 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       refute_receive {:telemetry, _, _, _}
     end
 
+    test "counts the pushed diff as a presence event", %{tenant: tenant} do
+      counter_key = Tenants.presence_events_per_second_key(tenant.external_id)
+      Realtime.GenCounter.reset(counter_key)
+      socket = presence_socket(tenant, true)
+      diff = presence_diff_with(%{"alice" => %{metas: [%{"name" => "alice", :phx_ref => "a1"}]}})
+
+      assert {:noreply, _socket} = RealtimeChannel.handle_info({:authorize_presence_diff, diff}, socket)
+
+      assert Realtime.GenCounter.get(counter_key) == 1
+    end
+
     test "drops the diff and records nothing when presence.read is denied", %{tenant: tenant} do
       socket = presence_socket(tenant, false)
       diff = presence_diff(%{ts: System.system_time(:millisecond), node: "elsewhere"})
