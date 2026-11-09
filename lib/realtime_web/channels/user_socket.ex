@@ -176,6 +176,12 @@ defmodule RealtimeWeb.UserSocket do
         Logging.log_error(socket, "JoinsRateLimitReached", msg)
         connect_error(:too_many_joins)
 
+      # Same code and log throttle as the joins RealtimeChannel refuses for this budget
+      {:error, :too_many_node_joins} ->
+        msg = "Too many joins per second"
+        Logging.maybe_log_error(socket, "JoinsRateLimitReached", msg, throttle: {1, 10_000})
+        connect_error(:too_many_node_joins)
+
       error ->
         log_error("ErrorConnectingToWebsocket", error)
         connect_error(error)
@@ -220,6 +226,7 @@ defmodule RealtimeWeb.UserSocket do
 
   defp error_response(:too_many_connections), do: {429, "Too many connected users"}
   defp error_response(:too_many_joins), do: {429, "Too many joins per second"}
+  defp error_response(:too_many_node_joins), do: {429, "Too many joins per second"}
 
   defp error_response(_reason), do: {500, "Error connecting to Realtime"}
 

@@ -38,9 +38,11 @@ Channel topics look like `realtime:<sub_topic>` and are all handled by `Realtime
 
 #### Join budget per node
 
-`Realtime.Tenants.NodeJoinBudget` measures how fast each tenant joins channels on each node. The budget is the larger of two values, in joins per second. The first is `NODE_JOIN_BUDGET_FLOOR` (default 10). The second is `CLIENT_JOINS_PER_SECOND` (default 1) times the tenant's clients on the node. The clients are the sockets that `Realtime.UsersCounter` counts.
+`Realtime.Tenants.NodeJoinBudget` limits how fast each tenant joins channels on each node. The budget is the larger of two values, in joins per second. The first is `NODE_JOIN_BUDGET_FLOOR` (default 10). The second is `CLIENT_JOINS_PER_SECOND` (default 1) times the tenant's clients on the node. The clients are the sockets that `Realtime.UsersCounter` counts.
 
-A token bucket (a store of joins that refills at the budget rate) holds `NODE_JOIN_BUDGET_BURST_SECONDS` (default 60) seconds of budget. A tenant with no clients on a node can make 600 joins at once (10 × 60), and then 10 joins per second. A tenant that keeps rejoining empties the bucket. After that, each join over the budget increments the metrics below. The moduledoc of `Realtime.Tenants.NodeJoinBudget` explains how the bucket works and why its size is in seconds.
+A token bucket (a store of joins that refills at the budget rate) holds `NODE_JOIN_BUDGET_BURST_SECONDS` (default 60) seconds of budget. A tenant with no clients on a node can make 600 joins at once (10 × 60), and then 10 joins per second. A tenant that keeps rejoining empties the bucket. The moduledoc of `Realtime.Tenants.NodeJoinBudget` explains how the bucket works and why its size is in seconds.
+
+The `node_join_budget` feature flag turns the budget on for a tenant. While the flag is on and the bucket is empty, Realtime refuses each channel join with `JoinsRateLimitReached`, and the socket stays connected. Realtime also refuses new WebSocket connections for the tenant with an HTTP 429. Each refused join increments the metrics below. A refused connection does not.
 
 | Metric | Endpoint | Label |
 | --- | --- | --- |

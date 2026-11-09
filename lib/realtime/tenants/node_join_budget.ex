@@ -86,11 +86,31 @@ defmodule Realtime.Tenants.NodeJoinBudget do
   @doc "Takes a join from the tenant's budget on this node, or returns `:error` when it is used up."
   @spec take(Tenant.t(), integer()) :: :ok | :error
   def take(%Tenant{external_id: tenant_id}, now \\ now()) do
+    {interval, tolerance} = limits(tenant_id)
+    take(tenant_id, interval, tolerance, now)
+  end
+
+  @doc "Returns `true` when the tenant's budget on this node is used up, so `take/2` would refuse. Takes no join."
+  @spec exhausted?(Tenant.t(), integer()) :: boolean()
+  def exhausted?(%Tenant{external_id: tenant_id}, now \\ now()) do
+    case :ets.lookup(@table, tenant_id) do
+      # A bucket that is full again needs no budget to know a join fits
+      [{^tenant_id, full_at}] when full_at > now ->
+        {_interval, tolerance} = limits(tenant_id)
+        full_at - now > tolerance
+
+      _ ->
+        false
+    end
+  end
+
+  # The interval one join costs and how far past now a take can move `full_at`, both in microseconds
+  defp limits(tenant_id) do
     budget = budget(tenant_id)
     interval = div(@microseconds_per_second, budget)
     burst_seconds = Application.fetch_env!(:realtime, :node_join_budget_burst_seconds)
 
-    take(tenant_id, interval, (budget * burst_seconds - 1) * interval, now)
+    {interval, (budget * burst_seconds - 1) * interval}
   end
 
   # Joins per second the tenant can make on this node right now

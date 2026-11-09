@@ -541,24 +541,53 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
   describe "rate limits - node join budget" do
     setup [:rls_context]
 
-    test "joins over the tenant's budget on the node are counted, not refused", %{
+    test "refuses joins over the tenant's budget on the node and keeps the socket connected", %{
       tenant: tenant,
       serializer: serializer
     } do
       enable_tenant_flag!(tenant, "node_join_budget")
       {socket, _} = get_connection(tenant, serializer, role: "authenticated")
       config = %{broadcast: %{self: true}, private: false}
-      topics = for _ <- 1..50, do: "realtime:#{random_string()}"
+      [topic_1 | _] = topics = for _ <- 1..50, do: "realtime:#{random_string()}"
 
       for topic <- topics, do: WebsocketClient.join(socket, topic, %{config: config})
 
-      for topic <- topics do
-        assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 5_000
-      end
+      replies =
+        for topic <- topics do
+          assert_receive %Message{event: "phx_reply", payload: %{"status" => status} = reply, topic: ^topic}, 10_000
+          {status, reply["response"]}
+        end
 
       # config/test.exs makes the budget max(10, 2 * sockets) joins per second with a 2 second burst, so with one socket
       # the first 20 joins always fit and the rest outrun the refill of 10 per second
-      assert node_join_budget_exceeded(tenant) in 1..30
+      refused = {"error", %{"reason" => "JoinsRateLimitReached: Too many joins per second"}}
+      {first_20, rest} = Enum.split(replies, 20)
+      assert Enum.all?(first_20, &match?({"ok", _}, &1))
+      assert Enum.all?(rest, &(match?({"ok", _}, &1) or &1 == refused))
+      refused_count = Enum.count(rest, &(&1 == refused))
+      assert refused_count in 1..30
+      assert node_join_budget_exceeded(tenant) == refused_count
+
+      payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+      WebsocketClient.send_event(socket, topic_1, "broadcast", payload)
+      assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic_1}, 500
+    end
+
+    test "refuses new connections while the tenant's budget on the node is used up", %{
+      tenant: tenant,
+      serializer: serializer
+    } do
+      enable_tenant_flag!(tenant, "node_join_budget")
+      future = System.monotonic_time(:microsecond) + 60_000_000
+      Stream.repeatedly(fn -> Realtime.Tenants.NodeJoinBudget.take(tenant, future) end) |> Enum.find(&(&1 == :error))
+
+      log =
+        capture_log(fn ->
+          assert {:error, %Mint.WebSocket.UpgradeFailureError{status_code: 429}} =
+                   get_connection(tenant, serializer, role: "authenticated")
+        end)
+
+      assert log =~ "JoinsRateLimitReached"
     end
   end
 

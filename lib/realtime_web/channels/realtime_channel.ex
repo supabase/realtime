@@ -116,7 +116,7 @@ defmodule RealtimeWeb.RealtimeChannel do
          socket = assign(socket, PresenceHandler.join(join, tenant)),
          :ok <- only_private?(tenant, socket),
          :ok <- limit_max_users(tenant, transport_pid),
-         :ok <- measure_node_joins(tenant),
+         :ok <- limit_node_joins(tenant),
          :ok <- limit_joins(tenant, socket),
          :ok <- limit_channels(tenant, socket),
          {:ok, claims, confirm_token_ref} <- confirm_token(socket),
@@ -219,6 +219,10 @@ defmodule RealtimeWeb.RealtimeChannel do
         msg = "ClientJoinRateLimitReached: Too many joins per second"
         send(transport_pid, %Phoenix.Socket.Broadcast{event: "disconnect"})
         {:error, %{reason: msg}}
+
+      # Only the join is refused, the socket stays connected
+      {:error, :too_many_node_joins} ->
+        maybe_log_error(socket, "JoinsRateLimitReached", "Too many joins per second", throttle: {1, 10_000})
 
       {:error, :increase_connection_pool} ->
         msg = "Please increase your connection pool size"
@@ -750,14 +754,15 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  # The node join budget is only measured for now: joins over it are counted, not refused. The flag is read on every
-  # join so switching it off takes effect without sockets reconnecting
-  defp measure_node_joins(tenant) do
+  # Checked before limit_joins so refused joins are not counted as joins. The flag is read on every join so switching it
+  # off takes effect without sockets reconnecting
+  defp limit_node_joins(tenant) do
     if FeatureFlags.enabled?(@node_join_budget_flag, tenant.external_id) and NodeJoinBudget.take(tenant) == :error do
       Telemetry.execute(@node_join_budget_exceeded_event, %{count: 1}, %{tenant: tenant.external_id})
+      {:error, :too_many_node_joins}
+    else
+      :ok
     end
-
-    :ok
   end
 
   defp measure_socket_broadcasts(%{assigns: %{tenant: tenant_id}, private: %{broadcast_bucket: bucket}}) do

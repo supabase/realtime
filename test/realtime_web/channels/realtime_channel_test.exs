@@ -1589,25 +1589,35 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       refute_receive {@node_join_budget_exceeded_event, ^ref, _, %{tenant: ^tenant_id}}
     end
 
-    test "allows a join over the budget and counts it", %{tenant: tenant} do
+    test "refuses a join over the budget, counts it and keeps the socket connected", %{tenant: tenant} do
       tenant = enable_node_join_budget_flag!(tenant)
       ref = :telemetry_test.attach_event_handlers(self(), [@node_join_budget_exceeded_event])
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
       use_up_node_join_budget(tenant)
 
-      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
+      assert {:error, %{reason: "JoinsRateLimitReached: Too many joins per second"}} =
+               subscribe_and_join(socket, "realtime:test", %{})
 
       tenant_id = tenant.external_id
       assert_receive {@node_join_budget_exceeded_event, ^ref, %{count: 1}, %{tenant: ^tenant_id}}
       refute_received %Phoenix.Socket.Broadcast{event: "disconnect"}
     end
 
-    test "counts nothing while the flag is off", %{tenant: tenant} do
+    test "refuses to connect while the budget is used up", %{tenant: tenant} do
+      tenant = enable_node_join_budget_flag!(tenant)
+      jwt = Generators.generate_jwt_token(tenant)
+      use_up_node_join_budget(tenant)
+
+      assert {:error, :too_many_node_joins} =
+               connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+    end
+
+    test "connects, joins and counts nothing while the flag is off", %{tenant: tenant} do
       ref = :telemetry_test.attach_event_handlers(self(), [@node_join_budget_exceeded_event])
       jwt = Generators.generate_jwt_token(tenant)
-      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
       use_up_node_join_budget(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
       assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
 
