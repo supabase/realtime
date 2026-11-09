@@ -166,6 +166,9 @@ muster_scope_shards = Env.get_integer("MUSTER_SCOPE_SHARDS", 5)
 # SIGTERM grace period must exceed timeout + settle + the rest of shutdown.
 muster_drain_timeout_ms = Env.get_integer("MUSTER_DRAIN_TIMEOUT_MS", :timer.seconds(10))
 muster_drain_settle_ms = Env.get_integer("MUSTER_DRAIN_SETTLE_MS", 7_500)
+# How long shutdown waits after it marks this node as draining (see Realtime.Nodes.mark_draining/1),
+# so every node sees the mark before this node stops its tenant processes. Adds to shutdown time.
+node_drain_settle_ms = Env.get_integer("NODE_DRAIN_SETTLE_MS", :timer.seconds(1))
 websocket_max_heap_size = div(Env.get_integer("WEBSOCKET_MAX_HEAP_SIZE", 50_000_000), :erlang.system_info(:wordsize))
 
 cluster_strategies = Env.get_binary("CLUSTER_STRATEGIES", "POSTGRES")
@@ -453,7 +456,8 @@ if config_env() != :test do
     channel_error_backoff_ms: channel_error_backoff_ms,
     client_join_rate_limit: [per_second: client_joins_per_second],
     node_join_budget_floor: node_join_budget_floor,
-    node_join_budget_burst_seconds: node_join_budget_burst_seconds
+    node_join_budget_burst_seconds: node_join_budget_burst_seconds,
+    node_drain_settle_ms: node_drain_settle_ms
 end
 
 # Setup Production

@@ -8,11 +8,15 @@ defmodule Realtime.NodesTest do
   alias Realtime.Nodes
   alias Realtime.Tenants
 
-  defp spawn_fake_node(region, node) do
+  defp spawn_fake_node(region, node), do: spawn_fake_member(RegionNodes, region, node)
+
+  defp spawn_fake_draining_node(region, node), do: spawn_fake_member(DrainingNodes, region, node)
+
+  defp spawn_fake_member(scope, region, node) do
     parent = self()
 
     fun = fn ->
-      :syn.join(RegionNodes, region, self(), node: node)
+      :syn.join(scope, region, self(), node: node)
       send(parent, :joined)
 
       receive do
@@ -20,7 +24,7 @@ defmodule Realtime.NodesTest do
       end
     end
 
-    {:ok, _pid} = start_supervised({Task, fun}, id: {region, node})
+    {:ok, _pid} = start_supervised({Task, fun}, id: {scope, region, node})
     assert_receive :joined
   end
 
@@ -58,6 +62,26 @@ defmodule Realtime.NodesTest do
 
     test "on non-existing region, returns empty list" do
       assert Nodes.region_nodes("non-existing-region") == []
+    end
+  end
+
+  describe "mark_draining/1 and draining_nodes/1" do
+    test "nil region has no draining nodes" do
+      assert Nodes.draining_nodes(nil) == MapSet.new()
+    end
+
+    test "marks this node as draining while the pid lives, and keeps it in the region nodes" do
+      region = Nodes.region()
+      {:ok, pid} = start_supervised({Task, fn -> Process.sleep(:infinity) end})
+
+      assert :ok = Nodes.mark_draining(pid)
+
+      assert Nodes.draining_nodes(region) == MapSet.new([node()])
+      assert node() in Nodes.region_nodes(region)
+
+      :ok = stop_supervised(Task)
+
+      assert_eventually Nodes.draining_nodes(region) == MapSet.new()
     end
   end
 
@@ -106,6 +130,8 @@ defmodule Realtime.NodesTest do
           {self(), [node: Enum.at(expected_nodes, 1)]}
         ]
       end)
+
+      expect(:syn, :members, fn DrainingNodes, ^region -> [] end)
 
       expected_region = Tenants.region(tenant)
 
@@ -319,6 +345,56 @@ defmodule Realtime.NodesTest do
 
       # Should distribute across multiple nodes (at least 2) using the hashed tenant IDs
       assert length(Enum.uniq(results)) >= 2
+    end
+  end
+
+  describe "launch_node/3 with draining nodes" do
+    test "leaves draining nodes out" do
+      region = "partly-draining-region"
+      spawn_fake_node(region, :node_a)
+      spawn_fake_node(region, :node_b)
+      spawn_fake_node(region, :node_c)
+      spawn_fake_draining_node(region, :node_c)
+
+      results = for i <- 1..30, do: Nodes.launch_node(region, node(), "tenant-#{i}")
+
+      assert results |> Enum.uniq() |> Enum.sort() == [:node_a, :node_b]
+    end
+
+    test "picks the only node that is not draining" do
+      region = "mostly-draining-region"
+      spawn_fake_node(region, :node_a)
+      spawn_fake_node(region, :node_b)
+      spawn_fake_node(region, :node_c)
+      spawn_fake_draining_node(region, :node_b)
+      spawn_fake_draining_node(region, :node_c)
+
+      results = for i <- 1..30, do: Nodes.launch_node(region, node(), "tenant-#{i}")
+
+      assert Enum.uniq(results) == [:node_a]
+    end
+
+    test "uses every region node when all of them are draining" do
+      region = "fully-draining-region"
+      spawn_fake_node(region, :node_a)
+      spawn_fake_node(region, :node_b)
+      spawn_fake_draining_node(region, :node_a)
+      spawn_fake_draining_node(region, :node_b)
+
+      results = for i <- 1..30, do: Nodes.launch_node(region, node(), "tenant-#{i}")
+
+      assert results |> Enum.uniq() |> Enum.sort() == [:node_a, :node_b]
+    end
+
+    test "ignores draining nodes of other regions" do
+      region = "steady-region"
+      spawn_fake_node(region, :node_a)
+      spawn_fake_node(region, :node_b)
+      spawn_fake_draining_node("other-region", :node_a)
+
+      results = for i <- 1..30, do: Nodes.launch_node(region, node(), "tenant-#{i}")
+
+      assert results |> Enum.uniq() |> Enum.sort() == [:node_a, :node_b]
     end
   end
 

@@ -120,7 +120,9 @@ flowchart TD
     A["launch_node(region, default, tenant_id)"] --> B{"nodes in region"}
     B -->|none| C["fallback: current node"]
     B -->|one| D["that node"]
-    B -->|many| E["seed RNG with phash2({tenant_id, time_bucket})"]
+    B -->|many| J["leave out draining nodes<br/>(keep all if all are draining)"]
+    J -->|one left| D
+    J -->|many left| E["seed RNG with phash2({tenant_id, time_bucket})"]
     E --> F["pick 2 candidate nodes<br/>(same result on every node in the bucket)"]
     F --> G["node_load/1 on both<br/>:cpu_sup.avg5, cached per node"]
     G -->|both known| H["least loaded wins"]
@@ -128,6 +130,7 @@ flowchart TD
 ```
 
 - Region membership comes from `:syn.members(RegionNodes, region)`, sorted for stability. Tenant regions are mapped to the nearest Realtime region by `platform_region_translator/1` (overridable via `REGION_MAPPING`).
+- A node that shuts down marks itself as draining in the `DrainingNodes` scope (`Realtime.Application.prep_stop/1` calls `Realtime.Nodes.mark_draining/1`). The picker leaves draining nodes out, so a restarted `Connect` or Postgres Changes poller does not land on a node that is about to stop. The node stays in `RegionNodes`, because it still serves broadcasts to its websockets until the Endpoint closes them. Shutdown then waits `NODE_DRAIN_SETTLE_MS` so that the mark reaches the other nodes before any tenant process stops.
 - The time bucket (default 60s, `:node_selection_time_bucket_seconds`) is the trick: every node computing in the same window picks the same two candidates, so concurrent requests agree. The next window picks a different pair, so placement spreads out over time. Agreement is best-effort not a guarantee. Requests landing on either side of a bucket edge (or on nodes with clock skew) get different candidate pairs. Then two singletons start and `:syn` resolves the conflict via `SynHandler.resolve_registry_conflict/4` (oldest registration wins, node name as tiebreak), stopping the loser with `{:shutdown, :syn_conflict_resolution}`.
 - Load is `:cpu_sup.avg5/0`, fetched over `GenRpc` for remote nodes and cached in `Realtime.Nodes.Cache` for the bucket duration. A node that hasn't been up long enough (`:node_balance_uptime_threshold_in_ms`) reports `{:error, :not_enough_data}` and the picker falls back to consistent hashing — this keeps freshly booted nodes from looking artificially idle and absorbing every tenant.
 
@@ -135,11 +138,12 @@ The same picker is used for Postgres Changes (`PostgresCdcRls.start_distributed/
 
 ### Highlight: syn as the cluster-wide registry
 
-[`:syn`](https://github.com/ostinelli/syn) gives us a distributed process registry with metadata and conflict resolution. Realtime uses three kinds of scopes, set up in `Realtime.Application`:
+[`:syn`](https://github.com/ostinelli/syn) gives us a distributed process registry with metadata and conflict resolution. Realtime uses four kinds of scopes, set up in `Realtime.Application`:
 
 | Scope | What's registered | Used for |
 | --- | --- | --- |
 | `RegionNodes` | one process per node, joined to a group named after its region | region membership → node selection, region flood |
+| `DrainingNodes` | one process per node that is shutting down, joined to a group named after its region | `launch_node/3` leaves these nodes out |
 | `Realtime.Tenants.Connect` | the `Connect` GenServer, keyed by `tenant_id` | find the tenant's DB pool from any node |
 | `realtime_postgres_cdc_<shard>` | the CDC `WorkerSupervisor`, keyed by `tenant_id` | find the tenant's poller; sharded (`:postgres_cdc_scope_shards`) so one scope's table isn't a hot spot |
 
