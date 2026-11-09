@@ -29,6 +29,14 @@ defmodule Rollcall.UseTest do
       assert Local.entries(Tracker.get_state(Instance, scope).local, "partition") == []
     end
 
+    test "pass the option :ref of track to the tracker", %{scope: scope} do
+      start_supervised!(Instance)
+
+      assert {:ok, "caller-ref"} = Instance.track(self(), scope, "partition", "key", %{}, ref: "caller-ref")
+
+      assert Instance.state(scope, "partition") == [{"caller-ref", "key", %{}}]
+    end
+
     test "give the options of use to the trackers", %{scope: scope} do
       start_supervised!(Tuned)
 

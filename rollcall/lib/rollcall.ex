@@ -96,9 +96,10 @@ defmodule Rollcall do
         Rollcall.start_link([name: __MODULE__] ++ Keyword.merge(unquote(opts), opts))
       end
 
-      @spec track(pid(), Rollcall.scope(), Rollcall.partition(), Rollcall.key(), Rollcall.meta()) ::
+      @spec track(pid(), Rollcall.scope(), Rollcall.partition(), Rollcall.key(), Rollcall.meta(), Keyword.t()) ::
               {:ok, Rollcall.ref()} | {:error, term()}
-      def track(pid, scope, partition, key, meta), do: Rollcall.track(__MODULE__, pid, scope, partition, key, meta)
+      def track(pid, scope, partition, key, meta, opts \\ []),
+        do: Rollcall.track(__MODULE__, pid, scope, partition, key, meta, opts)
 
       @spec untrack(pid(), Rollcall.scope(), Rollcall.partition(), Rollcall.key()) :: :ok
       def untrack(pid, scope, partition, key), do: Rollcall.untrack(__MODULE__, pid, scope, partition, key)
@@ -239,10 +240,14 @@ defmodule Rollcall do
   caller that wants to skip an unchanged meta compares it before the call.
 
   Starts the tracker for `scope` when no tracker runs.
+
+  A `:ref` option can be passed in the opts argument. When it's provided the value
+  will be used as the ref for the entry. Refs need to be unique per scope, when callers
+  provide the ref they are responsible for its uniqueness.
   """
-  @spec track(name(), pid(), scope(), partition(), key(), meta()) :: {:ok, ref()} | {:error, term()}
-  def track(name, pid, scope, partition, key, meta) when is_pid(pid) and is_map(meta) do
-    Tracker.track(name, scope, pid, partition, key, meta)
+  @spec track(name(), pid(), scope(), partition(), key(), meta(), Keyword.t()) :: {:ok, ref()} | {:error, term()}
+  def track(name, pid, scope, partition, key, meta, opts \\ []) when is_pid(pid) and is_map(meta) do
+    Tracker.track(name, scope, pid, partition, key, meta, opts)
   end
 
   @doc """

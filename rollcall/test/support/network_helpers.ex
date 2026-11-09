@@ -76,10 +76,10 @@ defmodule Rollcall.NetworkHelpers do
     pid
   end
 
-  @doc "Tracks an entry in `tracker`, and returns the ref."
-  @spec track(pid(), pid(), Rollcall.partition(), Rollcall.key(), Rollcall.meta()) :: Rollcall.ref()
-  def track(tracker, client, partition, key, meta \\ %{}) do
-    {:ok, ref} = GenServer.call(tracker, {:track, client, partition, key, meta})
+  @doc "Tracks an entry in `tracker`, and returns the ref. `opts` are the options of `Rollcall.track/7`."
+  @spec track(pid(), pid(), Rollcall.partition(), Rollcall.key(), Rollcall.meta(), Keyword.t()) :: Rollcall.ref()
+  def track(tracker, client, partition, key, meta \\ %{}, opts \\ []) do
+    {:ok, ref} = GenServer.call(tracker, {:track, client, partition, key, meta, opts})
     ref
   end
 
