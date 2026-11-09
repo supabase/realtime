@@ -262,7 +262,9 @@ defmodule RealtimeWeb.RealtimeChannel.RequestOutcomeTest do
         authorization_context: authorization_context,
         private?: private?,
         tenant: tenant.external_id
-      }
+      },
+      # `RealtimeWeb.UserSocket.connect/3` gives every socket one
+      private: %{broadcast_bucket: Realtime.TokenBucket.new(100, 1_000)}
     }
   end
 end

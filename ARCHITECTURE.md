@@ -55,6 +55,15 @@ A token bucket (a store of joins that refills at the budget rate) holds `NODE_JO
 | **Presence** | event of type `"presence"` | other clients' track/untrack, diffed and synced per topic |
 | **Postgres Changes** | configured at join | the tenant's WAL, via `PostgresCdcRls` |
 
+#### Broadcasts per socket
+
+`RealtimeWeb.UserSocket.connect/3` gives each socket a `Realtime.TokenBucket` for the broadcasts its clients send. The bucket holds `CLIENT_BROADCASTS_BURST` (default 1,000) broadcasts and refills at `CLIENT_BROADCASTS_PER_SECOND` (default 100). All channels of the socket share it. While the `socket_broadcast_limit` feature flag is on, each broadcast takes a token. For now the limit never refuses a broadcast. A broadcast that finds the bucket empty is still sent, and it increments the metrics below.
+
+| Metric | Endpoint | Label |
+| --- | --- | --- |
+| `realtime_channel_socket_broadcast_limit_exceeded` | `/tenant-metrics` | `tenant` |
+| `realtime_channel_global_socket_broadcast_limit_exceeded` | `/metrics` | none |
+
 ### 3. Fan-out and receive
 
 `Realtime.PubSub` reaches other nodes through `Realtime.GenRpcPubSub`, an adapter built on [`gen_rpc`](https://github.com/emqx/gen_rpc) (wrapped locally by `Realtime.GenRpc`) instead of Erlang distribution, so nodes can have more than one TCP connection between them for more bandwidth. How it picks which nodes to send to is the subject of [Broadcast fan-out](#broadcast-fan-out). Erlang distribution is still used for other types of communications including being Muster & [`:syn`](https://github.com/ostinelli/syn) transport layer.
