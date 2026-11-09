@@ -2,11 +2,16 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
   @moduledoc """
   Live Dashboard page to inspect tenant and extension information by external_id.
   Secrets (jwt_secret and encrypted extension fields) are never displayed.
+
+  It also reads, in a read-only transaction, who owns the realtime objects and who may execute
+  the realtime functions in the tenant database, so a privilege problem can be diagnosed without
+  SQL access to it. Each privileges section runs its own query, only once it is first opened.
   """
   use Phoenix.LiveDashboard.PageBuilder
   use Realtime.Logs
 
   alias Extensions.PostgresCdcRls
+  alias Phoenix.LiveView.JS
   alias Realtime.Api
   alias Realtime.Api.Tenant
   alias Realtime.Crypto
@@ -17,13 +22,18 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
 
   @application_name "realtime_dashboard_tenant_info"
   @cdc_rls_stop_timeout 5_000
+  @privileges_statement_timeout 5_000
+  @database_read_timeout 15_000
+  @privileges_sections ~w(default functions tables event-triggers)
+
+  @empty_assigns [pg_version: nil, privileges: %{}, runtime: nil, error: nil, action_msg: nil]
 
   @impl true
   def menu_link(_, _), do: {:ok, "Tenant Info"}
 
   @impl true
   def mount(_params, _, socket) do
-    {:ok, assign(socket, external_id: "", tenant: nil, pg_version: nil, runtime: nil, error: nil, action_msg: nil)}
+    {:ok, assign(socket, [external_id: "", tenant: nil] ++ @empty_assigns)}
   end
 
   @impl true
@@ -33,21 +43,15 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
     case Api.get_tenant_by_external_id(ref) do
       nil ->
         {:noreply,
-         assign(socket,
-           external_id: ref,
-           tenant: nil,
-           pg_version: nil,
-           runtime: nil,
-           error: "Tenant not found",
-           action_msg: nil
-         )}
+         assign(socket, [external_id: ref, tenant: nil] ++ Keyword.put(@empty_assigns, :error, "Tenant not found"))}
 
       %Tenant{} = tenant ->
         {:noreply,
          assign(socket,
            external_id: ref,
            tenant: prepare_tenant(tenant),
-           pg_version: fetch_pg_version(tenant),
+           pg_version: read_tenant_database(tenant, &fetch_pg_version/1),
+           privileges: %{},
            runtime: runtime_info(ref),
            error: nil,
            action_msg: nil
@@ -56,7 +60,7 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
   end
 
   def handle_params(_params, _uri, socket) do
-    {:noreply, assign(socket, external_id: "", tenant: nil, pg_version: nil, runtime: nil, error: nil, action_msg: nil)}
+    {:noreply, assign(socket, [external_id: "", tenant: nil] ++ @empty_assigns)}
   end
 
   @impl true
@@ -78,10 +82,21 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
     {:noreply, assign(socket, action_msg: "Attempting to shutdown Postgres Replication (CDC RLS) for #{ref}...")}
   end
 
+  # The summary of a privileges section sends this on every click, closing included. Only the first
+  # one reads, so a section keeps what it showed until the next lookup.
+  def handle_event("load_privileges", %{"section" => section}, %{assigns: %{external_id: ref}} = socket)
+      when ref != "" and section in @privileges_sections do
+    if Map.has_key?(socket.assigns.privileges, section) do
+      {:noreply, socket}
+    else
+      {:noreply, update(socket, :privileges, &Map.put(&1, section, read_privileges(ref, section)))}
+    end
+  end
+
   @impl true
   # Auto-refresh (the dashboard's "refresh every" selector) only recomputes the
-  # cheap runtime info. pg_version is intentionally not refreshed as it opens a
-  # database connection.
+  # cheap runtime info. pg_version and privileges are intentionally not refreshed
+  # as they open a database connection.
   def handle_refresh(socket) do
     case socket.assigns do
       %{external_id: ref, tenant: %Tenant{}} when ref != "" ->
@@ -175,7 +190,7 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
                   <td>
                     <%= case @pg_version do %>
                       <% nil -> %>
-                      <% {:ok, version} -> %><span class="font-monospace"><%= version %></span>
+                      <% {:ok, version} -> %><span class="text-monospace"><%= version %></span>
                       <% {:error, msg} -> %><span class="text-danger"><%= msg %></span>
                     <% end %>
                   </td>
@@ -183,6 +198,11 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
               </tbody>
             </table>
           </div>
+        </div>
+
+        <div class="card mb-4" id="privileges">
+          <div class="card-header"><strong>Privileges</strong></div>
+          <div class="card-body"><%= privileges_section(@privileges) %></div>
         </div>
 
         <div class="card mb-4">
@@ -347,7 +367,7 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
     assigns = %{node: node}
 
     ~H"""
-    <span class="text-success">up</span> <span class="font-monospace">(<%= @node %>)</span>
+    <span class="text-success">up</span> <span class="text-monospace">(<%= @node %>)</span>
     """
   end
 
@@ -359,22 +379,293 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
     """
   end
 
-  defp fetch_pg_version(%Tenant{} = tenant) do
+  defp privileges_section(privileges) do
+    assigns = %{
+      default: privileges["default"],
+      functions: privileges["functions"],
+      tables: privileges["tables"],
+      event_triggers: privileges["event-triggers"],
+      not_executable: not_executable(privileges["functions"])
+    }
+
+    # Sections start collapsed and each runs its query when first opened. Patches leave `open` alone,
+    # so a section stays open while its rows come in and through auto-refresh.
+    ~H"""
+    <p class="text-muted small">
+      Each section reads the tenant database when first opened, in a read-only transaction as the role tenant
+      migrations run as. An empty ACL cell means the built-in default: the owner and PUBLIC.
+    </p>
+
+    <details id="privileges-default-section" class="mb-3" phx-mounted={JS.ignore_attributes("open")}>
+      <summary phx-click="load_privileges" phx-value-section="default">
+        <h6 class="d-inline">Default privileges of the migration role<%= row_count(@default) %></h6>
+      </summary>
+      <%= case @default do %>
+        <% {:ok, rows} -> %>
+          <table class="table table-sm mt-2 mb-0" id="privileges-default">
+            <thead>
+              <tr><th>role</th><th>schema</th><th>object type</th><th>acl</th></tr>
+            </thead>
+            <tbody>
+              <%= if rows == [] do %>
+                <tr><td colspan="4" class="text-muted">None set</td></tr>
+              <% end %>
+              <%= for [role, schema, object_type, acl] <- rows do %>
+                <tr>
+                  <td><%= role %></td>
+                  <td><%= schema %></td>
+                  <td><%= object_type %></td>
+                  <td class="text-monospace" style="overflow-wrap: anywhere;"><%= acl %></td>
+                </tr>
+              <% end %>
+            </tbody>
+          </table>
+        <% state -> %><%= section_status(state) %>
+      <% end %>
+    </details>
+
+    <details id="privileges-functions-section" class="mb-3" phx-mounted={JS.ignore_attributes("open")}>
+      <summary phx-click="load_privileges" phx-value-section="functions">
+        <h6 class="d-inline">realtime functions<%= row_count(@functions) %></h6>
+        <%= if @not_executable > 0 do %>
+          <span class="text-danger">· <%= @not_executable %> not executable by their owner</span>
+        <% end %>
+      </summary>
+      <%= case @functions do %>
+        <% {:ok, rows} -> %>
+          <table class="table table-sm mt-2 mb-0" id="privileges-functions">
+            <thead>
+              <tr><th>function</th><th>owner</th><th>owner can execute</th><th>acl</th></tr>
+            </thead>
+            <tbody>
+              <%= for [function, owner, acl, owner_can_execute] <- rows do %>
+                <tr>
+                  <td class="text-monospace" style="overflow-wrap: anywhere;"><%= function %></td>
+                  <td><%= owner %></td>
+                  <td>
+                    <%= if owner_can_execute do %>
+                      yes
+                    <% else %>
+                      <span class="text-danger">no</span>
+                    <% end %>
+                  </td>
+                  <td class="text-monospace" style="overflow-wrap: anywhere;"><%= acl %></td>
+                </tr>
+              <% end %>
+            </tbody>
+          </table>
+        <% state -> %><%= section_status(state) %>
+      <% end %>
+    </details>
+
+    <details id="privileges-tables-section" class="mb-3" phx-mounted={JS.ignore_attributes("open")}>
+      <summary phx-click="load_privileges" phx-value-section="tables">
+        <h6 class="d-inline">realtime tables<%= row_count(@tables) %></h6>
+      </summary>
+      <%= case @tables do %>
+        <% {:ok, rows} -> %>
+          <table class="table table-sm mt-2 mb-0" id="privileges-tables">
+            <thead>
+              <tr><th>table</th><th>owner</th><th>acl</th></tr>
+            </thead>
+            <tbody>
+              <%= for [table, owner, acl] <- rows do %>
+                <tr>
+                  <td class="text-monospace" style="overflow-wrap: anywhere;"><%= table %></td>
+                  <td><%= owner %></td>
+                  <td class="text-monospace" style="overflow-wrap: anywhere;"><%= acl %></td>
+                </tr>
+              <% end %>
+            </tbody>
+          </table>
+        <% state -> %><%= section_status(state) %>
+      <% end %>
+    </details>
+
+    <details id="privileges-event-triggers-section" phx-mounted={JS.ignore_attributes("open")}>
+      <summary phx-click="load_privileges" phx-value-section="event-triggers">
+        <h6 class="d-inline">Event triggers<%= row_count(@event_triggers) %></h6>
+      </summary>
+      <%= case @event_triggers do %>
+        <% {:ok, rows} -> %>
+          <table class="table table-sm mt-2 mb-0" id="privileges-event-triggers">
+            <thead>
+              <tr><th>name</th><th>event</th><th>owner</th><th>enabled</th><th>function</th><th>tags</th></tr>
+            </thead>
+            <tbody>
+              <%= if rows == [] do %>
+                <tr><td colspan="6" class="text-muted">None</td></tr>
+              <% end %>
+              <%= for [name, event, owner, enabled, function, tags] <- rows do %>
+                <tr>
+                  <td><%= name %></td>
+                  <td><%= event %></td>
+                  <td><%= owner %></td>
+                  <td><%= enabled %></td>
+                  <td class="text-monospace" style="overflow-wrap: anywhere;"><%= function %></td>
+                  <td><%= tags %></td>
+                </tr>
+              <% end %>
+            </tbody>
+          </table>
+        <% state -> %><%= section_status(state) %>
+      <% end %>
+    </details>
+    """
+  end
+
+  defp section_status(nil) do
+    assigns = %{}
+
+    ~H"""
+    <p class="text-muted small mt-2 mb-0">Loading...</p>
+    """
+  end
+
+  defp section_status({:error, msg}) do
+    assigns = %{msg: msg}
+
+    ~H"""
+    <p class="text-danger mt-2 mb-0"><%= @msg %></p>
+    """
+  end
+
+  defp row_count({:ok, rows}), do: " (#{length(rows)})"
+  defp row_count(_), do: ""
+
+  defp not_executable({:ok, functions}), do: Enum.count(functions, fn [_, _, _, can_execute] -> !can_execute end)
+  defp not_executable(_), do: 0
+
+  # Every read runs in an unlinked task that starts its own connection. The connection pool traps
+  # exits and stops when the process that started it exits, so the connection closes when the task
+  # returns, crashes or is killed on timeout, and none of that can take the dashboard down.
+  defp read_tenant_database(%Tenant{} = tenant, read) do
+    task = Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn -> connect_and_read(tenant, read) end)
+
+    case Task.yield(task, @database_read_timeout) || Task.shutdown(task, :brutal_kill) do
+      {:ok, result} -> result
+      {:exit, reason} -> database_read_failed(reason)
+      nil -> database_read_failed(:timeout)
+    end
+  end
+
+  defp database_read_failed(reason) do
+    log_warning("TenantInfoDatabaseFailed", reason)
+    {:error, "Failed to read the tenant database: #{inspect(reason)}"}
+  end
+
+  defp connect_and_read(tenant, read) do
     with {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop),
-         {:ok, conn} <- Database.connect_db(settings),
-         {:ok, %{rows: [[version]]}} <- query_pg_version(conn) do
-      {:ok, version}
+         {:ok, conn} <- Database.connect_db(settings) do
+      read.(conn)
     else
+      {:error, reason} ->
+        log_warning("TenantInfoConnectFailed", reason)
+        {:error, "Failed to connect to the tenant database: #{inspect(reason)}"}
+    end
+  end
+
+  defp fetch_pg_version(conn) do
+    case Postgrex.query(conn, "SELECT version()", []) do
+      {:ok, %{rows: [[version]]}} ->
+        {:ok, version}
+
       {:error, reason} ->
         log_warning("TenantInfoPgVersionFailed", reason)
         {:error, "Failed to query postgres version: #{inspect(reason)}"}
     end
   end
 
-  defp query_pg_version(conn) do
-    Postgrex.query(conn, "SELECT version()", [])
-  after
-    if Process.alive?(conn), do: GenServer.stop(conn)
+  # Tenant migrations connect as the same role this page does, so that role's default privileges
+  # are the ACL every function they create starts from.
+  @default_privileges_query """
+  SELECT r.rolname,
+         coalesce(n.nspname, '(all schemas)'),
+         CASE d.defaclobjtype
+           WHEN 'r' THEN 'tables'
+           WHEN 'S' THEN 'sequences'
+           WHEN 'f' THEN 'functions'
+           WHEN 'T' THEN 'types'
+           WHEN 'n' THEN 'schemas'
+           ELSE d.defaclobjtype::text
+         END,
+         d.defaclacl::text
+  FROM pg_catalog.pg_default_acl d
+  JOIN pg_catalog.pg_roles r ON r.oid = d.defaclrole
+  LEFT JOIN pg_catalog.pg_namespace n ON n.oid = d.defaclnamespace
+  WHERE r.rolname = current_user
+  ORDER BY n.nspname NULLS FIRST, 3
+  """
+
+  @functions_query """
+  SELECT p.oid::pg_catalog.regprocedure::text,
+         pg_catalog.pg_get_userbyid(p.proowner),
+         p.proacl::text,
+         pg_catalog.has_function_privilege(p.proowner, p.oid, 'EXECUTE')
+  FROM pg_catalog.pg_proc p
+  JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+  WHERE n.nspname = 'realtime'
+  ORDER BY 1
+  """
+
+  @tables_query """
+  SELECT c.oid::pg_catalog.regclass::text,
+         pg_catalog.pg_get_userbyid(c.relowner),
+         c.relacl::text
+  FROM pg_catalog.pg_class c
+  JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = 'realtime' AND c.relkind IN ('r', 'p') AND NOT c.relispartition
+  ORDER BY 1
+  """
+
+  @event_triggers_query """
+  SELECT e.evtname,
+         e.evtevent,
+         pg_catalog.pg_get_userbyid(e.evtowner),
+         CASE e.evtenabled
+           WHEN 'O' THEN 'enabled'
+           WHEN 'D' THEN 'disabled'
+           WHEN 'R' THEN 'replica'
+           WHEN 'A' THEN 'always'
+         END,
+         e.evtfoid::pg_catalog.regproc::text,
+         coalesce(pg_catalog.array_to_string(e.evttags, ', '), '')
+  FROM pg_catalog.pg_event_trigger e
+  ORDER BY 1
+  """
+
+  defp read_privileges(ref, section) do
+    case Api.get_tenant_by_external_id(ref) do
+      %Tenant{} = tenant -> read_tenant_database(tenant, &query_privileges(&1, privileges_query(section)))
+      nil -> {:error, "Tenant not found"}
+    end
+  end
+
+  defp privileges_query("default"), do: @default_privileges_query
+  defp privileges_query("functions"), do: @functions_query
+  defp privileges_query("tables"), do: @tables_query
+  defp privileges_query("event-triggers"), do: @event_triggers_query
+
+  defp query_privileges(conn, query) do
+    result =
+      Postgrex.transaction(conn, fn conn ->
+        with {:ok, _} <- Postgrex.query(conn, "SET TRANSACTION READ ONLY", []),
+             {:ok, _} <- Postgrex.query(conn, "SET LOCAL statement_timeout = #{@privileges_statement_timeout}", []),
+             {:ok, %{rows: rows}} <- Postgrex.query(conn, query, []) do
+          rows
+        else
+          {:error, reason} -> Postgrex.rollback(conn, reason)
+        end
+      end)
+
+    case result do
+      {:ok, rows} ->
+        {:ok, rows}
+
+      {:error, reason} ->
+        log_warning("TenantInfoPrivilegesFailed", reason)
+        {:error, "Failed to query privileges: #{inspect(reason)}"}
+    end
   end
 
   defp resolve_host(host) do

@@ -46,18 +46,42 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
   end
 
   @tag :requires_direct_connection
-  test "tenant lookup releases the postgres version connection", %{conn: conn, tenant: tenant} do
-    {:ok, _view, _html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
+  test "tenant lookup and privileges sections release their connections", %{conn: conn, tenant: tenant} do
+    {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
+
+    for section <- ~w(default functions tables event-triggers), do: open_section(view, section)
 
     {:ok, settings} = Database.from_tenant(tenant, "tenant_info_test", :stop)
     {:ok, query_conn} = Database.connect_db(settings)
 
-    assert {:ok, %{rows: [[0]]}} =
-             Postgrex.query(
-               query_conn,
-               "SELECT count(*) FROM pg_stat_activity WHERE application_name = $1",
-               ["realtime_dashboard_tenant_info"]
-             )
+    # Each connection closes when the task that read through it exits, just after its read.
+    assert_eventually {:ok, %{rows: [[0]]}} =
+                        Postgrex.query(
+                          query_conn,
+                          "SELECT count(*) FROM pg_stat_activity WHERE application_name = $1",
+                          ["realtime_dashboard_tenant_info"]
+                        )
+  end
+
+  test "a crash while reading the tenant database closes the connection and keeps the page", %{
+    conn: conn,
+    tenant: tenant
+  } do
+    test_pid = self()
+
+    stub(Database, :connect_db, fn settings ->
+      {:ok, db_conn} = call_original(Database, :connect_db, [settings])
+      send(test_pid, {:db_conn, db_conn})
+      raise "boom"
+    end)
+
+    {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
+
+    assert_received {:db_conn, db_conn}
+    ref = Process.monitor(db_conn)
+    assert_receive {:DOWN, ^ref, :process, ^db_conn, _reason}
+    assert has_element?(view, "td", tenant.external_id)
+    assert has_element?(view, "td .text-danger", "Failed to read the tenant database")
   end
 
   test "shows tenant info for valid external_id via form submit", %{conn: conn, tenant: tenant} do
@@ -146,6 +170,137 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
     html = render(view)
     assert html =~ "Runtime"
     assert html =~ "Connected users per region"
+  end
+
+  describe "privileges" do
+    test "starts with every section collapsed and unread", %{conn: conn, tenant: tenant} do
+      {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
+
+      assert has_element?(view, "#privileges p", "the role tenant migrations run as")
+
+      for section <- ~w(default functions tables event-triggers) do
+        assert has_element?(view, "#privileges-#{section}-section summary[phx-value-section='#{section}']")
+        refute has_element?(view, "#privileges-#{section}-section[open]"), "expected #{section} to start collapsed"
+        refute has_element?(view, "#privileges-#{section}"), "expected #{section} to start unread"
+      end
+    end
+
+    test "reads a section from the tenant database only the first time it opens", %{conn: conn, tenant: tenant} do
+      test_pid = self()
+
+      stub(Database, :connect_db, fn settings ->
+        send(test_pid, :tenant_db_connect)
+        call_original(Database, :connect_db, [settings])
+      end)
+
+      {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
+
+      # The lookup itself connects for the postgres version.
+      assert_received :tenant_db_connect
+      flush_tenant_db_connects()
+
+      open_section(view, "tables")
+      assert_received :tenant_db_connect
+      refute_received :tenant_db_connect
+      assert has_element?(view, "#privileges-tables tbody tr")
+      refute has_element?(view, "#privileges-functions")
+
+      open_section(view, "tables")
+      refute_received :tenant_db_connect
+    end
+
+    test "shows the owner of realtime objects and whether it can execute each function", %{conn: conn, tenant: tenant} do
+      {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
+
+      open_section(view, "functions")
+      open_section(view, "tables")
+
+      assert has_element?(
+               view,
+               "#privileges-functions tbody tr",
+               "realtime.filters_hash(realtime.user_defined_filter[]) supabase_realtime_admin yes"
+             )
+
+      assert has_element?(
+               view,
+               "#privileges-functions tbody tr",
+               ~r/^realtime\.filters_hash\(realtime\.user_defined_filter\[\]\) .*supabase_realtime_admin=X/
+             )
+
+      assert has_element?(view, "#privileges-tables tbody tr", "realtime.subscription supabase_realtime_admin")
+      assert has_element?(view, "#privileges-tables tbody tr", "realtime.messages supabase_realtime_admin")
+      refute has_element?(view, "#privileges-functions-section summary .text-danger")
+    end
+
+    test "flags a function whose owner lost EXECUTE through the migrating role's default privileges", %{
+      conn: conn,
+      tenant: tenant
+    } do
+      {:ok, settings} = Database.from_tenant(tenant, "tenant_info_test", :stop)
+      {:ok, db_conn} = Database.connect_db(settings)
+
+      on_exit(fn ->
+        {:ok, db_conn} = Database.connect_db(settings)
+        Postgrex.query!(db_conn, "DROP FUNCTION IF EXISTS realtime.tenant_info_probe()", [])
+
+        Postgrex.query!(
+          db_conn,
+          "ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin GRANT EXECUTE ON FUNCTIONS TO PUBLIC, supabase_admin",
+          []
+        )
+      end)
+
+      Postgrex.query!(
+        db_conn,
+        "ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC, supabase_admin",
+        []
+      )
+
+      Postgrex.query!(
+        db_conn,
+        "CREATE FUNCTION realtime.tenant_info_probe() RETURNS int LANGUAGE sql AS 'SELECT 1'",
+        []
+      )
+
+      Postgrex.query!(db_conn, "ALTER FUNCTION realtime.tenant_info_probe() OWNER TO supabase_realtime_admin", [])
+
+      {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
+
+      open_section(view, "default")
+      open_section(view, "functions")
+
+      assert has_element?(
+               view,
+               "#privileges-functions tbody tr",
+               "realtime.tenant_info_probe() supabase_realtime_admin no"
+             )
+
+      refute has_element?(
+               view,
+               "#privileges-functions tbody tr",
+               ~r/^realtime\.tenant_info_probe\(\) .*supabase_realtime_admin=/
+             )
+
+      assert has_element?(view, "#privileges-default tbody tr", "supabase_admin (all schemas) functions {}")
+      assert has_element?(view, "#privileges-functions-section summary .text-danger", "1 not executable by their owner")
+    end
+
+    test "shows the error and keeps the page when the tenant database is unreachable", %{conn: conn, tenant: tenant} do
+      stub(Database, :connect_db, fn _settings -> {:error, :econnrefused} end)
+
+      {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
+
+      assert has_element?(view, "td", tenant.external_id)
+      assert has_element?(view, "td .text-danger", "Failed to connect to the tenant database: :econnrefused")
+
+      open_section(view, "functions")
+
+      assert has_element?(
+               view,
+               "#privileges-functions-section .text-danger",
+               "Failed to connect to the tenant database: :econnrefused"
+             )
+    end
   end
 
   describe "runtime info with mocked status" do
@@ -258,6 +413,18 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
 
       {region, nodes, connected}
     end)
+  end
+
+  defp open_section(view, section) do
+    view |> element("#privileges-#{section}-section summary") |> render_click()
+  end
+
+  defp flush_tenant_db_connects do
+    receive do
+      :tenant_db_connect -> flush_tenant_db_connects()
+    after
+      0 -> :ok
+    end
   end
 
   defp using_basic_auth(conn, username, password) do
