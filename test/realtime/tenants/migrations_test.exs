@@ -211,6 +211,55 @@ defmodule Realtime.Tenants.MigrationsTest do
       assert schema_migrations_grants(conn) == []
     end
 
+    test "builds the filters_hash index when supabase_admin's default privileges withhold EXECUTE from the owner" do
+      tenant = TestTenantDb.checkout_tenant(run_migrations: true)
+      total = Enum.count(Migrations.migrations())
+      {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
+      {:ok, conn} = Database.connect_db(%{settings | username: "supabase_admin"})
+
+      # With the realtime schema's own default grants in place, a function supabase_admin creates
+      # there grants EXECUTE to neither PUBLIC nor its owner, and ALTER OWNER hands that ACL to
+      # supabase_realtime_admin, the role the index build runs as. The build only checks EXECUTE
+      # once it evaluates the expression, so the table needs a row.
+      Postgrex.query!(
+        conn,
+        "ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC, supabase_admin",
+        []
+      )
+
+      on_exit(fn ->
+        {:ok, conn} = Database.connect_db(%{settings | username: "supabase_admin"})
+
+        Postgrex.query!(
+          conn,
+          "ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin GRANT EXECUTE ON FUNCTIONS TO PUBLIC, supabase_admin",
+          []
+        )
+      end)
+
+      Postgrex.query!(conn, "DROP INDEX realtime.subscription_subscription_id_entity_filters_hash_key", [])
+      Postgrex.query!(conn, "DROP FUNCTION realtime.filters_hash(realtime.user_defined_filter[])", [])
+      Postgrex.query!(conn, "DELETE FROM realtime.schema_migrations WHERE version = 20261027120000", [])
+
+      Postgrex.query!(
+        conn,
+        """
+        INSERT INTO realtime.subscription (subscription_id, entity, claims)
+        VALUES (gen_random_uuid(), 'realtime.messages'::regclass, '{"role": "authenticated"}')
+        """,
+        []
+      )
+
+      assert Migrations.run_migrations(%{tenant | migrations_ran: total - 1}) == :ok
+
+      assert %{rows: [[true]]} =
+               Postgrex.query!(
+                 conn,
+                 "SELECT to_regclass('realtime.subscription_subscription_id_entity_filters_hash_key') IS NOT NULL",
+                 []
+               )
+    end
+
     test "falls back to sequential migrations without crashing when the schema_migrations check errors unexpectedly" do
       tenant = TestTenantDb.checkout_tenant()
       total = Enum.count(Migrations.migrations())
