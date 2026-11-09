@@ -166,10 +166,18 @@ defmodule Rollcall.Tracker do
   stops an endless loop when a tracker exits without a reply. After the limit,
   the function exits with the reason of the last failure.
   """
-  @spec track(Rollcall.name(), Rollcall.scope(), pid(), Rollcall.partition(), Rollcall.key(), Rollcall.meta()) ::
+  @spec track(
+          Rollcall.name(),
+          Rollcall.scope(),
+          pid(),
+          Rollcall.partition(),
+          Rollcall.key(),
+          Rollcall.meta(),
+          Keyword.t()
+        ) ::
           {:ok, Rollcall.ref()} | {:error, term()}
-  def track(name, scope, pid, partition, key, meta) when is_pid(pid) and is_map(meta) do
-    call_or_start(name, scope, {:track, pid, partition, key, meta}, @max_retries)
+  def track(name, scope, pid, partition, key, meta, opts \\ []) when is_pid(pid) and is_map(meta) do
+    call_or_start(name, scope, {:track, pid, partition, key, meta, opts}, @max_retries)
   end
 
   # Calls the tracker for `scope`. Starts a tracker and sends the message again
@@ -378,10 +386,10 @@ defmodule Rollcall.Tracker do
     {:ok, state}
   end
 
-  # The messages that `track/6`, `untrack/5` and `get_state/2` send.
+  # The messages that `track/7`, `untrack/5` and `get_state/2` send.
   @typep call_message ::
            :get_state
-           | {:track, pid(), Rollcall.partition(), Rollcall.key(), Rollcall.meta()}
+           | {:track, pid(), Rollcall.partition(), Rollcall.key(), Rollcall.meta(), Keyword.t()}
            | {:untrack, pid(), Rollcall.partition(), Rollcall.key()}
 
   @impl true
@@ -391,8 +399,8 @@ defmodule Rollcall.Tracker do
     {:reply, State.inspect_view(state), state}
   end
 
-  def handle_call({:track, pid, partition, key, meta}, _from, state) do
-    ref = random_ref()
+  def handle_call({:track, pid, partition, key, meta, opts}, _from, state) do
+    ref = Keyword.get(opts, :ref) || random_ref()
 
     {changes, local} = Local.track(state.local, pid, partition, key, meta, ref)
 
