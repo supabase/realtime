@@ -72,8 +72,7 @@ jobs:
 
           # DETAILS may contain stack traces with quotes/backslashes/newlines,
           # so build the payload with jq rather than raw string interpolation.
-          # Slack rejects section text over 3000 chars, and the code fence adds 6 on top (3000 - 6).
-          TRUNCATED_DETAILS="$(printf '%s' "$DETAILS" | head -c 2994)"
+          TRUNCATED_DETAILS="$(printf '%s' "$DETAILS" | head -c 3000)"
 
           # DETAILS_BLOCKS lets a caller pass pre-built Block Kit blocks (e.g. one block per
           # entry, each with its own truncation budget) instead of one opaque code-fenced

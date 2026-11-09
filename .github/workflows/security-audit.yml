@@ -48,31 +48,54 @@ jobs:
       - name: Run hex audit
         id: audit
         run: |
-          set -o pipefail
+          # Human readable run for the job log, it also decides whether the job fails.
           status=0
-          mix hex.audit 2>&1 | tee audit.log || status=$?
+          mix hex.audit > audit.log 2>&1 || status=$?
+          cat audit.log
 
-          # Ignored advisories (see ignore_advisories in mix.exs) are printed in their own
-          # section, drop it so the notification only contains what is actionable. A section
-          # ends at the next non-indented line. ANSI codes are stripped for Slack.
-          details="$(sed 's/\x1b\[[0-9;]*m//g' audit.log \
-            | awk '/^Ignored advisories:/ { skip=1; next } /^[^ \t]/ { skip=0 } !skip' \
-            | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}')"
+          if [ "$status" -ne 0 ]; then
+            # The SARIF report only contains findings that are not ignored (see
+            # ignore_advisories in mix.exs), so the notification only has actionable ones.
+            mix hex.audit --format sarif --output audit.sarif || true
 
-          # A multiline value in $GITHUB_OUTPUT ends at the first line equal to the delimiter.
-          # Advisory text is third-party content: with a fixed delimiter, a line matching it
-          # would end the value early and the remainder would be parsed as further outputs.
-          # A delimiter that is random per run can't be guessed, so that can't happen.
-          delimiter="EOF_$(openssl rand -hex 8)"
-          {
-            echo "details<<${delimiter}"
-            echo "$details"
-            echo "${delimiter}"
-          } >> "$GITHUB_OUTPUT"
+            # One Slack section per finding. Compact JSON is a single line, so it is safe to
+            # write as a plain `name=value` output.
+            blocks=""
+            if [ -s audit.sarif ]; then
+              blocks="$(jq -c --argjson max 40 '
+                # Slack mrkdwn treats & < > as control characters
+                def esc: gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;");
+                def severity: if . >= 9 then "CRITICAL" elif . >= 7 then "HIGH" elif . >= 4 then "MEDIUM" else "LOW" end;
+                .runs[0] as $run
+                | ($run.tool.driver.rules | map({key: .id, value: .}) | from_entries) as $rules
+                | [ $run.results[]
+                    | ($rules[.ruleId].properties["security-severity"]) as $score
+                    | if $score != null then
+                        .message.arguments as [$pkg, $version, $advisory, $title, $url]
+                        | "*\($pkg) \($version)* - <\($url)|\($advisory | esc)> (\($score | tonumber | severity))\n\($title | esc | .[0:2000])"
+                      else
+                        (.message.text | esc | .[0:2900])
+                      end
+                    | { type: "section", text: { type: "mrkdwn", text: . } } ]
+                # Slack allows 50 blocks per message, the rest of the message needs a few
+                | if length > $max then
+                    .[0:$max] + [{ type: "context", elements: [{ type: "mrkdwn", text: "...and \(length - $max) more, see the run log" }] }]
+                  else . end
+              ' audit.sarif || true)"
+            fi
+
+            # No SARIF (e.g. the registry could not be fetched): show the plain log instead
+            # of a notification without any information.
+            if [ -z "$blocks" ] || [ "$blocks" = "[]" ]; then
+              blocks="$(sed 's/\x1b\[[0-9;]*m//g' audit.log \
+                | jq -Rsc '[{ type: "section", text: { type: "mrkdwn", text: ("```" + (gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;") | .[0:2900]) + "```") } }]')"
+            fi
+            echo "blocks=${blocks}" >> "$GITHUB_OUTPUT"
+          fi
 
           exit "$status"
     outputs:
-      details: ${{ steps.audit.outputs.details }}
+      blocks: ${{ steps.audit.outputs.blocks }}
 
   notify-slack:
     name: Notify Slack
@@ -82,6 +105,7 @@ jobs:
     with:
       title: 'Hex Audit'
       status: 'failure'
-      details: ${{ needs.hex-audit.outputs.details }}
+      # blocks is unset when the job failed before the audit step, slack-notify needs valid JSON
+      details_blocks: ${{ needs.hex-audit.outputs.blocks || '[]' }}
     secrets:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_ALERTS_WEBHOOK }}
