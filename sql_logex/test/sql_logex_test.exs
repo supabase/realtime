@@ -3,9 +3,9 @@ defmodule SqlLogexTest do
   #
   # The expressions are written the way Postgres prints them (pg_get_expr), the only form the parser
   # reads. Every expected value here was checked against Postgres 17. A fallback, `{:unsupported, _}`,
-  # is where the database is asked instead; the comment says what Postgres answers there. The
-  # differential test in Realtime (test/realtime/tenants/sql_logex_differential_test.exs) does the
-  # same against Postgres for thousands of expressions, written as customers write them.
+  # is where the database is asked instead; the comment says what Postgres answers there.
+  # test/postgres/expressions_test.exs does the same against Postgres for thousands of expressions,
+  # written as policy authors write them.
   use ExUnit.Case, async: true
 
   alias SqlLogex.Env

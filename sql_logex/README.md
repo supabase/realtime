@@ -10,7 +10,8 @@ a call is to replace it with the body of the function. The library has no defaul
 inputs. This README uses Supabase Realtime as its worked example, see "Example: Supabase Realtime".
 
 The library has no runtime dependencies, because NimbleParsec generates the parser at compile
-time. The best overview of what the library does and does not do is
+time. Postgrex is a dependency of the tests only. The best overview of what the library does and
+does not do is
 [test/sql_logex_test.exs](test/sql_logex_test.exs).
 
 ## How it works
@@ -124,8 +125,9 @@ Any other function call is a fallback. The only exception is the built-in
 `current_setting(name, true)` with a literal name.
 
 The library does not make sure that the tree of a known function does what its source does. The
-profile that builds the known function is responsible for that. For example, Realtime tests its
-known functions against Postgres, see "Tests against Postgres".
+profile that builds the known function is responsible for that. For example, the tests of the
+library compare the known functions of the Realtime profile with Postgres, see "Tests against
+Postgres".
 
 ## What it supports
 
@@ -200,7 +202,8 @@ These are examples of what is not supported. Each one is a fallback:
 
 ## Running the tests
 
-Run the library tests from this directory. They need no database.
+Run the library tests from this directory. Without a database, `mix test` excludes the tests
+against Postgres.
 
 ```sh
 mix test
@@ -210,13 +213,71 @@ Start to read at [test/sql_logex_test.exs](test/sql_logex_test.exs). SQL goes in
 out, for the most important cases. Each expected value is the value that Postgres 17 gives. The
 other library tests cover one stage each.
 
-The tests use the Realtime profile as their worked example. The library cannot depend on Realtime,
-so [test/support/realtime_profile.ex](test/support/realtime_profile.ex) holds a copy of it,
-`SqlLogex.Test.RealtimeProfile`. The fixtures in `test/fixtures/pg15` and `test/fixtures/pg17` hold
-policies and function bodies as Postgres prints them. Realtime generates them.
+The tests use Supabase Realtime as their worked example, see "Example: Supabase Realtime". The
+library cannot depend on Realtime, so [test/support](test/support) holds copies of the parts that
+the tests use:
 
-The tests that run against Postgres are in Realtime, because they need a database. See "Tests
-against Postgres".
+- `SqlLogex.Test.RealtimeProfile`: the profile.
+- `SqlLogex.Test.RealtimeDatabase`: the table, the roles and the function bodies of a tenant
+  database, as SQL for a plain Postgres.
+- `SqlLogex.Test.RealtimePolicies`: the policies.
+
+Realtime makes sure that the copies stay equal to the originals, see "Tests in Realtime". The
+fixtures in `test/fixtures/pg15` and `test/fixtures/pg17` hold the policies and the function bodies
+as Postgres prints them. The tests against Postgres generate them.
+
+### Tests against Postgres
+
+These tests run SQL in Postgres and compare the answers of Postgres with the answers of the library.
+Postgres is the oracle: its answer is the correct answer. The tests have the tag `:postgres`. If
+`SQL_LOGEX_DATABASE_URL` is set, they run. Postgres 14 or later works.
+
+[compose.yml](compose.yml) has one Postgres service for each major version that CI tests. Service
+`postgres<major>` listens on port `54<major>`. Its data is in memory, so `docker compose down`
+deletes it.
+
+```sh
+docker compose up -d --wait postgres17
+export SQL_LOGEX_DATABASE_URL=postgres://postgres:postgres@localhost:5417/sql_logex_test
+
+# about 15 s
+mix test
+SQL_LOGEX_REPORT=1 mix test test/postgres   # with a coverage report
+
+docker compose down
+```
+
+The user in the URL must be a superuser, because the tests create roles and change them. If the
+database does not exist, the tests create it and mark it with a comment. The tests refuse a
+database without that mark, because they drop and create the schemas `realtime` and `auth` in it.
+
+There are three test files:
+
+- [test/postgres/expressions_test.exs](test/postgres/expressions_test.exs), Level 1, compares single
+  expressions. It creates a policy with the expression as a policy author writes it, and reads
+  back the `pg_get_expr` text. Postgres evaluates that text against a row, and the library
+  evaluates the same text.
+- [test/postgres/decisions_test.exs](test/postgres/decisions_test.exs), Level 2, compares
+  `decide/3` with the row-level security of Postgres. A read is a `SELECT` of a probe row as the
+  role. A write is an `INSERT` as the role, after the `SELECT` of the same call
+  (`write_plans_select`). The scenarios are in `SqlLogex.Test.RealtimeScenarios`. They include the
+  decision table of `test/sql_logex/policy_set_test.exs`, so Postgres also checks what the unit
+  tests expect.
+- [test/postgres/fixtures_test.exs](test/postgres/fixtures_test.exs) makes sure that Postgres still
+  prints the policies and the function bodies as in the fixture of its major version. With
+  `SQL_LOGEX_WRITE_FIXTURES=1`, it writes that fixture again.
+
+Levels 1 and 2 fail on a decided answer that is different from the answer of Postgres. They also
+fail on a value where Postgres raised an error. They count fallbacks, but do not fail on them.
+`SqlLogex.Test.Differential` holds this comparison and the report. For the results, see "Tests in
+Realtime".
+
+CI runs these tests against the three services of `compose.yml`, see
+[sql_logex_tests.yml](../.github/workflows/sql_logex_tests.yml). Postgres 17 runs with ICU as its
+default collation provider and Postgres 15 with libc, as in the supabase/postgres images.
+
+On Postgres 14, run `mix test` and not `mix test --only postgres`. There is no pg14 fixture, so
+`test_helper.exs` excludes the fixtures test. But `--only postgres` includes that test again.
 
 ## Example: Supabase Realtime
 
@@ -267,12 +328,13 @@ The library tests use a copy of this profile.
 [test/realtime/tenants/sql_logex_profile_test.exs](../test/realtime/tenants/sql_logex_profile_test.exs)
 makes sure that the two copies stay equal.
 
-### Tests against Postgres
+### Tests in Realtime
 
-Run these from the Realtime root. They use the Realtime test database (supabase/postgres).
+The tests of the library run against plain Postgres, see "Tests against Postgres". Realtime runs
+the Realtime side of the same checks against its tenant database (supabase/postgres). Run these
+from the Realtime root:
 
 ```sh
-# about 25 s
 mix test test/realtime/tenants/sql_logex_differential_test.exs
 SQL_LOGEX_REPORT=1 mix test test/realtime/tenants/sql_logex_differential_test.exs   # coverage report
 mix test test/realtime/tenants/sql_logex_fixtures_test.exs
@@ -283,25 +345,28 @@ mix test test/realtime/tenants/sql_logex_{profile,loader,cache,env,shadow}_test.
 
 - The differential test,
   [test/realtime/tenants/sql_logex_differential_test.exs](../test/realtime/tenants/sql_logex_differential_test.exs),
-  runs every case through Postgres and through the library. It fails on any decided answer that is
-  different from the answer of Postgres, and on a value where Postgres raised an error. It counts
-  fallbacks, but does not fail on them. Level 1 compares single expressions, written as customers
-  write them. Level 2 compares `decide/3` with `realtime.authorize`.
+  runs the scenarios of Level 2 through `realtime.authorize`. It uses the production loader
+  (`Realtime.Tenants.SqlLogexLoader`) and the profile that Realtime ships. It loads the scenarios
+  from [test/support](test/support) of the library.
 - The fixtures test,
   [test/realtime/tenants/sql_logex_fixtures_test.exs](../test/realtime/tenants/sql_logex_fixtures_test.exs),
-  makes sure that Postgres still prints the captured policies and function bodies
-  (`test/fixtures/pg15`, `pg17`) in the form that the parser expects. With
-  `SQL_LOGEX_WRITE_FIXTURES=1`, it writes them again.
+  makes sure that a tenant database prints the same policies and function bodies as the fixtures
+  of the library. So it makes sure that `SqlLogex.Test.RealtimeDatabase` and
+  `SqlLogex.Test.RealtimePolicies` stay equal to Realtime.
+- The profile test makes sure that `SqlLogex.Test.RealtimeProfile` stays equal to the profile that
+  Realtime ships.
 
-These are the results with the Realtime profile, against Postgres 17 (`supabase/postgres:17.11`).
-There are 0 mismatches:
+These are the results with the Realtime profile, against Postgres 17. There are 0 mismatches:
 
-- Level 1, expressions: 4018 cases, 2714 decided, 1304 fall back.
-- Level 2, `decide/3` against `realtime.authorize`: 4308 cases, 2872 decided, 1436 fall back.
+- Level 1, expressions, on `postgres:17`: 4018 cases, 2714 decided, 1304 fall back.
+- Level 2, `decide/3`: 4308 cases, 2872 decided, 1436 fall back. Plain row-level security on
+  `postgres:17` and `realtime.authorize` on `supabase/postgres:17.11` give the same numbers.
 - A user-channel policy set (`topic = 'user:' || auth.uid()`, plus a literal `~*` policy): the
   library decides 800 of 816 `authenticated` joins with a uuid `sub` and an ASCII topic. The other
   16 have `\u0000` in a claim, which supabase/auth's `auth.uid()` reads.
-- Postgres 14 and 15 give the same coverage, also with 0 mismatches (measured locally).
+- On `postgres:14` and `postgres:15`, the tests of the library give the same numbers, also with 0
+  mismatches. Level 2 has 4284 cases there, because one scenario needs `GRANT ... WITH INHERIT`,
+  which Postgres 16 added.
 
 ### Shadow mode
 
@@ -417,8 +482,8 @@ Open decisions:
 - The parser, resolver, evaluator, policy combination and function fingerprints, with everything
   in "What it supports".
 - The profile. All knowledge of a table or a platform is input from the caller.
-- Measured against Postgres 14, 15 and 17 with the Realtime profile, with 0 mismatches. See "Tests
-  against Postgres".
+- Measured against Postgres 14, 15 and 17 with the Realtime profile, with 0 mismatches. CI runs
+  these tests. See "Tests against Postgres".
 
 ### Limits that the caller must cover
 
@@ -436,7 +501,6 @@ the database, the caller must rule them out or fall back:
 
 - `write_plans_select: false`, for a caller that runs only the `INSERT` of a write. Only `true` is
   measured against Postgres.
-- No CI job runs the library tests yet. Only the Realtime suite runs, with the differential test.
 
 ### Planned, or maybe
 

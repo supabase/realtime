@@ -14,7 +14,8 @@ defmodule SqlLogex.MixProject do
     ]
   end
 
-  # The tests share a profile in test/support (SqlLogex.Test.RealtimeProfile).
+  # The tests share the modules in test/support: the Realtime worked example (profile, database,
+  # policies, scenarios) and the helpers of the tests against Postgres.
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
 
@@ -27,7 +28,9 @@ defmodule SqlLogex.MixProject do
   defp deps do
     [
       # The parser is generated at compile time, so NimbleParsec isn't needed at runtime.
-      {:nimble_parsec, "~> 1.4", runtime: false}
+      {:nimble_parsec, "~> 1.4", runtime: false},
+      # Only for the tests against Postgres (tagged :postgres). The library never connects to a database.
+      {:postgrex, "~> 0.22", only: :test}
     ]
   end
 end
