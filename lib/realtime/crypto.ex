@@ -107,12 +107,15 @@ defmodule Realtime.Crypto do
     end
   end
 
+  # ECB is the legacy cipher we're already migrating off (see moduledoc), skips go with the ECB branch.
+  # sobelow_skip ["Crypto.WeakCipher"]
   defp encrypt_ecb!(text) do
     :aes_128_ecb
     |> :crypto.crypto_one_time(ecb_key(), pad(text), true)
     |> Base.encode64()
   end
 
+  # sobelow_skip ["Crypto.WeakCipher"]
   defp decrypt_ecb!(base64_text) do
     :aes_128_ecb
     |> :crypto.crypto_one_time(ecb_key(), Base.decode64!(base64_text), false)
