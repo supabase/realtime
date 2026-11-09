@@ -290,7 +290,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     end
 
     test "a sampled track stores the latency envelope in the tracker meta only", %{tenant: tenant, topic: topic} do
-      expect(Realtime.FeatureFlags, :enabled?, fn "presence_latency_metric", _ -> true end)
+      stub(Realtime.FeatureFlags, :enabled?, fn flag, _tenant -> flag == "presence_latency_metric" end)
       key = random_string()
       policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
       socket = socket_fixture(tenant, topic, key, policies: policies)
@@ -309,7 +309,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     end
 
     test "re-tracking the same payload is still a no-op when sampled", %{tenant: tenant, topic: topic} do
-      expect(Realtime.FeatureFlags, :enabled?, 1, fn "presence_latency_metric", _ -> true end)
+      stub(Realtime.FeatureFlags, :enabled?, fn flag, _tenant -> flag == "presence_latency_metric" end)
       key = random_string()
       policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
       socket = socket_fixture(tenant, topic, key, policies: policies)
@@ -323,7 +323,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     end
 
     test "a sampled update stamps the new meta", %{tenant: tenant, topic: topic} do
-      expect(Realtime.FeatureFlags, :enabled?, 2, fn "presence_latency_metric", _ -> true end)
+      stub(Realtime.FeatureFlags, :enabled?, fn flag, _tenant -> flag == "presence_latency_metric" end)
       key = random_string()
       policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
       socket = socket_fixture(tenant, topic, key, policies: policies)
@@ -338,7 +338,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     end
 
     test "an unsampled track stores no envelope", %{tenant: tenant, topic: topic} do
-      expect(Realtime.FeatureFlags, :enabled?, fn "presence_latency_metric", _ -> false end)
+      stub(Realtime.FeatureFlags, :enabled?, fn _flag, _tenant -> false end)
       key = random_string()
       policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
       socket = socket_fixture(tenant, topic, key, policies: policies)
@@ -785,7 +785,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     end
 
     test "strips the latency envelope from the presence state it pushes", %{tenant: tenant, topic: topic} do
-      stub(Realtime.FeatureFlags, :enabled?, fn "presence_latency_metric", _ -> true end)
+      stub(Realtime.FeatureFlags, :enabled?, fn flag, _tenant -> flag == "presence_latency_metric" end)
       key = random_string()
       policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
       socket = socket_fixture(tenant, topic, key, policies: policies, private?: true)
