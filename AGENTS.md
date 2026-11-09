@@ -8,6 +8,7 @@ Entry point for AI/LLM agents working in or with this repository.
 - [CONTRIBUTING.md](./CONTRIBUTING.md) - how to get started and work on issues and pull requests.
 - [DEVELOPERS.md](./DEVELOPERS.md) - technical details of the project.
 - [ARCHITECTURE.md](./ARCHITECTURE.md) - overview and glossary.
+- [Realtime Protocol](https://github.com/supabase/supabase/blob/master/apps/docs/content/guides/realtime/protocol.mdx) - WebSocket connection setup, message formats (`1.0.0` and `2.0.0`), event types, and error handling. Read it before changing anything clients send or receive.
 
 Other documentation files are listed in README.md
 
