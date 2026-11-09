@@ -24,6 +24,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   alias Phoenix.Tracker.Shard
   alias Realtime.Api.Tenant
   alias Realtime.GenCounter
+  alias Realtime.Presence.Metrics
   alias Realtime.RateCounter
   alias Realtime.Tenants
   alias Realtime.Tenants.Connect
@@ -141,7 +142,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   defp maybe_record_join_latency(%{assigns: %{presence_join_started_at: started_at}} = socket, state)
        when not is_nil(started_at) do
     tracker_state = if map_size(state) == 0, do: :cold, else: :warm
-    Presence.Metrics.record_join(started_at, socket.assigns.tenant, tracker_state)
+    Metrics.record_join(started_at, socket.assigns.tenant, tracker_state)
     assign(socket, :presence_join_started_at, nil)
   end
 
@@ -283,7 +284,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     # We use a separate copy of the payload, that may be stamped for timing measurements.
     # The separate copy is what we pass to Presence for distribution, but we want to raw payload
     # for limit checking and storing on the socket.
-    stamped_payload = Presence.Metrics.stamp(payload, tenant)
+    stamped_payload = Metrics.stamp(payload, tenant)
 
     with :ok <- check_track_payload(socket.assigns, payload),
          tenant <- Tenants.Cache.get_tenant_by_external_id(socket.assigns.tenant),
@@ -331,7 +332,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   # Tracks the client, or updates its existing presence if it is already tracked. Both are
   # GenServer calls on the presence shard, measured together as the cost of the client's request.
   defp track_or_update(tenant_topic, presence_key, payload) do
-    Presence.Metrics.measure_tracker_call(fn ->
+    Metrics.measure_tracker_call(fn ->
       case Presence.track(self(), tenant_topic, presence_key, payload) do
         {:error, {:already_tracked, pid, _, _}} -> {:update, Presence.update(pid, tenant_topic, presence_key, payload)}
         result -> {:track, result}
@@ -358,7 +359,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     |> Shard.name_for_topic(topic, size)
     |> Shard.dirty_list(topic)
     |> Phoenix.Presence.group()
-    |> Presence.Metrics.strip_state()
+    |> Metrics.strip_state()
   end
 
   defp limit_presence_event(socket) do

@@ -3,7 +3,7 @@ defmodule Realtime.Presence.EncoderTest do
 
   alias Phoenix.Socket.Broadcast
   alias Realtime.Presence.Encoder
-  alias RealtimeWeb.Presence.Metrics
+  alias Realtime.Presence.Metrics
 
   defp sorted(%{metas: metas} = presence), do: %{presence | metas: Enum.sort_by(metas, & &1.phx_ref)}
 

@@ -1,4 +1,4 @@
-defmodule RealtimeWeb.Presence.Metrics do
+defmodule Realtime.Presence.Metrics do
   @moduledoc """
   Handles metrics related to Presence performance.
 
@@ -92,7 +92,7 @@ defmodule RealtimeWeb.Presence.Metrics do
   Strips and returns the envelope from every join and leave meta in a `presence_diff` broadcast.
 
   Returns {msg, envelopes}, where msg has all the tracking timestamps removed and envelopes is 
-  a list of all the timestamps extracted out of the meta's and resolved into `RealtimeWeb.Presence.Metrics.Envelope`
+  a list of all the timestamps extracted out of the meta's and resolved into `Realtime.Presence.Metrics.Envelope`
   structs.
 
   Any other broadcast is returned untouched.

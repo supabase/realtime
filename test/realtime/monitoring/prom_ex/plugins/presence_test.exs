@@ -44,8 +44,8 @@ defmodule Realtime.PromEx.Plugins.PresenceTest do
   end
 
   describe "track latency" do
-    alias RealtimeWeb.Presence.Metrics
-    alias RealtimeWeb.Presence.Metrics.Envelope
+    alias Realtime.Presence.Metrics
+    alias Realtime.Presence.Metrics.Envelope
 
     @latency "realtime_presence_notify_latency"
     @discarded "realtime_presence_notify_discarded"
@@ -81,7 +81,7 @@ defmodule Realtime.PromEx.Plugins.PresenceTest do
   end
 
   describe "track duration" do
-    alias RealtimeWeb.Presence.Metrics
+    alias Realtime.Presence.Metrics
 
     @duration "realtime_presence_track_duration"
 
@@ -174,7 +174,7 @@ defmodule Realtime.PromEx.Plugins.PresenceTest do
   end
 
   describe "join latency" do
-    alias RealtimeWeb.Presence.Metrics
+    alias Realtime.Presence.Metrics
 
     @join_latency "realtime_presence_join_latency"
 

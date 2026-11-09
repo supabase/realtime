@@ -1,4 +1,4 @@
-defmodule RealtimeWeb.Presence.MetricsTest do
+defmodule Realtime.Presence.MetricsTest do
   use ExUnit.Case, async: true
   use Mimic
 
@@ -6,8 +6,8 @@ defmodule RealtimeWeb.Presence.MetricsTest do
 
   alias Phoenix.Socket.Broadcast
   alias Realtime.FeatureFlags
-  alias RealtimeWeb.Presence.Metrics
-  alias RealtimeWeb.Presence.Metrics.Envelope
+  alias Realtime.Presence.Metrics
+  alias Realtime.Presence.Metrics.Envelope
 
   @tenant "tenant-123"
 

@@ -476,13 +476,13 @@ defmodule RealtimeWeb.RealtimeChannel do
         %{assigns: %{tenant: tenant_id}} = socket
       )
       when PresenceHandler.can_read_presence?(socket) do
-    context = RealtimeWeb.Presence.Metrics.context(tenant_id, :channel)
-    {msg, envelopes} = RealtimeWeb.Presence.Metrics.strip_diff(msg)
+    context = Realtime.Presence.Metrics.context(tenant_id, :channel)
+    {msg, envelopes} = Realtime.Presence.Metrics.strip_diff(msg)
 
     push(socket, "presence_diff", msg.payload)
     GenCounter.add(Tenants.presence_events_per_second_key(tenant_id))
 
-    RealtimeWeb.Presence.Metrics.record(envelopes, context)
+    Realtime.Presence.Metrics.record(envelopes, context)
 
     {:noreply, socket}
   end

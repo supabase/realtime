@@ -12,7 +12,7 @@ defmodule Realtime.Presence.EncoderPhoenixTest do
   alias Realtime.Presence.Encoder
   alias Realtime.Presence.RollcallTransport
   alias RealtimeWeb.Presence
-  alias RealtimeWeb.Presence.Metrics
+  alias Realtime.Presence.Metrics
 
   @timeout 1_000
 
