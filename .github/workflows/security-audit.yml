@@ -46,7 +46,33 @@ jobs:
       - name: Install dependencies
         run: mix deps.get
       - name: Run hex audit
-        run: mix hex.audit
+        id: audit
+        run: |
+          set -o pipefail
+          status=0
+          mix hex.audit 2>&1 | tee audit.log || status=$?
+
+          # Ignored advisories (see ignore_advisories in mix.exs) are printed in their own
+          # section, drop it so the notification only contains what is actionable. A section
+          # ends at the next non-indented line. ANSI codes are stripped for Slack.
+          details="$(sed 's/\x1b\[[0-9;]*m//g' audit.log \
+            | awk '/^Ignored advisories:/ { skip=1; next } /^[^ \t]/ { skip=0 } !skip' \
+            | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}')"
+
+          # A multiline value in $GITHUB_OUTPUT ends at the first line equal to the delimiter.
+          # Advisory text is third-party content: with a fixed delimiter, a line matching it
+          # would end the value early and the remainder would be parsed as further outputs.
+          # A delimiter that is random per run can't be guessed, so that can't happen.
+          delimiter="EOF_$(openssl rand -hex 8)"
+          {
+            echo "details<<${delimiter}"
+            echo "$details"
+            echo "${delimiter}"
+          } >> "$GITHUB_OUTPUT"
+
+          exit "$status"
+    outputs:
+      details: ${{ steps.audit.outputs.details }}
 
   notify-slack:
     name: Notify Slack
@@ -56,5 +82,6 @@ jobs:
     with:
       title: 'Hex Audit'
       status: 'failure'
+      details: ${{ needs.hex-audit.outputs.details }}
     secrets:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_ALERTS_WEBHOOK }}
