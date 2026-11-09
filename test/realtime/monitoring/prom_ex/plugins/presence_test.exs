@@ -90,7 +90,7 @@ defmodule Realtime.PromEx.Plugins.PresenceTest do
       le_25_before = metric_value(@duration <> "_bucket", tags ++ [le: "25.0"]) || 0
       count_before = metric_value(@duration <> "_count", tags) || 0
 
-      Metrics.measure_tracker_call(fn -> {:update, {:ok, :ref}} end)
+      Metrics.measure_tracker_call(fn -> {:ok, :update, :ref} end)
 
       assert metric_value(@duration <> "_bucket", tags ++ [le: "25.0"]) == le_25_before + 1
       assert metric_value(@duration <> "_count", tags) == count_before + 1

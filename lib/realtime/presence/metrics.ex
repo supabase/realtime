@@ -175,33 +175,36 @@ defmodule Realtime.Presence.Metrics do
     })
   end
 
+  @typedoc "The tracker call that produced a result."
+  @type action :: :track | :update
+
   @doc """
   Times a client's call into the presence tracker and emits `[:realtime, :presence, :track, :duration]`.
 
-  `fun` makes the tracker calls and returns `{action, result}`, where `action` is `:track` or
-  `:update`: the call that produced `result`. The duration covers everything `fun` does, so a
-  track that falls back to an update is one observation tagged `:update`.
+  `fun` makes the tracker calls and returns `{:ok, action, ref}` or `{:error, action, reason}`, where
+  `action` is `:track` or `:update`: the call that produced the result. The duration covers
+  everything `fun` does, so a track that falls back to an update is one observation tagged `:update`.
 
-  Returns `{action, result}`. If `fun` exits, the exit is recorded under its reason and then
+  Returns the result of `fun`. If `fun` exits, the exit is recorded under its reason and then
   re-raised unchanged. An exit has no action to read, so it is recorded as `:track`, the call every
   request starts with.
   """
-  @spec measure_tracker_call((-> {:track | :update, result})) :: {:track | :update, result}
-        when result: term()
+  @spec measure_tracker_call((-> {:ok, action(), String.t()} | {:error, action(), term()})) ::
+          {:ok, action(), String.t()} | {:error, action(), term()}
   def measure_tracker_call(fun) do
-    {duration, {action, result}} =
+    {duration, result} =
       :timer.tc(
         fn ->
           try do
             fun.()
           catch
-            :exit, reason -> {:track, {:exit, reason}}
+            :exit, reason -> {:exit, :track, reason}
           end
         end,
         :millisecond
       )
 
-    {outcome, reason} = classify(result)
+    {outcome, action, reason} = classify(result)
 
     :telemetry.execute(@track_duration_event, %{duration: duration}, %{
       action: action,
@@ -211,17 +214,17 @@ defmodule Realtime.Presence.Metrics do
     })
 
     case result do
-      {:exit, exit_reason} -> exit(exit_reason)
-      result -> {action, result}
+      {:exit, _, exit_reason} -> exit(exit_reason)
+      result -> result
     end
   end
 
-  defp classify({:ok, _}), do: {:ok, :none}
-  defp classify({:error, reason}) when is_atom(reason), do: {:error, reason}
-  defp classify({:error, _}), do: {:error, :other}
-  defp classify({:exit, {:timeout, _}}), do: {:exit, :timeout}
-  defp classify({:exit, {:noproc, _}}), do: {:exit, :noproc}
-  defp classify({:exit, _}), do: {:exit, :other}
+  defp classify({:ok, action, _}), do: {:ok, action, :none}
+  defp classify({:error, action, reason}) when is_atom(reason), do: {:error, action, reason}
+  defp classify({:error, action, _}), do: {:error, action, :other}
+  defp classify({:exit, action, {:timeout, _}}), do: {:exit, action, :timeout}
+  defp classify({:exit, action, {:noproc, _}}), do: {:exit, action, :noproc}
+  defp classify({:exit, action, _}), do: {:exit, action, :other}
 
   @doc """
   Strips the envelope from every meta in a grouped presence list.

@@ -21,7 +21,6 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   import Phoenix.Channel, only: [push: 3]
 
   alias Phoenix.Socket
-  alias Phoenix.Tracker.Shard
   alias Realtime.Api.Tenant
   alias Realtime.GenCounter
   alias Realtime.Presence.Metrics
@@ -30,7 +29,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Authorization
   alias RealtimeWeb.Channels.Payloads
-  alias RealtimeWeb.Presence
+  alias Realtime.Presence
   alias RealtimeWeb.RealtimeChannel.Logging
 
   defguard is_private?(socket) when socket.assigns.private?
@@ -134,7 +133,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   end
 
   defp push_presence_state(socket, topic) do
-    state = presence_dirty_list(topic)
+    state = Presence.list(socket.assigns.tenant, topic)
     push(socket, "presence_state", state)
     maybe_record_join_latency(socket, state)
   end
@@ -248,8 +247,8 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   end
 
   defp handle_presence_event("untrack", _, socket) do
-    %{assigns: %{presence_key: presence_key, tenant_topic: tenant_topic}} = socket
-    :ok = Presence.untrack(self(), tenant_topic, presence_key)
+    %{assigns: %{presence_key: presence_key, tenant_topic: tenant_topic, tenant: tenant}} = socket
+    :ok = Presence.untrack(self(), tenant, tenant_topic, presence_key)
     {:ok, assign(socket, :presence_track_payload, nil), :no_resync}
   end
 
@@ -277,21 +276,16 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   end
 
   defp track(socket, payload) do
-    %{assigns: %{presence_key: presence_key, tenant_topic: tenant_topic, tenant: tenant}} = socket
+    %{assigns: %{presence_key: presence_key, tenant_topic: tenant_topic}} = socket
 
     payload = Map.get(payload, "payload", %{})
-
-    # We use a separate copy of the payload, that may be stamped for timing measurements.
-    # The separate copy is what we pass to Presence for distribution, but we want to raw payload
-    # for limit checking and storing on the socket.
-    stamped_payload = Metrics.stamp(payload, tenant)
 
     with :ok <- check_track_payload(socket.assigns, payload),
          tenant <- Tenants.Cache.get_tenant_by_external_id(socket.assigns.tenant),
          :ok <- validate_payload_size(tenant, payload),
          _ <- RealtimeWeb.TenantBroadcaster.collect_payload_size(socket.assigns.tenant, payload, :presence),
          :ok <- limit_presence_event(socket),
-         {action, {:ok, _}} <- track_or_update(tenant_topic, presence_key, stamped_payload) do
+         {:ok, action, _} <- Presence.track(self(), socket.assigns.tenant, tenant_topic, presence_key, payload) do
       case action do
         :track ->
           resync =
@@ -316,7 +310,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
         # no-op if payload hasn't changed
         {:ok, socket, :no_resync}
 
-      {_action, {:error, error}} ->
+      {:error, _action, error} ->
         log_error("UnableToTrackPresence", error)
         {:error, :unable_to_track_presence}
 
@@ -327,17 +321,6 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
         log_error("UnableToTrackPresence", error)
         {:error, :unable_to_track_presence}
     end
-  end
-
-  # Tracks the client, or updates its existing presence if it is already tracked. Both are
-  # GenServer calls on the presence shard, measured together as the cost of the client's request.
-  defp track_or_update(tenant_topic, presence_key, payload) do
-    Metrics.measure_tracker_call(fn ->
-      case Presence.track(self(), tenant_topic, presence_key, payload) do
-        {:error, {:already_tracked, pid, _, _}} -> {:update, Presence.update(pid, tenant_topic, presence_key, payload)}
-        result -> {:track, result}
-      end
-    end)
   end
 
   # presence.read is left unevaluated (nil) at join when presence is disabled. Authorize it now that
@@ -351,16 +334,6 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   defp check_track_payload(_assigns, payload) when not is_map(payload), do: {:error, :invalid_payload}
   defp check_track_payload(%{presence_track_payload: payload}, payload), do: {:error, :no_payload_change}
   defp check_track_payload(_assigns, _payload), do: :ok
-
-  defp presence_dirty_list(topic) do
-    [{:pool_size, size}] = :ets.lookup(Presence, :pool_size)
-
-    Presence
-    |> Shard.name_for_topic(topic, size)
-    |> Shard.dirty_list(topic)
-    |> Phoenix.Presence.group()
-    |> Metrics.strip_state()
-  end
 
   defp limit_presence_event(socket) do
     %{assigns: %{presence_rate_counter: presence_counter, tenant: _tenant_id}} = socket

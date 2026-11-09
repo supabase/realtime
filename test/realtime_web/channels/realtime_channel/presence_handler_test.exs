@@ -309,7 +309,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     end
 
     test "re-tracking the same payload is still a no-op when sampled", %{tenant: tenant, topic: topic} do
-      expect(Realtime.FeatureFlags, :enabled?, 2, fn "presence_latency_metric", _ -> true end)
+      expect(Realtime.FeatureFlags, :enabled?, 1, fn "presence_latency_metric", _ -> true end)
       key = random_string()
       policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
       socket = socket_fixture(tenant, topic, key, policies: policies)

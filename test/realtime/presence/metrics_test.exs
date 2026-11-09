@@ -227,18 +227,18 @@ defmodule Realtime.Presence.MetricsTest do
       on_exit(fn -> :telemetry.detach(id) end)
     end
 
-    test "records the duration, action and result, and returns the action and result" do
-      assert {:update, {:ok, :ref}} = Metrics.measure_tracker_call(fn -> {:update, {:ok, :ref}} end)
+    test "records the duration, action and result, and returns the result" do
+      assert {:ok, :update, :ref} = Metrics.measure_tracker_call(fn -> {:ok, :update, :ref} end)
 
       assert_receive {:duration, %{duration: duration}, %{action: :update, result: :ok, reason: :none}}
       assert is_integer(duration) and duration >= 0
     end
 
     test "tags an error with its reason, and anything that is not an atom as other" do
-      assert {:track, {:error, :nopresence}} =
-               Metrics.measure_tracker_call(fn -> {:track, {:error, :nopresence}} end)
+      assert {:error, :track, :nopresence} =
+               Metrics.measure_tracker_call(fn -> {:error, :track, :nopresence} end)
 
-      Metrics.measure_tracker_call(fn -> {:track, {:error, {:weird, 1}}} end)
+      Metrics.measure_tracker_call(fn -> {:error, :track, {:weird, 1}} end)
 
       assert_receive {:duration, _, %{action: :track, result: :error, reason: :nopresence}}
       assert_receive {:duration, _, %{result: :error, reason: :other}}
@@ -260,7 +260,7 @@ defmodule Realtime.Presence.MetricsTest do
     test "measures the time spent in the call" do
       Metrics.measure_tracker_call(fn ->
         Process.sleep(20)
-        {:track, {:ok, :ref}}
+        {:ok, :track, :ref}
       end)
 
       assert_receive {:duration, %{duration: duration}, _}
