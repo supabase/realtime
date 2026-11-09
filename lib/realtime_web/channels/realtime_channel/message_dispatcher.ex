@@ -50,10 +50,10 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
     do: do_dispatch(subscribers, from, msg, tenant_id)
 
   def dispatch(subscribers, from, %Broadcast{event: @presence_diff} = original_msg) do
-    {msg, envelopes} = RealtimeWeb.Presence.Metrics.strip_diff(original_msg)
+    {msg, envelopes} = Realtime.Presence.Metrics.strip_diff(original_msg)
 
     tenant_id = tenant_id(subscribers)
-    fastlane_metrics_context = RealtimeWeb.Presence.Metrics.context(tenant_id, :fastlane)
+    fastlane_metrics_context = Realtime.Presence.Metrics.context(tenant_id, :fastlane)
 
     {_encoded_cache, count} =
       Enum.reduce(subscribers, {%{}, 0}, fn
@@ -84,7 +84,7 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
           encoded_cache =
             fastlane_dispatch(msg, fastlane_pid, serializer, join_topic, encoded_cache, tenant_id, log_level)
 
-          RealtimeWeb.Presence.Metrics.record(envelopes, fastlane_metrics_context)
+          Realtime.Presence.Metrics.record(envelopes, fastlane_metrics_context)
 
           {encoded_cache, count + 1}
 

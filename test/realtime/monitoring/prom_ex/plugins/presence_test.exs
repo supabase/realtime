@@ -44,8 +44,8 @@ defmodule Realtime.PromEx.Plugins.PresenceTest do
   end
 
   describe "track latency" do
-    alias RealtimeWeb.Presence.Metrics
-    alias RealtimeWeb.Presence.Metrics.Envelope
+    alias Realtime.Presence.Metrics
+    alias Realtime.Presence.Metrics.Envelope
 
     @latency "realtime_presence_notify_latency"
     @discarded "realtime_presence_notify_discarded"
@@ -81,7 +81,7 @@ defmodule Realtime.PromEx.Plugins.PresenceTest do
   end
 
   describe "track duration" do
-    alias RealtimeWeb.Presence.Metrics
+    alias Realtime.Presence.Metrics
 
     @duration "realtime_presence_track_duration"
 
@@ -90,7 +90,7 @@ defmodule Realtime.PromEx.Plugins.PresenceTest do
       le_25_before = metric_value(@duration <> "_bucket", tags ++ [le: "25.0"]) || 0
       count_before = metric_value(@duration <> "_count", tags) || 0
 
-      Metrics.measure_tracker_call(fn -> {:update, {:ok, :ref}} end)
+      Metrics.measure_tracker_call(fn -> {:ok, :update, :ref} end)
 
       assert metric_value(@duration <> "_bucket", tags ++ [le: "25.0"]) == le_25_before + 1
       assert metric_value(@duration <> "_count", tags) == count_before + 1
@@ -174,7 +174,7 @@ defmodule Realtime.PromEx.Plugins.PresenceTest do
   end
 
   describe "join latency" do
-    alias RealtimeWeb.Presence.Metrics
+    alias Realtime.Presence.Metrics
 
     @join_latency "realtime_presence_join_latency"
 
