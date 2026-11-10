@@ -116,7 +116,7 @@ defmodule Realtime.MixProject do
       {:opentelemetry_phoenix, "~> 2.0"},
       {:opentelemetry_cowboy, "~> 1.0"},
       {:opentelemetry_ecto, "~> 1.2"},
-      {:gen_rpc, git: "https://github.com/emqx/gen_rpc.git", tag: "3.6.1"},
+      {:gen_rpc, git: "https://github.com/emqx/gen_rpc.git", tag: "4.0.2"},
       # gen_rpc uses a git dependency
       {:snabbkaffe, "~> 1.0", override: true},
       {:req, "~> 0.7.4"},
