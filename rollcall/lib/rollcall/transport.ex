@@ -7,6 +7,8 @@ defmodule Rollcall.Transport do
   so `Rollcall.Tracker`s can work independently of the messaging and network environment.
 
   The tracker holds no subscribers. The transport delivers the diffs to them.
+  The transport also tells the tracker whether the node still needs it. See
+  `has_interest?/1`.
 
   """
   alias Rollcall.Tracker.Messages
@@ -49,4 +51,23 @@ defmodule Rollcall.Transport do
   If the message is unknown or shouldn't be processed by the tracker, implementations can return `:ignore`.
   """
   @callback unwrap(t :: any, raw :: any) :: {:ok, scope :: Rollcall.scope(), message :: Messages.t()} | :ignore
+
+  @doc """
+  Called when the grace period of a tracker with no entry ends. Returns `true`
+  when the node still needs the tracker, and `false` otherwise.
+
+  The tracker stops when the function returns `false`. It starts the grace
+  period again when the function returns `true`.
+
+  Return `true` while a process on this node reads the scope. 
+
+  The tracker calls this function in its own process, once for each grace
+  period. The tracker waits for the function, so keep it fast.
+
+  The callback is optional. A transport that does not implement it has no
+  interest.
+  """
+  @callback has_interest?(t :: any) :: boolean()
+
+  @optional_callbacks has_interest?: 1
 end

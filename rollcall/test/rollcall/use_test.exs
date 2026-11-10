@@ -29,6 +29,15 @@ defmodule Rollcall.UseTest do
       assert Local.entries(Tracker.get_state(Instance, scope).local, "partition") == []
     end
 
+    test "ensure_started/1 starts a tracker on the instance named after the module", %{scope: scope} do
+      start_supervised!(Instance)
+
+      assert :ok = Instance.ensure_started(scope)
+
+      assert is_pid(Tracker.whereis(Instance, scope))
+      assert scope in Instance.scopes()
+    end
+
     test "pass the option :ref of track to the tracker", %{scope: scope} do
       start_supervised!(Instance)
 

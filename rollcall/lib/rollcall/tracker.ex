@@ -70,7 +70,14 @@ defmodule Rollcall.Tracker do
 
   The tracker waits for a grace period before it stops. It starts a timer when
   it holds no entry. A `track` cancels the timer. When the timer expires, the
-  tracker stops.
+  tracker asks the transport with `c:Rollcall.Transport.has_interest?/1`. The
+  tracker stops when the transport has no interest. It starts the timer again
+  when the transport has interest. A transport that does not implement the
+  callback has no interest.
+
+  The tracker holds the entries of its peers. A node that has listeners and no
+  entry of its own needs them. A stop would leave the listeners with no state
+  and no diffs.
 
   The cost of the wait is an idle tracker. It still sends a heartbeat in each
   period. The best length depends on the heartbeat period.
@@ -194,7 +201,14 @@ defmodule Rollcall.Tracker do
       end
   end
 
-  defp start(name, scope) do
+  @doc """
+  Starts the tracker for `scope` in the instance `name`.
+
+  Returns `:ok` also when a tracker runs already. Call `Rollcall.ensure_started/2`
+  instead. It does not start a child when a tracker runs.
+  """
+  @spec start(Rollcall.name(), Rollcall.scope()) :: :ok | {:error, term()}
+  def start(name, scope) do
     # The options of the library, stored in the registry by `Rollcall.start_link/1`.
     {:ok, opts} = Registry.meta(name, :tracker_options)
     {:ok, tracker_supervisor} = Registry.meta(name, :tracker_supervisor)
@@ -461,9 +475,13 @@ defmodule Rollcall.Tracker do
   @spec handle_info(term(), State.t()) :: {:noreply, State.t()} | {:stop, :normal, State.t()}
   def handle_info({:timeout, ref, :empty_timeout}, %{empty_timer: ref} = state) do
     if Local.empty?(state.local) do
-      tp(:rollcall_tracker_stopped, %{scope: state.scope})
+      if transport_has_interest?(state) do
+        {:noreply, start_empty_timer(%{state | empty_timer: nil})}
+      else
+        tp(:rollcall_tracker_stopped, %{scope: state.scope})
 
-      {:stop, :normal, state}
+        {:stop, :normal, state}
+      end
     else
       tp(:rollcall_tracker_stop_skipped, %{scope: state.scope})
 
@@ -616,6 +634,13 @@ defmodule Rollcall.Tracker do
     View.write(state.view, changes)
 
     state
+  end
+
+  # `function_exported?/3` does not load a module. The transport module is
+  # loaded, because `init/2` ran when the tracker started.
+  defp transport_has_interest?(state) do
+    function_exported?(state.transport_module, :has_interest?, 1) and
+      state.transport_module.has_interest?(state.transport_state)
   end
 
   defp publish_changes(state, changes) do
