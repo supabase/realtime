@@ -58,7 +58,7 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
     {"another uuid", @other}
   ]
 
-  @groups [:three_valued, :text_and_arrays, :user_id_and_role, :claims, :regex, :literals]
+  @groups [:three_valued, :text_and_arrays, :user_id_and_role, :claims, :regex, :like, :literals]
 
   setup_all do
     %{collector: Collector.start(:expressions)}
@@ -830,6 +830,104 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
       end
 
     ascii ++ unicode ++ others
+  end
+
+  defp cases(:like) do
+    teams = [
+      "public:lobby",
+      "PUBLIC:LOBBY",
+      "",
+      nil,
+      "a_b",
+      "a%b",
+      "a\\b",
+      "line\nbreak",
+      # é as one code point (U+00E9)
+      "é",
+      "éé",
+      "café",
+      # e and a combining acute accent (U+0301): two code points that show as one é
+      "é",
+      "café",
+      # four bytes in UTF-8 (U+1F389)
+      "🎉",
+      "a🎉b",
+      "it's"
+    ]
+
+    patterns = [
+      "public:%",
+      "%lobby",
+      "%:%",
+      "public:lobby",
+      "PUBLIC:%",
+      "_ublic:lobby",
+      "%",
+      "",
+      "_",
+      "__",
+      "%_",
+      "_%_",
+      "%%",
+      "caf_",
+      "caf__",
+      "%é",
+      "a_b",
+      "%🎉%",
+      "a\\%b",
+      "\\",
+      "x\\",
+      "%\\",
+      "line%",
+      "%\n%"
+    ]
+
+    matrix =
+      for team <- teams, pattern <- patterns, operator <- ["LIKE", "NOT LIKE", "ILIKE"] do
+        expression_case("app.team() #{operator} #{lit(pattern)}", team: team)
+      end
+
+    others =
+      for sql <- [
+            "app.team() LIKE NULL::text",
+            "app.team() NOT LIKE NULL::text",
+            "NULL::text LIKE 'a%'",
+            "NULL::text NOT LIKE 'a%'",
+            "'abc' LIKE 'a%'",
+            "'abc' NOT LIKE 'a%'",
+            "kind LIKE 'no%'",
+            "kind NOT LIKE 'no%'",
+            "kind ILIKE 'NO%'",
+            "NOT (app.team() LIKE 'a%')",
+            "NOT (app.team() NOT LIKE 'a%')",
+            "app.team() LIKE 'a%' AND kind LIKE 'no%'",
+            "app.team() NOT LIKE 'a%' OR kind NOT LIKE 'no%'",
+            "app.team() LIKE kind",
+            "app.team() NOT LIKE kind",
+            "app.team() LIKE ('a' || kind)",
+            "app.team() LIKE app.user_role()",
+            "app.team() LIKE 'a#%' ESCAPE '#'",
+            "app.team() NOT LIKE 'a#%' ESCAPE '#'",
+            "app.team() LIKE 'a%' ESCAPE ''"
+          ],
+          team <- ["a", "A", "a%", "a#%", "", nil],
+          kind <- ["note", nil] do
+        expression_case(sql, team: team, kind: kind)
+      end
+
+    # Without the abort in MatchText, these would backtrack exponentially
+    long =
+      for team <- [String.duplicate("a", 5_000), String.duplicate("ab", 2_500) <> "c"],
+          pattern <- [
+            String.duplicate("%a", 40) <> "%b",
+            String.duplicate("%a_", 20) <> "%c",
+            "%a" <> String.duplicate("_", 3_000)
+          ],
+          operator <- ["LIKE", "NOT LIKE"] do
+        expression_case("app.team() #{operator} #{lit(pattern)}", team: team)
+      end
+
+    matrix ++ others ++ long
   end
 
   defp cases(:literals) do

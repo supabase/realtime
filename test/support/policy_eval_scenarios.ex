@@ -436,6 +436,32 @@ defmodule PolicyEvalScenarios do
   end
 
   @doc """
+  The `realtime.messages` policies of the e2e fixtures (test/e2e/src/fixtures.ts), with their
+  expressions and commands as they are there. They have to be decided by the library, not fall back.
+  """
+  @spec e2e_fixture_scenarios() :: [map()]
+  def e2e_fixture_scenarios do
+    policies = [
+      policy_sql("receive on topic", "FOR SELECT TO authenticated USING (realtime.topic() like 'topic:%')"),
+      policy_sql("broadcast on topic", "FOR INSERT TO authenticated WITH CHECK (realtime.topic() like 'topic:%')"),
+      policy_sql("receive on read-only", "FOR SELECT TO authenticated USING (realtime.topic() like 'read-only:%')"),
+      policy_sql("receive on no-persist", "FOR SELECT TO authenticated USING (realtime.topic() like 'no-persist:%')"),
+      policy_sql(
+        "broadcast on no-persist",
+        "FOR INSERT TO authenticated WITH CHECK (realtime.topic() like 'no-persist:%' and realtime.messages.extension = 'broadcast')"
+      )
+    ]
+
+    # topic_1 is a near miss: the `:` in the patterns is a literal
+    for topic <- ["topic:1", "read-only:1", "no-persist:1", "other:1", "topic_1"] do
+      scenario("e2e fixtures", "e2e fixture policies, topic #{inspect(topic)}", policies,
+        role: "authenticated",
+        topic: topic
+      )
+    end
+  end
+
+  @doc """
   Everything the library doesn't model has to be a fallback, not an answer. The setups change the
   database in the transaction of the scenario, and roll back with it.
   """

@@ -69,6 +69,16 @@ defmodule Realtime.Tenants.PolicyEvalDifferentialTest do
     run(context, PolicyEvalScenarios.combination_scenarios())
   end
 
+  # Not only "no mismatch": the policies of test/e2e/src/fixtures.ts are decided by the library
+  test "e2e fixture policies", context do
+    results = run(context, PolicyEvalScenarios.e2e_fixture_scenarios())
+
+    assert results != []
+
+    assert Enum.all?(results, &(&1.class == :match)),
+           "fell back: #{inspect(Enum.reject(results, &(&1.class == :match)))}"
+  end
+
   test "what the snapshot has to rule out", %{db_conn: db_conn} = context do
     %{rows: [[version_num]]} = Postgrex.query!(db_conn, "SELECT current_setting('server_version_num')::int", [])
     run(context, PolicyEvalScenarios.snapshot_scenarios(version_num))
@@ -86,6 +96,7 @@ defmodule Realtime.Tenants.PolicyEvalDifferentialTest do
     results = Enum.flat_map(scenarios, &run_scenario(db_conn, &1))
     Agent.update(collected, &(results ++ &1))
     Differential.verify!(results)
+    results
   end
 
   # In a transaction that rolls back: the setup, the policies of the scenario in place of the ones

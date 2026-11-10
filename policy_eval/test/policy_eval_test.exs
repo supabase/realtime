@@ -132,6 +132,36 @@ defmodule PolicyEvalTest do
     end
   end
 
+  describe "LIKE" do
+    test "% matches any run and _ one character, on the whole text" do
+      sql = "(app.team() ~~ 'public:%'::text)"
+
+      assert evaluate(sql, team: "public:lobby") == true
+      assert evaluate(sql, team: "xpublic:lobby") == false
+      assert evaluate(sql, team: "publicx:lobby") == false
+      assert evaluate(sql, team: "public::lobby") == true
+      assert evaluate(sql, team: "room:1") == false
+      assert evaluate("(app.team() ~~ 'room:_'::text)", team: "room:1") == true
+    end
+
+    test "NOT LIKE is the negation, and NULL stays NULL" do
+      sql = "(app.team() !~~ 'public:%'::text)"
+
+      assert evaluate(sql, team: "public:lobby") == false
+      assert evaluate(sql, team: "room:1") == true
+      assert evaluate(sql, team: nil) == nil
+    end
+
+    test "fall back for a pattern with a backslash, or ILIKE" do
+      # Postgres: true, then true
+      assert evaluate("(app.team() ~~ 'public\\:%'::text)", team: "public:lobby") ==
+               {:unsupported, :like_escape}
+
+      assert evaluate("(app.team() ~~* 'PUBLIC:%'::text)", team: "public:lobby") ==
+               {:unsupported, {:operator, "~~*", :text, :text}}
+    end
+  end
+
   describe "claims" do
     test "are read with app.claims() ->>" do
       sql = "((app.claims() ->> 'role'::text) = 'member'::text)"

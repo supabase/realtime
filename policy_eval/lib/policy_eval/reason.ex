@@ -25,7 +25,8 @@ defmodule PolicyEval.Reason do
       * `:function`: a function in a platform schema of the profile that the evaluator doesn't
         know or whose definition isn't a known one, a Postgres built-in, or one that the policy
         author created
-      * `:operator`: an operator for these types, `ANY`/`ALL`, or a regex that isn't a literal
+      * `:operator`: an operator for these types, `ANY`/`ALL`, a regex that isn't a literal, or a
+        `LIKE` pattern with an escape
       * `:type`: a cast or a combination of types
       * `:column`: a column that is not in the profile
       * `:setting`: a setting the caller doesn't set
@@ -89,6 +90,7 @@ defmodule PolicyEval.Reason do
   defp expression({:operator, _op, _left, _right}), do: :operator
   defp expression({:array_operator, _op, _quantifier}), do: :operator
   defp expression(:regex_not_literal), do: :operator
+  defp expression(:like_escape), do: :operator
   defp expression({:cast, _from, _to}), do: :type
   defp expression({:coalesce_types, _types}), do: :type
   defp expression({:nullif, _left, _right}), do: :type
