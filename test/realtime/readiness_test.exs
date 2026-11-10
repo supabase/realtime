@@ -1,12 +1,15 @@
 defmodule Realtime.ReadinessTest do
   # async: false: joins the global RegionNodes scope and changes Application env
   use ExUnit.Case, async: false
+  use TestHelpers
 
   import ExUnit.CaptureLog
 
   alias Realtime.Readiness
 
-  # The test node itself is in RegionNodes under "us-east-1" (config/test.exs).
+  # The test node itself is in RegionNodes under "us-east-1" (config/test.exs). Fake nodes go into a region of the
+  # test's own: syn drops a member asynchronously when its process exits, so one test's fake nodes must not count
+  # toward another test's region.
   setup do
     original = Application.get_env(:realtime, :readiness_min_nodes_per_region)
     Readiness.reset()
@@ -16,6 +19,8 @@ defmodule Realtime.ReadinessTest do
       Application.put_env(:realtime, :shutdown_in_progress, false)
       Readiness.reset()
     end)
+
+    %{region: "test-region-#{System.unique_integer([:positive])}"}
   end
 
   defp min_nodes(minimums), do: Application.put_env(:realtime, :readiness_min_nodes_per_region, minimums)
@@ -46,24 +51,24 @@ defmodule Realtime.ReadinessTest do
     assert Readiness.check() == :ok
   end
 
-  test "waits until every listed region has its minimum" do
-    min_nodes([{"us-east-1", 2}, {"eu-west-1", 1}])
-    assert Readiness.check() == {:error, {:waiting_for_nodes, [{"us-east-1", 1, 2}, {"eu-west-1", 0, 1}]}}
+  test "waits until every listed region has its minimum", %{region: region} do
+    min_nodes([{"us-east-1", 1}, {region, 2}])
+    assert Readiness.check() == {:error, {:waiting_for_nodes, [{region, 0, 2}]}}
 
-    spawn_fake_node("eu-west-1", :eu_node_1)
-    assert Readiness.check() == {:error, {:waiting_for_nodes, [{"us-east-1", 1, 2}]}}
+    spawn_fake_node(region, :fake_node_1)
+    assert Readiness.check() == {:error, {:waiting_for_nodes, [{region, 1, 2}]}}
 
-    spawn_fake_node("us-east-1", :us_node_2)
+    spawn_fake_node(region, :fake_node_2)
     assert Readiness.check() == :ok
   end
 
-  test "stays ready after a region drops below its minimum" do
-    min_nodes([{"eu-west-1", 1}])
-    spawn_fake_node("eu-west-1", :eu_node_1)
+  test "stays ready after a region drops below its minimum", %{region: region} do
+    min_nodes([{region, 1}])
+    spawn_fake_node(region, :fake_node_1)
     assert Readiness.check() == :ok
 
-    :ok = stop_supervised({"eu-west-1", :eu_node_1})
-    assert Realtime.Nodes.region_nodes("eu-west-1") == []
+    :ok = stop_supervised({region, :fake_node_1})
+    assert_eventually Realtime.Nodes.region_nodes(region) == []
     assert Readiness.check() == :ok
   end
 
@@ -79,32 +84,32 @@ defmodule Realtime.ReadinessTest do
     assert Readiness.check() == {:error, :shutdown_in_progress}
   end
 
-  test "logs what it waits for once, and again only when that changes" do
-    min_nodes([{"us-east-1", 1}, {"eu-west-1", 2}])
+  test "logs what it waits for once, and again only when that changes", %{region: region} do
+    min_nodes([{"us-east-1", 1}, {region, 2}])
 
     log =
       capture_log(fn ->
         for _ <- 1..5, do: Readiness.check()
       end)
 
-    assert count(log, "Readiness: waiting for nodes: eu-west-1 0/2") == 1
+    assert count(log, "Readiness: waiting for nodes: #{region} 0/2") == 1
 
     log =
       capture_log(fn ->
-        spawn_fake_node("eu-west-1", :eu_node_1)
+        spawn_fake_node(region, :fake_node_1)
         for _ <- 1..5, do: Readiness.check()
       end)
 
-    assert count(log, "Readiness: waiting for nodes: eu-west-1 1/2") == 1
+    assert count(log, "Readiness: waiting for nodes: #{region} 1/2") == 1
     refute log =~ "0/2"
 
     log =
       capture_log(fn ->
-        spawn_fake_node("eu-west-1", :eu_node_2)
+        spawn_fake_node(region, :fake_node_2)
         for _ <- 1..5, do: Readiness.check()
       end)
 
-    assert count(log, "Readiness: ready, minimum nodes per region reached: us-east-1=1,eu-west-1=2") == 1
+    assert count(log, "Readiness: ready, minimum nodes per region reached: us-east-1=1,#{region}=2") == 1
     refute log =~ "waiting for nodes"
   end
 

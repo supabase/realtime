@@ -42,7 +42,9 @@ defmodule RealtimeWeb.PageControllerTest do
     end
 
     test "returns 503 while it waits for nodes, with the regions in the log only", %{conn: conn} do
-      Application.put_env(:realtime, :readiness_min_nodes_per_region, [{"us-east-1", 2}, {"eu-west-1", 1}])
+      # A region no other test uses: fake nodes from other tests leave RegionNodes asynchronously.
+      region = "test-region-#{System.unique_integer([:positive])}"
+      Application.put_env(:realtime, :readiness_min_nodes_per_region, [{"us-east-1", 1}, {region, 1}])
 
       log =
         capture_log(fn ->
@@ -50,7 +52,8 @@ defmodule RealtimeWeb.PageControllerTest do
           assert text_response(conn, 503) == "not ready"
         end)
 
-      assert log =~ "Readiness: waiting for nodes: us-east-1 1/2, eu-west-1 0/1"
+      assert log =~ "Readiness: waiting for nodes: #{region} 0/1"
+      refute log =~ "us-east-1 "
     end
 
     test "returns 503 while shutting down", %{conn: conn} do
