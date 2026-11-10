@@ -23,6 +23,11 @@ defmodule Realtime.Presence.RollcallTransport do
   end
 
   @impl true
+  def has_interest?(%{scope: scope}) do
+    Forum.Census.local_member_count(:users, scope) > 0
+  end
+
+  @impl true
   def heartbeat(%{scope: scope, pubsub: pubsub}, message) do
     Phoenix.PubSub.broadcast_from(pubsub, self(), topic_for(scope), wrap(scope, message))
     :ok
