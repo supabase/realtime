@@ -140,6 +140,41 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
 
       assert log =~ "RealtimeDisabledForTenant"
     end
+
+    test "connected socket is closed and cannot reconnect", %{tenant: tenant, topic: topic, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{config: %{broadcast: %{self: true}, private: false}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
+
+      {:ok, _} = Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{suspend: true})
+
+      assert_receive {:close_code, @service_restart_close_code}, 1000
+      assert_process_down(socket)
+
+      assert {:error, %Mint.WebSocket.UpgradeFailureError{status_code: 403}} =
+               get_connection(tenant, serializer, role: "authenticated")
+    end
+
+    test "socket that does not drain is killed", %{tenant: tenant, topic: topic, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{config: %{broadcast: %{self: true}, private: false}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
+
+      # A suspended transport never handles the drain, like one that is stuck or missed the broadcast
+      [{transport_pid, _}] = Registry.lookup(Realtime.PubSub, UserSocket.subscribers_id(tenant.external_id))
+      :ok = :sys.suspend(transport_pid)
+      ref = Process.monitor(transport_pid)
+
+      {:ok, _} = Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{suspend: true})
+
+      assert_receive {:DOWN, ^ref, :process, ^transport_pid, :killed}, 1000
+      assert_process_down(socket)
+      refute_received {:close_code, _}
+    end
   end
 
   describe "socket disconnect - configuration changes" do

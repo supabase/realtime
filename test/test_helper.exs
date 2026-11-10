@@ -232,6 +232,7 @@ Mimic.copy(RealtimeWeb.Presence)
 Mimic.copy(RealtimeWeb.Endpoint)
 Mimic.copy(RealtimeWeb.JwtVerification)
 Mimic.copy(RealtimeWeb.TenantBroadcaster)
+Mimic.copy(RealtimeWeb.UserSocket)
 Mimic.copy(NimbleZTA.Cloudflare)
 
 self_node = TestEnv.node_name()

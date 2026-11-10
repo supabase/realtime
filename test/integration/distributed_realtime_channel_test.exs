@@ -12,6 +12,9 @@ defmodule Realtime.Integration.DistributedRealtimeChannelTest do
   alias Realtime.FeatureFlags
   alias Realtime.Tenants.Connect
   alias Realtime.Integration.WebsocketClient
+  alias RealtimeWeb.UserSocket
+
+  @service_restart_close_code 1012
 
   # Evaluated on the peer too, so telemetry fired there can be forwarded to the test process.
   @aux_mod (quote do
@@ -148,6 +151,63 @@ defmodule Realtime.Integration.DistributedRealtimeChannelTest do
 
       assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 5000
     end
+  end
+
+  describe "tenant suspension" do
+    @tag mode: :distributed
+    test "closes the sockets on every node", %{tenant: tenant, topic: topic, serializer: serializer} do
+      {:ok, token} = generate_token(tenant, %{exp: System.system_time(:second) + 1000, role: "authenticated"})
+      topic = "realtime:#{topic}"
+
+      remote_socket = connect_and_join(tenant, serializer, TestEnv.peer_http_port(), token, topic)
+      socket = connect_and_join(tenant, serializer, nil, token, topic)
+
+      suspend(tenant)
+
+      assert_receive {:close_code, @service_restart_close_code}, 5000
+      assert_receive {:close_code, @service_restart_close_code}, 5000
+      assert_process_down(remote_socket)
+      assert_process_down(socket)
+    end
+
+    @tag mode: :distributed
+    test "kills a socket on another node that does not drain", %{
+      tenant: tenant,
+      topic: topic,
+      serializer: serializer,
+      node: node
+    } do
+      {:ok, token} = generate_token(tenant, %{exp: System.system_time(:second) + 1000, role: "authenticated"})
+      remote_socket = connect_and_join(tenant, serializer, TestEnv.peer_http_port(), token, "realtime:#{topic}")
+
+      # A suspended transport never handles the drain, like one that is stuck or missed the broadcast
+      id = UserSocket.subscribers_id(tenant.external_id)
+      [{transport_pid, _}] = :erpc.call(node, Registry, :lookup, [Realtime.PubSub, id])
+      :ok = :erpc.call(node, :sys, :suspend, [transport_pid])
+      ref = Process.monitor(transport_pid)
+
+      suspend(tenant)
+
+      assert_receive {:DOWN, ^ref, :process, ^transport_pid, :killed}, 5000
+      assert_process_down(remote_socket)
+      refute_received {:close_code, _}
+    end
+  end
+
+  # nil makes uri/3 use this node's port
+  defp connect_and_join(tenant, serializer, port, token, topic) do
+    {:ok, socket} = WebsocketClient.connect(self(), uri(tenant, serializer, port), serializer, [{"x-api-key", token}])
+    :ok = WebsocketClient.join(socket, topic, %{config: %{broadcast: %{self: true}, private: false}})
+    assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 5000
+    socket
+  end
+
+  # The tenant row lives outside the sandbox, so the update has to as well
+  defp suspend(tenant) do
+    {:ok, _} =
+      Ecto.Adapters.SQL.Sandbox.unboxed_run(Realtime.Repo, fn ->
+        Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{suspend: true})
+      end)
   end
 
   # Broadcasts route through Muster's region ring, so wait for the local and
