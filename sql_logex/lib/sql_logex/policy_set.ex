@@ -51,8 +51,8 @@ defmodule SqlLogex.PolicySet do
   raises, like `1 / 0` (22012), whatever the `INSERT` policies say. A `SELECT` policy that only
   raises when it is evaluated for a row, like the cast of a sub that isn't a uuid, did not fail a
   write-only call there, as there is no row to evaluate it for. Against a Multigres cluster it did,
-  for `realtime.topic() = 't1' AND (SELECT auth.uid())::text = '...'`: whether the plan evaluates
-  it anyway depends on more than the policy.
+  for a policy like `app.team() = 'red' AND (SELECT auth.uid())::text = '...'`: whether the plan
+  evaluates it anyway depends on more than the policy.
 
   This is not `INSERT ... RETURNING`. That statement checks the `SELECT` policies against the new
   row, so a false one fails the insert. Here a false `SELECT` policy does not change the answer.

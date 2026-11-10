@@ -63,7 +63,7 @@ defmodule SqlLogex.Test.RealtimeProfile do
     ]
   end
 
-  # `request.jwt.claim` (singular) is not one of the settings Realtime sets, so on its connections
+  # `request.jwt.claim` (singular) is not one of the settings of the example, so in its sessions
   # current_setting returns NULL (never set) or '' (set earlier on that backend), and
   # nullif(..., '') turns both into NULL. This argument is therefore always NULL.
   defp claim_singular, do: null()

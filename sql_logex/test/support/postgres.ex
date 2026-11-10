@@ -52,7 +52,7 @@ defmodule SqlLogex.Test.Postgres do
   end
 
   @doc """
-  Creates the test database when it does not exist, then creates the Realtime schema in it (see
+  Creates the test database when it does not exist, then creates the schema of the example in it (see
   `SqlLogex.Test.RealtimeDatabase`). Returns the major version of the server.
   """
   @spec prepare!() :: pos_integer()
@@ -99,8 +99,8 @@ defmodule SqlLogex.Test.Postgres do
     version_num
   end
 
-  @doc "A Postgres error as `{:error, sqlstate, code, message}`."
-  @spec error(Postgrex.Error.t()) :: {:error, String.t(), atom(), String.t()}
+  @doc "A Postgres error as `{:error, sqlstate, code, message}`, an answer of `SqlLogex.Differential`."
+  @spec error(Postgrex.Error.t()) :: SqlLogex.Differential.postgres_answer()
   def error(%Postgrex.Error{postgres: %{pg_code: sqlstate, code: code, message: message}}),
     do: {:error, sqlstate, code, message}
 

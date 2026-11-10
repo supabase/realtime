@@ -1,8 +1,8 @@
 defmodule SqlLogex.ProfileTest do
   # The profile is the only place where the library knows about the table and the platform. These
-  # tests change one field of the Realtime profile (the copy in test/support) and check that the
-  # decision follows it. The answers for other profiles are not checked against Postgres: the
-  # differential test in Realtime covers the Realtime profile only.
+  # tests change one field of the example profile (SqlLogex.Test.RealtimeProfile) and check that the
+  # decision follows it. The answers for other profiles are not checked against Postgres: the tests
+  # against Postgres (test/postgres) cover the example profile only.
   use ExUnit.Case, async: true
 
   alias SqlLogex.Env
@@ -36,7 +36,7 @@ defmodule SqlLogex.ProfileTest do
     Env.new(%{"role" => role, "request.jwt.claim.sub" => @uid, "request.jwt.claim.role" => role}, row)
   end
 
-  test "the Realtime profile has the columns and roles of realtime.messages" do
+  test "the example profile has the columns and roles of realtime.messages" do
     assert @realtime.write_plans_select == true
     assert @realtime.columns == %{"topic" => :text, "extension" => :text}
     assert @realtime.roles == ["anon", "authenticated"]

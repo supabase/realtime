@@ -126,7 +126,7 @@ Any other function call is a fallback. The only exception is the built-in
 
 The library does not make sure that the tree of a known function does what its source does. The
 profile that builds the known function is responsible for that. For example, the tests of the
-library compare the known functions of the Realtime profile with Postgres, see "Tests against
+library compare the known functions of the example profile with Postgres, see "Tests against
 Postgres".
 
 ## What it supports
@@ -175,7 +175,7 @@ The profile and the env decide which roles, columns, settings and functions a po
 - `COALESCE` over arguments of one type, and `NULLIF` on text. An unsupported argument anywhere
   makes `COALESCE` a fallback, even after a non-NULL argument. The reason is that Postgres can
   evaluate a later argument while it plans the query. For an example, see supabase/auth's
-  `auth.uid()` in "The Realtime profile".
+  `auth.uid()` in "Example: Supabase Realtime".
 - Casts from text to uuid, jsonb and boolean, and from uuid to text. Literals of those types,
   `true`, `false` and typed `NULL`s.
 
@@ -200,6 +200,41 @@ These are examples of what is not supported. Each one is a fallback:
 - columns that are not in the profile
 - functions that the profile does not know, for example `lower()` and `now()`
 
+## Comparing the library with your database
+
+Before a caller uses the answers of the library in place of the database, it can compare the two
+for its own policies. `SqlLogex.Differential` does this in tests.
+
+The caller asks Postgres, and the library decides the same question. `compare/3` puts the two
+answers in a class. `verify!/1` fails the test on a mismatch or a crash. A fallback does not fail,
+because the caller then asks the database. `SqlLogex.Differential` does not connect to a database.
+
+In this example, the test creates the policy in a transaction that rolls back. In the same
+transaction, it reads the snapshot input and asks Postgres:
+
+```elixir
+env = SqlLogex.Env.new(%{"role" => "member", "app.team" => "red"}, %{"team" => {:text, "blue"}})
+
+{input, postgres} =
+  MyApp.Policies.rolled_back(conn, fn conn ->
+    Postgrex.query!(conn, ~s(CREATE POLICY "own team" ON app.docs FOR SELECT TO member USING (team = app.team())), [])
+    # The snapshot input, read as the application reads it, and the answer of Postgres
+    {MyApp.Policies.snapshot_input(conn), MyApp.Policies.ask_postgres(conn, env, :read)}
+  end)
+
+library = SqlLogex.Differential.decide(SqlLogex.Snapshot.new(input, MyApp.Policies.profile()), env, :read)
+
+[SqlLogex.Differential.compare(postgres, library, name: "a member reads a row of another team")]
+|> SqlLogex.Differential.verify!()
+```
+
+`ask_postgres` asks as the application asks in production. If Postgres returns a value, the answer
+is `{:ok, value}`. If Postgres raises an error, the answer is `{:error, sqlstate, code, message}`.
+
+`SqlLogex.Differential.report/2` counts the matches and the fallbacks, and lists the most frequent
+reasons of the fallbacks. The tests of this library use the same module, see "Tests against
+Postgres".
+
 ## Running the tests
 
 Run the library tests from this directory. Without a database, `mix test` excludes the tests
@@ -213,18 +248,17 @@ Start to read at [test/sql_logex_test.exs](test/sql_logex_test.exs). SQL goes in
 out, for the most important cases. Each expected value is the value that Postgres 17 gives. The
 other library tests cover one stage each.
 
-The tests use Supabase Realtime as their worked example, see "Example: Supabase Realtime". The
-library cannot depend on Realtime, so [test/support](test/support) holds copies of the parts that
-the tests use:
+The tests use Supabase Realtime as their worked example, see "Example: Supabase Realtime". These
+modules in `test/support` hold the example:
 
 - `SqlLogex.Test.RealtimeProfile`: the profile.
-- `SqlLogex.Test.RealtimeDatabase`: the table, the roles and the function bodies of a tenant
-  database, as SQL for a plain Postgres.
+- `SqlLogex.Test.RealtimeDatabase`: the table, the roles and the function bodies, as SQL for a
+  plain Postgres.
 - `SqlLogex.Test.RealtimePolicies`: the policies.
+- `SqlLogex.Test.RealtimeScenarios`: the scenarios of the tests against Postgres.
 
-Realtime makes sure that the copies stay equal to the originals, see "Tests in Realtime". The
-fixtures in `test/fixtures/pg15` and `test/fixtures/pg17` hold the policies and the function bodies
-as Postgres prints them. The tests against Postgres generate them.
+The fixtures in `test/fixtures/pg15` and `test/fixtures/pg17` hold the policies and the function
+bodies as Postgres prints them. The tests against Postgres generate them.
 
 ### Tests against Postgres
 
@@ -269,37 +303,41 @@ There are three test files:
 
 Levels 1 and 2 fail on a decided answer that is different from the answer of Postgres. They also
 fail on a value where Postgres raised an error. They count fallbacks, but do not fail on them.
-`SqlLogex.Test.Differential` holds this comparison and the report. For the results, see "Tests in
-Realtime".
+`SqlLogex.Differential` holds this comparison and the report. `SqlLogex.Test.Collector` adds two
+checks for this library:
 
-CI runs these tests against the three services of `compose.yml`, see
-[sql_logex_tests.yml](../.github/workflows/sql_logex_tests.yml). Postgres 17 runs with ICU as its
-default collation provider and Postgres 15 with libc, as in the supabase/postgres images.
+- Each reason of a fallback has a category in `SqlLogex.Reason`.
+- Postgres agrees with each decision of the decision table of the unit tests.
+
+The collector also adds report sections about the example: the user-channel grid, the decision
+table and the planner-order cases.
+
+For the current numbers, run the tests with `SQL_LOGEX_REPORT=1`. For each level, the report gives
+the number of cases in each class, the classes by group, and the most frequent reasons of the
+fallbacks. On Postgres 14 and 15, Level 2 has fewer cases, because one scenario needs
+`GRANT ... WITH INHERIT`, which Postgres 16 added.
+
+CI runs these tests against the three services of `compose.yml`. Postgres 17 runs with ICU as its
+default collation provider, and Postgres 14 and 15 with libc. So the tests cover both providers.
 
 On Postgres 14, run `mix test` and not `mix test --only postgres`. There is no pg14 fixture, so
 `test_helper.exs` excludes the fixtures test. But `--only postgres` includes that test again.
 
 ## Example: Supabase Realtime
 
-Supabase Realtime is the first user of the library. Realtime authorizes a join to a private channel
-with the RLS policies on `realtime.messages`, in the database of the tenant. A tenant is one
-customer project, with its own database. When many clients reconnect at once, that database becomes
-the bottleneck. Many policies only compare the topic, the extension and JWT claims, and the library
-can decide those instead. Today Realtime runs the library in shadow mode only, see "Shadow mode".
+Supabase Realtime is the worked example of this README and of the tests. Realtime authorizes a
+join to a private channel with the RLS policies on the table `realtime.messages`. Many of these
+policies only compare the topic, the extension and JWT claims, so the library can decide them.
 
-### The Realtime profile
-
-`Realtime.Tenants.SqlLogexProfile`
-([lib/realtime/tenants/sql_logex_profile.ex](../lib/realtime/tenants/sql_logex_profile.ex)) builds
-the profile for `realtime.messages`:
+The tests build the profile of the example in `SqlLogex.Test.RealtimeProfile`:
 
 - `columns`: `topic` and `extension`, both text. These are the columns of the probe row. The probe
   row is the row that Realtime checks in place of a real message.
 - `roles`: `anon` and `authenticated`. The `policy_roles` also include `service_role`.
 - `platform_schemas`: `auth` and `realtime`. `platform_setting_prefixes`: `request.` and
   `realtime.`. `platform_roles`: `service_role`, `postgres` and `supabase_admin`.
-- `write_plans_select`: `true`, because `realtime.authorize` plans its `SELECT` in every call,
-  write-only calls included.
+- `write_plans_select`: `true`, because Realtime plans the `SELECT` in every check, write-only
+  checks included.
 - `functions`: these known definitions.
 
   | Function | Known definitions |
@@ -312,7 +350,7 @@ the profile for `realtime.messages`:
   The older supabase/auth versions of `auth.uid()` are not known, so a call to one of them is a
   fallback.
 
-The env holds the six settings that Realtime sets before the database check, with the exact
+The env holds the six settings that Realtime sets before it checks the policies, with the exact
 strings that Realtime sends: `role`, `realtime.topic`, `request.jwt.claims`,
 `request.jwt.claim.sub`, `request.jwt.claim.role` and `request.headers`.
 
@@ -324,157 +362,6 @@ Two facts about the known functions show how a profile models a body:
   `request.jwt.claim.sub`. If the claims contain `\u0000`, the call is a fallback. A set `sub` does
   not change that.
 
-The library tests use a copy of this profile.
-[test/realtime/tenants/sql_logex_profile_test.exs](../test/realtime/tenants/sql_logex_profile_test.exs)
-makes sure that the two copies stay equal.
-
-### Tests in Realtime
-
-The tests of the library run against plain Postgres, see "Tests against Postgres". Realtime runs
-the Realtime side of the same checks against its tenant database (supabase/postgres). Run these
-from the Realtime root:
-
-```sh
-mix test test/realtime/tenants/sql_logex_differential_test.exs
-SQL_LOGEX_REPORT=1 mix test test/realtime/tenants/sql_logex_differential_test.exs   # coverage report
-mix test test/realtime/tenants/sql_logex_fixtures_test.exs
-
-# the Realtime side: profile, loader, cache, env, shadow mode, metrics
-mix test test/realtime/tenants/sql_logex_{profile,loader,cache,env,shadow}_test.exs test/realtime/monitoring/prom_ex/plugins/sql_logex_test.exs
-```
-
-- The differential test,
-  [test/realtime/tenants/sql_logex_differential_test.exs](../test/realtime/tenants/sql_logex_differential_test.exs),
-  runs the scenarios of Level 2 through `realtime.authorize`. It uses the production loader
-  (`Realtime.Tenants.SqlLogexLoader`) and the profile that Realtime ships. It loads the scenarios
-  from [test/support](test/support) of the library.
-- The fixtures test,
-  [test/realtime/tenants/sql_logex_fixtures_test.exs](../test/realtime/tenants/sql_logex_fixtures_test.exs),
-  makes sure that a tenant database prints the same policies and function bodies as the fixtures
-  of the library. So it makes sure that `SqlLogex.Test.RealtimeDatabase` and
-  `SqlLogex.Test.RealtimePolicies` stay equal to Realtime.
-- The profile test makes sure that `SqlLogex.Test.RealtimeProfile` stays equal to the profile that
-  Realtime ships.
-
-These are the results with the Realtime profile, against Postgres 17. There are 0 mismatches:
-
-- Level 1, expressions, on `postgres:17`: 4018 cases, 2714 decided, 1304 fall back.
-- Level 2, `decide/3`: 4308 cases, 2872 decided, 1436 fall back. Plain row-level security on
-  `postgres:17` and `realtime.authorize` on `supabase/postgres:17.11` give the same numbers.
-- A user-channel policy set (`topic = 'user:' || auth.uid()`, plus a literal `~*` policy): the
-  library decides 800 of 816 `authenticated` joins with a uuid `sub` and an ASCII topic. The other
-  16 have `\u0000` in a claim, which supabase/auth's `auth.uid()` reads.
-- On `postgres:14` and `postgres:15`, the tests of the library give the same numbers, also with 0
-  mismatches. Level 2 has 4284 cases there, because one scenario needs `GRANT ... WITH INHERIT`,
-  which Postgres 16 added.
-
-### Shadow mode
-
-Shadow mode runs the library next to the current database check, behind the feature flag
-`sql_logex_shadow` (off by default, per tenant). Realtime always uses the answer of the database,
-and only compares the answer of the library with it. So shadow mode tests the library against real
-policies without risk, but it does not reduce the load on the database.
-
-- Where: in [lib/realtime/tenants/authorization.ex](../lib/realtime/tenants/authorization.ex),
-  `get_read_authorizations/4` and `get_write_authorizations/4` call
-  `Realtime.Tenants.SqlLogexShadow` after the database check. That is on the node with the database
-  connection of the tenant, after the RPC to it. So the cache only lives on that one node.
-- A snapshot per tenant: `Realtime.Tenants.SqlLogexLoader` reads these, in one transaction with
-  `search_path = ''`:
-  - the policies on `realtime.messages`
-  - the definitions of `auth.uid()`, `auth.role()`, `auth.jwt()` and `realtime.topic()`
-  - the RLS flags of the table
-  - the grants and `BYPASSRLS` of `anon` and `authenticated`
-
-  It asks the pool with `queue: false`. So a busy pool gives no snapshot, and the real check is not
-  delayed.
-- The cache: `Realtime.Tenants.SqlLogexCache` keeps the snapshot in Cachex, one cache per node.
-  - It loads on the first check that needs it.
-  - It does not cache a failed load.
-  - Entries expire after `SQL_LOGEX_SNAPSHOT_CACHE_EXPIRATION_IN_MS` (5 minutes by default). A
-    policy change takes that long to show.
-- An env per check: `Realtime.Tenants.SqlLogexEnv` builds it from the `%Authorization{}` struct,
-  with the exact strings that `set_conn_config/2` and `authorize/5` send to Postgres.
-- One decision per extension: the `extension` of the probe row is different for each extension.
-  So Realtime decides a read for each extension that `get_read_authorizations/4` checks
-  (`broadcast`, and `presence` for a channel with presence on). It decides a write for the one extension in
-  the request. `SqlLogex.decide/3` takes about 11 µs for the user-channel policies (measured
-  locally).
-- What it records: all of this runs in a detached task, so it cannot slow down or fail the real
-  check.
-  - Every decision emits `[:realtime, :tenants, :sql_logex, :shadow, :read | :write]` with an
-    outcome: `:match`, `:mismatch`, `:fallback` or `:no_real_answer`. `:no_real_answer` means that
-    the database check did not run (no connection, a timeout, a missing partition).
-  - If Postgres raises an error while it evaluates the policies, that is a real answer. Examples
-    are the SQLSTATE classes `22`, `42` and `P0`, like a sub that is not a uuid. So a decided answer
-    against it is a `:mismatch`, as in the differential test. Realtime also logs every mismatch as
-    a warning, with the SQLSTATE but not the error message.
-  - The same metadata has a `reason` tag. For a `:fallback`, the tag is the category of the
-    fallback (`SqlLogex.Reason.category/1`, a small fixed set like `:role`, `:function` or
-    `:operator`). For the other outcomes, the tag is `:none`. So the metrics show which kinds of
-    constructs cost coverage.
-  - `:unavailable` means that no snapshot loaded. `:exception` means that the decision raised an
-    exception.
-  - `:timing` covers the whole shadow check, the cache lookup included.
-  - `Realtime.PromEx.Plugins.SqlLogex` turns these into global metrics, with no tenant tag. The
-    logs hold the tenant: mismatches, exceptions and unsupported policies.
-- What the library cannot model: if some policies have parts that the library cannot model,
-  Realtime logs `SqlLogexUnsupportedPolicies` once at `info` for each snapshot load. For each policy, the log gives the command, whether the policy is permissive, and the
-  reasons (`SqlLogex.Snapshot.unsupported/1`). It has no policy names or SQL. That is once per
-  tenant per cache expiry, and it shows which constructs to support next.
-
-### Enforce mode
-
-In enforce mode, Realtime uses every answer that the library decides. It asks the database only
-on a fallback. Enforce mode is not built. It needs these changes:
-
-- `:allow` and `:deny` fill the `Policies` struct. If any extension falls back, the simplest rule
-  is to fall back for the whole call.
-- The snapshot must be ready before a burst of reconnects arrives, and a join must never wait for a
-  load. So Realtime loads it at the start of the database connection of the tenant
-  (`Realtime.Tenants.Connect`), not on the first join. This load does not delay "ready".
-- Realtime polls a fingerprint of everything that the snapshot reads (policies, function
-  definitions, settings) every few minutes. Only a change of the fingerprint reloads the
-  snapshot.
-- The loader rules out the items in "Limits that the caller must cover", and the open decisions
-  below have answers.
-
-### Open items in Realtime
-
-Not done:
-
-- Enforce mode, see "Enforce mode".
-- Role membership. The Realtime profile assumes that `anon`, `authenticated` and `service_role` are
-  not members of each other. A tenant that runs `GRANT anon TO authenticated` gets a wrong answer
-  for a policy `TO anon`. The loader must find that case (`pg_has_role`) and fall back. Shadow mode
-  does not need it, because such a case shows as a mismatch.
-- The other items in "Limits that the caller must cover". For Realtime, these are revoked `EXECUTE`
-  on the known functions, revoked `USAGE` on `auth` or `realtime`, and user triggers on
-  `realtime.messages`.
-- Policy changes. Only the expiry of the cache notices them, after up to 5 minutes.
-
-Planned, or maybe:
-
-- Other columns of `realtime.messages` (`event`, `private`, `payload`). The profile can list them,
-  and the env row must hold their values.
-- Pushing parsed snapshots to other nodes.
-- The row columns of postgres_changes.
-
-Open decisions:
-
-- `realtime.authorize` couples writes to reads. It plans its read statement on every call. If the
-  role does not have `SELECT`, or a `SELECT` policy fails while Postgres plans it, a write check
-  fails too. The transaction path does not do that. `decide(:write)` falls back where that
-  can happen, because the Realtime profile sets `write_plans_select`. Fix it in a migration, or
-  keep it.
-- A missing daily partition makes the current database check fail, but the library decides.
-  Realtime must choose which answer wins before enforce mode.
-- Where enforce mode decides. There are two options:
-  - On the node with the database connection of the tenant, where shadow mode runs. That saves the
-    query, but not the RPC.
-  - On the node that the client is connected to, before the RPC. That saves both, but needs a
-    snapshot on every node with clients of that tenant.
-
 ## Status
 
 ### Done
@@ -482,8 +369,9 @@ Open decisions:
 - The parser, resolver, evaluator, policy combination and function fingerprints, with everything
   in "What it supports".
 - The profile. All knowledge of a table or a platform is input from the caller.
-- Measured against Postgres 14, 15 and 17 with the Realtime profile, with 0 mismatches. CI runs
+- Measured against Postgres 14, 15 and 17 with the example profile, with 0 mismatches. CI runs
   these tests. See "Tests against Postgres".
+- `SqlLogex.Differential`, for a caller that compares the library with its own database.
 
 ### Limits that the caller must cover
 
@@ -517,12 +405,12 @@ the database, the caller must rule them out or fall back:
     no `SET`, no arguments, a single `SELECT` without `FROM`
   - functions that call functions, resolved recursively, with a depth limit
   - a replacement for a setting that a known tree reads as NULL, like `request.jwt.claim` in
-    Realtime's `auth.jwt()`. Read from the body, that setting is not in the env, so the call falls
-    back. If the caller rules out database-level defaults, the env can hold such settings too.
+    supabase/auth's `auth.jwt()` (see "Example: Supabase Realtime"). Read from the body, that
+    setting is not in the env, so the call falls back. If the caller rules out database-level
+    defaults, the env can hold such settings too.
 - Evaluate more of SQL, driven by what real policies use. The fallback reasons that a caller
-  records show which unsupported constructs cost coverage, for example the metrics of Realtime's
-  shadow mode. So they pick what to add next, and a differential test against Postgres makes sure
-  that each addition is correct. Candidates:
+  records show which unsupported constructs cost coverage. So they pick what to add next, and a
+  differential test against Postgres makes sure that each addition is correct. Candidates:
   - numbers: integer literals, comparisons (`<`, `>`, ...) and casts like
     `(claims ->> 'level')::integer`. These are simple, but rare in the policies seen so far. JSON
     numbers read with `->>` and `numeric` need more work, because Postgres normalizes how they

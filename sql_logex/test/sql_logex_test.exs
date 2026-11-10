@@ -35,7 +35,7 @@ defmodule SqlLogexTest do
 
   @own_channel_rls "(realtime.topic() = ('user:'::text || auth.uid()))"
 
-  # Evaluates `sql` in the session Realtime sets up for a join: the settings for a JWT with this
+  # Evaluates `sql` in the session that the example sets up for a join: the settings for a JWT with this
   # role, sub and claims, and the probe row with this topic and extension. A nil sub is a JWT
   # without one.
   defp evaluate(sql, opts) do

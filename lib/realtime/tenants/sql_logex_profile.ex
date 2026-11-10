@@ -3,11 +3,9 @@ defmodule Realtime.Tenants.SqlLogexProfile do
   The `SqlLogex.Profile` for `realtime.messages`: what sql_logex needs to know to decide a join
   to a private channel the way `realtime.authorize` does.
 
-  `realtime.authorize`
-  (`lib/realtime/tenants/repo/migrations/20261002120000_add_authorize_function.ex`) runs a
-  `SELECT` and an `INSERT` of probe rows of `realtime.messages`. It plans the `SELECT` on every
-  call, write-only calls included, so the profile sets `write_plans_select`. That makes a write
-  fall back where the `SELECT` might raise, see `SqlLogex.PolicySet`. This is conservative: the
+  `realtime.authorize` runs a `SELECT` and an `INSERT` of probe rows of `realtime.messages`.
+  It plans the `SELECT` on every call, write-only calls included, so the profile sets `write_plans_select`.
+  That makes a write fall back where the `SELECT` might raise, see `SqlLogex.PolicySet`. This is conservative: the
   transaction path (`write_policies_with_transaction` and `check_write_policy` in
   `Realtime.Tenants.Authorization`) only inserts, so there a fallback can come where Postgres
   decides.
@@ -33,9 +31,6 @@ defmodule Realtime.Tenants.SqlLogexProfile do
 
   The platform names are the `auth` and `realtime` schemas, the settings that start with
   `request.` or `realtime.`, and the roles `service_role`, `postgres` and `supabase_admin`.
-
-  The sql_logex tests use a copy of this profile (`sql_logex/test/support/realtime_profile.ex`),
-  and `test/realtime/tenants/sql_logex_profile_test.exs` keeps the two equal.
   """
 
   import SqlLogex.KnownFunction

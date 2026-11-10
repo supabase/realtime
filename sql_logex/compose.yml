@@ -39,5 +39,5 @@ services:
       - "5417:5432"
     environment:
       POSTGRES_PASSWORD: postgres
-      # ICU as the default collation provider, as in the supabase/postgres 17 images. 15 uses libc.
+      # ICU as the default collation provider, so that CI covers ICU (17) and libc (14, 15).
       POSTGRES_INITDB_ARGS: --locale-provider=icu --icu-locale=en-US

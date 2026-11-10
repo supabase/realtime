@@ -6,7 +6,7 @@ defmodule SqlLogex.CatalogTest do
   alias SqlLogex.Test.RealtimeProfile
   alias SqlLogex.Value
 
-  # The known functions of the Realtime profile
+  # The known functions of the example profile
   @known RealtimeProfile.profile().functions
 
   @fixture_versions ["pg17", "pg15"]

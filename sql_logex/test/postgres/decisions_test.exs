@@ -1,18 +1,19 @@
 defmodule SqlLogex.Postgres.DecisionsTest do
   # Level 2 of the differential tests: `SqlLogex.decide/3` decides allow or deny for a policy set
   # as Postgres row-level security does, or falls back when it cannot be sure. Postgres is the
-  # oracle. Every case runs through both, and the answers are compared, see
-  # SqlLogex.Test.Differential.
+  # oracle. Every scenario runs through both, and SqlLogex.Differential compares the answers.
   #
   #   mix test test/postgres/decisions_test.exs
   #   SQL_LOGEX_REPORT=1 mix test test/postgres/decisions_test.exs   # coverage report
   #
-  # The scenarios are in SqlLogex.Test.RealtimeScenarios. Realtime runs the same scenarios
-  # through `realtime.authorize`. The decision table of the unit tests (policy_set_test.exs) is
-  # among them, so Postgres also checks what the unit tests expect.
+  # The scenarios are in SqlLogex.Test.RealtimeScenarios. The decision table of the unit tests
+  # (policy_set_test.exs) is among them, so Postgres also checks what the unit tests expect, see
+  # SqlLogex.Test.Collector.
   use ExUnit.Case, async: false
 
-  alias SqlLogex.Test.Differential
+  alias SqlLogex.Differential
+  alias SqlLogex.Snapshot
+  alias SqlLogex.Test.Collector
   alias SqlLogex.Test.Postgres
   alias SqlLogex.Test.RealtimeDatabase
   alias SqlLogex.Test.RealtimeProfile
@@ -34,7 +35,7 @@ defmodule SqlLogex.Postgres.DecisionsTest do
   @insert "INSERT INTO realtime.messages (topic, extension) VALUES ($1, $2)"
 
   setup_all do
-    %{collector: Differential.start_collector("plain row-level security")}
+    %{collector: Collector.start(:decisions)}
   end
 
   setup do
@@ -72,20 +73,61 @@ defmodule SqlLogex.Postgres.DecisionsTest do
   end
 
   defp run(%{conn: conn, collector: collector}, scenarios) do
-    oracle = %{
-      prepare_functions: &prepare_functions!/2,
-      read: &Postgres.read(&1, RealtimeDatabase.table(), @profile),
-      outcomes: &outcomes/3,
-      profile: @profile
-    }
-
-    Differential.finish(collector, Enum.flat_map(scenarios, &RealtimeScenarios.run(conn, &1, oracle)))
+    Collector.finish(collector, Enum.flat_map(scenarios, &run_scenario(conn, &1)))
   end
 
-  defp prepare_functions!(_conn, :legacy), do: :ok
+  # In a transaction that rolls back: the setup, the policies of the scenario in place of the ones
+  # on the table, then the snapshot input and the answers of Postgres. Then the library decides
+  # each question, and SqlLogex.Differential compares the two answers.
+  defp run_scenario(conn, scenario) do
+    table = RealtimeDatabase.table()
 
-  defp prepare_functions!(conn, :supabase_auth),
-    do: Postgrex.query!(conn, RealtimeDatabase.supabase_auth_functions_statement(), [])
+    {input, answers} =
+      Postgres.rolled_back(conn, fn conn ->
+        Enum.each(scenario.setup, &execute!(conn, scenario, &1))
+
+        %{rows: rows} =
+          Postgrex.query!(conn, "SELECT polname FROM pg_policy WHERE polrelid = $1::text::regclass", [table])
+
+        Enum.each(rows, fn [policy] ->
+          execute!(conn, scenario, ~s(DROP POLICY "#{String.replace(policy, ~s("), ~s(""))}" ON #{table}))
+        end)
+
+        Enum.each(scenario.policies, &execute!(conn, scenario, &1))
+        {Postgres.read(conn, table, @profile), outcomes(conn, scenario)}
+      end)
+
+    snapshot = Snapshot.new(input, @profile)
+
+    for {{_operation, extension} = key, operation, env} <- scenario.questions do
+      Differential.compare(Map.fetch!(answers, key), Differential.decide(snapshot, env, operation),
+        name: "#{scenario.name} [#{operation} #{extension}]",
+        group: scenario.group,
+        detail: detail(scenario, key, env),
+        meta: Map.merge(scenario.meta, %{scenario: scenario.name, key: key})
+      )
+    end
+  end
+
+  defp execute!(conn, scenario, statement) do
+    case Postgrex.query(conn, statement, []) do
+      {:ok, _result} -> :ok
+      {:error, error} -> raise "#{inspect(scenario.name)}: #{Exception.message(error)}\nwhile running:\n#{statement}"
+    end
+  end
+
+  defp detail(scenario, key, env) do
+    policies = Enum.map(scenario.policies, &("    " <> String.replace(&1, "\n", " ")))
+
+    Enum.join(
+      ["  key: #{inspect(key)}", "  policies:"] ++
+        policies ++
+        ["  settings: #{format_map(env.settings)}", "  row: #{format_map(env.row)}", "  #{scenario.detail}"],
+      "\n"
+    ) <> "\n"
+  end
+
+  defp format_map(map), do: map |> Enum.sort() |> Enum.map_join(" ", fn {k, v} -> "#{k}=#{inspect(v)}" end)
 
   ## The oracle
 
@@ -96,7 +138,7 @@ defmodule SqlLogex.Postgres.DecisionsTest do
   # denies a write. The SELECT runs in every call, also without reads, so the writes depend on the
   # SELECT policies too: that is `write_plans_select: true`. Any other error fails the whole call,
   # so then each one is asked for on its own, to tell which one raised.
-  defp outcomes(conn, env, extensions) do
+  defp outcomes(conn, %{env: env, extensions: extensions}) do
     case ask(conn, env, extensions, extensions) do
       {:ok, read_allowed, write_allowed} ->
         Map.merge(zip(:read, extensions, read_allowed), zip(:write, extensions, write_allowed))

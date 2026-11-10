@@ -1,21 +1,24 @@
 defmodule SqlLogex.Test.RealtimeScenarios do
   @moduledoc """
-  The scenarios of Level 2 of the differential tests, for the Realtime worked example, and the
-  runner that compares `SqlLogex.decide/3` with Postgres for each of them.
+  The scenarios of Level 2 of the tests against Postgres (`test/postgres/decisions_test.exs`), for
+  the Realtime worked example.
 
-  A scenario is a set of policies on `realtime.messages`, an environment (the settings that
-  Realtime sets on a join, and the row), and the extensions it asks for. The runner asks Postgres
-  through an oracle, which the test module gives. `test/postgres/decisions_test.exs` asks plain
-  row-level security. Realtime's `sql_logex_differential_test.exs` asks `realtime.authorize`.
+  A scenario is a set of policies on `realtime.messages`, an environment (the settings of a join,
+  and the row), and the extensions it asks for. Each extension is asked
+  for as a read and as a write, with the key `{operation, extension}`. Its `:meta` has what
+  `SqlLogex.Test.Collector` reports.
+
+  Some scenarios test the internals of the library, for example the decision table of the unit
+  tests.
   """
 
-  alias SqlLogex.Test.Differential
+  alias SqlLogex.Test.RealtimeDatabase
   alias SqlLogex.Test.RealtimePolicies
 
   @own "c0ffee00-1111-4222-8333-444455556666"
   @other "deadbeef-0000-4000-8000-000000000001"
 
-  # What realtime.authorize is called with by Authorization.authorize/5, for reads and writes
+  # The extensions that the example checks, for reads and writes
   @extensions ["broadcast", "presence"]
 
   @headers ~s({"x-client-info":"supabase-js/2.0"})
@@ -36,7 +39,7 @@ defmodule SqlLogex.Test.RealtimeScenarios do
   @spec flavor_label(:legacy | :supabase_auth) :: String.t()
   def flavor_label(flavor), do: Map.fetch!(@flavor_labels, flavor)
 
-  ## The environment of a case: what Realtime sets on a join, and the row
+  ## The environment of a case: the settings of a join, and the row
 
   @doc """
   The environment of a case. `sub`, `topic` and `extension` are as in a join, and nil is NULL.
@@ -97,7 +100,7 @@ defmodule SqlLogex.Test.RealtimeScenarios do
   defp text(value), do: {:text, value}
 
   @doc """
-  Sets the settings of an environment in the transaction of `conn`, as Realtime does on a join.
+  Sets the settings of an environment in the transaction of `conn`, as the example does on a join.
   This also switches to the role.
   """
   @spec set_settings!(DBConnection.t(), map()) :: Postgrex.Result.t()
@@ -115,94 +118,6 @@ defmodule SqlLogex.Test.RealtimeScenarios do
     """
   end
 
-  ## The runner
-
-  @doc """
-  Runs a scenario and returns the result of each `{operation, extension}`.
-
-  In a transaction that rolls back, it creates the auth functions of the scenario, runs its
-  setup, replaces the policies on the table with the ones of the scenario, reads the snapshot
-  input, and asks Postgres. Then it decides the same with the library. `oracle` is a map:
-
-    * `:prepare_functions` - `fn conn, flavor -> ...` creates the bodies of `auth.uid()` and
-      `auth.role()` of the flavor, `:legacy` or `:supabase_auth`
-    * `:read` - `fn conn -> input`, the input of `SqlLogex.Snapshot.new/2`
-    * `:outcomes` - `fn conn, env, extensions -> %{{operation, extension} => pg}`, what Postgres
-      decides, see `SqlLogex.Test.Differential.result/7` for `pg`
-    * `:profile` - the profile of the snapshot
-  """
-  @spec run(DBConnection.conn(), map(), map()) :: [map()]
-  def run(conn, scenario, oracle) do
-    {:error, {__MODULE__, {snapshot_input, pg}}} =
-      Postgrex.transaction(
-        conn,
-        fn conn ->
-          oracle.prepare_functions.(conn, scenario.functions)
-          Enum.each(scenario.setup, &run!(conn, &1, scenario.name))
-          drop_policies!(conn, scenario.name)
-          Enum.each(scenario.policies, &run!(conn, &1, scenario.name))
-          snapshot_input = oracle.read.(conn)
-
-          Postgrex.rollback(
-            conn,
-            {__MODULE__, {snapshot_input, oracle.outcomes.(conn, scenario.env, scenario.extensions)}}
-          )
-        end,
-        timeout: 60_000
-      )
-
-    snapshot = SqlLogex.Snapshot.new(snapshot_input, oracle.profile)
-
-    for operation <- [:read, :write], extension <- scenario.extensions do
-      key = {operation, extension}
-      ex = Differential.decide(snapshot, logex_env(scenario.env, extension), operation)
-
-      detail = """
-        operation: #{operation}, extension: #{extension}, functions: #{scenario.functions}
-        policies:
-      #{Enum.map_join(scenario.policies, "\n", &("    " <> String.replace(&1, "\n", " ")))}
-        env:
-      #{describe_env(scenario.env, extension)}
-      """
-
-      Differential.result(
-        2,
-        scenario.group,
-        "#{scenario.name} [#{operation} #{extension}]",
-        Map.fetch!(pg, key),
-        ex,
-        detail,
-        %{
-          user_channels: scenario.user_channels,
-          scenario: scenario.name,
-          role: scenario.env.role,
-          meta: scenario.meta,
-          operation: operation,
-          extension: extension,
-          table: Map.get(scenario.table, key)
-        }
-      )
-    end
-  end
-
-  @doc "Runs a statement, and raises with the name of the case and the statement when it fails."
-  @spec run!(DBConnection.t(), String.t(), String.t()) :: :ok
-  def run!(conn, statement, name) do
-    case Postgrex.query(conn, statement, []) do
-      {:ok, _result} -> :ok
-      {:error, error} -> raise "#{inspect(name)}: #{Exception.message(error)}\nwhile running:\n#{statement}"
-    end
-  end
-
-  defp drop_policies!(conn, name) do
-    %{rows: policies} =
-      Postgrex.query!(conn, "SELECT polname FROM pg_policy WHERE polrelid = 'realtime.messages'::regclass", [])
-
-    for [policy] <- policies do
-      run!(conn, ~s(DROP POLICY "#{policy}" ON realtime.messages), name)
-    end
-  end
-
   ## Scenarios
 
   # name, group and the options of a scenario:
@@ -212,21 +127,40 @@ defmodule SqlLogex.Test.RealtimeScenarios do
   #   functions:  :legacy | :supabase_auth, the bodies of auth.uid() and auth.role()
   #   extensions: what is asked for, both as read and write extensions
   #   table:      %{{:read | :write, extension} => decision} the unit tests of sql_logex expect
-  #   user_channels: :grid | :table | :planner, for the user-channel coverage
+  #   user_channels: :grid | :table | :planner, for the user-channel sections of the report
+  #   meta:       more for the report
   defp scenario(group, name, policies, env_opts, opts \\ []) do
+    env = env(env_opts)
+    functions = Keyword.get(opts, :functions, :legacy)
+    extensions = Keyword.get(opts, :extensions, @extensions)
+
     %{
       group: group,
       name: name,
+      setup: functions_setup(functions) ++ Keyword.get(opts, :setup, []),
       policies: policies,
-      setup: Keyword.get(opts, :setup, []),
-      env: env(env_opts),
-      functions: Keyword.get(opts, :functions, :legacy),
-      extensions: Keyword.get(opts, :extensions, @extensions),
-      table: Keyword.get(opts, :table, %{}),
-      user_channels: Keyword.get(opts, :user_channels),
-      meta: Keyword.get(opts, :meta, %{})
+      questions:
+        for(
+          operation <- [:read, :write],
+          extension <- extensions,
+          do: {{operation, extension}, operation, logex_env(env, extension)}
+        ),
+      detail: "functions: #{flavor_label(functions)}",
+      env: env,
+      extensions: extensions,
+      meta:
+        Map.merge(Keyword.get(opts, :meta, %{}), %{
+          role: env.role,
+          flavor: functions,
+          table: Keyword.get(opts, :table, %{}),
+          user_channels: Keyword.get(opts, :user_channels)
+        })
     }
   end
+
+  # The database has the legacy bodies, see SqlLogex.Test.RealtimeDatabase
+  defp functions_setup(:legacy), do: []
+  defp functions_setup(:supabase_auth), do: [RealtimeDatabase.supabase_auth_functions_statement()]
 
   defp policy_sql(name, definition), do: ~s(CREATE POLICY "#{name}" ON realtime.messages #{definition})
 

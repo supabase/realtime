@@ -9,9 +9,9 @@ defmodule SqlLogex.KnownFunction do
   other functions build that tree. Each one stands for one Postgres construct, so a profile does not
   depend on the internal form of `SqlLogex.IR`.
 
-  For example, this is the body `select nullif(current_setting('realtime.topic', true), '')::text`:
+  For example, this is the body `select nullif(current_setting('app.team', true), '')::text`:
 
-      nullif(setting("realtime.topic"), text(""))
+      nullif(setting("app.team"), text(""))
 
   The builders do not check types, and nothing in the library checks that the tree does what the
   source does. The profile that builds a known function is responsible for both.

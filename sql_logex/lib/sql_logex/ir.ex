@@ -4,20 +4,20 @@ defmodule SqlLogex.IR do
 
   IR stands for intermediate representation, the compiler term for the form a program takes
   between parsing and running it. The AST says what the text says; the IR says what Postgres
-  will do. Take the policy expression `(realtime.topic() = ('user:'::text || auth.uid()))`.
+  will do. Take the policy expression `(app.team() = ('team:'::text || auth.uid()))`.
   The AST is only syntax: `=` and `||` are strings, and the functions are names.
 
-      {:op, "=", {:func, "realtime", "topic", []},
-       {:op, "||", {:cast, {:const, :string, "user:"}, "text"}, {:func, "auth", "uid", []}}}
+      {:op, "=", {:func, "app", "team", []},
+       {:op, "||", {:cast, {:const, :string, "team:"}, "text"}, {:func, "auth", "uid", []}}}
 
   The IR knows the types, so `=` on two texts is `texteq` and `||` on text and uuid is
   `textanycat`. The cast of a literal is already done, and both functions are replaced by
   their bodies (here the known bodies of a profile):
 
       {:apply, Value, :text_eq, [
-        {:apply, Value, :nullif, [{:setting, "realtime.topic"}, {:lit, {:text, ""}}]},
+        {:apply, Value, :nullif, [{:setting, "app.team"}, {:lit, {:text, ""}}]},
         {:apply, Value, :textanycat, [
-          {:lit, {:text, "user:"}},
+          {:lit, {:text, "team:"}},
           {:apply, Value, :uuid_in, [
             {:apply, Value, :nullif, [{:setting, "request.jwt.claim.sub"}, {:lit, {:text, ""}}]}
           ]}

@@ -1,7 +1,7 @@
 defmodule SqlLogex.Postgres.ExpressionsTest do
   # Level 1 of the differential tests: the evaluator gives the value that Postgres gives, for
   # single expressions, or falls back when it cannot be sure. Postgres is the oracle. Every case
-  # runs through both, and the answers are compared, see SqlLogex.Test.Differential.
+  # runs through both, and SqlLogex.Differential compares the answers.
   #
   #   mix test test/postgres/expressions_test.exs
   #   SQL_LOGEX_REPORT=1 mix test test/postgres/expressions_test.exs   # coverage report
@@ -12,10 +12,11 @@ defmodule SqlLogex.Postgres.ExpressionsTest do
   # same text. Each case runs in a transaction that rolls back.
   use ExUnit.Case, async: false
 
+  alias SqlLogex.Differential
   alias SqlLogex.Eval
   alias SqlLogex.Parser
   alias SqlLogex.Resolver
-  alias SqlLogex.Test.Differential
+  alias SqlLogex.Test.Collector
   alias SqlLogex.Test.Postgres
   alias SqlLogex.Test.RealtimeDatabase
   alias SqlLogex.Test.RealtimeProfile
@@ -60,7 +61,7 @@ defmodule SqlLogex.Postgres.ExpressionsTest do
   @groups [:three_valued, :text_and_arrays, :uid_and_role, :claims, :regex, :literals]
 
   setup_all do
-    %{collector: Differential.start_collector("Postgres")}
+    %{collector: Collector.start(:expressions)}
   end
 
   setup do
@@ -76,7 +77,7 @@ defmodule SqlLogex.Postgres.ExpressionsTest do
 
       results = Enum.map(cases(unquote(group)), &run_case(conn, functions, unquote(group), &1))
 
-      Differential.finish(collector, results)
+      Collector.finish(collector, results)
     end
   end
 
@@ -116,15 +117,16 @@ defmodule SqlLogex.Postgres.ExpressionsTest do
     #{RealtimeScenarios.describe_env(kase.env, kase.env.extension)}
     """
 
-    Differential.result(1, group, kase.name, pg, ex, detail, %{})
+    Differential.compare(pg, ex, name: kase.name, group: group, detail: detail)
   end
 
   defp create_policy_and_read_back!(conn, kase) do
-    RealtimeScenarios.run!(
-      conn,
-      "CREATE POLICY tmp ON realtime.messages FOR SELECT TO authenticated USING (#{kase.sql})",
-      kase.name
-    )
+    create_policy = "CREATE POLICY tmp ON realtime.messages FOR SELECT TO authenticated USING (#{kase.sql})"
+
+    case Postgrex.query(conn, create_policy, []) do
+      {:ok, _result} -> :ok
+      {:error, error} -> raise "#{inspect(kase.name)}: #{Exception.message(error)}\nwhile running:\n#{create_policy}"
+    end
 
     %{rows: [[deparsed]]} =
       Postgrex.query!(

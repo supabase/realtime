@@ -3,34 +3,10 @@ defmodule SqlLogexPolicies do
   Policies on `realtime.messages` shared by the sql_logex tests, as `CREATE POLICY` statements.
 
   Create them in a transaction that is rolled back, they are not meant to persist.
+
+  sql_logex has a copy as its worked example, `SqlLogex.Test.RealtimePolicies` in
+  sql_logex/test/support. The two copies do not have to stay equal.
   """
-
-  # Fixed so that the text Postgres reports for them is the same on every run
-  @generator_params %{topic: "fixture_topic", role: "authenticated", sub: "c0ffee00-1111-4222-8333-444455556666"}
-
-  # Every clause of Generators.policy_query/2
-  @generator_names ~w(
-    authenticated_all_topic_read
-    authenticated_all_topic_insert
-    authenticated_read_matching_user_sub
-    read_matching_user_role
-    authenticated_write_matching_user_sub
-    write_matching_user_role
-    authenticated_read_broadcast
-    authenticated_write_broadcast
-    authenticated_write_persistence
-    authenticated_read_presence
-    authenticated_write_presence
-    authenticated_read_presence_for_sub
-    authenticated_read_broadcast_and_presence
-    authenticated_write_broadcast_and_presence
-    authenticated_read_presence_based_on_claim
-    authenticated_read_broadcast_based_on_claim
-    broken_read_presence
-    broken_write_presence
-    slow_read
-    slow_write
-  )a
 
   @doc """
   Creates `auth.jwt()` when the database has none.
@@ -138,66 +114,12 @@ defmodule SqlLogexPolicies do
     """)
   end
 
-  @doc "One construct per policy, to exercise the grammar the parser has to handle."
-  @spec grammar_policies() :: [String.t()]
-  def grammar_policies do
-    [
-      select("not", "NOT (realtime.topic() = 'x')"),
-      select("is_null", "realtime.topic() IS NULL"),
-      select("is_not_null", "realtime.topic() IS NOT NULL"),
-      select("neq", "realtime.topic() <> 'x'"),
-      select("in_single", "extension IN ('broadcast')"),
-      select("not_in", "extension NOT IN ('broadcast', 'presence')"),
-      select("not_in_single", "extension NOT IN ('broadcast')"),
-      select("coalesce", "coalesce(realtime.topic(), 'x') = 'x'"),
-      select("nullif", "nullif(realtime.topic(), 'x') = 'y'"),
-      select("jwt_text", "auth.jwt() ->> 'k' = 'v'"),
-      select("jwt_text_initplan", "(select auth.jwt() ->> 'k') = 'v'"),
-      select("claims_text", "current_setting('request.jwt.claims', true)::jsonb ->> 'k' = 'v'"),
-      select("claims_boolean", "(current_setting('request.jwt.claims', true)::jsonb ->> 'k')::boolean"),
-      select("regex_case_sensitive", "realtime.topic() ~ 'public:lobby'"),
-      select("true", "true"),
-      select("false", "false"),
-      select("eq_null", "realtime.topic() = NULL"),
-      select("concat_null", "realtime.topic() = 'x' || NULL"),
-      select("and_in_or", "realtime.topic() = 'a' OR (realtime.topic() = 'b' AND extension = 'broadcast')"),
-      select("or_in_and", "(realtime.topic() = 'a' OR realtime.topic() = 'b') AND extension = 'broadcast'"),
-      select("and_three", "realtime.topic() = 'a' AND extension = 'broadcast' AND private = true"),
-      select("doubled_quote", "realtime.topic() = 'it''s'"),
-      select("exists", "EXISTS (SELECT 1 FROM realtime.messages m2 WHERE m2.topic = realtime.topic())"),
-      select("case_searched", "CASE WHEN extension = 'broadcast' THEN true ELSE false END"),
-      select("case_simple", "CASE extension WHEN 'broadcast' THEN true ELSE false END"),
-      select("auth_role", "auth.role() = 'authenticated'"),
-      select("private", "private = true"),
-      select("event", "event = 'x'"),
-      policy("grammar_all_using_only", "FOR ALL TO authenticated USING (realtime.topic() = 'x')"),
-      policy("grammar_restrictive", "AS RESTRICTIVE FOR SELECT TO authenticated USING (realtime.topic() = 'x')"),
-      policy("grammar_to_public", "FOR SELECT USING (realtime.topic() = 'x')"),
-      policy("grammar_to_anon_authenticated", "FOR SELECT TO anon, authenticated USING (realtime.topic() = 'x')")
-    ]
-  end
-
   @doc """
-  The `Generators.policy_query/2` policies and the params they need.
-
-  Create them with `generator_statements/0`. `test_log_error()` is also needed by the `broken_*` ones
-  and is created by `Generators.create_rls_policies/3`, with an empty list of policies.
-  """
-  @spec generator_policies() :: %{names: [atom()], params: map()}
-  def generator_policies, do: %{names: @generator_names, params: @generator_params}
-
-  @doc """
-  The `Generators.policy_query/2` statements for all `generator_policies/0`.
+  The `Generators.policy_query/2` statements for `names`, with `params`.
 
   Their names are replaced by `generator_<name>`: two pairs of generators use the same policy name
   (`authenticated_read_presence` and `authenticated_read_broadcast_and_presence`, and their write
   counterparts), so they cannot all exist at the same time otherwise.
-  """
-  @spec generator_statements() :: [String.t()]
-  def generator_statements, do: generator_statements(@generator_names, @generator_params)
-
-  @doc """
-  The `Generators.policy_query/2` statements for `names`, with `params`, named as in `generator_statements/0`.
   """
   @spec generator_statements([atom()], map()) :: [String.t()]
   def generator_statements(names, params) do
@@ -209,6 +131,4 @@ defmodule SqlLogexPolicies do
   end
 
   defp policy(name, definition), do: ~s(CREATE POLICY "#{name}" ON realtime.messages #{definition})
-
-  defp select(name, using), do: policy("grammar_#{name}", "FOR SELECT TO authenticated USING (#{using})")
 end

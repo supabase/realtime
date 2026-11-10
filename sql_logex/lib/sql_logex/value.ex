@@ -109,7 +109,7 @@ defmodule SqlLogex.Value do
 
   The executor stops at the first non-NULL argument, but Postgres folds constant arguments while
   planning (and literal casts like `'x'::uuid` while parsing), before that happens. So an argument
-  that is never reached at run time can still raise: `COALESCE(realtime.topic(), ((1 / 0))::text)
+  that is never reached at run time can still raise: `COALESCE(app.team(), ((1 / 0))::text)
   = 'x'::text` fails with `division by zero`, in a plain `SELECT` as well as in `EXPLAIN`.
   """
   @spec coalesce([result]) :: result

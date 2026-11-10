@@ -3,9 +3,8 @@ defmodule SqlLogex.Test.RealtimePolicies do
   Policies on `realtime.messages`, as `CREATE POLICY` statements, for the tests against Postgres
   and for the fixtures in `test/fixtures`. Create them in a transaction that rolls back.
 
-  A copy. Realtime has the same policies in `test/support/sql_logex_policies.ex`, and builds the
-  `generator_*` ones from the policies of its own tests (`Generators.policy_query/2`). Realtime's
-  `sql_logex_fixtures_test.exs` makes sure that both copies print the same.
+  The `generator_*` policies are a set of typical policies of the example. A few of them fail or are
+  slow on purpose.
   """
 
   # Fixed, so that the text Postgres prints for them is the same on every run
@@ -131,10 +130,7 @@ defmodule SqlLogex.Test.RealtimePolicies do
   @spec generator_statements([atom()], map()) :: [String.t()]
   def generator_statements(names, params), do: Enum.map(names, &generator(&1, params))
 
-  # Realtime's Generators.policy_query/2, with the names replaced by generator_<name>. Two pairs of
-  # generators use the same policy name there (authenticated_read_presence and
-  # authenticated_read_broadcast_and_presence, and their write counterparts), so they could not all
-  # exist at the same time otherwise.
+  # Each policy is named generator_<name>, so that all of them can exist at the same time.
   defp generator(:authenticated_all_topic_read, _params) do
     """
     CREATE POLICY "generator_authenticated_all_topic_read"

@@ -61,7 +61,7 @@ defmodule SqlLogex.PolicySetTest do
 
   ## Helpers
 
-  # The settings Realtime sets (see Realtime.Tenants.SqlLogexProfile in Realtime), for a JWT with this role and sub. A nil sub is
+  # The settings of the example (see SqlLogex.Test.RealtimeScenarios), for a JWT with this role and sub. A nil sub is
   # a token without one: set_config(..., NULL) for the setting, no key in the claims.
   defp env(opts) do
     role = Keyword.get(opts, :role, "authenticated")
@@ -149,7 +149,7 @@ defmodule SqlLogex.PolicySetTest do
   #   users send on own channel                   INSERT  WITH CHECK, the same expression
   #   users send on own channel (initplan)        the same with (select auth.uid())
   #
-  # With the claims a Realtime join builds, auth.uid() is the sub as a uuid: NULL for a missing or
+  # With the claims that the example sets, auth.uid() is the sub as a uuid: NULL for a missing or
   # empty sub, an error for something that isn't a uuid. Postgres compares text by bytes, and uuid
   # prints as lowercase 8-4-4-4-12.
 
@@ -187,7 +187,7 @@ defmodule SqlLogex.PolicySetTest do
       %{name: "sub with a leading space", topic: "user:#{@uid}", sub: " #{@uid}", expect: @invalid_uuid},
       # The legacy auth.uid() is nullif(sub, '')::uuid, so NULL, and NULL = ... is NULL, which denies.
       # supabase/auth's is coalesce(nullif(sub, ''), claims ->> 'sub')::uuid, and the claims have "sub": "", which
-      # is not NULL: ''::uuid raises. (Realtime doesn't send an empty sub today, but a third-party JWT could.)
+      # is not NULL: ''::uuid raises. (A third-party JWT can have an empty sub.)
       %{name: "empty sub", topic: "user:#{@uid}", sub: "", expect: @deny, supabase_auth: @invalid_uuid},
       # No sub anywhere: NULL with both bodies
       %{name: "no sub", topic: "user:#{@uid}", sub: nil, expect: @deny},
@@ -242,7 +242,7 @@ defmodule SqlLogex.PolicySetTest do
       end
     end
 
-    # Realtime doesn't check other extensions today, but the policy is only true for two
+    # The policy is only true for two extensions
     test "an extension outside the list, own uid", %{catalogs: catalogs} do
       env = env(topic: "user:#{@uid}", sub: @uid, extension: "postgres_changes")
       assert_all_variants(catalogs, &user_channel_policies/1, env, :read, @deny)
@@ -435,7 +435,7 @@ defmodule SqlLogex.PolicySetTest do
       no_insert = %{@roles | "authenticated" => %{bypass_rls: false, select: true, insert: false}}
       env = env(topic: "user:#{@uid}", sub: @uid)
 
-      # A write needs select too: realtime.authorize reads the table on every call, see the PolicySet moduledoc
+      # A write needs select too: the profile sets write_plans_select, see the PolicySet moduledoc
       snapshot = snapshot(policies, catalog.functions, %{roles: no_select})
       assert SqlLogex.decide(snapshot, env, :read) == {:fallback, {:missing_grant, "authenticated", :select}}
       assert SqlLogex.decide(snapshot, env, :write) == {:fallback, {:missing_grant, "authenticated", :select}}
@@ -728,7 +728,7 @@ defmodule SqlLogex.PolicySetTest do
     end
   end
 
-  ## Writes and the read statement of realtime.authorize
+  ## Writes that plan a SELECT (write_plans_select)
 
   describe "a write also needs the SELECT policies to be modelled" do
     @topic_x "(realtime.topic() = 'x'::text)"
@@ -829,7 +829,7 @@ defmodule SqlLogex.PolicySetTest do
     end
 
     test "a SELECT policy that raises for this input is a fallback", %{functions: functions} do
-      # Against Postgres 17 a write-only call of realtime.authorize didn't raise for a policy like
+      # Against Postgres 17 a write-only call that plans the SELECT didn't raise for a policy like
       # this, with no probe row to evaluate it for. Against a Multigres cluster it did.
       raising = "((realtime.topic() = 'x'::text) AND ((( SELECT auth.uid() AS uid))::text = 'x'::text))"
       policies = [insert_policy(), policy("select", qual: raising)]
@@ -878,7 +878,7 @@ defmodule SqlLogex.PolicySetTest do
     end
   end
 
-  ## The generator policies of Realtime's test suite
+  ## The generator policies of the example (SqlLogex.Test.RealtimePolicies)
 
   describe "claim-based policies" do
     @claim_cases [

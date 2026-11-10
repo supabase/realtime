@@ -1,16 +1,11 @@
 defmodule SqlLogex.Test.RealtimeDatabase do
   @moduledoc """
-  The part of a Supabase Realtime tenant database that the policies of the tests use, as SQL for
-  a plain Postgres. This is the database of the worked example, as `SqlLogex.Test.RealtimeProfile`
-  is its profile.
+  The database of the worked example, as SQL for a plain Postgres: the table `realtime.messages`,
+  its grants, the roles, and the functions that the policies of the tests call.
+  `SqlLogex.Test.RealtimeProfile` is the profile of the same example.
 
-  It is a copy. The roles are as in the supabase/postgres image, and the table and its grants are
-  as in Realtime's tenant migrations. The function bodies are the ones of the image and of
-  supabase/auth. One difference has no effect on the policies: the table has only a default
-  partition.
-
-  Realtime's `test/realtime/tenants/sql_logex_fixtures_test.exs` makes sure that a real tenant
-  database prints the same policies and functions as this copy (`test/fixtures`).
+  The roles are as in the supabase/postgres image. The function bodies are the ones of the image
+  and of supabase/auth. The table has only a default partition.
   """
 
   @table "realtime.messages"
