@@ -8,10 +8,10 @@ defmodule SqlLogex.Test.Collector do
     * a fallback reason without a category (`SqlLogex.Reason.category/1`), so that nobody can add
       a reason without one
     * a decision of the decision table of the unit tests (`meta.table`, see
-      `SqlLogex.Test.RealtimeScenarios`) that is not what Postgres returned
+      `SqlLogex.Test.ExampleScenarios`) that is not what Postgres returned
 
-  The report has extra sections for the scenarios of the Realtime worked example: the user-channel
-  grid, the decision table and the planner-order cases.
+  The report has extra sections for the personal-team scenarios of the example: the grid, the
+  decision table and the planner-order cases.
   """
 
   import ExUnit.Assertions, only: [flunk: 1]
@@ -99,7 +99,7 @@ defmodule SqlLogex.Test.Collector do
   ## Report
 
   defp report(collector, results) do
-    by_user_channels = Enum.group_by(results, & &1.meta[:user_channels])
+    by_personal_teams = Enum.group_by(results, & &1.meta[:personal_teams])
 
     Enum.join(
       [
@@ -107,17 +107,17 @@ defmodule SqlLogex.Test.Collector do
         "== sql_logex differential report ==",
         "",
         Differential.report(results, @titles[collector.level]),
-        user_channel_section(Map.get(by_user_channels, :grid, [])),
-        table_section(Map.get(by_user_channels, :table, [])),
-        planner_section(Map.get(by_user_channels, :planner, []))
+        grid_section(Map.get(by_personal_teams, :grid, [])),
+        table_section(Map.get(by_personal_teams, :table, [])),
+        planner_section(Map.get(by_personal_teams, :planner, []))
       ],
       "\n"
     )
   end
 
-  defp user_channel_section([]), do: ""
+  defp grid_section([]), do: ""
 
-  defp user_channel_section(results) do
+  defp grid_section(results) do
     scenarios = Enum.group_by(results, & &1.meta.scenario)
     decided = Enum.filter(results, &decided?/1)
     fallbacks = Enum.reject(results, &decided?/1)
@@ -131,31 +131,31 @@ defmodule SqlLogex.Test.Collector do
         "    #{role}: #{decided_share(in_role)}, scenarios #{scenario_shares(in_role)}"
       end)
 
-    authenticated = Enum.filter(results, &(&1.meta.role == "authenticated"))
+    member = Enum.filter(results, &(&1.meta.role == "member"))
 
     by_meta = fn key ->
-      authenticated
+      member
       |> Enum.group_by(& &1.meta[key])
       |> Enum.sort()
       |> Enum.map_join("\n", fn {label, in_label} -> "      #{label}: #{decided_share(in_label)}" end)
     end
 
-    valid_sub = Enum.filter(authenticated, &(&1.meta.sub_kind == :valid_uuid))
-    valid_or_missing_sub = Enum.filter(authenticated, &(&1.meta.sub_kind in [:valid_uuid, :missing]))
+    valid_user_id = Enum.filter(member, &(&1.meta.user_id_kind == :valid_uuid))
+    valid_or_missing_user_id = Enum.filter(member, &(&1.meta.user_id_kind in [:valid_uuid, :missing]))
 
     """
-    User channels, the grid (topics x subs x roles, plain and initplan, both auth.uid() bodies), the evaluator by default
+    Personal teams, the grid (teams x user ids x roles, plain and initplan, both app.user_id() bodies), the evaluator by default
       scenarios:  #{map_size(scenarios)}   fully decided #{scenario_states[:decided] || 0} (#{percent(scenario_states[:decided] || 0, map_size(scenarios))}), partly decided #{scenario_states[:partly_decided] || 0}, fully fell back #{scenario_states[:fell_back] || 0}
       decisions:  #{length(results)}   decided #{length(decided)} (#{percent(length(decided), length(results))}), fell back #{length(fallbacks)} (#{percent(length(fallbacks), length(results))})
-      authenticated with a valid sub (a spelling of a uuid), #{decided_share(valid_sub)}
-        and an ASCII topic, #{decided_share(Enum.filter(valid_sub, & &1.meta.ascii_topic))}
-      authenticated with a valid or a missing sub, #{decided_share(valid_or_missing_sub)}
+      member with a valid user id (a spelling of a uuid), #{decided_share(valid_user_id)}
+        and an ASCII team, #{decided_share(Enum.filter(valid_user_id, & &1.meta.ascii_team))}
+      member with a valid or a missing user id, #{decided_share(valid_or_missing_user_id)}
       by role:
     #{Enum.join(by_role, "\n")}
-      authenticated, by sub:
-    #{by_meta.(:sub)}
-      authenticated, by topic:
-    #{by_meta.(:topic)}
+      member, by user id:
+    #{by_meta.(:user_id)}
+      member, by team:
+    #{by_meta.(:team)}
       fallback reasons:
     #{reason_lines(fallbacks)}
     """
@@ -206,14 +206,14 @@ defmodule SqlLogex.Test.Collector do
   defp planner_section(results) do
     lines =
       results
-      |> Enum.filter(&(&1.meta.flavor == :legacy))
-      |> Enum.sort_by(&{&1.meta.topic, &1.meta.policies, &1.meta.key})
-      |> Enum.map_join("\n", fn %{meta: %{key: {operation, extension}}} = result ->
-        "    topic #{result.meta.topic}, #{result.meta.policies} policies, #{operation} #{extension}: postgres #{inspect(result.postgres)}; library #{inspect(result.library, limit: 12)}"
+      |> Enum.filter(&(&1.meta.flavor == :simple))
+      |> Enum.sort_by(&{&1.meta.team, &1.meta.policies, &1.meta.key})
+      |> Enum.map_join("\n", fn %{meta: %{key: {operation, kind}}} = result ->
+        "    team #{result.meta.team}, #{result.meta.policies} policies, #{operation} #{kind}: postgres #{inspect(result.postgres)}; library #{inspect(result.library, limit: 12)}"
       end)
 
     """
-    User channels, planner order: sub user_2abc, extensions outside the list (legacy auth.uid())
+    Personal teams, planner order: user id user_2abc, kinds outside the list (simple app.user_id())
     #{lines}
     """
   end
@@ -232,7 +232,7 @@ defmodule SqlLogex.Test.Collector do
       end)
 
     """
-    User channels, the decision table of the unit tests: #{length(results)} decisions, #{verdicts[:agrees] || 0} agree with Postgres, #{verdicts[:disagrees] || 0} disagree, #{verdicts[:conservative] || 0} are a fallback where Postgres returned a value, #{verdicts[:not_checked] || 0} not checkable (a fallback of the library)
+    Personal teams, the decision table of the unit tests: #{length(results)} decisions, #{verdicts[:agrees] || 0} agree with Postgres, #{verdicts[:disagrees] || 0} disagree, #{verdicts[:conservative] || 0} are a fallback where Postgres returned a value, #{verdicts[:not_checked] || 0} not checkable (a fallback of the library)
       the fallbacks where Postgres returned a value, because the library can't know the part that raises isn't reached:
     #{conservative_rows}
     """

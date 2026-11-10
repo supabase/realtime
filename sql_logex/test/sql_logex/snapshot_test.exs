@@ -3,17 +3,17 @@ defmodule SqlLogex.SnapshotTest do
 
   alias SqlLogex.Policy
   alias SqlLogex.Snapshot
-  alias SqlLogex.Test.RealtimeProfile
+  alias SqlLogex.Test.ExampleProfile
   alias SqlLogex.Value
 
-  @profile RealtimeProfile.profile()
+  @profile ExampleProfile.profile()
 
   {catalog, _} = Code.eval_file(Path.expand("../fixtures/pg17/catalog.exs", __DIR__))
   @functions catalog.functions
 
   @roles %{
-    "anon" => %{bypass_rls: false, select: true, insert: false},
-    "authenticated" => %{bypass_rls: false, select: true, insert: true}
+    "guest" => %{bypass_rls: false, select: true, insert: false},
+    "member" => %{bypass_rls: false, select: true, insert: true}
   }
 
   defp new_snapshot(attrs), do: Snapshot.new(attrs, @profile)
@@ -40,8 +40,8 @@ defmodule SqlLogex.SnapshotTest do
               name: "p",
               cmd: "r",
               permissive: true,
-              roles: ["authenticated"],
-              qual: "(realtime.topic() = 'x'::text)",
+              roles: ["member"],
+              qual: "(app.team() = 'x'::text)",
               with_check: nil
             },
             %{
@@ -50,7 +50,7 @@ defmodule SqlLogex.SnapshotTest do
               permissive: false,
               roles: ["public"],
               qual: nil,
-              with_check: "(extension = 'broadcast'::text)"
+              with_check: "(kind = 'note'::text)"
             }
           ])
         )
@@ -60,7 +60,7 @@ defmodule SqlLogex.SnapshotTest do
                  name: "p",
                  cmd: "r",
                  permissive: true,
-                 roles: ["authenticated"],
+                 roles: ["member"],
                  using: {{:apply, Value, :text_eq, [{:apply, Value, :nullif, _}, {:lit, {:text, "x"}}]}, :bool},
                  with_check: nil
                },
@@ -70,7 +70,7 @@ defmodule SqlLogex.SnapshotTest do
                  permissive: false,
                  roles: ["public"],
                  using: nil,
-                 with_check: {{:apply, Value, :text_eq, [{:column, "extension"}, {:lit, {:text, "broadcast"}}]}, :bool}
+                 with_check: {{:apply, Value, :text_eq, [{:column, "kind"}, {:lit, {:text, "note"}}]}, :bool}
                }
              ] = snapshot.policies
     end
@@ -98,13 +98,13 @@ defmodule SqlLogex.SnapshotTest do
               cmd: "r",
               permissive: true,
               roles: ["public"],
-              qual: "(realtime.topic() = 'x'::text)",
+              qual: "(app.team() = 'x'::text)",
               with_check: nil
             }
           ]
         })
 
-      assert [%Policy{using: {{:unsupported, {:function, "realtime.topic", :not_in_snapshot}}, :unknown}}] =
+      assert [%Policy{using: {{:unsupported, {:function, "app.team", :not_in_snapshot}}, :unknown}}] =
                snapshot.policies
     end
   end
@@ -125,8 +125,8 @@ defmodule SqlLogex.SnapshotTest do
       snapshot =
         new_snapshot(
           attrs([
-            policy("p", "r", "(realtime.topic() = 'x'::text)"),
-            policy("q", "a", nil, with_check: "(extension = 'broadcast'::text)")
+            policy("p", "r", "(app.team() = 'x'::text)"),
+            policy("q", "a", nil, with_check: "(kind = 'note'::text)")
           ])
         )
 
@@ -138,10 +138,10 @@ defmodule SqlLogex.SnapshotTest do
       snapshot =
         new_snapshot(
           attrs([
-            policy("modelled", "r", "(realtime.topic() = 'x'::text)"),
-            policy("secret_name", "r", "((realtime.topic() = 'x'::text) AND (lower(extension) = 'y'::text))"),
+            policy("modelled", "r", "(app.team() = 'x'::text)"),
+            policy("secret_name", "r", "((app.team() = 'x'::text) AND (lower(kind) = 'y'::text))"),
             policy("other", "a", nil, with_check: "CASE WHEN x THEN y END", permissive: false),
-            policy("custom", "*", "(public.my_fn() = 'x'::text)", with_check: "(auth.email() = 'a'::text)")
+            policy("custom", "*", "(public.my_fn() = 'x'::text)", with_check: "(app.email() = 'a'::text)")
           ])
         )
 
@@ -151,7 +151,7 @@ defmodule SqlLogex.SnapshotTest do
                %{
                  cmd: "*",
                  permissive: true,
-                 reasons: [{:function, :other_schema, :not_allowlisted}, {:function, "auth.email", :not_in_snapshot}]
+                 reasons: [{:function, :other_schema, :not_allowlisted}, {:function, "app.email", :not_in_snapshot}]
                }
              ]
 
@@ -162,8 +162,8 @@ defmodule SqlLogex.SnapshotTest do
       snapshot =
         new_snapshot(
           attrs([
-            policy("p", "*", "((lower(extension) = 'x'::text) OR (lower(extension) = 'y'::text))",
-              with_check: "(lower(extension) = 'z'::text)"
+            policy("p", "*", "((lower(kind) = 'x'::text) OR (lower(kind) = 'y'::text))",
+              with_check: "(lower(kind) = 'z'::text)"
             )
           ])
         )

@@ -12,7 +12,7 @@ defmodule SqlLogex.Test.Postgres do
   refuses a database without that mark, because it drops and creates schemas in it.
   """
 
-  alias SqlLogex.Test.RealtimeDatabase
+  alias SqlLogex.Test.ExampleDatabase
 
   @marker "sql_logex test database"
 
@@ -53,7 +53,7 @@ defmodule SqlLogex.Test.Postgres do
 
   @doc """
   Creates the test database when it does not exist, then creates the schema of the example in it (see
-  `SqlLogex.Test.RealtimeDatabase`). Returns the major version of the server.
+  `SqlLogex.Test.ExampleDatabase`). Returns the major version of the server.
   """
   @spec prepare!() :: pos_integer()
   def prepare! do
@@ -66,7 +66,7 @@ defmodule SqlLogex.Test.Postgres do
     try do
       {:ok, :ok} =
         Postgrex.transaction(conn, fn conn ->
-          Enum.each(RealtimeDatabase.setup_statements(), &Postgrex.query!(conn, &1, []))
+          Enum.each(ExampleDatabase.setup_statements(), &Postgrex.query!(conn, &1, []))
         end)
 
       div(server_version_num(conn), 10_000)

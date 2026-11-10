@@ -439,24 +439,24 @@ defmodule SqlLogex.ValueTest do
 
   describe "current_setting/2" do
     @settings %{
-      "request.jwt.claims" => ~s({"sub":"abc"}),
-      "request.jwt.claim.sub" => "",
-      "request.jwt.claim.role" => nil,
-      "realtime.topic" => "room:1",
-      "role" => "authenticated"
+      "app.claims" => ~s({"sub":"abc"}),
+      "app.user_id" => "",
+      "app.user_role" => nil,
+      "app.team" => "room:1",
+      "role" => "member"
     }
 
     test "returns the setting as text" do
-      assert Value.current_setting(@settings, "realtime.topic") == t("room:1")
-      assert Value.current_setting(@settings, "role") == t("authenticated")
-      assert Value.current_setting(@settings, "request.jwt.claims") == t(~s({"sub":"abc"}))
+      assert Value.current_setting(@settings, "app.team") == t("room:1")
+      assert Value.current_setting(@settings, "role") == t("member")
+      assert Value.current_setting(@settings, "app.claims") == t(~s({"sub":"abc"}))
     end
 
     test "folds ASCII case in the name, like guc_name_compare" do
-      assert Value.current_setting(@settings, "REALTIME.TOPIC") == t("room:1")
-      assert Value.current_setting(@settings, "Realtime.Topic") == t("room:1")
-      assert Value.current_setting(@settings, "Request.JWT.Claims") == t(~s({"sub":"abc"}))
-      assert Value.current_setting(@settings, "ROLE") == t("authenticated")
+      assert Value.current_setting(@settings, "APP.TEAM") == t("room:1")
+      assert Value.current_setting(@settings, "App.Team") == t("room:1")
+      assert Value.current_setting(@settings, "App.Claims") == t(~s({"sub":"abc"}))
+      assert Value.current_setting(@settings, "ROLE") == t("member")
     end
 
     test "does not fold non-ASCII letters" do
@@ -465,12 +465,12 @@ defmodule SqlLogex.ValueTest do
     end
 
     test "a setting reset with set_config(name, NULL) is the empty string, never NULL" do
-      assert Value.current_setting(@settings, "request.jwt.claim.role") == t("")
-      assert Value.current_setting(@settings, "Request.JWT.Claim.Role") == t("")
+      assert Value.current_setting(@settings, "app.user_role") == t("")
+      assert Value.current_setting(@settings, "App.User_Role") == t("")
     end
 
     test "an empty value stays the empty string" do
-      assert Value.current_setting(@settings, "request.jwt.claim.sub") == t("")
+      assert Value.current_setting(@settings, "app.user_id") == t("")
     end
 
     # SqlLogex.decide/3 keeps the name only for a platform setting, see policy_set_test.exs
@@ -480,11 +480,11 @@ defmodule SqlLogex.ValueTest do
       assert Value.current_setting(@settings, "") == {:unsupported, {:unknown_setting, ""}}
       assert Value.current_setting(%{}, "role") == {:unsupported, {:unknown_setting, "role"}}
 
-      assert Value.current_setting(@settings, "realtime.topic ") ==
-               {:unsupported, {:unknown_setting, "realtime.topic "}}
+      assert Value.current_setting(@settings, "app.team ") ==
+               {:unsupported, {:unknown_setting, "app.team "}}
 
-      assert Value.current_setting(@settings, "request.jwt.claim.exp") ==
-               {:unsupported, {:unknown_setting, "request.jwt.claim.exp"}}
+      assert Value.current_setting(@settings, "app.expires_at") ==
+               {:unsupported, {:unknown_setting, "app.expires_at"}}
     end
 
     test "is strict in the name" do

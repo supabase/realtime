@@ -15,8 +15,8 @@ defmodule SqlLogex.IRTest do
       assert IR.supported?({:lit, nil})
       assert IR.supported?({:lit, {:text, "a"}})
       assert IR.supported?({:lit, :case_insensitive})
-      assert IR.supported?({:setting, "realtime.topic"})
-      assert IR.supported?({:column, "topic"})
+      assert IR.supported?({:setting, "app.team"})
+      assert IR.supported?({:column, "team"})
     end
 
     test "an unsupported node is not, whatever its reason" do
@@ -69,7 +69,7 @@ defmodule SqlLogex.IRTest do
   describe "unsupported_reasons/1" do
     test "a supported tree has none" do
       assert IR.unsupported_reasons(@supported) == []
-      assert IR.unsupported_reasons({:setting, "realtime.topic"}) == []
+      assert IR.unsupported_reasons({:setting, "app.team"}) == []
       assert IR.unsupported_reasons({:and, [@supported, {:not, @supported}]}) == []
       assert IR.unsupported_reasons({:apply, Value, :is_null, []}) == []
     end
@@ -120,16 +120,16 @@ defmodule SqlLogex.IRTest do
     end
 
     defp resolve(text, functions),
-      do: text |> Parser.parse() |> Resolver.resolve(functions, SqlLogex.Test.RealtimeProfile.profile()) |> elem(0)
+      do: text |> Parser.parse() |> Resolver.resolve(functions, SqlLogex.Test.ExampleProfile.profile()) |> elem(0)
 
     test "an expression made of what is modelled", %{functions: functions} do
       for text <- [
             "true",
-            "(realtime.topic() = 'x'::text)",
-            "((realtime.topic() = ('user:'::text || auth.uid())) AND (extension = ANY (ARRAY['broadcast'::text, 'presence'::text])))",
-            "(realtime.topic() ~* 'public:lobby'::text)",
-            "(((current_setting('request.jwt.claims'::text, true))::jsonb ->> 'k'::text))::boolean",
-            "((( SELECT auth.uid() AS uid))::text = 'a'::text)"
+            "(app.team() = 'x'::text)",
+            "((app.team() = ('user:'::text || app.user_id())) AND (kind = ANY (ARRAY['note'::text, 'task'::text])))",
+            "(app.team() ~* 'public:lobby'::text)",
+            "(((current_setting('app.claims'::text, true))::jsonb ->> 'k'::text))::boolean",
+            "((( SELECT app.user_id() AS user_id))::text = 'a'::text)"
           ] do
         assert IR.supported?(resolve(text, functions)), text
       end
@@ -137,10 +137,10 @@ defmodule SqlLogex.IRTest do
 
     test "an expression with something that isn't, anywhere in it", %{functions: functions} do
       for text <- [
-            "(lower(extension) = 'x'::text)",
-            "((realtime.topic() = 'x'::text) AND (lower(extension) = 'x'::text))",
-            "(NOT ((realtime.topic() = 'x'::text) OR (private = true)))",
-            "(auth.email() = 'a'::text)",
+            "(lower(kind) = 'x'::text)",
+            "((app.team() = 'x'::text) AND (lower(kind) = 'x'::text))",
+            "(NOT ((app.team() = 'x'::text) OR (private = true)))",
+            "(app.email() = 'a'::text)",
             "( SELECT true\n   FROM pg_sleep((1)::double precision) pg_sleep(pg_sleep))"
           ] do
         refute IR.supported?(resolve(text, functions)), text
@@ -148,10 +148,10 @@ defmodule SqlLogex.IRTest do
     end
 
     test "a function whose definition isn't the known one", %{functions: functions} do
-      changed = Enum.map(functions, &if(&1.name == "topic", do: %{&1 | source: "select 'x'::text"}, else: &1))
+      changed = Enum.map(functions, &if(&1.name == "team", do: %{&1 | source: "select 'x'::text"}, else: &1))
 
-      assert IR.supported?(resolve("(realtime.topic() = 'x'::text)", functions))
-      refute IR.supported?(resolve("(realtime.topic() = 'x'::text)", changed))
+      assert IR.supported?(resolve("(app.team() = 'x'::text)", functions))
+      refute IR.supported?(resolve("(app.team() = 'x'::text)", changed))
     end
   end
 end

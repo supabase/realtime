@@ -6,8 +6,8 @@ defmodule SqlLogex.EvalTest do
   alias SqlLogex.Value
 
   @env Env.new(
-         %{"role" => "authenticated", "realtime.topic" => "room:1", "request.jwt.claim.role" => nil},
-         %{"topic" => {:text, "room:1"}}
+         %{"role" => "member", "app.team" => "room:1", "app.user_role" => nil},
+         %{"team" => {:text, "room:1"}}
        )
 
   # Each of the four results as a literal IR node, and as a name for the tables below
@@ -29,9 +29,9 @@ defmodule SqlLogex.EvalTest do
     end
 
     test "a setting is read from the env, a nil setting as the empty string" do
-      assert eval({:setting, "realtime.topic"}) == {:text, "room:1"}
-      assert eval({:setting, "REALTIME.TOPIC"}) == {:text, "room:1"}
-      assert eval({:setting, "request.jwt.claim.role"}) == {:text, ""}
+      assert eval({:setting, "app.team"}) == {:text, "room:1"}
+      assert eval({:setting, "APP.TEAM"}) == {:text, "room:1"}
+      assert eval({:setting, "app.user_role"}) == {:text, ""}
     end
 
     test "a setting that isn't in the env is unsupported" do
@@ -39,29 +39,29 @@ defmodule SqlLogex.EvalTest do
     end
 
     test "a column is read from the row, an unbound one is unsupported" do
-      assert eval({:column, "topic"}) == {:text, "room:1"}
-      assert eval({:column, "extension"}) == {:unsupported, {:unbound_column, "extension"}}
+      assert eval({:column, "team"}) == {:text, "room:1"}
+      assert eval({:column, "kind"}) == {:unsupported, {:unbound_column, "kind"}}
     end
   end
 
   describe "apply" do
     test "calls the primitive with the evaluated arguments" do
-      ir = {:apply, Value, :text_eq, [{:column, "topic"}, {:lit, {:text, "room:1"}}]}
+      ir = {:apply, Value, :text_eq, [{:column, "team"}, {:lit, {:text, "room:1"}}]}
       assert eval(ir) == true
-      assert eval({:apply, Value, :text_eq, [{:column, "topic"}, {:lit, {:text, "other"}}]}) == false
+      assert eval({:apply, Value, :text_eq, [{:column, "team"}, {:lit, {:text, "other"}}]}) == false
     end
 
     test "evaluates the arguments of nested calls" do
       ir =
         {:apply, Value, :text_eq,
-         [{:apply, Value, :nullif, [{:setting, "request.jwt.claim.role"}, {:lit, {:text, ""}}]}, {:lit, {:text, "x"}}]}
+         [{:apply, Value, :nullif, [{:setting, "app.user_role"}, {:lit, {:text, ""}}]}, {:lit, {:text, "x"}}]}
 
       assert eval(ir) == nil
     end
 
     test "an array argument is the list of its evaluated elements" do
       ir =
-        {:apply, Value, :text_eq_any, [{:column, "topic"}, {:array, [{:lit, {:text, "a"}}, {:lit, {:text, "room:1"}}]}]}
+        {:apply, Value, :text_eq_any, [{:column, "team"}, {:array, [{:lit, {:text, "a"}}, {:lit, {:text, "room:1"}}]}]}
 
       assert eval(ir) == true
 
@@ -75,10 +75,10 @@ defmodule SqlLogex.EvalTest do
     end
 
     test "the regex mode literal is passed through" do
-      ir = {:apply, Value, :regex_match, [{:column, "topic"}, {:lit, {:text, "ROOM"}}, {:lit, :case_insensitive}]}
+      ir = {:apply, Value, :regex_match, [{:column, "team"}, {:lit, {:text, "ROOM"}}, {:lit, :case_insensitive}]}
       assert eval(ir) == true
 
-      ir = {:apply, Value, :regex_match, [{:column, "topic"}, {:lit, {:text, "ROOM"}}, {:lit, :case_sensitive}]}
+      ir = {:apply, Value, :regex_match, [{:column, "team"}, {:lit, {:text, "ROOM"}}, {:lit, :case_sensitive}]}
       assert eval(ir) == false
     end
   end

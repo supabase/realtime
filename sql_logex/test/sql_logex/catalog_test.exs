@@ -3,39 +3,31 @@ defmodule SqlLogex.CatalogTest do
 
   alias SqlLogex.Catalog
   alias SqlLogex.Jsonb
-  alias SqlLogex.Test.RealtimeProfile
+  alias SqlLogex.Test.ExampleProfile
   alias SqlLogex.Value
 
   # The known functions of the example profile
-  @known RealtimeProfile.profile().functions
+  @known ExampleProfile.profile().functions
 
   @fixture_versions ["pg17", "pg15"]
 
-  # The bodies the spec lists, as supabase/auth ships them, with the layout of its migrations.
-  @uid_supabase_auth """
+  # The fallback bodies of the example, with the layout of a migration
+  @user_id_fallback """
 
     select
     coalesce(
-      nullif(current_setting('request.jwt.claim.sub', true), ''),
-      (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')
+      nullif(current_setting('app.user_id', true), ''),
+      (nullif(current_setting('app.claims', true), '')::jsonb ->> 'sub')
     )::uuid
 
   """
 
-  @role_supabase_auth """
+  @user_role_fallback """
   select
   coalesce(
-    nullif(current_setting('request.jwt.claim.role', true), ''),
-    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role')
+    nullif(current_setting('app.user_role', true), ''),
+    (nullif(current_setting('app.claims', true), '')::jsonb ->> 'role')
   )::text
-  """
-
-  @jwt_supabase_auth """
-  select
-    coalesce(
-        nullif(current_setting('request.jwt.claim', true), ''),
-        nullif(current_setting('request.jwt.claims', true), '')
-    )::jsonb
   """
 
   defp definition(schema, name, return_type, source, overrides \\ %{}) do
@@ -56,7 +48,7 @@ defmodule SqlLogex.CatalogTest do
 
   defp inline(definition), do: Catalog.inline(definition, @known)
 
-  defp uid(source, overrides \\ %{}), do: definition("auth", "uid", "uuid", source, overrides)
+  defp user_id(source, overrides \\ %{}), do: definition("app", "user_id", "uuid", source, overrides)
 
   defp nullif_setting(name), do: {:apply, Value, :nullif, [{:setting, name}, {:lit, {:text, ""}}]}
 
@@ -65,7 +57,7 @@ defmodule SqlLogex.CatalogTest do
      [
        nullif_setting(setting),
        {:apply, Jsonb, :object_field_text,
-        [{:apply, Jsonb, :parse, [nullif_setting("request.jwt.claims")]}, {:lit, {:text, field}}]}
+        [{:apply, Jsonb, :parse, [nullif_setting("app.claims")]}, {:lit, {:text, field}}]}
      ]}
   end
 
@@ -75,80 +67,74 @@ defmodule SqlLogex.CatalogTest do
       functions = Map.new(catalog.functions, &{{&1.schema, &1.name}, &1})
       @functions functions
 
-      test "#{version}: realtime.topic() is nullif(setting, '')" do
-        assert inline(@functions[{"realtime", "topic"}]) ==
-                 {:ok, {nullif_setting("realtime.topic"), :text}}
+      test "#{version}: app.team() is nullif(setting, '')" do
+        assert inline(@functions[{"app", "team"}]) ==
+                 {:ok, {nullif_setting("app.team"), :text}}
       end
 
-      test "#{version}: the legacy auth.uid() is uuid_in(nullif(sub, ''))" do
-        assert inline(@functions[{"auth", "uid"}]) ==
-                 {:ok, {{:apply, Value, :uuid_in, [nullif_setting("request.jwt.claim.sub")]}, :uuid}}
+      test "#{version}: the simple app.user_id() is uuid_in(nullif(user_id, ''))" do
+        assert inline(@functions[{"app", "user_id"}]) ==
+                 {:ok, {{:apply, Value, :uuid_in, [nullif_setting("app.user_id")]}, :uuid}}
       end
 
-      test "#{version}: the legacy auth.role() is nullif(role, '')" do
-        assert inline(@functions[{"auth", "role"}]) ==
-                 {:ok, {nullif_setting("request.jwt.claim.role"), :text}}
+      test "#{version}: the simple app.user_role() is nullif(user_role, '')" do
+        assert inline(@functions[{"app", "user_role"}]) ==
+                 {:ok, {nullif_setting("app.user_role"), :text}}
       end
 
-      test "#{version}: auth.jwt() is parsed claims, the singular setting being always NULL" do
-        assert inline(@functions[{"auth", "jwt"}]) ==
-                 {:ok,
-                  {{:apply, Jsonb, :parse, [{:coalesce, [{:lit, nil}, nullif_setting("request.jwt.claims")]}]}, :jsonb}}
+      test "#{version}: app.claims() is the parsed claims setting" do
+        assert inline(@functions[{"app", "claims"}]) ==
+                 {:ok, {{:apply, Jsonb, :parse, [nullif_setting("app.claims")]}, :jsonb}}
       end
     end
   end
 
-  describe "inline/2 on the supabase/auth bodies" do
-    test "auth.uid() of migration 20220224000811 is uuid_in(coalesce(sub, claims ->> 'sub'))" do
-      assert inline(uid(@uid_supabase_auth)) ==
-               {:ok, {{:apply, Value, :uuid_in, [claims_field("request.jwt.claim.sub", "sub")]}, :uuid}}
+  describe "inline/2 on the fallback bodies" do
+    test "app.user_id() is uuid_in(coalesce(user_id, claims ->> 'sub'))" do
+      assert inline(user_id(@user_id_fallback)) ==
+               {:ok, {{:apply, Value, :uuid_in, [claims_field("app.user_id", "sub")]}, :uuid}}
     end
 
-    test "auth.role() of migration 20220224000811 is coalesce(role, claims ->> 'role')" do
-      assert inline(definition("auth", "role", "text", @role_supabase_auth)) ==
-               {:ok, {claims_field("request.jwt.claim.role", "role"), :text}}
-    end
-
-    test "auth.jwt() of migration 20220531120530" do
-      assert {:ok, {_ir, :jsonb}} = inline(definition("auth", "jwt", "jsonb", @jwt_supabase_auth))
+    test "app.user_role() is coalesce(user_role, claims ->> 'role')" do
+      assert inline(definition("app", "user_role", "text", @user_role_fallback)) ==
+               {:ok, {claims_field("app.user_role", "role"), :text}}
     end
   end
 
   describe "inline/2 ignores layout" do
     for {name, source} <- [
-          {"the one-line form", "select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;"},
-          {"no trailing semicolon", "select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid"},
+          {"the one-line form", "select nullif(current_setting('app.user_id', true), '')::uuid;"},
+          {"no trailing semicolon", "select nullif(current_setting('app.user_id', true), '')::uuid"},
           {"surrounding newlines and indentation",
-           "\n    select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;\n  "},
-          {"tabs and carriage returns",
-           "select\tnullif(current_setting('request.jwt.claim.sub',\ttrue),\r\n''\t)::uuid;"},
-          {"runs of spaces", "select   nullif(  current_setting( 'request.jwt.claim.sub' ,true )  ,  '' )::uuid ;"},
-          {"no spaces around punctuation", "select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid"}
+           "\n    select nullif(current_setting('app.user_id', true), '')::uuid;\n  "},
+          {"tabs and carriage returns", "select\tnullif(current_setting('app.user_id',\ttrue),\r\n''\t)::uuid;"},
+          {"runs of spaces", "select   nullif(  current_setting( 'app.user_id' ,true )  ,  '' )::uuid ;"},
+          {"no spaces around punctuation", "select nullif(current_setting('app.user_id',true),'')::uuid"}
         ] do
       test "matches #{name}" do
-        assert {:ok, {_ir, :uuid}} = inline(uid(unquote(source)))
+        assert {:ok, {_ir, :uuid}} = inline(user_id(unquote(source)))
       end
     end
   end
 
   describe "inline/2 rejects" do
     for {name, source} <- [
-          # Earlier supabase/auth bodies (github.com/supabase/auth migrations), which we deliberately don't know
-          {"supabase/auth 20211124214934_update_auth_functions",
+          # Earlier versions of the fallback body, which the profile does not know
+          {"an earlier fallback body without nullif",
            """
              select
              coalesce(
-               current_setting('request.jwt.claim.sub', true),
-               (current_setting('request.jwt.claims', true)::jsonb ->> 'sub')
+               current_setting('app.user_id', true),
+               (current_setting('app.claims', true)::jsonb ->> 'sub')
              )::uuid
            """},
-          {"supabase/auth 20211202183645_update_auth_uid",
+          {"an earlier fallback body with nullif around the coalesce",
            """
              select
              nullif(
                coalesce(
-                 current_setting('request.jwt.claim.sub', true),
-                 (current_setting('request.jwt.claims', true)::jsonb ->> 'sub')
+                 current_setting('app.user_id', true),
+                 (current_setting('app.claims', true)::jsonb ->> 'sub')
                ),
                ''
              )::uuid
@@ -157,33 +143,30 @@ defmodule SqlLogex.CatalogTest do
            """
            select
              coalesce(
-               nullif(current_setting('request.jwt.claim.sub', true), ''),
-               (current_setting('request.jwt.claims', true)::jsonb ->> 'sub')
+               nullif(current_setting('app.user_id', true), ''),
+               (current_setting('app.claims', true)::jsonb ->> 'sub')
              )::uuid
            """},
-          {"a changed literal", "select nullif(current_setting('request.jwt.claim.subx', true), '')::uuid;"},
-          {"a changed empty-string literal",
-           "select nullif(current_setting('request.jwt.claim.sub', true), ' ')::uuid;"},
-          {"a changed missing_ok", "select nullif(current_setting('request.jwt.claim.sub', false), '')::uuid;"},
-          {"a changed function", "select coalesce(current_setting('request.jwt.claim.sub', true), '')::uuid;"},
-          {"another cast", "select nullif(current_setting('request.jwt.claim.sub', true), '')::text;"},
-          {"upper case keywords", "SELECT nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;"},
-          {"a different case in a literal", "select nullif(current_setting('Request.jwt.claim.sub', true), '')::uuid;"},
-          {"a second statement", "select 1; select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;"},
-          {"two semicolons", "select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;;"},
-          {"a line comment", "select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid; -- hi\n"},
-          {"a line comment in the middle",
-           "select nullif(current_setting('request.jwt.claim.sub', true), -- hi\n'')::uuid;"},
-          {"a block comment", "select /* hi */ nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;"},
-          {"a block comment without a space",
-           "select/**/nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;"},
-          {"a dollar-quoted body", "select $$nullif(current_setting('request.jwt.claim.sub', true), '')$$::uuid;"},
-          {"an escape string", "select nullif(current_setting(E'request.jwt.claim.sub', true), '')::uuid;"},
+          {"a changed literal", "select nullif(current_setting('app.user_idx', true), '')::uuid;"},
+          {"a changed empty-string literal", "select nullif(current_setting('app.user_id', true), ' ')::uuid;"},
+          {"a changed missing_ok", "select nullif(current_setting('app.user_id', false), '')::uuid;"},
+          {"a changed function", "select coalesce(current_setting('app.user_id', true), '')::uuid;"},
+          {"another cast", "select nullif(current_setting('app.user_id', true), '')::text;"},
+          {"upper case keywords", "SELECT nullif(current_setting('app.user_id', true), '')::uuid;"},
+          {"a different case in a literal", "select nullif(current_setting('App.user_id', true), '')::uuid;"},
+          {"a second statement", "select 1; select nullif(current_setting('app.user_id', true), '')::uuid;"},
+          {"two semicolons", "select nullif(current_setting('app.user_id', true), '')::uuid;;"},
+          {"a line comment", "select nullif(current_setting('app.user_id', true), '')::uuid; -- hi\n"},
+          {"a line comment in the middle", "select nullif(current_setting('app.user_id', true), -- hi\n'')::uuid;"},
+          {"a block comment", "select /* hi */ nullif(current_setting('app.user_id', true), '')::uuid;"},
+          {"a block comment without a space", "select/**/nullif(current_setting('app.user_id', true), '')::uuid;"},
+          {"a dollar-quoted body", "select $$nullif(current_setting('app.user_id', true), '')$$::uuid;"},
+          {"an escape string", "select nullif(current_setting(E'app.user_id', true), '')::uuid;"},
           {"nothing", ""},
-          {"an unterminated literal", "select nullif(current_setting('request.jwt.claim.sub, true), '')::uuid;"}
+          {"an unterminated literal", "select nullif(current_setting('app.user_id, true), '')::uuid;"}
         ] do
       test "#{name}" do
-        assert inline(uid(unquote(source))) == :error
+        assert inline(user_id(unquote(source))) == :error
       end
     end
 
@@ -196,12 +179,12 @@ defmodule SqlLogex.CatalogTest do
           {"another language", %{language: "plpgsql"}},
           {"another return type", %{return_type: "text"}},
           {"another schema", %{schema: "public"}},
-          {"another name", %{name: "uid2"}}
+          {"another name", %{name: "user_id2"}}
         ] do
       test "#{name}" do
         assert inline(
-                 uid(
-                   "select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;",
+                 user_id(
+                   "select nullif(current_setting('app.user_id', true), '')::uuid;",
                    unquote(Macro.escape(overrides))
                  )
                ) ==
@@ -210,14 +193,14 @@ defmodule SqlLogex.CatalogTest do
     end
 
     test "a body that matches another function's name" do
-      # The auth.role() body installed as auth.uid() is not auth.uid()
-      assert inline(uid("select nullif(current_setting('request.jwt.claim.role', true), '')::text;")) == :error
-      assert inline(uid(@role_supabase_auth)) == :error
+      # The app.user_role() body installed as app.user_id() is not app.user_id()
+      assert inline(user_id("select nullif(current_setting('app.user_role', true), '')::text;")) == :error
+      assert inline(user_id(@user_role_fallback)) == :error
     end
 
     test "a definition missing fields" do
       assert inline(%{}) == :error
-      assert inline(%{schema: "auth", name: "uid"}) == :error
+      assert inline(%{schema: "app", name: "user_id"}) == :error
     end
   end
 
@@ -257,14 +240,14 @@ defmodule SqlLogex.CatalogTest do
     end
 
     test "is idempotent" do
-      for source <- [@uid_supabase_auth, @role_supabase_auth, @jwt_supabase_auth, "f( 'a  b' , 'c' ) ;"] do
+      for source <- [@user_id_fallback, @user_role_fallback, "f( 'a  b' , 'c' ) ;"] do
         assert Catalog.normalize(Catalog.normalize(source)) == Catalog.normalize(source)
       end
     end
 
-    test "turns the supabase/auth uid into one line" do
-      assert Catalog.normalize(@uid_supabase_auth) ==
-               "select coalesce(nullif(current_setting('request.jwt.claim.sub',true),''),(nullif(current_setting('request.jwt.claims',true),'')::jsonb ->> 'sub'))::uuid"
+    test "turns the fallback body of app.user_id() into one line" do
+      assert Catalog.normalize(@user_id_fallback) ==
+               "select coalesce(nullif(current_setting('app.user_id',true),''),(nullif(current_setting('app.claims',true),'')::jsonb ->> 'sub'))::uuid"
     end
   end
 end
