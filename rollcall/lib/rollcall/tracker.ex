@@ -636,8 +636,6 @@ defmodule Rollcall.Tracker do
     state
   end
 
-  # `function_exported?/3` does not load a module. The transport module is
-  # loaded, because `init/2` ran when the tracker started.
   defp transport_has_interest?(state) do
     function_exported?(state.transport_module, :has_interest?, 1) and
       state.transport_module.has_interest?(state.transport_state)
