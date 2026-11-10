@@ -54,6 +54,17 @@ gen_rpc_socket_sndbuf = Env.get_integer("GEN_RPC_SOCKET_SEND_BUFFER")
 gen_rpc_ssl_client_port = Env.get_integer("GEN_RPC_SSL_CLIENT_PORT", 6369)
 gen_rpc_ssl_server_port = Env.get_integer("GEN_RPC_SSL_SERVER_PORT")
 
+# TLS versions gen_rpc's SSL driver accepts, e.g. "tlsv1.3"; unset leaves OTP's default.
+gen_rpc_ssl_versions =
+  "GEN_RPC_SSL_VERSIONS"
+  |> Env.get_list([])
+  |> Enum.reject(&(&1 == ""))
+  |> Enum.map(fn
+    "tlsv1.3" -> :"tlsv1.3"
+    "tlsv1.2" -> :"tlsv1.2"
+    other -> raise ArgumentError, "env GEN_RPC_SSL_VERSIONS expected tlsv1.2 or tlsv1.3, got #{inspect(other)}"
+  end)
+
 gen_rpc_default_port = 5369
 gen_rpc_dev_port_range = gen_rpc_default_port..(gen_rpc_default_port + 99)
 gen_rpc_tcp_client_port = Env.get_integer("GEN_RPC_TCP_CLIENT_PORT", gen_rpc_default_port)
@@ -391,6 +402,9 @@ if config_env() != :test do
       keyfile: System.fetch_env!("GEN_RPC_KEYFILE"),
       cacertfile: System.fetch_env!("GEN_RPC_CACERTFILE")
     ]
+
+    gen_rpc_ssl_opts =
+      if gen_rpc_ssl_versions == [], do: gen_rpc_ssl_opts, else: gen_rpc_ssl_opts ++ [versions: gen_rpc_ssl_versions]
 
     config :gen_rpc,
       ssl_server_port: gen_rpc_ssl_server_port,
