@@ -23,6 +23,54 @@ defmodule RealtimeWeb.PageControllerTest do
     assert text_response(conn, 200) == "ok"
   end
 
+  describe "GET /ready" do
+    setup do
+      original = Application.get_env(:realtime, :readiness_min_nodes_per_region)
+      Realtime.Readiness.reset()
+
+      on_exit(fn ->
+        Application.put_env(:realtime, :readiness_min_nodes_per_region, original)
+        Application.put_env(:realtime, :shutdown_in_progress, false)
+        Realtime.Readiness.reset()
+      end)
+    end
+
+    test "returns ok when no minimum is configured", %{conn: conn} do
+      Application.put_env(:realtime, :readiness_min_nodes_per_region, [])
+      conn = get(conn, "/ready")
+      assert text_response(conn, 200) == "ok"
+    end
+
+    test "returns 503 while it waits for nodes, with the regions in the log only", %{conn: conn} do
+      Application.put_env(:realtime, :readiness_min_nodes_per_region, [{"us-east-1", 2}, {"eu-west-1", 1}])
+
+      log =
+        capture_log(fn ->
+          conn = get(conn, "/ready")
+          assert text_response(conn, 503) == "not ready"
+        end)
+
+      assert log =~ "Readiness: waiting for nodes: us-east-1 1/2, eu-west-1 0/1"
+    end
+
+    test "returns 503 while shutting down", %{conn: conn} do
+      Application.put_env(:realtime, :readiness_min_nodes_per_region, [])
+      Application.put_env(:realtime, :shutdown_in_progress, true)
+      conn = get(conn, "/ready")
+      assert text_response(conn, 503) == "shutting down"
+    end
+
+    test "is not logged when DISABLE_HEALTHCHECK_LOGGING is true", %{conn: conn} do
+      original = Application.get_env(:realtime, :disable_healthcheck_logging, false)
+      on_exit(fn -> Application.put_env(:realtime, :disable_healthcheck_logging, original) end)
+      Application.put_env(:realtime, :disable_healthcheck_logging, true)
+      Application.put_env(:realtime, :readiness_min_nodes_per_region, [])
+
+      log = capture_log(fn -> assert text_response(get(conn, "/ready"), 200) == "ok" end)
+      refute log =~ "GET /ready"
+    end
+  end
+
   describe "GET /healthcheck logging behavior" do
     setup do
       original_value = Application.get_env(:realtime, :disable_healthcheck_logging, false)
