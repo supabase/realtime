@@ -34,20 +34,20 @@ defmodule Realtime.Presence.RollcallTransportTest do
 
   # The tracker asks at the end of its grace period. A node that has users of the tenant connected
   # keeps the tracker, so the users still get the state and the diffs of their peers.
-  describe "has_interest?/1" do
+  describe "active?/1" do
     setup %{scope: scope} do
       {:ok, state} = RollcallTransport.init(scope, pubsub: Realtime.PubSub)
       {:ok, state: state}
     end
 
     test "is false when no user of the scope is connected on the node", %{state: state} do
-      refute RollcallTransport.has_interest?(state)
+      refute RollcallTransport.active?(state)
     end
 
     test "is true while a user of the scope is connected on the node", %{state: state, scope: scope} do
       :ok = UsersCounter.add(connected_user(), scope)
 
-      assert RollcallTransport.has_interest?(state)
+      assert RollcallTransport.active?(state)
     end
 
     test "is false after the process of the user exits", %{state: state, scope: scope} do
@@ -56,13 +56,13 @@ defmodule Realtime.Presence.RollcallTransportTest do
 
       Process.exit(user, :kill)
 
-      assert_eventually(not RollcallTransport.has_interest?(state))
+      assert_eventually(not RollcallTransport.active?(state))
     end
 
     test "is false when only a user of another scope is connected on the node", %{state: state, scope: scope} do
       :ok = UsersCounter.add(connected_user(), "other-#{scope}")
 
-      refute RollcallTransport.has_interest?(state)
+      refute RollcallTransport.active?(state)
     end
   end
 

@@ -21,7 +21,7 @@ defmodule Rollcall do
   that reads a scope and tracks nothing in it. The tracker removes an entry
   when its process exits or untracks it, so an entry never outlives its
   process. The tracker stops after it holds no entry for the grace period,
-  unless the transport has interest. See `Rollcall.Transport.has_interest?/1`.
+  unless the transport is active. See `Rollcall.Transport.active?/1`.
   The grace period avoids a stop and a start when a scope gets a new process
   soon after it lost its last process. See `Rollcall.Tracker`.
 
@@ -183,7 +183,7 @@ defmodule Rollcall do
 
   Call this function on a node that reads the entries of `scope` and has no
   entry of its own. A tracker with no entry stops after the grace period,
-  unless the transport has interest. See `Rollcall.Transport.has_interest?/1`.
+  unless the transport is active. See `Rollcall.Transport.active?/1`.
   """
   @spec ensure_started(Rollcall.name(), Rollcall.scope()) :: :ok | {:error, term()}
   def ensure_started(name, scope) do

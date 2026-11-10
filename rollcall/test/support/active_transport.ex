@@ -1,9 +1,9 @@
-defmodule Rollcall.Transport.Interest do
+defmodule Rollcall.Transport.Active do
   @moduledoc """
-  A transport for tests that control the interest of the transport.
+  A transport for tests that control whether the transport is active.
 
-  The option of `init/2` is `:interest`, the pid of an `Agent` that holds a boolean.
-  `has_interest?/1` returns the value of the agent. A test changes the value with
+  The option of `init/2` is `:active`, the pid of an `Agent` that holds a boolean.
+  `active?/1` returns the value of the agent. A test changes the value with
   `Agent.update/2`.
 
   The transport unwraps a message like `Rollcall.Transport.PassThrough`. It sends no
@@ -15,7 +15,7 @@ defmodule Rollcall.Transport.Interest do
   alias Rollcall.Transport.PassThrough
 
   @impl true
-  def init(scope, opts), do: {:ok, %{scope: scope, interest: Keyword.fetch!(opts, :interest)}}
+  def init(scope, opts), do: {:ok, %{scope: scope, active: Keyword.fetch!(opts, :active)}}
 
   @impl true
   def heartbeat(_state, _message), do: :ok
@@ -24,7 +24,7 @@ defmodule Rollcall.Transport.Interest do
   def publish(_state, _partition, _diff), do: :ok
 
   @impl true
-  def has_interest?(%{interest: interest}), do: Agent.get(interest, & &1)
+  def active?(%{active: active}), do: Agent.get(active, & &1)
 
   @impl true
   def unwrap(%{scope: scope}, raw), do: PassThrough.unwrap(scope, raw)

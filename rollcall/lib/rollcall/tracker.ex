@@ -70,10 +70,10 @@ defmodule Rollcall.Tracker do
 
   The tracker waits for a grace period before it stops. It starts a timer when
   it holds no entry. A `track` cancels the timer. When the timer expires, the
-  tracker asks the transport with `c:Rollcall.Transport.has_interest?/1`. The
-  tracker stops when the transport has no interest. It starts the timer again
-  when the transport has interest. A transport that does not implement the
-  callback has no interest.
+  tracker asks the transport with `c:Rollcall.Transport.active?/1`. The
+  tracker stops when the transport is not active. It starts the timer again
+  when the transport is active. A transport that does not implement the
+  callback is not active.
 
   The tracker holds the entries of its peers. A node that has listeners and no
   entry of its own needs them. A stop would leave the listeners with no state
@@ -475,7 +475,7 @@ defmodule Rollcall.Tracker do
   @spec handle_info(term(), State.t()) :: {:noreply, State.t()} | {:stop, :normal, State.t()}
   def handle_info({:timeout, ref, :empty_timeout}, %{empty_timer: ref} = state) do
     if Local.empty?(state.local) do
-      if transport_has_interest?(state) do
+      if transport_active?(state) do
         {:noreply, start_empty_timer(%{state | empty_timer: nil})}
       else
         tp(:rollcall_tracker_stopped, %{scope: state.scope})
@@ -636,9 +636,9 @@ defmodule Rollcall.Tracker do
     state
   end
 
-  defp transport_has_interest?(state) do
-    function_exported?(state.transport_module, :has_interest?, 1) and
-      state.transport_module.has_interest?(state.transport_state)
+  defp transport_active?(state) do
+    function_exported?(state.transport_module, :active?, 1) and
+      state.transport_module.active?(state.transport_state)
   end
 
   defp publish_changes(state, changes) do

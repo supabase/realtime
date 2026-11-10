@@ -8,7 +8,7 @@ defmodule Rollcall.Transport do
 
   The tracker holds no subscribers. The transport delivers the diffs to them.
   The transport also tells the tracker whether the node still needs it. See
-  `has_interest?/1`.
+  `active?/1`.
 
   """
   alias Rollcall.Tracker.Messages
@@ -64,10 +64,10 @@ defmodule Rollcall.Transport do
   The tracker calls this function in its own process, once for each grace
   period. The tracker waits for the function, so keep it fast.
 
-  The callback is optional. A transport that does not implement it has no
-  interest.
+  The callback is optional. A transport that does not implement it is not
+  active.
   """
-  @callback has_interest?(t :: any) :: boolean()
+  @callback active?(t :: any) :: boolean()
 
-  @optional_callbacks has_interest?: 1
+  @optional_callbacks active?: 1
 end

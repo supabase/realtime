@@ -23,7 +23,7 @@ defmodule Realtime.Presence.RollcallTransport do
   end
 
   @impl true
-  def has_interest?(%{scope: scope}) do
+  def active?(%{scope: scope}) do
     Forum.Census.local_member_count(:users, scope) > 0
   end
 

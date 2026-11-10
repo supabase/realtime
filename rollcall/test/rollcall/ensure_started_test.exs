@@ -7,7 +7,7 @@ defmodule Rollcall.EnsureStartedTest do
 
   alias Rollcall.Tracker
   alias Rollcall.Transport.FailInit
-  alias Rollcall.Transport.Interest
+  alias Rollcall.Transport.Active
 
   # `ensure_started/2` starts the tracker of a scope when none runs. A node that
   # has listeners and has never tracked calls it, so the node holds the state of
@@ -59,18 +59,18 @@ defmodule Rollcall.EnsureStartedTest do
 
   describe "a tracker that ensure_started/2 starts" do
     setup do
-      interest = start_supervised!({Agent, fn -> true end})
+      active = start_supervised!({Agent, fn -> true end})
       rollcall = unique_name()
 
       start_supervised!(
-        {Rollcall, name: rollcall, heartbeat_period_in_ms: :manual, transport: {Interest, interest: interest}}
+        {Rollcall, name: rollcall, heartbeat_period_in_ms: :manual, transport: {Active, active: active}}
       )
 
-      {:ok, interest: interest, rollcall: rollcall}
+      {:ok, active: active, rollcall: rollcall}
     end
 
     # A node with listeners that never tracked locally.
-    test "keeps the entries of a peer at the end of the grace period while the transport has interest", ctx do
+    test "keeps the entries of a peer at the end of the grace period while the transport is active", ctx do
       %{scope: scope, rollcall: rollcall} = ctx
       :ok = Rollcall.ensure_started(rollcall, scope)
       tracker = Tracker.whereis(rollcall, scope)
@@ -83,9 +83,9 @@ defmodule Rollcall.EnsureStartedTest do
       assert [{"ref", "key", %{n: 1}}] = Rollcall.state(rollcall, scope, "partition")
     end
 
-    test "stops at the end of the grace period when the transport has no interest", ctx do
-      %{scope: scope, rollcall: rollcall, interest: interest} = ctx
-      Agent.update(interest, fn _ -> false end)
+    test "stops at the end of the grace period when the transport is not active", ctx do
+      %{scope: scope, rollcall: rollcall, active: active} = ctx
+      Agent.update(active, fn _ -> false end)
       :ok = Rollcall.ensure_started(rollcall, scope)
       tracker = Tracker.whereis(rollcall, scope)
       monitor = Process.monitor(tracker)
