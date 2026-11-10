@@ -3,15 +3,18 @@ defmodule SqlLogexTest do
   #
   # The expressions are written the way Postgres prints them (pg_get_expr), the only form the parser
   # reads. Every expected value here was checked against Postgres 17. A fallback, `{:unsupported, _}`,
-  # is where the database is asked instead; the comment says what Postgres answers there. The
-  # differential test in Realtime (test/realtime/tenants/sql_logex_differential_test.exs) does the
-  # same against Postgres for thousands of expressions, written as customers write them.
+  # is where the database is asked instead; the comment says what Postgres answers there.
+  # test/postgres/expressions_test.exs does the same against Postgres for thousands of expressions,
+  # written as policy authors write them.
   use ExUnit.Case, async: true
 
   alias SqlLogex.Env
   alias SqlLogex.Eval
   alias SqlLogex.Parser
   alias SqlLogex.Resolver
+  alias SqlLogex.Test.RealtimeProfile
+
+  @profile RealtimeProfile.profile()
 
   @uid "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
   @other_uid "b1ffcd00-8d1c-4ff9-cc7e-7cc0ce491b22"
@@ -32,11 +35,11 @@ defmodule SqlLogexTest do
 
   @own_channel_rls "(realtime.topic() = ('user:'::text || auth.uid()))"
 
-  # Evaluates `sql` in the session Realtime sets up for a join: the settings for a JWT with this
+  # Evaluates `sql` in the session that the example sets up for a join: the settings for a JWT with this
   # role, sub and claims, and the probe row with this topic and extension. A nil sub is a JWT
   # without one.
   defp evaluate(sql, opts) do
-    {ir, _type} = sql |> Parser.parse() |> Resolver.resolve(Keyword.get(opts, :functions, @functions))
+    {ir, _type} = sql |> Parser.parse() |> Resolver.resolve(Keyword.get(opts, :functions, @functions), @profile)
     Eval.eval(ir, env(opts))
   end
 

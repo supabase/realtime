@@ -7,6 +7,7 @@ defmodule Realtime.Tenants.SqlLogexCacheTest do
 
   alias Realtime.Tenants.SqlLogexCache
   alias Realtime.Tenants.SqlLogexLoader
+  alias Realtime.Tenants.SqlLogexProfile
 
   setup [:checkout_tenant_and_connect]
 
@@ -25,7 +26,12 @@ defmodule Realtime.Tenants.SqlLogexCacheTest do
 
     test "only loads once across repeated fetches for the same tenant" do
       tenant_id = "tenant_#{System.unique_integer([:positive])}"
-      snapshot = SqlLogex.Snapshot.new(%{rls_enabled: true, rls_forced: false, roles: %{}, policies: []})
+
+      snapshot =
+        SqlLogex.Snapshot.new(
+          %{rls_enabled: true, rls_forced: false, roles: %{}, policies: []},
+          SqlLogexProfile.profile()
+        )
 
       expect(SqlLogexLoader, :load, 1, fn :fake_conn, ^tenant_id -> {:ok, snapshot} end)
 
@@ -36,7 +42,12 @@ defmodule Realtime.Tenants.SqlLogexCacheTest do
 
     test "a load failure isn't cached, so the next fetch tries again" do
       tenant_id = "tenant_#{System.unique_integer([:positive])}"
-      snapshot = SqlLogex.Snapshot.new(%{rls_enabled: true, rls_forced: false, roles: %{}, policies: []})
+
+      snapshot =
+        SqlLogex.Snapshot.new(
+          %{rls_enabled: true, rls_forced: false, roles: %{}, policies: []},
+          SqlLogexProfile.profile()
+        )
 
       expect(SqlLogexLoader, :load, fn :fake_conn, ^tenant_id -> {:error, :boom} end)
       assert {:error, :boom} = SqlLogexCache.fetch(:fake_conn, tenant_id)
@@ -49,7 +60,12 @@ defmodule Realtime.Tenants.SqlLogexCacheTest do
   describe "invalidate/1" do
     test "forces the next fetch to reload" do
       tenant_id = "tenant_#{System.unique_integer([:positive])}"
-      snapshot = SqlLogex.Snapshot.new(%{rls_enabled: true, rls_forced: false, roles: %{}, policies: []})
+
+      snapshot =
+        SqlLogex.Snapshot.new(
+          %{rls_enabled: true, rls_forced: false, roles: %{}, policies: []},
+          SqlLogexProfile.profile()
+        )
 
       expect(SqlLogexLoader, :load, 2, fn :fake_conn, ^tenant_id -> {:ok, snapshot} end)
 

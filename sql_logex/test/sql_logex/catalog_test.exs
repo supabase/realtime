@@ -3,7 +3,11 @@ defmodule SqlLogex.CatalogTest do
 
   alias SqlLogex.Catalog
   alias SqlLogex.Jsonb
+  alias SqlLogex.Test.RealtimeProfile
   alias SqlLogex.Value
+
+  # The known functions of the example profile
+  @known RealtimeProfile.profile().functions
 
   @fixture_versions ["pg17", "pg15"]
 
@@ -50,6 +54,8 @@ defmodule SqlLogex.CatalogTest do
     )
   end
 
+  defp inline(definition), do: Catalog.inline(definition, @known)
+
   defp uid(source, overrides \\ %{}), do: definition("auth", "uid", "uuid", source, overrides)
 
   defp nullif_setting(name), do: {:apply, Value, :nullif, [{:setting, name}, {:lit, {:text, ""}}]}
@@ -63,52 +69,52 @@ defmodule SqlLogex.CatalogTest do
      ]}
   end
 
-  describe "inline/1 on the captured functions" do
+  describe "inline/2 on the captured functions" do
     for version <- @fixture_versions do
       {catalog, _} = Code.eval_file(Path.expand("../fixtures/#{version}/catalog.exs", __DIR__))
       functions = Map.new(catalog.functions, &{{&1.schema, &1.name}, &1})
       @functions functions
 
       test "#{version}: realtime.topic() is nullif(setting, '')" do
-        assert Catalog.inline(@functions[{"realtime", "topic"}]) ==
+        assert inline(@functions[{"realtime", "topic"}]) ==
                  {:ok, {nullif_setting("realtime.topic"), :text}}
       end
 
       test "#{version}: the legacy auth.uid() is uuid_in(nullif(sub, ''))" do
-        assert Catalog.inline(@functions[{"auth", "uid"}]) ==
+        assert inline(@functions[{"auth", "uid"}]) ==
                  {:ok, {{:apply, Value, :uuid_in, [nullif_setting("request.jwt.claim.sub")]}, :uuid}}
       end
 
       test "#{version}: the legacy auth.role() is nullif(role, '')" do
-        assert Catalog.inline(@functions[{"auth", "role"}]) ==
+        assert inline(@functions[{"auth", "role"}]) ==
                  {:ok, {nullif_setting("request.jwt.claim.role"), :text}}
       end
 
       test "#{version}: auth.jwt() is parsed claims, the singular setting being always NULL" do
-        assert Catalog.inline(@functions[{"auth", "jwt"}]) ==
+        assert inline(@functions[{"auth", "jwt"}]) ==
                  {:ok,
                   {{:apply, Jsonb, :parse, [{:coalesce, [{:lit, nil}, nullif_setting("request.jwt.claims")]}]}, :jsonb}}
       end
     end
   end
 
-  describe "inline/1 on the supabase/auth bodies" do
+  describe "inline/2 on the supabase/auth bodies" do
     test "auth.uid() of migration 20220224000811 is uuid_in(coalesce(sub, claims ->> 'sub'))" do
-      assert Catalog.inline(uid(@uid_supabase_auth)) ==
+      assert inline(uid(@uid_supabase_auth)) ==
                {:ok, {{:apply, Value, :uuid_in, [claims_field("request.jwt.claim.sub", "sub")]}, :uuid}}
     end
 
     test "auth.role() of migration 20220224000811 is coalesce(role, claims ->> 'role')" do
-      assert Catalog.inline(definition("auth", "role", "text", @role_supabase_auth)) ==
+      assert inline(definition("auth", "role", "text", @role_supabase_auth)) ==
                {:ok, {claims_field("request.jwt.claim.role", "role"), :text}}
     end
 
     test "auth.jwt() of migration 20220531120530" do
-      assert {:ok, {_ir, :jsonb}} = Catalog.inline(definition("auth", "jwt", "jsonb", @jwt_supabase_auth))
+      assert {:ok, {_ir, :jsonb}} = inline(definition("auth", "jwt", "jsonb", @jwt_supabase_auth))
     end
   end
 
-  describe "inline/1 ignores layout" do
+  describe "inline/2 ignores layout" do
     for {name, source} <- [
           {"the one-line form", "select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;"},
           {"no trailing semicolon", "select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid"},
@@ -120,12 +126,12 @@ defmodule SqlLogex.CatalogTest do
           {"no spaces around punctuation", "select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid"}
         ] do
       test "matches #{name}" do
-        assert {:ok, {_ir, :uuid}} = Catalog.inline(uid(unquote(source)))
+        assert {:ok, {_ir, :uuid}} = inline(uid(unquote(source)))
       end
     end
   end
 
-  describe "inline/1 rejects" do
+  describe "inline/2 rejects" do
     for {name, source} <- [
           # Earlier supabase/auth bodies (github.com/supabase/auth migrations), which we deliberately don't know
           {"supabase/auth 20211124214934_update_auth_functions",
@@ -177,7 +183,7 @@ defmodule SqlLogex.CatalogTest do
           {"an unterminated literal", "select nullif(current_setting('request.jwt.claim.sub, true), '')::uuid;"}
         ] do
       test "#{name}" do
-        assert Catalog.inline(uid(unquote(source))) == :error
+        assert inline(uid(unquote(source))) == :error
       end
     end
 
@@ -193,7 +199,7 @@ defmodule SqlLogex.CatalogTest do
           {"another name", %{name: "uid2"}}
         ] do
       test "#{name}" do
-        assert Catalog.inline(
+        assert inline(
                  uid(
                    "select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;",
                    unquote(Macro.escape(overrides))
@@ -205,13 +211,13 @@ defmodule SqlLogex.CatalogTest do
 
     test "a body that matches another function's name" do
       # The auth.role() body installed as auth.uid() is not auth.uid()
-      assert Catalog.inline(uid("select nullif(current_setting('request.jwt.claim.role', true), '')::text;")) == :error
-      assert Catalog.inline(uid(@role_supabase_auth)) == :error
+      assert inline(uid("select nullif(current_setting('request.jwt.claim.role', true), '')::text;")) == :error
+      assert inline(uid(@role_supabase_auth)) == :error
     end
 
     test "a definition missing fields" do
-      assert Catalog.inline(%{}) == :error
-      assert Catalog.inline(%{schema: "auth", name: "uid"}) == :error
+      assert inline(%{}) == :error
+      assert inline(%{schema: "auth", name: "uid"}) == :error
     end
   end
 

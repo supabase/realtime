@@ -3,34 +3,34 @@ defmodule SqlLogex.Resolver do
   Binds a `SqlLogex.AST` into `SqlLogex.IR`, with the type of every node.
 
   Types are `:text`, `:uuid`, `:jsonb`, `:bool` and `:unknown`. Operators are bound by name and
-  operand types from an allowlist, casts and functions likewise, and known functions are inlined
-  from `SqlLogex.Catalog` when the tenant's definition matches.
+  operand types from an allowlist, casts and functions likewise, and the profile's functions
+  (`SqlLogex.Profile`) are inlined by `SqlLogex.Catalog` when the definition in the database
+  matches.
 
   Resolution never fails. Whatever isn't allowlisted becomes `{:unsupported, reason}` in place,
   with type `:unknown`, so `SqlLogex.Eval` can still decide the rest of the expression. A node
   that has an unsupported operand is unsupported with the operand's reason, except where the
   evaluator treats operands individually: the children of `AND`, `OR` and `NOT` stay where they are.
 
-  Reasons are one of the following. None of them holds policy text or a name from the tenant's
-  schemas, since callers log them: `keyword`, `:other_schema` and the like say what kind of thing
-  it was, not which.
+  Reasons are one of the following. None of them holds policy text or a name that the policy
+  author chose, since callers log them: `keyword`, `:other_schema` and the like say what kind of
+  thing it was, not which.
 
     * `{:unparsed, keyword}`: the parser couldn't read this part. `keyword` is `:case`, `:exists`,
       `:select`, `:array`, `:row` or `:not` if the text starts with it, else `:subquery` if it
       contains a `SELECT` (`topic IN ( SELECT ...)`), else `:other`
     * `{:operator, op, left_type, right_type}`, `{:cast, from_type, to_type}`, `{:nullif, left_type,
       right_type}`: no binding for these types. A type is its name if it is unqualified (a
-      `pg_catalog` one) or in `auth` or `realtime`, else `:other_schema`
+      `pg_catalog` one) or in a platform schema of the profile, else `:other_schema`
     * `{:array_operator, op, quantifier}`, `:array_not_constructor`, `{:array_types, lhs_type,
       element_types}`
     * `{:not_boolean, type}`: something else where a boolean is required
     * `{:coalesce_types, types}`: arguments of different types
-    * `{:function, name, why}`: `name` is `"schema.name"` for `auth` and `realtime`, the bare name
+    * `{:function, name, why}`: `name` is `"schema.name"` for a platform schema, the bare name
       for a built-in and `:other_schema` for anything else. `why` is `:not_allowlisted`,
       `:not_in_snapshot`, `:overloaded` (more than one definition of the name) or
       `:unknown_definition`
-    * `{:column, name}`: a column other than `topic` and `extension`, since the other columns of
-      the row aren't modelled yet
+    * `{:column, name}`: a column that is not in the profile
     * `:untyped_string_literal`, `:number_literal`, `:untyped_null`: constants Postgres prints
       without a type, which it only does where we don't model the type
     * `{:unknown_node, tag}`: not a node of `SqlLogex.AST`, `tag` being the first element of the
@@ -57,6 +57,7 @@ defmodule SqlLogex.Resolver do
   alias SqlLogex.Catalog
   alias SqlLogex.IR
   alias SqlLogex.Jsonb
+  alias SqlLogex.Profile
   alias SqlLogex.Value
 
   @type type :: :text | :uuid | :jsonb | :bool | :unknown
@@ -66,19 +67,27 @@ defmodule SqlLogex.Resolver do
   @cast_types %{"text" => :text, "uuid" => :uuid, "jsonb" => :jsonb, "boolean" => :bool}
 
   @doc """
-  Resolves `ast`. `functions` are the tenant's definitions, as in `SqlLogex.Catalog`: a call to
-  `realtime.*` or `auth.*` is inlined only if its definition is one of the known ones.
+  Resolves `ast`. `functions` are the function definitions in the database, as in
+  `SqlLogex.Catalog`: a call to a function in a platform schema of `profile` is inlined only if
+  its definition is one of the profile's known ones.
   """
-  @spec resolve(AST.t(), [map()]) :: resolved
-  def resolve(ast, functions) when is_list(functions), do: res(ast, index(functions))
+  @spec resolve(AST.t(), [map()], Profile.t()) :: resolved
+  def resolve(ast, functions, %Profile{} = profile) when is_list(functions) do
+    res(ast, %{
+      functions: index(functions, profile),
+      columns: profile.columns,
+      platform_schemas: profile.platform_schemas,
+      platform_prefixes: Enum.map(profile.platform_schemas, &(&1 <> "."))
+    })
+  end
 
   # {schema, name} => {:ok, resolved} | {:error, why}
-  defp index(functions) do
+  defp index(functions, profile) do
     functions
     |> Enum.group_by(&{Map.get(&1, :schema), Map.get(&1, :name)})
     |> Map.new(fn
       {key, [definition]} ->
-        case Catalog.inline(definition) do
+        case Catalog.inline(definition, profile.functions) do
           {:ok, resolved} -> {key, {:ok, resolved}}
           :error -> {key, {:error, :unknown_definition}}
         end
@@ -90,47 +99,52 @@ defmodule SqlLogex.Resolver do
 
   ## Nodes
 
-  defp res({:unsupported, raw}, _fns), do: unsupported({:unparsed, unparsed_keyword(raw)})
+  defp res({:unsupported, raw}, _ctx), do: unsupported({:unparsed, unparsed_keyword(raw)})
 
   # Constants and columns
-  defp res({:const, :bool, value}, _fns), do: {{:lit, value}, :bool}
-  defp res({:const, :string, _}, _fns), do: unsupported(:untyped_string_literal)
-  defp res({:const, :number, _raw}, _fns), do: unsupported(:number_literal)
-  defp res({:const, :null}, _fns), do: unsupported(:untyped_null)
-  defp res({:column, name}, _fns) when name in ["topic", "extension"], do: {{:column, name}, :text}
-  defp res({:column, name}, _fns), do: unsupported({:column, name})
+  defp res({:const, :bool, value}, _ctx), do: {{:lit, value}, :bool}
+  defp res({:const, :string, _}, _ctx), do: unsupported(:untyped_string_literal)
+  defp res({:const, :number, _raw}, _ctx), do: unsupported(:number_literal)
+  defp res({:const, :null}, _ctx), do: unsupported(:untyped_null)
+
+  defp res({:column, name}, ctx) do
+    case Map.fetch(ctx.columns, name) do
+      {:ok, type} -> {{:column, name}, type}
+      :error -> unsupported({:column, name})
+    end
+  end
 
   # Casts. A literal is converted now, by the primitive the executor would run on it.
-  defp res({:cast, {:const, :string, string}, type}, _fns) do
+  defp res({:cast, {:const, :string, string}, type}, ctx) do
     case type do
       "text" -> {{:lit, {:text, string}}, :text}
       "uuid" -> literal(Value.uuid_in({:text, string}), :uuid)
       "jsonb" -> literal(Jsonb.parse({:text, string}), :jsonb)
       "boolean" -> literal(Value.bool_in({:text, string}), :bool)
-      _ -> unsupported({:cast, :string_literal, known_name(type)})
+      _ -> unsupported({:cast, :string_literal, known_name(type, ctx)})
     end
   end
 
-  defp res({:cast, {:const, :null}, type}, _fns) do
+  defp res({:cast, {:const, :null}, type}, ctx) do
     case Map.fetch(@cast_types, type) do
       {:ok, resolved_type} -> {{:lit, nil}, resolved_type}
-      :error -> unsupported({:cast, :null, known_name(type)})
+      :error -> unsupported({:cast, :null, known_name(type, ctx)})
     end
   end
 
-  defp res({:cast, expr, type}, fns) do
-    case res(expr, fns) do
+  defp res({:cast, expr, type}, ctx) do
+    case res(expr, ctx) do
       {{:unsupported, _} = unsupported, _} -> {unsupported, :unknown}
-      {ir, from} -> cast(ir, from, type)
+      {ir, from} -> cast(ir, from, type, ctx)
     end
   end
 
   # Boolean structure
-  defp res({:bool_expr, op, children}, fns), do: {{op, Enum.map(children, &boolean(&1, fns))}, :bool}
-  defp res({:not, child}, fns), do: {{:not, boolean(child, fns)}, :bool}
+  defp res({:bool_expr, op, children}, ctx), do: {{op, Enum.map(children, &boolean(&1, ctx))}, :bool}
+  defp res({:not, child}, ctx), do: {{:not, boolean(child, ctx)}, :bool}
 
-  defp res({:null_test, kind, child}, fns) do
-    case res(child, fns) do
+  defp res({:null_test, kind, child}, ctx) do
+    case res(child, ctx) do
       {{:unsupported, _} = unsupported, _} -> {unsupported, :unknown}
       # `kind` is `:is_null` or `:is_not_null`, which are also the names of the primitives.
       {ir, _type} -> {call(Value, kind, [ir]), :bool}
@@ -138,46 +152,46 @@ defmodule SqlLogex.Resolver do
   end
 
   # Operators
-  defp res({:op, op, left, right}, fns) do
-    case propagate([res(left, fns), res(right, fns)]) do
+  defp res({:op, op, left, right}, ctx) do
+    case propagate([res(left, ctx), res(right, ctx)]) do
       {:unsupported, _} = unsupported -> {unsupported, :unknown}
       [{l, lt}, {r, rt}] -> operator(op, lt, rt, l, r)
     end
   end
 
-  defp res({:scalar_array_op, "=", :any, lhs, array}, fns), do: any(lhs, array, fns)
+  defp res({:scalar_array_op, "=", :any, lhs, array}, ctx), do: any(lhs, array, ctx)
 
-  defp res({:scalar_array_op, "<>", :all, lhs, array}, fns) do
-    case any(lhs, array, fns) do
+  defp res({:scalar_array_op, "<>", :all, lhs, array}, ctx) do
+    case any(lhs, array, ctx) do
       {{:unsupported, _}, _} = unsupported -> unsupported
       {ir, :bool} -> {{:not, ir}, :bool}
     end
   end
 
-  defp res({:scalar_array_op, op, quantifier, _lhs, _array}, _fns), do: unsupported({:array_operator, op, quantifier})
-  defp res({:array, _}, _fns), do: unsupported(:array_not_constructor)
+  defp res({:scalar_array_op, op, quantifier, _lhs, _array}, _ctx), do: unsupported({:array_operator, op, quantifier})
+  defp res({:array, _}, _ctx), do: unsupported(:array_not_constructor)
 
   # Functions
-  defp res({:func, schema, name, []}, fns) when schema in ["realtime", "auth"] do
-    case Map.fetch(fns, {schema, name}) do
-      {:ok, {:ok, resolved}} -> resolved
-      {:ok, {:error, why}} -> unsupported({:function, "#{schema}.#{name}", why})
-      :error -> unsupported({:function, "#{schema}.#{name}", :not_in_snapshot})
-    end
-  end
-
-  defp res({:func, nil, "current_setting", [{:cast, {:const, :string, name}, "text"}, {:const, :bool, true}]}, _fns),
+  defp res({:func, nil, "current_setting", [{:cast, {:const, :string, name}, "text"}, {:const, :bool, true}]}, _ctx),
     do: {{:setting, name}, :text}
 
-  defp res({:func, schema, name, _args}, _fns) do
-    name = [schema, name] |> Enum.reject(&is_nil/1) |> Enum.join(".") |> known_name()
-    unsupported({:function, name, :not_allowlisted})
+  defp res({:func, schema, name, args}, ctx) do
+    if args == [] and schema in ctx.platform_schemas do
+      case Map.fetch(ctx.functions, {schema, name}) do
+        {:ok, {:ok, resolved}} -> resolved
+        {:ok, {:error, why}} -> unsupported({:function, "#{schema}.#{name}", why})
+        :error -> unsupported({:function, "#{schema}.#{name}", :not_in_snapshot})
+      end
+    else
+      name = [schema, name] |> Enum.reject(&is_nil/1) |> Enum.join(".") |> known_name(ctx)
+      unsupported({:function, name, :not_allowlisted})
+    end
   end
 
   # COALESCE, NULLIF and sublinks. An unsupported COALESCE argument makes the node unsupported
   # wherever it is, see `SqlLogex.Value.coalesce/1`. Postgres gave all arguments one type.
-  defp res({:coalesce, args}, fns) do
-    case propagate(Enum.map(args, &res(&1, fns))) do
+  defp res({:coalesce, args}, ctx) do
+    case propagate(Enum.map(args, &res(&1, ctx))) do
       {:unsupported, _} = unsupported ->
         {unsupported, :unknown}
 
@@ -189,28 +203,29 @@ defmodule SqlLogex.Resolver do
     end
   end
 
-  defp res({:nullif, a, b}, fns) do
-    case propagate([res(a, fns), res(b, fns)]) do
+  defp res({:nullif, a, b}, ctx) do
+    case propagate([res(a, ctx), res(b, ctx)]) do
       {:unsupported, _} = unsupported -> {unsupported, :unknown}
       [{l, :text}, {r, :text}] -> {call(Value, :nullif, [l, r]), :text}
       [{_, lt}, {_, rt}] -> unsupported({:nullif, lt, rt})
     end
   end
 
-  defp res({:sublink, expr, _alias}, fns), do: res(expr, fns)
+  defp res({:sublink, expr, _alias}, ctx), do: res(expr, ctx)
 
-  defp res(other, _fns), do: unsupported({:unknown_node, node_tag(other)})
+  defp res(other, _ctx), do: unsupported({:unknown_node, node_tag(other)})
 
   ## Pieces
 
-  defp cast(ir, :text, "text"), do: {ir, :text}
-  defp cast(ir, :uuid, "text"), do: {call(Value, :uuid_out, [ir]), :text}
-  defp cast(ir, :text, "uuid"), do: {call(Value, :uuid_in, [ir]), :uuid}
-  defp cast(ir, :text, "jsonb"), do: {call(Jsonb, :parse, [ir]), :jsonb}
-  defp cast(ir, :text, "boolean"), do: {call(Value, :bool_in, [ir]), :bool}
-  defp cast(_ir, from, type), do: unsupported({:cast, from, known_name(type)})
+  defp cast(ir, :text, "text", _ctx), do: {ir, :text}
+  defp cast(ir, :uuid, "text", _ctx), do: {call(Value, :uuid_out, [ir]), :text}
+  defp cast(ir, :text, "uuid", _ctx), do: {call(Value, :uuid_in, [ir]), :uuid}
+  defp cast(ir, :text, "jsonb", _ctx), do: {call(Jsonb, :parse, [ir]), :jsonb}
+  defp cast(ir, :text, "boolean", _ctx), do: {call(Value, :bool_in, [ir]), :bool}
+  defp cast(_ir, from, type, ctx), do: unsupported({:cast, from, known_name(type, ctx)})
 
-  # Reasons are logged, so they must not carry what the tenant wrote. These keep the kind of thing.
+  # Reasons are logged, so they must not carry what the policy author wrote. These keep the kind
+  # of thing.
 
   # The words Postgres prints at the start of what the parser can't read. Anything else is
   # `:subquery` if it has a SELECT in it, like `topic IN ( SELECT ...)`, and otherwise `:other`,
@@ -237,9 +252,10 @@ defmodule SqlLogex.Resolver do
   defp node_tag(_node), do: :other
 
   # Policies are deparsed with `search_path = ''`, so a name outside `pg_catalog` has its schema in
-  # front. The ones in `auth` and `realtime` are Supabase's, the rest are the tenant's.
-  defp known_name(name) do
-    if not String.contains?(name, ".") or String.starts_with?(name, ["auth.", "realtime."]),
+  # front. The ones in a platform schema of the profile are the platform's, the rest are the
+  # policy author's.
+  defp known_name(name, ctx) do
+    if not String.contains?(name, ".") or String.starts_with?(name, ctx.platform_prefixes),
       do: name,
       else: :other_schema
   end
@@ -249,8 +265,8 @@ defmodule SqlLogex.Resolver do
 
   # An operand of AND, OR or NOT: an unsupported one stays, so the evaluator can still decide the
   # rest around it.
-  defp boolean(ast, fns) do
-    case res(ast, fns) do
+  defp boolean(ast, ctx) do
+    case res(ast, ctx) do
       {ir, :bool} -> ir
       {{:unsupported, _} = unsupported, _} -> unsupported
       {_ir, type} -> {:unsupported, {:not_boolean, type}}
@@ -271,10 +287,10 @@ defmodule SqlLogex.Resolver do
   defp regex(l, r, mode), do: call(Value, :regex_match, [l, r, {:lit, mode}])
 
   # `lhs = ANY (ARRAY[...])` on text.
-  defp any(lhs, array, fns) do
+  defp any(lhs, array, ctx) do
     case array_elements(array) do
       {:ok, elements} ->
-        case propagate(Enum.map([lhs | elements], &res(&1, fns))) do
+        case propagate(Enum.map([lhs | elements], &res(&1, ctx))) do
           {:unsupported, _} = unsupported -> {unsupported, :unknown}
           [{l, :text} | elems] -> any_text(l, elems)
           [{_, lt} | elems] -> unsupported({:array_types, lt, Enum.map(elems, &elem(&1, 1))})

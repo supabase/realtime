@@ -13,6 +13,7 @@ defmodule Realtime.PromEx.Plugins.SqlLogexTest do
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
   alias Realtime.Tenants.SqlLogexCache
+  alias Realtime.Tenants.SqlLogexProfile
   alias Realtime.Tenants.SqlLogexShadow
 
   defmodule MetricsTest do
@@ -39,12 +40,15 @@ defmodule Realtime.PromEx.Plugins.SqlLogexTest do
   end
 
   defp always_allow_snapshot do
-    SqlLogex.Snapshot.new(%{
-      rls_enabled: true,
-      rls_forced: false,
-      roles: %{"authenticated" => %{bypass_rls: false, select: true, insert: true}},
-      policies: [%{name: "p", cmd: "*", permissive: true, roles: ["authenticated"], qual: "true", with_check: nil}]
-    })
+    SqlLogex.Snapshot.new(
+      %{
+        rls_enabled: true,
+        rls_forced: false,
+        roles: %{"authenticated" => %{bypass_rls: false, select: true, insert: true}},
+        policies: [%{name: "p", cmd: "*", permissive: true, roles: ["authenticated"], qual: "true", with_check: nil}]
+      },
+      SqlLogexProfile.profile()
+    )
   end
 
   defp metric_value(metric, expected_tags \\ nil) do

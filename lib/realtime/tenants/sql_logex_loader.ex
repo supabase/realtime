@@ -12,6 +12,7 @@ defmodule Realtime.Tenants.SqlLogexLoader do
   require Logger
 
   alias Realtime.Database
+  alias Realtime.Tenants.SqlLogexProfile
   alias SqlLogex.Snapshot
 
   @functions_query """
@@ -41,8 +42,9 @@ defmodule Realtime.Tenants.SqlLogexLoader do
   """
 
   @doc """
-  Loads a tenant's snapshot: opens a transaction on `db_conn`, reads everything `SqlLogex.Snapshot.new/1`
-  needs, and parses and resolves every policy expression once, outside the transaction.
+  Loads a tenant's snapshot: opens a transaction on `db_conn`, reads everything `SqlLogex.Snapshot.new/2`
+  needs, and parses and resolves every policy expression once, outside the transaction, for the
+  profile of `realtime.messages` (`Realtime.Tenants.SqlLogexProfile`).
 
   `db_conn` is whatever connection the caller already has for the tenant (the same one
   `Realtime.Tenants.Authorization` uses for the real check) — this module has no opinion on how it
@@ -66,7 +68,7 @@ defmodule Realtime.Tenants.SqlLogexLoader do
     # effect inside a transaction block.
     case Database.transaction(db_conn, &read/1, opts) do
       {:ok, input} ->
-        snapshot = Snapshot.new(input)
+        snapshot = Snapshot.new(input, SqlLogexProfile.profile())
         log_unsupported(snapshot, tenant_id)
         {:ok, snapshot}
 
@@ -90,7 +92,7 @@ defmodule Realtime.Tenants.SqlLogexLoader do
 
   @doc """
   Reads a tenant's RLS state from an already-open connection, inside a transaction, as the map
-  `SqlLogex.Snapshot.new/1` expects.
+  `SqlLogex.Snapshot.new/2` expects.
 
   The deparsed policy text (`pg_get_expr`) and function source are qualified by the session's
   search_path, so it is pinned to `''` for the duration and restored after, the way
@@ -122,7 +124,7 @@ defmodule Realtime.Tenants.SqlLogexLoader do
 
   @doc """
   Reads the tenant's definitions of `auth.uid/jwt/role` and `realtime.topic`, the ones
-  `SqlLogex.Catalog` knows how to recognise, from an already-open connection, inside a transaction.
+  `Realtime.Tenants.SqlLogexProfile` knows, from an already-open connection, inside a transaction.
   """
   @spec read_functions(DBConnection.t()) :: [map()]
   def read_functions(conn) do
