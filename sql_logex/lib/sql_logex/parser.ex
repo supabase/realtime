@@ -21,9 +21,9 @@ defmodule SqlLogex.Parser do
 
   Text longer than #{@max_bytes} bytes is `{:unsupported, text}` without running the grammar. The
   recovery path is quadratic in the nesting depth (measured: a 52 KB policy of 1500 nested
-  `COALESCE(... COLLATE "C", 'a')` that Postgres 17 accepted took 3.1 s), and tenants control
-  policy text. Real policy expressions are far smaller, the largest captured fixture is 200 bytes.
-  The round trip above still holds.
+  `COALESCE(... COLLATE "C", 'a')` that Postgres 17 accepted took 3.1 s), and the policy author
+  controls the policy text. Real policy expressions are far smaller, the largest captured fixture
+  is 200 bytes. The round trip above still holds.
 
   The grammar is NimbleParsec, compiled into this module. NimbleParsec is a compile-time
   dependency only.

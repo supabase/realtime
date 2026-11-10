@@ -24,21 +24,22 @@ end
 
 defmodule SqlLogex.Snapshot do
   @moduledoc """
-  Everything `SqlLogex.PolicySet.decide/4` needs to know about a tenant's `realtime.messages`,
-  as plain data: whether RLS is on, who may bypass it or lacks the grants, and the policies.
+  Everything `SqlLogex.PolicySet.decide/3` needs to know about the table, as plain data:
+  the profile, whether RLS is on, who may bypass it or lacks the grants, and the policies.
 
-  `new/1` takes the data as the loader reads it from the catalog:
+  `new/2` takes the data as the caller reads it from the catalog, and the profile
+  (`SqlLogex.Profile`):
 
     * `rls_enabled` and `rls_forced`: `relrowsecurity` and `relforcerowsecurity` of the table
-    * `roles`: for `"anon"` and `"authenticated"`, a map with `bypass_rls` (`rolbypassrls`) and the
+    * `roles`: for the roles of the profile, a map with `bypass_rls` (`rolbypassrls`) and the
       table privileges `select` and `insert`
     * `policies`: maps with `name`, `cmd`, `permissive`, `roles`, `qual` and `with_check`, where
       the last two are the text of `pg_get_expr` (or `nil`). The expressions must have been
       printed with `search_path = ''`, so every name is qualified
     * `functions`: maps with `schema`, `name`, `language`, `volatility`, `security_definer`,
-      `config`, `return_type` and `source` for the zero-argument functions in the `realtime` and
-      `auth` schemas (see `SqlLogex.Catalog`). Optional, `[]` by default. Two definitions with
-      the same name, for instance overloads, make calls to it unsupported
+      `config`, `return_type` and `source` for the zero-argument functions in the platform
+      schemas of the profile (see `SqlLogex.Catalog`). Optional, `[]` by default. Two
+      definitions with the same name, for instance overloads, make calls to it unsupported
 
   Every expression is parsed and resolved once, here, so deciding is only evaluation.
   """
@@ -46,25 +47,31 @@ defmodule SqlLogex.Snapshot do
   alias SqlLogex.IR
   alias SqlLogex.Parser
   alias SqlLogex.Policy
+  alias SqlLogex.Profile
   alias SqlLogex.Resolver
 
   @type role_info :: %{bypass_rls: boolean(), select: boolean(), insert: boolean()}
 
   @type t :: %__MODULE__{
+          profile: Profile.t(),
           rls_enabled: boolean(),
           rls_forced: boolean(),
           roles: %{optional(String.t()) => role_info},
           policies: [Policy.t()]
         }
 
-  defstruct [:rls_enabled, :rls_forced, :roles, :policies]
+  defstruct [:profile, :rls_enabled, :rls_forced, :roles, :policies]
 
-  @doc "Builds a snapshot, parsing and resolving the policy expressions."
-  @spec new(map()) :: t
-  def new(%{rls_enabled: rls_enabled, rls_forced: rls_forced, roles: roles, policies: policies} = attrs) do
+  @doc "Builds a snapshot for `profile`, parsing and resolving the policy expressions."
+  @spec new(map(), Profile.t()) :: t
+  def new(
+        %{rls_enabled: rls_enabled, rls_forced: rls_forced, roles: roles, policies: policies} = attrs,
+        %Profile{} = profile
+      ) do
     functions = Map.get(attrs, :functions, [])
 
     %__MODULE__{
+      profile: profile,
       rls_enabled: rls_enabled,
       rls_forced: rls_forced,
       roles: roles,
@@ -75,8 +82,8 @@ defmodule SqlLogex.Snapshot do
             cmd: policy.cmd,
             permissive: policy.permissive,
             roles: policy.roles,
-            using: expression(policy.qual, functions),
-            with_check: expression(policy.with_check, functions)
+            using: expression(policy.qual, functions, profile),
+            with_check: expression(policy.with_check, functions, profile)
           }
         end)
     }
@@ -99,6 +106,6 @@ defmodule SqlLogex.Snapshot do
     for {ir, _type} <- [using, with_check], reason <- IR.unsupported_reasons(ir), uniq: true, do: reason
   end
 
-  defp expression(nil, _functions), do: nil
-  defp expression(text, functions), do: text |> Parser.parse() |> Resolver.resolve(functions)
+  defp expression(nil, _functions, _profile), do: nil
+  defp expression(text, functions, profile), do: text |> Parser.parse() |> Resolver.resolve(functions, profile)
 end

@@ -35,7 +35,7 @@ defmodule SqlLogex.EvalTest do
     end
 
     test "a setting that isn't in the env is unsupported" do
-      assert eval({:setting, "app.x"}) == {:unsupported, {:unknown_setting, :other}}
+      assert eval({:setting, "app.x"}) == {:unsupported, {:unknown_setting, "app.x"}}
     end
 
     test "a column is read from the row, an unbound one is unsupported" do

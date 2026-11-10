@@ -1,6 +1,6 @@
 defmodule Realtime.Tenants.SqlLogexLoaderTest do
   # Direct tests for the loader that reads a tenant's realtime.messages RLS state into the shape
-  # SqlLogex.Snapshot.new/1 expects. sql_logex_differential_test.exs exercises this same code
+  # SqlLogex.Snapshot.new/2 expects. sql_logex_differential_test.exs exercises this same code
   # against thousands of decisions; this covers the loader itself in isolation.
   use RealtimeWeb.ConnCase, async: true
 
@@ -41,7 +41,7 @@ defmodule Realtime.Tenants.SqlLogexLoaderTest do
                "users send on own channel"
              ]
 
-      # The supabase/postgres image's auth.uid()/realtime.topic() are known bodies (SqlLogex.Catalog),
+      # The supabase/postgres image's auth.uid()/realtime.topic() are known bodies (Realtime.Tenants.SqlLogexProfile),
       # so the own-channel policy, which only uses them, should be fully modelled.
       own_channel = Enum.find(snapshot.policies, &(&1.name == "users receive on own channel"))
       {ir, :bool} = own_channel.using

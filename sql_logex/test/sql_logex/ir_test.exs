@@ -119,7 +119,8 @@ defmodule SqlLogex.IRTest do
       %{functions: catalog.functions}
     end
 
-    defp resolve(text, functions), do: text |> Parser.parse() |> Resolver.resolve(functions) |> elem(0)
+    defp resolve(text, functions),
+      do: text |> Parser.parse() |> Resolver.resolve(functions, SqlLogex.Test.RealtimeProfile.profile()) |> elem(0)
 
     test "an expression made of what is modelled", %{functions: functions} do
       for text <- [

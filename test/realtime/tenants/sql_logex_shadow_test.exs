@@ -21,6 +21,7 @@ defmodule Realtime.Tenants.SqlLogexShadowTest do
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.SqlLogexCache
   alias Realtime.Tenants.SqlLogexEnv
+  alias Realtime.Tenants.SqlLogexProfile
   alias Realtime.Tenants.SqlLogexShadow
 
   @flag "sql_logex_shadow"
@@ -47,12 +48,15 @@ defmodule Realtime.Tenants.SqlLogexShadowTest do
   # A one-policy snapshot: permissive, SELECT and INSERT, unconditionally true. Decides :allow for
   # both reads and writes by "authenticated", with no dependency on topic/sub/extension.
   defp always_allow_snapshot do
-    SqlLogex.Snapshot.new(%{
-      rls_enabled: true,
-      rls_forced: false,
-      roles: %{"authenticated" => %{bypass_rls: false, select: true, insert: true}},
-      policies: [%{name: "p", cmd: "*", permissive: true, roles: ["authenticated"], qual: "true", with_check: nil}]
-    })
+    SqlLogex.Snapshot.new(
+      %{
+        rls_enabled: true,
+        rls_forced: false,
+        roles: %{"authenticated" => %{bypass_rls: false, select: true, insert: true}},
+        policies: [%{name: "p", cmd: "*", permissive: true, roles: ["authenticated"], qual: "true", with_check: nil}]
+      },
+      SqlLogexProfile.profile()
+    )
   end
 
   # What Authorization's handle_policies_result/2 returns for any Postgrex.Error from the check.

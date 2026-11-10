@@ -3,7 +3,10 @@ defmodule SqlLogex.ResolverTest do
 
   alias SqlLogex.Jsonb
   alias SqlLogex.Resolver
+  alias SqlLogex.Test.RealtimeProfile
   alias SqlLogex.Value
+
+  @profile RealtimeProfile.profile()
 
   {catalog, _} = Code.eval_file(Path.expand("../fixtures/pg17/catalog.exs", __DIR__))
   @functions catalog.functions
@@ -27,7 +30,7 @@ defmodule SqlLogex.ResolverTest do
   defp lit_text(s), do: {:lit, {:text, s}}
   defp unsupported(reason), do: {{:unsupported, reason}, :unknown}
 
-  defp resolve(ast, functions \\ @functions), do: Resolver.resolve(ast, functions)
+  defp resolve(ast, functions \\ @functions), do: Resolver.resolve(ast, functions, @profile)
 
   describe "constants" do
     test "a boolean is a boolean literal" do
@@ -321,7 +324,7 @@ defmodule SqlLogex.ResolverTest do
       end
     end
 
-    test "to a type of the tenant's is unsupported without its name" do
+    test "to a type that the policy author created is unsupported without its name" do
       for type <- ["public.status", ~s(public."My Type"), "other.status[]"] do
         assert resolve({:cast, {:const, :string, "x"}, type}) == unsupported({:cast, :string_literal, :other_schema})
         assert resolve(null(type)) == unsupported({:cast, :null, :other_schema})
@@ -590,7 +593,7 @@ defmodule SqlLogex.ResolverTest do
 
       test "#{version}: every expression resolves, to a boolean or to an unsupported node" do
         for policy <- @catalog.policies, text <- [policy.qual, policy.with_check], text != nil do
-          {ir, type} = text |> SqlLogex.Parser.parse() |> Resolver.resolve(@catalog.functions)
+          {ir, type} = text |> SqlLogex.Parser.parse() |> Resolver.resolve(@catalog.functions, @profile)
           assert type in [:bool, :unknown], "#{policy.name}: #{inspect(type)}"
           assert type == :bool or match?({:unsupported, _}, ir), policy.name
         end
@@ -599,7 +602,7 @@ defmodule SqlLogex.ResolverTest do
       test "#{version}: the policies named in @supported resolve completely and the others are partly unsupported" do
         resolved =
           for policy <- @catalog.policies, text <- [policy.qual || policy.with_check] do
-            {ir, _type} = text |> SqlLogex.Parser.parse() |> Resolver.resolve(@catalog.functions)
+            {ir, _type} = text |> SqlLogex.Parser.parse() |> Resolver.resolve(@catalog.functions, @profile)
             {policy.name, contains_unsupported?(ir)}
           end
 

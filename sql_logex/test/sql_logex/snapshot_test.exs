@@ -3,7 +3,10 @@ defmodule SqlLogex.SnapshotTest do
 
   alias SqlLogex.Policy
   alias SqlLogex.Snapshot
+  alias SqlLogex.Test.RealtimeProfile
   alias SqlLogex.Value
+
+  @profile RealtimeProfile.profile()
 
   {catalog, _} = Code.eval_file(Path.expand("../fixtures/pg17/catalog.exs", __DIR__))
   @functions catalog.functions
@@ -13,6 +16,8 @@ defmodule SqlLogex.SnapshotTest do
     "authenticated" => %{bypass_rls: false, select: true, insert: true}
   }
 
+  defp new_snapshot(attrs), do: Snapshot.new(attrs, @profile)
+
   defp attrs(policies, overrides \\ %{}) do
     Map.merge(
       %{rls_enabled: true, rls_forced: false, roles: @roles, policies: policies, functions: @functions},
@@ -20,16 +25,16 @@ defmodule SqlLogex.SnapshotTest do
     )
   end
 
-  describe "new/1" do
+  describe "new/2" do
     test "keeps the table facts and the roles" do
-      snapshot = Snapshot.new(attrs([], %{rls_enabled: false, rls_forced: true}))
+      snapshot = new_snapshot(attrs([], %{rls_enabled: false, rls_forced: true}))
 
-      assert %Snapshot{rls_enabled: false, rls_forced: true, roles: @roles, policies: []} = snapshot
+      assert %Snapshot{profile: @profile, rls_enabled: false, rls_forced: true, roles: @roles, policies: []} = snapshot
     end
 
     test "parses and resolves the expressions of every policy" do
       snapshot =
-        Snapshot.new(
+        new_snapshot(
           attrs([
             %{
               name: "p",
@@ -72,7 +77,7 @@ defmodule SqlLogex.SnapshotTest do
 
     test "an expression the parser or resolver can't handle is unsupported in place" do
       snapshot =
-        Snapshot.new(
+        new_snapshot(
           attrs([
             %{name: "p", cmd: "r", permissive: true, roles: ["public"], qual: "CASE WHEN x THEN y END", with_check: nil}
           ])
@@ -83,7 +88,7 @@ defmodule SqlLogex.SnapshotTest do
 
     test "functions are optional, and without them calls are unsupported" do
       snapshot =
-        Snapshot.new(%{
+        new_snapshot(%{
           rls_enabled: true,
           rls_forced: false,
           roles: @roles,
@@ -118,7 +123,7 @@ defmodule SqlLogex.SnapshotTest do
 
     test "is empty when every policy is modelled" do
       snapshot =
-        Snapshot.new(
+        new_snapshot(
           attrs([
             policy("p", "r", "(realtime.topic() = 'x'::text)"),
             policy("q", "a", nil, with_check: "(extension = 'broadcast'::text)")
@@ -126,12 +131,12 @@ defmodule SqlLogex.SnapshotTest do
         )
 
       assert Snapshot.unsupported(snapshot) == []
-      assert [] |> attrs() |> Snapshot.new() |> Snapshot.unsupported() == []
+      assert [] |> attrs() |> new_snapshot() |> Snapshot.unsupported() == []
     end
 
     test "lists the cmd, permissive and reasons of the policies that aren't, without their names" do
       snapshot =
-        Snapshot.new(
+        new_snapshot(
           attrs([
             policy("modelled", "r", "(realtime.topic() = 'x'::text)"),
             policy("secret_name", "r", "((realtime.topic() = 'x'::text) AND (lower(extension) = 'y'::text))"),
@@ -155,7 +160,7 @@ defmodule SqlLogex.SnapshotTest do
 
     test "has each reason of a policy once, over using and with_check" do
       snapshot =
-        Snapshot.new(
+        new_snapshot(
           attrs([
             policy("p", "*", "((lower(extension) = 'x'::text) OR (lower(extension) = 'y'::text))",
               with_check: "(lower(extension) = 'z'::text)"
