@@ -104,7 +104,7 @@ defmodule Realtime.MixProject do
       {:logflare_logger_backend, "~> 0.11"},
       {:syn, "~> 3.3"},
       {:forum, path: "./forum"},
-      {:sql_logex, path: "./sql_logex"},
+      {:policy_eval, path: "./policy_eval"},
       {:rollcall, path: "./rollcall"},
       {:cachex, "~> 4.0"},
       {:open_api_spex, "~> 3.16"},
