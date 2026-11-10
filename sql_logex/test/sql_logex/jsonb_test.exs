@@ -491,10 +491,10 @@ defmodule SqlLogex.JsonbTest do
       assert Jsonb.object_field_text(doc, t("b")) == t("top")
     end
 
-    test "reads claims the way auth.uid() does" do
-      claims = parse(~S|{"sub":"A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11","role":"authenticated","exp":1700000000}|)
+    test "reads claims the way app.user_id() does" do
+      claims = parse(~S|{"sub":"A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11","role":"member","exp":1700000000}|)
       assert Jsonb.object_field_text(claims, t("sub")) == t("A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11")
-      assert Jsonb.object_field_text(claims, t("role")) == t("authenticated")
+      assert Jsonb.object_field_text(claims, t("role")) == t("member")
       assert Jsonb.object_field_text(claims, t("exp")) == {:unsupported, :jsonb_number_text}
       assert Jsonb.object_field_text(claims, t("missing")) == nil
     end

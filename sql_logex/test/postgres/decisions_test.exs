@@ -6,7 +6,7 @@ defmodule SqlLogex.Postgres.DecisionsTest do
   #   mix test test/postgres/decisions_test.exs
   #   SQL_LOGEX_REPORT=1 mix test test/postgres/decisions_test.exs   # coverage report
   #
-  # The scenarios are in SqlLogex.Test.RealtimeScenarios. The decision table of the unit tests
+  # The scenarios are in SqlLogex.Test.ExampleScenarios. The decision table of the unit tests
   # (policy_set_test.exs) is among them, so Postgres also checks what the unit tests expect, see
   # SqlLogex.Test.Collector.
   use ExUnit.Case, async: false
@@ -15,24 +15,24 @@ defmodule SqlLogex.Postgres.DecisionsTest do
   alias SqlLogex.Snapshot
   alias SqlLogex.Test.Collector
   alias SqlLogex.Test.Postgres
-  alias SqlLogex.Test.RealtimeDatabase
-  alias SqlLogex.Test.RealtimeProfile
-  alias SqlLogex.Test.RealtimeScenarios
+  alias SqlLogex.Test.ExampleDatabase
+  alias SqlLogex.Test.ExampleProfile
+  alias SqlLogex.Test.ExampleScenarios
 
   @moduletag :postgres
   @moduletag timeout: 600_000
 
-  @profile RealtimeProfile.profile()
+  @profile ExampleProfile.profile()
 
   @insert_probes """
-  INSERT INTO realtime.messages (topic, extension)
-  SELECT $1::text, extension FROM unnest($2::text[]) AS extension
-  RETURNING id, extension
+  INSERT INTO app.docs (team, kind)
+  SELECT $1::text, kind FROM unnest($2::text[]) AS kind
+  RETURNING id, kind
   """
 
-  @select_probes "SELECT id FROM realtime.messages WHERE id = ANY($1::uuid[])"
+  @select_probes "SELECT id FROM app.docs WHERE id = ANY($1::uuid[])"
 
-  @insert "INSERT INTO realtime.messages (topic, extension) VALUES ($1, $2)"
+  @insert "INSERT INTO app.docs (team, kind) VALUES ($1, $2)"
 
   setup_all do
     %{collector: Collector.start(:decisions)}
@@ -42,34 +42,34 @@ defmodule SqlLogex.Postgres.DecisionsTest do
     %{conn: start_supervised!(Postgres)}
   end
 
-  for form <- [:plain, :initplan], flavor <- [:legacy, :supabase_auth] do
-    test "user channels: #{form} policies, #{RealtimeScenarios.flavor_label(flavor)} auth functions", context do
-      run(context, RealtimeScenarios.user_channel_grid(unquote(form), unquote(flavor)))
+  for form <- [:plain, :initplan], flavor <- [:simple, :fallback] do
+    test "personal teams: #{form} policies, #{ExampleScenarios.flavor_label(flavor)} bodies", context do
+      run(context, ExampleScenarios.personal_team_grid(unquote(form), unquote(flavor)))
     end
   end
 
-  test "user channels: the decision table of the unit tests", context do
-    run(context, RealtimeScenarios.user_channel_table_scenarios())
+  test "personal teams: the decision table of the unit tests", context do
+    run(context, ExampleScenarios.personal_team_table_scenarios())
   end
 
-  test "generator policies", context do
-    run(context, RealtimeScenarios.generator_scenarios())
+  test "typical policies", context do
+    run(context, ExampleScenarios.typical_scenarios())
   end
 
   test "combining policies", context do
-    run(context, RealtimeScenarios.combination_scenarios())
+    run(context, ExampleScenarios.combination_scenarios())
   end
 
   test "what the snapshot has to rule out", %{conn: conn} = context do
-    run(context, RealtimeScenarios.snapshot_scenarios(Postgres.server_version_num(conn)))
+    run(context, ExampleScenarios.snapshot_scenarios(Postgres.server_version_num(conn)))
   end
 
   test "writes that fail with the SELECT of the call", context do
-    run(context, RealtimeScenarios.select_dependent_scenarios())
+    run(context, ExampleScenarios.select_dependent_scenarios())
   end
 
   test "a policy that raises next to one that allows", context do
-    run(context, RealtimeScenarios.raising_policy_scenarios())
+    run(context, ExampleScenarios.raising_policy_scenarios())
   end
 
   defp run(%{conn: conn, collector: collector}, scenarios) do
@@ -80,7 +80,7 @@ defmodule SqlLogex.Postgres.DecisionsTest do
   # on the table, then the snapshot input and the answers of Postgres. Then the library decides
   # each question, and SqlLogex.Differential compares the two answers.
   defp run_scenario(conn, scenario) do
-    table = RealtimeDatabase.table()
+    table = ExampleDatabase.table()
 
     {input, answers} =
       Postgres.rolled_back(conn, fn conn ->
@@ -99,9 +99,9 @@ defmodule SqlLogex.Postgres.DecisionsTest do
 
     snapshot = Snapshot.new(input, @profile)
 
-    for {{_operation, extension} = key, operation, env} <- scenario.questions do
+    for {{_operation, kind} = key, operation, env} <- scenario.questions do
       Differential.compare(Map.fetch!(answers, key), Differential.decide(snapshot, env, operation),
-        name: "#{scenario.name} [#{operation} #{extension}]",
+        name: "#{scenario.name} [#{operation} #{kind}]",
         group: scenario.group,
         detail: detail(scenario, key, env),
         meta: Map.merge(scenario.meta, %{scenario: scenario.name, key: key})
@@ -131,48 +131,48 @@ defmodule SqlLogex.Postgres.DecisionsTest do
 
   ## The oracle
 
-  # What Postgres decides for each {operation, extension}, asked the way that the profile describes.
+  # What Postgres decides for each {operation, kind}, asked the way that the profile describes.
   # One call asks for all of them. As the table owner, it inserts a probe row for each read. Then,
   # as the role and with the settings of the case, one SELECT reads the probes back, and each write
   # is an INSERT in a savepoint. insufficient_privilege, a missing grant or a failed WITH CHECK,
   # denies a write. The SELECT runs in every call, also without reads, so the writes depend on the
   # SELECT policies too: that is `write_plans_select: true`. Any other error fails the whole call,
   # so then each one is asked for on its own, to tell which one raised.
-  defp outcomes(conn, %{env: env, extensions: extensions}) do
-    case ask(conn, env, extensions, extensions) do
+  defp outcomes(conn, %{env: env, kinds: kinds}) do
+    case ask(conn, env, kinds, kinds) do
       {:ok, read_allowed, write_allowed} ->
-        Map.merge(zip(:read, extensions, read_allowed), zip(:write, extensions, write_allowed))
+        Map.merge(zip(:read, kinds, read_allowed), zip(:write, kinds, write_allowed))
 
       {:error, _error} ->
-        for operation <- [:read, :write], extension <- extensions, into: %{} do
-          {reads, writes} = if operation == :read, do: {[extension], []}, else: {[], [extension]}
+        for operation <- [:read, :write], kind <- kinds, into: %{} do
+          {reads, writes} = if operation == :read, do: {[kind], []}, else: {[], [kind]}
 
           case ask(conn, env, reads, writes) do
-            {:ok, [allowed], []} -> {{operation, extension}, {:ok, allowed}}
-            {:ok, [], [allowed]} -> {{operation, extension}, {:ok, allowed}}
-            {:error, error} -> {{operation, extension}, error}
+            {:ok, [allowed], []} -> {{operation, kind}, {:ok, allowed}}
+            {:ok, [], [allowed]} -> {{operation, kind}, {:ok, allowed}}
+            {:error, error} -> {{operation, kind}, error}
           end
         end
     end
   end
 
-  defp zip(operation, extensions, allowed) do
-    extensions |> Enum.zip(allowed) |> Map.new(fn {extension, value} -> {{operation, extension}, {:ok, value}} end)
+  defp zip(operation, kinds, allowed) do
+    kinds |> Enum.zip(allowed) |> Map.new(fn {kind, value} -> {{operation, kind}, {:ok, value}} end)
   end
 
   # In a savepoint that rolls back, so that the probes, the role and an error do not stay
-  defp ask(conn, env, read_extensions, write_extensions) do
+  defp ask(conn, env, read_kinds, write_kinds) do
     Postgrex.query!(conn, "SAVEPOINT ask", [])
 
     try do
-      %{rows: probes} = Postgrex.query!(conn, @insert_probes, [env.row_topic, read_extensions])
-      RealtimeScenarios.set_settings!(conn, env)
+      %{rows: probes} = Postgrex.query!(conn, @insert_probes, [env.row_team, read_kinds])
+      ExampleScenarios.set_settings!(conn, env)
 
       with {:ok, %{rows: visible}} <- query(conn, @select_probes, [Enum.map(probes, &hd/1)]),
-           {:ok, write_allowed} <- writes(conn, env, write_extensions) do
+           {:ok, write_allowed} <- writes(conn, env, write_kinds) do
         visible = MapSet.new(visible, &hd/1)
-        id_by_extension = Map.new(probes, fn [id, extension] -> {extension, id} end)
-        {:ok, Enum.map(read_extensions, &MapSet.member?(visible, id_by_extension[&1])), write_allowed}
+        id_by_kind = Map.new(probes, fn [id, kind] -> {kind, id} end)
+        {:ok, Enum.map(read_kinds, &MapSet.member?(visible, id_by_kind[&1])), write_allowed}
       end
     after
       Postgrex.query!(conn, "ROLLBACK TO SAVEPOINT ask", [])
@@ -180,9 +180,9 @@ defmodule SqlLogex.Postgres.DecisionsTest do
     end
   end
 
-  defp writes(conn, env, extensions) do
-    Enum.reduce_while(extensions, {:ok, []}, fn extension, {:ok, allowed} ->
-      case Postgrex.query(conn, @insert, [env.row_topic, extension], mode: :savepoint) do
+  defp writes(conn, env, kinds) do
+    Enum.reduce_while(kinds, {:ok, []}, fn kind, {:ok, allowed} ->
+      case Postgrex.query(conn, @insert, [env.row_team, kind], mode: :savepoint) do
         {:ok, _result} -> {:cont, {:ok, allowed ++ [true]}}
         {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} -> {:cont, {:ok, allowed ++ [false]}}
         {:error, %Postgrex.Error{} = error} -> {:halt, {:error, Postgres.error(error)}}

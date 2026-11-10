@@ -4,9 +4,9 @@ defmodule SqlLogex.PolicySetTest do
   alias SqlLogex.Env
   alias SqlLogex.Policy
   alias SqlLogex.Snapshot
-  alias SqlLogex.Test.RealtimeProfile
+  alias SqlLogex.Test.ExampleProfile
 
-  @profile RealtimeProfile.profile()
+  @profile ExampleProfile.profile()
 
   @versions ["pg17", "pg15"]
 
@@ -14,25 +14,25 @@ defmodule SqlLogex.PolicySetTest do
   @other_uid "b1ffcd00-8d1c-4ff9-cc7e-7cc0ce491b22"
 
   @roles %{
-    "anon" => %{bypass_rls: false, select: true, insert: true},
-    "authenticated" => %{bypass_rls: false, select: true, insert: true}
+    "guest" => %{bypass_rls: false, select: true, insert: true},
+    "member" => %{bypass_rls: false, select: true, insert: true}
   }
 
-  # supabase/auth's current bodies (migration 20220224000811), swapped in for the ones of the fixture
-  @uid_supabase_auth """
+  # The fallback bodies, swapped in for the simple ones of the fixture
+  @user_id_fallback """
   select
-  coalesce(
-    nullif(current_setting('request.jwt.claim.sub', true), ''),
-    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')
-  )::uuid
+    coalesce(
+      nullif(current_setting('app.user_id', true), ''),
+      (nullif(current_setting('app.claims', true), '')::jsonb ->> 'sub')
+    )::uuid
   """
 
-  @role_supabase_auth """
+  @user_role_fallback """
   select
-  coalesce(
-    nullif(current_setting('request.jwt.claim.role', true), ''),
-    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role')
-  )::text
+    coalesce(
+      nullif(current_setting('app.user_role', true), ''),
+      (nullif(current_setting('app.claims', true), '')::jsonb ->> 'role')
+    )::text
   """
 
   @allow :allow
@@ -46,7 +46,7 @@ defmodule SqlLogex.PolicySetTest do
                  {:unsupported, {:raises, :invalid_text_representation, "invalid input syntax for type json"}}}
   @regex_non_ascii {:fallback, {:unsupported, :regex_non_ascii}}
 
-  # The qual of generator_slow_read and the check of generator_slow_write, a subselect the parser leaves as raw text
+  # The qual of typical_slow_read and the check of typical_slow_write, a subselect the parser leaves as raw text
   @slow_unsupported {:fallback, {:unsupported, {:unparsed, :select}}}
 
   setup_all do
@@ -61,38 +61,38 @@ defmodule SqlLogex.PolicySetTest do
 
   ## Helpers
 
-  # The settings of the example (see SqlLogex.Test.RealtimeScenarios), for a JWT with this role and sub. A nil sub is
-  # a token without one: set_config(..., NULL) for the setting, no key in the claims.
+  # The settings of the example (see SqlLogex.Test.ExampleScenarios), for a user with this role and user id. A nil
+  # user id is a user without one: set_config(..., NULL) for the setting, no sub in the claims.
   defp env(opts) do
-    role = Keyword.get(opts, :role, "authenticated")
-    sub = Keyword.get(opts, :sub)
-    topic = Keyword.fetch!(opts, :topic)
-    extension = Keyword.get(opts, :extension, "broadcast")
+    role = Keyword.get(opts, :role, "member")
+    user_id = Keyword.get(opts, :user_id)
+    team = Keyword.fetch!(opts, :team)
+    kind = Keyword.get(opts, :kind, "note")
 
     claims =
       Keyword.get_lazy(opts, :claims, fn ->
-        JSON.encode!(if sub, do: %{"role" => role, "sub" => sub}, else: %{"role" => role})
+        JSON.encode!(if user_id, do: %{"role" => role, "sub" => user_id}, else: %{"role" => role})
       end)
 
     Env.new(
       %{
         "role" => role,
-        "realtime.topic" => topic,
-        "request.jwt.claims" => claims,
-        "request.jwt.claim.sub" => sub,
-        "request.jwt.claim.role" => role,
-        "request.headers" => "{}"
+        "app.team" => team,
+        "app.claims" => claims,
+        "app.user_id" => user_id,
+        "app.user_role" => role,
+        "app.headers" => "{}"
       },
-      %{"topic" => {:text, topic}, "extension" => {:text, extension}}
+      %{"team" => {:text, team}, "kind" => {:text, kind}}
     )
   end
 
-  defp functions(catalog, :legacy), do: catalog.functions
+  defp functions(catalog, :simple), do: catalog.functions
 
-  defp functions(catalog, :supabase_auth) do
+  defp functions(catalog, :fallback) do
     Enum.map(catalog.functions, fn
-      %{schema: "auth", name: "uid"} = function -> %{function | source: @uid_supabase_auth}
-      %{schema: "auth", name: "role"} = function -> %{function | source: @role_supabase_auth}
+      %{schema: "app", name: "user_id"} = function -> %{function | source: @user_id_fallback}
+      %{schema: "app", name: "user_role"} = function -> %{function | source: @user_role_fallback}
       function -> function
     end)
   end
@@ -109,203 +109,203 @@ defmodule SqlLogex.PolicySetTest do
 
   defp named(catalog, names), do: Enum.filter(catalog.policies, &(&1.name in names))
 
-  defp user_channel_policies(catalog) do
-    Enum.filter(catalog.policies, &(String.starts_with?(&1.name, "users ") or &1.name == "lobby"))
+  defp personal_team_policies(catalog) do
+    Enum.filter(catalog.policies, &(String.starts_with?(&1.name, "members ") or &1.name == "lobby"))
   end
 
   defp policy(name, attrs) do
     Map.merge(
-      %{name: name, cmd: "r", permissive: true, roles: ["authenticated"], qual: "true", with_check: nil},
+      %{name: name, cmd: "r", permissive: true, roles: ["member"], qual: "true", with_check: nil},
       Map.new(attrs)
     )
   end
 
-  defp decide_with(policies, functions, operation, topic) do
-    SqlLogex.decide(snapshot(policies, functions), env(topic: topic, sub: @uid), operation)
+  defp decide_with(policies, functions, operation, team) do
+    SqlLogex.decide(snapshot(policies, functions), env(team: team, user_id: @uid), operation)
   end
 
   defp policy_attrs(policy), do: Map.take(policy, [:name, :cmd, :permissive, :roles, :qual, :with_check])
 
-  # Runs `decide` for both Postgres versions of the fixtures and both bodies of auth.uid()/auth.role().
-  # `expected` is for the legacy bodies of the fixture, `supabase_auth` for supabase/auth's, which differ in one case.
-  defp assert_all_variants(catalogs, policies_fun, env, operation, expected, supabase_auth \\ nil) do
-    for version <- @versions, variant <- [:legacy, :supabase_auth] do
+  # Runs `decide` for both Postgres versions of the fixtures and both bodies of app.user_id()/app.user_role().
+  # `expected` is for the simple bodies of the fixture, `fallback` for the fallback bodies, which differ in one case.
+  defp assert_all_variants(catalogs, policies_fun, env, operation, expected, fallback \\ nil) do
+    for version <- @versions, variant <- [:simple, :fallback] do
       catalog = catalogs[version]
       snapshot = snapshot(policies_fun.(catalog), functions(catalog, variant))
-      want = if variant == :supabase_auth and supabase_auth != nil, do: supabase_auth, else: expected
+      want = if variant == :fallback and fallback != nil, do: fallback, else: expected
 
       assert SqlLogex.decide(snapshot, env, operation) == want, "#{version} with #{variant} functions"
     end
   end
 
-  ## User channels
+  ## Personal teams
   #
-  # Five policies, all TO authenticated:
+  # Five policies, all TO member:
   #
-  #   lobby                                       SELECT  realtime.topic() ~* 'public:lobby'
-  #   users receive on own channel                SELECT  realtime.topic() = 'user:' || auth.uid()
-  #                                                       AND extension IN ('broadcast', 'presence')
-  #   users receive on own channel (initplan)     the same with (select auth.uid())
-  #   users send on own channel                   INSERT  WITH CHECK, the same expression
-  #   users send on own channel (initplan)        the same with (select auth.uid())
+  #   lobby                                         SELECT  app.team() ~* 'public:lobby'
+  #   members read in their own team                SELECT  app.team() = 'user:' || app.user_id()
+  #                                                         AND kind IN ('note', 'task')
+  #   members read in their own team (initplan)     the same with (select app.user_id())
+  #   members write in their own team               INSERT  WITH CHECK, the same expression
+  #   members write in their own team (initplan)    the same with (select app.user_id())
   #
-  # With the claims that the example sets, auth.uid() is the sub as a uuid: NULL for a missing or
-  # empty sub, an error for something that isn't a uuid. Postgres compares text by bytes, and uuid
+  # With the settings that the example sets, app.user_id() is the user id as a uuid: NULL for a
+  # missing or empty user id, an error for something that isn't a uuid. Postgres compares text by bytes, and uuid
   # prints as lowercase 8-4-4-4-12.
 
-  describe "user channels, read" do
+  describe "personal teams, read" do
     @reads [
-      # Topics, for a token whose sub is @uid
-      %{name: "own uid", topic: "user:#{@uid}", sub: @uid, expect: @allow},
-      %{name: "someone else's uid", topic: "user:#{@other_uid}", sub: @uid, expect: @deny},
+      # Teams, for a user whose id is @uid
+      %{name: "own user id", team: "user:#{@uid}", user_id: @uid, expect: @allow},
+      %{name: "someone else's user id", team: "user:#{@other_uid}", user_id: @uid, expect: @deny},
       # uuid prints lowercase and texteq compares bytes
-      %{name: "own uid in upper case", topic: "user:#{String.upcase(@uid)}", sub: @uid, expect: @deny},
-      %{name: "the lobby topic", topic: "public:lobby", sub: @uid, expect: @allow},
+      %{name: "own user id in upper case", team: "user:#{String.upcase(@uid)}", user_id: @uid, expect: @deny},
+      %{name: "the lobby team", team: "public:lobby", user_id: @uid, expect: @allow},
       # ~* ignores case
-      %{name: "the lobby topic in upper case", topic: "PUBLIC:LOBBY", sub: @uid, expect: @allow},
+      %{name: "the lobby team in upper case", team: "PUBLIC:LOBBY", user_id: @uid, expect: @allow},
       # ~ is an unanchored substring match
-      %{name: "the lobby topic inside another one", topic: "xpublic:lobbyy", sub: @uid, expect: @allow},
-      %{name: "a topic that matches nothing", topic: "room:1", sub: @uid, expect: @deny},
+      %{name: "the lobby team inside another one", team: "xpublic:lobbyy", user_id: @uid, expect: @allow},
+      %{name: "a team that matches nothing", team: "room:1", user_id: @uid, expect: @deny},
       # How ~* folds non-ASCII letters depends on the database's collation, so it falls back, even for
-      # a topic that can't match
-      %{name: "a non-ASCII topic", topic: "public:lobby:é", sub: @uid, expect: @regex_non_ascii},
-      %{name: "a non-ASCII topic that can't match", topic: "café", sub: @uid, expect: @regex_non_ascii},
-      # The topic setting is '', which realtime.topic() turns into NULL: every comparison is NULL, and NULL denies
-      %{name: "an empty topic", topic: "", sub: @uid, expect: @deny},
+      # a team that can't match
+      %{name: "a non-ASCII team", team: "public:lobby:é", user_id: @uid, expect: @regex_non_ascii},
+      %{name: "a non-ASCII team that can't match", team: "café", user_id: @uid, expect: @regex_non_ascii},
+      # The team setting is '', which app.team() turns into NULL: every comparison is NULL, and NULL denies
+      %{name: "an empty team", team: "", user_id: @uid, expect: @deny},
 
-      # Subs, for the topic "user:" and the canonical uuid
-      %{name: "sub in upper case", topic: "user:#{@uid}", sub: String.upcase(@uid), expect: @allow},
-      %{name: "braced sub", topic: "user:#{@uid}", sub: "{#{@uid}}", expect: @allow},
-      %{name: "unhyphenated sub", topic: "user:#{@uid}", sub: String.replace(@uid, "-", ""), expect: @allow},
+      # User ids, for the team "user:" and the canonical uuid
+      %{name: "user id in upper case", team: "user:#{@uid}", user_id: String.upcase(@uid), expect: @allow},
+      %{name: "braced user id", team: "user:#{@uid}", user_id: "{#{@uid}}", expect: @allow},
+      %{name: "unhyphenated user id", team: "user:#{@uid}", user_id: String.replace(@uid, "-", ""), expect: @allow},
       %{
-        name: "sub with hyphens after every group",
-        topic: "user:#{@uid}",
-        sub: "a0ee-bc99-9c0b-4ef8-bb6d-6bb9-bd38-0a11",
+        name: "user id with hyphens after every group",
+        team: "user:#{@uid}",
+        user_id: "a0ee-bc99-9c0b-4ef8-bb6d-6bb9-bd38-0a11",
         expect: @allow
       },
       # uuid_in doesn't skip whitespace
-      %{name: "sub with a leading space", topic: "user:#{@uid}", sub: " #{@uid}", expect: @invalid_uuid},
-      # The legacy auth.uid() is nullif(sub, '')::uuid, so NULL, and NULL = ... is NULL, which denies.
-      # supabase/auth's is coalesce(nullif(sub, ''), claims ->> 'sub')::uuid, and the claims have "sub": "", which
-      # is not NULL: ''::uuid raises. (A third-party JWT can have an empty sub.)
-      %{name: "empty sub", topic: "user:#{@uid}", sub: "", expect: @deny, supabase_auth: @invalid_uuid},
-      # No sub anywhere: NULL with both bodies
-      %{name: "no sub", topic: "user:#{@uid}", sub: nil, expect: @deny},
-      %{name: "no sub on the lobby topic", topic: "public:lobby", sub: nil, expect: @allow},
-      # A sub that isn't a uuid, as a third-party auth provider sends: the cast raises where it is
+      %{name: "user id with a leading space", team: "user:#{@uid}", user_id: " #{@uid}", expect: @invalid_uuid},
+      # The simple app.user_id() is nullif(user_id, '')::uuid, so NULL, and NULL = ... is NULL, which denies.
+      # The fallback one is coalesce(nullif(user_id, ''), claims ->> 'sub')::uuid, and the claims have "sub": "",
+      # which is not NULL: ''::uuid raises. (A third-party JWT can have an empty sub.)
+      %{name: "empty user id", team: "user:#{@uid}", user_id: "", expect: @deny, fallback: @invalid_uuid},
+      # No user id anywhere: NULL with both bodies
+      %{name: "no user id", team: "user:#{@uid}", user_id: nil, expect: @deny},
+      %{name: "no user id on the lobby team", team: "public:lobby", user_id: nil, expect: @allow},
+      # A user id that isn't a uuid, as a third-party auth provider sends: the cast raises where it is
       # reached, and there is nothing to decide the OR without it
-      %{name: "sub that isn't a uuid", topic: "user:user_2abc", sub: "user_2abc", expect: @invalid_uuid},
+      %{name: "user id that isn't a uuid", team: "user:user_2abc", user_id: "user_2abc", expect: @invalid_uuid},
       %{
-        name: "sub that isn't a uuid, on a topic nothing matches",
-        topic: "room:1",
-        sub: "user_2abc",
+        name: "user id that isn't a uuid, on a team nothing matches",
+        team: "room:1",
+        user_id: "user_2abc",
         expect: @invalid_uuid
       },
       # ... and lobby is true, but that doesn't decide the OR: Postgres may have evaluated the failing
       # branch first, and raises, as measured
       %{
-        name: "sub that isn't a uuid, on the lobby topic",
-        topic: "public:lobby",
-        sub: "user_2abc",
+        name: "user id that isn't a uuid, on the lobby team",
+        team: "public:lobby",
+        user_id: "user_2abc",
         expect: @invalid_uuid
       },
 
-      # Roles. No policy is for anon, so there is no permissive policy and Postgres uses `false`
-      %{name: "anon, own uid", topic: "user:#{@uid}", sub: @uid, role: "anon", expect: @deny},
-      %{name: "anon, the lobby topic", topic: "public:lobby", sub: @uid, role: "anon", expect: @deny},
+      # Roles. No policy is for guest, so there is no permissive policy and Postgres uses `false`
+      %{name: "guest, own user id", team: "user:#{@uid}", user_id: @uid, role: "guest", expect: @deny},
+      %{name: "guest, the lobby team", team: "public:lobby", user_id: @uid, role: "guest", expect: @deny},
       # Not a role we model, it bypasses RLS
       %{
-        name: "service_role",
-        topic: "user:#{@uid}",
-        sub: @uid,
-        role: "service_role",
-        expect: {:fallback, {:role, "service_role"}}
+        name: "admin",
+        team: "user:#{@uid}",
+        user_id: @uid,
+        role: "admin",
+        expect: {:fallback, {:role, "admin"}}
       }
     ]
 
-    for %{name: name} = case_ <- @reads, extension <- ["broadcast", "presence"] do
-      test "#{extension}: #{name}", %{catalogs: catalogs} do
+    for %{name: name} = case_ <- @reads, kind <- ["note", "task"] do
+      test "#{kind}: #{name}", %{catalogs: catalogs} do
         case_ = unquote(Macro.escape(case_))
-        extension = unquote(extension)
+        kind = unquote(kind)
 
         env =
-          env(topic: case_.topic, sub: case_.sub, role: Map.get(case_, :role, "authenticated"), extension: extension)
+          env(team: case_.team, user_id: case_.user_id, role: Map.get(case_, :role, "member"), kind: kind)
 
         assert_all_variants(
           catalogs,
-          &user_channel_policies/1,
+          &personal_team_policies/1,
           env,
           :read,
           case_.expect,
-          Map.get(case_, :supabase_auth)
+          Map.get(case_, :fallback)
         )
       end
     end
 
-    # The policy is only true for two extensions
-    test "an extension outside the list, own uid", %{catalogs: catalogs} do
-      env = env(topic: "user:#{@uid}", sub: @uid, extension: "postgres_changes")
-      assert_all_variants(catalogs, &user_channel_policies/1, env, :read, @deny)
+    # The policy is only true for two kinds
+    test "a kind outside the list, own user id", %{catalogs: catalogs} do
+      env = env(team: "user:#{@uid}", user_id: @uid, kind: "comment")
+      assert_all_variants(catalogs, &personal_team_policies/1, env, :read, @deny)
     end
 
-    # false AND <error> is false for the executor only if it evaluates the extension comparison first,
+    # false AND <error> is false for the executor only if it evaluates the kind comparison first,
     # which the planner decides. Postgres 17 raises here on reads, so it is a fallback
-    test "an extension outside the list, sub that isn't a uuid: the failing cast decides", %{catalogs: catalogs} do
-      env = env(topic: "user:user_2abc", sub: "user_2abc", extension: "postgres_changes")
-      assert_all_variants(catalogs, &user_channel_policies/1, env, :read, @invalid_uuid)
+    test "a kind outside the list, user id that isn't a uuid: the failing cast decides", %{catalogs: catalogs} do
+      env = env(team: "user:user_2abc", user_id: "user_2abc", kind: "comment")
+      assert_all_variants(catalogs, &personal_team_policies/1, env, :read, @invalid_uuid)
     end
   end
 
-  describe "user channels, write" do
+  describe "personal teams, write" do
     @writes [
-      %{name: "own uid", topic: "user:#{@uid}", sub: @uid, expect: @allow},
-      %{name: "someone else's uid", topic: "user:#{@other_uid}", sub: @uid, expect: @deny},
-      %{name: "own uid in upper case", topic: "user:#{String.upcase(@uid)}", sub: @uid, expect: @deny},
+      %{name: "own user id", team: "user:#{@uid}", user_id: @uid, expect: @allow},
+      %{name: "someone else's user id", team: "user:#{@other_uid}", user_id: @uid, expect: @deny},
+      %{name: "own user id in upper case", team: "user:#{String.upcase(@uid)}", user_id: @uid, expect: @deny},
       # Only the receive side has a policy for the lobby
-      %{name: "the lobby topic", topic: "public:lobby", sub: @uid, expect: @deny},
-      %{name: "the lobby topic in upper case", topic: "PUBLIC:LOBBY", sub: @uid, expect: @deny},
-      %{name: "the lobby topic inside another one", topic: "xpublic:lobbyy", sub: @uid, expect: @deny},
+      %{name: "the lobby team", team: "public:lobby", user_id: @uid, expect: @deny},
+      %{name: "the lobby team in upper case", team: "PUBLIC:LOBBY", user_id: @uid, expect: @deny},
+      %{name: "the lobby team inside another one", team: "xpublic:lobbyy", user_id: @uid, expect: @deny},
       # The send policies have no regex, but the lobby SELECT policy does, and a write might evaluate
       # it: a fallback, as for a read
-      %{name: "a non-ASCII topic", topic: "public:lobby:é", sub: @uid, expect: @regex_non_ascii},
-      %{name: "an empty topic", topic: "", sub: @uid, expect: @deny},
-      %{name: "sub in upper case", topic: "user:#{@uid}", sub: String.upcase(@uid), expect: @allow},
-      %{name: "braced sub", topic: "user:#{@uid}", sub: "{#{@uid}}", expect: @allow},
-      %{name: "unhyphenated sub", topic: "user:#{@uid}", sub: String.replace(@uid, "-", ""), expect: @allow},
+      %{name: "a non-ASCII team", team: "public:lobby:é", user_id: @uid, expect: @regex_non_ascii},
+      %{name: "an empty team", team: "", user_id: @uid, expect: @deny},
+      %{name: "user id in upper case", team: "user:#{@uid}", user_id: String.upcase(@uid), expect: @allow},
+      %{name: "braced user id", team: "user:#{@uid}", user_id: "{#{@uid}}", expect: @allow},
+      %{name: "unhyphenated user id", team: "user:#{@uid}", user_id: String.replace(@uid, "-", ""), expect: @allow},
       # See the read case
-      %{name: "empty sub", topic: "user:#{@uid}", sub: "", expect: @deny, supabase_auth: @invalid_uuid},
-      %{name: "no sub", topic: "user:#{@uid}", sub: nil, expect: @deny},
-      %{name: "sub that isn't a uuid", topic: "user:user_2abc", sub: "user_2abc", expect: @invalid_uuid},
+      %{name: "empty user id", team: "user:#{@uid}", user_id: "", expect: @deny, fallback: @invalid_uuid},
+      %{name: "no user id", team: "user:#{@uid}", user_id: nil, expect: @deny},
+      %{name: "user id that isn't a uuid", team: "user:user_2abc", user_id: "user_2abc", expect: @invalid_uuid},
       # No policy is false, and both send policies fail: nothing to decide with
       %{
-        name: "sub that isn't a uuid, on the lobby topic",
-        topic: "public:lobby",
-        sub: "user_2abc",
+        name: "user id that isn't a uuid, on the lobby team",
+        team: "public:lobby",
+        user_id: "user_2abc",
         expect: @invalid_uuid
       },
-      %{name: "anon, own uid", topic: "user:#{@uid}", sub: @uid, role: "anon", expect: @deny},
+      %{name: "guest, own user id", team: "user:#{@uid}", user_id: @uid, role: "guest", expect: @deny},
       %{
-        name: "service_role",
-        topic: "user:#{@uid}",
-        sub: @uid,
-        role: "service_role",
-        expect: {:fallback, {:role, "service_role"}}
+        name: "admin",
+        team: "user:#{@uid}",
+        user_id: @uid,
+        role: "admin",
+        expect: {:fallback, {:role, "admin"}}
       },
-      # The extension is in the list for both, but not for others
-      %{name: "own uid, presence", topic: "user:#{@uid}", sub: @uid, extension: "presence", expect: @allow},
+      # The kind is in the list for both, but not for others
+      %{name: "own user id, task", team: "user:#{@uid}", user_id: @uid, kind: "task", expect: @allow},
       %{
-        name: "own uid, an extension outside the list",
-        topic: "user:#{@uid}",
-        sub: @uid,
-        extension: "persistence",
+        name: "own user id, a kind outside the list",
+        team: "user:#{@uid}",
+        user_id: @uid,
+        kind: "file",
         expect: @deny
       },
-      # The extension comparison is false, but the failing cast may be evaluated first
+      # The kind comparison is false, but the failing cast may be evaluated first
       %{
-        name: "sub that isn't a uuid, an extension outside the list",
-        topic: "user:user_2abc",
-        sub: "user_2abc",
-        extension: "persistence",
+        name: "user id that isn't a uuid, a kind outside the list",
+        team: "user:user_2abc",
+        user_id: "user_2abc",
+        kind: "file",
         expect: @invalid_uuid
       }
     ]
@@ -316,51 +316,51 @@ defmodule SqlLogex.PolicySetTest do
 
         env =
           env(
-            topic: case_.topic,
-            sub: case_.sub,
-            role: Map.get(case_, :role, "authenticated"),
-            extension: Map.get(case_, :extension, "broadcast")
+            team: case_.team,
+            user_id: case_.user_id,
+            role: Map.get(case_, :role, "member"),
+            kind: Map.get(case_, :kind, "note")
           )
 
         assert_all_variants(
           catalogs,
-          &user_channel_policies/1,
+          &personal_team_policies/1,
           env,
           :write,
           case_.expect,
-          Map.get(case_, :supabase_auth)
+          Map.get(case_, :fallback)
         )
       end
     end
   end
 
-  describe "the same results with supabase/auth's auth.uid()" do
+  describe "the same results with the fallback app.user_id()" do
     # assert_all_variants runs every case above with both bodies. This one pins what differs.
-    test "differs only for a sub that is an empty string, where supabase/auth's body raises", %{catalogs: catalogs} do
+    test "differs only for a user id that is an empty string, where the fallback body raises", %{catalogs: catalogs} do
       for operation <- [:read, :write], version <- @versions do
         catalog = catalogs[version]
-        env = env(topic: "user:#{@uid}", sub: "")
+        env = env(team: "user:#{@uid}", user_id: "")
 
-        legacy = snapshot(user_channel_policies(catalog), functions(catalog, :legacy))
-        supabase_auth = snapshot(user_channel_policies(catalog), functions(catalog, :supabase_auth))
+        simple = snapshot(personal_team_policies(catalog), functions(catalog, :simple))
+        fallback = snapshot(personal_team_policies(catalog), functions(catalog, :fallback))
 
-        assert SqlLogex.decide(legacy, env, operation) == @deny
-        assert SqlLogex.decide(supabase_auth, env, operation) == @invalid_uuid
+        assert SqlLogex.decide(simple, env, operation) == @deny
+        assert SqlLogex.decide(fallback, env, operation) == @invalid_uuid
       end
     end
 
-    # supabase/auth's body parses the claims even when the sub setting is set, as COALESCE can't skip an
-    # argument that raises. The legacy body doesn't read the claims at all.
-    test "falls back for claims that don't parse, even with the sub set", %{catalogs: catalogs} do
+    # The fallback body parses the claims even when the user id setting is set, as COALESCE can't skip an
+    # argument that raises. The simple body doesn't read the claims at all.
+    test "falls back for claims that don't parse, even with the user id set", %{catalogs: catalogs} do
       catalog = catalogs["pg17"]
-      env = env(topic: "user:#{@uid}", sub: @uid, claims: ~s({"sub":"#{@uid}","x":"\\u0000"}))
+      env = env(team: "user:#{@uid}", user_id: @uid, claims: ~s({"sub":"#{@uid}","x":"\\u0000"}))
 
-      legacy = snapshot(user_channel_policies(catalog), functions(catalog, :legacy))
-      supabase_auth = snapshot(user_channel_policies(catalog), functions(catalog, :supabase_auth))
+      simple = snapshot(personal_team_policies(catalog), functions(catalog, :simple))
+      fallback = snapshot(personal_team_policies(catalog), functions(catalog, :fallback))
 
-      assert SqlLogex.decide(legacy, env, :read) == @allow
+      assert SqlLogex.decide(simple, env, :read) == @allow
 
-      assert SqlLogex.decide(supabase_auth, env, :read) ==
+      assert SqlLogex.decide(fallback, env, :read) ==
                {:fallback, {:unsupported, {:raises, :untranslatable_character, "unsupported Unicode escape sequence"}}}
     end
   end
@@ -370,27 +370,26 @@ defmodule SqlLogex.PolicySetTest do
   describe "fallbacks before evaluating" do
     setup %{catalogs: catalogs} do
       catalog = catalogs["pg17"]
-      %{catalog: catalog, policies: user_channel_policies(catalog)}
+      %{catalog: catalog, policies: personal_team_policies(catalog)}
     end
 
     test "the baseline decides", %{catalog: catalog, policies: policies} do
       snapshot = snapshot(policies, catalog.functions)
-      assert SqlLogex.decide(snapshot, env(topic: "user:#{@uid}", sub: @uid), :read) == @allow
+      assert SqlLogex.decide(snapshot, env(team: "user:#{@uid}", user_id: @uid), :read) == @allow
     end
 
     # The reason names a role only if it is a platform one, the others are the policy author's to name.
     for {role, named} <- [
-          {"service_role", "service_role"},
+          {"admin", "admin"},
           {"postgres", "postgres"},
-          {"supabase_admin", "supabase_admin"},
-          {"authenticator", :other},
+          {"editor", :other},
           {"team_member", :other},
           {"", :other},
-          {"ANON", :other}
+          {"GUEST", :other}
         ] do
       test "the role #{inspect(role)} is not modelled", %{catalog: catalog, policies: policies} do
         snapshot = snapshot(policies, catalog.functions)
-        env = env(topic: "user:#{@uid}", sub: @uid, role: unquote(role))
+        env = env(team: "user:#{@uid}", user_id: @uid, role: unquote(role))
 
         assert SqlLogex.decide(snapshot, env, :read) == {:fallback, {:role, unquote(named)}}
         assert SqlLogex.decide(snapshot, env, :write) == {:fallback, {:role, unquote(named)}}
@@ -406,48 +405,48 @@ defmodule SqlLogex.PolicySetTest do
 
     test "RLS disabled", %{catalog: catalog, policies: policies} do
       snapshot = snapshot(policies, catalog.functions, %{rls_enabled: false})
-      assert SqlLogex.decide(snapshot, env(topic: "t", sub: @uid), :read) == {:fallback, :rls_disabled}
+      assert SqlLogex.decide(snapshot, env(team: "t", user_id: @uid), :read) == {:fallback, :rls_disabled}
     end
 
     test "RLS forced", %{catalog: catalog, policies: policies} do
       snapshot = snapshot(policies, catalog.functions, %{rls_forced: true})
-      assert SqlLogex.decide(snapshot, env(topic: "t", sub: @uid), :write) == {:fallback, :rls_forced}
+      assert SqlLogex.decide(snapshot, env(team: "t", user_id: @uid), :write) == {:fallback, :rls_forced}
     end
 
     test "a role that bypasses RLS", %{catalog: catalog, policies: policies} do
-      roles = %{@roles | "authenticated" => %{bypass_rls: true, select: true, insert: true}}
+      roles = %{@roles | "member" => %{bypass_rls: true, select: true, insert: true}}
       snapshot = snapshot(policies, catalog.functions, %{roles: roles})
 
-      assert SqlLogex.decide(snapshot, env(topic: "t", sub: @uid), :read) == {:fallback, {:bypass_rls, "authenticated"}}
+      assert SqlLogex.decide(snapshot, env(team: "t", user_id: @uid), :read) == {:fallback, {:bypass_rls, "member"}}
       # another role isn't affected
-      assert SqlLogex.decide(snapshot, env(topic: "t", sub: @uid, role: "anon"), :read) == @deny
+      assert SqlLogex.decide(snapshot, env(team: "t", user_id: @uid, role: "guest"), :read) == @deny
     end
 
     test "a role missing from the snapshot", %{catalog: catalog, policies: policies} do
-      snapshot = snapshot(policies, catalog.functions, %{roles: Map.delete(@roles, "anon")})
+      snapshot = snapshot(policies, catalog.functions, %{roles: Map.delete(@roles, "guest")})
 
-      assert SqlLogex.decide(snapshot, env(topic: "t", role: "anon"), :read) ==
-               {:fallback, {:role_not_in_snapshot, "anon"}}
+      assert SqlLogex.decide(snapshot, env(team: "t", role: "guest"), :read) ==
+               {:fallback, {:role_not_in_snapshot, "guest"}}
     end
 
     test "a missing grant is a fallback for the operation it is needed for", %{catalog: catalog, policies: policies} do
-      no_select = %{@roles | "authenticated" => %{bypass_rls: false, select: false, insert: true}}
-      no_insert = %{@roles | "authenticated" => %{bypass_rls: false, select: true, insert: false}}
-      env = env(topic: "user:#{@uid}", sub: @uid)
+      no_select = %{@roles | "member" => %{bypass_rls: false, select: false, insert: true}}
+      no_insert = %{@roles | "member" => %{bypass_rls: false, select: true, insert: false}}
+      env = env(team: "user:#{@uid}", user_id: @uid)
 
       # A write needs select too: the profile sets write_plans_select, see the PolicySet moduledoc
       snapshot = snapshot(policies, catalog.functions, %{roles: no_select})
-      assert SqlLogex.decide(snapshot, env, :read) == {:fallback, {:missing_grant, "authenticated", :select}}
-      assert SqlLogex.decide(snapshot, env, :write) == {:fallback, {:missing_grant, "authenticated", :select}}
+      assert SqlLogex.decide(snapshot, env, :read) == {:fallback, {:missing_grant, "member", :select}}
+      assert SqlLogex.decide(snapshot, env, :write) == {:fallback, {:missing_grant, "member", :select}}
 
       snapshot = snapshot(policies, catalog.functions, %{roles: no_insert})
       assert SqlLogex.decide(snapshot, env, :read) == @allow
-      assert SqlLogex.decide(snapshot, env, :write) == {:fallback, {:missing_grant, "authenticated", :insert}}
+      assert SqlLogex.decide(snapshot, env, :write) == {:fallback, {:missing_grant, "member", :insert}}
 
       # With neither, the one the write itself needs is reported
-      none = %{@roles | "authenticated" => %{bypass_rls: false, select: false, insert: false}}
+      none = %{@roles | "member" => %{bypass_rls: false, select: false, insert: false}}
       snapshot = snapshot(policies, catalog.functions, %{roles: none})
-      assert SqlLogex.decide(snapshot, env, :write) == {:fallback, {:missing_grant, "authenticated", :insert}}
+      assert SqlLogex.decide(snapshot, env, :write) == {:fallback, {:missing_grant, "member", :insert}}
     end
 
     test "a policy for a role that isn't modelled, for the command being decided", %{
@@ -455,7 +454,7 @@ defmodule SqlLogex.PolicySetTest do
       policies: policies
     } do
       extra = fn cmd -> policy("for_team", cmd: cmd, roles: ["team_member"], qual: "true", with_check: "true") end
-      env = env(topic: "user:#{@uid}", sub: @uid)
+      env = env(team: "user:#{@uid}", user_id: @uid)
 
       for {cmd, read, write} <- [
             {"r", {:fallback, :unmodelled_policy_role}, @allow},
@@ -473,26 +472,26 @@ defmodule SqlLogex.PolicySetTest do
 
     test "a policy naming several roles falls back if any is not modelled", %{catalog: catalog, policies: policies} do
       snapshot =
-        snapshot(policies ++ [policy("p", roles: ["authenticated", "team_member"])], catalog.functions)
+        snapshot(policies ++ [policy("p", roles: ["member", "team_member"])], catalog.functions)
 
-      assert SqlLogex.decide(snapshot, env(topic: "t", sub: @uid), :read) == {:fallback, :unmodelled_policy_role}
+      assert SqlLogex.decide(snapshot, env(team: "t", user_id: @uid), :read) == {:fallback, :unmodelled_policy_role}
     end
 
-    test "policies for public, anon, authenticated and service_role are fine", %{catalog: catalog, policies: policies} do
+    test "policies for public, guest, member and admin are fine", %{catalog: catalog, policies: policies} do
       extra =
-        for role <- ["public", "anon", "authenticated", "service_role"],
+        for role <- ["public", "guest", "member", "admin"],
             do: policy("for_#{role}", roles: [role], qual: "false")
 
       snapshot = snapshot(policies ++ extra, catalog.functions)
 
-      assert SqlLogex.decide(snapshot, env(topic: "user:#{@uid}", sub: @uid), :read) == @allow
+      assert SqlLogex.decide(snapshot, env(team: "user:#{@uid}", user_id: @uid), :read) == @allow
     end
 
     test "an applicable policy without the expression to evaluate", %{catalog: catalog, policies: policies} do
       read = policy("no_using", cmd: "r", qual: nil)
       write = policy("no_check", cmd: "a", qual: nil, with_check: nil)
       all = policy("no_expression", cmd: "*", qual: nil, with_check: nil)
-      env = env(topic: "user:#{@uid}", sub: @uid)
+      env = env(team: "user:#{@uid}", user_id: @uid)
 
       assert SqlLogex.decide(snapshot(policies ++ [read], catalog.functions), env, :read) ==
                {:fallback, :policy_without_expression}
@@ -514,7 +513,7 @@ defmodule SqlLogex.PolicySetTest do
       assert SqlLogex.decide(snapshot(policies ++ [write], catalog.functions), env, :read) == @allow
 
       assert SqlLogex.decide(
-               snapshot(policies ++ [policy("anon_only", roles: ["anon"], qual: nil)], catalog.functions),
+               snapshot(policies ++ [policy("guest_only", roles: ["guest"], qual: nil)], catalog.functions),
                env,
                :read
              ) == @allow
@@ -525,7 +524,7 @@ defmodule SqlLogex.PolicySetTest do
         name: "broken",
         cmd: "r",
         permissive: true,
-        roles: ["authenticated"],
+        roles: ["member"],
         using: {{:apply, SqlLogex.Value, :no_such_primitive, []}, :bool},
         with_check: nil
       }
@@ -533,10 +532,10 @@ defmodule SqlLogex.PolicySetTest do
       snapshot = %Snapshot{snapshot([], catalog.functions) | policies: [broken]}
 
       # the module, not the message, which names the function and may hold input
-      assert SqlLogex.decide(snapshot, env(topic: "t"), :read) == {:fallback, {:exception, UndefinedFunctionError}}
+      assert SqlLogex.decide(snapshot, env(team: "t"), :read) == {:fallback, {:exception, UndefinedFunctionError}}
 
       assert {:fallback, {:exception, module}} =
-               SqlLogex.decide(%Snapshot{snapshot | policies: :oops}, env(topic: "t"), :read)
+               SqlLogex.decide(%Snapshot{snapshot | policies: :oops}, env(team: "t"), :read)
 
       assert is_atom(module)
 
@@ -544,21 +543,21 @@ defmodule SqlLogex.PolicySetTest do
     end
 
     test "a table fact that isn't the expected boolean is the unsafe answer", %{catalog: catalog, policies: policies} do
-      env = env(topic: "user:#{@uid}", sub: @uid)
+      env = env(team: "user:#{@uid}", user_id: @uid)
       snapshot = snapshot(policies, catalog.functions)
 
       assert SqlLogex.decide(%Snapshot{snapshot | rls_enabled: nil}, env, :read) == {:fallback, :rls_disabled}
       assert SqlLogex.decide(%Snapshot{snapshot | rls_forced: nil}, env, :read) == {:fallback, :rls_forced}
 
-      roles = %{"authenticated" => %{select: true, insert: true}}
+      roles = %{"member" => %{select: true, insert: true}}
 
       assert SqlLogex.decide(%Snapshot{snapshot | roles: roles}, env, :read) ==
-               {:fallback, {:bypass_rls, "authenticated"}}
+               {:fallback, {:bypass_rls, "member"}}
 
-      roles = %{"authenticated" => %{bypass_rls: false}}
+      roles = %{"member" => %{bypass_rls: false}}
 
       assert SqlLogex.decide(%Snapshot{snapshot | roles: roles}, env, :read) ==
-               {:fallback, {:missing_grant, "authenticated", :select}}
+               {:fallback, {:missing_grant, "member", :select}}
 
       assert SqlLogex.decide(%Snapshot{profile: @profile}, env, :read) == {:fallback, :rls_disabled}
       # a snapshot without a profile can't be decided
@@ -570,15 +569,15 @@ defmodule SqlLogex.PolicySetTest do
     # Evaluation keeps the name of the setting, and decide/3 keeps it only for a platform setting of
     # the profile. The others are the policy author's to name.
     for {setting, named} <- [
-          {"request.jwt.claim.exp", "request.jwt.claim.exp"},
-          {"realtime.other", "realtime.other"},
-          {"Request.jwt.claim.exp", :other},
-          {"app.settings.secret", :other}
+          {"app.expires_at", "app.expires_at"},
+          {"app.other", "app.other"},
+          {"App.expires_at", :other},
+          {"custom.secret", :other}
         ] do
       test "#{setting} in a read, in a write and in a SELECT policy of a write" do
         check = "(current_setting('#{unquote(setting)}'::text, true) = 'x'::text)"
         want = {:fallback, {:unsupported, {:unknown_setting, unquote(named)}}}
-        env = env(topic: "t", sub: @uid)
+        env = env(team: "t", user_id: @uid)
 
         assert SqlLogex.decide(snapshot([policy("p", qual: check)], []), env, :read) == want
         assert SqlLogex.decide(snapshot([policy("p", cmd: "a", qual: nil, with_check: check)], []), env, :write) == want
@@ -592,15 +591,15 @@ defmodule SqlLogex.PolicySetTest do
   ## Combining policies
 
   describe "combining" do
-    @topic_is_x "(realtime.topic() = 'x'::text)"
-    @topic_is_y "(realtime.topic() = 'y'::text)"
+    @team_is_x "(app.team() = 'x'::text)"
+    @team_is_y "(app.team() = 'y'::text)"
 
     setup %{catalogs: catalogs} do
       %{functions: catalogs["pg17"].functions}
     end
 
     test "permissive policies are OR'd", %{functions: functions} do
-      policies = [policy("a", qual: @topic_is_x), policy("b", qual: @topic_is_y)]
+      policies = [policy("a", qual: @team_is_x), policy("b", qual: @team_is_y)]
 
       assert decide_with(policies, functions, :read, "x") == @allow
       assert decide_with(policies, functions, :read, "y") == @allow
@@ -610,8 +609,8 @@ defmodule SqlLogex.PolicySetTest do
     test "restrictive policies are AND'd with the permissive ones", %{functions: functions} do
       policies = [
         policy("a", qual: "true"),
-        policy("r1", permissive: false, qual: "(realtime.topic() <> 'x'::text)"),
-        policy("r2", permissive: false, qual: "(realtime.topic() <> 'y'::text)")
+        policy("r1", permissive: false, qual: "(app.team() <> 'x'::text)"),
+        policy("r2", permissive: false, qual: "(app.team() <> 'y'::text)")
       ]
 
       assert decide_with(policies, functions, :read, "z") == @allow
@@ -624,7 +623,7 @@ defmodule SqlLogex.PolicySetTest do
       assert decide_with(policies, functions, :read, "x") == @deny
 
       # not even a restrictive policy we couldn't evaluate
-      policies = [policy("r", permissive: false, qual: "(auth.email() = 'a'::text)")]
+      policies = [policy("r", permissive: false, qual: "(app.email() = 'a'::text)")]
       assert decide_with(policies, functions, :read, "x") == @deny
     end
 
@@ -634,53 +633,53 @@ defmodule SqlLogex.PolicySetTest do
     end
 
     test "NULL denies, for permissive and restrictive policies", %{functions: functions} do
-      assert decide_with([policy("a", qual: "(realtime.topic() = NULL::text)")], functions, :read, "x") == @deny
+      assert decide_with([policy("a", qual: "(app.team() = NULL::text)")], functions, :read, "x") == @deny
 
-      policies = [policy("a", qual: "true"), policy("r", permissive: false, qual: "(realtime.topic() = NULL::text)")]
+      policies = [policy("a", qual: "true"), policy("r", permissive: false, qual: "(app.team() = NULL::text)")]
       assert decide_with(policies, functions, :read, "x") == @deny
     end
 
     test "a NULL permissive policy next to a true one allows", %{functions: functions} do
-      policies = [policy("a", qual: "(realtime.topic() = NULL::text)"), policy("b", qual: "true")]
+      policies = [policy("a", qual: "(app.team() = NULL::text)"), policy("b", qual: "true")]
       assert decide_with(policies, functions, :read, "x") == @allow
     end
 
-    @unsupported_email {:fallback, {:unsupported, {:function, "auth.email", :not_in_snapshot}}}
+    @unsupported_email {:fallback, {:unsupported, {:function, "app.email", :not_in_snapshot}}}
 
     test "an unsupported policy makes the decision a fallback, whatever the others say", %{functions: functions} do
-      policies = [policy("a", qual: "(auth.email() = 'a'::text)"), policy("b", qual: @topic_is_x)]
+      policies = [policy("a", qual: "(app.email() = 'a'::text)"), policy("b", qual: @team_is_x)]
 
       assert decide_with(policies, functions, :read, "x") == @unsupported_email
       assert decide_with(policies, functions, :read, "y") == @unsupported_email
 
       # a restrictive policy that fails doesn't decide it either
-      policies = [policy("a", qual: "(auth.email() = 'a'::text)"), policy("r", permissive: false, qual: @topic_is_y)]
+      policies = [policy("a", qual: "(app.email() = 'a'::text)"), policy("r", permissive: false, qual: @team_is_y)]
       assert decide_with(policies, functions, :read, "x") == @unsupported_email
     end
 
     test "an expression that isn't boolean is unsupported", %{functions: functions} do
-      policies = [policy("a", qual: "realtime.topic()")]
+      policies = [policy("a", qual: "app.team()")]
 
       assert decide_with(policies, functions, :read, "x") == {:fallback, {:unsupported, {:not_boolean, :text}}}
     end
 
     test "reads use USING and ignore WITH CHECK", %{functions: functions} do
-      policies = [policy("a", cmd: "*", qual: @topic_is_x, with_check: @topic_is_y)]
+      policies = [policy("a", cmd: "*", qual: @team_is_x, with_check: @team_is_y)]
 
       assert decide_with(policies, functions, :read, "x") == @allow
       assert decide_with(policies, functions, :read, "y") == @deny
     end
 
     test "writes use WITH CHECK, and USING for ALL policies that have none", %{functions: functions} do
-      both = [policy("a", cmd: "*", qual: @topic_is_x, with_check: @topic_is_y)]
+      both = [policy("a", cmd: "*", qual: @team_is_x, with_check: @team_is_y)]
       assert decide_with(both, functions, :write, "y") == @allow
       assert decide_with(both, functions, :write, "x") == @deny
 
-      using_only = [policy("a", cmd: "*", qual: @topic_is_x, with_check: nil)]
+      using_only = [policy("a", cmd: "*", qual: @team_is_x, with_check: nil)]
       assert decide_with(using_only, functions, :write, "x") == @allow
       assert decide_with(using_only, functions, :write, "y") == @deny
 
-      insert = [policy("a", cmd: "a", qual: nil, with_check: @topic_is_x)]
+      insert = [policy("a", cmd: "a", qual: nil, with_check: @team_is_x)]
       assert decide_with(insert, functions, :write, "x") == @allow
       assert decide_with(insert, functions, :write, "y") == @deny
     end
@@ -700,25 +699,25 @@ defmodule SqlLogex.PolicySetTest do
     end
 
     test "a policy applies to the roles it names, or to public", %{functions: functions} do
-      policies = [policy("for_anon", roles: ["anon"], qual: "true")]
-      env = fn role -> env(topic: "x", sub: @uid, role: role) end
+      policies = [policy("for_guest", roles: ["guest"], qual: "true")]
+      env = fn role -> env(team: "x", user_id: @uid, role: role) end
 
-      assert SqlLogex.decide(snapshot(policies, functions), env.("anon"), :read) == @allow
-      assert SqlLogex.decide(snapshot(policies, functions), env.("authenticated"), :read) == @deny
+      assert SqlLogex.decide(snapshot(policies, functions), env.("guest"), :read) == @allow
+      assert SqlLogex.decide(snapshot(policies, functions), env.("member"), :read) == @deny
 
       policies = [policy("for_public", roles: ["public"], qual: "true")]
-      assert SqlLogex.decide(snapshot(policies, functions), env.("anon"), :read) == @allow
-      assert SqlLogex.decide(snapshot(policies, functions), env.("authenticated"), :read) == @allow
+      assert SqlLogex.decide(snapshot(policies, functions), env.("guest"), :read) == @allow
+      assert SqlLogex.decide(snapshot(policies, functions), env.("member"), :read) == @allow
 
-      policies = [policy("both", roles: ["anon", "authenticated"], qual: "true")]
-      assert SqlLogex.decide(snapshot(policies, functions), env.("anon"), :read) == @allow
-      assert SqlLogex.decide(snapshot(policies, functions), env.("authenticated"), :read) == @allow
+      policies = [policy("both", roles: ["guest", "member"], qual: "true")]
+      assert SqlLogex.decide(snapshot(policies, functions), env.("guest"), :read) == @allow
+      assert SqlLogex.decide(snapshot(policies, functions), env.("member"), :read) == @allow
     end
 
     test "the order of the policies doesn't matter", %{functions: functions} do
       policies = [
-        policy("a", qual: "(auth.email() = 'a'::text)"),
-        policy("b", qual: @topic_is_x),
+        policy("a", qual: "(app.email() = 'a'::text)"),
+        policy("b", qual: @team_is_x),
         policy("r", permissive: false, qual: "true")
       ]
 
@@ -731,23 +730,23 @@ defmodule SqlLogex.PolicySetTest do
   ## Writes that plan a SELECT (write_plans_select)
 
   describe "a write also needs the SELECT policies to be modelled" do
-    @topic_x "(realtime.topic() = 'x'::text)"
-    @unsupported_select "(auth.email() = 'a'::text)"
+    @team_x "(app.team() = 'x'::text)"
+    @unsupported_select "(app.email() = 'a'::text)"
 
     setup %{catalogs: catalogs} do
       %{functions: catalogs["pg17"].functions}
     end
 
-    defp insert_policy, do: policy("insert", cmd: "a", qual: nil, with_check: @topic_x)
+    defp insert_policy, do: policy("insert", cmd: "a", qual: nil, with_check: @team_x)
 
     defp write_with(policies, functions, opts \\ []) do
-      role = Keyword.get(opts, :role, "authenticated")
-      sub = Keyword.get(opts, :sub, @uid)
-      SqlLogex.decide(snapshot(policies, functions), env(topic: "x", sub: sub, role: role), :write)
+      role = Keyword.get(opts, :role, "member")
+      user_id = Keyword.get(opts, :user_id, @uid)
+      SqlLogex.decide(snapshot(policies, functions), env(team: "x", user_id: user_id, role: role), :write)
     end
 
     test "a SELECT policy that is supported doesn't matter", %{functions: functions} do
-      assert write_with([insert_policy(), policy("select", qual: @topic_x)], functions) == @allow
+      assert write_with([insert_policy(), policy("select", qual: @team_x)], functions) == @allow
       assert write_with([insert_policy(), policy("select", qual: "false")], functions) == @allow
     end
 
@@ -761,10 +760,10 @@ defmodule SqlLogex.PolicySetTest do
 
     test "unsupported anywhere in the expression counts", %{functions: functions} do
       for qual <- [
-            "(#{@topic_x} AND (auth.email() = 'a'::text))",
-            "(#{@topic_x} OR (NOT (auth.email() = 'a'::text)))",
-            "(realtime.topic() = ANY (ARRAY['a'::text, auth.email()]))",
-            "COALESCE((auth.email() = 'a'::text), true)",
+            "(#{@team_x} AND (app.email() = 'a'::text))",
+            "(#{@team_x} OR (NOT (app.email() = 'a'::text)))",
+            "(app.team() = ANY (ARRAY['a'::text, app.email()]))",
+            "COALESCE((app.email() = 'a'::text), true)",
             "( SELECT true\n   FROM pg_sleep((1)::double precision) pg_sleep(pg_sleep))",
             "(private = true)"
           ] do
@@ -779,13 +778,13 @@ defmodule SqlLogex.PolicySetTest do
     end
 
     test "an ALL policy counts for its USING, even if the write uses its WITH CHECK", %{functions: functions} do
-      policies = [policy("all", cmd: "*", qual: @unsupported_select, with_check: @topic_x)]
+      policies = [policy("all", cmd: "*", qual: @unsupported_select, with_check: @team_x)]
       assert write_with(policies, functions) == {:fallback, :select_policy_unsupported}
 
-      policies = [policy("all", cmd: "*", qual: nil, with_check: @topic_x)]
+      policies = [policy("all", cmd: "*", qual: nil, with_check: @team_x)]
       assert write_with(policies, functions) == {:fallback, :select_policy_unsupported}
 
-      policies = [policy("all", cmd: "*", qual: @topic_x, with_check: @topic_x)]
+      policies = [policy("all", cmd: "*", qual: @team_x, with_check: @team_x)]
       assert write_with(policies, functions) == @allow
     end
 
@@ -796,13 +795,13 @@ defmodule SqlLogex.PolicySetTest do
 
     test "only the policies that might apply to the role count", %{functions: functions} do
       policies = [
-        policy("insert", cmd: "a", roles: ["anon", "authenticated"], qual: nil, with_check: @topic_x),
-        policy("for_anon", roles: ["anon"], qual: @unsupported_select)
+        policy("insert", cmd: "a", roles: ["guest", "member"], qual: nil, with_check: @team_x),
+        policy("for_guest", roles: ["guest"], qual: @unsupported_select)
       ]
 
       assert write_with(policies, functions) == @allow
 
-      assert write_with(policies, functions, role: "anon") == {:fallback, :select_policy_unsupported}
+      assert write_with(policies, functions, role: "guest") == {:fallback, :select_policy_unsupported}
 
       # public applies to everyone
       policies = [insert_policy(), policy("for_public", roles: ["public"], qual: @unsupported_select)]
@@ -814,7 +813,7 @@ defmodule SqlLogex.PolicySetTest do
       assert write_with(policies, functions) == {:fallback, :select_policy_unsupported}
 
       # one we can read can't fail the statement by being there
-      policies = [insert_policy(), policy("for_team", roles: ["team_member"], qual: @topic_x)]
+      policies = [insert_policy(), policy("for_team", roles: ["team_member"], qual: @team_x)]
       assert write_with(policies, functions) == @allow
     end
 
@@ -831,10 +830,10 @@ defmodule SqlLogex.PolicySetTest do
     test "a SELECT policy that raises for this input is a fallback", %{functions: functions} do
       # Against Postgres 17 a write-only call that plans the SELECT didn't raise for a policy like
       # this, with no probe row to evaluate it for. Against a Multigres cluster it did.
-      raising = "((realtime.topic() = 'x'::text) AND ((( SELECT auth.uid() AS uid))::text = 'x'::text))"
+      raising = "((app.team() = 'x'::text) AND ((( SELECT app.user_id() AS user_id))::text = 'x'::text))"
       policies = [insert_policy(), policy("select", qual: raising)]
 
-      assert write_with(policies, functions, sub: "user_2abc") ==
+      assert write_with(policies, functions, user_id: "user_2abc") ==
                {:fallback,
                 {:unsupported, {:raises, :invalid_text_representation, "invalid input syntax for type uuid"}}}
 
@@ -842,24 +841,24 @@ defmodule SqlLogex.PolicySetTest do
     end
 
     test "a read is not affected, it evaluates the policies it needs", %{functions: functions} do
-      policies = [insert_policy(), policy("select", qual: @topic_x)]
-      assert SqlLogex.decide(snapshot(policies, functions), env(topic: "x", sub: @uid), :read) == @allow
+      policies = [insert_policy(), policy("select", qual: @team_x)]
+      assert SqlLogex.decide(snapshot(policies, functions), env(team: "x", user_id: @uid), :read) == @allow
 
       # the INSERT policy is not even looked at
       policies = [
         policy("insert", cmd: "a", qual: nil, with_check: @unsupported_select),
-        policy("select", qual: @topic_x)
+        policy("select", qual: @team_x)
       ]
 
-      assert SqlLogex.decide(snapshot(policies, functions), env(topic: "x", sub: @uid), :read) == @allow
+      assert SqlLogex.decide(snapshot(policies, functions), env(team: "x", user_id: @uid), :read) == @allow
     end
 
     test "the grants are checked first", %{functions: functions} do
-      roles = %{@roles | "authenticated" => %{bypass_rls: false, select: false, insert: true}}
+      roles = %{@roles | "member" => %{bypass_rls: false, select: false, insert: true}}
       policies = [insert_policy(), policy("select", qual: @unsupported_select)]
 
-      assert SqlLogex.decide(snapshot(policies, functions, %{roles: roles}), env(topic: "x", sub: @uid), :write) ==
-               {:fallback, {:missing_grant, "authenticated", :select}}
+      assert SqlLogex.decide(snapshot(policies, functions, %{roles: roles}), env(team: "x", user_id: @uid), :write) ==
+               {:fallback, {:missing_grant, "member", :select}}
     end
 
     test "with no policy for SELECT at all, the write decides", %{functions: functions} do
@@ -867,40 +866,40 @@ defmodule SqlLogex.PolicySetTest do
       assert write_with([], functions) == @deny
     end
 
-    test "the user-channel SELECT policies are modelled, so its writes decide", %{catalogs: catalogs} do
-      for version <- @versions, variant <- [:legacy, :supabase_auth] do
+    test "the personal-team SELECT policies are modelled, so their writes decide", %{catalogs: catalogs} do
+      for version <- @versions, variant <- [:simple, :fallback] do
         catalog = catalogs[version]
-        snapshot = snapshot(user_channel_policies(catalog), functions(catalog, variant))
+        snapshot = snapshot(personal_team_policies(catalog), functions(catalog, variant))
 
-        assert SqlLogex.decide(snapshot, env(topic: "user:#{@uid}", sub: @uid), :write) == @allow,
+        assert SqlLogex.decide(snapshot, env(team: "user:#{@uid}", user_id: @uid), :write) == @allow,
                "#{version} #{variant}"
       end
     end
   end
 
-  ## The generator policies of the example (SqlLogex.Test.RealtimePolicies)
+  ## The typical policies of the example (SqlLogex.Test.ExamplePolicies)
 
   describe "claim-based policies" do
     @claim_cases [
-      {"true", ~s({"broadcast_read":true}), @allow},
-      {"the string true", ~s({"broadcast_read":"true"}), @allow},
-      {"the string yes", ~s({"broadcast_read":"yes"}), @allow},
-      {"false", ~s({"broadcast_read":false}), @deny},
-      {"the string 0", ~s({"broadcast_read":"0"}), @deny},
+      {"true", ~s({"notes_read":true}), @allow},
+      {"the string true", ~s({"notes_read":"true"}), @allow},
+      {"the string yes", ~s({"notes_read":"yes"}), @allow},
+      {"false", ~s({"notes_read":false}), @deny},
+      {"the string 0", ~s({"notes_read":"0"}), @deny},
       # ->> gives NULL, COALESCE turns it into false
-      {"JSON null", ~s({"broadcast_read":null}), @deny},
+      {"JSON null", ~s({"notes_read":null}), @deny},
       {"a missing key", ~s({"other":true}), @deny},
       {"an empty object", "{}", @deny},
-      {"an array root", ~s(["broadcast_read"]), @deny},
-      {"a string root", ~s("broadcast_read"), @deny},
+      {"an array root", ~s(["notes_read"]), @deny},
+      {"a string root", ~s("notes_read"), @deny},
       # jsonb keeps the last of duplicate keys
-      {"duplicate keys", ~s({"broadcast_read":false,"broadcast_read":true}), @allow},
+      {"duplicate keys", ~s({"notes_read":false,"notes_read":true}), @allow},
       # ::boolean raises
-      {"a string that isn't a boolean", ~s({"broadcast_read":"maybe"}), @invalid_bool},
+      {"a string that isn't a boolean", ~s({"notes_read":"maybe"}), @invalid_bool},
       # A number would be allowed by Postgres ('1' is true) but we don't render numbers
-      {"a number", ~s({"broadcast_read":1}), {:fallback, {:unsupported, :jsonb_number_text}}},
-      {"an object", ~s({"broadcast_read":{"a":1}}), {:fallback, {:unsupported, :jsonb_container_text}}},
-      {"a NUL escape", ~s({"broadcast_read":"\\u0000"}),
+      {"a number", ~s({"notes_read":1}), {:fallback, {:unsupported, :jsonb_number_text}}},
+      {"an object", ~s({"notes_read":{"a":1}}), {:fallback, {:unsupported, :jsonb_container_text}}},
+      {"a NUL escape", ~s({"notes_read":"\\u0000"}),
        {:fallback, {:unsupported, {:raises, :untranslatable_character, "unsupported Unicode escape sequence"}}}},
       # The policy casts the setting itself, with no nullif: '' isn't JSON
       {"not JSON", "not json", @invalid_json},
@@ -908,12 +907,12 @@ defmodule SqlLogex.PolicySetTest do
     ]
 
     for {name, claims, expect} <- @claim_cases do
-      test "broadcast_read is #{name}", %{catalogs: catalogs} do
-        env = env(topic: "fixture_topic", extension: "broadcast", claims: unquote(claims))
+      test "notes_read is #{name}", %{catalogs: catalogs} do
+        env = env(team: "fixture_team", kind: "note", claims: unquote(claims))
 
         assert_all_variants(
           catalogs,
-          &named(&1, ["generator_authenticated_read_broadcast_based_on_claim"]),
+          &named(&1, ["typical_member_read_notes_by_claim"]),
           env,
           :read,
           unquote(Macro.escape(expect))
@@ -921,112 +920,112 @@ defmodule SqlLogex.PolicySetTest do
       end
     end
 
-    test "the claim only matters on the topic and extension of the policy", %{catalogs: catalogs} do
-      policies = &named(&1, ["generator_authenticated_read_broadcast_based_on_claim"])
+    test "the claim only matters on the team and kind of the policy", %{catalogs: catalogs} do
+      policies = &named(&1, ["typical_member_read_notes_by_claim"])
 
-      # another topic, or another extension, is false before the claim is looked at ...
-      for {topic, extension} <- [{"other_topic", "broadcast"}, {"fixture_topic", "presence"}] do
-        env = env(topic: topic, extension: extension, claims: ~s({"broadcast_read":true}))
+      # another team, or another kind, is false before the claim is looked at ...
+      for {team, kind} <- [{"other_team", "note"}, {"fixture_team", "task"}] do
+        env = env(team: team, kind: kind, claims: ~s({"notes_read":true}))
         assert_all_variants(catalogs, policies, env, :read, @deny)
 
         # ... and one the claim can't change, though the claim here raises. That decides nothing,
         # as Postgres may have evaluated the cast first
-        env = env(topic: topic, extension: extension, claims: ~s({"broadcast_read":"maybe"}))
+        env = env(team: team, kind: kind, claims: ~s({"notes_read":"maybe"}))
         assert_all_variants(catalogs, policies, env, :read, @invalid_bool)
 
-        env = env(topic: topic, extension: extension, claims: "not json")
+        env = env(team: team, kind: kind, claims: "not json")
         assert_all_variants(catalogs, policies, env, :read, @invalid_json)
       end
     end
 
-    test "the presence policy reads presence_read", %{catalogs: catalogs} do
-      policies = &named(&1, ["generator_authenticated_read_presence_based_on_claim"])
-      env = &env(topic: "fixture_topic", extension: "presence", claims: &1)
+    test "the task policy reads tasks_read", %{catalogs: catalogs} do
+      policies = &named(&1, ["typical_member_read_tasks_by_claim"])
+      env = &env(team: "fixture_team", kind: "task", claims: &1)
 
-      assert_all_variants(catalogs, policies, env.(~s({"presence_read":true})), :read, @allow)
-      assert_all_variants(catalogs, policies, env.(~s({"broadcast_read":true})), :read, @deny)
+      assert_all_variants(catalogs, policies, env.(~s({"tasks_read":true})), :read, @allow)
+      assert_all_variants(catalogs, policies, env.(~s({"notes_read":true})), :read, @deny)
     end
 
     test "with the other policies on top, a true one doesn't decide", %{catalogs: catalogs} do
       policies =
-        &named(&1, ["generator_authenticated_read_broadcast_based_on_claim", "generator_authenticated_read_broadcast"])
+        &named(&1, ["typical_member_read_notes_by_claim", "typical_member_read_notes"])
 
-      env = env(topic: "fixture_topic", extension: "broadcast", claims: ~s({"broadcast_read":"maybe"}))
+      env = env(team: "fixture_team", kind: "note", claims: ~s({"notes_read":"maybe"}))
 
       assert_all_variants(catalogs, policies, env, :read, @invalid_bool)
     end
   end
 
-  describe "generator policies" do
-    test "topic and extension", %{catalogs: catalogs} do
-      read = &named(&1, ["generator_authenticated_read_broadcast"])
-      write = &named(&1, ["generator_authenticated_write_broadcast"])
+  describe "typical policies" do
+    test "team and kind", %{catalogs: catalogs} do
+      read = &named(&1, ["typical_member_read_notes"])
+      write = &named(&1, ["typical_member_write_notes"])
 
-      for {topic, extension, expect} <- [
-            {"fixture_topic", "broadcast", @allow},
-            {"fixture_topic", "presence", @deny},
-            {"other", "broadcast", @deny},
-            {"fixture_topic ", "broadcast", @deny},
-            {"FIXTURE_TOPIC", "broadcast", @deny}
+      for {team, kind, expect} <- [
+            {"fixture_team", "note", @allow},
+            {"fixture_team", "task", @deny},
+            {"other", "note", @deny},
+            {"fixture_team ", "note", @deny},
+            {"FIXTURE_TOPIC", "note", @deny}
           ] do
-        env = env(topic: topic, extension: extension)
+        env = env(team: team, kind: kind)
         assert_all_variants(catalogs, read, env, :read, expect)
         assert_all_variants(catalogs, write, env, :write, expect)
       end
     end
 
-    test "extension lists", %{catalogs: catalogs} do
-      read = &named(&1, ["generator_authenticated_read_broadcast_and_presence"])
+    test "kind lists", %{catalogs: catalogs} do
+      read = &named(&1, ["typical_member_read_notes_and_tasks"])
 
       write =
-        &named(&1, ["generator_authenticated_write_broadcast_and_presence", "generator_authenticated_write_persistence"])
+        &named(&1, ["typical_member_write_notes_and_tasks", "typical_member_write_files"])
 
-      for {extension, expect} <- [{"broadcast", @allow}, {"presence", @allow}, {"other", @deny}] do
-        env = env(topic: "fixture_topic", extension: extension)
+      for {kind, expect} <- [{"note", @allow}, {"task", @allow}, {"other", @deny}] do
+        env = env(team: "fixture_team", kind: kind)
         assert_all_variants(catalogs, read, env, :read, expect)
         assert_all_variants(catalogs, write, env, :write, expect)
       end
 
-      # the other write policy is for persistence
-      env = env(topic: "fixture_topic", extension: "persistence")
+      # the other write policy is for file
+      env = env(team: "fixture_team", kind: "file")
       assert_all_variants(catalogs, write, env, :write, @allow)
     end
 
     test "true policies allow everything", %{catalogs: catalogs} do
-      env = env(topic: "anything", extension: "presence")
+      env = env(team: "anything", kind: "task")
 
-      assert_all_variants(catalogs, &named(&1, ["generator_authenticated_all_topic_read"]), env, :read, @allow)
-      assert_all_variants(catalogs, &named(&1, ["generator_authenticated_all_topic_insert"]), env, :write, @allow)
+      assert_all_variants(catalogs, &named(&1, ["typical_member_read_all"]), env, :read, @allow)
+      assert_all_variants(catalogs, &named(&1, ["typical_member_insert_all"]), env, :write, @allow)
     end
 
-    test "a policy that matches on the sub", %{catalogs: catalogs} do
-      sub = "c0ffee00-1111-4222-8333-444455556666"
-      read = &named(&1, ["generator_authenticated_read_matching_user_sub"])
-      write = &named(&1, ["generator_authenticated_write_matching_user_sub"])
+    test "a policy that matches on the user id", %{catalogs: catalogs} do
+      user_id = "c0ffee00-1111-4222-8333-444455556666"
+      read = &named(&1, ["typical_member_read_matching_user_id"])
+      write = &named(&1, ["typical_member_write_matching_user_id"])
 
-      for {sub_in_token, expect} <- [
-            {sub, @allow},
+      for {user_id_in_session, expect} <- [
+            {user_id, @allow},
             # uuid_out prints lowercase
-            {String.upcase(sub), @allow},
-            {"{#{sub}}", @allow},
+            {String.upcase(user_id), @allow},
+            {"{#{user_id}}", @allow},
             {@uid, @deny},
             {nil, @deny},
             {"user_2abc", @invalid_uuid}
           ] do
-        env = env(topic: "t", sub: sub_in_token)
+        env = env(team: "t", user_id: user_id_in_session)
         assert_all_variants(catalogs, read, env, :read, expect)
         assert_all_variants(catalogs, write, env, :write, expect)
       end
     end
 
-    test "a policy on topic, extension and sub", %{catalogs: catalogs} do
-      policies = &named(&1, ["generator_authenticated_read_presence_for_sub"])
-      sub = "c0ffee00-1111-4222-8333-444455556666"
+    test "a policy on team, kind and user id", %{catalogs: catalogs} do
+      policies = &named(&1, ["typical_member_read_own_tasks"])
+      user_id = "c0ffee00-1111-4222-8333-444455556666"
 
       assert_all_variants(
         catalogs,
         policies,
-        env(topic: "fixture_topic", extension: "presence", sub: sub),
+        env(team: "fixture_team", kind: "task", user_id: user_id),
         :read,
         @allow
       )
@@ -1034,26 +1033,26 @@ defmodule SqlLogex.PolicySetTest do
       assert_all_variants(
         catalogs,
         policies,
-        env(topic: "fixture_topic", extension: "presence", sub: @uid),
+        env(team: "fixture_team", kind: "task", user_id: @uid),
         :read,
         @deny
       )
 
-      assert_all_variants(catalogs, policies, env(topic: "other", extension: "presence", sub: sub), :read, @deny)
+      assert_all_variants(catalogs, policies, env(team: "other", kind: "task", user_id: user_id), :read, @deny)
 
       assert_all_variants(
         catalogs,
         policies,
-        env(topic: "fixture_topic", extension: "broadcast", sub: sub),
+        env(team: "fixture_team", kind: "note", user_id: user_id),
         :read,
         @deny
       )
 
-      # the cast of auth.uid() fails, unless the topic or extension is wrong first
+      # the cast of app.user_id() fails, unless the team or kind is wrong first
       assert_all_variants(
         catalogs,
         policies,
-        env(topic: "fixture_topic", extension: "presence", sub: "x"),
+        env(team: "fixture_team", kind: "task", user_id: "x"),
         :read,
         @invalid_uuid
       )
@@ -1061,78 +1060,78 @@ defmodule SqlLogex.PolicySetTest do
       assert_all_variants(
         catalogs,
         policies,
-        env(topic: "other", extension: "presence", sub: "x"),
+        env(team: "other", kind: "task", user_id: "x"),
         :read,
         @invalid_uuid
       )
     end
 
     test "policies on the role, for public", %{catalogs: catalogs} do
-      read = &named(&1, ["generator_read_matching_user_role"])
-      write = &named(&1, ["generator_write_matching_user_role"])
+      read = &named(&1, ["typical_read_matching_user_role"])
+      write = &named(&1, ["typical_write_matching_user_role"])
 
-      # auth.role() is the role of the token, which is also the role the probe runs as
-      for {role, expect} <- [{"authenticated", @allow}, {"anon", @deny}] do
-        env = env(topic: "t", role: role)
+      # app.user_role() is the role of the token, which is also the role the probe runs as
+      for {role, expect} <- [{"member", @allow}, {"guest", @deny}] do
+        env = env(team: "t", role: role)
         assert_all_variants(catalogs, read, env, :read, expect)
         assert_all_variants(catalogs, write, env, :write, expect)
       end
     end
 
     test "a restrictive policy we can't evaluate", %{catalogs: catalogs} do
-      policies = &named(&1, ["generator_authenticated_all_topic_read", "generator_slow_read"])
+      policies = &named(&1, ["typical_member_read_all", "typical_slow_read"])
 
       # true AND unsupported: nothing to decide with
-      env = env(topic: "t")
+      env = env(team: "t")
       assert_all_variants(catalogs, policies, env, :read, @slow_unsupported)
 
-      policies = &named(&1, ["generator_authenticated_read_broadcast", "generator_slow_read"])
+      policies = &named(&1, ["typical_member_read_notes", "typical_slow_read"])
 
       # false AND unsupported: nothing to decide with either
-      env = env(topic: "other")
+      env = env(team: "other")
       assert_all_variants(catalogs, policies, env, :read, @slow_unsupported)
 
       # no permissive policy applies for write... the slow write is restrictive too
-      policies = &named(&1, ["generator_slow_write"])
-      assert_all_variants(catalogs, policies, env(topic: "t"), :write, @deny)
+      policies = &named(&1, ["typical_slow_write"])
+      assert_all_variants(catalogs, policies, env(team: "t"), :write, @deny)
 
-      policies = &named(&1, ["generator_authenticated_all_topic_insert", "generator_slow_write"])
-      assert_all_variants(catalogs, policies, env(topic: "t"), :write, @slow_unsupported)
+      policies = &named(&1, ["typical_member_insert_all", "typical_slow_write"])
+      assert_all_variants(catalogs, policies, env(team: "t"), :write, @slow_unsupported)
     end
 
     test "a broken permissive policy decides nothing, whatever the others say", %{catalogs: catalogs} do
-      broken = "generator_broken_read_presence"
+      broken = "typical_broken_read"
       unsupported = {:fallback, {:unsupported, {:function, :other_schema, :not_allowlisted}}}
 
       for policies <- [
-            &named(&1, [broken, "generator_authenticated_all_topic_read"]),
-            &named(&1, [broken, "generator_authenticated_read_broadcast"])
+            &named(&1, [broken, "typical_member_read_all"]),
+            &named(&1, [broken, "typical_member_read_notes"])
           ] do
-        assert_all_variants(catalogs, policies, env(topic: "t"), :read, unsupported)
+        assert_all_variants(catalogs, policies, env(team: "t"), :read, unsupported)
       end
     end
 
     test "ALL policy with only USING", %{catalogs: catalogs} do
       policies = &named(&1, ["grammar_all_using_only"])
 
-      assert_all_variants(catalogs, policies, env(topic: "x"), :read, @allow)
-      assert_all_variants(catalogs, policies, env(topic: "x"), :write, @allow)
-      assert_all_variants(catalogs, policies, env(topic: "y"), :read, @deny)
-      assert_all_variants(catalogs, policies, env(topic: "y"), :write, @deny)
+      assert_all_variants(catalogs, policies, env(team: "x"), :read, @allow)
+      assert_all_variants(catalogs, policies, env(team: "x"), :write, @allow)
+      assert_all_variants(catalogs, policies, env(team: "y"), :read, @deny)
+      assert_all_variants(catalogs, policies, env(team: "y"), :write, @deny)
     end
 
     test "restrictive policy of the grammar", %{catalogs: catalogs} do
-      policies = &named(&1, ["generator_authenticated_all_topic_read", "grammar_restrictive"])
+      policies = &named(&1, ["typical_member_read_all", "grammar_restrictive"])
 
-      assert_all_variants(catalogs, policies, env(topic: "x"), :read, @allow)
-      assert_all_variants(catalogs, policies, env(topic: "y"), :read, @deny)
+      assert_all_variants(catalogs, policies, env(team: "x"), :read, @allow)
+      assert_all_variants(catalogs, policies, env(team: "y"), :read, @deny)
     end
 
     test "every policy of the fixtures can be decided or falls back, without raising", %{catalogs: catalogs} do
-      for version <- @versions, variant <- [:legacy, :supabase_auth], policy <- catalogs[version].policies do
-        for role <- ["anon", "authenticated"], operation <- [:read, :write] do
+      for version <- @versions, variant <- [:simple, :fallback], policy <- catalogs[version].policies do
+        for role <- ["guest", "member"], operation <- [:read, :write] do
           snapshot = snapshot([policy_attrs(policy)], functions(catalogs[version], variant))
-          decision = SqlLogex.decide(snapshot, env(topic: "fixture_topic", sub: @uid, role: role), operation)
+          decision = SqlLogex.decide(snapshot, env(team: "fixture_team", user_id: @uid, role: role), operation)
 
           refute match?({:fallback, {:exception, _}}, decision), "#{version} #{policy.name}"
         end
