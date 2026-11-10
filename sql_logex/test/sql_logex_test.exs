@@ -12,138 +12,137 @@ defmodule SqlLogexTest do
   alias SqlLogex.Eval
   alias SqlLogex.Parser
   alias SqlLogex.Resolver
-  alias SqlLogex.Test.RealtimeProfile
+  alias SqlLogex.Test.ExampleProfile
 
-  @profile RealtimeProfile.profile()
+  @profile ExampleProfile.profile()
 
   @uid "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
   @other_uid "b1ffcd00-8d1c-4ff9-cc7e-7cc0ce491b22"
 
-  # auth.uid(), auth.role(), auth.jwt() and realtime.topic() as Postgres 17 reports them: the bodies
-  # of the supabase/postgres image, and supabase/auth's auth.jwt()
+  # app.team(), app.user_id(), app.user_role() and app.claims() as Postgres 17 reports them, with the
+  # simple bodies of app.user_id() and app.user_role()
   {catalog, _binding} = Code.eval_file(Path.expand("fixtures/pg17/catalog.exs", __DIR__))
   @functions catalog.functions
 
-  # supabase/auth's auth.uid() (migration 20220224000811), which also reads the sub from the claims
-  @uid_supabase_auth """
+  # The fallback body of app.user_id(), which also reads the sub from the claims
+  @user_id_fallback """
   select
-  coalesce(
-    nullif(current_setting('request.jwt.claim.sub', true), ''),
-    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')
-  )::uuid
+    coalesce(
+      nullif(current_setting('app.user_id', true), ''),
+      (nullif(current_setting('app.claims', true), '')::jsonb ->> 'sub')
+    )::uuid
   """
 
-  @own_channel_rls "(realtime.topic() = ('user:'::text || auth.uid()))"
+  @own_team_rls "(app.team() = ('user:'::text || app.user_id()))"
 
-  # Evaluates `sql` in the session that the example sets up for a join: the settings for a JWT with this
-  # role, sub and claims, and the probe row with this topic and extension. A nil sub is a JWT
-  # without one.
+  # Evaluates `sql` in the session that the application of the example sets up: the settings for a
+  # user with this role, user id and claims, and the row with this team and kind. A nil user id is
+  # a user without one.
   defp evaluate(sql, opts) do
     {ir, _type} = sql |> Parser.parse() |> Resolver.resolve(Keyword.get(opts, :functions, @functions), @profile)
     Eval.eval(ir, env(opts))
   end
 
-  # The functions above, with these changes to the definition of auth.uid()
-  defp with_auth_uid(changes) do
+  # The functions above, with these changes to the definition of app.user_id()
+  defp with_user_id(changes) do
     Enum.map(@functions, fn
-      %{schema: "auth", name: "uid"} = function -> Map.merge(function, changes)
+      %{schema: "app", name: "user_id"} = function -> Map.merge(function, changes)
       function -> function
     end)
   end
 
   defp env(opts) do
-    role = Keyword.get(opts, :role, "authenticated")
-    sub = Keyword.get(opts, :sub)
-    topic = Keyword.get(opts, :topic, "room:1")
-    claims = Keyword.get_lazy(opts, :claims, fn -> JSON.encode!(%{"role" => role, "sub" => sub}) end)
+    role = Keyword.get(opts, :role, "member")
+    user_id = Keyword.get(opts, :user_id)
+    team = Keyword.get(opts, :team, "room:1")
+    claims = Keyword.get_lazy(opts, :claims, fn -> JSON.encode!(%{"role" => role, "sub" => user_id}) end)
 
     Env.new(
       %{
         "role" => role,
-        "realtime.topic" => topic,
-        "request.jwt.claims" => claims,
-        "request.jwt.claim.sub" => sub,
-        "request.jwt.claim.role" => role,
-        "request.headers" => "{}"
+        "app.team" => team,
+        "app.claims" => claims,
+        "app.user_id" => user_id,
+        "app.user_role" => role
       },
-      %{"topic" => {:text, topic}, "extension" => {:text, Keyword.get(opts, :extension, "broadcast")}}
+      %{"team" => {:text, team}, "kind" => {:text, Keyword.get(opts, :kind, "note")}}
     )
   end
 
-  describe "a user's own channel" do
-    test "is the topic user:<their uid>" do
-      assert evaluate(@own_channel_rls, topic: "user:#{@uid}", sub: @uid) == true
-      assert evaluate(@own_channel_rls, topic: "user:#{@other_uid}", sub: @uid) == false
+  describe "a user's own team" do
+    test "is the team user:<their user id>" do
+      assert evaluate(@own_team_rls, team: "user:#{@uid}", user_id: @uid) == true
+      assert evaluate(@own_team_rls, team: "user:#{@other_uid}", user_id: @uid) == false
     end
 
-    test "is the same in the (select auth.uid()) form" do
-      initplan = "(realtime.topic() = ('user:'::text || ( SELECT auth.uid() AS uid)))"
+    test "is the same in the (select app.user_id()) form" do
+      initplan = "(app.team() = ('user:'::text || ( SELECT app.user_id() AS user_id)))"
 
-      assert evaluate(initplan, topic: "user:#{@uid}", sub: @uid) == true
-      assert evaluate(initplan, topic: "user:#{@other_uid}", sub: @uid) == false
+      assert evaluate(initplan, team: "user:#{@uid}", user_id: @uid) == true
+      assert evaluate(initplan, team: "user:#{@other_uid}", user_id: @uid) == false
     end
 
-    test "compares the uid as Postgres prints it, in lower case" do
-      assert evaluate(@own_channel_rls, topic: "user:#{@uid}", sub: String.upcase(@uid)) == true
-      assert evaluate(@own_channel_rls, topic: "user:#{String.upcase(@uid)}", sub: @uid) == false
+    test "compares the user id as Postgres prints it, in lower case" do
+      assert evaluate(@own_team_rls, team: "user:#{@uid}", user_id: String.upcase(@uid)) == true
+      assert evaluate(@own_team_rls, team: "user:#{String.upcase(@uid)}", user_id: @uid) == false
     end
 
-    test "is NULL without a sub, which denies" do
-      assert evaluate(@own_channel_rls, topic: "user:", sub: nil) == nil
+    test "is NULL without a user id, which denies" do
+      assert evaluate(@own_team_rls, team: "user:", user_id: nil) == nil
     end
 
-    test "falls back for a sub that isn't a uuid, where Postgres raises" do
-      assert evaluate(@own_channel_rls, topic: "user:user_2abc", sub: "user_2abc") ==
+    test "falls back for a user id that isn't a uuid, where Postgres raises" do
+      assert evaluate(@own_team_rls, team: "user:user_2abc", user_id: "user_2abc") ==
                {:unsupported, {:raises, :invalid_text_representation, "invalid input syntax for type uuid"}}
     end
 
-    test "depends on the body of auth.uid(): supabase/auth's also reads the sub from the claims" do
-      opts = [topic: "user:#{@uid}", sub: "", claims: ~s({"sub":"#{@uid}"})]
+    test "depends on the body of app.user_id(): the fallback body also reads the sub from the claims" do
+      opts = [team: "user:#{@uid}", user_id: "", claims: ~s({"sub":"#{@uid}"})]
 
-      assert evaluate(@own_channel_rls, [functions: with_auth_uid(%{source: @uid_supabase_auth})] ++ opts) == true
-      assert evaluate(@own_channel_rls, opts) == nil
+      assert evaluate(@own_team_rls, [functions: with_user_id(%{source: @user_id_fallback})] ++ opts) == true
+      assert evaluate(@own_team_rls, opts) == nil
     end
   end
 
   describe "lists" do
     test "IN is = ANY over an array" do
-      sql = "(extension = ANY (ARRAY['broadcast'::text, 'presence'::text]))"
+      sql = "(kind = ANY (ARRAY['note'::text, 'task'::text]))"
 
-      assert evaluate(sql, extension: "presence") == true
-      assert evaluate(sql, extension: "postgres_changes") == false
+      assert evaluate(sql, kind: "task") == true
+      assert evaluate(sql, kind: "comment") == false
     end
   end
 
   describe "regular expressions" do
     test "a literal pattern is an unanchored match, ~* ignores ASCII case" do
-      sql = "(realtime.topic() ~* 'public:lobby'::text)"
+      sql = "(app.team() ~* 'public:lobby'::text)"
 
-      assert evaluate(sql, topic: "PUBLIC:LOBBY") == true
-      assert evaluate(sql, topic: "xpublic:lobbyy") == true
-      assert evaluate(sql, topic: "room:1") == false
+      assert evaluate(sql, team: "PUBLIC:LOBBY") == true
+      assert evaluate(sql, team: "xpublic:lobbyy") == true
+      assert evaluate(sql, team: "room:1") == false
     end
 
-    test "fall back for a pattern with metacharacters, or ~* on a topic that isn't ASCII" do
+    test "fall back for a pattern with metacharacters, or ~* on a team that isn't ASCII" do
       # Postgres: true, then false
-      assert evaluate("(realtime.topic() ~ '^public'::text)", topic: "public:lobby") ==
+      assert evaluate("(app.team() ~ '^public'::text)", team: "public:lobby") ==
                {:unsupported, :regex_not_literal}
 
-      assert evaluate("(realtime.topic() ~* 'public:lobby'::text)", topic: "café") ==
+      assert evaluate("(app.team() ~* 'public:lobby'::text)", team: "café") ==
                {:unsupported, :regex_non_ascii}
     end
   end
 
   describe "claims" do
-    test "are read from the JWT with auth.jwt() ->>" do
-      sql = "((auth.jwt() ->> 'role'::text) = 'authenticated'::text)"
+    test "are read with app.claims() ->>" do
+      sql = "((app.claims() ->> 'role'::text) = 'member'::text)"
 
-      assert evaluate(sql, claims: ~s({"role":"authenticated"})) == true
-      assert evaluate(sql, claims: ~s({"role":"anon"})) == false
+      assert evaluate(sql, claims: ~s({"role":"member"})) == true
+      assert evaluate(sql, claims: ~s({"role":"guest"})) == false
       assert evaluate(sql, claims: ~s({})) == nil
     end
 
     test "cast to boolean as Postgres reads booleans" do
-      sql = "((auth.jwt() ->> 'is_admin'::text))::boolean"
+      sql = "((app.claims() ->> 'is_admin'::text))::boolean"
 
       assert evaluate(sql, claims: ~s({"is_admin":true})) == true
       assert evaluate(sql, claims: ~s({"is_admin":"yes"})) == true
@@ -154,56 +153,56 @@ defmodule SqlLogexTest do
 
     test "fall back for a number, whose text Postgres normalises" do
       # Postgres: true
-      assert evaluate("((auth.jwt() ->> 'level'::text) = '1'::text)", claims: ~s({"level":1})) ==
+      assert evaluate("((app.claims() ->> 'level'::text) = '1'::text)", claims: ~s({"level":1})) ==
                {:unsupported, :jsonb_number_text}
     end
   end
 
   describe "NULL" do
     test "follows SQL's three-valued logic" do
-      null = "(realtime.topic() = NULL::text)"
+      null = "(app.team() = NULL::text)"
 
       assert evaluate(null, []) == nil
       assert evaluate("(NOT #{null})", []) == nil
-      assert evaluate("(#{null} OR (extension = 'broadcast'::text))", []) == true
-      assert evaluate("(#{null} AND (extension = 'broadcast'::text))", []) == nil
-      assert evaluate("(#{null} AND (extension = 'presence'::text))", []) == false
+      assert evaluate("(#{null} OR (kind = 'note'::text))", []) == true
+      assert evaluate("(#{null} AND (kind = 'note'::text))", []) == nil
+      assert evaluate("(#{null} AND (kind = 'task'::text))", []) == false
     end
   end
 
   describe "falling back rather than guessing" do
     test "an unsupported part decides an OR even next to a true one" do
       # Postgres: true. It may evaluate the unsupported part first or while planning, and raise
-      sql = "((extension = 'broadcast'::text) OR (realtime.topic() ~ 'a.b'::text))"
+      sql = "((kind = 'note'::text) OR (app.team() ~ 'a.b'::text))"
 
-      assert evaluate(sql, extension: "broadcast") == {:unsupported, :regex_not_literal}
+      assert evaluate(sql, kind: "note") == {:unsupported, :regex_not_literal}
     end
 
     test "a COALESCE with an unsupported argument, even after a non-NULL one" do
       # Postgres raises division_by_zero: the planner folds the constant 1 / 0 before COALESCE
-      # would stop at realtime.topic(). Here 1 / 0 is unsupported because numbers aren't modelled
+      # would stop at app.team(). Here 1 / 0 is unsupported because numbers aren't modelled
       # at all (hence the reason); what the test shows is that COALESCE doesn't skip it.
       assert {:unsupported, :number_literal} =
-               evaluate("(COALESCE(realtime.topic(), ((1 / 0))::text) = 'x'::text)", topic: "x")
+               evaluate("(COALESCE(app.team(), ((1 / 0))::text) = 'x'::text)", team: "x")
     end
 
-    test "a column other than topic and extension" do
-      assert evaluate("(event = 'x'::text)", []) == {:unsupported, {:column, "event"}}
+    test "a column other than team and kind" do
+      assert evaluate("(title = 'x'::text)", []) == {:unsupported, {:column, "title"}}
     end
 
     test "a function whose definition isn't one of the known ones" do
       for changes <- [%{source: "select '#{@uid}'::uuid;"}, %{security_definer: true}] do
-        assert evaluate(@own_channel_rls, topic: "user:#{@uid}", sub: @uid, functions: with_auth_uid(changes)) ==
-                 {:unsupported, {:function, "auth.uid", :unknown_definition}}
+        assert evaluate(@own_team_rls, team: "user:#{@uid}", user_id: @uid, functions: with_user_id(changes)) ==
+                 {:unsupported, {:function, "app.user_id", :unknown_definition}}
       end
     end
 
     test "an expression over 4 KB" do
       # Postgres: true
-      sql = "(" <> Enum.map_join(1..200, " OR ", &"(realtime.topic() = 'room:#{&1}'::text)") <> ")"
+      sql = "(" <> Enum.map_join(1..200, " OR ", &"(app.team() = 'room:#{&1}'::text)") <> ")"
 
       assert byte_size(sql) > 4096
-      assert evaluate(sql, topic: "room:1") == {:unsupported, {:unparsed, :other}}
+      assert evaluate(sql, team: "room:1") == {:unsupported, {:unparsed, :other}}
     end
   end
 end

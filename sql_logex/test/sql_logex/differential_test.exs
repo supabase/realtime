@@ -7,28 +7,28 @@ defmodule SqlLogex.DifferentialTest do
   alias SqlLogex.Differential.VerificationError
   alias SqlLogex.Env
   alias SqlLogex.Snapshot
-  alias SqlLogex.Test.RealtimeProfile
+  alias SqlLogex.Test.ExampleProfile
 
   @raises_uuid {:unsupported, {:raises, :invalid_text_representation, "invalid input syntax for type uuid"}}
   @postgres_uuid_error {:error, "22P02", :invalid_text_representation, ~s(invalid input syntax for type uuid: "x")}
 
   defp snapshot do
-    policy = %{name: "p", cmd: "r", permissive: true, roles: ["public"], qual: "(topic = 'x'::text)", with_check: nil}
-    roles = %{"authenticated" => %{bypass_rls: false, select: true, insert: true}}
+    policy = %{name: "p", cmd: "r", permissive: true, roles: ["public"], qual: "(team = 'x'::text)", with_check: nil}
+    roles = %{"member" => %{bypass_rls: false, select: true, insert: true}}
 
     Snapshot.new(
       %{rls_enabled: true, rls_forced: false, roles: roles, policies: [policy], functions: []},
-      RealtimeProfile.profile()
+      ExampleProfile.profile()
     )
   end
 
-  defp env(role, topic),
-    do: Env.new(%{"role" => role}, %{"topic" => {:text, topic}, "extension" => {:text, "broadcast"}})
+  defp env(role, team),
+    do: Env.new(%{"role" => role}, %{"team" => {:text, team}, "kind" => {:text, "note"}})
 
   test "decide/3 gives the decision as an answer" do
-    assert Differential.decide(snapshot(), env("authenticated", "x"), :read) == {:value, true}
-    assert Differential.decide(snapshot(), env("authenticated", "y"), :read) == {:value, false}
-    assert Differential.decide(snapshot(), env("service_role", "x"), :read) == {:unsupported, {:role, "service_role"}}
+    assert Differential.decide(snapshot(), env("member", "x"), :read) == {:value, true}
+    assert Differential.decide(snapshot(), env("member", "y"), :read) == {:value, false}
+    assert Differential.decide(snapshot(), env("admin", "x"), :read) == {:unsupported, {:role, "admin"}}
   end
 
   test "compare/3 puts each pair of answers in a class" do
@@ -50,9 +50,9 @@ defmodule SqlLogex.DifferentialTest do
   end
 
   test "compare/3 keeps the fields that the caller gives" do
-    result = Differential.compare({:ok, true}, {:value, true}, name: "n", group: :g, meta: %{role: "anon"})
+    result = Differential.compare({:ok, true}, {:value, true}, name: "n", group: :g, meta: %{role: "guest"})
 
-    assert %{name: "n", group: :g, meta: %{role: "anon"}, postgres: {:ok, true}, library: {:value, true}} = result
+    assert %{name: "n", group: :g, meta: %{role: "guest"}, postgres: {:ok, true}, library: {:value, true}} = result
     assert result.detail == ""
   end
 

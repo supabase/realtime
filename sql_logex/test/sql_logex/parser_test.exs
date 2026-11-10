@@ -6,8 +6,8 @@ defmodule SqlLogex.ParserTest.Trees do
   def text(value), do: {:cast, {:const, :string, value}, "text"}
   def col(name), do: {:column, name}
   def number(raw), do: {:const, :number, raw}
-  def topic, do: {:func, "realtime", "topic", []}
-  def uid, do: {:func, "auth", "uid", []}
+  def team, do: {:func, "app", "team", []}
+  def user_id, do: {:func, "app", "user_id", []}
 end
 
 defmodule SqlLogex.ParserTest do
@@ -18,7 +18,7 @@ defmodule SqlLogex.ParserTest do
   alias SqlLogex.Deparse
   alias SqlLogex.Parser
 
-  # What Postgres reported for the policies in test/support/sql_logex_policies.ex, per major version.
+  # What Postgres reported for the policies in test/support/example_policies.ex, per major version.
   @catalogs Enum.map(~w(pg17 pg15), fn version ->
               {catalog, _binding} = Code.eval_file(Path.expand("../fixtures/#{version}/catalog.exs", __DIR__))
               {version, catalog}
@@ -34,7 +34,7 @@ defmodule SqlLogex.ParserTest do
   # The expressions that are CASE, EXISTS or a subselect with FROM. Postgres prints them over several
   # lines, and none of them is part of the supported grammar.
   @unsupported_policies ~w(
-    generator_slow_read generator_slow_write grammar_case_searched grammar_case_simple grammar_exists
+    typical_slow_read typical_slow_write grammar_case_searched grammar_case_simple grammar_exists
   )
 
   @missing_raw "(EXISTS ( SELECT 1\n   FROM t\n  WHERE (x = y)))"
@@ -105,27 +105,27 @@ defmodule SqlLogex.ParserTest do
     end
   end
 
-  describe "exact trees for the user-channel policies" do
+  describe "exact trees for the personal-team policies" do
     for {version, _catalog} <- @catalogs do
       test "#{version} lobby" do
         assert Parser.parse(policy_text(unquote(version), "lobby")) ==
-                 {:op, "~*", topic(), text("public:lobby")}
+                 {:op, "~*", team(), text("public:lobby")}
       end
 
-      for {name, uid} <- [
-            {"users receive on own channel", :call},
-            {"users send on own channel", :call},
-            {"users receive on own channel (initplan)", :sublink},
-            {"users send on own channel (initplan)", :sublink}
+      for {name, form} <- [
+            {"members read in their own team", :call},
+            {"members write in their own team", :call},
+            {"members read in their own team (initplan)", :sublink},
+            {"members write in their own team (initplan)", :sublink}
           ] do
         test "#{version} #{name}" do
-          uid = if unquote(uid) == :call, do: uid(), else: {:sublink, uid(), "uid"}
+          user_id = if unquote(form) == :call, do: user_id(), else: {:sublink, user_id(), "user_id"}
 
           assert Parser.parse(policy_text(unquote(version), unquote(name))) ==
                    {:bool_expr, :and,
                     [
-                      {:op, "=", topic(), {:op, "||", text("user:"), uid}},
-                      {:scalar_array_op, "=", :any, col("extension"), {:array, [text("broadcast"), text("presence")]}}
+                      {:op, "=", team(), {:op, "||", text("user:"), user_id}},
+                      {:scalar_array_op, "=", :any, col("kind"), {:array, [text("note"), text("task")]}}
                     ]}
         end
       end
@@ -133,49 +133,48 @@ defmodule SqlLogex.ParserTest do
   end
 
   describe "exact trees for the grammar policies" do
-    claims = {:cast, {:func, nil, "current_setting", [text("request.jwt.claims"), {:const, :bool, true}]}, "jsonb"}
+    claims = {:cast, {:func, nil, "current_setting", [text("app.claims"), {:const, :bool, true}]}, "jsonb"}
 
     expected = [
-      {"grammar_not_in",
-       {:scalar_array_op, "<>", :all, col("extension"), {:array, [text("broadcast"), text("presence")]}}},
-      {"grammar_in_single", {:op, "=", col("extension"), text("broadcast")}},
-      {"grammar_not", {:not, {:op, "=", topic(), text("x")}}},
-      {"grammar_is_null", {:null_test, :is_null, topic()}},
-      {"grammar_is_not_null", {:null_test, :is_not_null, topic()}},
-      {"grammar_coalesce", {:op, "=", {:coalesce, [topic(), text("x")]}, text("x")}},
-      {"grammar_nullif", {:op, "=", {:nullif, topic(), text("x")}, text("y")}},
-      {"grammar_claims_text", {:op, "=", {:op, "->>", claims, text("k")}, text("v")}},
-      {"grammar_claims_boolean", {:cast, {:op, "->>", claims, text("k")}, "boolean"}},
-      {"grammar_doubled_quote", {:op, "=", topic(), text("it's")}},
-      {"grammar_eq_null", {:op, "=", topic(), {:cast, {:const, :null}, "text"}}},
-      {"grammar_concat_null", {:op, "=", topic(), {:op, "||", text("x"), {:cast, {:const, :null}, "text"}}}},
-      {"grammar_auth_role", {:op, "=", {:func, "auth", "role", []}, text("authenticated")}},
-      {"grammar_jwt_text_initplan",
-       {:op, "=", {:sublink, {:op, "->>", {:func, "auth", "jwt", []}, text("k")}, nil}, text("v")}},
-      {"generator_authenticated_read_matching_user_sub",
-       {:op, "=", {:cast, {:sublink, uid(), "uid"}, "text"}, text("c0ffee00-1111-4222-8333-444455556666")}},
-      {"generator_broken_read_presence", {:sublink, {:func, "public", "test_log_error", []}, "test_log_error"}},
+      {"grammar_not_in", {:scalar_array_op, "<>", :all, col("kind"), {:array, [text("note"), text("task")]}}},
+      {"grammar_in_single", {:op, "=", col("kind"), text("note")}},
+      {"grammar_not", {:not, {:op, "=", team(), text("x")}}},
+      {"grammar_is_null", {:null_test, :is_null, team()}},
+      {"grammar_is_not_null", {:null_test, :is_not_null, team()}},
+      {"grammar_coalesce", {:op, "=", {:coalesce, [team(), text("x")]}, text("x")}},
+      {"grammar_nullif", {:op, "=", {:nullif, team(), text("x")}, text("y")}},
+      {"grammar_setting_text", {:op, "=", {:op, "->>", claims, text("k")}, text("v")}},
+      {"grammar_setting_boolean", {:cast, {:op, "->>", claims, text("k")}, "boolean"}},
+      {"grammar_doubled_quote", {:op, "=", team(), text("it's")}},
+      {"grammar_eq_null", {:op, "=", team(), {:cast, {:const, :null}, "text"}}},
+      {"grammar_concat_null", {:op, "=", team(), {:op, "||", text("x"), {:cast, {:const, :null}, "text"}}}},
+      {"grammar_user_role", {:op, "=", {:func, "app", "user_role", []}, text("member")}},
+      {"grammar_claims_text_initplan",
+       {:op, "=", {:sublink, {:op, "->>", {:func, "app", "claims", []}, text("k")}, nil}, text("v")}},
+      {"typical_member_read_matching_user_id",
+       {:op, "=", {:cast, {:sublink, user_id(), "user_id"}, "text"}, text("c0ffee00-1111-4222-8333-444455556666")}},
+      {"typical_broken_read", {:sublink, {:func, "public", "test_log_error", []}, "test_log_error"}},
       {"grammar_true", {:const, :bool, true}},
       {"grammar_false", {:const, :bool, false}},
       {"grammar_and_three",
        {:bool_expr, :and,
         [
-          {:op, "=", topic(), text("a")},
-          {:op, "=", col("extension"), text("broadcast")},
+          {:op, "=", team(), text("a")},
+          {:op, "=", col("kind"), text("note")},
           {:op, "=", col("private"), {:const, :bool, true}}
         ]}},
       {"grammar_or_in_and",
        {:bool_expr, :and,
         [
-          {:bool_expr, :or, [{:op, "=", topic(), text("a")}, {:op, "=", topic(), text("b")}]},
-          {:op, "=", col("extension"), text("broadcast")}
+          {:bool_expr, :or, [{:op, "=", team(), text("a")}, {:op, "=", team(), text("b")}]},
+          {:op, "=", col("kind"), text("note")}
         ]}},
-      {"generator_authenticated_read_broadcast_based_on_claim",
+      {"typical_member_read_notes_by_claim",
        {:bool_expr, :and,
         [
-          {:op, "=", topic(), text("fixture_topic")},
-          {:op, "=", col("extension"), text("broadcast")},
-          {:coalesce, [{:cast, {:op, "->>", claims, text("broadcast_read")}, "boolean"}, {:const, :bool, false}]}
+          {:op, "=", team(), text("fixture_team")},
+          {:op, "=", col("kind"), text("note")},
+          {:coalesce, [{:cast, {:op, "->>", claims, text("notes_read")}, "boolean"}, {:const, :bool, false}]}
         ]}}
     ]
 
@@ -239,7 +238,7 @@ defmodule SqlLogex.ParserTest do
       {"COALESCE(a, b, 1)", {:coalesce, [col("a"), col("b"), number("1")]}},
       {"((a)::text IS NOT NULL)", {:null_test, :is_not_null, {:cast, col("a"), "text"}}},
       {"(NOT (NOT b))", {:not, {:not, col("b")}}},
-      {"(( SELECT auth.uid() AS uid) = u)", {:op, "=", {:sublink, uid(), "uid"}, col("u")}},
+      {"(( SELECT app.user_id() AS user_id) = u)", {:op, "=", {:sublink, user_id(), "user_id"}, col("u")}},
       {"((a OR b) AND (c OR d))",
        {:bool_expr, :and, [{:bool_expr, :or, [col("a"), col("b")]}, {:bool_expr, :or, [col("c"), col("d")]}]}}
     ]
@@ -253,8 +252,8 @@ defmodule SqlLogex.ParserTest do
 
   describe "recovery" do
     test "the example from the brief: EXISTS as the last OR operand" do
-      input = "((realtime.topic() = 'a'::text) OR #{@missing_raw})"
-      assert parse!(input) == {:bool_expr, :or, [{:op, "=", topic(), text("a")}, @missing]}
+      input = "((app.team() = 'a'::text) OR #{@missing_raw})"
+      assert parse!(input) == {:bool_expr, :or, [{:op, "=", team(), text("a")}, @missing]}
     end
 
     for {op, tag} <- [{"AND", :and}, {"OR", :or}] do
@@ -281,13 +280,13 @@ defmodule SqlLogex.ParserTest do
 
     test "unsupported inside NOT" do
       assert parse!("(NOT #{@missing_raw})") == {:not, @missing}
-      assert parse!("(NOT m.topic)") == {:not, {:unsupported, "m.topic"}}
+      assert parse!("(NOT m.team)") == {:not, {:unsupported, "m.team"}}
     end
 
     test "unsupported inside an operator operand, on either side" do
-      assert parse!("(m.topic = 'x'::text)") == {:op, "=", {:unsupported, "m.topic"}, text("x")}
-      assert parse!("('x'::text = m.topic)") == {:op, "=", text("x"), {:unsupported, "m.topic"}}
-      assert parse!("(m.topic = n.topic)") == {:op, "=", {:unsupported, "m.topic"}, {:unsupported, "n.topic"}}
+      assert parse!("(m.team = 'x'::text)") == {:op, "=", {:unsupported, "m.team"}, text("x")}
+      assert parse!("('x'::text = m.team)") == {:op, "=", text("x"), {:unsupported, "m.team"}}
+      assert parse!("(m.team = n.team)") == {:op, "=", {:unsupported, "m.team"}, {:unsupported, "n.team"}}
 
       assert parse!("(\nCASE\n    WHEN a THEN 1\n    ELSE 2\nEND = 1)") ==
                {:op, "=", {:unsupported, "\nCASE\n    WHEN a THEN 1\n    ELSE 2\nEND"}, number("1")}
@@ -462,16 +461,16 @@ defmodule SqlLogex.ParserTest do
   end
 
   describe "size limit" do
-    # (topic = '<filler>'::text) is 18 bytes plus the filler
-    defp comparison(bytes), do: "(topic = '" <> String.duplicate("x", bytes - 18) <> "'::text)"
+    # (team = '<filler>'::text) is 17 bytes plus the filler
+    defp comparison(bytes), do: "(team = '" <> String.duplicate("x", bytes - 17) <> "'::text)"
 
-    defp any_list(count), do: "(topic = ANY (ARRAY[#{Enum.map_join(1..count, ", ", fn _ -> "'a'::text" end)}]))"
+    defp any_list(count), do: "(team = ANY (ARRAY[#{Enum.map_join(1..count, ", ", fn _ -> "'a'::text" end)}]))"
 
     test "an expression of 4096 bytes still parses" do
       input = comparison(4096)
 
       assert byte_size(input) == 4096
-      assert parse!(input) == {:op, "=", col("topic"), text(String.duplicate("x", 4078))}
+      assert parse!(input) == {:op, "=", col("team"), text(String.duplicate("x", 4079))}
     end
 
     test "an expression of 4097 bytes is unsupported as a whole, and prints back unchanged" do
@@ -499,7 +498,7 @@ defmodule SqlLogex.ParserTest do
     end
 
     test "the size is counted in bytes, not characters" do
-      input = "(topic = '" <> String.duplicate("é", 2040) <> "'::text)"
+      input = "(team = '" <> String.duplicate("é", 2040) <> "'::text)"
 
       assert String.length(input) < 4096
       assert byte_size(input) > 4096
@@ -509,14 +508,14 @@ defmodule SqlLogex.ParserTest do
 
   describe "Deparse" do
     test "quotes identifiers the way Postgres does" do
-      assert Deparse.to_string({:column, "topic"}) == "topic"
+      assert Deparse.to_string({:column, "team"}) == "team"
       assert Deparse.to_string({:column, "has space"}) == ~s("has space")
       assert Deparse.to_string({:column, "Upper"}) == ~s("Upper")
       assert Deparse.to_string({:column, "1abc"}) == ~s("1abc")
       assert Deparse.to_string({:column, ~s(a"b)}) == ~s("a""b")
       assert Deparse.to_string({:column, "user"}) == ~s("user")
       assert Deparse.to_string({:column, "event"}) == "event"
-      assert Deparse.to_string({:func, "auth", "uid", []}) == "auth.uid()"
+      assert Deparse.to_string({:func, "app", "user_id", []}) == "app.user_id()"
       assert Deparse.to_string({:func, "My Schema", "left", []}) == ~s|"My Schema"."left"()|
     end
 

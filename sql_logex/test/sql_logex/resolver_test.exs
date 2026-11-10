@@ -3,10 +3,10 @@ defmodule SqlLogex.ResolverTest do
 
   alias SqlLogex.Jsonb
   alias SqlLogex.Resolver
-  alias SqlLogex.Test.RealtimeProfile
+  alias SqlLogex.Test.ExampleProfile
   alias SqlLogex.Value
 
-  @profile RealtimeProfile.profile()
+  @profile ExampleProfile.profile()
 
   {catalog, _} = Code.eval_file(Path.expand("../fixtures/pg17/catalog.exs", __DIR__))
   @functions catalog.functions
@@ -17,13 +17,13 @@ defmodule SqlLogex.ResolverTest do
   # AST builders
   defp text(s), do: {:cast, {:const, :string, s}, "text"}
   defp null(type), do: {:cast, {:const, :null}, type}
-  defp topic, do: {:column, "topic"}
-  defp extension, do: {:column, "extension"}
-  defp uid, do: {:func, "auth", "uid", []}
-  defp realtime_topic, do: {:func, "realtime", "topic", []}
+  defp team, do: {:column, "team"}
+  defp kind, do: {:column, "kind"}
+  defp user_id, do: {:func, "app", "user_id", []}
+  defp app_team, do: {:func, "app", "team", []}
 
   defp claims,
-    do: {:cast, {:func, nil, "current_setting", [text("request.jwt.claims"), {:const, :bool, true}]}, "jsonb"}
+    do: {:cast, {:func, nil, "current_setting", [text("app.claims"), {:const, :bool, true}]}, "jsonb"}
 
   # IR builders
   defp call(module, function, args), do: {:apply, module, function, args}
@@ -57,11 +57,11 @@ defmodule SqlLogex.ResolverTest do
             {"ROW(a, b)", :row},
             {"NOT a", :not},
             {"exists (x)", :exists},
-            {"((extension = 'x'::text) IS TRUE)", :other},
+            {"((kind = 'x'::text) IS TRUE)", :other},
             {"CASEY WHEN", :other},
             {"case_x", :other},
             {~s("case" = 1), :other},
-            {"m.topic", :other},
+            {"m.team", :other},
             {"", :other}
           ] do
         assert resolve({:unsupported, raw}) == unsupported({:unparsed, keyword}), inspect(raw)
@@ -69,11 +69,11 @@ defmodule SqlLogex.ResolverTest do
     end
 
     test "unparsed text with a SELECT further in is a subquery" do
-      # How Postgres 17 prints `topic IN (SELECT l.topic FROM public.lookup l)` with search_path = ''
-      assert resolve({:unsupported, "(topic IN ( SELECT l.topic\n   FROM public.lookup l))"}) ==
+      # How Postgres 17 prints `team IN (SELECT l.team FROM public.lookup l)` with search_path = ''
+      assert resolve({:unsupported, "(team IN ( SELECT l.team\n   FROM public.lookup l))"}) ==
                unsupported({:unparsed, :subquery})
 
-      assert resolve({:unsupported, "(topic ~~ 'selected%'::text)"}) == unsupported({:unparsed, :other})
+      assert resolve({:unsupported, "(team ~~ 'selected%'::text)"}) == unsupported({:unparsed, :other})
     end
 
     test "an unknown node is unsupported rather than a crash, with its tag only" do
@@ -86,9 +86,9 @@ defmodule SqlLogex.ResolverTest do
   end
 
   describe "columns" do
-    test "topic and extension are text columns" do
-      assert resolve(topic()) == {{:column, "topic"}, :text}
-      assert resolve(extension()) == {{:column, "extension"}, :text}
+    test "team and kind are text columns" do
+      assert resolve(team()) == {{:column, "team"}, :text}
+      assert resolve(kind()) == {{:column, "kind"}, :text}
     end
 
     test "any other column is unsupported" do
@@ -100,20 +100,20 @@ defmodule SqlLogex.ResolverTest do
 
   describe "AND, OR and NOT" do
     test "AND and OR bind their children and are boolean" do
-      ast = {:bool_expr, :and, [{:const, :bool, true}, {:op, "=", topic(), text("a")}]}
+      ast = {:bool_expr, :and, [{:const, :bool, true}, {:op, "=", team(), text("a")}]}
 
       assert resolve(ast) ==
-               {{:and, [{:lit, true}, call(Value, :text_eq, [{:column, "topic"}, lit_text("a")])]}, :bool}
+               {{:and, [{:lit, true}, call(Value, :text_eq, [{:column, "team"}, lit_text("a")])]}, :bool}
 
       assert {{:or, [{:lit, true}, {:lit, false}]}, :bool} =
                resolve({:bool_expr, :or, [{:const, :bool, true}, {:const, :bool, false}]})
     end
 
     test "a child that isn't boolean becomes unsupported in place" do
-      assert resolve({:bool_expr, :and, [{:const, :bool, true}, topic()]}) ==
+      assert resolve({:bool_expr, :and, [{:const, :bool, true}, team()]}) ==
                {{:and, [{:lit, true}, {:unsupported, {:not_boolean, :text}}]}, :bool}
 
-      assert resolve({:bool_expr, :or, [uid(), {:const, :bool, true}]}) ==
+      assert resolve({:bool_expr, :or, [user_id(), {:const, :bool, true}]}) ==
                {{:or, [{:unsupported, {:not_boolean, :uuid}}, {:lit, true}]}, :bool}
     end
 
@@ -128,21 +128,21 @@ defmodule SqlLogex.ResolverTest do
     end
 
     test "NOT of a non-boolean is NOT of an unsupported" do
-      assert resolve({:not, topic()}) == {{:not, {:unsupported, {:not_boolean, :text}}}, :bool}
+      assert resolve({:not, team()}) == {{:not, {:unsupported, {:not_boolean, :text}}}, :bool}
     end
   end
 
   describe "operators" do
     for {op, function} <- [{"=", :text_eq}, {"<>", :text_ne}] do
       test "#{op} on text with text is #{function}" do
-        assert resolve({:op, unquote(op), topic(), text("a")}) ==
-                 {call(Value, unquote(function), [{:column, "topic"}, lit_text("a")]), :bool}
+        assert resolve({:op, unquote(op), team(), text("a")}) ==
+                 {call(Value, unquote(function), [{:column, "team"}, lit_text("a")]), :bool}
       end
     end
 
     for {op, function} <- [{"=", :uuid_eq}, {"<>", :uuid_ne}] do
       test "#{op} on uuid with uuid is #{function}" do
-        ast = {:op, unquote(op), uid(), {:cast, {:const, :string, @uuid_text}, "uuid"}}
+        ast = {:op, unquote(op), user_id(), {:cast, {:const, :string, @uuid_text}, "uuid"}}
 
         assert {{:apply, Value, unquote(function), [_uid_body, {:lit, {:uuid, @uuid}}]}, :bool} = resolve(ast)
       end
@@ -153,39 +153,39 @@ defmodule SqlLogex.ResolverTest do
                {call(Value, :textcat, [lit_text("a"), lit_text("b")]), :text}
 
       assert {{:apply, Value, :textanycat, [{:lit, {:text, "user:"}}, {:apply, Value, :uuid_in, _}]}, :text} =
-               resolve({:op, "||", text("user:"), uid()})
+               resolve({:op, "||", text("user:"), user_id()})
     end
 
     test "~ and ~* on text with text are the regex primitive with the mode as a literal" do
-      assert resolve({:op, "~", topic(), text("a")}) ==
-               {call(Value, :regex_match, [{:column, "topic"}, lit_text("a"), {:lit, :case_sensitive}]), :bool}
+      assert resolve({:op, "~", team(), text("a")}) ==
+               {call(Value, :regex_match, [{:column, "team"}, lit_text("a"), {:lit, :case_sensitive}]), :bool}
 
-      assert resolve({:op, "~*", topic(), text("a")}) ==
-               {call(Value, :regex_match, [{:column, "topic"}, lit_text("a"), {:lit, :case_insensitive}]), :bool}
+      assert resolve({:op, "~*", team(), text("a")}) ==
+               {call(Value, :regex_match, [{:column, "team"}, lit_text("a"), {:lit, :case_insensitive}]), :bool}
     end
 
     test "->> on jsonb with text is object_field_text" do
       assert resolve({:op, "->>", claims(), text("sub")}) ==
                {call(Jsonb, :object_field_text, [
-                  call(Jsonb, :parse, [{:setting, "request.jwt.claims"}]),
+                  call(Jsonb, :parse, [{:setting, "app.claims"}]),
                   lit_text("sub")
                 ]), :text}
     end
 
     test "any other combination is unsupported" do
       for {op, left, right, types} <- [
-            {"=", topic(), uid(), {:text, :uuid}},
-            {"=", uid(), topic(), {:uuid, :text}},
+            {"=", team(), user_id(), {:text, :uuid}},
+            {"=", user_id(), team(), {:uuid, :text}},
             {"<>", claims(), claims(), {:jsonb, :jsonb}},
             {"=", {:const, :bool, true}, {:const, :bool, true}, {:bool, :bool}},
-            {"||", uid(), text("a"), {:uuid, :text}},
+            {"||", user_id(), text("a"), {:uuid, :text}},
             {"||", claims(), text("a"), {:jsonb, :text}},
-            {"~", uid(), text("a"), {:uuid, :text}},
+            {"~", user_id(), text("a"), {:uuid, :text}},
             {"->", claims(), text("a"), {:jsonb, :text}},
-            {"->>", topic(), text("a"), {:text, :text}},
-            {"<", topic(), text("a"), {:text, :text}},
-            {"~~", topic(), text("a"), {:text, :text}},
-            {"!~", topic(), text("a"), {:text, :text}}
+            {"->>", team(), text("a"), {:text, :text}},
+            {"<", team(), text("a"), {:text, :text}},
+            {"~~", team(), text("a"), {:text, :text}},
+            {"!~", team(), text("a"), {:text, :text}}
           ] do
         {_, lt} = resolve(left)
         {_, rt} = resolve(right)
@@ -197,7 +197,7 @@ defmodule SqlLogex.ResolverTest do
 
     test "an operand that is unsupported makes the operator unsupported with that reason" do
       assert resolve({:op, "=", {:unsupported, "CASE x"}, text("a")}) == unsupported({:unparsed, :case})
-      assert resolve({:op, "=", topic(), {:column, "private"}}) == unsupported({:column, "private"})
+      assert resolve({:op, "=", team(), {:column, "private"}}) == unsupported({:column, "private"})
 
       assert resolve({:op, "=", {:unsupported, "CASE x"}, {:unsupported, "EXISTS y"}}) ==
                unsupported({:unparsed, :case})
@@ -208,33 +208,33 @@ defmodule SqlLogex.ResolverTest do
     defp array(elements), do: {:array, elements}
 
     test "text = ANY (ARRAY[...]) is text_eq_any over the element list" do
-      assert resolve({:scalar_array_op, "=", :any, extension(), array([text("broadcast"), text("presence")])}) ==
+      assert resolve({:scalar_array_op, "=", :any, kind(), array([text("note"), text("task")])}) ==
                {call(Value, :text_eq_any, [
-                  {:column, "extension"},
-                  {:array, [lit_text("broadcast"), lit_text("presence")]}
+                  {:column, "kind"},
+                  {:array, [lit_text("note"), lit_text("task")]}
                 ]), :bool}
     end
 
     test "elements may be NULL, and the array may be empty" do
-      assert resolve({:scalar_array_op, "=", :any, extension(), array([text("a"), null("text")])}) ==
-               {call(Value, :text_eq_any, [{:column, "extension"}, {:array, [lit_text("a"), {:lit, nil}]}]), :bool}
+      assert resolve({:scalar_array_op, "=", :any, kind(), array([text("a"), null("text")])}) ==
+               {call(Value, :text_eq_any, [{:column, "kind"}, {:array, [lit_text("a"), {:lit, nil}]}]), :bool}
 
-      assert resolve({:scalar_array_op, "=", :any, extension(), {:cast, array([]), "text[]"}}) ==
-               {call(Value, :text_eq_any, [{:column, "extension"}, {:array, []}]), :bool}
+      assert resolve({:scalar_array_op, "=", :any, kind(), {:cast, array([]), "text[]"}}) ==
+               {call(Value, :text_eq_any, [{:column, "kind"}, {:array, []}]), :bool}
     end
 
     test "text <> ALL (ARRAY[...]) is NOT of the = ANY" do
-      assert resolve({:scalar_array_op, "<>", :all, extension(), array([text("broadcast"), text("presence")])}) ==
+      assert resolve({:scalar_array_op, "<>", :all, kind(), array([text("note"), text("task")])}) ==
                {{:not,
                  call(Value, :text_eq_any, [
-                   {:column, "extension"},
-                   {:array, [lit_text("broadcast"), lit_text("presence")]}
+                   {:column, "kind"},
+                   {:array, [lit_text("note"), lit_text("task")]}
                  ])}, :bool}
     end
 
     test "other operators and quantifiers are unsupported" do
       for {op, quantifier} <- [{"<>", :any}, {"=", :all}, {"<", :any}, {"~", :any}, {"<", :all}] do
-        assert resolve({:scalar_array_op, op, quantifier, extension(), array([text("a")])}) ==
+        assert resolve({:scalar_array_op, op, quantifier, kind(), array([text("a")])}) ==
                  unsupported({:array_operator, op, quantifier})
       end
     end
@@ -242,13 +242,13 @@ defmodule SqlLogex.ResolverTest do
     test "a left side or elements that aren't text are unsupported" do
       uuid = {:cast, {:const, :string, @uuid_text}, "uuid"}
 
-      assert resolve({:scalar_array_op, "=", :any, uid(), array([text("a")])}) ==
+      assert resolve({:scalar_array_op, "=", :any, user_id(), array([text("a")])}) ==
                unsupported({:array_types, :uuid, [:text]})
 
-      assert resolve({:scalar_array_op, "=", :any, extension(), array([text("a"), uuid])}) ==
+      assert resolve({:scalar_array_op, "=", :any, kind(), array([text("a"), uuid])}) ==
                unsupported({:array_types, :text, [:text, :uuid]})
 
-      assert resolve({:scalar_array_op, "<>", :all, extension(), array([uuid])}) ==
+      assert resolve({:scalar_array_op, "<>", :all, kind(), array([uuid])}) ==
                unsupported({:array_types, :text, [:uuid]})
     end
 
@@ -256,18 +256,18 @@ defmodule SqlLogex.ResolverTest do
       assert resolve({:scalar_array_op, "=", :any, {:unsupported, "CASE x"}, array([text("a")])}) ==
                unsupported({:unparsed, :case})
 
-      assert resolve({:scalar_array_op, "=", :any, extension(), array([text("a"), {:unsupported, "EXISTS y"}])}) ==
+      assert resolve({:scalar_array_op, "=", :any, kind(), array([text("a"), {:unsupported, "EXISTS y"}])}) ==
                unsupported({:unparsed, :exists})
 
-      assert resolve({:scalar_array_op, "<>", :all, extension(), array([{:unsupported, "EXISTS y"}])}) ==
+      assert resolve({:scalar_array_op, "<>", :all, kind(), array([{:unsupported, "EXISTS y"}])}) ==
                unsupported({:unparsed, :exists})
     end
 
     test "an array that isn't a constructor is unsupported" do
-      assert resolve({:scalar_array_op, "=", :any, extension(), {:cast, {:const, :string, "{a}"}, "text[]"}}) ==
+      assert resolve({:scalar_array_op, "=", :any, kind(), {:cast, {:const, :string, "{a}"}, "text[]"}}) ==
                unsupported(:array_not_constructor)
 
-      assert resolve({:scalar_array_op, "=", :any, extension(), {:unsupported, "CASE x"}}) ==
+      assert resolve({:scalar_array_op, "=", :any, kind(), {:unsupported, "CASE x"}}) ==
                unsupported(:array_not_constructor)
 
       assert resolve({:array, [text("a")]}) == unsupported(:array_not_constructor)
@@ -276,10 +276,10 @@ defmodule SqlLogex.ResolverTest do
 
   describe "NULL tests" do
     test "IS NULL and IS NOT NULL are the primitives" do
-      assert resolve({:null_test, :is_null, topic()}) == {call(Value, :is_null, [{:column, "topic"}]), :bool}
+      assert resolve({:null_test, :is_null, team()}) == {call(Value, :is_null, [{:column, "team"}]), :bool}
 
       assert {{:apply, Value, :is_not_null, [{:apply, Value, :uuid_in, _}]}, :bool} =
-               resolve({:null_test, :is_not_null, uid()})
+               resolve({:null_test, :is_not_null, user_id()})
     end
 
     test "an unsupported operand makes it unsupported" do
@@ -328,10 +328,10 @@ defmodule SqlLogex.ResolverTest do
       for type <- ["public.status", ~s(public."My Type"), "other.status[]"] do
         assert resolve({:cast, {:const, :string, "x"}, type}) == unsupported({:cast, :string_literal, :other_schema})
         assert resolve(null(type)) == unsupported({:cast, :null, :other_schema})
-        assert resolve({:cast, topic(), type}) == unsupported({:cast, :text, :other_schema})
+        assert resolve({:cast, team(), type}) == unsupported({:cast, :text, :other_schema})
       end
 
-      assert resolve({:cast, topic(), "auth.aal_level"}) == unsupported({:cast, :text, "auth.aal_level"})
+      assert resolve({:cast, team(), "app.level"}) == unsupported({:cast, :text, "app.level"})
     end
 
     test "NULL cast to the four types is a typed NULL literal" do
@@ -348,17 +348,17 @@ defmodule SqlLogex.ResolverTest do
 
   describe "casts of expressions" do
     test "text to text is the identity" do
-      assert resolve({:cast, topic(), "text"}) == {{:column, "topic"}, :text}
+      assert resolve({:cast, team(), "text"}) == {{:column, "team"}, :text}
     end
 
     test "uuid to text is uuid_out" do
-      assert {{:apply, Value, :uuid_out, [{:apply, Value, :uuid_in, _}]}, :text} = resolve({:cast, uid(), "text"})
+      assert {{:apply, Value, :uuid_out, [{:apply, Value, :uuid_in, _}]}, :text} = resolve({:cast, user_id(), "text"})
     end
 
     test "text to uuid, jsonb and boolean" do
-      assert resolve({:cast, topic(), "uuid"}) == {call(Value, :uuid_in, [{:column, "topic"}]), :uuid}
-      assert resolve({:cast, topic(), "jsonb"}) == {call(Jsonb, :parse, [{:column, "topic"}]), :jsonb}
-      assert resolve({:cast, topic(), "boolean"}) == {call(Value, :bool_in, [{:column, "topic"}]), :bool}
+      assert resolve({:cast, team(), "uuid"}) == {call(Value, :uuid_in, [{:column, "team"}]), :uuid}
+      assert resolve({:cast, team(), "jsonb"}) == {call(Jsonb, :parse, [{:column, "team"}]), :jsonb}
+      assert resolve({:cast, team(), "boolean"}) == {call(Value, :bool_in, [{:column, "team"}]), :bool}
     end
 
     test "a NULL literal goes through the cast like any value" do
@@ -369,10 +369,10 @@ defmodule SqlLogex.ResolverTest do
       for {expr, from, to} <- [
             {claims(), :jsonb, "text"},
             {{:const, :bool, true}, :bool, "text"},
-            {uid(), :uuid, "uuid"},
-            {uid(), :uuid, "boolean"},
-            {topic(), :text, "character varying"},
-            {topic(), :text, "integer"},
+            {user_id(), :uuid, "uuid"},
+            {user_id(), :uuid, "boolean"},
+            {team(), :text, "character varying"},
+            {team(), :text, "integer"},
             {claims(), :jsonb, "boolean"},
             {{:const, :bool, true}, :bool, "boolean"}
           ] do
@@ -387,41 +387,44 @@ defmodule SqlLogex.ResolverTest do
   end
 
   describe "known functions" do
-    test "realtime.topic() is inlined" do
-      assert resolve(realtime_topic()) ==
-               {call(Value, :nullif, [{:setting, "realtime.topic"}, lit_text("")]), :text}
+    test "app.team() is inlined" do
+      assert resolve(app_team()) ==
+               {call(Value, :nullif, [{:setting, "app.team"}, lit_text("")]), :text}
     end
 
-    test "auth.uid() is inlined with the type uuid, auth.role() as text and auth.jwt() as jsonb" do
-      assert {{:apply, Value, :uuid_in, _}, :uuid} = resolve(uid())
-      assert {{:apply, Value, :nullif, _}, :text} = resolve({:func, "auth", "role", []})
-      assert {{:apply, Jsonb, :parse, _}, :jsonb} = resolve({:func, "auth", "jwt", []})
+    test "app.user_id() is inlined with the type uuid, app.user_role() as text and app.claims() as jsonb" do
+      assert {{:apply, Value, :uuid_in, _}, :uuid} = resolve(user_id())
+      assert {{:apply, Value, :nullif, _}, :text} = resolve({:func, "app", "user_role", []})
+      assert {{:apply, Jsonb, :parse, _}, :jsonb} = resolve({:func, "app", "claims", []})
     end
 
     test "a function absent from the snapshot is unsupported" do
-      assert resolve(realtime_topic(), []) == unsupported({:function, "realtime.topic", :not_in_snapshot})
-      assert resolve(uid(), []) == unsupported({:function, "auth.uid", :not_in_snapshot})
-      assert resolve({:func, "auth", "email", []}) == unsupported({:function, "auth.email", :not_in_snapshot})
+      assert resolve(app_team(), []) == unsupported({:function, "app.team", :not_in_snapshot})
+      assert resolve(user_id(), []) == unsupported({:function, "app.user_id", :not_in_snapshot})
+      assert resolve({:func, "app", "email", []}) == unsupported({:function, "app.email", :not_in_snapshot})
     end
 
     test "a definition that isn't a known one is unsupported" do
-      changed = Enum.map(@functions, &if(&1.name == "uid", do: %{&1 | volatility: "v"}, else: &1))
+      changed = Enum.map(@functions, &if(&1.name == "user_id", do: %{&1 | volatility: "v"}, else: &1))
 
-      assert resolve(uid(), changed) == unsupported({:function, "auth.uid", :unknown_definition})
-      assert {_, :text} = resolve(realtime_topic(), changed)
+      assert resolve(user_id(), changed) == unsupported({:function, "app.user_id", :unknown_definition})
+      assert {_, :text} = resolve(app_team(), changed)
     end
 
     test "several definitions of the same name are unsupported" do
-      [uid_definition] = Enum.filter(@functions, &(&1.name == "uid"))
+      [user_id_definition] = Enum.filter(@functions, &(&1.name == "user_id"))
 
-      assert resolve(uid(), [uid_definition, uid_definition]) == unsupported({:function, "auth.uid", :overloaded})
+      assert resolve(user_id(), [user_id_definition, user_id_definition]) ==
+               unsupported({:function, "app.user_id", :overloaded})
     end
 
     test "a call with arguments, or another schema, is not allowlisted" do
-      assert resolve({:func, "auth", "uid", [text("x")]}) == unsupported({:function, "auth.uid", :not_allowlisted})
-      assert resolve({:func, "public", "uid", []}) == unsupported({:function, :other_schema, :not_allowlisted})
+      assert resolve({:func, "app", "user_id", [text("x")]}) ==
+               unsupported({:function, "app.user_id", :not_allowlisted})
+
+      assert resolve({:func, "public", "user_id", []}) == unsupported({:function, :other_schema, :not_allowlisted})
       assert resolve({:func, nil, "now", []}) == unsupported({:function, "now", :not_allowlisted})
-      assert resolve({:func, nil, "uid", []}) == unsupported({:function, "uid", :not_allowlisted})
+      assert resolve({:func, nil, "user_id", []}) == unsupported({:function, "user_id", :not_allowlisted})
 
       assert resolve({:func, "public", "test_log_error", []}) ==
                unsupported({:function, :other_schema, :not_allowlisted})
@@ -430,18 +433,18 @@ defmodule SqlLogex.ResolverTest do
 
   describe "current_setting" do
     test "with a literal name and missing_ok true is a setting" do
-      assert resolve({:func, nil, "current_setting", [text("request.jwt.claims"), {:const, :bool, true}]}) ==
-               {{:setting, "request.jwt.claims"}, :text}
+      assert resolve({:func, nil, "current_setting", [text("app.claims"), {:const, :bool, true}]}) ==
+               {{:setting, "app.claims"}, :text}
 
-      assert resolve({:func, nil, "current_setting", [text("Request.JWT.Claims"), {:const, :bool, true}]}) ==
-               {{:setting, "Request.JWT.Claims"}, :text}
+      assert resolve({:func, nil, "current_setting", [text("App.Claims"), {:const, :bool, true}]}) ==
+               {{:setting, "App.Claims"}, :text}
     end
 
     test "any other form is unsupported" do
       for args <- [
             [text("role"), {:const, :bool, false}],
             [text("role")],
-            [topic(), {:const, :bool, true}],
+            [team(), {:const, :bool, true}],
             [{:const, :string, "role"}, {:const, :bool, true}],
             [text("role"), {:cast, {:const, :string, "true"}, "boolean"}],
             [text("role"), {:const, :bool, true}, {:const, :bool, true}]
@@ -459,8 +462,8 @@ defmodule SqlLogex.ResolverTest do
 
   describe "COALESCE" do
     test "of arguments of one type has that type" do
-      assert resolve({:coalesce, [realtime_topic(), text("x")]}) ==
-               {{:coalesce, [call(Value, :nullif, [{:setting, "realtime.topic"}, lit_text("")]), lit_text("x")]}, :text}
+      assert resolve({:coalesce, [app_team(), text("x")]}) ==
+               {{:coalesce, [call(Value, :nullif, [{:setting, "app.team"}, lit_text("")]), lit_text("x")]}, :text}
     end
 
     test "a NULL literal has the type it is cast to" do
@@ -468,11 +471,11 @@ defmodule SqlLogex.ResolverTest do
     end
 
     test "arguments of different types are unsupported" do
-      assert resolve({:coalesce, [topic(), uid()]}) == unsupported({:coalesce_types, [:text, :uuid]})
+      assert resolve({:coalesce, [team(), user_id()]}) == unsupported({:coalesce_types, [:text, :uuid]})
     end
 
     test "an unsupported argument makes it unsupported, wherever it is" do
-      assert resolve({:coalesce, [topic(), {:unsupported, "CASE x"}]}) == unsupported({:unparsed, :case})
+      assert resolve({:coalesce, [team(), {:unsupported, "CASE x"}]}) == unsupported({:unparsed, :case})
       assert resolve({:coalesce, [{:unsupported, "CASE x"}, {:const, :bool, false}]}) == unsupported({:unparsed, :case})
     end
 
@@ -482,10 +485,10 @@ defmodule SqlLogex.ResolverTest do
     end
 
     test "an argument Postgres folds and raises on makes the comparison unsupported, even after a value" do
-      # Postgres 17 folds ((1 / 0))::text while planning, so this raises even though topic comes first
-      ast = SqlLogex.Parser.parse("(COALESCE(realtime.topic(), ((1 / 0))::text) = 'x'::text)")
+      # Postgres 17 folds ((1 / 0))::text while planning, so this raises even though team comes first
+      ast = SqlLogex.Parser.parse("(COALESCE(app.team(), ((1 / 0))::text) = 'x'::text)")
       {ir, _type} = resolve(ast)
-      env = SqlLogex.Env.new(%{"realtime.topic" => "x"}, %{})
+      env = SqlLogex.Env.new(%{"app.team" => "x"}, %{})
 
       assert {:unsupported, _reason} = SqlLogex.Eval.eval(ir, env)
     end
@@ -493,22 +496,22 @@ defmodule SqlLogex.ResolverTest do
 
   describe "NULLIF" do
     test "is bound for text only" do
-      assert resolve({:nullif, realtime_topic(), text("x")}) ==
-               {call(Value, :nullif, [call(Value, :nullif, [{:setting, "realtime.topic"}, lit_text("")]), lit_text("x")]),
+      assert resolve({:nullif, app_team(), text("x")}) ==
+               {call(Value, :nullif, [call(Value, :nullif, [{:setting, "app.team"}, lit_text("")]), lit_text("x")]),
                 :text}
 
-      assert resolve({:nullif, uid(), uid()}) == unsupported({:nullif, :uuid, :uuid})
-      assert resolve({:nullif, topic(), uid()}) == unsupported({:nullif, :text, :uuid})
+      assert resolve({:nullif, user_id(), user_id()}) == unsupported({:nullif, :uuid, :uuid})
+      assert resolve({:nullif, team(), user_id()}) == unsupported({:nullif, :text, :uuid})
     end
 
     test "with an unsupported argument is unsupported with that reason" do
-      assert resolve({:nullif, topic(), {:unsupported, "CASE x"}}) == unsupported({:unparsed, :case})
+      assert resolve({:nullif, team(), {:unsupported, "CASE x"}}) == unsupported({:unparsed, :case})
     end
   end
 
   describe "scalar subselects" do
     test "( SELECT x) is x" do
-      assert resolve({:sublink, uid(), "uid"}) == resolve(uid())
+      assert resolve({:sublink, user_id(), "uid"}) == resolve(user_id())
 
       assert resolve({:sublink, {:func, "public", "f", []}, nil}) ==
                unsupported({:function, :other_schema, :not_allowlisted})
@@ -519,31 +522,31 @@ defmodule SqlLogex.ResolverTest do
     # Policies that resolve to IR with no unsupported node anywhere
     @supported [
       "lobby",
-      "users receive on own channel",
-      "users receive on own channel (initplan)",
-      "users send on own channel",
-      "users send on own channel (initplan)",
-      "generator_authenticated_all_topic_read",
-      "generator_authenticated_all_topic_insert",
-      "generator_authenticated_read_broadcast",
-      "generator_authenticated_read_broadcast_and_presence",
-      "generator_authenticated_read_broadcast_based_on_claim",
-      "generator_authenticated_read_matching_user_sub",
-      "generator_authenticated_read_presence",
-      "generator_authenticated_read_presence_based_on_claim",
-      "generator_authenticated_read_presence_for_sub",
-      "generator_authenticated_write_broadcast",
-      "generator_authenticated_write_broadcast_and_presence",
-      "generator_authenticated_write_matching_user_sub",
-      "generator_authenticated_write_persistence",
-      "generator_authenticated_write_presence",
-      "generator_read_matching_user_role",
-      "generator_write_matching_user_role",
+      "members read in their own team",
+      "members read in their own team (initplan)",
+      "members write in their own team",
+      "members write in their own team (initplan)",
+      "typical_member_read_all",
+      "typical_member_insert_all",
+      "typical_member_read_notes",
+      "typical_member_read_notes_and_tasks",
+      "typical_member_read_notes_by_claim",
+      "typical_member_read_matching_user_id",
+      "typical_member_read_tasks",
+      "typical_member_read_tasks_by_claim",
+      "typical_member_read_own_tasks",
+      "typical_member_write_notes",
+      "typical_member_write_notes_and_tasks",
+      "typical_member_write_matching_user_id",
+      "typical_member_write_files",
+      "typical_member_write_tasks",
+      "typical_read_matching_user_role",
+      "typical_write_matching_user_role",
       "grammar_all_using_only",
       "grammar_and_in_or",
-      "grammar_auth_role",
-      "grammar_claims_boolean",
-      "grammar_claims_text",
+      "grammar_user_role",
+      "grammar_setting_boolean",
+      "grammar_setting_text",
       "grammar_coalesce",
       "grammar_concat_null",
       "grammar_doubled_quote",
@@ -552,8 +555,8 @@ defmodule SqlLogex.ResolverTest do
       "grammar_in_single",
       "grammar_is_not_null",
       "grammar_is_null",
-      "grammar_jwt_text",
-      "grammar_jwt_text_initplan",
+      "grammar_claims_text",
+      "grammar_claims_text_initplan",
       "grammar_neq",
       "grammar_not",
       "grammar_not_in",
@@ -562,7 +565,7 @@ defmodule SqlLogex.ResolverTest do
       "grammar_or_in_and",
       "grammar_regex_case_sensitive",
       "grammar_restrictive",
-      "grammar_to_anon_authenticated",
+      "grammar_to_guest_member",
       "grammar_to_public",
       "grammar_true"
     ]
@@ -570,14 +573,14 @@ defmodule SqlLogex.ResolverTest do
     # Policies that stay unsupported in part: a subselect with FROM, CASE, EXISTS, a call to a
     # function we don't know, or a column of the row we don't model
     @partly_unsupported [
-      "generator_broken_read_presence",
-      "generator_broken_write_presence",
-      "generator_slow_read",
-      "generator_slow_write",
+      "typical_broken_read",
+      "typical_broken_write",
+      "typical_slow_read",
+      "typical_slow_write",
       "grammar_and_three",
       "grammar_case_searched",
       "grammar_case_simple",
-      "grammar_event",
+      "grammar_title",
       "grammar_exists",
       "grammar_private"
     ]

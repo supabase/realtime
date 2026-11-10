@@ -7,7 +7,8 @@ to ask the database.
 The library models Postgres only. The caller gives everything else as input: the table and its
 columns, the roles, the session settings, and the functions that the library can inline. To inline
 a call is to replace it with the body of the function. The library has no defaults for these
-inputs. This README uses Supabase Realtime as its worked example, see "Example: Supabase Realtime".
+inputs. The tests use one example application for all of these inputs, see "The example of the
+tests".
 
 The library has no runtime dependencies, because NimbleParsec generates the parser at compile
 time. Postgrex is a dependency of the tests only. The best overview of what the library does and
@@ -174,8 +175,8 @@ The profile and the env decide which roles, columns, settings and functions a po
   NULL. Numbers, objects and arrays are a fallback.
 - `COALESCE` over arguments of one type, and `NULLIF` on text. An unsupported argument anywhere
   makes `COALESCE` a fallback, even after a non-NULL argument. The reason is that Postgres can
-  evaluate a later argument while it plans the query. For an example, see supabase/auth's
-  `auth.uid()` in "Example: Supabase Realtime".
+  evaluate a later argument while it plans the query. For an example, see the fallback body of
+  `app.user_id()` in "The example of the tests".
 - Casts from text to uuid, jsonb and boolean, and from uuid to text. Literals of those types,
   `true`, `false` and typed `NULL`s.
 
@@ -248,14 +249,14 @@ Start to read at [test/sql_logex_test.exs](test/sql_logex_test.exs). SQL goes in
 out, for the most important cases. Each expected value is the value that Postgres 17 gives. The
 other library tests cover one stage each.
 
-The tests use Supabase Realtime as their worked example, see "Example: Supabase Realtime". These
-modules in `test/support` hold the example:
+The tests use one example application, see "The example of the tests". These modules in
+`test/support` hold the example:
 
-- `SqlLogex.Test.RealtimeProfile`: the profile.
-- `SqlLogex.Test.RealtimeDatabase`: the table, the roles and the function bodies, as SQL for a
+- `SqlLogex.Test.ExampleProfile`: the profile.
+- `SqlLogex.Test.ExampleDatabase`: the table, the roles and the function bodies, as SQL for a
   plain Postgres.
-- `SqlLogex.Test.RealtimePolicies`: the policies.
-- `SqlLogex.Test.RealtimeScenarios`: the scenarios of the tests against Postgres.
+- `SqlLogex.Test.ExamplePolicies`: the policies.
+- `SqlLogex.Test.ExampleScenarios`: the scenarios of the tests against Postgres.
 
 The fixtures in `test/fixtures/pg15` and `test/fixtures/pg17` hold the policies and the function
 bodies as Postgres prints them. The tests against Postgres generate them.
@@ -283,7 +284,9 @@ docker compose down
 
 The user in the URL must be a superuser, because the tests create roles and change them. If the
 database does not exist, the tests create it and mark it with a comment. The tests refuse a
-database without that mark, because they drop and create the schemas `realtime` and `auth` in it.
+database without that mark, because they drop and create the schema `app` in it. The roles
+`guest`, `member` and `admin` belong to the whole server. The tests create them if they do not
+exist.
 
 There are three test files:
 
@@ -294,7 +297,7 @@ There are three test files:
 - [test/postgres/decisions_test.exs](test/postgres/decisions_test.exs), Level 2, compares
   `decide/3` with the row-level security of Postgres. A read is a `SELECT` of a probe row as the
   role. A write is an `INSERT` as the role, after the `SELECT` of the same call
-  (`write_plans_select`). The scenarios are in `SqlLogex.Test.RealtimeScenarios`. They include the
+  (`write_plans_select`). The scenarios are in `SqlLogex.Test.ExampleScenarios`. They include the
   decision table of `test/sql_logex/policy_set_test.exs`, so Postgres also checks what the unit
   tests expect.
 - [test/postgres/fixtures_test.exs](test/postgres/fixtures_test.exs) makes sure that Postgres still
@@ -309,8 +312,8 @@ checks for this library:
 - Each reason of a fallback has a category in `SqlLogex.Reason`.
 - Postgres agrees with each decision of the decision table of the unit tests.
 
-The collector also adds report sections about the example: the user-channel grid, the decision
-table and the planner-order cases.
+The collector also adds report sections about the personal-team policies of the example: the
+grid, the decision table and the planner-order cases.
 
 For the current numbers, run the tests with `SQL_LOGEX_REPORT=1`. For each level, the report gives
 the number of cases in each class, the classes by group, and the most frequent reasons of the
@@ -323,44 +326,36 @@ default collation provider, and Postgres 14 and 15 with libc. So the tests cover
 On Postgres 14, run `mix test` and not `mix test --only postgres`. There is no pg14 fixture, so
 `test_helper.exs` excludes the fixtures test. But `--only postgres` includes that test again.
 
-## Example: Supabase Realtime
+## The example of the tests
 
-Supabase Realtime is the worked example of this README and of the tests. Realtime authorizes a
-join to a private channel with the RLS policies on the table `realtime.messages`. Many of these
-policies only compare the topic, the extension and JWT claims, so the library can decide them.
+The tests use one example application. It stores documents in the table `app.docs`. A document
+belongs to a team (`team`) and has a kind (`kind`), for example `note` or `task`. Before a query,
+the application sets the session settings that its policies read. `SqlLogex.Test.ExampleProfile`
+is the profile of the example:
 
-The tests build the profile of the example in `SqlLogex.Test.RealtimeProfile`:
+- `columns`: `team` and `kind`, both text.
+- `roles`: `guest` and `member`. The `policy_roles` also include `admin`, a role that bypasses
+  row-level security.
+- `platform_schemas`: `app`. `platform_setting_prefixes`: `app.`. `platform_roles`: `admin` and
+  `postgres`.
+- `write_plans_select`: `true`.
+- `functions`: the known definitions of the functions in the schema `app`.
 
-- `columns`: `topic` and `extension`, both text. These are the columns of the probe row. The probe
-  row is the row that Realtime checks in place of a real message.
-- `roles`: `anon` and `authenticated`. The `policy_roles` also include `service_role`.
-- `platform_schemas`: `auth` and `realtime`. `platform_setting_prefixes`: `request.` and
-  `realtime.`. `platform_roles`: `service_role`, `postgres` and `supabase_admin`.
-- `write_plans_select`: `true`, because Realtime plans the `SELECT` in every check, write-only
-  checks included.
-- `functions`: these known definitions.
+The functions read the session settings:
 
-  | Function | Known definitions |
-  |---|---|
-  | `realtime.topic()` | the one Realtime installs |
-  | `auth.uid()` | the supabase/postgres image's (reads `request.jwt.claim.sub`), supabase/auth's (also falls back to `sub` in the claims) |
-  | `auth.role()` | the same two, for the role |
-  | `auth.jwt()` | supabase/auth's |
+- `app.team()` reads `app.team`, the team of the session.
+- `app.user_id()` reads `app.user_id`, the id of the user, as a uuid.
+- `app.user_role()` reads `app.user_role`, the role of the user.
+- `app.claims()` reads `app.claims`, the claims of the user, as jsonb.
 
-  The older supabase/auth versions of `auth.uid()` are not known, so a call to one of them is a
-  fallback.
+`app.user_id()` and `app.user_role()` have two known bodies each. The simple body reads only its
+setting. The fallback body reads `sub` or `role` from the claims when its setting is empty. The
+fallback body is a `COALESCE`, and the library evaluates every argument of a `COALESCE` (see
+"Operators and expressions"). So if the claims contain `\u0000`, a call to the fallback body is a
+fallback, also when the user id is set.
 
-The env holds the six settings that Realtime sets before it checks the policies, with the exact
-strings that Realtime sends: `role`, `realtime.topic`, `request.jwt.claims`,
-`request.jwt.claim.sub`, `request.jwt.claim.role` and `request.headers`.
-
-Two facts about the known functions show how a profile models a body:
-
-- supabase/auth's `auth.jwt()` also reads `request.jwt.claim`, a setting that Realtime never sets.
-  The tree of that known function reads it as NULL.
-- supabase/auth's `auth.uid()` is a `COALESCE` that reads `request.jwt.claims` after
-  `request.jwt.claim.sub`. If the claims contain `\u0000`, the call is a fallback. A set `sub` does
-  not change that.
+The env holds the settings `role`, `app.team`, `app.user_id`, `app.user_role`, `app.claims` and
+`app.headers`, with the exact strings that the application passes to `set_config`.
 
 ## Status
 
@@ -397,17 +392,16 @@ the database, the caller must rule them out or fall back:
   But a caller can have Postgres print each body in the same canonical form as the policies. In a
   transaction that it rolls back, with `search_path = ''`, it creates a temporary view from the
   body. Then it reads the view back with `pg_get_viewdef`. The parser and resolver already read
-  that text for supabase/auth's `auth.uid()`, and it evaluates correctly without a known function.
-  Then a profile needs no list of known bodies, and simple helper functions of the policy author
-  are covered too. It needs:
+  that text for a body like the fallback body of `app.user_id()`, and it evaluates correctly
+  without a known function. Then a profile needs no list of known bodies, and simple helper
+  functions of the policy author are covered too. It needs:
   - the `TEMP` privilege in the database (not known yet)
   - the same conditions as today for inlining a body: SQL language, stable, no `SECURITY DEFINER`,
     no `SET`, no arguments, a single `SELECT` without `FROM`
   - functions that call functions, resolved recursively, with a depth limit
-  - a replacement for a setting that a known tree reads as NULL, like `request.jwt.claim` in
-    supabase/auth's `auth.jwt()` (see "Example: Supabase Realtime"). Read from the body, that
-    setting is not in the env, so the call falls back. If the caller rules out database-level
-    defaults, the env can hold such settings too.
+  - a replacement for a setting that a known tree reads as NULL, because the caller never sets
+    it. Read from the body, that setting is not in the env, so the call falls back. If the caller
+    rules out database-level defaults, the env can hold such settings too.
 - Evaluate more of SQL, driven by what real policies use. The fallback reasons that a caller
   records show which unsupported constructs cost coverage. So they pick what to add next, and a
   differential test against Postgres makes sure that each addition is correct. Candidates:

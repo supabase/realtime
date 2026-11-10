@@ -14,7 +14,7 @@ defmodule SqlLogex.MixProject do
     ]
   end
 
-  # The tests share the modules in test/support: the Realtime worked example (profile, database,
+  # The tests share the modules in test/support: the example of the tests (profile, database,
   # policies, scenarios) and the helpers of the tests against Postgres.
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]

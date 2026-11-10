@@ -6,14 +6,14 @@ defmodule SqlLogex.ReasonTest do
   # One of every reason shape the library produces, as `decide/3` returns it.
   @categories [
     # the setup
-    {{:role, "service_role"}, :role},
+    {{:role, "admin"}, :role},
     {{:role, :other}, :role},
     {{:role, nil}, :role},
     {:rls_disabled, :setup},
     {:rls_forced, :setup},
-    {{:role_not_in_snapshot, "anon"}, :setup},
-    {{:bypass_rls, "authenticated"}, :setup},
-    {{:missing_grant, "authenticated", :select}, :setup},
+    {{:role_not_in_snapshot, "guest"}, :setup},
+    {{:bypass_rls, "member"}, :setup},
+    {{:missing_grant, "member", :select}, :setup},
     {:unmodelled_policy_role, :setup},
     {:policy_without_expression, :setup},
     {:select_policy_unsupported, :select_policy},
@@ -30,8 +30,8 @@ defmodule SqlLogex.ReasonTest do
     {{:unsupported, :jsonb_number_token}, :input},
 
     # the policy
-    {{:unsupported, {:function, "auth.email", :not_in_snapshot}}, :function},
-    {{:unsupported, {:function, "realtime.topic", :overloaded}}, :function},
+    {{:unsupported, {:function, "app.email", :not_in_snapshot}}, :function},
+    {{:unsupported, {:function, "app.team", :overloaded}}, :function},
     {{:unsupported, {:function, "lower", :not_allowlisted}}, :function},
     {{:unsupported, {:function, :other_schema, :not_allowlisted}}, :function},
     {{:unsupported, {:operator, "~~", :text, :text}}, :operator},
@@ -50,7 +50,7 @@ defmodule SqlLogex.ReasonTest do
     {{:unsupported, :array_not_constructor}, :type},
     {{:unsupported, {:column, "event"}}, :column},
     {{:unsupported, {:unbound_column, "event"}}, :column},
-    {{:unsupported, {:unknown_setting, "request.jwt.claim.exp"}}, :setting},
+    {{:unsupported, {:unknown_setting, "app.expires_at"}}, :setting},
     {{:unsupported, {:unknown_setting, :other}}, :setting},
     {{:unsupported, {:unparsed, :exists}}, :subquery},
     {{:unsupported, {:unparsed, :select}}, :subquery},
