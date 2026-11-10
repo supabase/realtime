@@ -1,8 +1,11 @@
 defmodule Realtime.Presence.RollcallTransportTest do
   use ExUnit.Case, async: true
+  use Mimic
 
   alias Realtime.Presence.RollcallTransport
   alias Rollcall.Tracker.Messages
+
+  setup :set_mimic_from_context
 
   setup do
     scope = "rollcall-#{System.unique_integer([:positive])}"
@@ -70,6 +73,7 @@ defmodule Realtime.Presence.RollcallTransportTest do
 
   describe "publish/3" do
     setup %{scope: scope} do
+      stub(Realtime.FeatureFlags, :enabled?, fn flag, ^scope -> flag == "presence_rollcall_primary" end)
       {:ok, state} = RollcallTransport.init(scope, pubsub: Realtime.PubSub)
       {:ok, state: state, partition: "realtime:partition-#{scope}"}
     end
@@ -103,6 +107,15 @@ defmodule Realtime.Presence.RollcallTransportTest do
       Phoenix.PubSub.subscribe(Realtime.PubSub, partition <> "-other")
 
       :ok = RollcallTransport.publish(state, partition, {[{"r1", "alice", %{}}], []})
+
+      refute_receive %Phoenix.Socket.Broadcast{}, 100
+    end
+
+    test "sends nothing unless the Rollcall mode is on", %{scope: scope, state: state, partition: partition} do
+      stub(Realtime.FeatureFlags, :enabled?, fn flag, ^scope -> flag == "presence_rollcall_shadow" end)
+      Phoenix.PubSub.subscribe(Realtime.PubSub, partition)
+
+      assert :ok = RollcallTransport.publish(state, partition, {[{"r1", "alice", %{}}], []})
 
       refute_receive %Phoenix.Socket.Broadcast{}, 100
     end

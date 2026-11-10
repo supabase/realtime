@@ -7,6 +7,7 @@ defmodule Realtime.Presence.EncoderPhoenixTest do
   # the two sides, so the comparison replaces each ref by the number of the step that made it. The
   # order of the metas under one key is not defined, so the comparison sorts them.
   use ExUnit.Case, async: false
+  use Mimic
 
   alias Phoenix.Socket.Broadcast
   alias Realtime.Presence.Encoder
@@ -16,7 +17,11 @@ defmodule Realtime.Presence.EncoderPhoenixTest do
 
   @timeout 1_000
 
+  setup :set_mimic_global
+
   setup do
+    # The transport publishes only in Rollcall mode, from the process of the tracker.
+    stub(Realtime.FeatureFlags, :enabled?, fn flag, _scope -> flag == "presence_rollcall_primary" end)
     id = System.unique_integer([:positive])
     name = :"encoder_phoenix_#{id}"
 
