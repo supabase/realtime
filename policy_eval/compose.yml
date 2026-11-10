@@ -1,0 +1,43 @@
+# Plain Postgres for the tests tagged :postgres, one service for each major version that CI tests.
+# See "Tests against Postgres" in README.md.
+#
+#   docker compose up -d --wait postgres17
+#   export POLICY_EVAL_DATABASE_URL=postgres://postgres:postgres@localhost:5417/policy_eval_test
+
+x-postgres: &postgres
+  # The data is in memory, so `docker compose down` leaves nothing behind.
+  tmpfs:
+    - /var/lib/postgresql/data
+  healthcheck:
+    # Over TCP, not the socket: while initdb runs, the entrypoint starts a server on the socket only.
+    test: ["CMD-SHELL", "pg_isready -U postgres -h 127.0.0.1 -p 5432"]
+    interval: 2s
+    timeout: 5s
+    retries: 30
+
+services:
+  postgres14:
+    <<: *postgres
+    image: postgres:14
+    ports:
+      - "5414:5432"
+    environment:
+      POSTGRES_PASSWORD: postgres
+
+  postgres15:
+    <<: *postgres
+    image: postgres:15
+    ports:
+      - "5415:5432"
+    environment:
+      POSTGRES_PASSWORD: postgres
+
+  postgres17:
+    <<: *postgres
+    image: postgres:17
+    ports:
+      - "5417:5432"
+    environment:
+      POSTGRES_PASSWORD: postgres
+      # ICU as the default collation provider, so that CI covers ICU (17) and libc (14, 15).
+      POSTGRES_INITDB_ARGS: --locale-provider=icu --icu-locale=en-US
