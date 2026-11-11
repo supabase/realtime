@@ -28,22 +28,22 @@ defmodule Realtime.Integration.PresenceDistributedTest do
     # The listener never tracks. This is the case of a node with subscribers and no local track.
     test "reaches a client that never tracks on another node, and a client that joins later", ctx do
       %{tenant: tenant, topic: topic, nodes: [node_a, _node_b]} = ctx
-      {_, _} = connect(tenant, node_a, :listener, topic, "listener")
-      {tracker, _} = connect(tenant, :local, :tracker, topic, "tracker")
+      connect(tenant, node_a, :listener, topic, "listener")
+      tracker = connect(tenant, :local, :tracker, topic, "tracker")
 
       ClusterPresence.track(tracker, topic, %{name: "alice"})
 
       assert_receive {:listener, %Message{event: "presence_diff", payload: %{"joins" => %{"tracker" => _}}}},
                      @remote_timeout
 
-      {_, state} = connect(tenant, node_a, :late, topic, "late")
+      {_socket, state} = ClusterPresence.connect_client(tenant, node_a, :late, topic: topic, key: "late")
       assert %{"tracker" => %{"metas" => [%{"name" => "alice"}]}} = state
     end
 
     test "that replaces the entry reaches another node as one diff with a leave and a join", ctx do
       %{tenant: tenant, topic: topic, nodes: [node_a, _node_b]} = ctx
-      {_, _} = connect(tenant, node_a, :listener, topic, "listener")
-      {tracker, _} = connect(tenant, :local, :tracker, topic, "tracker")
+      connect(tenant, node_a, :listener, topic, "listener")
+      tracker = connect(tenant, :local, :tracker, topic, "tracker")
       ClusterPresence.track(tracker, topic, %{name: "first"})
 
       assert_receive {:listener, %Message{event: "presence_diff", payload: %{"joins" => %{"tracker" => _}}}},
@@ -66,8 +66,8 @@ defmodule Realtime.Integration.PresenceDistributedTest do
   describe "the end of an entry on one node" do
     test "reaches another node as a leave when the client untracks", ctx do
       %{tenant: tenant, topic: topic, nodes: [node_a, _node_b]} = ctx
-      {_, _} = connect(tenant, node_a, :listener, topic, "listener")
-      {tracker, _} = connect(tenant, :local, :tracker, topic, "tracker")
+      connect(tenant, node_a, :listener, topic, "listener")
+      tracker = connect(tenant, :local, :tracker, topic, "tracker")
       ClusterPresence.track(tracker, topic, %{name: "alice"})
 
       assert_receive {:listener, %Message{event: "presence_diff", payload: %{"joins" => %{"tracker" => _}}}},
@@ -81,8 +81,8 @@ defmodule Realtime.Integration.PresenceDistributedTest do
 
     test "reaches another node as a leave when the client closes the socket", ctx do
       %{tenant: tenant, topic: topic, nodes: [node_a, _node_b]} = ctx
-      {_, _} = connect(tenant, node_a, :listener, topic, "listener")
-      {tracker, _} = connect(tenant, :local, :tracker, topic, "tracker")
+      connect(tenant, node_a, :listener, topic, "listener")
+      tracker = connect(tenant, :local, :tracker, topic, "tracker")
       ClusterPresence.track(tracker, topic, %{name: "alice"})
 
       assert_receive {:listener, %Message{event: "presence_diff", payload: %{"joins" => %{"tracker" => _}}}},
@@ -101,14 +101,14 @@ defmodule Realtime.Integration.PresenceDistributedTest do
     # receive. No condition shows a tracker that does not stop, so the test waits for the time.
     test "keeps receiving after the grace period of the tracker ends", ctx do
       %{tenant: tenant, topic: topic, nodes: [node_a, _node_b]} = ctx
-      {listener, _} = connect(tenant, node_a, :listener, topic, "listener")
+      listener = connect(tenant, node_a, :listener, topic, "listener")
       ClusterPresence.track(listener, topic, %{name: "listener"})
       assert_receive {:listener, %Message{event: "presence_diff", payload: %{"joins" => %{"listener" => _}}}}, 2_000
       ClusterPresence.untrack(listener, topic)
       assert_receive {:listener, %Message{event: "presence_diff", payload: %{"leaves" => %{"listener" => _}}}}, 2_000
       Process.sleep(2 * grace_period_in_ms())
 
-      {tracker, _} = connect(tenant, :local, :tracker, topic, "tracker")
+      tracker = connect(tenant, :local, :tracker, topic, "tracker")
       ClusterPresence.track(tracker, topic, %{name: "alice"})
 
       assert_receive {:listener, %Message{event: "presence_diff", payload: %{"joins" => %{"tracker" => _}}}},
@@ -122,8 +122,8 @@ defmodule Realtime.Integration.PresenceDistributedTest do
     test "reaches a client on another node once, and a client that joins later", ctx do
       %{tenant: tenant, topic: topic, nodes: [node_a, _node_b] = nodes} = ctx
       :ok = ClusterPresence.set_presence_mode(tenant, :shadow, [node() | nodes])
-      {_, _} = connect(tenant, node_a, :listener, topic, "listener")
-      {tracker, _} = connect(tenant, :local, :tracker, topic, "tracker")
+      connect(tenant, node_a, :listener, topic, "listener")
+      tracker = connect(tenant, :local, :tracker, topic, "tracker")
 
       ClusterPresence.track(tracker, topic, %{name: "alice"})
 
@@ -132,7 +132,7 @@ defmodule Realtime.Integration.PresenceDistributedTest do
 
       refute_receive {:listener, %Message{event: "presence_diff"}}, 300
 
-      {_, state} = connect(tenant, node_a, :late, topic, "late")
+      {_socket, state} = ClusterPresence.connect_client(tenant, node_a, :late, topic: topic, key: "late")
       assert %{"tracker" => %{"metas" => [%{"name" => "alice"}]}} = state
     end
   end
@@ -144,7 +144,7 @@ defmodule Realtime.Integration.PresenceDistributedTest do
 
       sockets =
         for {tag, node} <- clients do
-          {socket, _} = connect(tenant, node, tag, topic, "key-#{tag}")
+          socket = connect(tenant, node, tag, topic, "key-#{tag}")
           {tag, socket}
         end
 
@@ -160,7 +160,8 @@ defmodule Realtime.Integration.PresenceDistributedTest do
   end
 
   defp connect(tenant, node, tag, topic, key) do
-    ClusterPresence.connect_client(tenant, node, tag, topic: topic, key: key)
+    {socket, _state} = ClusterPresence.connect_client(tenant, node, tag, topic: topic, key: key)
+    socket
   end
 
   defp grace_period_in_ms do

@@ -21,8 +21,8 @@ defmodule Realtime.Integration.PresenceNodeLossTest do
     test "loses its entries on the other nodes", %{tenant: tenant, topic: topic} do
       [node_a] = Clustered.start_peers([:rollcall_a])
       :ok = ClusterPresence.set_presence_mode(tenant, :rollcall, [node(), node_a])
-      {_, _} = connect(tenant, :local, :listener, topic, "listener")
-      {tracker, _} = connect(tenant, node_a, :tracker, topic, "tracker")
+      connect(tenant, :local, :listener, topic, "listener")
+      tracker = connect(tenant, node_a, :tracker, topic, "tracker")
       ClusterPresence.track(tracker, topic, %{name: "alice"})
       assert_receive {:listener, %Message{event: "presence_diff", payload: %{"joins" => %{"tracker" => _}}}}, @timeout
 
@@ -42,8 +42,8 @@ defmodule Realtime.Integration.PresenceNodeLossTest do
       observer = Clustered.start_peer(:rollcall_b, rollcall: [silence_threshold: 1_000])
       Clustered.wait_for_muster([node(), node_a, observer])
       :ok = ClusterPresence.set_presence_mode(tenant, :rollcall, [node(), node_a, observer])
-      {_, _} = connect(tenant, observer, :listener, topic, "listener")
-      {tracker, _} = connect(tenant, node_a, :tracker, topic, "tracker")
+      connect(tenant, observer, :listener, topic, "listener")
+      tracker = connect(tenant, node_a, :tracker, topic, "tracker")
       ClusterPresence.track(tracker, topic, %{name: "alice"})
       assert_receive {:listener, %Message{event: "presence_diff", payload: %{"joins" => %{"tracker" => _}}}}, @timeout
 
@@ -55,6 +55,7 @@ defmodule Realtime.Integration.PresenceNodeLossTest do
   end
 
   defp connect(tenant, node, tag, topic, key) do
-    ClusterPresence.connect_client(tenant, node, tag, topic: topic, key: key)
+    {socket, _state} = ClusterPresence.connect_client(tenant, node, tag, topic: topic, key: key)
+    socket
   end
 end
