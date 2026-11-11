@@ -9,8 +9,9 @@ defmodule Realtime.PromEx.Plugins.PolicyEval do
   that matters is in the logs instead: `PolicyEvalShadowMismatch`, `PolicyEvalShadowException` and
   `PolicyEvalUnsupportedPolicies` all name the tenant in their message.
 
-  `decisions_total` (counter): how often a decision matched, mismatched, fell back, or had no real
-  answer to compare against (`outcome` and `extension` tags). The `reason` tag is the bounded category
+  `decisions_total` (counter): how often a decision matched, mismatched, mismatched only on a stale
+  snapshot (`stale_snapshot`), fell back, or had no real answer to compare against (`outcome` and
+  `extension` tags). The `reason` tag is the bounded category
   of a fallback (`PolicyEval.Reason.category/1`), `none` for every other outcome. The `role` tag is
   the caller's role: `anon`, `authenticated`, or one of the platform roles `service_role`,
   `postgres` and `supabase_admin` by name, `other` for any role the tenant made, `none` without a

@@ -51,6 +51,8 @@ defmodule Realtime.PromEx.Plugins.PolicyEvalTest do
     )
   end
 
+  defp cached(snapshot, load_reason \\ :ttl), do: PolicyEvalCache.Entry.new(snapshot, load_reason)
+
   defp metric_value(metric, expected_tags \\ nil) do
     MetricsHelper.search(PromEx.get_metrics(MetricsTest), metric, expected_tags) || 0
   end
@@ -58,7 +60,7 @@ defmodule Realtime.PromEx.Plugins.PolicyEvalTest do
   test "counts a matching read decision and records shadow duration, without a tenant tag" do
     tenant_id = random_string()
     expect(FeatureFlags, :enabled?, fn "policy_eval_shadow", ^tenant_id -> true end)
-    expect(PolicyEvalCache, :fetch, fn :fake_conn, ^tenant_id -> {:ok, always_allow_snapshot()} end)
+    expect(PolicyEvalCache, :fetch, fn :fake_conn, ^tenant_id -> {:ok, cached(always_allow_snapshot())} end)
 
     decision = "realtime_tenants_policy_eval_shadow_read_decisions_total"
     duration = "realtime_tenants_policy_eval_shadow_read_shadow_duration_count"
@@ -77,7 +79,7 @@ defmodule Realtime.PromEx.Plugins.PolicyEvalTest do
   test "tags a fallback with the category of its reason and the caller's role" do
     tenant_id = random_string()
     expect(FeatureFlags, :enabled?, fn "policy_eval_shadow", ^tenant_id -> true end)
-    expect(PolicyEvalCache, :fetch, fn :fake_conn, ^tenant_id -> {:ok, always_allow_snapshot()} end)
+    expect(PolicyEvalCache, :fetch, fn :fake_conn, ^tenant_id -> {:ok, cached(always_allow_snapshot())} end)
 
     decision = "realtime_tenants_policy_eval_shadow_read_decisions_total"
     tags = [outcome: "fallback", extension: "broadcast", reason: "role", role: "service_role"]
@@ -94,7 +96,9 @@ defmodule Realtime.PromEx.Plugins.PolicyEvalTest do
   test "broadcast and presence decisions are counted as separate series" do
     tenant_id = random_string()
     expect(FeatureFlags, :enabled?, fn "policy_eval_shadow", ^tenant_id -> true end)
-    expect(PolicyEvalCache, :fetch, fn :fake_conn, ^tenant_id -> {:ok, always_allow_snapshot()} end)
+    # Already reloaded for a mismatch, so presence's mismatch is final without another load.
+    expect(PolicyEvalCache, :fetch, fn :fake_conn, ^tenant_id -> {:ok, cached(always_allow_snapshot(), :mismatch)} end)
+    reject(&PolicyEvalCache.reload/3)
 
     decision = "realtime_tenants_policy_eval_shadow_read_decisions_total"
     broadcast_tags = [outcome: "match", extension: "broadcast"]
