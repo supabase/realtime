@@ -39,12 +39,7 @@ defmodule RealtimeWeb.TenantBroadcaster do
           :ok
   def pubsub_broadcast(tenant_id, topic, message, dispatcher, message_type) do
     collect_payload_size(tenant_id, message, message_type)
-    tagged_message = tag_tenant(tenant_id, message, dispatcher, message_type)
-
-    # We measure here for the local dispatch and GenRpcPubSub measures on the remote nodes
-    measure_broadcast_fanout(tagged_message)
-
-    PubSub.broadcast(Realtime.PubSub, topic, tagged_message, dispatcher)
+    PubSub.broadcast(Realtime.PubSub, topic, tag_tenant(tenant_id, message, dispatcher, message_type), dispatcher)
     :ok
   end
 
@@ -59,16 +54,12 @@ defmodule RealtimeWeb.TenantBroadcaster do
           :ok
   def pubsub_broadcast_from(tenant_id, from, topic, message, dispatcher, message_type) do
     collect_payload_size(tenant_id, message, message_type)
-    tagged_message = tag_tenant(tenant_id, message, dispatcher, message_type)
-
-    # We measure here for the local dispatch and GenRpcPubSub measures on the remote nodes
-    measure_broadcast_fanout(tagged_message)
 
     PubSub.broadcast_from(
       Realtime.PubSub,
       from,
       topic,
-      tagged_message,
+      tag_tenant(tenant_id, message, dispatcher, message_type),
       dispatcher
     )
 
@@ -81,21 +72,6 @@ defmodule RealtimeWeb.TenantBroadcaster do
   # Presence/postgres_changes stay untagged.
   defp tag_tenant(tenant_id, message, MessageDispatcher, :broadcast), do: {:tb, tenant_id, message}
   defp tag_tenant(_tenant_id, message, _dispatcher, _message_type), do: message
-
-  @fanout_event [:realtime, :broadcast, :fanout, :node_delivery]
-
-  @doc """
-  Records whether the current node holds any connection for the broadcast's tenant, so that
-  aggregating `hit=false` tells us how many node deliveries could have been avoided.
-  """
-  @spec measure_broadcast_fanout(message :: term) :: :ok
-  def measure_broadcast_fanout({:tb, tenant_id, _message}) do
-    count = Forum.Census.local_member_count(:users, tenant_id)
-
-    :telemetry.execute(@fanout_event, %{local_tenant_users: count}, %{tenant: tenant_id, hit: count > 0})
-  end
-
-  def measure_broadcast_fanout(_message), do: :ok
 
   @payload_size_event [:realtime, :tenants, :payload, :size]
 
