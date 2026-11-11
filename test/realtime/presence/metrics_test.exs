@@ -348,6 +348,9 @@ defmodule Realtime.Presence.MetricsTest do
     setup do
       tenant = "tenant-#{System.unique_integer([:positive])}"
       attach_join_telemetry(tenant)
+      # No presence flag is set for the tenant, so the mode is Phoenix. The tenant is not in the
+      # database, and a flag lookup that reaches the tenant cache would query for it.
+      stub(FeatureFlags, :enabled?, fn _flag, _tenant -> false end)
       %{tenant: tenant}
     end
 
