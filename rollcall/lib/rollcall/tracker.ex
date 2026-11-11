@@ -138,6 +138,7 @@ defmodule Rollcall.Tracker do
   alias Rollcall.Tracker.View
 
   @max_retries 3
+  @default_call_timeout :timer.seconds(5)
   @default_empty_grace_in_ms :timer.seconds(5)
   # Default to sending a heartbeat every 1.5 seconds
   @default_heartbeat_period_in_ms 1500
@@ -172,6 +173,10 @@ defmodule Rollcall.Tracker do
   The function sends the message again at most #{@max_retries} times. The limit
   stops an endless loop when a tracker exits without a reply. After the limit,
   the function exits with the reason of the last failure.
+
+  The option `:timeout` sets the milliseconds that the function waits for the
+  reply. The default is #{@default_call_timeout}. The function exits with
+  `{:timeout, _}` when the tracker does not reply in time. 
   """
   @spec track(
           Rollcall.name(),
@@ -184,19 +189,21 @@ defmodule Rollcall.Tracker do
         ) ::
           {:ok, Rollcall.ref()} | {:error, term()}
   def track(name, scope, pid, partition, key, meta, opts \\ []) when is_pid(pid) and is_map(meta) do
-    call_or_start(name, scope, {:track, pid, partition, key, meta, opts}, @max_retries)
+    timeout = Keyword.get(opts, :timeout, @default_call_timeout)
+
+    call_or_start(name, scope, {:track, pid, partition, key, meta, opts}, timeout, @max_retries)
   end
 
   # Calls the tracker for `scope`. Starts a tracker and sends the message again
   # when none runs, at most `retries` times.
-  defp call_or_start(name, scope, message, retries) do
-    GenServer.call(via(name, scope), message)
+  defp call_or_start(name, scope, message, timeout, retries) do
+    GenServer.call(via(name, scope), message, timeout)
   catch
     :exit, {reason, _} = caught when reason in @gone ->
       if retries == 0, do: exit(caught)
 
       case start(name, scope) do
-        :ok -> call_or_start(name, scope, message, retries - 1)
+        :ok -> call_or_start(name, scope, message, timeout, retries - 1)
         error -> error
       end
   end
@@ -230,17 +237,21 @@ defmodule Rollcall.Tracker do
 
   The function does not start a tracker. A tracker that starts only to find
   nothing to remove would stop again after the grace period.
+
+  The option `:timeout` works as it does for `track/7`.
   """
-  @spec untrack(Rollcall.name(), Rollcall.scope(), pid(), Rollcall.partition(), Rollcall.key()) :: :ok
-  def untrack(name, scope, pid, partition, key) do
-    call_if_running(name, scope, {:untrack, pid, partition, key}, :ok)
+  @spec untrack(Rollcall.name(), Rollcall.scope(), pid(), Rollcall.partition(), Rollcall.key(), Keyword.t()) :: :ok
+  def untrack(name, scope, pid, partition, key, opts \\ []) do
+    timeout = Keyword.get(opts, :timeout, @default_call_timeout)
+
+    call_if_running(name, scope, {:untrack, pid, partition, key}, timeout, :ok)
   end
 
   # Calls the tracker for `scope`. Returns `default` when no tracker runs, when
   # the tracker stops before it replies, or when the instance does not run.
-  defp call_if_running(name, scope, message, default) do
+  defp call_if_running(name, scope, message, timeout, default) do
     case lookup(name, scope) do
-      [{pid, _}] -> GenServer.call(pid, message)
+      [{pid, _}] -> GenServer.call(pid, message, timeout)
       [] -> default
     end
   catch
@@ -268,7 +279,7 @@ defmodule Rollcall.Tracker do
   """
   @spec get_state(Rollcall.name(), Rollcall.scope()) :: State.view() | nil
   def get_state(name, scope) do
-    call_if_running(name, scope, :get_state, nil)
+    call_if_running(name, scope, :get_state, @default_call_timeout, nil)
   end
 
   @doc """

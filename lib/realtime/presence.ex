@@ -21,6 +21,9 @@ defmodule Realtime.Presence do
   require Logger
 
   @shadow_error_event [:realtime, :presence, :shadow, :error]
+  # The shadow mode bounds the wait for Rollcall, so a slow tracker adds at most this to the
+  # latency of a client.
+  @shadow_timeout_in_ms 100
 
   @type tenant :: String.t()
   @type topic :: String.t()
@@ -67,7 +70,10 @@ defmodule Realtime.Presence do
 
   In the shadow mode, Phoenix tracks first. Rollcall tracks only when Phoenix succeeds, and it uses
   the Phoenix ref. A Rollcall error, raise or exit does not change the result. The facade emits
-  `[:realtime, :presence, :shadow, :error]` with the `operation` and the `tenant` instead.
+  `[:realtime, :presence, :shadow, :error]` with the `operation`, the `tenant` and the `reason`
+  instead. The `reason` is `:timeout` when the tracker does not reply within
+  #{@shadow_timeout_in_ms} ms, and `:error` for any other failure. A timeout does not mean the call
+  failed: the tracker handles it later.
 
   Each backend call emits its own `[:realtime, :presence, :track, :duration]` event, tagged with
   the backend.
@@ -84,7 +90,10 @@ defmodule Realtime.Presence do
 
       :shadow ->
         with {:ok, _, ref} = result <- phoenix_track(pid, tenant, topic, key, meta) do
-          shadow(:track, tenant, fn -> rollcall_track(pid, tenant, topic, key, meta, ref: ref) end)
+          shadow(:track, tenant, fn ->
+            rollcall_track(pid, tenant, topic, key, meta, ref: ref, timeout: @shadow_timeout_in_ms)
+          end)
+
           result
         end
     end
@@ -121,7 +130,10 @@ defmodule Realtime.Presence do
 
       :shadow ->
         PhoenixBackend.untrack(pid, topic, key)
-        shadow(:untrack, tenant, fn -> RollcallBackend.untrack(pid, tenant, topic, key) end)
+
+        shadow(:untrack, tenant, fn ->
+          RollcallBackend.untrack(pid, tenant, topic, key, timeout: @shadow_timeout_in_ms)
+        end)
     end
   end
 
@@ -188,9 +200,17 @@ defmodule Realtime.Presence do
   end
 
   defp log_shadow_error(tenant, operation, error) do
-    :telemetry.execute(@shadow_error_event, %{}, %{tenant: tenant, operation: operation})
+    :telemetry.execute(@shadow_error_event, %{}, %{
+      tenant: tenant,
+      operation: operation,
+      reason: shadow_error_reason(error)
+    })
+
     log_error(shadow_error_code(operation), error, external_id: tenant)
   end
+
+  defp shadow_error_reason({:timeout, _}), do: :timeout
+  defp shadow_error_reason(_), do: :error
 
   defp shadow_error_code(:track), do: "RollcallShadowTrackError"
   defp shadow_error_code(:untrack), do: "RollcallShadowUntrackError"

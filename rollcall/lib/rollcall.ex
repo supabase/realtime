@@ -106,8 +106,9 @@ defmodule Rollcall do
       def track(pid, scope, partition, key, meta, opts \\ []),
         do: Rollcall.track(__MODULE__, pid, scope, partition, key, meta, opts)
 
-      @spec untrack(pid(), Rollcall.scope(), Rollcall.partition(), Rollcall.key()) :: :ok
-      def untrack(pid, scope, partition, key), do: Rollcall.untrack(__MODULE__, pid, scope, partition, key)
+      @spec untrack(pid(), Rollcall.scope(), Rollcall.partition(), Rollcall.key(), Keyword.t()) :: :ok
+      def untrack(pid, scope, partition, key, opts \\ []),
+        do: Rollcall.untrack(__MODULE__, pid, scope, partition, key, opts)
 
       @spec scopes() :: [Rollcall.scope()]
       def scopes, do: Rollcall.scopes(__MODULE__)
@@ -267,6 +268,10 @@ defmodule Rollcall do
   A `:ref` option can be passed in the opts argument. When it's provided the value
   will be used as the ref for the entry. Refs need to be unique per scope, when callers
   provide the ref they are responsible for its uniqueness.
+
+  A `:timeout` option sets the milliseconds to wait for the tracker. The default is 5000. The
+  function exits with `{:timeout, _}` when the tracker does not reply in time. The tracker still
+  handles the call later, so the entry exists after the exit.
   """
   @spec track(name(), pid(), scope(), partition(), key(), meta(), Keyword.t()) :: {:ok, ref()} | {:error, term()}
   def track(name, pid, scope, partition, key, meta, opts \\ []) when is_pid(pid) and is_map(meta) do
@@ -282,9 +287,11 @@ defmodule Rollcall do
 
   Does not start a tracker. A tracker that starts only to find nothing to
   remove would stop again after the grace period.
+
+  The `:timeout` option works as it does for `track/7`.
   """
-  @spec untrack(name(), pid(), scope(), partition(), key()) :: :ok
-  def untrack(name, pid, scope, partition, key) when is_pid(pid) do
-    Tracker.untrack(name, scope, pid, partition, key)
+  @spec untrack(name(), pid(), scope(), partition(), key(), Keyword.t()) :: :ok
+  def untrack(name, pid, scope, partition, key, opts \\ []) when is_pid(pid) do
+    Tracker.untrack(name, scope, pid, partition, key, opts)
   end
 end
