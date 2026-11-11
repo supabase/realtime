@@ -28,26 +28,15 @@ defmodule Realtime.Integration.PresenceDistributedTest do
     # The listener never tracks. This is the case of a node with subscribers and no local track.
     test "reaches a client that never tracks on another node, and a client that joins later", ctx do
       %{tenant: tenant, topic: topic, nodes: [node_a, _node_b]} = ctx
-      connect(tenant, node_a, :listener, topic, "listener")
-      tracker = connect(tenant, :local, :tracker, topic, "tracker")
-
-      ClusterPresence.track(tracker, topic, %{name: "alice"})
-
-      assert_receive {:listener, %Message{event: "presence_diff", payload: %{"joins" => %{"tracker" => _}}}},
-                     @remote_timeout
+      track_and_receive_join(ctx, %{name: "alice"})
 
       {_socket, state} = ClusterPresence.connect_client(tenant, node_a, :late, topic: topic, key: "late")
       assert %{"tracker" => %{"metas" => [%{"name" => "alice"}]}} = state
     end
 
     test "that replaces the entry reaches another node as one diff with a leave and a join", ctx do
-      %{tenant: tenant, topic: topic, nodes: [node_a, _node_b]} = ctx
-      connect(tenant, node_a, :listener, topic, "listener")
-      tracker = connect(tenant, :local, :tracker, topic, "tracker")
-      ClusterPresence.track(tracker, topic, %{name: "first"})
-
-      assert_receive {:listener, %Message{event: "presence_diff", payload: %{"joins" => %{"tracker" => _}}}},
-                     @remote_timeout
+      %{topic: topic} = ctx
+      tracker = track_and_receive_join(ctx, %{name: "first"})
 
       ClusterPresence.track(tracker, topic, %{name: "second"})
 
@@ -65,13 +54,8 @@ defmodule Realtime.Integration.PresenceDistributedTest do
 
   describe "the end of an entry on one node" do
     test "reaches another node as a leave when the client untracks", ctx do
-      %{tenant: tenant, topic: topic, nodes: [node_a, _node_b]} = ctx
-      connect(tenant, node_a, :listener, topic, "listener")
-      tracker = connect(tenant, :local, :tracker, topic, "tracker")
-      ClusterPresence.track(tracker, topic, %{name: "alice"})
-
-      assert_receive {:listener, %Message{event: "presence_diff", payload: %{"joins" => %{"tracker" => _}}}},
-                     @remote_timeout
+      %{topic: topic} = ctx
+      tracker = track_and_receive_join(ctx, %{name: "alice"})
 
       ClusterPresence.untrack(tracker, topic)
 
@@ -80,13 +64,7 @@ defmodule Realtime.Integration.PresenceDistributedTest do
     end
 
     test "reaches another node as a leave when the client closes the socket", ctx do
-      %{tenant: tenant, topic: topic, nodes: [node_a, _node_b]} = ctx
-      connect(tenant, node_a, :listener, topic, "listener")
-      tracker = connect(tenant, :local, :tracker, topic, "tracker")
-      ClusterPresence.track(tracker, topic, %{name: "alice"})
-
-      assert_receive {:listener, %Message{event: "presence_diff", payload: %{"joins" => %{"tracker" => _}}}},
-                     @remote_timeout
+      tracker = track_and_receive_join(ctx, %{name: "alice"})
 
       WebsocketClient.close(tracker)
 
@@ -122,13 +100,7 @@ defmodule Realtime.Integration.PresenceDistributedTest do
     test "reaches a client on another node once, and a client that joins later", ctx do
       %{tenant: tenant, topic: topic, nodes: [node_a, _node_b] = nodes} = ctx
       :ok = ClusterPresence.set_presence_mode(tenant, :shadow, [node() | nodes])
-      connect(tenant, node_a, :listener, topic, "listener")
-      tracker = connect(tenant, :local, :tracker, topic, "tracker")
-
-      ClusterPresence.track(tracker, topic, %{name: "alice"})
-
-      assert_receive {:listener, %Message{event: "presence_diff", payload: %{"joins" => %{"tracker" => _}}}},
-                     @remote_timeout
+      track_and_receive_join(ctx, %{name: "alice"})
 
       refute_receive {:listener, %Message{event: "presence_diff"}}, 300
 
@@ -157,6 +129,20 @@ defmodule Realtime.Integration.PresenceDistributedTest do
         assert_receive {^tag, %Message{event: "presence_diff", payload: %{"joins" => %{^key => _}}}}, @remote_timeout
       end
     end
+  end
+
+  # Connects a listener to node A that never tracks, and a tracker to the test node. The tracker tracks
+  # the payload, and the function returns after the listener received the join. Returns the tracker.
+  defp track_and_receive_join(%{tenant: tenant, topic: topic, nodes: [node_a, _node_b]}, payload) do
+    connect(tenant, node_a, :listener, topic, "listener")
+    tracker = connect(tenant, :local, :tracker, topic, "tracker")
+
+    ClusterPresence.track(tracker, topic, payload)
+
+    assert_receive {:listener, %Message{event: "presence_diff", payload: %{"joins" => %{"tracker" => _}}}},
+                   @remote_timeout
+
+    tracker
   end
 
   defp connect(tenant, node, tag, topic, key) do
