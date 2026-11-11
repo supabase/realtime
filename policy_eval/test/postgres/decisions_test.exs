@@ -67,8 +67,8 @@ defmodule PolicyEval.Postgres.DecisionsTest do
     run(context, ExampleScenarios.snapshot_scenarios(Postgres.server_version_num(conn)))
   end
 
-  test "writes that fail with the SELECT of the call", context do
-    run(context, ExampleScenarios.select_dependent_scenarios())
+  test "a SELECT that fails doesn't change a write", context do
+    run(context, ExampleScenarios.write_ignores_select_scenarios())
   end
 
   test "a policy that raises next to one that allows", context do
@@ -138,9 +138,9 @@ defmodule PolicyEval.Postgres.DecisionsTest do
   # One call asks for all of them. As the table owner, it inserts a probe row for each read. Then,
   # as the role and with the settings of the case, one SELECT reads the probes back, and each write
   # is an INSERT in a savepoint. insufficient_privilege, a missing grant or a failed WITH CHECK,
-  # denies a write. The SELECT runs in every call, also without reads, so the writes depend on the
-  # SELECT policies too: that is `write_plans_select: true`. Any other error fails the whole call,
-  # so then each one is asked for on its own, to tell which one raised.
+  # denies a write. A call without reads runs no SELECT, so a write depends only on the INSERT
+  # policies, as PolicyEval.PolicySet assumes. Any other error fails the whole call, so then each
+  # one is asked for on its own, to tell which one raised.
   defp outcomes(conn, %{env: env, kinds: kinds}) do
     case ask(conn, env, kinds, kinds) do
       {:ok, read_allowed, write_allowed} ->
@@ -171,15 +171,23 @@ defmodule PolicyEval.Postgres.DecisionsTest do
       %{rows: probes} = Postgrex.query!(conn, @insert_probes, [env.row_team, read_kinds])
       ExampleScenarios.set_settings!(conn, env)
 
-      with {:ok, %{rows: visible}} <- query(conn, @select_probes, [Enum.map(probes, &hd/1)]),
+      with {:ok, visible} <- read_back(conn, probes),
            {:ok, write_allowed} <- writes(conn, env, write_kinds) do
-        visible = MapSet.new(visible, &hd/1)
         id_by_kind = Map.new(probes, fn [id, kind] -> {kind, id} end)
         {:ok, Enum.map(read_kinds, &MapSet.member?(visible, id_by_kind[&1])), write_allowed}
       end
     after
       Postgrex.query!(conn, "ROLLBACK TO SAVEPOINT ask", [])
       Postgrex.query!(conn, "RELEASE SAVEPOINT ask", [])
+    end
+  end
+
+  # The ids of the probes that the role can see. Without probes, no SELECT runs.
+  defp read_back(_conn, []), do: {:ok, MapSet.new()}
+
+  defp read_back(conn, probes) do
+    with {:ok, %{rows: rows}} <- query(conn, @select_probes, [Enum.map(probes, &hd/1)]) do
+      {:ok, MapSet.new(rows, &hd/1)}
     end
   end
 

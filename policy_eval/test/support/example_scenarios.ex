@@ -720,14 +720,14 @@ defmodule PolicyEval.Test.ExampleScenarios do
   end
 
   @doc """
-  A write reads the table too: the SELECT of the call runs in every call, write-only calls
-  included (`write_plans_select: true`). So whatever makes that SELECT fail makes the writes fail:
-  a missing SELECT privilege, and a SELECT policy that Postgres can't plan. The library decides a
-  write only from what it can read of the SELECT policies: it falls back for a missing grant, and
-  for a policy it doesn't fully model, see `PolicyEval.PolicySet`.
+  A write is a plain INSERT, so the SELECT privilege and the SELECT policies don't change it, see
+  `PolicyEval.PolicySet`. Each scenario has an INSERT policy, and a SELECT setup that makes a
+  SELECT of the table fail even when it reads no rows: a missing SELECT privilege, or a SELECT
+  policy that Postgres can't plan. A read can raise, and a write still gets the answer of the
+  INSERT policy.
   """
-  @spec select_dependent_scenarios() :: [map()]
-  def select_dependent_scenarios do
+  @spec write_ignores_select_scenarios() :: [map()]
+  def write_ignores_select_scenarios do
     insert_policy = policy_sql("insert", "FOR INSERT TO member, guest WITH CHECK (app.team() = 'x')")
 
     revokes = [
@@ -743,7 +743,7 @@ defmodule PolicyEval.Test.ExampleScenarios do
     from_revokes =
       for {label, setup} <- revokes, role <- ["member", "guest"], team <- ["x", "y"] do
         scenario(
-          "select dependent",
+          "write ignores select",
           "#{label}, #{role}, team #{inspect(team)}",
           [policy_sql("select", "FOR SELECT TO member, guest USING (app.team() = 'x')"), insert_policy],
           [role: role, team: team],
@@ -771,7 +771,7 @@ defmodule PolicyEval.Test.ExampleScenarios do
     from_policies =
       for {label, qual} <- select_policies, role <- ["member", "guest"], user_id <- [@own, "user_2abc"] do
         scenario(
-          "select dependent",
+          "write ignores select",
           "#{label}, #{role}, user id #{inspect(user_id)}",
           [policy_sql("select", "FOR SELECT TO member, guest USING (#{qual})"), insert_policy],
           role: role,

@@ -37,7 +37,6 @@ defmodule PolicyEval.ProfileTest do
   end
 
   test "the example profile has the columns and roles of app.docs" do
-    assert @example.write_plans_select == true
     assert @example.columns == %{"team" => :text, "kind" => :text}
     assert @example.roles == ["guest", "member"]
   end

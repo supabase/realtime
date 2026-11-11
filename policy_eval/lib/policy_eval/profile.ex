@@ -7,10 +7,6 @@ defmodule PolicyEval.Profile do
 
   A profile holds:
 
-    * `write_plans_select`: whether the caller plans a `SELECT` of the table in the same call as
-      the `INSERT` of a write. Then a write also needs the `SELECT` grant, and it falls back
-      where a `SELECT` policy might raise, see `PolicyEval.PolicySet`. The only value is `true`,
-      because only that case is measured against Postgres
     * `columns`: the columns of the checked row that a policy can read, with their types
       (`PolicyEval.Resolver.type/0`). A policy that reads another column is unsupported
     * `functions`: the function definitions that can be inlined, built with
@@ -28,7 +24,6 @@ defmodule PolicyEval.Profile do
   """
 
   @type t :: %__MODULE__{
-          write_plans_select: true,
           columns: %{optional(String.t()) => PolicyEval.Resolver.type()},
           functions: [PolicyEval.KnownFunction.t()],
           roles: [String.t()],
@@ -39,7 +34,6 @@ defmodule PolicyEval.Profile do
         }
 
   @enforce_keys [
-    :write_plans_select,
     :columns,
     :functions,
     :roles,

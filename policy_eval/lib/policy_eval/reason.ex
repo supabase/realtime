@@ -12,12 +12,6 @@ defmodule PolicyEval.Reason do
       * `:setup`: RLS is off or forced; the role bypasses RLS, lacks a grant or isn't in the
         snapshot; or a policy names a role other than `public` and the profile's policy roles, or
         lacks the expression to evaluate
-      * `:select_policy`: a write, where a `SELECT` or `ALL` policy that might apply to the role
-        has no `USING` or something in it the evaluator can't model. When the profile's
-        `write_plans_select` is true, a write also plans a `SELECT`, so that policy might make the
-        write fail. It doesn't say what
-        the construct is: a write blocked by a subquery in a `SELECT` policy lands here, not in
-        `:subquery`
     * the input
       * `:raises`: Postgres raises on it too, like a sub that isn't a uuid
       * `:input`: something about it the evaluator can't model, like non-ASCII text in a regex
@@ -32,7 +26,7 @@ defmodule PolicyEval.Reason do
       * `:setting`: a setting the caller doesn't set
       * `:subquery`: `EXISTS`, `IN (SELECT ...)` or `(SELECT ... FROM ...)`. It reads another
         table, which only the database can do, so its share of fallbacks is what no addition here
-        can win back. For writes, some of that share is in `:select_policy`
+        can win back
       * `:unparsed`: anything else the parser can't read
     * neither
       * `:exception`: deciding raised
@@ -42,7 +36,6 @@ defmodule PolicyEval.Reason do
   @type category ::
           :role
           | :setup
-          | :select_policy
           | :raises
           | :input
           | :function
@@ -78,7 +71,6 @@ defmodule PolicyEval.Reason do
   def category({:missing_grant, _role, _grant}), do: :setup
   def category(:unmodelled_policy_role), do: :setup
   def category(:policy_without_expression), do: :setup
-  def category(:select_policy_unsupported), do: :select_policy
   def category({:exception, _module}), do: :exception
   def category({:unsupported, reason}), do: expression(reason)
   def category(_reason), do: :other
