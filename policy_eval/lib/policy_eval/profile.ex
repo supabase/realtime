@@ -49,4 +49,16 @@ defmodule PolicyEval.Profile do
     :platform_setting_prefixes
   ]
   defstruct @enforce_keys
+
+  @doc """
+  The name of `role` that a fallback reason or a metric may keep
+
+  * the role itself if the profile decides for it or it is a platform role
+  * `nil` if there is none
+  * `:other` for any other role
+  """
+  @spec reported_role(t(), String.t() | nil) :: String.t() | nil | :other
+  def reported_role(%__MODULE__{} = profile, role) do
+    if role in [nil | profile.roles ++ profile.platform_roles], do: role, else: :other
+  end
 end

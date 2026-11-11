@@ -62,7 +62,7 @@ defmodule Realtime.PromEx.Plugins.PolicyEvalTest do
 
     decision = "realtime_tenants_policy_eval_shadow_read_decisions_total"
     duration = "realtime_tenants_policy_eval_shadow_read_shadow_duration_count"
-    tags = [outcome: "match", extension: "broadcast", reason: "none"]
+    tags = [outcome: "match", extension: "broadcast", reason: "none", role: "authenticated"]
     decisions_before = metric_value(decision, tags)
     durations_before = metric_value(duration)
 
@@ -74,13 +74,13 @@ defmodule Realtime.PromEx.Plugins.PolicyEvalTest do
     refute PromEx.get_metrics(MetricsTest) |> IO.iodata_to_binary() =~ tenant_id
   end
 
-  test "tags a fallback with the category of its reason" do
+  test "tags a fallback with the category of its reason and the caller's role" do
     tenant_id = random_string()
     expect(FeatureFlags, :enabled?, fn "policy_eval_shadow", ^tenant_id -> true end)
     expect(PolicyEvalCache, :fetch, fn :fake_conn, ^tenant_id -> {:ok, always_allow_snapshot()} end)
 
     decision = "realtime_tenants_policy_eval_shadow_read_decisions_total"
-    tags = [outcome: "fallback", extension: "broadcast", reason: "role"]
+    tags = [outcome: "fallback", extension: "broadcast", reason: "role", role: "service_role"]
     before = metric_value(decision, tags)
 
     # service_role isn't a role policy_eval models, so it falls back with {:role, "service_role"}

@@ -11,8 +11,10 @@ defmodule Realtime.Tenants.PolicyEvalShadow do
     * the bare event, one per extension decided: metadata carries `outcome` (`:match`, `:mismatch`,
       `:fallback` or `:no_real_answer`), `real`, what the real check produced for that extension, and
       `reason`: for a `:fallback`, the bounded category of why
-      (`PolicyEval.Reason.category/1`), `:none` for every other outcome. A `:mismatch` also logs a warning
-      immediately. `:exception` is the same, for the rare case deciding itself raises.
+      (`PolicyEval.Reason.category/1`), `:none` for every other outcome. `role` is the caller's role
+      as `PolicyEval.Profile.reported_role/2` keeps it: `anon`, `authenticated` or a platform role
+      like `service_role` by name, `:other` for a role the tenant made, `:none` without a role. A
+      `:mismatch` also logs a warning immediately. `:exception` is the same, for the rare case deciding itself raises.
 
       `real` is a boolean, or `{:error, sqlstate}` when Postgres raised evaluating the policies for
       this input, like a sub that isn't a uuid. That is Postgres's answer too, so a decided
@@ -104,7 +106,14 @@ defmodule Realtime.Tenants.PolicyEvalShadow do
           {:error, reason} -> {:fallback, reason}
         end
 
-      outcome_metadata = Map.merge(metadata, %{outcome: tag(outcome), real: real, reason: reason(outcome)})
+      outcome_metadata =
+        Map.merge(metadata, %{
+          outcome: tag(outcome),
+          real: real,
+          reason: reason(outcome),
+          role: role(snapshot, check.authorization_context.role)
+        })
+
       Telemetry.execute(check.event, %{}, outcome_metadata)
 
       case outcome do
@@ -156,6 +165,14 @@ defmodule Realtime.Tenants.PolicyEvalShadow do
 
   defp reason({:fallback, reason}), do: PolicyEval.Reason.category(reason)
   defp reason(_outcome), do: :none
+
+  # Bounded like the role in a fallback reason, see the moduledoc.
+  defp role(snapshot, role) do
+    case PolicyEval.Profile.reported_role(snapshot.profile, role) do
+      nil -> :none
+      reported -> reported
+    end
+  end
 
   # Mirrors Realtime.Tenants.Authorization's own update_write_policy/3 mapping, as a getter.
   defp real_read({:ok, %Policies{broadcast: %{read: v}}}, :broadcast), do: v

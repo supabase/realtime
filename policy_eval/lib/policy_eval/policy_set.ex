@@ -114,14 +114,10 @@ defmodule PolicyEval.PolicySet do
   defp commands(:read), do: ["r", "*"]
   defp commands(:write), do: ["a", "*"]
 
-  # A reason names a role only if it is a platform one (or there is none). Any other name is the
-  # policy author's choice.
+  # A reason names a role only if it is a platform one (or there is none), see
+  # `Profile.reported_role/2`. Any other name is the policy author's choice.
   defp check_role(role, profile) do
-    cond do
-      role in profile.roles -> :ok
-      role in [nil | profile.platform_roles] -> {:fallback, {:role, role}}
-      true -> {:fallback, {:role, :other}}
-    end
+    if role in profile.roles, do: :ok, else: {:fallback, {:role, Profile.reported_role(profile, role)}}
   end
 
   # The privileges an operation needs. A write that plans a `SELECT` needs `select` too, see the

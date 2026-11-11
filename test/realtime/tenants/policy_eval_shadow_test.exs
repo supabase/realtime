@@ -46,14 +46,18 @@ defmodule Realtime.Tenants.PolicyEvalShadowTest do
   end
 
   # A one-policy snapshot: permissive, SELECT and INSERT, unconditionally true. Decides :allow for
-  # both reads and writes by "authenticated", with no dependency on topic/sub/extension.
+  # both reads and writes by "anon" and "authenticated", with no dependency on topic/sub/extension.
   defp always_allow_snapshot do
+    privileges = %{bypass_rls: false, select: true, insert: true}
+
     PolicyEval.Snapshot.new(
       %{
         rls_enabled: true,
         rls_forced: false,
-        roles: %{"authenticated" => %{bypass_rls: false, select: true, insert: true}},
-        policies: [%{name: "p", cmd: "*", permissive: true, roles: ["authenticated"], qual: "true", with_check: nil}]
+        roles: %{"anon" => privileges, "authenticated" => privileges},
+        policies: [
+          %{name: "p", cmd: "*", permissive: true, roles: ["anon", "authenticated"], qual: "true", with_check: nil}
+        ]
       },
       PolicyEvalProfile.profile()
     )
@@ -113,7 +117,36 @@ defmodule Realtime.Tenants.PolicyEvalShadowTest do
       assert decision_metadata.outcome == :match
       assert decision_metadata.real == true
       assert decision_metadata.reason == :none
+      assert decision_metadata.role == "authenticated"
       refute log =~ "PolicyEvalShadowMismatch"
+    end
+
+    test "role: names only the profile's and platform roles, :other for a tenant's role, :none without one" do
+      # Only a role policy_eval decides gets past the role check; every other role falls back as :role.
+      for {role, reason, tag} <- [
+            {"authenticated", :none, "authenticated"},
+            {"anon", :none, "anon"},
+            # Not an official role name we support
+            {"anonymous", :role, :other},
+            {"service_role", :role, "service_role"},
+            {"app_writer", :role, :other},
+            {nil, :role, :none}
+          ] do
+        tenant_id = unique_tenant_id()
+        expect(FeatureFlags, :enabled?, fn @flag, _tenant_id -> true end)
+        expect(PolicyEvalCache, :fetch, fn :fake_conn, _tenant_id -> {:ok, always_allow_snapshot()} end)
+
+        decision_ref = attach(@read_decision)
+        timing_ref = attach(@read_timing)
+
+        ctx = context(tenant_id: tenant_id, role: role, claims: %{"role" => role})
+        result = {:ok, %Policies{broadcast: %BroadcastPolicies{read: true}}}
+
+        assert :ok = PolicyEvalShadow.read(:fake_conn, ctx, [:broadcast], result)
+        assert_receive {:telemetry, ^timing_ref, _event, _measurements, %{tenant: ^tenant_id}}, 2000
+        assert_received {:telemetry, ^decision_ref, _event, _measurements, %{tenant: ^tenant_id} = decision_metadata}
+        assert {decision_metadata.reason, decision_metadata.role} == {reason, tag}
+      end
     end
 
     test "fallback: records outcome: :fallback with the reason's category, nothing is logged" do
