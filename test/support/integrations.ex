@@ -20,12 +20,12 @@ defmodule Integrations do
     for serializer <- @serializers, mode <- presence_mode_parameters(), do: Map.put(mode, :serializer, serializer)
   end
 
+  def presence_flags(mode) when mode in @presence_modes do
+    %{"presence_rollcall_primary" => mode == :rollcall, "presence_rollcall_shadow" => mode == :shadow}
+  end
+
   def set_presence_mode(%{tenant: tenant, presence_mode: mode}) when mode in @presence_modes do
-    flags =
-      Map.merge(tenant.feature_flags, %{
-        "presence_rollcall_primary" => mode == :rollcall,
-        "presence_rollcall_shadow" => mode == :shadow
-      })
+    flags = Map.merge(tenant.feature_flags, presence_flags(mode))
 
     tenant = tenant |> Tenant.changeset(%{feature_flags: flags}) |> Realtime.Repo.update!()
     Realtime.Tenants.Cache.update_cache(tenant)

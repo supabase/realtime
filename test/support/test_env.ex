@@ -29,7 +29,9 @@ defmodule TestEnv do
     rr_int_a: 8,
     rr_int_b: 9,
     rr_int_c: 10,
-    bad_tcp: 11
+    bad_tcp: 11,
+    rollcall_a: 12,
+    rollcall_b: 13
   }
 
   # Labels this run's databases and containers. config/test.exs takes it from TENANT (or
