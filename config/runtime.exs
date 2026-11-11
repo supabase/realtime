@@ -138,15 +138,6 @@ presence_usage_poll_rate = Env.get_integer("PRESENCE_USAGE_POLL_RATE_MS", 60_000
 presence_latency_sample_rate =
   Env.get_float("PRESENCE_LATENCY_SAMPLE_RATE", if(config_env() == :test, do: 1.0, else: 0.0))
 
-# An unset value uses the default of the Rollcall library. The tests shorten the periods, so a test
-# that waits for a heartbeat, a purge or the end of a grace period does not wait for the defaults.
-rollcall_empty_grace_in_ms = Env.get_integer("ROLLCALL_EMPTY_GRACE_IN_MS", if(config_env() == :test, do: 500))
-
-rollcall_heartbeat_period_in_ms =
-  Env.get_integer("ROLLCALL_HEARTBEAT_PERIOD_IN_MS", if(config_env() == :test, do: 200))
-
-rollcall_silence_threshold = Env.get_integer("ROLLCALL_SILENCE_THRESHOLD")
-
 prom_poll_rate = Env.get_integer("PROM_POLL_RATE", 5000)
 realtime_ip_version = System.get_env("REALTIME_IP_VERSION")
 rebalance_check_interval_in_ms = Env.get_integer("REBALANCE_CHECK_INTERVAL_IN_MS", to_timeout(minute: 10))
@@ -271,15 +262,6 @@ config :realtime,
   presence_broadcast_period: presence_broadcast_period_in_ms,
   presence_permdown_period: presence_permdown_period_in_ms,
   presence_latency_sample_rate: presence_latency_sample_rate,
-  rollcall:
-    Keyword.reject(
-      [
-        empty_grace_in_ms: rollcall_empty_grace_in_ms,
-        heartbeat_period_in_ms: rollcall_heartbeat_period_in_ms,
-        silence_threshold: rollcall_silence_threshold
-      ],
-      fn {_option, value} -> is_nil(value) end
-    ),
   users_scope_shards: users_scope_shards,
   muster_scope_shards: muster_scope_shards,
   muster_drain_opts: [timeout_ms: muster_drain_timeout_ms, settle_ms: muster_drain_settle_ms],
