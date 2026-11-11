@@ -39,12 +39,15 @@ begin
             set_config('request.jwt.claim.role', role_name, true),
             set_config('request.headers', headers, true);
 
-    -- One lookup for every probe, by the full primary key.
-    visible_ids := array(
-      select m.id
-      from realtime.messages m
-      where m.inserted_at = probe_inserted_at
-        and m.id = any(probe_ids));
+    -- One lookup for every probe, by the full primary key. Skipped without probes, so the
+    -- SELECT policies are not planned for a write.
+    if cardinality(probe_ids) > 0 then
+      visible_ids := array(
+        select m.id
+        from realtime.messages m
+        where m.inserted_at = probe_inserted_at
+          and m.id = any(probe_ids));
+    end if;
 
     read_allowed := array(
       select p.id = any(visible_ids)

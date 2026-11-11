@@ -113,7 +113,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_261_022_120_000, Migrations.MessagesReplayIndex},
     {20_261_027_120_000, Migrations.HashSubscriptionFiltersIndex},
     {20_261_029_120_000, Migrations.RevokeSchemaMigrationsGrants},
-    {20_261_103_130_000, Migrations.FilterOnRawWalValues}
+    {20_261_103_130_000, Migrations.FilterOnRawWalValues},
+    {20_261_111_120_000, Migrations.AuthorizeWritesSkipSelect}
   ]
 
   defstruct [:tenant_external_id, :settings, migrations_ran: 0]

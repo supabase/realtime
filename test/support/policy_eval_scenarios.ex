@@ -497,14 +497,14 @@ defmodule PolicyEvalScenarios do
   end
 
   @doc """
-  A write reads the table too: the SELECT of the call runs in every call, write-only calls
-  included (`write_plans_select: true`). So whatever makes that SELECT fail makes the writes fail:
-  a missing SELECT privilege, and a SELECT policy that Postgres can't plan. The library decides a
-  write only from what it can read of the SELECT policies: it falls back for a missing grant, and
-  for a policy it doesn't fully model, see `PolicyEval.PolicySet`.
+  A write is a plain INSERT: `realtime.authorize` runs no SELECT on a write-only call. So the SELECT
+  privilege and the SELECT policies don't change a write, see `PolicyEval.PolicySet`. Each scenario
+  has an INSERT policy, and a SELECT setup that makes a SELECT of the table fail even when it reads
+  no rows: a missing SELECT privilege, or a SELECT policy that Postgres can't plan. A read can
+  raise, and a write still gets the answer of the INSERT policy.
   """
-  @spec select_dependent_scenarios() :: [map()]
-  def select_dependent_scenarios do
+  @spec write_ignores_select_scenarios() :: [map()]
+  def write_ignores_select_scenarios do
     insert_policy = policy_sql("insert", "FOR INSERT TO authenticated, anon WITH CHECK (realtime.topic() = 'x')")
 
     revokes = [
@@ -520,7 +520,7 @@ defmodule PolicyEvalScenarios do
     from_revokes =
       for {label, setup} <- revokes, role <- ["authenticated", "anon"], topic <- ["x", "y"] do
         scenario(
-          "select dependent",
+          "write ignores select",
           "#{label}, #{role}, topic #{inspect(topic)}",
           [policy_sql("select", "FOR SELECT TO authenticated, anon USING (realtime.topic() = 'x')"), insert_policy],
           [role: role, topic: topic],
@@ -549,7 +549,7 @@ defmodule PolicyEvalScenarios do
     from_policies =
       for {label, qual} <- select_policies, role <- ["authenticated", "anon"], sub <- [@own, "user_2abc"] do
         scenario(
-          "select dependent",
+          "write ignores select",
           "#{label}, #{role}, sub #{inspect(sub)}",
           [policy_sql("select", "FOR SELECT TO authenticated, anon USING (#{qual})"), insert_policy],
           role: role,

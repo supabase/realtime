@@ -265,9 +265,8 @@ defmodule PolicyEval.PolicySetTest do
       %{name: "the lobby team", team: "public:lobby", user_id: @uid, expect: @deny},
       %{name: "the lobby team in upper case", team: "PUBLIC:LOBBY", user_id: @uid, expect: @deny},
       %{name: "the lobby team inside another one", team: "xpublic:lobbyy", user_id: @uid, expect: @deny},
-      # The send policies have no regex, but the lobby SELECT policy does, and a write might evaluate
-      # it: a fallback, as for a read
-      %{name: "a non-ASCII team", team: "public:lobby:é", user_id: @uid, expect: @regex_non_ascii},
+      # Only the lobby SELECT policy has a regex, and a write ignores it: unlike a read, no fallback
+      %{name: "a non-ASCII team", team: "public:lobby:é", user_id: @uid, expect: @deny},
       %{name: "an empty team", team: "", user_id: @uid, expect: @deny},
       %{name: "user id in upper case", team: "user:#{@uid}", user_id: String.upcase(@uid), expect: @allow},
       %{name: "braced user id", team: "user:#{@uid}", user_id: "{#{@uid}}", expect: @allow},
@@ -434,16 +433,15 @@ defmodule PolicyEval.PolicySetTest do
       no_insert = %{@roles | "member" => %{bypass_rls: false, select: true, insert: false}}
       env = env(team: "user:#{@uid}", user_id: @uid)
 
-      # A write needs select too: the profile sets write_plans_select, see the PolicySet moduledoc
+      # A write is a plain INSERT, so it doesn't need select, see the PolicySet moduledoc
       snapshot = snapshot(policies, catalog.functions, %{roles: no_select})
       assert PolicyEval.decide(snapshot, env, :read) == {:fallback, {:missing_grant, "member", :select}}
-      assert PolicyEval.decide(snapshot, env, :write) == {:fallback, {:missing_grant, "member", :select}}
+      assert PolicyEval.decide(snapshot, env, :write) == @allow
 
       snapshot = snapshot(policies, catalog.functions, %{roles: no_insert})
       assert PolicyEval.decide(snapshot, env, :read) == @allow
       assert PolicyEval.decide(snapshot, env, :write) == {:fallback, {:missing_grant, "member", :insert}}
 
-      # With neither, the one the write itself needs is reported
       none = %{@roles | "member" => %{bypass_rls: false, select: false, insert: false}}
       snapshot = snapshot(policies, catalog.functions, %{roles: none})
       assert PolicyEval.decide(snapshot, env, :write) == {:fallback, {:missing_grant, "member", :insert}}
@@ -502,15 +500,12 @@ defmodule PolicyEval.PolicySetTest do
       assert PolicyEval.decide(snapshot(policies ++ [all], catalog.functions), env, :read) ==
                {:fallback, :policy_without_expression}
 
-      # A write also needs the USING of the SELECT and ALL policies, see the PolicySet moduledoc
       assert PolicyEval.decide(snapshot(policies ++ [all], catalog.functions), env, :write) ==
-               {:fallback, :select_policy_unsupported}
-
-      assert PolicyEval.decide(snapshot(policies ++ [read], catalog.functions), env, :write) ==
-               {:fallback, :select_policy_unsupported}
+               {:fallback, :policy_without_expression}
 
       # a policy that doesn't apply doesn't matter
       assert PolicyEval.decide(snapshot(policies ++ [write], catalog.functions), env, :read) == @allow
+      assert PolicyEval.decide(snapshot(policies ++ [read], catalog.functions), env, :write) == @allow
 
       assert PolicyEval.decide(
                snapshot(policies ++ [policy("guest_only", roles: ["guest"], qual: nil)], catalog.functions),
@@ -574,7 +569,7 @@ defmodule PolicyEval.PolicySetTest do
           {"App.expires_at", :other},
           {"custom.secret", :other}
         ] do
-      test "#{setting} in a read, in a write and in a SELECT policy of a write" do
+      test "#{setting} in a read and in a write" do
         check = "(current_setting('#{unquote(setting)}'::text, true) = 'x'::text)"
         want = {:fallback, {:unsupported, {:unknown_setting, unquote(named)}}}
         env = env(team: "t", user_id: @uid)
@@ -583,9 +578,6 @@ defmodule PolicyEval.PolicySetTest do
 
         assert PolicyEval.decide(snapshot([policy("p", cmd: "a", qual: nil, with_check: check)], []), env, :write) ==
                  want
-
-        select_and_insert = [policy("s", qual: check), policy("i", cmd: "a", qual: nil, with_check: "true")]
-        assert PolicyEval.decide(snapshot(select_and_insert, []), env, :write) == want
       end
     end
   end
@@ -729,9 +721,9 @@ defmodule PolicyEval.PolicySetTest do
     end
   end
 
-  ## Writes that plan a SELECT (write_plans_select)
+  ## Writes ignore the SELECT policies
 
-  describe "a write also needs the SELECT policies to be modelled" do
+  describe "a write ignores the SELECT policies" do
     @team_x "(app.team() = 'x'::text)"
     @unsupported_select "(app.email() = 'a'::text)"
 
@@ -742,140 +734,40 @@ defmodule PolicyEval.PolicySetTest do
     defp insert_policy, do: policy("insert", cmd: "a", qual: nil, with_check: @team_x)
 
     defp write_with(policies, functions, opts \\ []) do
-      role = Keyword.get(opts, :role, "member")
       user_id = Keyword.get(opts, :user_id, @uid)
-      PolicyEval.decide(snapshot(policies, functions), env(team: "x", user_id: user_id, role: role), :write)
+      PolicyEval.decide(snapshot(policies, functions), env(team: "x", user_id: user_id), :write)
     end
 
-    test "a SELECT policy that is supported doesn't matter", %{functions: functions} do
-      assert write_with([insert_policy(), policy("select", qual: @team_x)], functions) == @allow
-      assert write_with([insert_policy(), policy("select", qual: "false")], functions) == @allow
-    end
-
-    test "a SELECT policy with an unsupported expression is a fallback", %{functions: functions} do
-      policies = [insert_policy(), policy("select_email", qual: @unsupported_select)]
-
-      assert write_with(policies, functions) == {:fallback, :select_policy_unsupported}
-      # even though the INSERT policy decides on its own
-      assert write_with([insert_policy()], functions) == @allow
-    end
-
-    test "unsupported anywhere in the expression counts", %{functions: functions} do
-      for qual <- [
-            "(#{@team_x} AND (app.email() = 'a'::text))",
-            "(#{@team_x} OR (NOT (app.email() = 'a'::text)))",
-            "(app.team() = ANY (ARRAY['a'::text, app.email()]))",
-            "COALESCE((app.email() = 'a'::text), true)",
-            "( SELECT true\n   FROM pg_sleep((1)::double precision) pg_sleep(pg_sleep))",
-            "(private = true)"
+    test "whatever the SELECT policies are, the INSERT policies decide", %{functions: functions} do
+      for select <- [
+            policy("select", qual: @team_x),
+            policy("select", qual: "false"),
+            policy("select", qual: @unsupported_select),
+            policy("select", qual: nil),
+            policy("select", permissive: false, qual: @unsupported_select),
+            policy("select", roles: ["public"], qual: @unsupported_select),
+            # a role that isn't modelled only matters in a policy for the command being decided
+            policy("select", roles: ["team_member"], qual: @unsupported_select)
           ] do
-        policies = [insert_policy(), policy("select", qual: qual)]
-        assert write_with(policies, functions) == {:fallback, :select_policy_unsupported}, qual
+        assert write_with([insert_policy(), select], functions) == @allow, inspect(select)
+        assert write_with([select], functions) == @deny, inspect(select)
       end
     end
 
-    test "a SELECT policy without a USING expression is a fallback", %{functions: functions} do
-      policies = [insert_policy(), policy("select", qual: nil)]
-      assert write_with(policies, functions) == {:fallback, :select_policy_unsupported}
-    end
-
-    test "an ALL policy counts for its USING, even if the write uses its WITH CHECK", %{functions: functions} do
-      policies = [policy("all", cmd: "*", qual: @unsupported_select, with_check: @team_x)]
-      assert write_with(policies, functions) == {:fallback, :select_policy_unsupported}
-
-      policies = [policy("all", cmd: "*", qual: nil, with_check: @team_x)]
-      assert write_with(policies, functions) == {:fallback, :select_policy_unsupported}
-
-      policies = [policy("all", cmd: "*", qual: @team_x, with_check: @team_x)]
-      assert write_with(policies, functions) == @allow
-    end
-
-    test "restrictive SELECT policies count too, even when they would not be evaluated", %{functions: functions} do
-      policies = [insert_policy(), policy("restrictive", permissive: false, qual: @unsupported_select)]
-      assert write_with(policies, functions) == {:fallback, :select_policy_unsupported}
-    end
-
-    test "only the policies that might apply to the role count", %{functions: functions} do
-      policies = [
-        policy("insert", cmd: "a", roles: ["guest", "member"], qual: nil, with_check: @team_x),
-        policy("for_guest", roles: ["guest"], qual: @unsupported_select)
-      ]
-
-      assert write_with(policies, functions) == @allow
-
-      assert write_with(policies, functions, role: "guest") == {:fallback, :select_policy_unsupported}
-
-      # public applies to everyone
-      policies = [insert_policy(), policy("for_public", roles: ["public"], qual: @unsupported_select)]
-      assert write_with(policies, functions) == {:fallback, :select_policy_unsupported}
-    end
-
-    test "a policy for a role that isn't modelled might apply, by membership", %{functions: functions} do
-      policies = [insert_policy(), policy("for_team", roles: ["team_member"], qual: @unsupported_select)]
-      assert write_with(policies, functions) == {:fallback, :select_policy_unsupported}
-
-      # one we can read can't fail the statement by being there
-      policies = [insert_policy(), policy("for_team", roles: ["team_member"], qual: @team_x)]
-      assert write_with(policies, functions) == @allow
-    end
-
-    test "UPDATE and DELETE policies don't count", %{functions: functions} do
-      policies = [
-        insert_policy(),
-        policy("update", cmd: "w", qual: @unsupported_select, with_check: @unsupported_select),
-        policy("delete", cmd: "d", qual: nil)
-      ]
-
-      assert write_with(policies, functions) == @allow
-    end
-
-    test "a SELECT policy that raises for this input is a fallback", %{functions: functions} do
-      # Against Postgres 17 a write-only call that plans the SELECT didn't raise for a policy like
-      # this, with no probe row to evaluate it for. Against a Multigres cluster it did.
+    test "a SELECT policy that raises for the input doesn't matter", %{functions: functions} do
       raising = "((app.team() = 'x'::text) AND ((( SELECT app.user_id() AS user_id))::text = 'x'::text))"
       policies = [insert_policy(), policy("select", qual: raising)]
 
-      assert write_with(policies, functions, user_id: "user_2abc") ==
-               {:fallback,
-                {:unsupported, {:raises, :invalid_text_representation, "invalid input syntax for type uuid"}}}
-
-      assert write_with(policies, functions) == @allow
+      assert write_with(policies, functions, user_id: "user_2abc") == @allow
     end
 
-    test "a read is not affected, it evaluates the policies it needs", %{functions: functions} do
-      policies = [insert_policy(), policy("select", qual: @team_x)]
-      assert PolicyEval.decide(snapshot(policies, functions), env(team: "x", user_id: @uid), :read) == @allow
+    test "an ALL policy counts only for the expression the write evaluates", %{functions: functions} do
+      assert write_with([policy("all", cmd: "*", qual: @unsupported_select, with_check: @team_x)], functions) == @allow
+      assert write_with([policy("all", cmd: "*", qual: nil, with_check: @team_x)], functions) == @allow
 
-      # the INSERT policy is not even looked at
-      policies = [
-        policy("insert", cmd: "a", qual: nil, with_check: @unsupported_select),
-        policy("select", qual: @team_x)
-      ]
-
-      assert PolicyEval.decide(snapshot(policies, functions), env(team: "x", user_id: @uid), :read) == @allow
-    end
-
-    test "the grants are checked first", %{functions: functions} do
-      roles = %{@roles | "member" => %{bypass_rls: false, select: false, insert: true}}
-      policies = [insert_policy(), policy("select", qual: @unsupported_select)]
-
-      assert PolicyEval.decide(snapshot(policies, functions, %{roles: roles}), env(team: "x", user_id: @uid), :write) ==
-               {:fallback, {:missing_grant, "member", :select}}
-    end
-
-    test "with no policy for SELECT at all, the write decides", %{functions: functions} do
-      assert write_with([insert_policy()], functions) == @allow
-      assert write_with([], functions) == @deny
-    end
-
-    test "the personal-team SELECT policies are modelled, so their writes decide", %{catalogs: catalogs} do
-      for version <- @versions, variant <- [:simple, :fallback] do
-        catalog = catalogs[version]
-        snapshot = snapshot(personal_team_policies(catalog), functions(catalog, variant))
-
-        assert PolicyEval.decide(snapshot, env(team: "user:#{@uid}", user_id: @uid), :write) == @allow,
-               "#{version} #{variant}"
-      end
+      # without a WITH CHECK, the write evaluates the USING
+      assert write_with([policy("all", cmd: "*", qual: @unsupported_select, with_check: nil)], functions) ==
+               @unsupported_email
     end
   end
 

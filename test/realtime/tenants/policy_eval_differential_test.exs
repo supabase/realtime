@@ -74,8 +74,8 @@ defmodule Realtime.Tenants.PolicyEvalDifferentialTest do
     run(context, PolicyEvalScenarios.snapshot_scenarios(version_num))
   end
 
-  test "writes that fail with the SELECT of realtime.authorize", context do
-    run(context, PolicyEvalScenarios.select_dependent_scenarios())
+  test "a SELECT that fails doesn't change a write", context do
+    run(context, PolicyEvalScenarios.write_ignores_select_scenarios())
   end
 
   test "a policy that raises next to one that allows", context do

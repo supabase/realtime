@@ -3,12 +3,13 @@ defmodule Realtime.Tenants.PolicyEvalProfile do
   The `PolicyEval.Profile` for `realtime.messages`: what policy_eval needs to know to decide a join
   to a private channel the way `realtime.authorize` does.
 
-  `realtime.authorize` runs a `SELECT` and an `INSERT` of probe rows of `realtime.messages`.
-  It plans the `SELECT` on every call, write-only calls included, so the profile sets `write_plans_select`.
-  That makes a write fall back where the `SELECT` might raise, see `PolicyEval.PolicySet`. This is conservative: the
+  For a read, `realtime.authorize` inserts probe rows of `realtime.messages` as the connection role,
+  then reads them back with a `SELECT` as the user's role. For a write, it only runs an `INSERT` as
+  the user's role: since tenant migration 20261111120000, a write-only call runs no `SELECT`. The
   transaction path (`write_policies_with_transaction` and `check_write_policy` in
-  `Realtime.Tenants.Authorization`) only inserts, so there a fallback can come where Postgres
-  decides.
+  `Realtime.Tenants.Authorization`) also only inserts. So only the `INSERT` and `ALL` policies decide
+  a write, as `PolicyEval.PolicySet` assumes. A tenant that has not run that migration yet still
+  plans the `SELECT` on a write, so shadow mode can count a mismatch where that `SELECT` raises.
 
   Before the call, Realtime sets exactly six settings in the session (in
   `Realtime.Tenants.Authorization`), always with the exact strings that `PolicyEval.Env` gets:
@@ -41,7 +42,6 @@ defmodule Realtime.Tenants.PolicyEvalProfile do
   @spec profile() :: Profile.t()
   def profile do
     %Profile{
-      write_plans_select: true,
       columns: %{"topic" => :text, "extension" => :text},
       functions: realtime_functions() ++ auth_functions(),
       roles: ["anon", "authenticated"],
