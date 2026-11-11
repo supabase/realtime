@@ -6,8 +6,8 @@ defmodule Realtime.PromEx do
   alias Realtime.PromEx.Plugins.Muster
   alias Realtime.PromEx.Plugins.OsMon
   alias Realtime.PromEx.Plugins.Phoenix
+  alias Realtime.PromEx.Plugins.PolicyEval
   alias Realtime.PromEx.Plugins.Presence
-  alias Realtime.PromEx.Plugins.SqlLogex
   alias Realtime.PromEx.Plugins.TenantGlobal
   alias Realtime.PromEx.Plugins.Tenants
 
@@ -125,7 +125,7 @@ defmodule Realtime.PromEx do
       {GenRpc, poll_rate: poll_rate},
       {Muster, poll_rate: poll_rate},
       {Presence, poll_rate: presence_usage_poll_rate},
-      {SqlLogex, poll_rate: poll_rate},
+      {PolicyEval, poll_rate: poll_rate},
       ClientRequests
     ]
   end

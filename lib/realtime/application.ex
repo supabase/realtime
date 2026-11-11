@@ -173,7 +173,7 @@ defmodule Realtime.Application do
           id: Realtime.LogThrottle
         ),
         Realtime.Tenants.Cache,
-        Realtime.Tenants.SqlLogexCache,
+        Realtime.Tenants.PolicyEvalCache,
         Realtime.FeatureFlags.Cache,
         Realtime.RateCounter.DynamicSupervisor,
         {Registry, keys: :unique, name: Realtime.Registry.Unique},

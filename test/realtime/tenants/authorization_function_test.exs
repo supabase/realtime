@@ -293,12 +293,12 @@ defmodule Realtime.Tenants.AuthorizationFunctionTest do
   end
 
   # Each Authorization check looks up "use_authorize_function" once, and (since
-  # Realtime.Tenants.SqlLogexShadow's hook) "sql_logex_shadow" once as well — always off here, it's
+  # Realtime.Tenants.PolicyEvalShadow's hook) "policy_eval_shadow" once as well — always off here, it's
   # not what this file tests.
   defp use_authorize_function(enabled?, checks \\ 1) do
     expect(FeatureFlags, :enabled?, checks * 2, fn
       "use_authorize_function", _tenant_id -> enabled?
-      "sql_logex_shadow", _tenant_id -> false
+      "policy_eval_shadow", _tenant_id -> false
     end)
   end
 

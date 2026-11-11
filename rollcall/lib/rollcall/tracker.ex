@@ -589,13 +589,17 @@ defmodule Rollcall.Tracker do
   end
 
   defp put_peer(state, node, peer, changes) do
-    tp(:rollcall_tracker_peer_message, %{
-      scope: state.scope,
-      node: node,
-      joins: Changes.join_refs(changes),
-      leaves: Changes.leave_refs(changes),
-      behind: Peer.behind?(peer)
-    })
+    tp(
+      :rollcall_tracker_peer_message,
+      %{
+        scope: state.scope,
+        node: node,
+        joins: Changes.join_refs(changes),
+        leaves: Changes.leave_refs(changes),
+        behind: Peer.behind?(peer)
+      },
+      ignore_side_effects: true
+    )
 
     state
     |> State.put_peer(node, peer)
@@ -616,12 +620,16 @@ defmodule Rollcall.Tracker do
               |> update_view(changes)
               |> publish_changes(changes)
 
-              tp(:rollcall_tracker_peer_purged, %{
-                scope: state.scope,
-                node: node,
-                joins: Changes.join_refs(changes),
-                leaves: Changes.leave_refs(changes)
-              })
+              tp(
+                :rollcall_tracker_peer_purged,
+                %{
+                  scope: state.scope,
+                  node: node,
+                  joins: Changes.join_refs(changes),
+                  leaves: Changes.leave_refs(changes)
+                },
+                ignore_side_effects: true
+              )
 
               kept
           end
@@ -668,13 +676,17 @@ defmodule Rollcall.Tracker do
 
     :ok = state.transport_module.heartbeat(state.transport_state, snapshot)
 
-    tp(:rollcall_tracker_heartbeat_sent, %{
-      scope: state.scope,
-      origin: self(),
-      kind: :snapshot,
-      version: state.version,
-      refs: Enum.map(local_entries, & &1.ref)
-    })
+    tp(
+      :rollcall_tracker_heartbeat_sent,
+      %{
+        scope: state.scope,
+        origin: self(),
+        kind: :snapshot,
+        version: state.version,
+        refs: Enum.map(local_entries, & &1.ref)
+      },
+      ignore_side_effects: true
+    )
 
     state
   end

@@ -4,7 +4,7 @@ defmodule Realtime.MixProject do
   def project do
     [
       app: :realtime,
-      version: "2.156.0",
+      version: "2.156.1",
       elixir: "~> 1.19",
       elixirc_paths: elixirc_paths(Mix.env()),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
@@ -104,7 +104,7 @@ defmodule Realtime.MixProject do
       {:logflare_logger_backend, "~> 0.11"},
       {:syn, "~> 3.3"},
       {:forum, path: "./forum"},
-      {:sql_logex, path: "./sql_logex"},
+      {:policy_eval, path: "./policy_eval"},
       {:rollcall, path: "./rollcall"},
       {:cachex, "~> 4.0"},
       {:open_api_spex, "~> 3.16"},
@@ -116,7 +116,7 @@ defmodule Realtime.MixProject do
       {:opentelemetry_phoenix, "~> 2.0"},
       {:opentelemetry_cowboy, "~> 1.0"},
       {:opentelemetry_ecto, "~> 1.2"},
-      {:gen_rpc, git: "https://github.com/emqx/gen_rpc.git", tag: "3.6.1"},
+      {:gen_rpc, git: "https://github.com/emqx/gen_rpc.git", tag: "4.0.2"},
       # gen_rpc uses a git dependency
       {:snabbkaffe, "~> 1.0", override: true},
       {:req, "~> 0.7.4"},
