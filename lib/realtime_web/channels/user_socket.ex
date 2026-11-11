@@ -8,6 +8,7 @@ defmodule RealtimeWeb.UserSocket do
 
   alias Realtime.Api.Tenant
   alias Realtime.Database
+  alias Realtime.SignalHandler
   alias Realtime.Tenants
   alias Realtime.TokenBucket
   alias Realtime.UsersCounter
@@ -117,7 +118,8 @@ defmodule RealtimeWeb.UserSocket do
       |> assign(:log_level, log_level)
       |> assign(:access_token, token)
 
-    with {:ok,
+    with :ok <- SignalHandler.shutdown_in_progress?(),
+         {:ok,
           %Tenant{
             jwt_secret: jwt_secret,
             jwt_jwks: jwt_jwks,
@@ -141,6 +143,10 @@ defmodule RealtimeWeb.UserSocket do
 
       {:ok, socket |> assign(assigns) |> put_join_bucket(tenant) |> put_broadcast_bucket()}
     else
+      {:error, :shutdown_in_progress} ->
+        log_error("RealtimeRestarting", "Realtime is restarting, please standby")
+        {:error, :shutdown_in_progress}
+
       {:error, :tenant_not_found} ->
         log_error("TenantNotFound", "Tenant not found: #{external_id}")
         connect_error(:tenant_not_found)
@@ -221,12 +227,11 @@ defmodule RealtimeWeb.UserSocket do
   end
 
   defp error_response(:tenant_suspended), do: {403, "Realtime was disabled for this tenant"}
-
   defp error_response(:tenant_not_found), do: {404, "Tenant not found"}
-
   defp error_response(:too_many_connections), do: {429, "Too many connected users"}
   defp error_response(:too_many_joins), do: {429, "Too many joins per second"}
   defp error_response(:too_many_node_joins), do: {429, "Too many joins per second"}
+  defp error_response(:shutdown_in_progress), do: {503, "Realtime is restarting, please standby"}
 
   defp error_response(_reason), do: {500, "Error connecting to Realtime"}
 
