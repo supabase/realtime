@@ -8,6 +8,7 @@ defmodule RealtimeWeb.UserSocket do
 
   alias Realtime.Api.Tenant
   alias Realtime.Database
+  alias Realtime.GenRpc
   alias Realtime.Tenants
   alias Realtime.TokenBucket
   alias Realtime.UsersCounter
@@ -348,26 +349,78 @@ defmodule RealtimeWeb.UserSocket do
   @spec subscribers_id(String.t()) :: String.t()
   def subscribers_id(tenant), do: "user_socket:" <> tenant
 
+  @disconnect_msg %Phoenix.Socket.Broadcast{
+    event: "system",
+    payload: %{extension: "system", status: "ok", message: "Server requested disconnect"}
+  }
+
   @spec disconnect(binary()) :: :ok
   def disconnect(tenant_external_id) do
-    Logger.warning("Disconnecting all sockets for tenant #{tenant_external_id}",
-      external_id: tenant_external_id,
-      project: tenant_external_id
-    )
-
-    disconnect_msg = %Phoenix.Socket.Broadcast{
-      event: "system",
-      payload: %{extension: "system", status: "ok", message: "Server requested disconnect"}
-    }
+    log_disconnect(tenant_external_id)
 
     Phoenix.PubSub.broadcast!(
       Realtime.PubSub,
       "realtime:operations:" <> tenant_external_id,
-      disconnect_msg,
+      @disconnect_msg,
       MessageDispatcher
     )
 
     Phoenix.PubSub.broadcast(Realtime.PubSub, subscribers_id(tenant_external_id), :socket_drain)
     :ok
+  end
+
+  @doc """
+  Disconnects all sockets of a tenant like `disconnect/1`, then kills the ones still connected once the
+  `:socket_kill_delay_ms` grace period (`SOCKET_KILL_DELAY_MS`) is over.
+
+  A single cast to every node: each one drains its own sockets and kills the leftovers on its own timer. The kill is a
+  backstop for the drain, which a transport only acts on once it gets through its mailbox, and which a socket that
+  connected just before the tenant change landed never sees.
+  """
+  @spec disconnect_and_kill(binary()) :: :ok
+  def disconnect_and_kill(tenant_external_id) do
+    log_disconnect(tenant_external_id)
+    delay = Application.fetch_env!(:realtime, :socket_kill_delay_ms)
+    GenRpc.multicast(__MODULE__, :disconnect_and_kill_local, [tenant_external_id, delay])
+  end
+
+  @doc false
+  @spec disconnect_and_kill_local(binary(), non_neg_integer()) :: :ok
+  def disconnect_and_kill_local(tenant_external_id, delay) do
+    Phoenix.PubSub.local_broadcast(
+      Realtime.PubSub,
+      "realtime:operations:" <> tenant_external_id,
+      @disconnect_msg,
+      MessageDispatcher
+    )
+
+    Phoenix.PubSub.local_broadcast(Realtime.PubSub, subscribers_id(tenant_external_id), :socket_drain)
+    {:ok, _} = :timer.apply_after(delay, __MODULE__, :kill_local, [tenant_external_id])
+    :ok
+  end
+
+  @doc "Kills the sockets of a tenant connected to this node."
+  @spec kill_local(binary()) :: :ok
+  def kill_local(tenant_external_id) do
+    # Every transport subscribes to its socket id on init, so this also finds sockets without channels
+    pids = for {pid, _} <- Registry.lookup(Realtime.PubSub, subscribers_id(tenant_external_id)), do: pid
+
+    if pids != [] do
+      Logger.warning("Killing #{length(pids)} sockets still connected for tenant #{tenant_external_id}",
+        external_id: tenant_external_id,
+        project: tenant_external_id
+      )
+
+      Enum.each(pids, &Process.exit(&1, :kill))
+    end
+
+    :ok
+  end
+
+  defp log_disconnect(tenant_external_id) do
+    Logger.warning("Disconnecting all sockets for tenant #{tenant_external_id}",
+      external_id: tenant_external_id,
+      project: tenant_external_id
+    )
   end
 end

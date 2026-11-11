@@ -147,6 +147,7 @@ request_id_baggage_key = System.get_env("REQUEST_ID_BAGGAGE_KEY", "request-id")
 rpc_timeout = Env.get_integer("RPC_TIMEOUT", to_timeout(second: 30))
 run_janitor = Env.get_boolean("RUN_JANITOR", false)
 slot_name_suffix = System.get_env("SLOT_NAME_SUFFIX")
+socket_kill_delay_ms = Env.get_integer("SOCKET_KILL_DELAY_MS", to_timeout(second: 5))
 
 policy_eval_snapshot_cache_expiration_in_ms =
   Env.get_integer("POLICY_EVAL_SNAPSHOT_CACHE_EXPIRATION_IN_MS", to_timeout(minute: 5))
@@ -457,6 +458,7 @@ if config_env() != :test do
     max_gen_rpc_call_clients: max_gen_rpc_call_clients,
     connect_error_backoff_ms: connect_error_backoff_ms,
     channel_error_backoff_ms: channel_error_backoff_ms,
+    socket_kill_delay_ms: socket_kill_delay_ms,
     client_join_rate_limit: [per_second: client_joins_per_second],
     client_broadcast_rate_limit: [per_second: client_broadcasts_per_second, burst: client_broadcasts_burst],
     node_join_budget_floor: node_join_budget_floor,
