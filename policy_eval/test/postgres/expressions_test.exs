@@ -10,6 +10,9 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
   # back: that is the text that the library gets. Postgres runs the deparsed text in a SELECT,
   # against a row of a table, with the settings of the case. The evaluator parses and evaluates the
   # same text. Each case runs in a transaction that rolls back.
+  #
+  # Not async: the tests against Postgres share one database and change the same table, functions
+  # and roles in it. Even in transactions that roll back, they would block or fail each other.
   use ExUnit.Case, async: false
 
   alias PolicyEval.Differential
