@@ -1,18 +1,21 @@
 defmodule Realtime.Presence.RollcallBackendTest do
-  # The tests use the Rollcall instance that the application starts. Each test has its own tenant
-  # and topic. The tracker publishes the diffs from its own process, so the stub of the flag is global.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
   use Mimic
 
   alias Phoenix.Socket.Broadcast
   alias Realtime.Presence.RollcallBackend
 
-  setup :set_mimic_global
+  setup :set_mimic_from_context
 
   setup do
-    stub(Realtime.FeatureFlags, :enabled?, fn flag, _tenant -> flag == "presence_rollcall_primary" end)
     id = System.unique_integer([:positive])
-    {:ok, tenant: "tenant-#{id}", topic: "realtime:rollcall-presence-#{id}"}
+    tenant = "tenant-#{id}"
+
+    Realtime.FeatureFlags
+    |> stub(:enabled?, fn flag, _tenant -> flag == "presence_rollcall_primary" end)
+    |> allow(self(), fn -> Rollcall.Tracker.whereis(Realtime.Presence.Rollcall, tenant) end)
+
+    {:ok, tenant: tenant, topic: "realtime:rollcall-presence-#{id}"}
   end
 
   test "track/6 adds the entry to the state that list/2 returns", %{tenant: tenant, topic: topic} do
