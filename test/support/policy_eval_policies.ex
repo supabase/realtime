@@ -4,8 +4,9 @@ defmodule PolicyEvalPolicies do
 
   Create them in a transaction that is rolled back, they are not meant to persist.
 
-  policy_eval has a copy as its worked example, `PolicyEval.Test.RealtimePolicies` in
-  policy_eval/test/support. The two copies do not have to stay equal.
+  The policy_eval tests translate these policies to their own example, the table `app.docs`
+  (`PolicyEval.Test.ExamplePolicies` in policy_eval/test/support). The two sets do not have to stay
+  equal.
   """
 
   @doc """

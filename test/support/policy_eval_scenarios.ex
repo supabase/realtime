@@ -7,9 +7,9 @@ defmodule PolicyEvalScenarios do
   the row), and the extensions it asks for. Each extension is asked for as a read and as a write,
   with the key `{operation, extension}`.
 
-  policy_eval has a copy of these scenarios as its worked example
-  (`policy_eval/test/support/realtime_scenarios.ex`), with more scenarios about the internals of the
-  library. The two copies do not have to stay equal.
+  The policy_eval tests translate these scenarios to their own example, the table `app.docs`
+  (`policy_eval/test/support/example_scenarios.ex`), with more scenarios about the internals of the
+  library. The two sets do not have to stay equal.
   """
 
   @own "c0ffee00-1111-4222-8333-444455556666"
