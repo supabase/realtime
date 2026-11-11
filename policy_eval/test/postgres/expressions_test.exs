@@ -832,103 +832,7 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
     ascii ++ unicode ++ others
   end
 
-  defp cases(:like) do
-    teams = [
-      "public:lobby",
-      "PUBLIC:LOBBY",
-      "",
-      nil,
-      "a_b",
-      "a%b",
-      "a\\b",
-      "line\nbreak",
-      # é as one code point (U+00E9)
-      "é",
-      "éé",
-      "café",
-      # e and a combining acute accent (U+0301): two code points that show as one é
-      "é",
-      "café",
-      # four bytes in UTF-8 (U+1F389)
-      "🎉",
-      "a🎉b",
-      "it's"
-    ]
-
-    patterns = [
-      "public:%",
-      "%lobby",
-      "%:%",
-      "public:lobby",
-      "PUBLIC:%",
-      "_ublic:lobby",
-      "%",
-      "",
-      "_",
-      "__",
-      "%_",
-      "_%_",
-      "%%",
-      "caf_",
-      "caf__",
-      "%é",
-      "a_b",
-      "%🎉%",
-      "a\\%b",
-      "\\",
-      "x\\",
-      "%\\",
-      "line%",
-      "%\n%"
-    ]
-
-    matrix =
-      for team <- teams, pattern <- patterns, operator <- ["LIKE", "NOT LIKE", "ILIKE"] do
-        expression_case("app.team() #{operator} #{lit(pattern)}", team: team)
-      end
-
-    others =
-      for sql <- [
-            "app.team() LIKE NULL::text",
-            "app.team() NOT LIKE NULL::text",
-            "NULL::text LIKE 'a%'",
-            "NULL::text NOT LIKE 'a%'",
-            "'abc' LIKE 'a%'",
-            "'abc' NOT LIKE 'a%'",
-            "kind LIKE 'no%'",
-            "kind NOT LIKE 'no%'",
-            "kind ILIKE 'NO%'",
-            "NOT (app.team() LIKE 'a%')",
-            "NOT (app.team() NOT LIKE 'a%')",
-            "app.team() LIKE 'a%' AND kind LIKE 'no%'",
-            "app.team() NOT LIKE 'a%' OR kind NOT LIKE 'no%'",
-            "app.team() LIKE kind",
-            "app.team() NOT LIKE kind",
-            "app.team() LIKE ('a' || kind)",
-            "app.team() LIKE app.user_role()",
-            "app.team() LIKE 'a#%' ESCAPE '#'",
-            "app.team() NOT LIKE 'a#%' ESCAPE '#'",
-            "app.team() LIKE 'a%' ESCAPE ''"
-          ],
-          team <- ["a", "A", "a%", "a#%", "", nil],
-          kind <- ["note", nil] do
-        expression_case(sql, team: team, kind: kind)
-      end
-
-    # Without the abort in MatchText, these would backtrack exponentially
-    long =
-      for team <- [String.duplicate("a", 5_000), String.duplicate("ab", 2_500) <> "c"],
-          pattern <- [
-            String.duplicate("%a", 40) <> "%b",
-            String.duplicate("%a_", 20) <> "%c",
-            "%a" <> String.duplicate("_", 3_000)
-          ],
-          operator <- ["LIKE", "NOT LIKE"] do
-        expression_case("app.team() #{operator} #{lit(pattern)}", team: team)
-      end
-
-    matrix ++ others ++ long
-  end
+  defp cases(:like), do: like_matrix() ++ like_operands() ++ like_long_texts() ++ like_from_postgres()
 
   defp cases(:literals) do
     # uuid_in's accepted forms, from uuid.sql. A literal is deparsed to its canonical form.
@@ -1040,6 +944,201 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
       end
 
     uuid_literals ++ boolean_literals ++ jsonb_literals ++ raising_operand ++ strings
+  end
+
+  # Every string against every pattern, with LIKE, NOT LIKE and ILIKE. The string is the value of
+  # app.team().
+  defp like_matrix do
+    strings = [
+      "public:lobby",
+      "PUBLIC:LOBBY",
+      "",
+      nil,
+      "a_b",
+      "a%b",
+      "a\\b",
+      "line\nbreak",
+      # é as one code point (U+00E9)
+      "é",
+      "éé",
+      "café",
+      # e and a combining acute accent (U+0301): two code points that show as one é
+      "é",
+      "café",
+      # four bytes in UTF-8 (U+1F389)
+      "🎉",
+      "a🎉b",
+      "it's"
+    ]
+
+    patterns = [
+      "public:%",
+      "%lobby",
+      "%:%",
+      "public:lobby",
+      "PUBLIC:%",
+      "_ublic:lobby",
+      "%",
+      "",
+      "_",
+      "__",
+      "%_",
+      "_%_",
+      "%%",
+      "caf_",
+      "caf__",
+      "%é",
+      "a_b",
+      "%🎉%",
+      "a\\%b",
+      "\\",
+      "x\\",
+      "%\\",
+      "line%",
+      "%\n%"
+    ]
+
+    for string <- strings, pattern <- patterns, operator <- ["LIKE", "NOT LIKE", "ILIKE"] do
+      expression_case("app.team() #{operator} #{lit(pattern)}", team: string)
+    end
+  end
+
+  # NULL, literals, columns and other functions as operands, LIKE inside NOT, AND and OR, and ESCAPE
+  defp like_operands do
+    for sql <- [
+          "app.team() LIKE NULL::text",
+          "app.team() NOT LIKE NULL::text",
+          "NULL::text LIKE 'a%'",
+          "NULL::text NOT LIKE 'a%'",
+          "'abc' LIKE 'a%'",
+          "'abc' NOT LIKE 'a%'",
+          "kind LIKE 'no%'",
+          "kind NOT LIKE 'no%'",
+          "kind ILIKE 'NO%'",
+          "NOT (app.team() LIKE 'a%')",
+          "NOT (app.team() NOT LIKE 'a%')",
+          "app.team() LIKE 'a%' AND kind LIKE 'no%'",
+          "app.team() NOT LIKE 'a%' OR kind NOT LIKE 'no%'",
+          "app.team() LIKE kind",
+          "app.team() NOT LIKE kind",
+          "app.team() LIKE ('a' || kind)",
+          "app.team() LIKE app.user_role()",
+          "app.team() LIKE 'a#%' ESCAPE '#'",
+          "app.team() NOT LIKE 'a#%' ESCAPE '#'",
+          "app.team() LIKE 'a%' ESCAPE ''"
+        ],
+        team <- ["a", "A", "a%", "a#%", "", nil],
+        kind <- ["note", nil] do
+      expression_case(sql, team: team, kind: kind)
+    end
+  end
+
+  # Without the abort in MatchText, these would backtrack exponentially
+  defp like_long_texts do
+    for string <- [String.duplicate("a", 5_000), String.duplicate("ab", 2_500) <> "c"],
+        pattern <- [
+          String.duplicate("%a", 40) <> "%b",
+          String.duplicate("%a_", 20) <> "%c",
+          "%a" <> String.duplicate("_", 3_000)
+        ],
+        operator <- ["LIKE", "NOT LIKE"] do
+      expression_case("app.team() #{operator} #{lit(pattern)}", team: string)
+    end
+  end
+
+  # The LIKE and ILIKE tests of Postgres's own regression suite, src/test/regress/sql/strings.sql,
+  # plus the ones of collate.icu.utf8.sql and collate.linux.utf8.sql without a COLLATE. The ones
+  # with ESCAPE, `\`, ILIKE, name or bytea fall back.
+  defp like_from_postgres do
+    for sql <- [
+          # E061-04 like predicate
+          "'hawkeye' LIKE 'h%'",
+          "'hawkeye' NOT LIKE 'h%'",
+          "'hawkeye' LIKE 'H%'",
+          "'hawkeye' NOT LIKE 'H%'",
+          "'hawkeye' LIKE 'indio%'",
+          "'hawkeye' NOT LIKE 'indio%'",
+          "'hawkeye' LIKE 'h%eye'",
+          "'hawkeye' NOT LIKE 'h%eye'",
+          "'indio' LIKE '_ndio'",
+          "'indio' NOT LIKE '_ndio'",
+          "'indio' LIKE 'in__o'",
+          "'indio' NOT LIKE 'in__o'",
+          "'indio' LIKE 'in_o'",
+          "'indio' NOT LIKE 'in_o'",
+          "'abc'::name LIKE '_b_'",
+          "'abc'::name NOT LIKE '_b_'",
+          "'abc'::bytea LIKE '_b_'::bytea",
+          "'abc'::bytea NOT LIKE '_b_'::bytea",
+          # unused escape character
+          "'hawkeye' LIKE 'h%' ESCAPE '#'",
+          "'hawkeye' NOT LIKE 'h%' ESCAPE '#'",
+          "'indio' LIKE 'ind_o' ESCAPE '$'",
+          "'indio' NOT LIKE 'ind_o' ESCAPE '$'",
+          # E061-05 like predicate with escape clause
+          "'h%' LIKE 'h#%' ESCAPE '#'",
+          "'h%' NOT LIKE 'h#%' ESCAPE '#'",
+          "'h%wkeye' LIKE 'h#%' ESCAPE '#'",
+          "'h%wkeye' NOT LIKE 'h#%' ESCAPE '#'",
+          "'h%wkeye' LIKE 'h#%%' ESCAPE '#'",
+          "'h%wkeye' NOT LIKE 'h#%%' ESCAPE '#'",
+          "'h%awkeye' LIKE 'h#%a%k%e' ESCAPE '#'",
+          "'h%awkeye' NOT LIKE 'h#%a%k%e' ESCAPE '#'",
+          "'indio' LIKE '_ndio' ESCAPE '$'",
+          "'indio' NOT LIKE '_ndio' ESCAPE '$'",
+          "'i_dio' LIKE 'i$_d_o' ESCAPE '$'",
+          "'i_dio' NOT LIKE 'i$_d_o' ESCAPE '$'",
+          "'i_dio' LIKE 'i$_nd_o' ESCAPE '$'",
+          "'i_dio' NOT LIKE 'i$_nd_o' ESCAPE '$'",
+          "'i_dio' LIKE 'i$_d%o' ESCAPE '$'",
+          "'i_dio' NOT LIKE 'i$_d%o' ESCAPE '$'",
+          "'a_c'::bytea LIKE 'a$__'::bytea ESCAPE '$'::bytea",
+          "'a_c'::bytea NOT LIKE 'a$__'::bytea ESCAPE '$'::bytea",
+          # escape character same as pattern character
+          "'maca' LIKE 'm%aca' ESCAPE '%'",
+          "'maca' NOT LIKE 'm%aca' ESCAPE '%'",
+          "'ma%a' LIKE 'm%a%%a' ESCAPE '%'",
+          "'ma%a' NOT LIKE 'm%a%%a' ESCAPE '%'",
+          "'bear' LIKE 'b_ear' ESCAPE '_'",
+          "'bear' NOT LIKE 'b_ear' ESCAPE '_'",
+          "'be_r' LIKE 'b_e__r' ESCAPE '_'",
+          "'be_r' NOT LIKE 'b_e__r' ESCAPE '_'",
+          "'be_r' LIKE '__e__r' ESCAPE '_'",
+          "'be_r' NOT LIKE '__e__r' ESCAPE '_'",
+          # ILIKE
+          "'hawkeye' ILIKE 'h%'",
+          "'hawkeye' NOT ILIKE 'h%'",
+          "'hawkeye' ILIKE 'H%'",
+          "'hawkeye' NOT ILIKE 'H%'",
+          "'hawkeye' ILIKE 'H%Eye'",
+          "'hawkeye' NOT ILIKE 'H%Eye'",
+          "'Hawkeye' ILIKE 'h%'",
+          "'Hawkeye' NOT ILIKE 'h%'",
+          "'ABC'::name ILIKE '_b_'",
+          "'ABC'::name NOT ILIKE '_b_'",
+          # %/_ combination cases, cf bugs #4821 and #5478
+          "'foo' LIKE '_%'",
+          "'f' LIKE '_%'",
+          "'' LIKE '_%'",
+          "'foo' LIKE '%_'",
+          "'f' LIKE '%_'",
+          "'' LIKE '%_'",
+          "'foo' LIKE '__%'",
+          "'foo' LIKE '___%'",
+          "'foo' LIKE '____%'",
+          "'foo' LIKE '%__'",
+          "'foo' LIKE '%___'",
+          "'foo' LIKE '%____'",
+          "'jack' LIKE '%____%'",
+          # collate.icu.utf8.sql and collate.linux.utf8.sql
+          "'abc' LIKE 'abc'",
+          "'abc' LIKE 'a\\bc'",
+          "'Türkiye' ILIKE '%KI%'",
+          "'bıt' ILIKE 'BIT'",
+          "'café' ILIKE 'caf_'"
+        ] do
+      expression_case(sql)
+    end
   end
 
   defp claim_text(value) when is_binary(value), do: value
