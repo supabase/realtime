@@ -11,6 +11,29 @@ defmodule Integrations do
     %{tenant: TestTenantDb.checkout_tenant(run_migrations: true)}
   end
 
+  @presence_modes [:phoenix, :shadow, :rollcall]
+  @serializers [Phoenix.Socket.V1.JSONSerializer, RealtimeWeb.Socket.V2Serializer]
+
+  def presence_mode_parameters, do: for(presence_mode <- @presence_modes, do: %{presence_mode: presence_mode})
+
+  def presence_parameters do
+    for serializer <- @serializers, mode <- presence_mode_parameters(), do: Map.put(mode, :serializer, serializer)
+  end
+
+  def set_presence_mode(%{tenant: tenant, presence_mode: mode}) when mode in @presence_modes do
+    flags =
+      Map.merge(tenant.feature_flags, %{
+        "presence_rollcall_primary" => mode == :rollcall,
+        "presence_rollcall_shadow" => mode == :shadow
+      })
+
+    tenant = tenant |> Tenant.changeset(%{feature_flags: flags}) |> Realtime.Repo.update!()
+    Realtime.Tenants.Cache.update_cache(tenant)
+
+    assert Realtime.Presence.mode(tenant.external_id) == mode
+    %{tenant: tenant}
+  end
+
   def checkout_tenant_and_connect(_context \\ %{}) do
     tenant = TestTenantDb.checkout_tenant(run_migrations: true)
     {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)

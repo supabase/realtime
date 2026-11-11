@@ -1,10 +1,7 @@
 defmodule Realtime.Integration.RtChannel.BillableEventsTest do
   use RealtimeWeb.ConnCase,
     async: true,
-    parameterize: [
-      %{serializer: Phoenix.Socket.V1.JSONSerializer},
-      %{serializer: RealtimeWeb.Socket.V2Serializer}
-    ]
+    parameterize: Integrations.presence_parameters()
 
   import Generators
 
@@ -16,7 +13,7 @@ defmodule Realtime.Integration.RtChannel.BillableEventsTest do
 
   @moduletag :capture_log
 
-  setup [:checkout_tenant_connect_and_setup_postgres_changes]
+  setup [:checkout_tenant_connect_and_setup_postgres_changes, :set_presence_mode]
 
   setup %{tenant: tenant} do
     events = [

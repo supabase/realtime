@@ -3,10 +3,7 @@ defmodule Realtime.Integration.RtChannel.PresenceLatencyTest do
   # which needs a synchronous module.
   use RealtimeWeb.ConnCase,
     async: false,
-    parameterize: [
-      %{serializer: Phoenix.Socket.V1.JSONSerializer},
-      %{serializer: RealtimeWeb.Socket.V2Serializer}
-    ]
+    parameterize: Integrations.presence_parameters()
 
   use Mimic
 
@@ -36,7 +33,7 @@ defmodule Realtime.Integration.RtChannel.PresenceLatencyTest do
     "score" => 42
   }
 
-  setup [:checkout_tenant, :rls_context, :set_mimic_global]
+  setup [:checkout_tenant, :set_presence_mode, :rls_context, :set_mimic_global]
 
   setup %{tenant: tenant} do
     stub(FeatureFlags, :enabled?, fn
@@ -58,7 +55,8 @@ defmodule Realtime.Integration.RtChannel.PresenceLatencyTest do
   test "measures every other member's notification and never leaks the envelope", %{
     tenant: tenant,
     topic: topic,
-    serializer: serializer
+    serializer: serializer,
+    presence_mode: mode
   } do
     tenant_id = tenant.external_id
     topic = "realtime:#{topic}"
@@ -87,13 +85,7 @@ defmodule Realtime.Integration.RtChannel.PresenceLatencyTest do
     assert [%{"name" => "dave"} = meta] = joins |> Map.values() |> hd() |> Map.fetch!("metas")
     refute Map.has_key?(meta, "_rt")
 
-    for _ <- 1..3 do
-      assert_receive {:telemetry, @latency, %{latency: latency},
-                      %{tenant: ^tenant_id, action: :track, origin: :local, path: :fastlane, implementation: :phoenix}},
-                     1_000
-
-      assert is_integer(latency) and latency >= 0
-    end
+    assert_observations(tenant_id, mode, :track, 3)
 
     refute_receive {:telemetry, _, _, _}
 
@@ -114,9 +106,7 @@ defmodule Realtime.Integration.RtChannel.PresenceLatencyTest do
     assert_receive {:alice, %Message{event: "presence_diff", topic: ^topic}}, 1_000
     assert_receive {:bob, %Message{event: "presence_diff", topic: ^topic}}, 1_000
 
-    for _ <- 1..3 do
-      assert_receive {:telemetry, @latency, _, %{tenant: ^tenant_id, action: :update, origin: :local}}, 1_000
-    end
+    assert_observations(tenant_id, mode, :update, 3)
 
     refute_receive {:telemetry, _, _, _}
   end
@@ -157,6 +147,33 @@ defmodule Realtime.Integration.RtChannel.PresenceLatencyTest do
     assert_receive {:erin, %Message{event: "presence_state", payload: state, topic: ^topic}}, 1_000
     assert [meta] = state |> Map.values() |> hd() |> Map.fetch!("metas")
     assert Map.delete(meta, "phx_ref") == @nested_payload
+  end
+
+  # One observation for each member that the fastlane notifies. The backend that serves the clients
+  # stamps them, and the shadow mode serves them from Phoenix. Rollcall publishes to no client in the
+  # shadow mode, so the transport records one observation of its own for the change.
+  defp assert_observations(tenant_id, mode, action, members) do
+    implementation = if mode == :rollcall, do: :rollcall, else: :phoenix
+
+    for _ <- 1..members do
+      assert_receive {:telemetry, @latency, %{latency: latency},
+                      %{
+                        tenant: ^tenant_id,
+                        action: ^action,
+                        origin: :local,
+                        path: :fastlane,
+                        implementation: ^implementation
+                      }},
+                     1_000
+
+      assert is_integer(latency) and latency >= 0
+    end
+
+    if mode == :shadow do
+      assert_receive {:telemetry, @latency, %{latency: _},
+                      %{tenant: ^tenant_id, action: ^action, path: :transport, implementation: :rollcall}},
+                     1_000
+    end
   end
 
   defp connect_client(tenant, serializer, inbox) do
