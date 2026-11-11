@@ -196,6 +196,12 @@ end
 
 for tenant <- Api.list_tenants(), do: Api.delete_tenant_by_external_id(tenant.external_id)
 
+# A tenant override of a flag counts only when the flag exists. The presence mode tests set the
+# mode of a tenant with an override, so the flags exist and stay off for every other tenant.
+for name <- ["presence_rollcall_primary", "presence_rollcall_shadow"] do
+  {:ok, _flag} = Api.upsert_feature_flag(%{name: name, enabled: false})
+end
+
 Ecto.Adapters.SQL.Sandbox.mode(Realtime.Repo, :manual)
 
 Mimic.copy(:syn)

@@ -1,11 +1,11 @@
 defmodule Realtime.Integration.MeasureTrafficTest do
-  use RealtimeWeb.ConnCase, async: false
+  use RealtimeWeb.ConnCase, async: false, parameterize: Integrations.presence_mode_parameters()
 
   alias Phoenix.Socket.Message
   alias Realtime.Integration.WebsocketClient
   alias Realtime.Tenants.ReplicationConnection
 
-  setup [:checkout_tenant_and_connect]
+  setup [:checkout_tenant_and_connect, :set_presence_mode]
 
   def handle_telemetry(event, measurements, metadata, name) do
     tenant = metadata[:tenant]
