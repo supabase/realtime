@@ -171,6 +171,9 @@ The profile and the env decide which roles, columns, settings and functions a po
   `<> ALL (ARRAY[...])`.
 - `~` and `~*` with a literal pattern that has no regex metacharacters
   (`| * + ? ( ) . ^ $ \ [ {`). For `~*`, the text and the pattern must be ASCII.
+- `LIKE` and `NOT LIKE` on text, with `%` and `_`. A pattern with `\` is a fallback. A `\` at the
+  end raises an error, but only if matching gets that far, so whether it raises depends on the
+  text.
 - `jsonb ->> text` where the value is a string or a boolean. A missing key or JSON `null` gives
   NULL. Numbers, objects and arrays are a fallback.
 - `COALESCE` over arguments of one type, and `NULLIF` on text. An unsupported argument anywhere
@@ -195,7 +198,7 @@ The profile and the env decide which roles, columns, settings and functions a po
 These are examples of what is not supported. Each one is a fallback:
 
 - subqueries with `FROM`, `EXISTS` and `CASE`
-- `IS TRUE` and similar tests, `LIKE`, `ILIKE` and `!~`
+- `IS TRUE` and similar tests, `ILIKE`, `LIKE` with an escape or `ESCAPE`, and `!~`
 - the jsonb operators `->`, `?` and `@>`
 - number literals, and casts to `integer`, `numeric` or `json`
 - columns that are not in the profile
@@ -410,7 +413,9 @@ the database, the caller must rule them out or fall back:
     numbers read with `->>` and `numeric` need more work, because Postgres normalizes how they
     print (`1e2` becomes `100`, `1.50` keeps its scale).
   - more of jsonb: `->`, `?`, `@>`
-  - `LIKE`, `IS TRUE` and similar tests, `lower()`
+  - `IS TRUE` and similar tests, `lower()`
+  - `ILIKE`. Unlike `~*`, Postgres folds its case with the collation (`lower()`), even for ASCII
+    letters, so it depends on the locale of the database. A Turkish locale folds `I` to `ı`.
 - Maybe: decide for real rows of a table, not only for one row that the caller builds. Only
   `{:setting, _}` and `{:column, _}` read data from outside the expression, so to bind a row is to
   fill in the env.

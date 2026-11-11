@@ -146,6 +146,8 @@ defmodule PolicyEval.ParserTest do
       {"grammar_setting_text", {:op, "=", {:op, "->>", claims, text("k")}, text("v")}},
       {"grammar_setting_boolean", {:cast, {:op, "->>", claims, text("k")}, "boolean"}},
       {"grammar_doubled_quote", {:op, "=", team(), text("it's")}},
+      {"grammar_like", {:op, "~~", team(), text("public:%")}},
+      {"grammar_not_like", {:op, "!~~", team(), text("public:%")}},
       {"grammar_eq_null", {:op, "=", team(), {:cast, {:const, :null}, "text"}}},
       {"grammar_concat_null", {:op, "=", team(), {:op, "||", text("x"), {:cast, {:const, :null}, "text"}}}},
       {"grammar_user_role", {:op, "=", {:func, "app", "user_role", []}, text("member")}},

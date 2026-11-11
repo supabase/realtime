@@ -42,6 +42,10 @@ defmodule PolicyEval.Resolver do
     * `||`: text with text is `textcat`, text with uuid is `textanycat` (the uuid goes through `uuid_out`)
     * `~` and `~*`, text with text: `PolicyEval.Value.regex_match/3`, with the mode as the IR literal
       `{:lit, :case_sensitive}` or `{:lit, :case_insensitive}`
+    * `~~` (`LIKE`), text with text: `PolicyEval.Value.like/2`. `!~~` (`NOT LIKE`) is resolved as
+      `NOT (text ~~ text)`, which is exact: `textnlike` is the negation of `textlike`, and both
+      are NULL when an operand is NULL. `~~*` (`ILIKE`) has no binding, because Postgres folds its
+      case with the collation
     * `->>`: jsonb with text
     * `text = ANY (ARRAY[...])` over text elements. `text <> ALL (ARRAY[...])` is resolved as
       `NOT (text = ANY (ARRAY[...]))`, which is exact for text. For non-NULL operands `textne` is
@@ -281,6 +285,8 @@ defmodule PolicyEval.Resolver do
   defp operator("||", :text, :uuid, l, r), do: {call(Value, :textanycat, [l, r]), :text}
   defp operator("~", :text, :text, l, r), do: {regex(l, r, :case_sensitive), :bool}
   defp operator("~*", :text, :text, l, r), do: {regex(l, r, :case_insensitive), :bool}
+  defp operator("~~", :text, :text, l, r), do: {call(Value, :like, [l, r]), :bool}
+  defp operator("!~~", :text, :text, l, r), do: {{:not, call(Value, :like, [l, r])}, :bool}
   defp operator("->>", :jsonb, :text, l, r), do: {call(Jsonb, :object_field_text, [l, r]), :text}
   defp operator(op, lt, rt, _l, _r), do: unsupported({:operator, op, lt, rt})
 

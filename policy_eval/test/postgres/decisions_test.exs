@@ -9,6 +9,9 @@ defmodule PolicyEval.Postgres.DecisionsTest do
   # The scenarios are in PolicyEval.Test.ExampleScenarios. The decision table of the unit tests
   # (policy_set_test.exs) is among them, so Postgres also checks what the unit tests expect, see
   # PolicyEval.Test.Collector.
+  #
+  # Not async: the tests against Postgres share one database and change the same table, functions
+  # and roles in it. Even in transactions that roll back, they would block or fail each other.
   use ExUnit.Case, async: false
 
   alias PolicyEval.Differential

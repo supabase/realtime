@@ -164,6 +164,20 @@ defmodule PolicyEval.ResolverTest do
                {call(Value, :regex_match, [{:column, "team"}, lit_text("a"), {:lit, :case_insensitive}]), :bool}
     end
 
+    test "~~ on text with text is like, and !~~ is its negation" do
+      assert resolve({:op, "~~", team(), text("a%")}) ==
+               {call(Value, :like, [{:column, "team"}, lit_text("a%")]), :bool}
+
+      assert resolve({:op, "!~~", team(), text("a%")}) ==
+               {{:not, call(Value, :like, [{:column, "team"}, lit_text("a%")])}, :bool}
+    end
+
+    test "~~* and !~~* on text with text are unsupported, because ILIKE folds case by the collation" do
+      for op <- ["~~*", "!~~*"] do
+        assert resolve({:op, op, team(), text("a%")}) == unsupported({:operator, op, :text, :text})
+      end
+    end
+
     test "->> on jsonb with text is object_field_text" do
       assert resolve({:op, "->>", claims(), text("sub")}) ==
                {call(Jsonb, :object_field_text, [
@@ -184,7 +198,8 @@ defmodule PolicyEval.ResolverTest do
             {"->", claims(), text("a"), {:jsonb, :text}},
             {"->>", team(), text("a"), {:text, :text}},
             {"<", team(), text("a"), {:text, :text}},
-            {"~~", team(), text("a"), {:text, :text}},
+            {"~~", user_id(), text("a"), {:uuid, :text}},
+            {"!~~", team(), user_id(), {:text, :uuid}},
             {"!~", team(), text("a"), {:text, :text}}
           ] do
         {_, lt} = resolve(left)
@@ -564,6 +579,8 @@ defmodule PolicyEval.ResolverTest do
       "grammar_nullif",
       "grammar_or_in_and",
       "grammar_regex_case_sensitive",
+      "grammar_like",
+      "grammar_not_like",
       "grammar_restrictive",
       "grammar_to_guest_member",
       "grammar_to_public",

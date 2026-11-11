@@ -47,7 +47,8 @@ defmodule PolicyEval.ValueTest do
       {"bool_in", :bool_in, [{:text, "true"}], [0]},
       {"bool_not", :bool_not, [true], [0]},
       {"regex_match (~)", :regex_match, [{:text, "abc"}, {:text, "b"}, :case_sensitive], [0, 1]},
-      {"regex_match (~*)", :regex_match, [{:text, "abc"}, {:text, "B"}, :case_insensitive], [0, 1]}
+      {"regex_match (~*)", :regex_match, [{:text, "abc"}, {:text, "B"}, :case_insensitive], [0, 1]},
+      {"like", :like, [{:text, "abc"}, {:text, "a%"}], [0, 1]}
     ]
 
     for {label, fun, args, positions} <- @strict, position <- positions do
@@ -697,6 +698,91 @@ defmodule PolicyEval.ValueTest do
   describe "regex_match/3 arguments" do
     test "rejects an unknown mode" do
       assert_raise FunctionClauseError, fn -> Value.regex_match(t("a"), t("a"), :multiline) end
+    end
+  end
+
+  describe "like/2" do
+    # The expressions test against Postgres covers many more cases. These show the rules.
+    for {subject, pattern, result} <- [
+          # the pattern matches the whole text, and case matters
+          {"public:lobby", "public:lobby", true},
+          {"public:lobby", "lobby", false},
+          {"PUBLIC:LOBBY", "public:lobby", false},
+          {"", "", true},
+          {"a", "", false},
+          # % matches any run of characters, including none
+          {"public:lobby", "public:%", true},
+          {"public:", "public:%", true},
+          {"public", "public:%", false},
+          {"public:lobby", "%:%", true},
+          {"", "%", true},
+          {"abc", "%c%b%", false},
+          {"abab", "%ab", true},
+          # _ matches exactly one character
+          {"abc", "a_c", true},
+          {"abc", "__", false},
+          {"", "_", false},
+          {"a%b", "a_b", true},
+          {"abc", "%__c", true},
+          {"a", "_%_", false},
+          # nothing else is special, and a newline is a character like any other
+          {"abc", "a.c", false},
+          {"a*c", "a*c", true},
+          {"line\nbreak", "line_break", true},
+          {"line\nbreak", "line%", true},
+          # _ steps over a code point, not over a byte or a grapheme
+          # é as one code point (U+00E9)
+          {"é", "_", true},
+          {"é", "__", false},
+          {"日本語", "_本_", true},
+          # e and a combining acute accent (U+0301): two code points that show as one é
+          {"é", "__", true}
+        ] do
+      test "#{inspect(subject)} LIKE #{inspect(pattern)} is #{result}" do
+        assert Value.like(t(unquote(subject)), t(unquote(pattern))) == unquote(result)
+      end
+    end
+
+    test "a backslash anywhere in the pattern is unsupported, whatever the text" do
+      for pattern <- ["\\", "x\\", "\\x", "a\\%b", "%\\", "\\%", "\\_", "\\\\", "a%\\b", "é\\"],
+          subject <- ["", "a", "a\\b", "x", "é", "abc"] do
+        assert Value.like(t(subject), t(pattern)) == {:unsupported, :like_escape}, inspect({subject, pattern})
+      end
+    end
+
+    test "a backslash in the text is an ordinary character" do
+      assert Value.like(t("a\\b"), t("a_b")) == true
+    end
+
+    test "invalid UTF-8 in the text or the pattern is unsupported" do
+      for {subject, pattern} <- [{<<0xFF>>, "%"}, {"é" |> binary_part(0, 1), "_"}, {"abc", "%" <> <<0xC3>>}] do
+        assert Value.like(t(subject), t(pattern)) == {:unsupported, :invalid_utf8}, inspect({subject, pattern})
+      end
+    end
+
+    test "a NULL operand is NULL, even with a pattern that is unsupported on its own" do
+      assert Value.like(nil, t("a%")) == nil
+      assert Value.like(t("a"), nil) == nil
+      assert Value.like(nil, nil) == nil
+      assert Value.like(nil, t("\\")) == nil
+      assert Value.like(t(<<0xFF>>), nil) == nil
+    end
+
+    test "an unsupported argument wins over a pattern that is unsupported on its own" do
+      assert Value.like(@boom, t("\\")) == @boom
+      assert Value.like(t("a"), @boom) == @boom
+      assert Value.like(nil, @boom) == @boom
+    end
+
+    test "many % against a long text that can't match returns quickly" do
+      # Without the abort, this backtracks exponentially. Postgres stops after the first position
+      # from which the text is too short for the rest of the pattern.
+      text = String.duplicate("a", 5_000)
+      pattern = String.duplicate("%a", 40) <> "%b"
+
+      task = Task.async(fn -> Value.like(t(text), t(pattern)) end)
+
+      assert Task.await(task, 5_000) == false
     end
   end
 end
