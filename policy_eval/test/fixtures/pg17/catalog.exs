@@ -181,6 +181,14 @@
     },
     %{
       cmd: "r",
+      name: "grammar_like",
+      permissive: true,
+      qual: "(app.team() ~~ 'public:%'::text)",
+      roles: ["member"],
+      with_check: nil
+    },
+    %{
+      cmd: "r",
       name: "grammar_neq",
       permissive: true,
       qual: "(app.team() <> 'x'::text)",
@@ -208,6 +216,14 @@
       name: "grammar_not_in_single",
       permissive: true,
       qual: "(kind <> 'note'::text)",
+      roles: ["member"],
+      with_check: nil
+    },
+    %{
+      cmd: "r",
+      name: "grammar_not_like",
+      permissive: true,
+      qual: "(app.team() !~~ 'public:%'::text)",
       roles: ["member"],
       with_check: nil
     },

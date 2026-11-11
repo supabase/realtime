@@ -579,6 +579,8 @@ defmodule PolicyEval.ResolverTest do
       "grammar_nullif",
       "grammar_or_in_and",
       "grammar_regex_case_sensitive",
+      "grammar_like",
+      "grammar_not_like",
       "grammar_restrictive",
       "grammar_to_guest_member",
       "grammar_to_public",
