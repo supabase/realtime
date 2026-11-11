@@ -4,6 +4,8 @@ defmodule Realtime.PresenceTest do
   use ExUnit.Case, async: false
   use Mimic
 
+  import ExUnit.CaptureLog
+
   setup :set_mimic_global
 
   alias Phoenix.Socket.Broadcast
@@ -20,6 +22,75 @@ defmodule Realtime.PresenceTest do
   setup do
     id = System.unique_integer([:positive])
     {:ok, tenant: "tenant-#{id}", topic: "realtime:presence-facade-#{id}", client: client()}
+  end
+
+  # A node that has listeners and tracks nothing needs a Rollcall tracker, so that it holds the
+  # entries of its peers. The Phoenix mode does not use Rollcall.
+  describe "watch/1" do
+    test "starts no Rollcall tracker with no flag set", %{tenant: tenant} do
+      enable([])
+
+      assert :ok = Presence.watch(tenant)
+
+      refute tenant in Realtime.Presence.Rollcall.scopes()
+    end
+
+    test "starts the Rollcall tracker of the tenant in shadow mode", %{tenant: tenant} do
+      enable([@shadow])
+
+      assert :ok = Presence.watch(tenant)
+
+      assert tenant in Realtime.Presence.Rollcall.scopes()
+    end
+
+    test "starts the Rollcall tracker of the tenant in Rollcall mode", %{tenant: tenant} do
+      enable([@primary])
+
+      assert :ok = Presence.watch(tenant)
+
+      assert tenant in Realtime.Presence.Rollcall.scopes()
+    end
+
+    # The shadow mode must not change what the client gets. The channel calls watch/1 when it syncs.
+    test "returns :ok in shadow mode when the tracker does not start, and emits an event", %{tenant: tenant} do
+      enable([@shadow])
+      attach_shadow_error()
+      stub(Realtime.Presence.Rollcall, :ensure_started, fn _tenant -> {:error, :boom} end)
+
+      assert :ok = Presence.watch(tenant)
+
+      assert_receive {:shadow_error, %{operation: :watch, tenant: ^tenant}}
+    end
+
+    test "returns :ok in shadow mode when Rollcall raises, and emits an event", %{tenant: tenant} do
+      enable([@shadow])
+      attach_shadow_error()
+      stub(Realtime.Presence.Rollcall, :ensure_started, fn _tenant -> raise "boom" end)
+
+      assert :ok = Presence.watch(tenant)
+
+      assert_receive {:shadow_error, %{operation: :watch, tenant: ^tenant}}
+    end
+
+    test "returns :ok in shadow mode when Rollcall exits, and emits an event", %{tenant: tenant} do
+      enable([@shadow])
+      attach_shadow_error()
+      stub(Realtime.Presence.Rollcall, :ensure_started, fn _tenant -> exit(:timeout) end)
+
+      assert :ok = Presence.watch(tenant)
+
+      assert_receive {:shadow_error, %{operation: :watch, tenant: ^tenant}}
+    end
+
+    # In Rollcall mode a failed start leaves the node with no state. The log is the only signal.
+    test "returns the error and logs it in Rollcall mode when the tracker does not start", %{tenant: tenant} do
+      enable([@primary])
+      stub(Realtime.Presence.Rollcall, :ensure_started, fn _tenant -> {:error, :boom} end)
+
+      log = capture_log(fn -> assert {:error, :boom} = Presence.watch(tenant) end)
+
+      assert log =~ "boom"
+    end
   end
 
   describe "with no flag set" do

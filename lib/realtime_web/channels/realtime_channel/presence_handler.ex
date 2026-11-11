@@ -133,6 +133,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   end
 
   defp push_presence_state(socket, topic) do
+    Presence.watch(socket.assigns.tenant)
     state = Presence.list(socket.assigns.tenant, topic)
     push(socket, "presence_state", state)
     maybe_record_join_latency(socket, state)

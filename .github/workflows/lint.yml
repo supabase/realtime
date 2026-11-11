@@ -73,7 +73,7 @@ jobs:
         id: plt-cache
         with:
           path: priv/plts
-          key: ${{ runner.os }}-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-plts-${{ hashFiles('mix.lock', 'forum/mix.lock', 'forum/mix.exs', 'forum/lib/**/*.ex', 'policy_eval/mix.lock', 'policy_eval/mix.exs', 'policy_eval/lib/**/*.ex') }}
+          key: ${{ runner.os }}-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-plts-${{ hashFiles('mix.lock', 'forum/mix.lock', 'forum/mix.exs', 'forum/lib/**/*.ex', 'rollcall/mix.lock', 'rollcall/mix.exs', 'rollcall/lib/**/*.ex', 'policy_eval/mix.lock', 'policy_eval/mix.exs', 'policy_eval/lib/**/*.ex') }}
       - name: Create PLTs
         if: steps.plt-cache.outputs.cache-hit != 'true'
         run: |

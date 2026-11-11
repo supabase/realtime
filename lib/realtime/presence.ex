@@ -125,10 +125,47 @@ defmodule Realtime.Presence do
     end
   end
 
+  @doc """
+  Makes sure the Rollcall tracker of the tenant runs on this node.
+
+  A node that has listeners and no entry of its own needs the tracker, so that it holds the entries
+  of its peers. The channel calls this function when it syncs the presence state.
+
+  In the Phoenix mode, the function starts no tracker and returns `:ok`.
+
+  In the shadow mode, the function returns `:ok`. A Rollcall error, raise or exit does not reach the
+  caller. The facade emits `[:realtime, :presence, :shadow, :error]` with the operation `:watch`
+  instead, as it does for `track/5`.
+
+  In the Rollcall mode, the function returns `:ok` or `{:error, reason}`. It logs the error, because
+  a node with no tracker has no presence state for the tenant.
+  """
+  @spec watch(tenant()) :: :ok | {:error, term()}
+  def watch(tenant) do
+    case mode(tenant) do
+      :rollcall ->
+        case Realtime.Presence.Rollcall.ensure_started(tenant) do
+          :ok ->
+            :ok
+
+          {:error, error} = result ->
+            log_error("RollcallWatchError", error, external_id: tenant)
+            result
+        end
+
+      :shadow ->
+        shadow(:watch, tenant, fn -> Realtime.Presence.Rollcall.ensure_started(tenant) end)
+
+      :phoenix ->
+        :ok
+    end
+  end
+
   # Runs the Rollcall call of the shadow mode. A failure of that call must not change the result
   # of the Phoenix call, so the facade logs it and emits the shadow error event instead.
   defp shadow(operation, tenant, fun) do
     case fun.() do
+      {:error, error} -> log_shadow_error(tenant, operation, error)
       {:error, _action, error} -> log_shadow_error(tenant, operation, error)
       _ -> :ok
     end
@@ -157,4 +194,5 @@ defmodule Realtime.Presence do
 
   defp shadow_error_code(:track), do: "RollcallShadowTrackError"
   defp shadow_error_code(:untrack), do: "RollcallShadowUntrackError"
+  defp shadow_error_code(:watch), do: "RollcallShadowWatchError"
 end
