@@ -150,6 +150,8 @@ defmodule PolicyEval.Value do
   Not strict: the result is never NULL, so `NULL IS NULL` is `true`. A jsonb `null` is a value,
   not SQL NULL. An unsupported argument is returned unchanged, since we don't know if it is NULL.
   """
+  # These reflect the Postgres names
+  # credo:disable-for-lines:8 Credo.Check.Readability.PredicateFunctionNames
   @spec is_null(result) :: result
   def is_null({:unsupported, _} = unsupported), do: unsupported
   def is_null(a), do: is_nil(a)
