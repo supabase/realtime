@@ -19,7 +19,7 @@ defmodule Realtime.MessagesTest do
 
     :telemetry.attach(
       __MODULE__,
-      [:realtime, :tenants, :replay],
+      [:realtime, :broadcast, :replay],
       &__MODULE__.handle_telemetry/4,
       pid: self()
     )
@@ -151,7 +151,7 @@ defmodule Realtime.MessagesTest do
 
       assert_receive {
         :telemetry,
-        [:realtime, :tenants, :replay],
+        [:realtime, :broadcast, :replay],
         %{latency: _, messages: 1},
         %{tenant: ^external_id}
       }
@@ -174,7 +174,7 @@ defmodule Realtime.MessagesTest do
       assert {:ok, messages, _} = Messages.replay(conn, external_id, "test", 0, 10)
       assert length(messages) == 3
 
-      assert_receive {:telemetry, [:realtime, :tenants, :replay], %{messages: 3}, %{tenant: ^external_id}}
+      assert_receive {:telemetry, [:realtime, :broadcast, :replay], %{messages: 3}, %{tenant: ^external_id}}
     end
 
     test "replay private topic only", %{conn: conn, tenant: tenant} do
@@ -414,7 +414,7 @@ defmodule Realtime.MessagesTest do
                {:error, :failed_to_replay_messages}
 
       external_id = tenant.external_id
-      assert_receive {:telemetry, [:realtime, :tenants, :replay], %{messages: 0}, %{tenant: ^external_id}}
+      assert_receive {:telemetry, [:realtime, :broadcast, :replay], %{messages: 0}, %{tenant: ^external_id}}
     end
   end
 

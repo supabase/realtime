@@ -58,7 +58,7 @@ defmodule Realtime.PromEx.Plugins.TenantGlobal do
       [
         sum(
           [:realtime, :broadcast, :global, :replay, :messages],
-          event_name: [:realtime, :tenants, :replay],
+          event_name: [:realtime, :broadcast, :replay],
           measurement: :messages,
           description: "Global sum of broadcast messages read from realtime.messages to replay on channel join."
         )

@@ -162,7 +162,7 @@ defmodule Realtime.Messages do
     {latency, value} =
       :timer.tc(Realtime.Tenants.Repo, :all, [conn, query, Message, [timeout: @default_timeout]], :millisecond)
 
-    :telemetry.execute([:realtime, :tenants, :replay], %{latency: latency, messages: replayed_count(value)}, %{
+    :telemetry.execute([:realtime, :broadcast, :replay], %{latency: latency, messages: replayed_count(value)}, %{
       tenant: tenant_id
     })
 

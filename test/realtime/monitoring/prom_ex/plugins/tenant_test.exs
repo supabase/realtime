@@ -261,7 +261,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       metric = "realtime_broadcast_global_replay_messages"
       metric_value = metric_value(metric) || 0
 
-      :telemetry.execute([:realtime, :tenants, :replay], %{latency: 1, messages: 3}, %{tenant: external_id})
+      :telemetry.execute([:realtime, :broadcast, :replay], %{latency: 1, messages: 3}, %{tenant: external_id})
 
       assert_eventually metric_value(metric) >= metric_value + 3
     end
