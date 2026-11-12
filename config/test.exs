@@ -130,6 +130,9 @@ config :realtime,
   load_tenant_db_dump: false,
   prom_poll_rate: 5_000,
   presence_usage_poll_rate: 5_000,
+  # Shorter than the defaults, so a test that waits for a heartbeat, a purge or the end of a grace
+  # period does not wait for the defaults. The peer nodes of the tests get the same values.
+  rollcall: [heartbeat_period_in_ms: 200, empty_grace_in_ms: 500],
   request_id_baggage_key: "sb-request-id",
   node_balance_uptime_threshold_in_ms: 999_999_999_999,
   connect_error_backoff_ms: 100,
