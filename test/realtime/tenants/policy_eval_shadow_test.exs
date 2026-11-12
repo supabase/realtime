@@ -63,6 +63,21 @@ defmodule Realtime.Tenants.PolicyEvalShadowTest do
     )
   end
 
+  # No policies: decides :deny for everything "authenticated" does.
+  defp always_deny_snapshot do
+    PolicyEval.Snapshot.new(
+      %{
+        rls_enabled: true,
+        rls_forced: false,
+        roles: %{"authenticated" => %{bypass_rls: false, select: true, insert: true}},
+        policies: []
+      },
+      PolicyEvalProfile.profile()
+    )
+  end
+
+  defp cached(snapshot, load_reason \\ :ttl), do: PolicyEvalCache.Entry.new(snapshot, load_reason)
+
   # What Authorization's handle_policies_result/2 returns for any Postgrex.Error from the check.
   defp policy_error(code, pg_code, message),
     do: {:error, :rls_policy_error, %Postgrex.Error{postgres: %{code: code, pg_code: pg_code, message: message}}}
@@ -98,7 +113,7 @@ defmodule Realtime.Tenants.PolicyEvalShadowTest do
     test "agreement: outcome is :match, nothing is logged" do
       tenant_id = unique_tenant_id()
       expect(FeatureFlags, :enabled?, fn @flag, _tenant_id -> true end)
-      expect(PolicyEvalCache, :fetch, fn :fake_conn, _tenant_id -> {:ok, always_allow_snapshot()} end)
+      expect(PolicyEvalCache, :fetch, fn :fake_conn, _tenant_id -> {:ok, cached(always_allow_snapshot())} end)
 
       decision_ref = attach(@read_decision)
       timing_ref = attach(@read_timing)
@@ -134,7 +149,7 @@ defmodule Realtime.Tenants.PolicyEvalShadowTest do
           ] do
         tenant_id = unique_tenant_id()
         expect(FeatureFlags, :enabled?, fn @flag, _tenant_id -> true end)
-        expect(PolicyEvalCache, :fetch, fn :fake_conn, _tenant_id -> {:ok, always_allow_snapshot()} end)
+        expect(PolicyEvalCache, :fetch, fn :fake_conn, _tenant_id -> {:ok, cached(always_allow_snapshot())} end)
 
         decision_ref = attach(@read_decision)
         timing_ref = attach(@read_timing)
@@ -152,7 +167,7 @@ defmodule Realtime.Tenants.PolicyEvalShadowTest do
     test "fallback: records outcome: :fallback with the reason's category, nothing is logged" do
       tenant_id = unique_tenant_id()
       expect(FeatureFlags, :enabled?, fn @flag, _tenant_id -> true end)
-      expect(PolicyEvalCache, :fetch, fn :fake_conn, _tenant_id -> {:ok, always_allow_snapshot()} end)
+      expect(PolicyEvalCache, :fetch, fn :fake_conn, _tenant_id -> {:ok, cached(always_allow_snapshot())} end)
 
       decision_ref = attach(@read_decision)
       timing_ref = attach(@read_timing)
@@ -174,10 +189,15 @@ defmodule Realtime.Tenants.PolicyEvalShadowTest do
       refute log =~ "PolicyEvalShadowMismatch"
     end
 
-    test "mismatch: logs a warning and records outcome: :mismatch" do
+    test "mismatch the reloaded snapshot confirms: logs a warning and records outcome: :mismatch" do
       tenant_id = unique_tenant_id()
       expect(FeatureFlags, :enabled?, fn @flag, _tenant_id -> true end)
-      expect(PolicyEvalCache, :fetch, fn :fake_conn, _tenant_id -> {:ok, always_allow_snapshot()} end)
+      stale = cached(always_allow_snapshot())
+      expect(PolicyEvalCache, :fetch, fn :fake_conn, _tenant_id -> {:ok, stale} end)
+
+      expect(PolicyEvalCache, :reload, fn :fake_conn, ^tenant_id, ^stale ->
+        {:ok, cached(always_allow_snapshot(), :mismatch)}
+      end)
 
       timing_ref = attach(@read_timing)
       decision_ref = attach(@read_decision)
@@ -197,6 +217,8 @@ defmodule Realtime.Tenants.PolicyEvalShadowTest do
       assert decision_metadata.reason == :none
 
       assert log =~ ~s(tenant_id: "#{tenant_id}")
+      assert log =~ "snapshot_load_reason: :mismatch"
+      assert log =~ "snapshot_age_ms: "
 
       # No tenant logger metadata, as that may route it to the tenant's own logs. The message spans
       # several lines, metadata is on the first: the one with the code.
@@ -210,10 +232,83 @@ defmodule Realtime.Tenants.PolicyEvalShadowTest do
       end
     end
 
+    test "mismatch the reloaded snapshot doesn't confirm: records outcome: :stale_snapshot, nothing is logged" do
+      tenant_id = unique_tenant_id()
+      expect(FeatureFlags, :enabled?, fn @flag, _tenant_id -> true end)
+      stale = cached(always_allow_snapshot())
+      expect(PolicyEvalCache, :fetch, fn :fake_conn, _tenant_id -> {:ok, stale} end)
+
+      # The tenant dropped its policy since the cached snapshot was loaded.
+      expect(PolicyEvalCache, :reload, fn :fake_conn, ^tenant_id, ^stale ->
+        {:ok, cached(always_deny_snapshot(), :mismatch)}
+      end)
+
+      decision_ref = attach(@read_decision)
+      timing_ref = attach(@read_timing)
+      result = {:ok, %Policies{broadcast: %BroadcastPolicies{read: false}}}
+
+      log =
+        capture_log(fn ->
+          assert :ok = PolicyEvalShadow.read(:fake_conn, context(tenant_id: tenant_id), [:broadcast], result)
+          assert_receive {:telemetry, ^timing_ref, _event, _measurements, %{tenant: ^tenant_id}}, 2000
+        end)
+
+      assert_received {:telemetry, ^decision_ref, _event, _measurements, %{tenant: ^tenant_id} = decision_metadata}
+      assert decision_metadata.outcome == :stale_snapshot
+      assert decision_metadata.reason == :none
+      refute log =~ "PolicyEvalShadowMismatch"
+    end
+
+    test "mismatch on a snapshot already reloaded for a mismatch: :mismatch without loading again" do
+      tenant_id = unique_tenant_id()
+      expect(FeatureFlags, :enabled?, fn @flag, _tenant_id -> true end)
+
+      expect(PolicyEvalCache, :fetch, fn :fake_conn, _tenant_id ->
+        {:ok, cached(always_allow_snapshot(), :mismatch)}
+      end)
+
+      reject(&PolicyEvalCache.reload/3)
+
+      decision_ref = attach(@read_decision)
+      timing_ref = attach(@read_timing)
+      result = {:ok, %Policies{broadcast: %BroadcastPolicies{read: false}}}
+
+      log =
+        capture_log(fn ->
+          assert :ok = PolicyEvalShadow.read(:fake_conn, context(tenant_id: tenant_id), [:broadcast], result)
+          assert_receive {:telemetry, ^timing_ref, _event, _measurements, %{tenant: ^tenant_id}}, 2000
+        end)
+
+      assert_received {:telemetry, ^decision_ref, _event, _measurements, %{tenant: ^tenant_id} = decision_metadata}
+      assert decision_metadata.outcome == :mismatch
+      assert log =~ "snapshot_load_reason: :mismatch"
+    end
+
+    test "mismatch whose reload fails: :mismatch against the cached snapshot" do
+      tenant_id = unique_tenant_id()
+      expect(FeatureFlags, :enabled?, fn @flag, _tenant_id -> true end)
+      expect(PolicyEvalCache, :fetch, fn :fake_conn, _tenant_id -> {:ok, cached(always_allow_snapshot())} end)
+      expect(PolicyEvalCache, :reload, fn :fake_conn, ^tenant_id, _stale -> {:error, :boom} end)
+
+      decision_ref = attach(@read_decision)
+      timing_ref = attach(@read_timing)
+      result = {:ok, %Policies{broadcast: %BroadcastPolicies{read: false}}}
+
+      log =
+        capture_log(fn ->
+          assert :ok = PolicyEvalShadow.read(:fake_conn, context(tenant_id: tenant_id), [:broadcast], result)
+          assert_receive {:telemetry, ^timing_ref, _event, _measurements, %{tenant: ^tenant_id}}, 2000
+        end)
+
+      assert_received {:telemetry, ^decision_ref, _event, _measurements, %{tenant: ^tenant_id} = decision_metadata}
+      assert decision_metadata.outcome == :mismatch
+      assert log =~ "snapshot_load_reason: :ttl"
+    end
+
     test "a real check that errored becomes :no_real_answer, not a crash or a mismatch" do
       tenant_id = unique_tenant_id()
       expect(FeatureFlags, :enabled?, fn @flag, _tenant_id -> true end)
-      expect(PolicyEvalCache, :fetch, fn :fake_conn, _tenant_id -> {:ok, always_allow_snapshot()} end)
+      expect(PolicyEvalCache, :fetch, fn :fake_conn, _tenant_id -> {:ok, cached(always_allow_snapshot())} end)
 
       decision_ref = attach(@read_decision)
       timing_ref = attach(@read_timing)
@@ -230,7 +325,10 @@ defmodule Realtime.Tenants.PolicyEvalShadowTest do
     test "Postgres raising on the policy is a real answer: decided against it is a mismatch, logged without the message" do
       tenant_id = unique_tenant_id()
       expect(FeatureFlags, :enabled?, fn @flag, _tenant_id -> true end)
-      expect(PolicyEvalCache, :fetch, fn :fake_conn, _tenant_id -> {:ok, always_allow_snapshot()} end)
+
+      expect(PolicyEvalCache, :fetch, fn :fake_conn, _tenant_id ->
+        {:ok, cached(always_allow_snapshot(), :mismatch)}
+      end)
 
       decision_ref = attach(@read_decision)
       timing_ref = attach(@read_timing)
@@ -253,7 +351,7 @@ defmodule Realtime.Tenants.PolicyEvalShadowTest do
     test "an error that isn't from evaluating the policy stays :no_real_answer" do
       tenant_id = unique_tenant_id()
       expect(FeatureFlags, :enabled?, fn @flag, _tenant_id -> true end)
-      expect(PolicyEvalCache, :fetch, fn :fake_conn, _tenant_id -> {:ok, always_allow_snapshot()} end)
+      expect(PolicyEvalCache, :fetch, fn :fake_conn, _tenant_id -> {:ok, cached(always_allow_snapshot())} end)
 
       decision_ref = attach(@read_decision)
       timing_ref = attach(@read_timing)
@@ -269,7 +367,7 @@ defmodule Realtime.Tenants.PolicyEvalShadowTest do
     test "a fallback against Postgres raising on the policy stays a fallback" do
       tenant_id = unique_tenant_id()
       expect(FeatureFlags, :enabled?, fn @flag, _tenant_id -> true end)
-      expect(PolicyEvalCache, :fetch, fn :fake_conn, _tenant_id -> {:ok, always_allow_snapshot()} end)
+      expect(PolicyEvalCache, :fetch, fn :fake_conn, _tenant_id -> {:ok, cached(always_allow_snapshot())} end)
 
       decision_ref = attach(@read_decision)
       timing_ref = attach(@read_timing)
@@ -301,7 +399,7 @@ defmodule Realtime.Tenants.PolicyEvalShadowTest do
     test "deciding raises: records :exception and logs the tenant id in the message, never the exception's message" do
       tenant_id = unique_tenant_id()
       expect(FeatureFlags, :enabled?, fn @flag, _tenant_id -> true end)
-      expect(PolicyEvalCache, :fetch, fn :fake_conn, _tenant_id -> {:ok, always_allow_snapshot()} end)
+      expect(PolicyEvalCache, :fetch, fn :fake_conn, _tenant_id -> {:ok, cached(always_allow_snapshot())} end)
       expect(PolicyEvalEnv, :build, fn _context, _extension -> raise "policy content" end)
 
       exception_ref = attach(@read_exception)
@@ -336,7 +434,7 @@ defmodule Realtime.Tenants.PolicyEvalShadowTest do
     test ":persistence reads the real answer off policies.broadcast.persist" do
       tenant_id = unique_tenant_id()
       expect(FeatureFlags, :enabled?, fn @flag, _tenant_id -> true end)
-      expect(PolicyEvalCache, :fetch, fn :fake_conn, _tenant_id -> {:ok, always_allow_snapshot()} end)
+      expect(PolicyEvalCache, :fetch, fn :fake_conn, _tenant_id -> {:ok, cached(always_allow_snapshot())} end)
 
       decision_ref = attach(@write_decision)
       timing_ref = attach(@write_timing)
