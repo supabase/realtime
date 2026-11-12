@@ -10,7 +10,16 @@ defmodule PolicyEval.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       # Captured Postgres output, loaded by the tests rather than run
       test_ignore_filters: [&String.starts_with?(&1, "test/fixtures/")],
+      dialyzer: dialyzer(),
       deps: deps()
+    ]
+  end
+
+  defp dialyzer do
+    [
+      plt_core_path: "priv/plts",
+      plt_file: {:no_warn, "priv/plts/dialyzer.plt"},
+      list_unused_filters: true
     ]
   end
 
@@ -29,6 +38,8 @@ defmodule PolicyEval.MixProject do
     [
       # The parser is generated at compile time, so NimbleParsec isn't needed at runtime.
       {:nimble_parsec, "~> 1.4", runtime: false},
+      {:dialyxir, "~> 1.4", only: :dev, runtime: false},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       # Only for the tests against Postgres (tagged :postgres). The library never connects to a database.
       {:postgrex, "~> 0.22", only: :test}
     ]
