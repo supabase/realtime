@@ -9,6 +9,7 @@ defmodule Realtime.PromEx.Plugins.Presence do
     * the duration of a client's track or update call on the presence shard,
     * periodic usage numbers (tenant/topic counts, member-count distribution)
       read off Phoenix.Tracker's own replicated state.
+    * errors that occur when a tracker is running in shadow mode
   """
 
   alias RealtimeWeb.Presence
@@ -22,6 +23,7 @@ defmodule Realtime.PromEx.Plugins.Presence do
   @event_usage [:realtime, :presence, :usage]
   @event_usage_bucket [:realtime, :presence, :usage, :bucket]
   @event_join_latency [:realtime, :presence, :join, :latency]
+  @event_shadow_error [:realtime, :presence, :shadow, :error]
 
   # Comfortably under the 60s poll interval, so a timed-out scan is never still in flight when
   # the next tick fires.
@@ -95,6 +97,12 @@ defmodule Realtime.PromEx.Plugins.Presence do
         description: "Latency from a client's channel join to receiving its first presence_state push.",
         tags: [:state, :implementation],
         reporter_options: [peep_bucket_calculator: Join.Buckets]
+      ),
+      counter(
+        @event_shadow_error,
+        event_name: @event_shadow_error,
+        description: "Errors that arise from Rollcall when it is running in shadow mode",
+        tags: [:operation, :reason]
       )
     ])
   end

@@ -106,6 +106,24 @@ defmodule Realtime.PromEx.Plugins.PresenceTest do
     end
   end
 
+  describe "shadow errors" do
+    @shadow_error "realtime_presence_shadow_error"
+
+    test "counts each Rollcall failure by operation and reason, with no tenant label" do
+      tags = [operation: "untrack", reason: "timeout"]
+      count_before = metric_value(@shadow_error, tags) || 0
+
+      :telemetry.execute([:realtime, :presence, :shadow, :error], %{}, %{
+        tenant: "shadow-error-tenant",
+        operation: :untrack,
+        reason: :timeout
+      })
+
+      assert metric_value(@shadow_error, tags) == count_before + 1
+      assert metric_value(@shadow_error, tenant: "shadow-error-tenant") == nil
+    end
+  end
+
   describe "usage metrics" do
     alias Realtime.Tenants
     alias Realtime.Test.PresenceUsageTracker, as: Tracker
