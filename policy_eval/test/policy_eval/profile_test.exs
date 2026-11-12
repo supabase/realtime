@@ -62,6 +62,15 @@ defmodule PolicyEval.ProfileTest do
     assert PolicyEval.decide(snapshot("true", profile), env("guest", row), :read) == {:fallback, {:role, :other}}
   end
 
+  test "reported_role/2 keeps the profile's roles, platform roles and a missing role, nothing else" do
+    assert Profile.reported_role(@example, "member") == "member"
+    assert Profile.reported_role(@example, "admin") == "admin"
+    assert Profile.reported_role(@example, "postgres") == "postgres"
+    assert Profile.reported_role(@example, nil) == nil
+    assert Profile.reported_role(@example, "app_writer") == :other
+    assert Profile.reported_role(@example, "dave") == :other
+  end
+
   test "only a function in a platform schema of the profile is inlined, and only its name is kept" do
     row = %{"team" => {:text, "t"}, "kind" => {:text, "note"}}
     user_id_policy = "(app.user_id() = '#{@uid}'::uuid)"
