@@ -11,10 +11,10 @@ defmodule Rollcall.TelemetryTest do
   # The tracker uses `Rollcall.Transport.PassThrough`. A test delivers a message with
   # `send(tracker, {:deliver, scope, message})`, and sends each `:tick` itself.
 
-  @start [:rollcall, :tracker, :start]
-  @stop [:rollcall, :tracker, :stop]
-  @purge [:rollcall, :tracker, :peer, :purge]
-  @peers [:rollcall, :tracker, :peers]
+  @start Rollcall.Metrics.tracker_start()
+  @stop Rollcall.Metrics.tracker_stop()
+  @purge Rollcall.Metrics.tracker_peer_purge()
+  @peers Rollcall.Metrics.tracker_peers()
 
   # A transport that raises on a heartbeat. The tracker sends a heartbeat only for the goodbye, because
   # the tests turn the heartbeat timer off.

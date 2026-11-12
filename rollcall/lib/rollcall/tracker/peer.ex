@@ -159,10 +159,9 @@ defmodule Rollcall.Tracker.Peer do
 
   @doc "Returns true if the peer holds entries and we haven't heard from it in more than 1 tick"
   @spec overdue?(t()) :: boolean()
-  def overdue?(%__MODULE__{replica: replica, silent_ticks: silent_ticks})
-      when map_size(replica) > 0 and silent_ticks > 1, do: true
-
-  def overdue?(_), do: false
+  def overdue?(%__MODULE__{replica: replica, silent_ticks: silent_ticks}) do
+    map_size(replica) > 0 and silent_ticks > 1
+  end
 
   @doc "Returns the stamp of the message that gave the replica, or `nil` before the first snapshot."
   @spec mark(t()) :: Messages.stamp() | nil
