@@ -93,6 +93,30 @@
     },
     %{
       cmd: "r",
+      name: "grammar_claims_index",
+      permissive: true,
+      qual: "((((app.claims() -> 'k'::text) -> 0) ->> 'k2'::text) = 'v'::text)",
+      roles: ["member"],
+      with_check: nil
+    },
+    %{
+      cmd: "r",
+      name: "grammar_claims_negative_index",
+      permissive: true,
+      qual: "((app.claims() -> '-1'::integer) IS NULL)",
+      roles: ["member"],
+      with_check: nil
+    },
+    %{
+      cmd: "r",
+      name: "grammar_claims_nested",
+      permissive: true,
+      qual: "(((app.claims() -> 'k'::text) ->> 'k2'::text) = 'v'::text)",
+      roles: ["member"],
+      with_check: nil
+    },
+    %{
+      cmd: "r",
       name: "grammar_claims_text",
       permissive: true,
       qual: "((app.claims() ->> 'k'::text) = 'v'::text)",
@@ -101,9 +125,25 @@
     },
     %{
       cmd: "r",
+      name: "grammar_claims_text_index",
+      permissive: true,
+      qual: "(((app.claims() -> 'k'::text) ->> 0) = 'v'::text)",
+      roles: ["member"],
+      with_check: nil
+    },
+    %{
+      cmd: "r",
       name: "grammar_claims_text_initplan",
       permissive: true,
       qual: "(( SELECT (app.claims() ->> 'k'::text)) = 'v'::text)",
+      roles: ["member"],
+      with_check: nil
+    },
+    %{
+      cmd: "r",
+      name: "grammar_claims_text_negative_index",
+      permissive: true,
+      qual: "((app.claims() ->> '-1'::integer) = 'v'::text)",
       roles: ["member"],
       with_check: nil
     },

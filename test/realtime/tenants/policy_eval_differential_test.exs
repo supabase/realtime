@@ -79,6 +79,19 @@ defmodule Realtime.Tenants.PolicyEvalDifferentialTest do
            "fell back: #{inspect(Enum.reject(results, &(&1.class == :match)))}"
   end
 
+  test "nested claims", context do
+    results = run(context, PolicyEvalScenarios.nested_claim_scenarios(:well_formed))
+
+    assert results != []
+
+    assert Enum.all?(results, &(&1.class == :match)),
+           "fell back: #{inspect(Enum.reject(results, &(&1.class == :match)))}"
+  end
+
+  test "nested claims of other shapes", context do
+    run(context, PolicyEvalScenarios.nested_claim_scenarios(:other))
+  end
+
   test "what the snapshot has to rule out", %{db_conn: db_conn} = context do
     %{rows: [[version_num]]} = Postgrex.query!(db_conn, "SELECT current_setting('server_version_num')::int", [])
     run(context, PolicyEvalScenarios.snapshot_scenarios(version_num))

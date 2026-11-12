@@ -3,9 +3,10 @@ defmodule PolicyEval.Value do
   Postgres value primitives: one function per Postgres function or operator the evaluator needs.
 
   Values are `{:text, binary}`, `{:uuid, <<_::128>>}`, `{:jsonb, term}` (see `PolicyEval.Jsonb`),
-  a bare `true`/`false`, and `nil` for SQL NULL. Every function returns a value, `nil`, or
-  `{:unsupported, reason}`. Where Postgres raises, the reason is `{:raises, sqlstate_name, detail}`,
-  so the caller asks the database instead.
+  `{:int4, integer}`, a bare `true`/`false`, and `nil` for SQL NULL. An `{:int4, _}` comes only from
+  an integer literal, and only `jsonb -> integer` and `jsonb ->> integer` take one. Every function
+  returns a value, `nil`, or `{:unsupported, reason}`. Where Postgres raises, the reason is
+  `{:raises, sqlstate_name, detail}`, so the caller asks the database instead.
 
   Arguments are already evaluated, so any of them may itself be `{:unsupported, _}`. Postgres
   evaluates all arguments of a function before calling it, so unless stated otherwise the first
@@ -15,7 +16,7 @@ defmodule PolicyEval.Value do
   without NUL bytes (Postgres text can't hold them).
   """
 
-  @type t :: {:text, binary()} | {:uuid, <<_::128>>} | {:jsonb, term()} | boolean() | nil
+  @type t :: {:text, binary()} | {:uuid, <<_::128>>} | {:jsonb, term()} | {:int4, integer()} | boolean() | nil
   @type result :: t | {:unsupported, term()}
 
   # Characters that make a pattern more than a literal in a Postgres advanced regular expression.

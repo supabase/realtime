@@ -71,6 +71,10 @@ defmodule PolicyEval.Postgres.DecisionsTest do
     run(context, ExampleScenarios.write_ignores_select_scenarios())
   end
 
+  test "nested claims", context do
+    run(context, ExampleScenarios.nested_claim_scenarios())
+  end
+
   test "a policy that raises next to one that allows", context do
     run(context, ExampleScenarios.raising_policy_scenarios())
   end
