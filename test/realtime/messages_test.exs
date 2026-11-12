@@ -157,6 +157,26 @@ defmodule Realtime.MessagesTest do
       }
     end
 
+    test "replay telemetry counts every replayed message", %{conn: conn, tenant: tenant} do
+      external_id = tenant.external_id
+
+      for i <- 1..3 do
+        message_fixture(tenant, %{
+          "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-i, :minute),
+          "event" => "event_#{i}",
+          "extension" => "broadcast",
+          "topic" => "test",
+          "private" => true,
+          "payload" => %{"value" => i}
+        })
+      end
+
+      assert {:ok, messages, _} = Messages.replay(conn, external_id, "test", 0, 10)
+      assert length(messages) == 3
+
+      assert_receive {:telemetry, [:realtime, :tenants, :replay], %{messages: 3}, %{tenant: ^external_id}}
+    end
+
     test "replay private topic only", %{conn: conn, tenant: tenant} do
       privatem =
         message_fixture(tenant, %{
