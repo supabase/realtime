@@ -1,1 +1,2 @@
 /SECURITY.md @supabase/realtime @supabase/security
+/.github/workflows/actions.lock @supabase/realtime @supabase/security
