@@ -96,7 +96,9 @@ jobs:
         id: docker-cache
         with:
           path: /tmp/docker-images
-          key: docker-images-zstd-${{ env.POSTGRES_IMAGE }}-${{ env.TENANT_DB_IMAGE }}
+          # A miss restores any cache whose key starts with this one, so no key may be a
+          # prefix of another: an empty tenant image would make pg17's a prefix of multigres'.
+          key: docker-images-zstd-${{ env.POSTGRES_IMAGE }}-${{ env.TENANT_DB_IMAGE || 'none' }}
       - name: Load Docker images from cache
         if: steps.docker-cache.outputs.cache-hit == 'true'
         run: zstd -d --stdout /tmp/docker-images/images.tar.zst | docker image load
