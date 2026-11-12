@@ -943,9 +943,8 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
 
       tenant_id = Ecto.UUID.generate()
       rate_args = Realtime.Tenants.events_per_second_rate(tenant_id, 100)
-      {:ok, counter_pid} = Realtime.RateCounter.new(rate_args)
       # Wait for the immediate first tick so it does not reset the count mid-test
-      :sys.get_state(counter_pid)
+      RateCounterHelper.new!(rate_args)
 
       subscriber_pid = spawn_subscriber(self())
 
