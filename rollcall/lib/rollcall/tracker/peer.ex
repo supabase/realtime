@@ -149,9 +149,20 @@ defmodule Rollcall.Tracker.Peer do
   @spec entries(t()) :: [Entry.t()]
   def entries(%__MODULE__{replica: replica}), do: Map.values(replica)
 
+  @doc "Returns true when the peer is holds no entries"
+  @spec empty?(t()) :: boolean()
+  def empty?(%__MODULE__{replica: replica}), do: Enum.empty?(replica)
+
   @doc "Returns true when the peer knows it missed a message that is newer than its mark."
   @spec behind?(t()) :: boolean()
   def behind?(%__MODULE__{behind: behind}), do: behind
+
+  @doc "Returns true if the peer holds entries and we haven't heard from it in more than 1 tick"
+  @spec overdue?(t()) :: boolean()
+  def overdue?(%__MODULE__{replica: replica, silent_ticks: silent_ticks})
+      when map_size(replica) > 0 and silent_ticks > 1, do: true
+
+  def overdue?(_), do: false
 
   @doc "Returns the stamp of the message that gave the replica, or `nil` before the first snapshot."
   @spec mark(t()) :: Messages.stamp() | nil
