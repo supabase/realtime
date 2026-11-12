@@ -601,8 +601,8 @@ defmodule Realtime.Tenants.ConnectTest do
 
       assert_receive {:migrations_ran_at_run, ^stale_count}
 
-      updated_tenant = Tenants.get_tenant_by_external_id(tenant.external_id)
-      assert updated_tenant.migrations_ran == total_migrations
+      # Migrations persists the new count asynchronously, after Connect is already ready
+      assert_eventually Tenants.get_tenant_by_external_id(tenant.external_id).migrations_ran == total_migrations
     end
 
     test "starts broadcast handler and does not fail on existing connection", %{tenant: tenant} do
