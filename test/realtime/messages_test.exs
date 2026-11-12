@@ -152,7 +152,7 @@ defmodule Realtime.MessagesTest do
       assert_receive {
         :telemetry,
         [:realtime, :tenants, :replay],
-        %{latency: _},
+        %{latency: _, messages: 1},
         %{tenant: ^external_id}
       }
     end
@@ -392,6 +392,9 @@ defmodule Realtime.MessagesTest do
 
       assert :erpc.call(node, Messages, :replay, [pid, tenant.external_id, "test", 0, 30]) ==
                {:error, :failed_to_replay_messages}
+
+      external_id = tenant.external_id
+      assert_receive {:telemetry, [:realtime, :tenants, :replay], %{messages: 0}, %{tenant: ^external_id}}
     end
   end
 
