@@ -64,6 +64,12 @@ defmodule Realtime.PromEx.Plugins.Presence do
         description: "Bytes (:erlang.external_size/1) of Presence state replication received from other nodes",
         tags: [:implementation]
       ),
+      counter(
+        [:realtime, :presence, :replication, :received, :messages],
+        event_name: @event_replication_received,
+        description: "Count of the number of messages received by presence replication",
+        tags: [:implementation]
+      ),
       distribution(
         @event_notify_latency,
         event_name: @event_notify_latency,

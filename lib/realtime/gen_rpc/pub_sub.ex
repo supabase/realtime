@@ -315,6 +315,12 @@ defmodule Realtime.GenRpcPubSub.Worker do
     })
   end
 
+  defp measure_presence_replication_received("rollcall:" <> _, msg) do
+    :telemetry.execute(@presence_replication_received_event, %{size: :erlang.external_size(msg)}, %{
+      implementation: "rollcall"
+    })
+  end
+
   defp measure_presence_replication_received(_topic, _msg), do: :ok
 
   @fanout_event [:realtime, :broadcast, :fanout, :node_delivery]
