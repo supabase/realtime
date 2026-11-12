@@ -28,15 +28,15 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@v6.0.2
       - name: Setup elixir
         id: beam
-        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1.24.0
+        uses: erlef/setup-beam@v1.24.0
         with:
           otp-version: 28.5.0.4 # Define the OTP version [required]
           elixir-version: 1.19.5 # Define the elixir version [required]
       - name: Cache Mix
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@v5.0.4
         with:
           path: |
             policy_eval/deps
@@ -55,7 +55,7 @@ jobs:
       - name: Credo checks
         run: mix credo
       - name: Retrieve PLT Cache
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@v5.0.4
         id: plt-cache
         with:
           path: policy_eval/priv/plts
@@ -86,17 +86,17 @@ jobs:
       POLICY_EVAL_REPORT: "1"
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@v6.0.2
       - name: Start Postgres
         run: docker compose up -d --wait --wait-timeout 120 postgres${{ matrix.postgres }}
       - name: Setup elixir
         id: beam
-        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1.24.0
+        uses: erlef/setup-beam@v1.24.0
         with:
           otp-version: 28.5.0.4 # Define the OTP version [required]
           elixir-version: 1.19.5 # Define the elixir version [required]
       - name: Cache Mix
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@v5.0.4
         with:
           path: |
             policy_eval/deps

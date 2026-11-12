@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@v6.0.2
 
       - name: Bump pg-delta
         id: bump
@@ -24,14 +24,14 @@ jobs:
 
       - name: Generate token
         id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@v3.2.0
         with:
           client-id: ${{ secrets.GH_APP_MANAGER_ID }}
           private-key: ${{ secrets.GH_APP_MANAGER_PRIVATE_KEY }}
 
       # The app token (not GITHUB_TOKEN) makes the PR trigger the workflows that regenerate the tenant schema snapshot.
       - name: Create pull request
-        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        uses: peter-evans/create-pull-request@v8.1.1
         with:
           token: ${{ steps.app-token.outputs.token }}
           commit-message: "fix(deps): bump pg-delta to ${{ steps.bump.outputs.version }}"
