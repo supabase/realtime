@@ -113,6 +113,14 @@ defmodule Realtime.Presence do
     )
   end
 
+  defp phoenix_untrack(pid, topic, key) do
+    Metrics.measure_untrack_call(fn -> PhoenixBackend.untrack(pid, topic, key) end, :phoenix)
+  end
+
+  defp rollcall_untrack(pid, tenant, topic, key, opts) do
+    Metrics.measure_untrack_call(fn -> RollcallBackend.untrack(pid, tenant, topic, key, opts) end, :rollcall)
+  end
+
   @doc """
   Removes the entry of the key for the pid.
 
@@ -123,16 +131,16 @@ defmodule Realtime.Presence do
   def untrack(pid, tenant, topic, key) do
     case mode(tenant) do
       :phoenix ->
-        PhoenixBackend.untrack(pid, topic, key)
+        phoenix_untrack(pid, topic, key)
 
       :rollcall ->
-        RollcallBackend.untrack(pid, tenant, topic, key)
+        rollcall_untrack(pid, tenant, topic, key, [])
 
       :shadow ->
-        PhoenixBackend.untrack(pid, topic, key)
+        phoenix_untrack(pid, topic, key)
 
         shadow(:untrack, tenant, fn ->
-          RollcallBackend.untrack(pid, tenant, topic, key, timeout: @shadow_timeout_in_ms)
+          rollcall_untrack(pid, tenant, topic, key, timeout: @shadow_timeout_in_ms)
         end)
     end
   end

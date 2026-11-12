@@ -367,6 +367,42 @@ defmodule Realtime.PresenceTest do
     end
   end
 
+  describe "the metric of an untrack" do
+    setup do
+      id = {__MODULE__, make_ref()}
+      :telemetry.attach(id, [:realtime, :presence, :track, :duration], &__MODULE__.handle_duration/4, self())
+      on_exit(fn -> :telemetry.detach(id) end)
+    end
+
+    test "has the implementation :phoenix with no flag set", %{tenant: tenant, topic: topic, client: client} do
+      enable([])
+      {:ok, :track, _ref} = Presence.track(client, tenant, topic, "alice", %{})
+
+      :ok = Presence.untrack(client, tenant, topic, "alice")
+
+      assert_receive {:duration, %{implementation: :phoenix, action: :untrack, result: :ok}, _ms}
+    end
+
+    test "has one observation for each implementation in shadow mode", %{tenant: tenant, topic: topic, client: client} do
+      enable([@shadow])
+      {:ok, :track, _ref} = Presence.track(client, tenant, topic, "alice", %{})
+
+      :ok = Presence.untrack(client, tenant, topic, "alice")
+
+      assert_receive {:duration, %{implementation: :phoenix, action: :untrack, result: :ok}, _ms}
+      assert_receive {:duration, %{implementation: :rollcall, action: :untrack, result: :ok}, _ms}
+    end
+
+    test "has the implementation :rollcall in Rollcall mode", %{tenant: tenant, topic: topic, client: client} do
+      enable([@primary])
+      {:ok, :track, _ref} = Presence.track(client, tenant, topic, "alice", %{})
+
+      :ok = Presence.untrack(client, tenant, topic, "alice")
+
+      assert_receive {:duration, %{implementation: :rollcall, action: :untrack, result: :ok}, _ms}
+    end
+  end
+
   describe "the notify latency metric of a sampled presence_diff" do
     @notify_latency [:realtime, :presence, :notify, :latency]
 
