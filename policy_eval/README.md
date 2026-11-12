@@ -323,6 +323,17 @@ default collation provider, and Postgres 14 and 15 with libc. So the tests cover
 On Postgres 14, run `mix test` and not `mix test --only postgres`. There is no pg14 fixture, so
 `test_helper.exs` excludes the fixtures test. But `--only postgres` includes that test again.
 
+### Static analysis
+
+CI also runs Credo and Dialyzer on the library. `dialyxir` is a dev dependency, so run Dialyzer
+with `MIX_ENV=dev`. The first Dialyzer run builds the PLT (the type information of the
+dependencies) in `priv/plts`.
+
+```sh
+mix credo
+MIX_ENV=dev mix dialyzer
+```
+
 ## The example of the tests
 
 The tests use one example application. It stores documents in the table `app.docs`. A document
