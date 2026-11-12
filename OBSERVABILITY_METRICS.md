@@ -137,11 +137,12 @@ These metrics measure end-to-end latency and processing performance across diffe
 
 These metrics track security policy enforcement and error rates.
 
-| Metric                          | Type    | Description                                                                                                                                     | Scope            | Endpoint          |
-| ------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ----------------- |
-| `realtime_channel_error`        | Counter | Unhandled channel errors per tenant. Any non-zero value warrants investigation.                                                                 | **Per-Tenant**   | `/tenant-metrics` |
-| `realtime_channel_global_error` | Counter | Global unhandled channel error count across all tenants, tagged by error code.                                                                  | Global Aggregate | `/metrics`        |
-| `phoenix_channel_joined_total`  | Counter | WebSocket channel join attempts tagged by `result` (`ok`/`error`) and `transport`. Use `result="error"` rate to detect client or policy issues. | Per-Node         | `/metrics`        |
+| Metric                           | Type    | Description                                                                                                                                     | Scope            | Endpoint          |
+| -------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ----------------- |
+| `realtime_channel_error`         | Counter | Unhandled channel errors per tenant. Any non-zero value warrants investigation.                                                                 | **Per-Tenant**   | `/tenant-metrics` |
+| `realtime_channel_global_error`  | Counter | Global unhandled channel error count across all tenants, tagged by error code.                                                                  | Global Aggregate | `/metrics`        |
+| `phoenix_channel_joined_total`   | Counter | WebSocket channel join attempts tagged by `result` (`ok`/`error`) and `transport`. Use `result="error"` rate to detect client or policy issues. | Per-Node         | `/metrics`        |
+| `realtime_presence_shadow_error` | Counter | Rollcall calls that fail while Phoenix succeeds in shadow mode, by `operation` (`track`, `untrack`, `watch`) and `reason` (`timeout`, `error`). | Global Aggregate | `/metrics`        |
 
 ## Subscription Pooler Metrics
 
