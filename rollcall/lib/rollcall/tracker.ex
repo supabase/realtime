@@ -129,9 +129,10 @@ defmodule Rollcall.Tracker do
 
   use GenServer, restart: :temporary
   use Snabbkaffex, only: :trace
+  alias Rollcall.Metrics
+  alias Rollcall.Tracker.Changes
   alias Rollcall.Tracker.Entry
   alias Rollcall.Tracker.Local
-  alias Rollcall.Tracker.Changes
   alias Rollcall.Tracker.Messages
   alias Rollcall.Tracker.Peer
   alias Rollcall.Tracker.State
@@ -408,6 +409,8 @@ defmodule Rollcall.Tracker do
       |> schedule_heartbeat()
       |> start_empty_timer()
 
+    :telemetry.execute(Metrics.tracker_start(), %{}, %{scope: scope})
+
     {:ok, state}
   end
 
@@ -554,7 +557,7 @@ defmodule Rollcall.Tracker do
   end
 
   @impl true
-  def terminate(_reason, state) do
+  def terminate(reason, state) do
     # When terminating we send a goodbye message, which is an empty snapshot.
     #
     # We need to bump the version on a goodbye to make sure any peer holding our current
@@ -562,6 +565,8 @@ defmodule Rollcall.Tracker do
     stamp = State.goodbye_stamp(state)
     {:stamp, _incarnation, goodbye_version} = stamp
     snapshot = Messages.snapshot(self(), stamp, [])
+
+    :telemetry.execute(Metrics.tracker_stop(), %{}, %{scope: state.scope, reason: reason})
 
     :ok = state.transport_module.heartbeat(state.transport_state, snapshot)
 
@@ -642,11 +647,43 @@ defmodule Rollcall.Tracker do
                 ignore_side_effects: true
               )
 
+              purge_count = length(changes.leaves)
+
+              :telemetry.execute(
+                Metrics.tracker_peer_purge(),
+                %{entries: purge_count},
+                %{node: node, scope: state.scope, stale: purge_count > 0}
+              )
+
               kept
           end
       end)
 
+    emit_peer_metric(state, peers)
+
     %{state | peers: peers}
+  end
+
+  defp emit_peer_metric(state, peers) do
+    peer_list = Map.values(peers)
+
+    max_silent_ticks =
+      peer_list
+      |> Stream.reject(&Peer.empty?/1)
+      |> Stream.map(& &1.silent_ticks)
+      |> Enum.max(fn -> 0 end)
+
+    :telemetry.execute(
+      Metrics.tracker_peers(),
+      %{
+        count: map_size(peers),
+        overdue_count: Enum.count(peer_list, &Peer.overdue?/1),
+        max_silent_ticks: max_silent_ticks
+      },
+      %{
+        scope: state.scope
+      }
+    )
   end
 
   defp update_view(state, changes) do

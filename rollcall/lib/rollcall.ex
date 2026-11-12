@@ -27,6 +27,9 @@ defmodule Rollcall do
 
   A client reads the entries of a partition with `state/3`. 
 
+  The tracker emits telemetry events for its start, its stop, the purge of a peer
+  and the state of its peers. See `Rollcall.Metrics`.
+
   Use the functions in this module. Do not call `Rollcall.Tracker` directly.
   """
 
