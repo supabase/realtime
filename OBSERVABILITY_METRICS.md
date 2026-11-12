@@ -10,6 +10,7 @@
 - [Latency & Performance Metrics](#latency--performance-metrics)
 - [Authorization & Error Metrics](#authorization--error-metrics)
 - [Subscription Pooler Metrics](#subscription-pooler-metrics)
+- [Rollcall Metrics](#rollcall-metrics)
 - [Tenant Migration Metrics](#tenant-migration-metrics)
 - [BEAM/Erlang VM Metrics](#beamerlang-vm-metrics)
   - [Memory Metrics](#memory-metrics)
@@ -158,6 +159,19 @@ These metrics cover the Postgres Changes subscription pooler per tenant: the wor
 | `realtime_replication_poller_changes_dispatch`        | Counter | Number of Postgres Changes rows the poller broadcast to subscribers.                         | **Per-Tenant** | `/tenant-metrics` |
 | `realtime_replication_poller_changes_skip`            | Counter | Number of Postgres Changes rows skipped without broadcasting, tagged by `reason`.            | **Per-Tenant** | `/tenant-metrics` |
 | `realtime_subscriptions_manager_dead_pid`             | Counter | Not-alive subscriber pids the manager handled, tagged by `reason`: `phantom` or `not_found`. | **Per-Tenant** | `/tenant-metrics` |
+
+## Rollcall Metrics
+
+These metrics come from the telemetry events of Rollcall, the presence tracker. They have no tenant label.
+
+| Metric                                         | Type      | Description                                                                                                                                                                                                                          | Scope            | Endpoint   |
+| ---------------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------- | ---------- |
+| `realtime_rollcall_tracker_started`            | Counter   | Rollcall trackers that started on this node.                                                                                                                                                                                         | Global Aggregate | `/metrics` |
+| `realtime_rollcall_tracker_stopped`            | Counter   | Rollcall trackers that stopped on this node, tagged by `reason`: `normal` (the grace period ended), `shutdown` (a supervisor stopped the tracker) or `crash`.                                                                       | Global Aggregate | `/metrics` |
+| `realtime_rollcall_peer_purged`                | Counter   | Peer records that a tracker deleted after the silence threshold, tagged by `stale`. `stale=false` is normal: the peer said goodbye. `stale=true` means no goodbye arrived, and the entries of the peer left with the record.        | Global Aggregate | `/metrics` |
+| `realtime_rollcall_peer_silent_ticks_bucket`   | Histogram | The highest number of ticks without a message over the peers that hold entries, for each tracker at each tick. A healthy peer has 1. | Global Aggregate | `/metrics` |
+| `realtime_rollcall_peer_observations`          | Counter   | The peers that trackers held, counted for each tracker at each tick.                                                                                                                                                                 | Global Aggregate | `/metrics` |
+| `realtime_rollcall_peer_observations_overdue`  | Counter   | Peer observations where the peer holds entries and missed a heartbeat. | Global Aggregate | `/metrics` |
 
 ## Tenant Migration Metrics
 
