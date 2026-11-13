@@ -52,6 +52,7 @@ defmodule Realtime.SynHandlerTest do
     @tag tenant_id: "tenant999"
     test "tenant hash = 1", %{node: node, peer_pid: peer_pid, tenant_id: tenant_id} do
       assert :erlang.phash2(tenant_id, 2) == 1
+      LogForwarder.attach()
       local_pid = start_supervised!({FakeConnect, [tenant_id, "us-east-1", [conn: "local_conn"]]})
       {:ok, remote_pid} = :peer.call(peer_pid, FakeConnect, :start_link, [[tenant_id, "ap-southeast-2", []]])
       on_exit(fn -> Process.exit(remote_pid, :brutal_kill) end)
@@ -77,7 +78,11 @@ defmodule Realtime.SynHandlerTest do
         end)
 
       assert log =~ "stop local process: #{inspect(local_pid)}"
-      assert log =~ "Successfully stopped #{inspect(local_pid)}"
+
+      stopped =
+        "SynHandler(#{node()}): Successfully stopped #{inspect(local_pid)}. Reason: {:shutdown, :syn_conflict_resolution}"
+
+      assert_receive {:log, ^stopped}, 1000
 
       assert log =~
                "Elixir.Realtime.Tenants.Connect terminated due to syn conflict resolution: \"#{tenant_id}\" #{inspect(local_pid)}"
@@ -156,6 +161,7 @@ defmodule Realtime.SynHandlerTest do
     @tag tenant_id: "tenant123"
     test "tenant hash = 0", %{node: node, peer_pid: peer_pid, tenant_id: tenant_id} do
       assert :erlang.phash2(tenant_id, 2) == 0
+      LogForwarder.attach()
       # Start remote process first
       {:ok, remote_pid} = :peer.call(peer_pid, FakeConnect, :start_link, [[tenant_id, "ap-southeast-2", []]])
 
@@ -184,7 +190,11 @@ defmodule Realtime.SynHandlerTest do
         end)
 
       assert log =~ "stop local process: #{inspect(local_pid)}"
-      assert log =~ "Successfully stopped #{inspect(local_pid)}"
+
+      stopped =
+        "SynHandler(#{node()}): Successfully stopped #{inspect(local_pid)}. Reason: {:shutdown, :syn_conflict_resolution}"
+
+      assert_receive {:log, ^stopped}, 1000
 
       assert log =~
                "Elixir.Realtime.Tenants.Connect terminated due to syn conflict resolution: \"#{tenant_id}\" #{inspect(local_pid)}"
