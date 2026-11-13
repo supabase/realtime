@@ -23,6 +23,8 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
   @send_entries "realtime_rollcall_heartbeat_send_entries"
   @publish_entries "realtime_rollcall_publish_entries"
   @tracker_entries "realtime_rollcall_tracker_entries"
+  @tracker_process_bytes "realtime_rollcall_tracker_process_bytes"
+  @tracker_ets_bytes "realtime_rollcall_tracker_ets_bytes"
 
   setup_all do
     start_supervised!(MetricsTest)
@@ -198,6 +200,45 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
       assert metric_value(@tracker_entries <> "_bucket", le: "500.5") == le_500_before + 2
       assert metric_value(@tracker_entries <> "_bucket", le: "100.5") == le_100_before + 1
     end
+
+    # Peep writes a bound of 1000 or more in scientific notation.
+    test "records the process memory in bytes" do
+      count_before = metric_value(@tracker_process_bytes <> "_count") || 0
+      le_10k_before = metric_value(@tracker_process_bytes <> "_bucket", le: "1.0e4") || 0
+      le_50k_before = metric_value(@tracker_process_bytes <> "_bucket", le: "5.0e4") || 0
+
+      usage(process_bytes: 20_000)
+
+      assert metric_value(@tracker_process_bytes <> "_count") == count_before + 1
+      assert metric_value(@tracker_process_bytes <> "_bucket", le: "5.0e4") == le_50k_before + 1
+      assert (metric_value(@tracker_process_bytes <> "_bucket", le: "1.0e4") || 0) == le_10k_before
+    end
+
+    test "records the memory of the view table in bytes" do
+      count_before = metric_value(@tracker_ets_bytes <> "_count") || 0
+      le_1k_before = metric_value(@tracker_ets_bytes <> "_bucket", le: "1.0e3") || 0
+      le_10k_before = metric_value(@tracker_ets_bytes <> "_bucket", le: "1.0e4") || 0
+
+      usage(ets_bytes: 5_000)
+
+      assert metric_value(@tracker_ets_bytes <> "_count") == count_before + 1
+      assert metric_value(@tracker_ets_bytes <> "_bucket", le: "1.0e4") == le_10k_before + 1
+      assert (metric_value(@tracker_ets_bytes <> "_bucket", le: "1.0e3") || 0) == le_1k_before
+    end
+
+    # A value above the last bound has no bucket of its own. The distribution counts it in `+Inf`,
+    # `_count` and `_sum` only.
+    test "counts a memory value above the last bound in +Inf only" do
+      count_before = metric_value(@tracker_process_bytes <> "_count") || 0
+      last_before = metric_value(@tracker_process_bytes <> "_bucket", le: "1.0e8") || 0
+      inf_before = metric_value(@tracker_process_bytes <> "_bucket", le: "+Inf") || 0
+
+      usage(process_bytes: 150_000_000)
+
+      assert metric_value(@tracker_process_bytes <> "_count") == count_before + 1
+      assert metric_value(@tracker_process_bytes <> "_bucket", le: "+Inf") == inf_before + 1
+      assert (metric_value(@tracker_process_bytes <> "_bucket", le: "1.0e8") || 0) == last_before
+    end
   end
 
   # The metrics are global. A scope label would give each tenant its own series.
@@ -226,6 +267,8 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
 
     metrics = [
       @tracker_entries <> "_count",
+      @tracker_process_bytes <> "_count",
+      @tracker_ets_bytes <> "_count",
       @started,
       @stopped,
       @purged,

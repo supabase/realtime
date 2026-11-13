@@ -33,6 +33,10 @@ defmodule Realtime.PromEx.Plugins.Rollcall do
       `source`. It is the churn of the entries.
     * `realtime_rollcall_tracker_entries` - a distribution of the entries in the view of a tracker:
       the local entries plus the entries of the peers. The tracker takes one observation at each tick.
+    * `realtime_rollcall_tracker_process_bytes` - a distribution of the memory of a tracker process,
+      in bytes. A value above 100 MB counts in the `+Inf` bucket only.
+    * `realtime_rollcall_tracker_ets_bytes` - a distribution of the memory of the view table of a
+      tracker, in bytes. A value above 100 MB counts in the `+Inf` bucket only.
 
   The events carry each `duration` in native time units, and the plugin converts it to microseconds.
   """
@@ -60,6 +64,26 @@ defmodule Realtime.PromEx.Plugins.Rollcall do
     # bound, so each bound is half an entry above the value it stands for. An empty heartbeat, from a
     # tracker with no local entry, has its own bucket.
     use Peep.Buckets.Custom, buckets: [0.5, 1.5, 5.5, 10.5, 50.5, 100.5, 500.5, 1_000.5, 5_000.5, 10_000.5]
+  end
+
+  defmodule Bytes.Buckets do
+    @moduledoc false
+    # Bytes. An idle tracker process uses about 10 to 20 KB. The view table of a tracker with no entry
+    # uses about 1 KB. Both grow with the number of entries. A value above the last bound counts in
+    # the `+Inf` bucket only.
+    use Peep.Buckets.Custom,
+      buckets: [
+        1_000,
+        10_000,
+        50_000,
+        100_000,
+        500_000,
+        1_000_000,
+        5_000_000,
+        10_000_000,
+        50_000_000,
+        100_000_000
+      ]
   end
 
   @impl true
@@ -160,6 +184,21 @@ defmodule Realtime.PromEx.Plugins.Rollcall do
         description:
           "The entries in the view of a Rollcall tracker, counted at each tick: the local entries plus the entries of the peers.",
         reporter_options: [peep_bucket_calculator: Entries.Buckets]
+      ),
+      distribution(
+        [:realtime, :rollcall, :tracker, :process, :bytes],
+        event_name: Rollcall.Metrics.tracker_usage(),
+        measurement: :process_bytes,
+        description:
+          "The memory of a Rollcall tracker process, in bytes, counted at each tick. It is the memory value of Process.info/2: the heap, the stack and the mailbox.",
+        reporter_options: [peep_bucket_calculator: Bytes.Buckets]
+      ),
+      distribution(
+        [:realtime, :rollcall, :tracker, :ets, :bytes],
+        event_name: Rollcall.Metrics.tracker_usage(),
+        measurement: :ets_bytes,
+        description: "The memory of the view table of a Rollcall tracker, in bytes, counted at each tick.",
+        reporter_options: [peep_bucket_calculator: Bytes.Buckets]
       )
     ])
   end
