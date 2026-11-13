@@ -12,104 +12,34 @@ defmodule Realtime.Presence.PhoenixUsageTest do
   end
 
   test "no tracked presences reports zero tenants, zero topics, and every bucket at zero" do
-    assert Usage.scan(Tracker) == %{
-             tenant_count: 0,
-             topic_count: 0,
-             buckets: %{
-               5 => 0,
-               10 => 0,
-               25 => 0,
-               50 => 0,
-               100 => 0,
-               200 => 0,
-               500 => 0,
-               1000 => 0,
-               :infinity => 0
-             }
-           }
+    assert Usage.scan(Tracker) == %{tenant_count: 0, topic_count: 0, buckets: buckets(%{})}
   end
 
   test "one tracked presence counts one tenant, one topic, and one member in the first bucket" do
     {:ok, _ref} = Tracker.track(self(), Tenants.tenant_topic("tenant1", "room"), "key1", %{})
 
-    assert Usage.scan(Tracker) == %{
-             tenant_count: 1,
-             topic_count: 1,
-             buckets: %{
-               5 => 1,
-               10 => 0,
-               25 => 0,
-               50 => 0,
-               100 => 0,
-               200 => 0,
-               500 => 0,
-               1000 => 0,
-               :infinity => 0
-             }
-           }
+    assert Usage.scan(Tracker) == %{tenant_count: 1, topic_count: 1, buckets: buckets(%{1 => 1})}
   end
 
   test "public and private topics for the same tenant count as one tenant" do
     {:ok, _ref} = Tracker.track(self(), Tenants.tenant_topic("tenant1", "room"), "key1", %{})
     {:ok, _ref} = Tracker.track(self(), Tenants.tenant_topic("tenant1", "other", false), "key2", %{})
 
-    assert Usage.scan(Tracker) == %{
-             tenant_count: 1,
-             topic_count: 2,
-             buckets: %{
-               5 => 2,
-               10 => 0,
-               25 => 0,
-               50 => 0,
-               100 => 0,
-               200 => 0,
-               500 => 0,
-               1000 => 0,
-               :infinity => 0
-             }
-           }
+    assert Usage.scan(Tracker) == %{tenant_count: 1, topic_count: 2, buckets: buckets(%{1 => 2})}
   end
 
   test "an external_id that merely contains \"-private\" isn't truncated" do
     {:ok, _ref} = Tracker.track(self(), Tenants.tenant_topic("big", "room1"), "key1", %{})
     {:ok, _ref} = Tracker.track(self(), Tenants.tenant_topic("big-private-eye", "room2"), "key2", %{})
 
-    assert Usage.scan(Tracker) == %{
-             tenant_count: 2,
-             topic_count: 2,
-             buckets: %{
-               5 => 2,
-               10 => 0,
-               25 => 0,
-               50 => 0,
-               100 => 0,
-               200 => 0,
-               500 => 0,
-               1000 => 0,
-               :infinity => 0
-             }
-           }
+    assert Usage.scan(Tracker) == %{tenant_count: 2, topic_count: 2, buckets: buckets(%{1 => 2})}
   end
 
   test "a public sub_topic containing \"-private:\" doesn't shift the tenant boundary" do
     {:ok, _ref} = Tracker.track(self(), Tenants.tenant_topic("t", "normal"), "key1", %{})
     {:ok, _ref} = Tracker.track(self(), Tenants.tenant_topic("t", "room-private:thing"), "key2", %{})
 
-    assert Usage.scan(Tracker) == %{
-             tenant_count: 1,
-             topic_count: 2,
-             buckets: %{
-               5 => 2,
-               10 => 0,
-               25 => 0,
-               50 => 0,
-               100 => 0,
-               200 => 0,
-               500 => 0,
-               1000 => 0,
-               :infinity => 0
-             }
-           }
+    assert Usage.scan(Tracker) == %{tenant_count: 1, topic_count: 2, buckets: buckets(%{1 => 2})}
   end
 
   @tag pool_size: 4
@@ -120,44 +50,21 @@ defmodule Realtime.Presence.PhoenixUsageTest do
     {:ok, _ref} = Tracker.track(self(), Tenants.tenant_topic("tenantB", "room"), "key2", %{})
     {:ok, _ref} = Tracker.track(self(), Tenants.tenant_topic("tenantA", "room"), "key3", %{})
 
-    assert Usage.scan(Tracker) == %{
-             tenant_count: 3,
-             topic_count: 3,
-             buckets: %{
-               5 => 3,
-               10 => 0,
-               25 => 0,
-               50 => 0,
-               100 => 0,
-               200 => 0,
-               500 => 0,
-               1000 => 0,
-               :infinity => 0
-             }
-           }
+    assert Usage.scan(Tracker) == %{tenant_count: 3, topic_count: 3, buckets: buckets(%{1 => 3})}
   end
 
-  test "bucket boundaries are inclusive: 5 members stays in bucket 5, 6 rolls to bucket 10" do
-    five = Tenants.tenant_topic("tenant1", "five")
-    six = Tenants.tenant_topic("tenant2", "six")
-
-    for key <- ~w(a1 a2 a3 a4 a5), do: {:ok, _ref} = Tracker.track(self(), five, key, %{})
-    for key <- ~w(b1 b2 b3 b4 b5 b6), do: {:ok, _ref} = Tracker.track(self(), six, key, %{})
+  test "bucket boundaries are inclusive: a bound stays in its bucket, one more rolls to the next" do
+    # 1, 2, 3 and 5 are bounds. 4 rolls past the bound 3 into the bucket 5, and 6 rolls past the
+    # bound 5 into the bucket 10.
+    for members <- 1..6 do
+      topic = Tenants.tenant_topic("tenant#{members}", "room")
+      for n <- 1..members, do: {:ok, _ref} = Tracker.track(self(), topic, "key#{n}", %{})
+    end
 
     assert Usage.scan(Tracker) == %{
-             tenant_count: 2,
-             topic_count: 2,
-             buckets: %{
-               5 => 1,
-               10 => 1,
-               25 => 0,
-               50 => 0,
-               100 => 0,
-               200 => 0,
-               500 => 0,
-               1000 => 0,
-               :infinity => 0
-             }
+             tenant_count: 6,
+             topic_count: 6,
+             buckets: buckets(%{1 => 1, 2 => 1, 3 => 1, 5 => 2, 10 => 1})
            }
   end
 
@@ -183,17 +90,7 @@ defmodule Realtime.Presence.PhoenixUsageTest do
     assert Usage.scan(Tracker) == %{
              tenant_count: 7,
              topic_count: 7,
-             buckets: %{
-               5 => 0,
-               10 => 0,
-               25 => 1,
-               50 => 1,
-               100 => 1,
-               200 => 1,
-               500 => 1,
-               1000 => 1,
-               :infinity => 1
-             }
+             buckets: buckets(%{25 => 1, 50 => 1, 100 => 1, 200 => 1, 500 => 1, 1000 => 1, :infinity => 1})
            }
   end
 
@@ -205,21 +102,7 @@ defmodule Realtime.Presence.PhoenixUsageTest do
     :ets.new(tracker, [:set, :public, :named_table])
     :ets.insert(tracker, {:pool_size, 1})
 
-    assert Usage.scan(tracker) == %{
-             tenant_count: 0,
-             topic_count: 0,
-             buckets: %{
-               5 => 0,
-               10 => 0,
-               25 => 0,
-               50 => 0,
-               100 => 0,
-               200 => 0,
-               500 => 0,
-               1000 => 0,
-               :infinity => 0
-             }
-           }
+    assert Usage.scan(tracker) == %{tenant_count: 0, topic_count: 0, buckets: buckets(%{})}
   end
 
   test "a tracker that hasn't started at all is treated as empty, not a crash" do
@@ -227,30 +110,23 @@ defmodule Realtime.Presence.PhoenixUsageTest do
     # RealtimeWeb.Presence has started (e.g. a poller's near-instant first tick during boot).
     tracker = :"usage_test_nonexistent_tracker_#{System.unique_integer([:positive])}"
 
-    assert Usage.scan(tracker) == %{
-             tenant_count: 0,
-             topic_count: 0,
-             buckets: %{
-               5 => 0,
-               10 => 0,
-               25 => 0,
-               50 => 0,
-               100 => 0,
-               200 => 0,
-               500 => 0,
-               1000 => 0,
-               :infinity => 0
-             }
-           }
+    assert Usage.scan(tracker) == %{tenant_count: 0, topic_count: 0, buckets: buckets(%{})}
   end
 
   test "scanning the real RealtimeWeb.Presence returns a well-formed result" do
-    assert %{tenant_count: tenant_count, topic_count: topic_count, buckets: buckets} =
-             Usage.scan(Presence)
+    assert %{tenant_count: tenant_count, topic_count: topic_count, buckets: scanned} = Usage.scan(Presence)
 
     assert is_integer(tenant_count) and tenant_count >= 0
     assert is_integer(topic_count) and topic_count >= 0
-    assert Enum.sort(Map.keys(buckets)) == Enum.sort([5, 10, 25, 50, 100, 200, 500, 1000, :infinity])
-    assert Enum.all?(buckets, fn {_bucket, count} -> is_integer(count) and count >= 0 end)
+    assert Enum.sort(Map.keys(scanned)) == Enum.sort(Map.keys(buckets(%{})))
+    assert Enum.all?(scanned, fn {_bucket, count} -> is_integer(count) and count >= 0 end)
+  end
+
+  # Every bucket of `Realtime.Presence.Usage` and `:infinity`, with the counts in `counts`. A bucket
+  # that `counts` does not name is 0.
+  defp buckets(counts) do
+    (Realtime.Presence.Usage.buckets() ++ [:infinity])
+    |> Map.new(&{&1, 0})
+    |> Map.merge(counts)
   end
 end
