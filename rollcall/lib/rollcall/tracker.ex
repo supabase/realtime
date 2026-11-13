@@ -387,6 +387,8 @@ defmodule Rollcall.Tracker do
 
     {_new, _old} = Registry.update_value(Keyword.fetch!(opts, :name), scope, fn _ -> view end)
 
+    {:reductions, reductions} = Process.info(self(), :reductions)
+
     state = %State{
       scope: scope,
       incarnation: System.monotonic_time(:nanosecond),
@@ -396,7 +398,8 @@ defmodule Rollcall.Tracker do
       silence_threshold: Keyword.get(opts, :silence_threshold, @default_silence_threshold),
       heartbeat_period_in_ms: Keyword.get(opts, :heartbeat_period_in_ms, @default_heartbeat_period_in_ms),
       transport_module: transport_module,
-      transport_state: transport_state
+      transport_state: transport_state,
+      reductions: reductions
     }
 
     # Trap exists in this process so we get terminate/2 callbacks and can send goodbye messages
@@ -520,13 +523,14 @@ defmodule Rollcall.Tracker do
   end
 
   def handle_info(:tick, state) do
-    state =
+    {
+      :noreply,
       state
       |> send_heartbeat()
       |> tick_and_purge_peers()
       |> schedule_heartbeat()
-
-    {:noreply, state}
+      |> emit_usage_metrics()
+    }
   end
 
   # In this catch all handle_info, we see if the message was a message from one
@@ -711,6 +715,24 @@ defmodule Rollcall.Tracker do
         scope: state.scope
       }
     )
+  end
+
+  defp emit_usage_metrics(state) do
+    {:memory, process_bytes} = Process.info(self(), :memory)
+    {:reductions, reductions} = Process.info(self(), :reductions)
+
+    :telemetry.execute(
+      Metrics.tracker_usage(),
+      %{
+        entries: :ets.info(state.view, :size),
+        process_bytes: process_bytes,
+        ets_bytes: :ets.info(state.view, :memory) * :erlang.system_info(:wordsize),
+        reductions: reductions - state.reductions
+      },
+      %{scope: state.scope}
+    )
+
+    %{state | reductions: reductions}
   end
 
   defp update_view(state, changes) do

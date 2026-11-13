@@ -49,7 +49,8 @@ defmodule Rollcall.Tracker.State do
     :silence_threshold,
     :transport_module,
     :transport_state,
-    :heartbeat_period_in_ms
+    :heartbeat_period_in_ms,
+    :reductions
   ]
 
   defstruct [
@@ -62,6 +63,7 @@ defmodule Rollcall.Tracker.State do
     :transport_module,
     :transport_state,
     :heartbeat_period_in_ms,
+    :reductions,
     empty_timer: nil,
     version: 0,
     monitors: %{},
@@ -81,7 +83,8 @@ defmodule Rollcall.Tracker.State do
           peers: %{node() => Peer.t()},
           silence_threshold: pos_integer(),
           transport_module: module(),
-          transport_state: any()
+          transport_state: any(),
+          reductions: non_neg_integer()
         }
 
   @doc """

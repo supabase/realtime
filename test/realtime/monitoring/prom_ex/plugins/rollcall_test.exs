@@ -4,11 +4,18 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
   alias Realtime.PromEx.Plugins.Rollcall, as: RollcallPlugin
   alias Rollcall.Metrics
 
+  # The plugin counts the trackers of this instance, so the count does not depend on the trackers
+  # that other tests start in the Rollcall instance of Realtime.
+  defmodule TestRollcall do
+    @moduledoc false
+    use Rollcall, transport: {Rollcall.Transport.Null, []}
+  end
+
   defmodule MetricsTest do
     use PromEx, otp_app: :realtime_test_rollcall
 
     @impl true
-    def plugins, do: [RollcallPlugin]
+    def plugins, do: [{RollcallPlugin, poll_rate: 50, rollcall: Realtime.PromEx.Plugins.RollcallTest.TestRollcall}]
   end
 
   @started "realtime_rollcall_tracker_started"
@@ -22,8 +29,15 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
   @publish_duration "realtime_rollcall_publish_duration"
   @send_entries "realtime_rollcall_heartbeat_send_entries"
   @publish_entries "realtime_rollcall_publish_entries"
+  @tracker_entries "realtime_rollcall_tracker_entries"
+  @tracker_process_bytes "realtime_rollcall_tracker_process_bytes"
+  @tracker_ets_bytes "realtime_rollcall_tracker_ets_bytes"
+  @tracker_reductions "realtime_rollcall_tracker_reductions"
+
+  @trackers "realtime_rollcall_trackers"
 
   setup_all do
+    start_supervised!(TestRollcall)
     start_supervised!(MetricsTest)
     :ok
   end
@@ -181,6 +195,95 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
     end
   end
 
+  describe "the usage event" do
+    # The values are whole entries, so each bound is half an entry above the value it stands for.
+    test "records the entries of each tracker at each tick in a distribution" do
+      count_before = metric_value(@tracker_entries <> "_count") || 0
+      empty_before = metric_value(@tracker_entries <> "_bucket", le: "0.5") || 0
+      le_100_before = metric_value(@tracker_entries <> "_bucket", le: "100.5") || 0
+      le_500_before = metric_value(@tracker_entries <> "_bucket", le: "500.5") || 0
+
+      usage(entries: 0)
+      usage(entries: 150)
+
+      assert metric_value(@tracker_entries <> "_count") == count_before + 2
+      assert metric_value(@tracker_entries <> "_bucket", le: "0.5") == empty_before + 1
+      assert metric_value(@tracker_entries <> "_bucket", le: "500.5") == le_500_before + 2
+      assert metric_value(@tracker_entries <> "_bucket", le: "100.5") == le_100_before + 1
+    end
+
+    # Peep writes a bound of 1000 or more in scientific notation.
+    test "records the process memory in bytes" do
+      count_before = metric_value(@tracker_process_bytes <> "_count") || 0
+      le_10k_before = metric_value(@tracker_process_bytes <> "_bucket", le: "1.0e4") || 0
+      le_50k_before = metric_value(@tracker_process_bytes <> "_bucket", le: "5.0e4") || 0
+
+      usage(process_bytes: 20_000)
+
+      assert metric_value(@tracker_process_bytes <> "_count") == count_before + 1
+      assert metric_value(@tracker_process_bytes <> "_bucket", le: "5.0e4") == le_50k_before + 1
+      assert (metric_value(@tracker_process_bytes <> "_bucket", le: "1.0e4") || 0) == le_10k_before
+    end
+
+    test "records the memory of the view table in bytes" do
+      count_before = metric_value(@tracker_ets_bytes <> "_count") || 0
+      le_1k_before = metric_value(@tracker_ets_bytes <> "_bucket", le: "1.0e3") || 0
+      le_10k_before = metric_value(@tracker_ets_bytes <> "_bucket", le: "1.0e4") || 0
+
+      usage(ets_bytes: 5_000)
+
+      assert metric_value(@tracker_ets_bytes <> "_count") == count_before + 1
+      assert metric_value(@tracker_ets_bytes <> "_bucket", le: "1.0e4") == le_10k_before + 1
+      assert (metric_value(@tracker_ets_bytes <> "_bucket", le: "1.0e3") || 0) == le_1k_before
+    end
+
+    test "records the reductions of each tick in a distribution" do
+      count_before = metric_value(@tracker_reductions <> "_count") || 0
+      le_1k_before = metric_value(@tracker_reductions <> "_bucket", le: "1.0e3") || 0
+      le_10k_before = metric_value(@tracker_reductions <> "_bucket", le: "1.0e4") || 0
+
+      usage(reductions: 5_000)
+
+      assert metric_value(@tracker_reductions <> "_count") == count_before + 1
+      assert metric_value(@tracker_reductions <> "_bucket", le: "1.0e4") == le_10k_before + 1
+      assert (metric_value(@tracker_reductions <> "_bucket", le: "1.0e3") || 0) == le_1k_before
+    end
+
+    # A value above the last bound has no bucket of its own. The distribution counts it in `+Inf`,
+    # `_count` and `_sum` only.
+    test "counts a memory value above the last bound in +Inf only" do
+      count_before = metric_value(@tracker_process_bytes <> "_count") || 0
+      last_before = metric_value(@tracker_process_bytes <> "_bucket", le: "1.0e8") || 0
+      inf_before = metric_value(@tracker_process_bytes <> "_bucket", le: "+Inf") || 0
+
+      usage(process_bytes: 150_000_000)
+
+      assert metric_value(@tracker_process_bytes <> "_count") == count_before + 1
+      assert metric_value(@tracker_process_bytes <> "_bucket", le: "+Inf") == inf_before + 1
+      assert (metric_value(@tracker_process_bytes <> "_bucket", le: "1.0e8") || 0) == last_before
+    end
+  end
+
+  describe "the tracker gauge" do
+    test "is the number of running trackers of the Rollcall instance" do
+      id = System.unique_integer([:positive])
+      scopes = ["gauge-#{id}-1", "gauge-#{id}-2", "gauge-#{id}-3"]
+      base = metric_value(@trackers) || 0
+
+      for scope <- scopes, do: :ok = TestRollcall.ensure_started(scope)
+      assert_eventually metric_value(@trackers) == base + 3
+
+      pid = Rollcall.Tracker.whereis(TestRollcall, "gauge-#{id}-1")
+      GenServer.stop(pid)
+      assert_eventually metric_value(@trackers) == base + 2
+    end
+
+    # `:telemetry_poller` stops a measurement for good after it raises once.
+    test "does not raise when the Rollcall instance is not running" do
+      assert RollcallPlugin.execute_metrics(Realtime.PromEx.Plugins.RollcallTest.NoSuchRollcall) == :ok
+    end
+  end
+
   # The metrics are global. A scope label would give each tenant its own series.
   test "no metric has a scope label" do
     scope = "scope-label-check"
@@ -203,7 +306,14 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
 
     :telemetry.execute(Metrics.tracker_publish(), %{duration: native(50), entries: 1}, %{scope: scope, source: :local})
 
+    usage([], scope)
+
     metrics = [
+      @trackers,
+      @tracker_entries <> "_count",
+      @tracker_process_bytes <> "_count",
+      @tracker_ets_bytes <> "_count",
+      @tracker_reductions <> "_count",
       @started,
       @stopped,
       @purged,
@@ -223,6 +333,12 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
 
     # The apply event also carries the node of the peer, which is not a label either.
     assert metric_value(@apply_duration <> "_count", node: "a@host") == nil
+  end
+
+  defp usage(measurements, scope \\ "tenant-a") do
+    defaults = %{entries: 1, process_bytes: 20_000, ets_bytes: 2_000, reductions: 1_000}
+
+    :telemetry.execute(Metrics.tracker_usage(), Map.merge(defaults, Map.new(measurements)), %{scope: scope})
   end
 
   defp native(microseconds), do: System.convert_time_unit(microseconds, :microsecond, :native)

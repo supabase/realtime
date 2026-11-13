@@ -95,6 +95,22 @@ defmodule Rollcall.Metrics do
       message from a peer, and `:purge` for the purge of a peer.
 
       The tracker emits no event when there are no changes to publish.
+
+    * `tracker_usage/0` - the resources that a tracker uses. The tracker emits
+      the event at the end of each tick, after it purged the silent peers.
+
+      Measurements:
+
+        * `entries` - the number of entries in the view: the local entries plus
+          the entries of the peers.
+        * `process_bytes` - the memory of the tracker process, in bytes. It is the
+          `:memory` value of `Process.info/2`.
+        * `ets_bytes` - the memory of the view table, in bytes.
+        * `reductions` - the reductions that the tracker process used since the
+          previous tick. For the first tick, it is the reductions since the
+          tracker started.
+
+      Metadata: `scope`.
   """
 
   @typedoc "The name of a telemetry event."
@@ -113,6 +129,8 @@ defmodule Rollcall.Metrics do
   @tracker_heartbeat_apply [:rollcall, :tracker, :heartbeat, :apply]
 
   @tracker_publish [:rollcall, :tracker, :publish]
+
+  @tracker_usage [:rollcall, :tracker, :usage]
 
   @doc "Returns the name of the event for a purge of a peer record. See the module doc."
   @spec tracker_peer_purge() :: event_name()
@@ -141,4 +159,8 @@ defmodule Rollcall.Metrics do
   @doc "Returns the name of the event for the time to publish changes. See the module doc."
   @spec tracker_publish() :: event_name()
   def tracker_publish, do: @tracker_publish
+
+  @doc "Returns the name of the event for the resources that a tracker uses. See the module doc."
+  @spec tracker_usage() :: event_name()
+  def tracker_usage, do: @tracker_usage
 end

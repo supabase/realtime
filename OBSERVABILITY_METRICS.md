@@ -177,6 +177,11 @@ These metrics come from the telemetry events of Rollcall, the presence tracker. 
 | `realtime_rollcall_heartbeat_send_entries_bucket` | Histogram | The entries in each heartbeat that a Rollcall tracker sends, tagged by the `kind` of the message (`snapshot` or `diff`). A snapshot holds all the local entries of the tracker. The bucket bounds are half an entry above a value, so an empty heartbeat is in the `le="0.5"` bucket. | Global Aggregate | `/metrics` |
 | `realtime_rollcall_publish_entries`            | Counter   | The joins and the leaves that Rollcall trackers publish, tagged by `source`: `local` (clients), `peer` (a message from a peer) or `purge` (a peer that was purged). | Global Aggregate | `/metrics` |
 | `realtime_rollcall_publish_duration_bucket`    | Histogram | Time of one call that publishes the changes of a Rollcall partition, in microseconds, tagged by `source` (`local`, `peer` or `purge`). It depends on the subscribers of the partition. | Global Aggregate | `/metrics` |
+| `realtime_rollcall_tracker_entries_bucket` | Histogram | The entries in the view of a Rollcall tracker, counted at each tick: the local entries plus the entries of the peers. The bucket bounds are half an entry above a value, so an empty view is in the `le="0.5"` bucket. | Global Aggregate | `/metrics` |
+| `realtime_rollcall_tracker_process_bytes_bucket` | Histogram | The memory of a Rollcall tracker process, in bytes, counted at each tick. It is the memory value of `Process.info/2`: the heap, the stack and the mailbox. The last bound is 100 MB. A larger value counts in the `+Inf` bucket only. | Global Aggregate | `/metrics` |
+| `realtime_rollcall_tracker_ets_bytes_bucket` | Histogram | The memory of the view table of a Rollcall tracker, in bytes, counted at each tick. The last bound is 100 MB. A larger value counts in the `+Inf` bucket only. | Global Aggregate | `/metrics` |
+| `realtime_rollcall_tracker_reductions_bucket` | Histogram | The reductions that a Rollcall tracker process used since its previous tick. It measures the CPU work of a tracker in each period. | Global Aggregate | `/metrics` |
+| `realtime_rollcall_trackers` | Gauge | The Rollcall trackers that run on this node. Each tenant with presence has one tracker. | Per-Node | `/metrics` |
 
 ## Tenant Migration Metrics
 

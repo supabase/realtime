@@ -31,10 +31,23 @@ defmodule Realtime.PromEx.Plugins.Rollcall do
       that a tracker sends, by `kind`. A snapshot holds all the local entries of the tracker.
     * `realtime_rollcall_publish_entries` - the joins and the leaves that trackers publish, by
       `source`. It is the churn of the entries.
+    * `realtime_rollcall_tracker_entries` - a distribution of the entries in the view of a tracker:
+      the local entries plus the entries of the peers. The tracker takes one observation at each tick.
+    * `realtime_rollcall_tracker_process_bytes` - a distribution of the memory of a tracker process,
+      in bytes. A value above 100 MB counts in the `+Inf` bucket only.
+    * `realtime_rollcall_tracker_ets_bytes` - a distribution of the memory of the view table of a
+      tracker, in bytes. A value above 100 MB counts in the `+Inf` bucket only.
+    * `realtime_rollcall_tracker_reductions` - a distribution of the reductions that a tracker process
+      used since its previous tick.
+    * `realtime_rollcall_trackers` - a gauge of the trackers that run on this node. The plugin polls
+      the Registry of the Rollcall instance. The option `:rollcall` sets the instance. The default
+      is `Realtime.Presence.Rollcall`.
 
   The events carry each `duration` in native time units, and the plugin converts it to microseconds.
   """
   use PromEx.Plugin
+
+  @event_trackers [:prom_ex, :plugin, :rollcall, :trackers]
 
   defmodule SilentTicks.Buckets do
     @moduledoc false
@@ -58,6 +71,33 @@ defmodule Realtime.PromEx.Plugins.Rollcall do
     # bound, so each bound is half an entry above the value it stands for. An empty heartbeat, from a
     # tracker with no local entry, has its own bucket.
     use Peep.Buckets.Custom, buckets: [0.5, 1.5, 5.5, 10.5, 50.5, 100.5, 500.5, 1_000.5, 5_000.5, 10_000.5]
+  end
+
+  defmodule Bytes.Buckets do
+    @moduledoc false
+    # Bytes. An idle tracker process uses about 10 to 20 KB. The view table of a tracker with no entry
+    # uses about 1 KB. Both grow with the number of entries. A value above the last bound counts in
+    # the `+Inf` bucket only.
+    use Peep.Buckets.Custom,
+      buckets: [
+        1_000,
+        10_000,
+        50_000,
+        100_000,
+        500_000,
+        1_000_000,
+        5_000_000,
+        10_000_000,
+        50_000_000,
+        100_000_000
+      ]
+  end
+
+  defmodule Reductions.Buckets do
+    @moduledoc false
+    # Reductions of one tick, in powers of ten. The bounds are a first guess. Adjust them when the
+    # metric has data.
+    use Peep.Buckets.Custom, buckets: [100, 1_000, 10_000, 100_000, 1_000_000, 10_000_000]
   end
 
   @impl true
@@ -150,8 +190,74 @@ defmodule Realtime.PromEx.Plugins.Rollcall do
         description:
           "The joins and the leaves that Rollcall trackers publish, tagged by source: local (clients), peer (a message from a peer) or purge (a peer that was purged).",
         tags: [:source]
+      ),
+      distribution(
+        [:realtime, :rollcall, :tracker, :entries],
+        event_name: Rollcall.Metrics.tracker_usage(),
+        measurement: :entries,
+        description:
+          "The entries in the view of a Rollcall tracker, counted at each tick: the local entries plus the entries of the peers.",
+        reporter_options: [peep_bucket_calculator: Entries.Buckets]
+      ),
+      distribution(
+        [:realtime, :rollcall, :tracker, :process, :bytes],
+        event_name: Rollcall.Metrics.tracker_usage(),
+        measurement: :process_bytes,
+        description:
+          "The memory of a Rollcall tracker process, in bytes, counted at each tick. It is the memory value of Process.info/2: the heap, the stack and the mailbox.",
+        reporter_options: [peep_bucket_calculator: Bytes.Buckets]
+      ),
+      distribution(
+        [:realtime, :rollcall, :tracker, :ets, :bytes],
+        event_name: Rollcall.Metrics.tracker_usage(),
+        measurement: :ets_bytes,
+        description: "The memory of the view table of a Rollcall tracker, in bytes, counted at each tick.",
+        reporter_options: [peep_bucket_calculator: Bytes.Buckets]
+      ),
+      distribution(
+        [:realtime, :rollcall, :tracker, :reductions],
+        event_name: Rollcall.Metrics.tracker_usage(),
+        measurement: :reductions,
+        description:
+          "The reductions that a Rollcall tracker process used since its previous tick. It measures the CPU work of a tracker in each period.",
+        reporter_options: [peep_bucket_calculator: Reductions.Buckets]
       )
     ])
+  end
+
+  @impl true
+  def polling_metrics(opts) do
+    poll_rate = Keyword.get(opts, :poll_rate)
+    rollcall = Keyword.get(opts, :rollcall, Realtime.Presence.Rollcall)
+
+    [
+      Polling.build(
+        :realtime_rollcall_polling_metrics,
+        poll_rate,
+        {__MODULE__, :execute_metrics, [rollcall]},
+        [
+          last_value(
+            [:realtime, :rollcall, :trackers],
+            event_name: @event_trackers,
+            description: "The Rollcall trackers that run on this node. Each tenant with presence has one tracker.",
+            measurement: :count
+          )
+        ],
+        detach_on_error: false
+      )
+    ]
+  end
+
+  @doc """
+  Emits the number of running trackers of the Rollcall instance `rollcall`.
+
+  `:telemetry_poller` stops a measurement for good after it raises once. `Registry.count/1` raises
+  when the Registry of the instance is not running, so the function emits no event in that case.
+  """
+  def execute_metrics(rollcall) do
+    :telemetry.execute(@event_trackers, %{count: Registry.count(rollcall)}, %{})
+  rescue
+    ArgumentError -> :ok
   end
 
   # The reason of a stop is the exit reason of the tracker, which can be any term. The tag has three
