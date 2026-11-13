@@ -882,6 +882,33 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert_process_down(channel_pid)
     end
 
+    @tag policies: [:authenticated_all_topic_read]
+    test "client rate limit counts tracks denied by the presence write policy", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      config = %{"config" => %{"private" => true, "presence" => %{"enabled" => true}}}
+      assert {:ok, _, %Socket{channel_pid: channel_pid} = socket} = subscribe_and_join(socket, "realtime:test", config)
+
+      capture_log(fn ->
+        for i <- 1..5 do
+          ref = push(socket, "presence", %{"type" => "presence", "event" => "TRACK", "payload" => %{"call" => i}})
+          assert_receive %Socket.Reply{ref: ^ref, status: :error}, 500
+        end
+
+        push(socket, "presence", %{"type" => "presence", "event" => "TRACK", "payload" => %{"call" => 6}})
+
+        assert_receive %Socket.Message{
+                         topic: "realtime:test",
+                         event: "system",
+                         payload: %{message: "Client presence rate limit exceeded", status: "error"}
+                       },
+                       500
+      end)
+
+      assert_process_down(channel_pid)
+    end
+
     test "client rate limits are independent per connection", %{tenant: tenant} do
       jwt1 = Generators.generate_jwt_token(tenant)
       jwt2 = Generators.generate_jwt_token(tenant)
