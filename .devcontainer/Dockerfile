@@ -10,9 +10,10 @@ ENV DEBIAN_FRONTEND=noninteractive
 # inotify-tools backs Phoenix live reload
 # sudo is for post-create's chown
 # procps supplies the `ps` the VS Code server probes with
+# gh is practical and loved by claude and friends
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential autoconf libncurses-dev libssl-dev \
-      ca-certificates curl git inotify-tools locales openssh-client \
+      ca-certificates curl gh git inotify-tools locales openssh-client \
       postgresql-client procps sudo zsh \
     && rm -rf /var/lib/apt/lists/*
 
