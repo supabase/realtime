@@ -126,7 +126,7 @@ defmodule Realtime.PromEx do
       {GenRpc, poll_rate: poll_rate},
       {Muster, poll_rate: poll_rate},
       {Presence, poll_rate: presence_usage_poll_rate},
-      Rollcall,
+      {Rollcall, poll_rate: poll_rate},
       {PolicyEval, poll_rate: poll_rate},
       ClientRequests
     ]

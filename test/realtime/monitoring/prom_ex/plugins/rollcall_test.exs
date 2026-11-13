@@ -4,11 +4,18 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
   alias Realtime.PromEx.Plugins.Rollcall, as: RollcallPlugin
   alias Rollcall.Metrics
 
+  # The plugin counts the trackers of this instance, so the count does not depend on the trackers
+  # that other tests start in the Rollcall instance of Realtime.
+  defmodule TestRollcall do
+    @moduledoc false
+    use Rollcall, transport: {Rollcall.Transport.Null, []}
+  end
+
   defmodule MetricsTest do
     use PromEx, otp_app: :realtime_test_rollcall
 
     @impl true
-    def plugins, do: [RollcallPlugin]
+    def plugins, do: [{RollcallPlugin, poll_rate: 50, rollcall: Realtime.PromEx.Plugins.RollcallTest.TestRollcall}]
   end
 
   @started "realtime_rollcall_tracker_started"
@@ -27,7 +34,10 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
   @tracker_ets_bytes "realtime_rollcall_tracker_ets_bytes"
   @tracker_reductions "realtime_rollcall_tracker_reductions"
 
+  @trackers "realtime_rollcall_trackers"
+
   setup_all do
+    start_supervised!(TestRollcall)
     start_supervised!(MetricsTest)
     :ok
   end
@@ -254,6 +264,26 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
     end
   end
 
+  describe "the tracker gauge" do
+    test "is the number of running trackers of the Rollcall instance" do
+      id = System.unique_integer([:positive])
+      scopes = ["gauge-#{id}-1", "gauge-#{id}-2", "gauge-#{id}-3"]
+      base = metric_value(@trackers) || 0
+
+      for scope <- scopes, do: :ok = TestRollcall.ensure_started(scope)
+      assert_eventually metric_value(@trackers) == base + 3
+
+      pid = Rollcall.Tracker.whereis(TestRollcall, "gauge-#{id}-1")
+      GenServer.stop(pid)
+      assert_eventually metric_value(@trackers) == base + 2
+    end
+
+    # `:telemetry_poller` stops a measurement for good after it raises once.
+    test "does not raise when the Rollcall instance is not running" do
+      assert RollcallPlugin.execute_metrics(Realtime.PromEx.Plugins.RollcallTest.NoSuchRollcall) == :ok
+    end
+  end
+
   # The metrics are global. A scope label would give each tenant its own series.
   test "no metric has a scope label" do
     scope = "scope-label-check"
@@ -279,6 +309,7 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
     usage([], scope)
 
     metrics = [
+      @trackers,
       @tracker_entries <> "_count",
       @tracker_process_bytes <> "_count",
       @tracker_ets_bytes <> "_count",

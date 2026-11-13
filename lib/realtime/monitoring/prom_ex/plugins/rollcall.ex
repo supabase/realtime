@@ -39,10 +39,15 @@ defmodule Realtime.PromEx.Plugins.Rollcall do
       tracker, in bytes. A value above 100 MB counts in the `+Inf` bucket only.
     * `realtime_rollcall_tracker_reductions` - a distribution of the reductions that a tracker process
       used since its previous tick.
+    * `realtime_rollcall_trackers` - a gauge of the trackers that run on this node. The plugin polls
+      the Registry of the Rollcall instance. The option `:rollcall` sets the instance. The default
+      is `Realtime.Presence.Rollcall`.
 
   The events carry each `duration` in native time units, and the plugin converts it to microseconds.
   """
   use PromEx.Plugin
+
+  @event_trackers [:prom_ex, :plugin, :rollcall, :trackers]
 
   defmodule SilentTicks.Buckets do
     @moduledoc false
@@ -218,6 +223,41 @@ defmodule Realtime.PromEx.Plugins.Rollcall do
         reporter_options: [peep_bucket_calculator: Reductions.Buckets]
       )
     ])
+  end
+
+  @impl true
+  def polling_metrics(opts) do
+    poll_rate = Keyword.get(opts, :poll_rate)
+    rollcall = Keyword.get(opts, :rollcall, Realtime.Presence.Rollcall)
+
+    [
+      Polling.build(
+        :realtime_rollcall_polling_metrics,
+        poll_rate,
+        {__MODULE__, :execute_metrics, [rollcall]},
+        [
+          last_value(
+            [:realtime, :rollcall, :trackers],
+            event_name: @event_trackers,
+            description: "The Rollcall trackers that run on this node. Each tenant with presence has one tracker.",
+            measurement: :count
+          )
+        ],
+        detach_on_error: false
+      )
+    ]
+  end
+
+  @doc """
+  Emits the number of running trackers of the Rollcall instance `rollcall`.
+
+  `:telemetry_poller` stops a measurement for good after it raises once. `Registry.count/1` raises
+  when the Registry of the instance is not running, so the function emits no event in that case.
+  """
+  def execute_metrics(rollcall) do
+    :telemetry.execute(@event_trackers, %{count: Registry.count(rollcall)}, %{})
+  rescue
+    ArgumentError -> :ok
   end
 
   # The reason of a stop is the exit reason of the tracker, which can be any term. The tag has three

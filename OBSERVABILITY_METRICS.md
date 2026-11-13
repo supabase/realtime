@@ -181,6 +181,7 @@ These metrics come from the telemetry events of Rollcall, the presence tracker. 
 | `realtime_rollcall_tracker_process_bytes_bucket` | Histogram | The memory of a Rollcall tracker process, in bytes, counted at each tick. It is the memory value of `Process.info/2`: the heap, the stack and the mailbox. The last bound is 100 MB. A larger value counts in the `+Inf` bucket only. | Global Aggregate | `/metrics` |
 | `realtime_rollcall_tracker_ets_bytes_bucket` | Histogram | The memory of the view table of a Rollcall tracker, in bytes, counted at each tick. The last bound is 100 MB. A larger value counts in the `+Inf` bucket only. | Global Aggregate | `/metrics` |
 | `realtime_rollcall_tracker_reductions_bucket` | Histogram | The reductions that a Rollcall tracker process used since its previous tick. It measures the CPU work of a tracker in each period. | Global Aggregate | `/metrics` |
+| `realtime_rollcall_trackers` | Gauge | The Rollcall trackers that run on this node. Each tenant with presence has one tracker. | Per-Node | `/metrics` |
 
 ## Tenant Migration Metrics
 
