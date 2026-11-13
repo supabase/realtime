@@ -34,13 +34,24 @@
     "MISE_TRUSTED_CONFIG_PATHS": "${localWorkspaceFolder}"
   },
 
-  // Write-heavy, many-small-file dirs: several times slower over a macOS bind mount even
-  // under VirtioFS. All are gitignored, so keeping them out of the host tree loses nothing.
   "mounts": [
+    // Write-heavy, many-small-file dirs: several times slower over a macOS bind mount even
+    // under VirtioFS. All are gitignored, so keeping them out of the host tree loses nothing.
     "source=realtime-build-${devcontainerId},target=${containerWorkspaceFolder}/_build,type=volume",
     "source=realtime-deps-${devcontainerId},target=${containerWorkspaceFolder}/deps,type=volume",
     "source=realtime-node-modules-${devcontainerId},target=${containerWorkspaceFolder}/assets/node_modules,type=volume",
-    "source=realtime-plts-${devcontainerId},target=${containerWorkspaceFolder}/priv/plts,type=volume"
+    "source=realtime-plts-${devcontainerId},target=${containerWorkspaceFolder}/priv/plts,type=volume",
+
+    // The home dir, so shell history, logins and tool state survive a rebuild. Docker seeds a
+    // new volume from the image, ownership included, but never again after that - see the
+    // Dockerfile. `docker volume rm realtime-home-<id>` resets it.
+    "source=realtime-home-${devcontainerId},target=/home/vscode,type=volume",
+
+    // Opt-in, e.g. for the folder holding sibling checkouts. Set on the host, at the host path
+    // like the workspace (so `docker run -v` paths from in here resolve on the daemon):
+    //   REALTIME_DEVCONTAINER_EXTRA_MOUNT="type=bind,source=$HOME/code,target=$HOME/code"
+    // Unset, it is an empty throwaway volume: a mount entry cannot be left out conditionally.
+    "${localEnv:REALTIME_DEVCONTAINER_EXTRA_MOUNT:type=volume,source=realtime-no-extra-mount,target=/tmp/no-extra-mount}"
   ],
 
   "postCreateCommand": ".devcontainer/post-create.sh",
