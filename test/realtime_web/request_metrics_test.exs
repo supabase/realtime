@@ -171,4 +171,49 @@ defmodule RealtimeWeb.RequestMetricsTest do
       end
     end
   end
+
+  describe "broadcast_error_codes/0" do
+    test "a code gives one kind of outcome, and no code is listed twice" do
+      %{rejected: rejected, upstream_failure: upstream_failure} = RequestMetrics.broadcast_error_codes()
+
+      assert rejected == Enum.uniq(rejected)
+      assert upstream_failure == Enum.uniq(upstream_failure)
+      assert MapSet.disjoint?(MapSet.new(rejected), MapSet.new(upstream_failure))
+    end
+
+    test "each listed code gives the kind of its list" do
+      for {kind, codes} <- RequestMetrics.broadcast_error_codes(), code <- codes do
+        assert {^kind, ^code} = RequestMetrics.classify_broadcast_error(code)
+      end
+    end
+  end
+
+  # Single and Batch share this mapping. The values are what `Connect` and `Authorization` return.
+  describe "classify_authorization_error/1" do
+    for {error, outcome} <- [
+          {{:error, :tenant_database_unavailable}, {:upstream_failure, :unable_to_connect_to_project}},
+          {{:error, :initializing}, {:upstream_failure, :initializing_project_connection}},
+          {{:error, :tenant_database_connection_initializing}, {:upstream_failure, :initializing_project_connection}},
+          {{:error, :tenant_db_too_many_connections}, {:upstream_failure, :database_lack_of_connections}},
+          {{:error, :connect_rate_limit_reached}, {:upstream_failure, :database_connection_rate_limit_reached}},
+          {{:error, :increase_connection_pool}, {:upstream_failure, :increase_connection_pool}},
+          {{:error, :rls_policy_error, "x"}, {:upstream_failure, :rls_policy_error}},
+          {{:error, :query_canceled, "x"}, {:upstream_failure, :query_canceled}},
+          {{:error, :missing_partition}, {:internal_failure, :missing_partition}},
+          {{:error, :rpc_error, :timeout}, {:internal_failure, :unable_to_handle_broadcast}}
+        ] do
+      test "#{inspect(error)} is #{inspect(outcome)}" do
+        assert unquote(Macro.escape(outcome)) ==
+                 RequestMetrics.classify_authorization_error(unquote(Macro.escape(error)))
+      end
+    end
+
+    test "an error it does not know is an internal failure" do
+      expected = {:internal_failure, :unable_to_set_policies}
+
+      assert expected == RequestMetrics.classify_authorization_error({:error, "boom"})
+      assert expected == RequestMetrics.classify_authorization_error({:error, :brand_new})
+      assert expected == RequestMetrics.classify_authorization_error({:error, :brand_new, "detail"})
+    end
+  end
 end

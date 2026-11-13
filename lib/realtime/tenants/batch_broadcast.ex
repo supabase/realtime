@@ -216,29 +216,14 @@ defmodule Realtime.Tenants.BatchBroadcast do
     case permissions_for_message(tenant, auth_params, topic) do
       %Policies{broadcast: %BroadcastPolicies{write: true}} -> :success
       %Policies{broadcast: %BroadcastPolicies{}} -> RequestMetrics.classify_broadcast_error(:unauthorized)
-      {:error, _} = error -> RequestMetrics.classify_broadcast_error(authorization_error_code(error))
-      {:error, _, _} = error -> RequestMetrics.classify_broadcast_error(authorization_error_code(error))
+      {:error, _} = error -> RequestMetrics.classify_authorization_error(error)
+      {:error, _, _} = error -> RequestMetrics.classify_authorization_error(error)
       _ -> nil
     end
   end
 
   defp outcome_per_message(nil, _events), do: []
   defp outcome_per_message(outcome, events), do: List.duplicate(outcome, length(events))
-
-  defp authorization_error_code({:error, :tenant_database_unavailable}), do: :unable_to_connect_to_project
-
-  defp authorization_error_code({:error, reason})
-       when reason in [:initializing, :tenant_database_connection_initializing],
-       do: :initializing_project_connection
-
-  defp authorization_error_code({:error, :tenant_db_too_many_connections}), do: :database_lack_of_connections
-  defp authorization_error_code({:error, :connect_rate_limit_reached}), do: :database_connection_rate_limit_reached
-  defp authorization_error_code({:error, :increase_connection_pool}), do: :increase_connection_pool
-  defp authorization_error_code({:error, :missing_partition}), do: :missing_partition
-  defp authorization_error_code({:error, :rpc_error, _}), do: :unable_to_handle_broadcast
-  defp authorization_error_code({:error, :rls_policy_error, _}), do: :rls_policy_error
-  defp authorization_error_code({:error, :query_canceled, _}), do: :query_canceled
-  defp authorization_error_code(_error), do: :unable_to_set_policies
 
   # An invalid message rejects the whole batch, but each message gets its own reason. When an entry is not
   # an object, `cast_embed` keeps no message changesets, so every entry counts as invalid and the count comes
