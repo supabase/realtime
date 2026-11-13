@@ -25,6 +25,7 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
   @tracker_entries "realtime_rollcall_tracker_entries"
   @tracker_process_bytes "realtime_rollcall_tracker_process_bytes"
   @tracker_ets_bytes "realtime_rollcall_tracker_ets_bytes"
+  @tracker_reductions "realtime_rollcall_tracker_reductions"
 
   setup_all do
     start_supervised!(MetricsTest)
@@ -226,6 +227,18 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
       assert (metric_value(@tracker_ets_bytes <> "_bucket", le: "1.0e3") || 0) == le_1k_before
     end
 
+    test "records the reductions of each tick in a distribution" do
+      count_before = metric_value(@tracker_reductions <> "_count") || 0
+      le_1k_before = metric_value(@tracker_reductions <> "_bucket", le: "1.0e3") || 0
+      le_10k_before = metric_value(@tracker_reductions <> "_bucket", le: "1.0e4") || 0
+
+      usage(reductions: 5_000)
+
+      assert metric_value(@tracker_reductions <> "_count") == count_before + 1
+      assert metric_value(@tracker_reductions <> "_bucket", le: "1.0e4") == le_10k_before + 1
+      assert (metric_value(@tracker_reductions <> "_bucket", le: "1.0e3") || 0) == le_1k_before
+    end
+
     # A value above the last bound has no bucket of its own. The distribution counts it in `+Inf`,
     # `_count` and `_sum` only.
     test "counts a memory value above the last bound in +Inf only" do
@@ -269,6 +282,7 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
       @tracker_entries <> "_count",
       @tracker_process_bytes <> "_count",
       @tracker_ets_bytes <> "_count",
+      @tracker_reductions <> "_count",
       @started,
       @stopped,
       @purged,
