@@ -8,11 +8,14 @@ defmodule Realtime.PromEx.Plugins.Presence do
     * the latency from a client's join to its first presence_state push,
     * the duration of a client's track, untrack or update call on the presence shard,
     * periodic usage numbers (tenant/topic counts, member-count distribution)
-      read off Phoenix.Tracker's own replicated state.
+      for each backend, tagged by `implementation`: read off Phoenix.Tracker's own
+      replicated state, and read off the views of the Rollcall trackers. Both
+      backends use the buckets of `Realtime.Presence.Usage`.
     * errors that occur when a tracker is running in shadow mode
   """
 
-  alias RealtimeWeb.Presence
+  alias Realtime.Presence.PhoenixUsage
+  alias Realtime.Presence.Usage
   use PromEx.Plugin
   use Realtime.Logs
 
@@ -116,38 +119,46 @@ defmodule Realtime.PromEx.Plugins.Presence do
   @impl true
   def polling_metrics(opts) do
     poll_rate = Keyword.get(opts, :poll_rate)
+    rollcall = Keyword.get(opts, :rollcall, Realtime.Presence.Rollcall)
 
     [
       Polling.build(
         :realtime_presence_usage_metrics,
         poll_rate,
-        {__MODULE__, :execute_usage_metrics, [RealtimeWeb.Presence]},
+        {__MODULE__, :execute_usage_metrics, [RealtimeWeb.Presence, rollcall]},
         [
           last_value(
             [:realtime, :presence, :usage, :tenants],
             event_name: @event_usage,
-            description: "The count of tenants with at least one live tracked presence member.",
-            measurement: :tenant_count
+            description:
+              "The count of tenants with at least one live tracked presence member, tagged by implementation (phoenix or rollcall).",
+            measurement: :tenant_count,
+            tags: [:implementation]
           ),
           last_value(
             [:realtime, :presence, :usage, :topics],
             event_name: @event_usage,
-            description: "The count of presence topics with at least one live tracked member.",
-            measurement: :topic_count
+            description:
+              "The count of presence topics with at least one live tracked member, tagged by implementation (phoenix or rollcall).",
+            measurement: :topic_count,
+            tags: [:implementation]
           ),
           last_value(
             [:realtime, :presence, :usage, :topics_by_bucket],
             event_name: @event_usage_bucket,
-            description: "The count of presence topics whose live member count falls in a given bucket.",
+            description:
+              "The count of presence topics whose live member count falls in a given bucket, tagged by implementation (phoenix or rollcall).",
             measurement: :count,
-            tags: [:bucket]
+            tags: [:bucket, :implementation]
           ),
           distribution(
             [:realtime, :presence, :usage, :scan, :duration, :milliseconds],
             event_name: @event_usage,
             measurement: :duration,
             unit: :millisecond,
-            description: "Time taken to scan Phoenix.Tracker's replicated state for presence usage metrics.",
+            description:
+              "Time taken to read the presence usage numbers, tagged by implementation: a scan of Phoenix.Tracker's replicated state, or a scan of the views of the Rollcall trackers.",
+            tags: [:implementation],
             reporter_options: [peep_bucket_calculator: Scan.Buckets]
           )
         ],
@@ -157,12 +168,14 @@ defmodule Realtime.PromEx.Plugins.Presence do
   end
 
   @doc """
-  Emits usage metrics by scanning presence buckets.
+  Emits usage metrics for each backend: a scan of the Phoenix `tracker`, and a scan of the views of the
+  Rollcall instance `rollcall`. The events carry the `implementation` in their metadata.
 
-  Runs the scan in an unlinked, supervised task with a timeout: a crash or a hang in
-  `Presence.Usage.scan/1` must never crash or wedge this poller - `:telemetry_poller` permanently
+  Runs each scan in an unlinked, supervised task, and waits for both with one timeout: a crash or a
+  hang in a scan must never crash or wedge this poller - `:telemetry_poller` permanently
   stops calling any measurement that raises, so letting that happen here would silently kill this
-  metric for the life of the node, not just for one poll.
+  metric for the life of the node, not just for one poll. The scans run at the same time, so the
+  worst case of one poll stays under the poll interval. A failure in one scan does not stop the other.
 
   The `catch` below exists for the same reason, one level up: `Task.Supervisor.async_nolink/2`
   itself exits (not raises) if `Realtime.TaskSupervisor` isn't registered yet, which `rescue`
@@ -171,33 +184,52 @@ defmodule Realtime.PromEx.Plugins.Presence do
   supervision-tree order here is exactly the kind of assumption that's easy to break without
   noticing, so this is a second layer of defence.
   """
-  def execute_usage_metrics(tracker) do
-    task = Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn -> scan_and_measure(tracker) end)
+  def execute_usage_metrics(tracker, rollcall) do
+    scans = [phoenix: fn -> PhoenixUsage.scan(tracker) end, rollcall: fn -> rollcall_usage(rollcall) end]
 
-    case Task.yield(task, @scan_timeout) || Task.shutdown(task, :brutal_kill) do
-      {:ok, :ok} ->
-        :ok
-
-      {:exit, reason} ->
-        log_error("PresenceUsageScanCrashed", reason)
-
-      nil ->
-        log_error("PresenceUsageScanTimeout", "Presence usage scan did not complete within #{@scan_timeout}ms")
-    end
+    Realtime.TaskSupervisor
+    |> Task.Supervisor.async_stream_nolink(
+      scans,
+      fn {implementation, scan} -> scan_and_measure(implementation, scan) end,
+      timeout: @scan_timeout,
+      on_timeout: :kill_task,
+      zip_input_on_exit: true
+    )
+    |> Enum.each(&log_scan_failure/1)
   catch
     :exit, reason -> log_error("PresenceUsageScanSetupFailed", reason)
   end
 
-  defp scan_and_measure(tracker) do
+  defp log_scan_failure({:ok, :ok}), do: :ok
+
+  defp log_scan_failure({:exit, {{implementation, _scan}, :timeout}}) do
+    log_error(
+      "PresenceUsageScanTimeout",
+      "#{implementation}: Presence usage scan did not complete within #{@scan_timeout}ms"
+    )
+  end
+
+  defp log_scan_failure({:exit, {{implementation, _scan}, reason}}),
+    do: log_error("PresenceUsageScanCrashed", "#{implementation}: #{inspect(reason)}")
+
+  # A Rollcall scope is a tenant and a Rollcall partition is a topic.
+  defp rollcall_usage(rollcall) do
+    %{scope_count: scope_count, partition_count: partition_count, entry_count_buckets: buckets} =
+      Rollcall.usage(rollcall, Usage.buckets())
+
+    %{tenant_count: scope_count, topic_count: partition_count, buckets: buckets}
+  end
+
+  defp scan_and_measure(implementation, scan) do
     start = System.monotonic_time()
-    scan = Presence.Usage.scan(tracker)
+    usage = scan.()
     duration = System.convert_time_unit(System.monotonic_time() - start, :native, :millisecond)
 
-    measurements = scan |> Map.take([:tenant_count, :topic_count]) |> Map.put(:duration, duration)
-    :telemetry.execute(@event_usage, measurements)
+    measurements = usage |> Map.take([:tenant_count, :topic_count]) |> Map.put(:duration, duration)
+    :telemetry.execute(@event_usage, measurements, %{implementation: implementation})
 
-    Enum.each(scan.buckets, fn {bucket, count} ->
-      :telemetry.execute(@event_usage_bucket, %{count: count}, %{bucket: bucket})
+    Enum.each(usage.buckets, fn {bucket, count} ->
+      :telemetry.execute(@event_usage_bucket, %{count: count}, %{bucket: bucket, implementation: implementation})
     end)
 
     :ok
