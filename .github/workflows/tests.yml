@@ -24,6 +24,7 @@ on:
       - ".github/workflows/tests.yml"
       - ".github/db-images.json"
       - ".github/scripts/db_images.sh"
+      - ".github/scripts/run_tests_with_retry.sh"
 
   push:
     branches:
