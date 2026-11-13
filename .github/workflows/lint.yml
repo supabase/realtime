@@ -34,15 +34,15 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@v6.0.2
       - name: Setup elixir
         id: beam
-        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1.24.0
+        uses: erlef/setup-beam@v1.24.0
         with:
           otp-version: 28.5.0.4 # Define the OTP version [required]
           elixir-version: 1.19.5 # Define the elixir version [required]
       - name: Cache Mix
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@v5.0.4
         with:
           path: |
             deps
@@ -69,11 +69,11 @@ jobs:
       - name: Run sobelow
         run: mix sobelow --config
       - name: Retrieve PLT Cache
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@v5.0.4
         id: plt-cache
         with:
           path: priv/plts
-          key: ${{ runner.os }}-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-plts-${{ hashFiles('mix.lock', 'forum/mix.lock', 'forum/mix.exs', 'forum/lib/**/*.ex', 'policy_eval/mix.lock', 'policy_eval/mix.exs', 'policy_eval/lib/**/*.ex') }}
+          key: ${{ runner.os }}-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-plts-${{ hashFiles('mix.lock', 'forum/mix.lock', 'forum/mix.exs', 'forum/lib/**/*.ex', 'rollcall/mix.lock', 'rollcall/mix.exs', 'rollcall/lib/**/*.ex', 'policy_eval/mix.lock', 'policy_eval/mix.exs', 'policy_eval/lib/**/*.ex') }}
       - name: Create PLTs
         if: steps.plt-cache.outputs.cache-hit != 'true'
         run: |
@@ -86,9 +86,9 @@ jobs:
     name: Assets Lint
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@v6.0.2
       - name: Setup Node.js
-        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        uses: actions/setup-node@v6.2.0
         with:
           node-version: "24"
           cache: "npm"
@@ -104,14 +104,28 @@ jobs:
     name: Actionlint
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@v6.0.2
       - name: Run actionlint
         uses: rhysd/actionlint@v1.7.7
+
+  actions-lock:
+    name: Actions lockfile
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          persist-credentials: false
+      - name: Install gh-actions-lock
+        run: gh extension install github/gh-actions-lock --pin v0.4.1
+      - name: Verify actions.lock
+        run: gh actions-lock --verify
 
   shellcheck:
     name: Shellcheck
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@v6.0.2
       - name: Run shellcheck
         run: git ls-files -z "*.sh" | xargs -0 shellcheck

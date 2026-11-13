@@ -16,7 +16,6 @@ defmodule PolicyEval.ReasonTest do
     {{:missing_grant, "member", :select}, :setup},
     {:unmodelled_policy_role, :setup},
     {:policy_without_expression, :setup},
-    {:select_policy_unsupported, :select_policy},
 
     # the input
     {{:unsupported, {:raises, :invalid_text_representation, "invalid input syntax for type uuid"}}, :raises},

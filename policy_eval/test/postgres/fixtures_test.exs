@@ -9,6 +9,9 @@ defmodule PolicyEval.Postgres.FixturesTest do
   #
   # test_helper.exs excludes this test for a version that has no fixture, unless it writes them.
   # `--only postgres` includes it again, because an include wins over an exclude in ExUnit.
+  #
+  # Not async: the tests against Postgres share one database and change the same table, functions
+  # and roles in it. Even in transactions that roll back, they would block or fail each other.
   use ExUnit.Case, async: false
 
   alias PolicyEval.Test.Postgres

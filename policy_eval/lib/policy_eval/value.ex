@@ -150,6 +150,8 @@ defmodule PolicyEval.Value do
   Not strict: the result is never NULL, so `NULL IS NULL` is `true`. A jsonb `null` is a value,
   not SQL NULL. An unsupported argument is returned unchanged, since we don't know if it is NULL.
   """
+  # These reflect the Postgres names
+  # credo:disable-for-lines:8 Credo.Check.Readability.PredicateFunctionNames
   @spec is_null(result) :: result
   def is_null({:unsupported, _} = unsupported), do: unsupported
   def is_null(a), do: is_nil(a)
@@ -333,6 +335,67 @@ defmodule PolicyEval.Value do
   end
 
   defp contains?(subject, pattern), do: :binary.match(subject, pattern) != :nomatch
+
+  ## LIKE
+
+  @doc """
+  `text LIKE text`
+
+  `textlike`, src/backend/utils/adt/like.c, matching as `MatchText` in
+  src/backend/utils/adt/like_match.c. Strict.
+
+  The pattern matches the whole text. `%` matches any run of characters, `_` exactly one character
+  (a code point, as `NextChar` steps in UTF-8), and any other character itself. Under the
+  deterministic collation this module assumes, Postgres compares those bytes.
+
+  A pattern containing `\\` is `{:unsupported, :like_escape}`. A backslash escapes the next
+  character, and one at the end of the pattern raises, but only if matching gets that far, so
+  whether it raises depends on the text. Text that is not valid UTF-8 is
+  `{:unsupported, :invalid_utf8}`.
+
+  `NOT LIKE` (`textnlike`) is the negation of this, see `PolicyEval.Resolver`.
+  """
+  @spec like(result, result) :: result
+  def like(a, b) do
+    strict2(a, b, fn {:text, text}, {:text, pattern} ->
+      cond do
+        String.contains?(pattern, "\\") -> {:unsupported, :like_escape}
+        not (String.valid?(text) and String.valid?(pattern)) -> {:unsupported, :invalid_utf8}
+        true -> match_like(text, pattern) == true
+      end
+    end)
+  end
+
+  # MatchText. Besides true and false, it returns :abort when the text ran out before the pattern.
+  # Then a `%` further left can't match at a later position either, so it stops trying.
+  defp match_like(text, "%" <> pattern), do: match_percent(text, pattern)
+  defp match_like(<<_::utf8, text::binary>>, "_" <> pattern), do: match_like(text, pattern)
+  defp match_like(<<c, text::binary>>, <<c, pattern::binary>>), do: match_like(text, pattern)
+  defp match_like("", ""), do: true
+  defp match_like("", _pattern), do: :abort
+  defp match_like(_text, _pattern), do: false
+
+  # After a `%`: the `%` and `_` that follow it, then the first position of the text where the rest
+  # of the pattern matches.
+  defp match_percent(text, "%" <> pattern), do: match_percent(text, pattern)
+  defp match_percent(<<_::utf8, text::binary>>, "_" <> pattern), do: match_percent(text, pattern)
+  defp match_percent("", "_" <> _pattern), do: :abort
+  defp match_percent(_text, ""), do: true
+  defp match_percent(text, <<first, _::binary>> = pattern), do: find_like(text, first, pattern)
+
+  # Like MatchText, it tries only positions where the text starts with the first byte of the rest.
+  defp find_like("", _first, _pattern), do: :abort
+
+  defp find_like(<<first, _::binary>> = text, first, pattern) do
+    case match_like(text, pattern) do
+      false -> find_like(next_char(text), first, pattern)
+      matched -> matched
+    end
+  end
+
+  defp find_like(text, first, pattern), do: find_like(next_char(text), first, pattern)
+
+  defp next_char(<<_::utf8, rest::binary>>), do: rest
 
   ## Helpers
 

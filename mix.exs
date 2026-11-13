@@ -4,7 +4,7 @@ defmodule Realtime.MixProject do
   def project do
     [
       app: :realtime,
-      version: "2.156.0",
+      version: "2.160.0",
       elixir: "~> 1.19",
       elixirc_paths: elixirc_paths(Mix.env()),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
@@ -17,16 +17,7 @@ defmodule Realtime.MixProject do
       hex: [
         # Can be overridden via `HEX_COOLDOWN=0d` should you want to, see DEVELOPERS.md#dependency-cooldown
         cooldown: "7d",
-        # No released fixes as of cowboy 2.20.0 / cowlib 2.21.0, remove once they ship.
-        ignore_advisories: [
-          # cowlib: cow_http_struct_hd:item/1 with untrusted input - we don't call it.
-          "CVE-2026-43966",
-          # cowboy: HTTP/1.1 pipelined data buffered while a handler runs; introduced in 2.18.0,
-          # older versions are affected by CVE-2026-65624 instead.
-          "CVE-2026-115701",
-          # cowlib: HTTP/2 HPACK header-list amplification.
-          "CVE-2026-113431"
-        ]
+        ignore_advisories: []
       ],
       releases: [
         realtime: [
@@ -36,6 +27,21 @@ defmodule Realtime.MixProject do
             opentelemetry: :temporary
           ]
         ]
+      ]
+    ]
+  end
+
+  def cli do
+    [
+      preferred_envs: [
+        coveralls: :test,
+        "coveralls.detail": :test,
+        "coveralls.post": :test,
+        "coveralls.html": :test,
+        "coveralls.lcov": :test,
+        "coveralls.json": :test,
+        "coveralls.xml": :test,
+        "coveralls.github": :test
       ]
     ]
   end
@@ -116,7 +122,7 @@ defmodule Realtime.MixProject do
       {:opentelemetry_phoenix, "~> 2.0"},
       {:opentelemetry_cowboy, "~> 1.0"},
       {:opentelemetry_ecto, "~> 1.2"},
-      {:gen_rpc, git: "https://github.com/emqx/gen_rpc.git", tag: "3.6.1"},
+      {:gen_rpc, git: "https://github.com/emqx/gen_rpc.git", tag: "4.0.2"},
       # gen_rpc uses a git dependency
       {:snabbkaffe, "~> 1.0", override: true},
       {:req, "~> 0.7.4"},

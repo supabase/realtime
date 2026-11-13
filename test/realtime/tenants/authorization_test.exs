@@ -384,6 +384,33 @@ defmodule Realtime.Tenants.AuthorizationTest do
     end
   end
 
+  # Only the INSERT policies decide a write. realtime.authorize reads probes back only for reads, so
+  # a write plans no SELECT as the user's role, as on the transaction path.
+  describe "a write does not depend on the SELECT policies" do
+    @tag role: "authenticated", policies: [:authenticated_write_broadcast]
+    test "a role without SELECT on realtime.messages can write", context do
+      Postgrex.query!(context.db_conn, "REVOKE SELECT ON realtime.messages FROM authenticated", [])
+
+      assert {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}} = write_authorizations(context, :broadcast)
+    end
+
+    @tag role: "authenticated", policies: [:authenticated_write_broadcast]
+    test "a SELECT policy that raises when planned does not fail a write", context do
+      # Postgres folds the constant 1 / 0 when it plans a query that this policy applies to.
+      Postgrex.query!(
+        context.db_conn,
+        ~s[CREATE POLICY "authenticated_read_divides_by_zero" ON realtime.messages FOR SELECT TO authenticated USING (1 / 0 = 1)],
+        []
+      )
+
+      assert {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}} = write_authorizations(context, :broadcast)
+
+      # A read still plans it.
+      assert {:error, :rls_policy_error, %Postgrex.Error{postgres: %{code: :division_by_zero}}} =
+               Authorization.get_read_authorizations(%Policies{}, context.db_conn, context.authorization_context)
+    end
+  end
+
   describe "database error" do
     @tag role: "authenticated",
          policies: [

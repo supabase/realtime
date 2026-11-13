@@ -303,6 +303,121 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
     end
   end
 
+  describe "policy_eval" do
+    test "starts collapsed and unread", %{conn: conn, tenant: tenant} do
+      {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
+
+      assert has_element?(view, "#policy-eval .card-header", "Policies")
+      assert has_element?(view, "#policy-eval-section summary[phx-click='load_policy_eval']")
+      refute has_element?(view, "#policy-eval-section[open]")
+      refute has_element?(view, "#policy-eval-policies")
+    end
+
+    test "reads the policies once and shows what policy_eval makes of them", %{conn: conn, tenant: tenant} do
+      {:ok, settings} = Database.from_tenant(tenant, "tenant_info_test", :stop)
+      {:ok, db_conn} = Database.connect_db(settings)
+
+      on_exit(fn ->
+        {:ok, db_conn} = Database.connect_db(settings)
+        Postgrex.query!(db_conn, ~s(DROP POLICY IF EXISTS "dashboard lobby" ON realtime.messages), [])
+        Postgrex.query!(db_conn, ~s(DROP POLICY IF EXISTS "dashboard members" ON realtime.messages), [])
+        Postgrex.query!(db_conn, ~s(DROP POLICY IF EXISTS "dashboard admins" ON realtime.messages), [])
+      end)
+
+      Postgrex.query!(
+        db_conn,
+        ~s[CREATE POLICY "dashboard lobby" ON realtime.messages FOR SELECT TO authenticated USING (realtime.topic() = 'lobby')],
+        []
+      )
+
+      Postgrex.query!(
+        db_conn,
+        ~s[CREATE POLICY "dashboard members" ON realtime.messages FOR SELECT TO authenticated USING (EXISTS (SELECT 1 FROM pg_catalog.pg_class))],
+        []
+      )
+
+      # postgres is not a role that policy_eval models, so every write falls back
+      Postgrex.query!(
+        db_conn,
+        ~s[CREATE POLICY "dashboard admins" ON realtime.messages FOR INSERT TO postgres WITH CHECK (true)],
+        []
+      )
+
+      test_pid = self()
+
+      stub(Database, :connect_db, fn settings ->
+        send(test_pid, :tenant_db_connect)
+        call_original(Database, :connect_db, [settings])
+      end)
+
+      {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
+      flush_tenant_db_connects()
+
+      open_policy_eval(view)
+      assert_received :tenant_db_connect
+
+      assert has_element?(view, "#policy-eval-section summary", "Policies on realtime.messages (3)")
+
+      assert has_element?(
+               view,
+               "#policy-eval-policies tbody tr",
+               ~r/dashboard lobby\s+SELECT\s+permissive\s+authenticated/
+             )
+
+      assert has_element?(view, "#policy-eval-policies tbody tr", ~r/realtime\.topic\(\) = 'lobby'::text.*\s+supported/)
+      assert has_element?(view, "#policy-eval-policies tbody tr .text-danger", "subquery: {:unparsed, :exists}")
+      assert has_element?(view, "#policy-eval-policies tbody tr .text-danger", "postgres (not modelled)")
+
+      assert has_element?(view, "#policy-eval-decisions tbody tr", ~r/authenticated\s+read\s+evaluates dashboard lobby/)
+
+      assert has_element?(
+               view,
+               "#policy-eval-decisions tbody tr",
+               ~r/authenticated\s+write\s+always falls back: a policy for this command names a role/
+             )
+
+      assert has_element?(view, "#policy-eval-decisions tbody tr", ~r/anon\s+read\s+always denied/)
+
+      assert has_element?(view, "#policy-eval-functions tbody tr", ~r/realtime\.topic\(\)\s+known/)
+      assert has_element?(view, "#policy-eval-roles tbody tr", ~r/row level security enabled/)
+
+      open_policy_eval(view)
+      refute_received :tenant_db_connect
+    end
+
+    test "shows the error and keeps the page when the policies can't be read", %{conn: conn, tenant: tenant} do
+      stub(Realtime.Tenants.PolicyEvalLoader, :read, fn conn ->
+        Postgrex.query!(conn, "SELECT 'realtime.missing'::regclass", [])
+      end)
+
+      {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
+
+      open_policy_eval(view)
+
+      assert has_element?(
+               view,
+               "#policy-eval-section .text-danger",
+               "Failed to read the policies: ERROR 42P01 (undefined_table) relation \"realtime.missing\" does not exist"
+             )
+
+      assert has_element?(view, "td", tenant.external_id)
+    end
+
+    test "shows the error when the tenant database is unreachable", %{conn: conn, tenant: tenant} do
+      stub(Database, :connect_db, fn _settings -> {:error, :econnrefused} end)
+
+      {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
+
+      open_policy_eval(view)
+
+      assert has_element?(
+               view,
+               "#policy-eval-section .text-danger",
+               "Failed to connect to the tenant database: :econnrefused"
+             )
+    end
+  end
+
   describe "runtime info with mocked status" do
     test "shows connect, replication and cdc_rls as up with their node", %{conn: conn, tenant: tenant} do
       manager = self()
@@ -417,6 +532,10 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
 
   defp open_section(view, section) do
     view |> element("#privileges-#{section}-section summary") |> render_click()
+  end
+
+  defp open_policy_eval(view) do
+    view |> element("#policy-eval-section summary") |> render_click()
   end
 
   defp flush_tenant_db_connects do

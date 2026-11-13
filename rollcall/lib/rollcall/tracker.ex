@@ -70,7 +70,14 @@ defmodule Rollcall.Tracker do
 
   The tracker waits for a grace period before it stops. It starts a timer when
   it holds no entry. A `track` cancels the timer. When the timer expires, the
-  tracker stops.
+  tracker asks the transport with `c:Rollcall.Transport.active?/1`. The
+  tracker stops when the transport is not active. It starts the timer again
+  when the transport is active. A transport that does not implement the
+  callback is not active.
+
+  The tracker holds the entries of its peers. A node that has listeners and no
+  entry of its own needs them. A stop would leave the listeners with no state
+  and no diffs.
 
   The cost of the wait is an idle tracker. It still sends a heartbeat in each
   period. The best length depends on the heartbeat period.
@@ -122,15 +129,17 @@ defmodule Rollcall.Tracker do
 
   use GenServer, restart: :temporary
   use Snabbkaffex, only: :trace
+  alias Rollcall.Metrics
+  alias Rollcall.Tracker.Changes
   alias Rollcall.Tracker.Entry
   alias Rollcall.Tracker.Local
-  alias Rollcall.Tracker.Changes
   alias Rollcall.Tracker.Messages
   alias Rollcall.Tracker.Peer
   alias Rollcall.Tracker.State
   alias Rollcall.Tracker.View
 
   @max_retries 3
+  @default_call_timeout :timer.seconds(5)
   @default_empty_grace_in_ms :timer.seconds(5)
   # Default to sending a heartbeat every 1.5 seconds
   @default_heartbeat_period_in_ms 1500
@@ -165,6 +174,10 @@ defmodule Rollcall.Tracker do
   The function sends the message again at most #{@max_retries} times. The limit
   stops an endless loop when a tracker exits without a reply. After the limit,
   the function exits with the reason of the last failure.
+
+  The option `:timeout` sets the milliseconds that the function waits for the
+  reply. The default is #{@default_call_timeout}. The function exits with
+  `{:timeout, _}` when the tracker does not reply in time. 
   """
   @spec track(
           Rollcall.name(),
@@ -177,24 +190,33 @@ defmodule Rollcall.Tracker do
         ) ::
           {:ok, Rollcall.ref()} | {:error, term()}
   def track(name, scope, pid, partition, key, meta, opts \\ []) when is_pid(pid) and is_map(meta) do
-    call_or_start(name, scope, {:track, pid, partition, key, meta, opts}, @max_retries)
+    timeout = Keyword.get(opts, :timeout, @default_call_timeout)
+
+    call_or_start(name, scope, {:track, pid, partition, key, meta, opts}, timeout, @max_retries)
   end
 
   # Calls the tracker for `scope`. Starts a tracker and sends the message again
   # when none runs, at most `retries` times.
-  defp call_or_start(name, scope, message, retries) do
-    GenServer.call(via(name, scope), message)
+  defp call_or_start(name, scope, message, timeout, retries) do
+    GenServer.call(via(name, scope), message, timeout)
   catch
     :exit, {reason, _} = caught when reason in @gone ->
       if retries == 0, do: exit(caught)
 
       case start(name, scope) do
-        :ok -> call_or_start(name, scope, message, retries - 1)
+        :ok -> call_or_start(name, scope, message, timeout, retries - 1)
         error -> error
       end
   end
 
-  defp start(name, scope) do
+  @doc """
+  Starts the tracker for `scope` in the instance `name`.
+
+  Returns `:ok` also when a tracker runs already. Call `Rollcall.ensure_started/2`
+  instead. It does not start a child when a tracker runs.
+  """
+  @spec start(Rollcall.name(), Rollcall.scope()) :: :ok | {:error, term()}
+  def start(name, scope) do
     # The options of the library, stored in the registry by `Rollcall.start_link/1`.
     {:ok, opts} = Registry.meta(name, :tracker_options)
     {:ok, tracker_supervisor} = Registry.meta(name, :tracker_supervisor)
@@ -216,17 +238,21 @@ defmodule Rollcall.Tracker do
 
   The function does not start a tracker. A tracker that starts only to find
   nothing to remove would stop again after the grace period.
+
+  The option `:timeout` works as it does for `track/7`.
   """
-  @spec untrack(Rollcall.name(), Rollcall.scope(), pid(), Rollcall.partition(), Rollcall.key()) :: :ok
-  def untrack(name, scope, pid, partition, key) do
-    call_if_running(name, scope, {:untrack, pid, partition, key}, :ok)
+  @spec untrack(Rollcall.name(), Rollcall.scope(), pid(), Rollcall.partition(), Rollcall.key(), Keyword.t()) :: :ok
+  def untrack(name, scope, pid, partition, key, opts \\ []) do
+    timeout = Keyword.get(opts, :timeout, @default_call_timeout)
+
+    call_if_running(name, scope, {:untrack, pid, partition, key}, timeout, :ok)
   end
 
   # Calls the tracker for `scope`. Returns `default` when no tracker runs, when
   # the tracker stops before it replies, or when the instance does not run.
-  defp call_if_running(name, scope, message, default) do
+  defp call_if_running(name, scope, message, timeout, default) do
     case lookup(name, scope) do
-      [{pid, _}] -> GenServer.call(pid, message)
+      [{pid, _}] -> GenServer.call(pid, message, timeout)
       [] -> default
     end
   catch
@@ -254,7 +280,7 @@ defmodule Rollcall.Tracker do
   """
   @spec get_state(Rollcall.name(), Rollcall.scope()) :: State.view() | nil
   def get_state(name, scope) do
-    call_if_running(name, scope, :get_state, nil)
+    call_if_running(name, scope, :get_state, @default_call_timeout, nil)
   end
 
   @doc """
@@ -383,6 +409,8 @@ defmodule Rollcall.Tracker do
       |> schedule_heartbeat()
       |> start_empty_timer()
 
+    :telemetry.execute(Metrics.tracker_start(), %{}, %{scope: scope})
+
     {:ok, state}
   end
 
@@ -461,9 +489,13 @@ defmodule Rollcall.Tracker do
   @spec handle_info(term(), State.t()) :: {:noreply, State.t()} | {:stop, :normal, State.t()}
   def handle_info({:timeout, ref, :empty_timeout}, %{empty_timer: ref} = state) do
     if Local.empty?(state.local) do
-      tp(:rollcall_tracker_stopped, %{scope: state.scope})
+      if transport_active?(state) do
+        {:noreply, start_empty_timer(%{state | empty_timer: nil})}
+      else
+        tp(:rollcall_tracker_stopped, %{scope: state.scope})
 
-      {:stop, :normal, state}
+        {:stop, :normal, state}
+      end
     else
       tp(:rollcall_tracker_stop_skipped, %{scope: state.scope})
 
@@ -525,7 +557,7 @@ defmodule Rollcall.Tracker do
   end
 
   @impl true
-  def terminate(_reason, state) do
+  def terminate(reason, state) do
     # When terminating we send a goodbye message, which is an empty snapshot.
     #
     # We need to bump the version on a goodbye to make sure any peer holding our current
@@ -533,6 +565,8 @@ defmodule Rollcall.Tracker do
     stamp = State.goodbye_stamp(state)
     {:stamp, _incarnation, goodbye_version} = stamp
     snapshot = Messages.snapshot(self(), stamp, [])
+
+    :telemetry.execute(Metrics.tracker_stop(), %{}, %{scope: state.scope, reason: reason})
 
     :ok = state.transport_module.heartbeat(state.transport_state, snapshot)
 
@@ -613,17 +647,54 @@ defmodule Rollcall.Tracker do
                 ignore_side_effects: true
               )
 
+              purge_count = length(changes.leaves)
+
+              :telemetry.execute(
+                Metrics.tracker_peer_purge(),
+                %{entries: purge_count},
+                %{node: node, scope: state.scope, stale: purge_count > 0}
+              )
+
               kept
           end
       end)
 
+    emit_peer_metric(state, peers)
+
     %{state | peers: peers}
+  end
+
+  defp emit_peer_metric(state, peers) do
+    peer_list = Map.values(peers)
+
+    max_silent_ticks =
+      peer_list
+      |> Stream.reject(&Peer.empty?/1)
+      |> Stream.map(& &1.silent_ticks)
+      |> Enum.max(fn -> 0 end)
+
+    :telemetry.execute(
+      Metrics.tracker_peers(),
+      %{
+        count: map_size(peers),
+        overdue_count: Enum.count(peer_list, &Peer.overdue?/1),
+        max_silent_ticks: max_silent_ticks
+      },
+      %{
+        scope: state.scope
+      }
+    )
   end
 
   defp update_view(state, changes) do
     View.write(state.view, changes)
 
     state
+  end
+
+  defp transport_active?(state) do
+    function_exported?(state.transport_module, :active?, 1) and
+      state.transport_module.active?(state.transport_state)
   end
 
   defp publish_changes(state, changes) do

@@ -196,6 +196,28 @@ end
 
 for tenant <- Api.list_tenants(), do: Api.delete_tenant_by_external_id(tenant.external_id)
 
+# A tenant override of a flag counts only when the flag exists. The presence mode tests set the
+# mode of a tenant with an override, so the flags exist and stay off for every other tenant.
+#
+# The flag cache refills an expired entry in a process of its own, which cannot read the database of
+# an async test. The refill fails, the flag reads as off, and a test in the Rollcall mode falls back
+# to Phoenix in the middle of the test. An entry with no expiry is never refilled, so the flags are
+# in the cache with no expiry. The insert does not use `Api.upsert_feature_flag/1`, because that
+# function updates the cache with a cast that lands later and gives the entry an expiry again.
+for name <- ["presence_rollcall_primary", "presence_rollcall_shadow"] do
+  {:ok, flag} =
+    %Realtime.Api.FeatureFlag{}
+    |> Realtime.Api.FeatureFlag.changeset(%{name: name, enabled: false})
+    |> Realtime.Repo.insert(
+      on_conflict: {:replace, [:enabled, :rollout_percentage, :bucket_key, :updated_at]},
+      conflict_target: :name,
+      returning: true
+    )
+
+  {:ok, true} = Realtime.FeatureFlags.Cache.update_cache(flag)
+  {:ok, true} = Cachex.persist(Realtime.FeatureFlags.Cache, {:get_flag, name})
+end
+
 Ecto.Adapters.SQL.Sandbox.mode(Realtime.Repo, :manual)
 
 Mimic.copy(:syn)
@@ -212,6 +234,7 @@ Mimic.copy(Realtime.GenCounter)
 Mimic.copy(Realtime.GenRpc)
 Mimic.copy(Realtime.Nodes)
 Mimic.copy(Realtime.Presence.PhoenixBackend)
+Mimic.copy(Realtime.Presence.Rollcall)
 Mimic.copy(Realtime.Presence.RollcallBackend)
 Mimic.copy(Realtime.Repo)
 Mimic.copy(Realtime.Repo.Replica)
@@ -232,6 +255,7 @@ Mimic.copy(RealtimeWeb.Presence)
 Mimic.copy(RealtimeWeb.Endpoint)
 Mimic.copy(RealtimeWeb.JwtVerification)
 Mimic.copy(RealtimeWeb.TenantBroadcaster)
+Mimic.copy(RealtimeWeb.UserSocket)
 Mimic.copy(NimbleZTA.Cloudflare)
 
 self_node = TestEnv.node_name()

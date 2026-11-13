@@ -279,6 +279,36 @@ defmodule Realtime.Presence.MetricsTest do
     end
   end
 
+  describe "measure_untrack_call/2" do
+    setup do
+      id = {__MODULE__, make_ref()}
+      :telemetry.attach(id, [:realtime, :presence, :track, :duration], &__MODULE__.handle_duration/4, self())
+      on_exit(fn -> :telemetry.detach(id) end)
+    end
+
+    test "records the duration as an untrack, tagged with the implementation, and returns :ok" do
+      assert :ok = Metrics.measure_untrack_call(fn -> :ok end, :phoenix)
+
+      assert_receive {:duration, %{duration: duration},
+                      %{action: :untrack, result: :ok, reason: :none, implementation: :phoenix}}
+
+      assert is_integer(duration) and duration >= 0
+    end
+
+    test "records an exit by reason as an untrack, then exits with the original reason" do
+      timeout = {:timeout, {GenServer, :call, [:shard, :msg, 100]}}
+
+      assert catch_exit(Metrics.measure_untrack_call(fn -> exit(timeout) end, :rollcall)) == timeout
+      assert_receive {:duration, _, %{action: :untrack, result: :exit, reason: :timeout, implementation: :rollcall}}
+
+      catch_exit(Metrics.measure_untrack_call(fn -> exit({:noproc, {}}) end, :rollcall))
+      assert_receive {:duration, _, %{action: :untrack, result: :exit, reason: :noproc}}
+
+      catch_exit(Metrics.measure_untrack_call(fn -> exit(:killed) end, :rollcall))
+      assert_receive {:duration, _, %{action: :untrack, result: :exit, reason: :other}}
+    end
+  end
+
   describe "record/2" do
     setup do
       tenant = "tenant-#{System.unique_integer([:positive])}"
@@ -348,6 +378,9 @@ defmodule Realtime.Presence.MetricsTest do
     setup do
       tenant = "tenant-#{System.unique_integer([:positive])}"
       attach_join_telemetry(tenant)
+      # No presence flag is set for the tenant, so the mode is Phoenix. The tenant is not in the
+      # database, and a flag lookup that reaches the tenant cache would query for it.
+      stub(FeatureFlags, :enabled?, fn _flag, _tenant -> false end)
       %{tenant: tenant}
     end
 

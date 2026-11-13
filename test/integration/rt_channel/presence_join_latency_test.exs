@@ -1,10 +1,7 @@
 defmodule Realtime.Integration.RtChannel.PresenceJoinLatencyTest do
   use RealtimeWeb.ConnCase,
     async: false,
-    parameterize: [
-      %{serializer: Phoenix.Socket.V1.JSONSerializer},
-      %{serializer: RealtimeWeb.Socket.V2Serializer}
-    ]
+    parameterize: Integrations.presence_parameters()
 
   import Generators
 
@@ -14,7 +11,7 @@ defmodule Realtime.Integration.RtChannel.PresenceJoinLatencyTest do
   @moduletag :capture_log
   @join_latency [:realtime, :presence, :join, :latency]
 
-  setup [:checkout_tenant, :rls_context]
+  setup [:checkout_tenant, :set_presence_mode, :rls_context]
 
   setup %{tenant: tenant} do
     id = {__MODULE__, tenant.external_id}
@@ -26,8 +23,10 @@ defmodule Realtime.Integration.RtChannel.PresenceJoinLatencyTest do
   end
 
   test "records one join-latency observation, tagged :cold for a first joiner, when presence is enabled at join",
-       %{tenant: tenant, topic: topic, serializer: serializer} do
+       %{tenant: tenant, topic: topic, serializer: serializer, presence_mode: mode} do
     tenant_id = tenant.external_id
+    # The backend that serves the clients records the join. The shadow mode serves them from Phoenix.
+    implementation = if mode == :rollcall, do: :rollcall, else: :phoenix
     topic = "realtime:#{topic}"
     config = %{presence: %{key: "", enabled: true}, private: false}
 
@@ -37,7 +36,7 @@ defmodule Realtime.Integration.RtChannel.PresenceJoinLatencyTest do
     assert_receive %Message{event: "presence_state", topic: ^topic}, 1_000
 
     assert_receive {:telemetry, @join_latency, %{latency: latency},
-                    %{tenant: ^tenant_id, state: :cold, implementation: :phoenix}},
+                    %{tenant: ^tenant_id, state: :cold, implementation: ^implementation}},
                    1_000
 
     assert is_integer(latency) and latency >= 0

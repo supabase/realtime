@@ -25,9 +25,10 @@ defmodule Realtime.Presence.RollcallBackend do
   Tracks `key` on `topic` for `pid`, or replaces the entry when `pid` tracks `key` already.
 
   Returns `{:ok, :track, ref}` for both calls. Rollcall does not tell a track from an update.
-  Pass `ref: ref` to use a ref that the caller made, such as a Phoenix ref.
+  Pass `ref: ref` to use a ref that the caller made, such as a Phoenix ref. Pass `timeout: ms` to
+  limit the wait for the tracker. The call exits with `{:timeout, _}` at the limit.
   """
-  @spec track(pid(), tenant(), topic(), key(), map(), ref: String.t()) ::
+  @spec track(pid(), tenant(), topic(), key(), map(), ref: String.t(), timeout: timeout()) ::
           {:ok, :track, String.t()} | {:error, :track, term()}
   def track(pid, tenant, topic, key, meta, opts \\ []) do
     case Rollcall.track(pid, tenant, topic, key, meta, opts) do
@@ -39,8 +40,8 @@ defmodule Realtime.Presence.RollcallBackend do
   @doc """
   Removes the entry of `key` on `topic` for `pid`.
   """
-  @spec untrack(pid(), tenant(), topic(), key()) :: :ok
-  def untrack(pid, tenant, topic, key) do
-    Rollcall.untrack(pid, tenant, topic, key)
+  @spec untrack(pid(), tenant(), topic(), key(), timeout: timeout()) :: :ok
+  def untrack(pid, tenant, topic, key, opts \\ []) do
+    Rollcall.untrack(pid, tenant, topic, key, opts)
   end
 end

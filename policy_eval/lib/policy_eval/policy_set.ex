@@ -15,14 +15,10 @@ defmodule PolicyEval.PolicySet do
     * RLS is off (`:rls_disabled`) or forced (`:rls_forced`), or the role isn't in the snapshot
       (`{:role_not_in_snapshot, role}`)
     * the role bypasses RLS (`{:bypass_rls, role}`) or lacks a privilege the operation needs
-      (`{:missing_grant, role, :select | :insert}`): `select` for a read, `insert` and `select`
-      for a write that plans a `SELECT` (see below)
+      (`{:missing_grant, role, :select | :insert}`): `select` for a read, `insert` for a write
     * a policy of the right command names a role other than `public` and the profile's
       `policy_roles` (`:unmodelled_policy_role`). Policies match by inherited role membership,
       which isn't modelled
-    * for a write, a `SELECT` or `ALL` policy that might apply to the role has no `USING`
-      expression, or one that isn't fully modelled: `:select_policy_unsupported`. Or it is
-      unsupported for this input, raising included: `{:unsupported, reason}`. See below
     * an applicable policy lacks the expression to evaluate (`:policy_without_expression`)
     * the result is unsupported (`{:unsupported, reason}`)
     * anything raises (`{:exception, exception_module}`)
@@ -40,32 +36,19 @@ defmodule PolicyEval.PolicySet do
   without one the `USING` expression (`QUAL_FOR_WCO` in `rowsecurity.c`). An expression that
   isn't boolean is unsupported.
 
-  ## Writes that plan a SELECT also depend on the read policies
+  ## Writes depend only on the INSERT policies
 
-  This applies when the profile's `write_plans_select` is `true`, the only value. The caller then
-  plans a `SELECT` of the table in the same call as the `INSERT` of a write. On a write-only call,
-  that `SELECT` reads no rows, but Postgres still plans it: it checks the `SELECT` privilege,
-  expands the `SELECT` policies and evaluates what the planner folds into constants. Measured
-  against Postgres 17, a write-only call raised when the role lacked `SELECT` (42501), when a
-  `SELECT` policy reads the table itself (42P17), and when a `SELECT` policy has a constant that
-  raises, like `1 / 0` (22012), whatever the `INSERT` policies say. A `SELECT` policy that only
-  raises when it is evaluated for a row, like the cast of a sub that isn't a uuid, did not fail a
-  write-only call there, as there is no row to evaluate it for. Against a Multigres cluster it did,
-  for a policy like `app.team() = 'red' AND (SELECT auth.uid())::text = '...'`: whether the plan
-  evaluates it anyway depends on more than the policy.
+  A write is a plain `INSERT` of the row, with no `RETURNING`. It needs the `INSERT` privilege,
+  and only the `INSERT` and `ALL` policies decide it. The `SELECT` privilege and the `SELECT`
+  policies do not change the answer.
 
-  This is not `INSERT ... RETURNING`. That statement checks the `SELECT` policies against the new
-  row, so a false one fails the insert. Here a false `SELECT` policy does not change the answer.
-
-  So a write falls back where the call might raise, even though only `INSERT` decides. A write
-  falls back with `{:missing_grant, role, :select}` if the
-  role lacks `SELECT`, and with `:select_policy_unsupported` if a `SELECT` or `ALL` policy
-  that might apply has no `USING` or has one with an unsupported node anywhere in it
-  (`PolicyEval.IR.supported?/1`). That is decided from the tree alone: what the planner folds isn't
-  modelled, so an expression we can't read is one that might fail. A policy we can read is then
-  evaluated with the write's row, and falls back with `{:unsupported, reason}` if that is
-  unsupported, raising included, as the plan might evaluate it. A policy that might apply is one
-  for `public`, for the role, or for a role we don't model, as those apply by membership.
+  The caller must not run other statements on the table as the role in the same call as the
+  write. For example, Postgres plans the `SELECT` policies for a `SELECT` of the table even when it
+  reads no rows. A policy that raises when planned then fails the call, whatever the `INSERT`
+  policies say. Measured against Postgres 17, that happened when the role lacked `SELECT` (42501),
+  when a `SELECT` policy reads the table itself (42P17), and when a `SELECT` policy has a constant
+  that raises, like `1 / 0` (22012). `INSERT ... RETURNING` is not modelled either: it checks the
+  `SELECT` policies against the new row, so a false one fails the insert.
 
   ## Combining
 
@@ -80,7 +63,6 @@ defmodule PolicyEval.PolicySet do
 
   alias PolicyEval.Env
   alias PolicyEval.Eval
-  alias PolicyEval.IR
   alias PolicyEval.Policy
   alias PolicyEval.Profile
   alias PolicyEval.Snapshot
@@ -103,7 +85,6 @@ defmodule PolicyEval.PolicySet do
          :ok <- check_snapshot(snapshot, role, operation),
          policies = Enum.filter(snapshot.policies, &(&1.cmd in commands(operation))),
          :ok <- check_policy_roles(policies, profile),
-         :ok <- check_select_policies(snapshot, env, role, operation),
          {permissive, restrictive} = policies |> Enum.filter(&applies_to?(&1, role)) |> Enum.split_with(& &1.permissive),
          {:ok, permissive} <- expressions(permissive, operation),
          {:ok, restrictive} <- expressions(restrictive, operation) do
@@ -114,20 +95,15 @@ defmodule PolicyEval.PolicySet do
   defp commands(:read), do: ["r", "*"]
   defp commands(:write), do: ["a", "*"]
 
-  # A reason names a role only if it is a platform one (or there is none). Any other name is the
-  # policy author's choice.
+  # A reason names a role only if it is a platform one (or there is none), see
+  # `Profile.reported_role/2`. Any other name is the policy author's choice.
   defp check_role(role, profile) do
-    cond do
-      role in profile.roles -> :ok
-      role in [nil | profile.platform_roles] -> {:fallback, {:role, role}}
-      true -> {:fallback, {:role, :other}}
-    end
+    if role in profile.roles, do: :ok, else: {:fallback, {:role, Profile.reported_role(profile, role)}}
   end
 
-  # The privileges an operation needs. A write that plans a `SELECT` needs `select` too, see the
-  # moduledoc.
-  defp grants(:read, _profile), do: [:select]
-  defp grants(:write, %Profile{write_plans_select: true}), do: [:insert, :select]
+  # The privileges an operation needs. A write is a plain INSERT, see the moduledoc.
+  defp grants(:read), do: [:select]
+  defp grants(:write), do: [:insert]
 
   # Anything but the expected boolean is treated as the unsafe answer.
   defp check_snapshot(snapshot, role, operation) do
@@ -136,7 +112,7 @@ defmodule PolicyEval.PolicySet do
       snapshot.rls_forced != false -> {:fallback, :rls_forced}
       not is_map_key(snapshot.roles, role) -> {:fallback, {:role_not_in_snapshot, role}}
       snapshot.roles[role][:bypass_rls] != false -> {:fallback, {:bypass_rls, role}}
-      true -> check_grants(snapshot.roles[role], role, grants(operation, snapshot.profile))
+      true -> check_grants(snapshot.roles[role], role, grants(operation))
     end
   end
 
@@ -159,41 +135,6 @@ defmodule PolicyEval.PolicySet do
   defp modelled_roles(profile), do: ["public" | profile.policy_roles]
 
   defp applies_to?(%Policy{roles: roles}, role), do: "public" in roles or role in roles
-
-  # A policy for a role we don't model applies by membership, so it might apply
-  defp may_apply_to?(%Policy{roles: roles} = policy, role, profile),
-    do: applies_to?(policy, role) or roles -- modelled_roles(profile) != []
-
-  # The `SELECT` that a write plans when the profile's `write_plans_select` is true. See the
-  # moduledoc.
-  defp check_select_policies(_snapshot, _env, _role, :read), do: :ok
-
-  defp check_select_policies(
-         %Snapshot{profile: %Profile{write_plans_select: true} = profile} = snapshot,
-         env,
-         role,
-         :write
-       ) do
-    snapshot.policies
-    |> Enum.filter(&(&1.cmd in commands(:read) and may_apply_to?(&1, role, profile)))
-    |> Enum.find_value(:ok, &select_policy_fallback(&1.using, env, profile))
-  end
-
-  # A SELECT policy we can't read might fail the statement. One we can read is evaluated with the
-  # write's row: whether the plan evaluates it for a write-only call isn't modelled, so one that is
-  # unsupported for this input, raising included, is a fallback too.
-  defp select_policy_fallback(nil, _env, _profile), do: {:fallback, :select_policy_unsupported}
-
-  defp select_policy_fallback({ir, type}, env, profile) do
-    if IR.supported?(ir) do
-      case Eval.eval(boolean(ir, type), env) do
-        {:unsupported, reason} -> {:fallback, {:unsupported, platform_reason(reason, profile)}}
-        _result -> nil
-      end
-    else
-      {:fallback, :select_policy_unsupported}
-    end
-  end
 
   # The IR to evaluate for each policy, or a fallback for the first one that has none.
   defp expressions(policies, operation), do: expressions(policies, operation, [])

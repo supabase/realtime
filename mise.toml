@@ -228,6 +228,22 @@ run = "docker compose -f compose.tests.yml stop"
 description = "Remove the integration test stack"
 run = "docker compose -f compose.tests.yml rm -sf"
 
+[tasks.test-changed]
+description = "Run the mix tests for staged, unstaged and untracked test files"
+run = '''
+files=$({
+  git diff --name-only --diff-filter=d HEAD -- 'test/*_test.exs'
+  git ls-files --others --exclude-standard -- 'test/*_test.exs'
+} | sort -u)
+
+if [ -z "$files" ]; then
+  echo "No changed test files"
+  exit 0
+fi
+
+mix test $files
+'''
+
 [tasks.walrus]
 description = "Run the WALRUS pg_regress suite against the tenant realtime schema"
 usage = '''

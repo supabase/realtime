@@ -23,7 +23,6 @@ defmodule PolicyEval.Test.ExampleProfile do
   @spec profile() :: Profile.t()
   def profile do
     %Profile{
-      write_plans_select: true,
       columns: %{"team" => :text, "kind" => :text},
       functions: functions(),
       roles: ["guest", "member"],

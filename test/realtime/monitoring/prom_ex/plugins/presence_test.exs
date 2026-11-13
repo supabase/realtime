@@ -25,6 +25,7 @@ defmodule Realtime.PromEx.Plugins.PresenceTest do
     ftr = Worker.forward_to_region("phx_presence:shard_1", tracker_msg, Phoenix.PubSub)
 
     bytes_before = metric_value("realtime_presence_replication_received_bytes") || 0
+    messages_before = metric_value("realtime_presence_replication_received_messages") || 0
 
     send(@worker, ftl)
     send(@worker, ftr)
@@ -32,6 +33,24 @@ defmodule Realtime.PromEx.Plugins.PresenceTest do
 
     assert metric_value("realtime_presence_replication_received_bytes") ==
              bytes_before + :erlang.external_size(ftl) + :erlang.external_size(ftr)
+
+    assert metric_value("realtime_presence_replication_received_messages") == messages_before + 2
+  end
+
+  test "sizes and counts Rollcall heartbeats received via :ftl" do
+    tags = [implementation: "rollcall"]
+    ftl = Worker.forward_to_local("rollcall:tenant-a", {:tb, "tenant-a", :heartbeat}, Phoenix.PubSub)
+
+    bytes_before = metric_value("realtime_presence_replication_received_bytes", tags) || 0
+    messages_before = metric_value("realtime_presence_replication_received_messages", tags) || 0
+
+    send(@worker, ftl)
+    :sys.get_state(@worker)
+
+    assert metric_value("realtime_presence_replication_received_bytes", tags) ==
+             bytes_before + :erlang.external_size(ftl)
+
+    assert metric_value("realtime_presence_replication_received_messages", tags) == messages_before + 1
   end
 
   test "ignores non-presence topics" do
@@ -103,6 +122,24 @@ defmodule Realtime.PromEx.Plugins.PresenceTest do
       catch_exit(Metrics.measure_tracker_call(fn -> exit({:timeout, {GenServer, :call, []}}) end))
 
       assert metric_value(@duration <> "_count", tags) == count_before + 1
+    end
+  end
+
+  describe "shadow errors" do
+    @shadow_error "realtime_presence_shadow_error"
+
+    test "counts each Rollcall failure by operation and reason, with no tenant label" do
+      tags = [operation: "untrack", reason: "timeout"]
+      count_before = metric_value(@shadow_error, tags) || 0
+
+      :telemetry.execute([:realtime, :presence, :shadow, :error], %{}, %{
+        tenant: "shadow-error-tenant",
+        operation: :untrack,
+        reason: :timeout
+      })
+
+      assert metric_value(@shadow_error, tags) == count_before + 1
+      assert metric_value(@shadow_error, tenant: "shadow-error-tenant") == nil
     end
   end
 

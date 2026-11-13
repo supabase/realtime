@@ -4,6 +4,8 @@ defmodule Realtime.PresenceTest do
   use ExUnit.Case, async: false
   use Mimic
 
+  import ExUnit.CaptureLog
+
   setup :set_mimic_global
 
   alias Phoenix.Socket.Broadcast
@@ -20,6 +22,75 @@ defmodule Realtime.PresenceTest do
   setup do
     id = System.unique_integer([:positive])
     {:ok, tenant: "tenant-#{id}", topic: "realtime:presence-facade-#{id}", client: client()}
+  end
+
+  # A node that has listeners and tracks nothing needs a Rollcall tracker, so that it holds the
+  # entries of its peers. The Phoenix mode does not use Rollcall.
+  describe "watch/1" do
+    test "starts no Rollcall tracker with no flag set", %{tenant: tenant} do
+      enable([])
+
+      assert :ok = Presence.watch(tenant)
+
+      refute tenant in Realtime.Presence.Rollcall.scopes()
+    end
+
+    test "starts the Rollcall tracker of the tenant in shadow mode", %{tenant: tenant} do
+      enable([@shadow])
+
+      assert :ok = Presence.watch(tenant)
+
+      assert tenant in Realtime.Presence.Rollcall.scopes()
+    end
+
+    test "starts the Rollcall tracker of the tenant in Rollcall mode", %{tenant: tenant} do
+      enable([@primary])
+
+      assert :ok = Presence.watch(tenant)
+
+      assert tenant in Realtime.Presence.Rollcall.scopes()
+    end
+
+    # The shadow mode must not change what the client gets. The channel calls watch/1 when it syncs.
+    test "returns :ok in shadow mode when the tracker does not start, and emits an event", %{tenant: tenant} do
+      enable([@shadow])
+      attach_shadow_error()
+      stub(Realtime.Presence.Rollcall, :ensure_started, fn _tenant -> {:error, :boom} end)
+
+      assert :ok = Presence.watch(tenant)
+
+      assert_receive {:shadow_error, %{operation: :watch, tenant: ^tenant}}
+    end
+
+    test "returns :ok in shadow mode when Rollcall raises, and emits an event", %{tenant: tenant} do
+      enable([@shadow])
+      attach_shadow_error()
+      stub(Realtime.Presence.Rollcall, :ensure_started, fn _tenant -> raise "boom" end)
+
+      assert :ok = Presence.watch(tenant)
+
+      assert_receive {:shadow_error, %{operation: :watch, tenant: ^tenant}}
+    end
+
+    test "returns :ok in shadow mode when Rollcall exits, and emits an event", %{tenant: tenant} do
+      enable([@shadow])
+      attach_shadow_error()
+      stub(Realtime.Presence.Rollcall, :ensure_started, fn _tenant -> exit(:timeout) end)
+
+      assert :ok = Presence.watch(tenant)
+
+      assert_receive {:shadow_error, %{operation: :watch, tenant: ^tenant}}
+    end
+
+    # In Rollcall mode a failed start leaves the node with no state. The log is the only signal.
+    test "returns the error and logs it in Rollcall mode when the tracker does not start", %{tenant: tenant} do
+      enable([@primary])
+      stub(Realtime.Presence.Rollcall, :ensure_started, fn _tenant -> {:error, :boom} end)
+
+      log = capture_log(fn -> assert {:error, :boom} = Presence.watch(tenant) end)
+
+      assert log =~ "boom"
+    end
   end
 
   describe "with no flag set" do
@@ -86,7 +157,7 @@ defmodule Realtime.PresenceTest do
       assert {:ok, :track, ref} = Presence.track(client, tenant, topic, "alice", %{})
 
       assert PhoenixBackend.list(topic) == %{"alice" => %{metas: [%{phx_ref: ref}]}}
-      assert_receive {:shadow_error, %{operation: :track, tenant: ^tenant}}
+      assert_receive {:shadow_error, %{operation: :track, tenant: ^tenant, reason: :error}}
     end
 
     test "returns the Phoenix result when Rollcall exits, and emits an event", %{
@@ -109,12 +180,69 @@ defmodule Realtime.PresenceTest do
     } do
       attach_shadow_error()
       {:ok, :track, _ref} = Presence.track(client, tenant, topic, "alice", %{})
-      stub(RollcallBackend, :untrack, fn _pid, _tenant, _topic, _key -> raise "boom" end)
+      stub(RollcallBackend, :untrack, fn _pid, _tenant, _topic, _key, _opts -> raise "boom" end)
 
       assert :ok = Presence.untrack(client, tenant, topic, "alice")
 
       assert PhoenixBackend.list(topic) == %{}
       assert_receive {:shadow_error, %{operation: :untrack, tenant: ^tenant}}
+    end
+
+    # A suspended tracker handles no message. The default call timeout is 5000 ms, so a bound of
+    # one second shows that the facade passes a short timeout. The call still reaches the tracker
+    # after it resumes.
+    test "returns the Phoenix result at the timeout when the Rollcall tracker is stuck, and emits a timeout event", %{
+      tenant: tenant,
+      topic: topic,
+      client: client
+    } do
+      attach_shadow_error()
+      tracker = suspend_tracker(tenant)
+
+      {elapsed, result} = :timer.tc(fn -> Presence.track(client, tenant, topic, "alice", %{}) end)
+
+      assert {:ok, :track, _ref} = result
+      assert elapsed < 1_000_000
+      assert_receive {:shadow_error, %{operation: :track, tenant: ^tenant, reason: :timeout}}
+
+      resume_tracker(tracker)
+
+      assert RollcallBackend.list(tenant, topic) == PhoenixBackend.list(topic)
+    end
+
+    test "returns :ok at the timeout when the Rollcall tracker is stuck on an untrack, and emits a timeout event", %{
+      tenant: tenant,
+      topic: topic,
+      client: client
+    } do
+      attach_shadow_error()
+      {:ok, :track, _ref} = Presence.track(client, tenant, topic, "alice", %{})
+      tracker = suspend_tracker(tenant)
+
+      {elapsed, result} = :timer.tc(fn -> Presence.untrack(client, tenant, topic, "alice") end)
+
+      assert result == :ok
+      assert elapsed < 1_000_000
+      assert_receive {:shadow_error, %{operation: :untrack, tenant: ^tenant, reason: :timeout}}
+
+      resume_tracker(tracker)
+
+      assert RollcallBackend.list(tenant, topic) == %{}
+    end
+
+    test "leaves no entry in Rollcall for a track and an untrack that time out", %{
+      tenant: tenant,
+      topic: topic,
+      client: client
+    } do
+      tracker = suspend_tracker(tenant)
+
+      {:ok, :track, _ref} = Presence.track(client, tenant, topic, "alice", %{})
+      :ok = Presence.untrack(client, tenant, topic, "alice")
+      resume_tracker(tracker)
+
+      assert PhoenixBackend.list(topic) == %{}
+      assert RollcallBackend.list(tenant, topic) == %{}
     end
 
     test "sends one presence_diff for a track", %{tenant: tenant, topic: topic, client: client} do
@@ -169,6 +297,22 @@ defmodule Realtime.PresenceTest do
       assert PhoenixBackend.list(topic) == %{}
     end
 
+    test "waits for a stuck Rollcall tracker with the default timeout", %{
+      tenant: tenant,
+      topic: topic,
+      client: client
+    } do
+      tracker = suspend_tracker(tenant)
+      task = Task.async(fn -> Presence.track(client, tenant, topic, "alice", %{}) end)
+
+      # The shadow timeout is 100 ms. A call with that timeout has exited by now.
+      assert Task.yield(task, 500) == nil
+
+      resume_tracker(tracker)
+
+      assert {:ok, :track, _ref} = Task.await(task)
+    end
+
     test "wins over the shadow flag", %{tenant: tenant, topic: topic, client: client} do
       enable([@shadow, @primary])
 
@@ -220,6 +364,42 @@ defmodule Realtime.PresenceTest do
       {:ok, :track, _ref} = Presence.track(client, tenant, topic, "alice", %{})
 
       assert_receive {:duration, %{implementation: :rollcall, action: :track, result: :ok}, _ms}
+    end
+  end
+
+  describe "the metric of an untrack" do
+    setup do
+      id = {__MODULE__, make_ref()}
+      :telemetry.attach(id, [:realtime, :presence, :track, :duration], &__MODULE__.handle_duration/4, self())
+      on_exit(fn -> :telemetry.detach(id) end)
+    end
+
+    test "has the implementation :phoenix with no flag set", %{tenant: tenant, topic: topic, client: client} do
+      enable([])
+      {:ok, :track, _ref} = Presence.track(client, tenant, topic, "alice", %{})
+
+      :ok = Presence.untrack(client, tenant, topic, "alice")
+
+      assert_receive {:duration, %{implementation: :phoenix, action: :untrack, result: :ok}, _ms}
+    end
+
+    test "has one observation for each implementation in shadow mode", %{tenant: tenant, topic: topic, client: client} do
+      enable([@shadow])
+      {:ok, :track, _ref} = Presence.track(client, tenant, topic, "alice", %{})
+
+      :ok = Presence.untrack(client, tenant, topic, "alice")
+
+      assert_receive {:duration, %{implementation: :phoenix, action: :untrack, result: :ok}, _ms}
+      assert_receive {:duration, %{implementation: :rollcall, action: :untrack, result: :ok}, _ms}
+    end
+
+    test "has the implementation :rollcall in Rollcall mode", %{tenant: tenant, topic: topic, client: client} do
+      enable([@primary])
+      {:ok, :track, _ref} = Presence.track(client, tenant, topic, "alice", %{})
+
+      :ok = Presence.untrack(client, tenant, topic, "alice")
+
+      assert_receive {:duration, %{implementation: :rollcall, action: :untrack, result: :ok}, _ms}
     end
   end
 
@@ -335,4 +515,22 @@ defmodule Realtime.PresenceTest do
 
   # A process that stays alive until the test ends. Presence removes its entries after that.
   defp client, do: spawn_link(fn -> Process.sleep(:infinity) end)
+
+  # Starts the Rollcall tracker of the tenant and suspends it. A suspended tracker handles no
+  # message, so a call to it waits until its timeout. The test resumes the tracker with
+  # `resume_tracker/1`. The `on_exit` callback resumes it when the test fails first.
+  defp suspend_tracker(tenant) do
+    :ok = Realtime.Presence.Rollcall.ensure_started(tenant)
+    tracker = Rollcall.Tracker.whereis(Realtime.Presence.Rollcall, tenant)
+    :ok = :sys.suspend(tracker)
+    on_exit(fn -> if Process.alive?(tracker), do: :sys.resume(tracker) end)
+    tracker
+  end
+
+  # Resumes the tracker and waits until it handles the calls that it received.
+  defp resume_tracker(tracker) do
+    :ok = :sys.resume(tracker)
+    _ = :sys.get_state(tracker)
+    :ok
+  end
 end

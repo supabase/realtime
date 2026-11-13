@@ -29,7 +29,6 @@ source = "select nullif(current_setting('app.team', true), '')::text"
 
 # What the library knows about the table and the platform around it (see "Profiles")
 profile = %PolicyEval.Profile{
-  write_plans_select: true,
   columns: %{"team" => :text},
   # app.team() can be inlined: the source that the definition must match, and the body as a tree
   functions: [new("app", "team", "text", source, nullif(setting("app.team"), text("")))],
@@ -95,10 +94,6 @@ A profile holds what the library knows about the table that it decides for, and 
 around that table. The platform is the system that runs the database. `PolicyEval.Snapshot.new/2` takes a profile, and
 `PolicyEval.decide/3` reads it from the snapshot. `PolicyEval.Profile` has these fields:
 
-- `write_plans_select`: the caller plans a `SELECT` of the table in the same call as the `INSERT`
-  of a write. A write then also needs the `SELECT` grant. It falls back where a `SELECT` policy can
-  raise an error (see `PolicyEval.PolicySet`). The only value is `true`, because only that case is
-  measured against Postgres.
 - `columns`: the columns of the checked row that a policy can read, with their types.
 - `functions`: the functions that the library can inline, see "Inlined functions". You build them
   with `PolicyEval.KnownFunction`, so a profile does not depend on the internal form of `PolicyEval.IR`.
@@ -148,8 +143,8 @@ The profile and the env decide which roles, columns, settings and functions a po
 - If RLS is off or forced, or the role has `BYPASSRLS`, the decision is a fallback. If the role
   does not have the `SELECT` grant (reads) or the `INSERT` grant (writes), the decision is also a
   fallback.
-- With `write_plans_select`, a write also needs the `SELECT` grant. If a `SELECT` policy that can
-  apply is not fully supported, a write also falls back, see `PolicyEval.PolicySet`.
+- A write is a plain `INSERT`, with no `RETURNING`. The `SELECT` grant and the `SELECT` policies
+  do not change it, see `PolicyEval.PolicySet`.
 - Expressions up to 4 KB of `pg_get_expr` text.
 
 ### What a policy can read
@@ -171,6 +166,9 @@ The profile and the env decide which roles, columns, settings and functions a po
   `<> ALL (ARRAY[...])`.
 - `~` and `~*` with a literal pattern that has no regex metacharacters
   (`| * + ? ( ) . ^ $ \ [ {`). For `~*`, the text and the pattern must be ASCII.
+- `LIKE` and `NOT LIKE` on text, with `%` and `_`. A pattern with `\` is a fallback. A `\` at the
+  end raises an error, but only if matching gets that far, so whether it raises depends on the
+  text.
 - `jsonb ->> text` where the value is a string or a boolean. A missing key or JSON `null` gives
   NULL. Numbers, objects and arrays are a fallback.
 - `COALESCE` over arguments of one type, and `NULLIF` on text. An unsupported argument anywhere
@@ -195,7 +193,7 @@ The profile and the env decide which roles, columns, settings and functions a po
 These are examples of what is not supported. Each one is a fallback:
 
 - subqueries with `FROM`, `EXISTS` and `CASE`
-- `IS TRUE` and similar tests, `LIKE`, `ILIKE` and `!~`
+- `IS TRUE` and similar tests, `ILIKE`, `LIKE` with an escape or `ESCAPE`, and `!~`
 - the jsonb operators `->`, `?` and `@>`
 - number literals, and casts to `integer`, `numeric` or `json`
 - columns that are not in the profile
@@ -285,8 +283,8 @@ docker compose down
 The user in the URL must be a superuser, because the tests create roles and change them. If the
 database does not exist, the tests create it and mark it with a comment. The tests refuse a
 database without that mark, because they drop and create the schema `app` in it. The roles
-`guest`, `member` and `admin` belong to the whole server. The tests create them if they do not
-exist.
+`guest`, `member` and `admin` belong to the whole server. If they do not exist, the tests create
+them.
 
 There are three test files:
 
@@ -296,10 +294,9 @@ There are three test files:
   evaluates the same text.
 - [test/postgres/decisions_test.exs](test/postgres/decisions_test.exs), Level 2, compares
   `decide/3` with the row-level security of Postgres. A read is a `SELECT` of a probe row as the
-  role. A write is an `INSERT` as the role, after the `SELECT` of the same call
-  (`write_plans_select`). The scenarios are in `PolicyEval.Test.ExampleScenarios`. They include the
-  decision table of `test/policy_eval/policy_set_test.exs`, so Postgres also checks what the unit
-  tests expect.
+  role. A write is an `INSERT` as the role. A call without reads runs no `SELECT`. The scenarios
+  are in `PolicyEval.Test.ExampleScenarios`. They include the decision table of
+  `test/policy_eval/policy_set_test.exs`, so Postgres also checks what the unit tests expect.
 - [test/postgres/fixtures_test.exs](test/postgres/fixtures_test.exs) makes sure that Postgres still
   prints the policies and the function bodies as in the fixture of its major version. With
   `POLICY_EVAL_WRITE_FIXTURES=1`, it writes that fixture again.
@@ -326,6 +323,17 @@ default collation provider, and Postgres 14 and 15 with libc. So the tests cover
 On Postgres 14, run `mix test` and not `mix test --only postgres`. There is no pg14 fixture, so
 `test_helper.exs` excludes the fixtures test. But `--only postgres` includes that test again.
 
+### Static analysis
+
+CI also runs Credo and Dialyzer on the library. `dialyxir` is a dev dependency, so run Dialyzer
+with `MIX_ENV=dev`. The first Dialyzer run builds the PLT (the type information of the
+dependencies) in `priv/plts`.
+
+```sh
+mix credo
+MIX_ENV=dev mix dialyzer
+```
+
 ## The example of the tests
 
 The tests use one example application. It stores documents in the table `app.docs`. A document
@@ -338,7 +346,6 @@ is the profile of the example:
   row-level security.
 - `platform_schemas`: `app`. `platform_setting_prefixes`: `app.`. `platform_roles`: `admin` and
   `postgres`.
-- `write_plans_select`: `true`.
 - `functions`: the known definitions of the functions in the schema `app`.
 
 The functions read the session settings:
@@ -349,13 +356,13 @@ The functions read the session settings:
 - `app.claims()` reads `app.claims`, the claims of the user, as jsonb.
 
 `app.user_id()` and `app.user_role()` have two known bodies each. The simple body reads only its
-setting. The fallback body reads `sub` or `role` from the claims when its setting is empty. The
+setting. When its setting is empty, the fallback body reads `sub` or `role` from the claims. The
 fallback body is a `COALESCE`, and the library evaluates every argument of a `COALESCE` (see
 "Operators and expressions"). So if the claims contain `\u0000`, a call to the fallback body is a
 fallback, also when the user id is set.
 
-The env holds the settings `role`, `app.team`, `app.user_id`, `app.user_role`, `app.claims` and
-`app.headers`, with the exact strings that the application passes to `set_config`.
+The env holds six settings: `role`, `app.team`, `app.user_id`, `app.user_role`, `app.claims` and
+`app.headers`. Each one has the exact string that the application passes to `set_config`.
 
 ## Status
 
@@ -379,11 +386,9 @@ the database, the caller must rule them out or fall back:
   read, or for `search_path`. The env holds the settings that the caller sets, not these defaults.
 - A revoked `EXECUTE` on an inlined function, or a revoked `USAGE` on its schema.
 - Triggers on the table.
-
-### Not done
-
-- `write_plans_select: false`, for a caller that runs only the `INSERT` of a write. Only `true` is
-  measured against Postgres.
+- Other statements on the table as the role in the same call as a write, such as a `SELECT` or an
+  `INSERT ... RETURNING`. Postgres plans the `SELECT` policies for them, and a policy that raises
+  then fails the write. See `PolicyEval.PolicySet`.
 
 ### Planned, or maybe
 
@@ -392,7 +397,7 @@ the database, the caller must rule them out or fall back:
   But a caller can have Postgres print each body in the same canonical form as the policies. In a
   transaction that it rolls back, with `search_path = ''`, it creates a temporary view from the
   body. Then it reads the view back with `pg_get_viewdef`. The parser and resolver already read
-  that text for a body like the fallback body of `app.user_id()`, and it evaluates correctly
+  that text for a body like the fallback body of `app.user_id()`. That text evaluates correctly
   without a known function. Then a profile needs no list of known bodies, and simple helper
   functions of the policy author are covered too. It needs:
   - the `TEMP` privilege in the database (not known yet)
@@ -410,7 +415,9 @@ the database, the caller must rule them out or fall back:
     numbers read with `->>` and `numeric` need more work, because Postgres normalizes how they
     print (`1e2` becomes `100`, `1.50` keeps its scale).
   - more of jsonb: `->`, `?`, `@>`
-  - `LIKE`, `IS TRUE` and similar tests, `lower()`
+  - `IS TRUE` and similar tests, `lower()`
+  - `ILIKE`. Unlike `~*`, Postgres folds its case with the collation (`lower()`), even for ASCII
+    letters, so it depends on the locale of the database. A Turkish locale folds `I` to `ı`.
 - Maybe: decide for real rows of a table, not only for one row that the caller builds. Only
   `{:setting, _}` and `{:column, _}` read data from outside the expression, so to bind a row is to
   fill in the env.

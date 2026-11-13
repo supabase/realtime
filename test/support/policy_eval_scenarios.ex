@@ -7,9 +7,9 @@ defmodule PolicyEvalScenarios do
   the row), and the extensions it asks for. Each extension is asked for as a read and as a write,
   with the key `{operation, extension}`.
 
-  policy_eval has a copy of these scenarios as its worked example
-  (`policy_eval/test/support/realtime_scenarios.ex`), with more scenarios about the internals of the
-  library. The two copies do not have to stay equal.
+  The policy_eval tests translate these scenarios to their own example, the table `app.docs`
+  (`policy_eval/test/support/example_scenarios.ex`), with more scenarios about the internals of the
+  library. The two sets do not have to stay equal.
   """
 
   @own "c0ffee00-1111-4222-8333-444455556666"
@@ -436,6 +436,32 @@ defmodule PolicyEvalScenarios do
   end
 
   @doc """
+  The `realtime.messages` policies of the e2e fixtures (test/e2e/src/fixtures.ts), with their
+  expressions and commands as they are there. They have to be decided by the library, not fall back.
+  """
+  @spec e2e_fixture_scenarios() :: [map()]
+  def e2e_fixture_scenarios do
+    policies = [
+      policy_sql("receive on topic", "FOR SELECT TO authenticated USING (realtime.topic() like 'topic:%')"),
+      policy_sql("broadcast on topic", "FOR INSERT TO authenticated WITH CHECK (realtime.topic() like 'topic:%')"),
+      policy_sql("receive on read-only", "FOR SELECT TO authenticated USING (realtime.topic() like 'read-only:%')"),
+      policy_sql("receive on no-persist", "FOR SELECT TO authenticated USING (realtime.topic() like 'no-persist:%')"),
+      policy_sql(
+        "broadcast on no-persist",
+        "FOR INSERT TO authenticated WITH CHECK (realtime.topic() like 'no-persist:%' and realtime.messages.extension = 'broadcast')"
+      )
+    ]
+
+    # topic_1 is a near miss: the `:` in the patterns is a literal
+    for topic <- ["topic:1", "read-only:1", "no-persist:1", "other:1", "topic_1"] do
+      scenario("e2e fixtures", "e2e fixture policies, topic #{inspect(topic)}", policies,
+        role: "authenticated",
+        topic: topic
+      )
+    end
+  end
+
+  @doc """
   Everything the library doesn't model has to be a fallback, not an answer. The setups change the
   database in the transaction of the scenario, and roll back with it.
   """
@@ -497,14 +523,14 @@ defmodule PolicyEvalScenarios do
   end
 
   @doc """
-  A write reads the table too: the SELECT of the call runs in every call, write-only calls
-  included (`write_plans_select: true`). So whatever makes that SELECT fail makes the writes fail:
-  a missing SELECT privilege, and a SELECT policy that Postgres can't plan. The library decides a
-  write only from what it can read of the SELECT policies: it falls back for a missing grant, and
-  for a policy it doesn't fully model, see `PolicyEval.PolicySet`.
+  A write is a plain INSERT: `realtime.authorize` runs no SELECT on a write-only call. So the SELECT
+  privilege and the SELECT policies don't change a write, see `PolicyEval.PolicySet`. Each scenario
+  has an INSERT policy, and a SELECT setup that makes a SELECT of the table fail even when it reads
+  no rows: a missing SELECT privilege, or a SELECT policy that Postgres can't plan. A read can
+  raise, and a write still gets the answer of the INSERT policy.
   """
-  @spec select_dependent_scenarios() :: [map()]
-  def select_dependent_scenarios do
+  @spec write_ignores_select_scenarios() :: [map()]
+  def write_ignores_select_scenarios do
     insert_policy = policy_sql("insert", "FOR INSERT TO authenticated, anon WITH CHECK (realtime.topic() = 'x')")
 
     revokes = [
@@ -520,7 +546,7 @@ defmodule PolicyEvalScenarios do
     from_revokes =
       for {label, setup} <- revokes, role <- ["authenticated", "anon"], topic <- ["x", "y"] do
         scenario(
-          "select dependent",
+          "write ignores select",
           "#{label}, #{role}, topic #{inspect(topic)}",
           [policy_sql("select", "FOR SELECT TO authenticated, anon USING (realtime.topic() = 'x')"), insert_policy],
           [role: role, topic: topic],
@@ -549,7 +575,7 @@ defmodule PolicyEvalScenarios do
     from_policies =
       for {label, qual} <- select_policies, role <- ["authenticated", "anon"], sub <- [@own, "user_2abc"] do
         scenario(
-          "select dependent",
+          "write ignores select",
           "#{label}, #{role}, sub #{inspect(sub)}",
           [policy_sql("select", "FOR SELECT TO authenticated, anon USING (#{qual})"), insert_policy],
           role: role,

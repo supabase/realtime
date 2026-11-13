@@ -27,6 +27,22 @@ defmodule Realtime.Tenants.ConnectTest do
     %{tenant: tenant}
   end
 
+  # True once no further replication connection can start on the server: every WAL
+  # sender is in use or every replication slot exists.
+  defp wal_budget_spent?(conn) do
+    %{rows: [[spent?]]} =
+      Postgrex.query!(
+        conn,
+        """
+        SELECT (SELECT count(*) FROM pg_stat_replication) >= current_setting('max_wal_senders')::int
+            OR (SELECT count(*) FROM pg_replication_slots) >= current_setting('max_replication_slots')::int
+        """,
+        []
+      )
+
+    spent?
+  end
+
   defp assert_process_down(pid, timeout \\ 100, reason \\ nil) do
     ref = Process.monitor(pid)
 
@@ -585,8 +601,8 @@ defmodule Realtime.Tenants.ConnectTest do
 
       assert_receive {:migrations_ran_at_run, ^stale_count}
 
-      updated_tenant = Tenants.get_tenant_by_external_id(tenant.external_id)
-      assert updated_tenant.migrations_ran == total_migrations
+      # Migrations persists the new count asynchronously, after Connect is already ready
+      assert_eventually Tenants.get_tenant_by_external_id(tenant.external_id).migrations_ran == total_migrations
     end
 
     test "starts broadcast handler and does not fail on existing connection", %{tenant: tenant} do
@@ -724,20 +740,21 @@ defmodule Realtime.Tenants.ConnectTest do
           end)
         end
 
-      GenServer.stop(table_conn)
-
-      # Over-provision the replication connections and only wait for enough of
-      # them to report ready to occupy every WAL sender, so that Connect's own
-      # replication attempt below is the one that trips max_wal_senders. We don't
-      # pin to specific spawns: bringing up real replication connections is
-      # timing-sensitive (especially on a loaded machine or a freshly reused
-      # tenant DB), so requiring every single one to report by index is flaky.
-      for _ <- 1..4, do: assert_receive(:replication_ready, 30_000)
-
       on_exit(fn ->
         Enum.each(pids, &send(&1, :stop))
         Process.sleep(2000)
       end)
+
+      # We spawned more connections than fit, so wait on the server until its WAL
+      # sender or replication slot budget is spent. Only then is Connect's own
+      # replication attempt below the one that trips the limit; starting it earlier
+      # lets it take the last free sender and succeed. We ask the server instead of
+      # counting `:replication_ready` messages because how many connections fit
+      # depends on both limits and on what the image uses itself, and bringing the
+      # connections up is timing-sensitive (loaded machine, freshly reused tenant DB).
+      assert_eventually wal_budget_spent?(table_conn), @slow_replication_wait
+
+      GenServer.stop(table_conn)
 
       log =
         capture_log(fn ->

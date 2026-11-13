@@ -6,6 +6,11 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
   It also reads, in a read-only transaction, who owns the realtime objects and who may execute
   the realtime functions in the tenant database, so a privilege problem can be diagnosed without
   SQL access to it. Each privileges section runs its own query, only once it is first opened.
+
+  The Policies section shows what policy_eval makes of the policies on `realtime.messages`
+  (`Realtime.Tenants.PolicyEvalReport`), so the fallbacks of shadow mode can be diagnosed. It reads
+  with the loader of shadow mode (`Realtime.Tenants.PolicyEvalLoader`), in a read-only transaction,
+  only once it is first opened.
   """
   use Phoenix.LiveDashboard.PageBuilder
   use Realtime.Logs
@@ -18,15 +23,17 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
   alias Realtime.Database
   alias Realtime.Nodes
   alias Realtime.Tenants.Connect
+  alias Realtime.Tenants.PolicyEvalLoader
+  alias Realtime.Tenants.PolicyEvalReport
   alias Realtime.UsersCounter
 
   @application_name "realtime_dashboard_tenant_info"
   @cdc_rls_stop_timeout 5_000
-  @privileges_statement_timeout 5_000
+  @statement_timeout 5_000
   @database_read_timeout 15_000
   @privileges_sections ~w(default functions tables event-triggers)
 
-  @empty_assigns [pg_version: nil, privileges: %{}, runtime: nil, error: nil, action_msg: nil]
+  @empty_assigns [pg_version: nil, privileges: %{}, policy_eval: nil, runtime: nil, error: nil, action_msg: nil]
 
   @impl true
   def menu_link(_, _), do: {:ok, "Tenant Info"}
@@ -52,6 +59,7 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
            tenant: prepare_tenant(tenant),
            pg_version: read_tenant_database(tenant, &fetch_pg_version/1),
            privileges: %{},
+           policy_eval: nil,
            runtime: runtime_info(ref),
            error: nil,
            action_msg: nil
@@ -90,6 +98,14 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
       {:noreply, socket}
     else
       {:noreply, update(socket, :privileges, &Map.put(&1, section, read_privileges(ref, section)))}
+    end
+  end
+
+  def handle_event("load_policy_eval", _params, %{assigns: %{external_id: ref}} = socket) when ref != "" do
+    if socket.assigns.policy_eval do
+      {:noreply, socket}
+    else
+      {:noreply, assign(socket, policy_eval: read_policy_eval(ref))}
     end
   end
 
@@ -203,6 +219,11 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
         <div class="card mb-4" id="privileges">
           <div class="card-header"><strong>Privileges</strong></div>
           <div class="card-body"><%= privileges_section(@privileges) %></div>
+        </div>
+
+        <div class="card mb-4" id="policy-eval">
+          <div class="card-header"><strong>Policies</strong></div>
+          <div class="card-body"><%= policy_eval_section(%{policy_eval: @policy_eval}) %></div>
         </div>
 
         <div class="card mb-4">
@@ -536,6 +557,226 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
   defp not_executable({:ok, functions}), do: Enum.count(functions, fn [_, _, _, can_execute] -> !can_execute end)
   defp not_executable(_), do: 0
 
+  defp policy_eval_section(%{policy_eval: policy_eval}) do
+    assigns = %{state: policy_eval}
+
+    ~H"""
+    <details id="policy-eval-section" phx-mounted={JS.ignore_attributes("open")}>
+      <summary phx-click="load_policy_eval">
+        <h6 class="d-inline">Policies on realtime.messages<%= policy_count(@state) %></h6>
+      </summary>
+      <%= case @state do %>
+        <% {:ok, report} -> %><%= policy_eval_report(%{report: report}) %>
+        <% state -> %><%= section_status(state) %>
+      <% end %>
+    </details>
+    """
+  end
+
+  defp policy_eval_report(%{report: report}) do
+    assigns = %{report: report}
+
+    ~H"""
+    <h6 class="mt-3 mb-1">Decisions</h6>
+    <table class="table table-sm mb-3" id="policy-eval-decisions">
+      <thead>
+        <tr><th>role</th><th>operation</th><th>outcome</th></tr>
+      </thead>
+      <tbody>
+        <%= for decision <- @report.decisions do %>
+          <tr>
+            <td><%= decision.role %></td>
+            <td><%= decision.operation %></td>
+            <td><%= outcome_cell(decision.outcome) %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+
+    <h6 class="mb-1">Table and roles</h6>
+    <table class="table table-sm mb-3" id="policy-eval-roles">
+      <thead>
+        <tr><th>role</th><th>bypasses RLS</th><th>SELECT</th><th>INSERT</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>realtime.messages</td>
+          <td colspan="3">
+            row level security <%= flag(@report.rls_enabled, true, "enabled", "disabled") %>,
+            <%= flag(@report.rls_forced, false, "forced", "not forced") %>
+          </td>
+        </tr>
+        <%= for %{name: name, info: info} <- @report.roles do %>
+          <tr>
+            <td><%= name %></td>
+            <%= if info do %>
+              <td><%= flag(info.bypass_rls, false) %></td>
+              <td><%= flag(info.select, true) %></td>
+              <td><%= flag(info.insert, true) %></td>
+            <% else %>
+              <td colspan="3" class="text-danger">does not exist</td>
+            <% end %>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+
+    <h6 class="mb-1">Known functions</h6>
+    <p class="text-muted small mb-1">
+      policy_eval inlines a call to one of these functions only if its definition is LANGUAGE sql, STABLE, not SECURITY
+      DEFINER, without SET, and its body is a known one. A call to any other function is unsupported.
+    </p>
+    <table class="table table-sm mb-3" id="policy-eval-functions">
+      <thead>
+        <tr><th>function</th><th>status</th><th>definition</th></tr>
+      </thead>
+      <tbody>
+        <%= for function <- @report.functions do %>
+          <tr>
+            <td class="text-monospace"><%= function.name %>()</td>
+            <td><%= function_status(function.status) %></td>
+            <td>
+              <%= for definition <- function.definitions do %>
+                <div class="small text-muted">
+                  language <%= definition.language %>, volatility <%= definition.volatility %>,
+                  security definer <%= definition.security_definer %>, config <%= inspect(definition.config) %>,
+                  returns <%= definition.return_type %>
+                </div>
+                <pre class="small mb-1" style="white-space: pre-wrap; overflow-wrap: anywhere;"><%= definition.source %></pre>
+              <% end %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+
+    <h6 class="mb-1">Policies</h6>
+    <table class="table table-sm mb-0" id="policy-eval-policies">
+      <thead>
+        <tr><th>name</th><th>command</th><th>type</th><th>roles</th><th>USING</th><th>WITH CHECK</th></tr>
+      </thead>
+      <tbody>
+        <%= if @report.policies == [] do %>
+          <tr><td colspan="6" class="text-muted">None</td></tr>
+        <% end %>
+        <%= for policy <- @report.policies do %>
+          <tr>
+            <td><%= policy.name %></td>
+            <td>
+              <%= policy.command %>
+              <%= unless policy.used do %><div class="text-muted small">not used by Realtime</div><% end %>
+            </td>
+            <td><%= if policy.permissive, do: "permissive", else: "restrictive" %></td>
+            <td>
+              <%= for role <- policy.roles do %>
+                <%= if role in policy.unmodelled_roles do %>
+                  <div class="text-danger" title="policy_eval does not model this role">
+                    <%= role %> (not modelled)
+                  </div>
+                <% else %>
+                  <div><%= role %></div>
+                <% end %>
+              <% end %>
+            </td>
+            <td><%= expression_cell(policy.using) %></td>
+            <td><%= expression_cell(policy.with_check) %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+    """
+  end
+
+  defp outcome_cell({:always_fallback, {category, reason} = part}) do
+    assigns = %{description: PolicyEvalReport.describe(reason), part: part, category: category}
+
+    ~H"""
+    <span class="text-danger">always falls back:</span> <%= @description %>
+    <%= unsupported_parts([@part]) %>
+    """
+  end
+
+  defp outcome_cell(:no_permissive_policy) do
+    assigns = %{}
+
+    ~H"""
+    always denied: no permissive policy applies
+    """
+  end
+
+  defp outcome_cell({:evaluates, names, unsupported}) do
+    assigns = %{names: Enum.join(names, ", "), unsupported: unsupported}
+
+    ~H"""
+    evaluates <%= @names %>
+    <%= if @unsupported == [] do %>
+      <div class="text-success small">no unsupported parts</div>
+    <% else %>
+      <div class="small">falls back when the evaluation reaches:</div>
+      <%= unsupported_parts(@unsupported) %>
+    <% end %>
+    """
+  end
+
+  defp expression_cell(nil) do
+    assigns = %{}
+
+    ~H"""
+    <span class="text-muted">none</span>
+    """
+  end
+
+  defp expression_cell(%{text: text, unsupported: unsupported}) do
+    assigns = %{text: text, unsupported: unsupported}
+
+    ~H"""
+    <div class="text-monospace small" style="white-space: pre-wrap; overflow-wrap: anywhere;"><%= @text %></div>
+    <%= if @unsupported == [] do %>
+      <div class="text-success small">supported</div>
+    <% else %>
+      <%= unsupported_parts(@unsupported) %>
+    <% end %>
+    """
+  end
+
+  defp unsupported_parts(parts) do
+    assigns = %{parts: parts}
+
+    ~H"""
+    <%= for {category, reason} <- @parts do %>
+      <div class="text-danger text-monospace small"><%= category %>: <%= inspect(reason) %></div>
+    <% end %>
+    """
+  end
+
+  defp function_status(:known) do
+    assigns = %{}
+
+    ~H"""
+    known
+    """
+  end
+
+  defp function_status(status) do
+    assigns = %{status: status |> Atom.to_string() |> String.replace("_", " ")}
+
+    ~H"""
+    <span class="text-danger"><%= @status %></span>
+    """
+  end
+
+  # A value that differs from what policy_eval needs is red.
+  defp flag(value, expected, yes \\ "yes", no \\ "no") do
+    assigns = %{text: if(value, do: yes, else: no), ok: value == expected}
+
+    ~H"""
+    <span class={unless @ok, do: "text-danger"}><%= @text %></span>
+    """
+  end
+
+  defp policy_count({:ok, report}), do: " (#{length(report.policies)})"
+  defp policy_count(_), do: ""
+
   # Every read runs in an unlinked task that starts its own connection. The connection pool traps
   # exits and stops when the process that started it exits, so the connection closes when the task
   # returns, crashes or is killed on timeout, and none of that can take the dashboard down.
@@ -650,7 +891,7 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
     result =
       Postgrex.transaction(conn, fn conn ->
         with {:ok, _} <- Postgrex.query(conn, "SET TRANSACTION READ ONLY", []),
-             {:ok, _} <- Postgrex.query(conn, "SET LOCAL statement_timeout = #{@privileges_statement_timeout}", []),
+             {:ok, _} <- Postgrex.query(conn, "SET LOCAL statement_timeout = #{@statement_timeout}", []),
              {:ok, %{rows: rows}} <- Postgrex.query(conn, query, []) do
           rows
         else
@@ -666,6 +907,37 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
         log_warning("TenantInfoPrivilegesFailed", reason)
         {:error, "Failed to query privileges: #{inspect(reason)}"}
     end
+  end
+
+  defp read_policy_eval(ref) do
+    case Api.get_tenant_by_external_id(ref) do
+      %Tenant{} = tenant -> read_tenant_database(tenant, &query_policy_eval/1)
+      nil -> {:error, "Tenant not found"}
+    end
+  end
+
+  # The reads of shadow mode (PolicyEvalLoader.read/1), so the report shows what its snapshot holds.
+  # The loader raises on a failed query, and the transaction rolls back and raises again.
+  defp query_policy_eval(conn) do
+    result =
+      Postgrex.transaction(conn, fn conn ->
+        Postgrex.query!(conn, "SET TRANSACTION READ ONLY", [])
+        Postgrex.query!(conn, "SET LOCAL statement_timeout = #{@statement_timeout}", [])
+        PolicyEvalLoader.read(conn)
+      end)
+
+    case result do
+      {:ok, input} -> {:ok, PolicyEvalReport.build(input)}
+      {:error, reason} -> policy_eval_failed(reason)
+    end
+  rescue
+    error in [Postgrex.Error, DBConnection.ConnectionError] -> policy_eval_failed(error)
+  end
+
+  defp policy_eval_failed(reason) do
+    log_warning("TenantInfoPolicyEvalFailed", reason)
+    message = if is_exception(reason), do: Exception.message(reason), else: inspect(reason)
+    {:error, "Failed to read the policies: #{message}"}
   end
 
   defp resolve_host(host) do

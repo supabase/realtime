@@ -17,13 +17,18 @@ defmodule Rollcall do
   view of a node is its own entries plus the replicas of the other nodes.
 
   The first `track/6` for a scope starts the tracker, so an unused scope costs
-  nothing. The tracker removes an entry when its process exits or untracks it,
-  so an entry never outlives its process. The tracker stops after it holds no
-  entry for the grace period. The grace period avoids a stop and a start when a
-  scope gets a new process soon after it lost its last process. See
-  `Rollcall.Tracker`.
+  nothing. `ensure_started/2` starts the tracker without an entry, for a node
+  that reads a scope and tracks nothing in it. The tracker removes an entry
+  when its process exits or untracks it, so an entry never outlives its
+  process. The tracker stops after it holds no entry for the grace period,
+  unless the transport is active. See `Rollcall.Transport.active?/1`.
+  The grace period avoids a stop and a start when a scope gets a new process
+  soon after it lost its last process. See `Rollcall.Tracker`.
 
   A client reads the entries of a partition with `state/3`. 
+
+  The tracker emits telemetry events for its start, its stop, the purge of a peer
+  and the state of its peers. See `Rollcall.Metrics`.
 
   Use the functions in this module. Do not call `Rollcall.Tracker` directly.
   """
@@ -96,13 +101,17 @@ defmodule Rollcall do
         Rollcall.start_link([name: __MODULE__] ++ Keyword.merge(unquote(opts), opts))
       end
 
+      @spec ensure_started(Rollcall.scope()) :: :ok | {:error, term()}
+      def ensure_started(scope), do: Rollcall.ensure_started(__MODULE__, scope)
+
       @spec track(pid(), Rollcall.scope(), Rollcall.partition(), Rollcall.key(), Rollcall.meta(), Keyword.t()) ::
               {:ok, Rollcall.ref()} | {:error, term()}
       def track(pid, scope, partition, key, meta, opts \\ []),
         do: Rollcall.track(__MODULE__, pid, scope, partition, key, meta, opts)
 
-      @spec untrack(pid(), Rollcall.scope(), Rollcall.partition(), Rollcall.key()) :: :ok
-      def untrack(pid, scope, partition, key), do: Rollcall.untrack(__MODULE__, pid, scope, partition, key)
+      @spec untrack(pid(), Rollcall.scope(), Rollcall.partition(), Rollcall.key(), Keyword.t()) :: :ok
+      def untrack(pid, scope, partition, key, opts \\ []),
+        do: Rollcall.untrack(__MODULE__, pid, scope, partition, key, opts)
 
       @spec scopes() :: [Rollcall.scope()]
       def scopes, do: Rollcall.scopes(__MODULE__)
@@ -168,6 +177,24 @@ defmodule Rollcall do
 
   defp validate_option!(key, value) do
     raise ArgumentError, "invalid value for the option #{inspect(key)}: #{inspect(value)}"
+  end
+
+  @doc """
+  Starts the tracker for `scope` when none runs.
+
+  Returns `:ok` when a tracker runs for `scope`, or when the call started one.
+  Returns `{:error, reason}` when the tracker does not start. 
+
+  Call this function on a node that reads the entries of `scope` and has no
+  entry of its own. A tracker with no entry stops after the grace period,
+  unless the transport is active. See `Rollcall.Transport.active?/1`.
+  """
+  @spec ensure_started(Rollcall.name(), Rollcall.scope()) :: :ok | {:error, term()}
+  def ensure_started(name, scope) do
+    case Tracker.whereis(name, scope) do
+      nil -> Tracker.start(name, scope)
+      _pid -> :ok
+    end
   end
 
   @doc """
@@ -244,6 +271,10 @@ defmodule Rollcall do
   A `:ref` option can be passed in the opts argument. When it's provided the value
   will be used as the ref for the entry. Refs need to be unique per scope, when callers
   provide the ref they are responsible for its uniqueness.
+
+  A `:timeout` option sets the milliseconds to wait for the tracker. The default is 5000. The
+  function exits with `{:timeout, _}` when the tracker does not reply in time. The tracker still
+  handles the call later, so the entry exists after the exit.
   """
   @spec track(name(), pid(), scope(), partition(), key(), meta(), Keyword.t()) :: {:ok, ref()} | {:error, term()}
   def track(name, pid, scope, partition, key, meta, opts \\ []) when is_pid(pid) and is_map(meta) do
@@ -259,9 +290,11 @@ defmodule Rollcall do
 
   Does not start a tracker. A tracker that starts only to find nothing to
   remove would stop again after the grace period.
+
+  The `:timeout` option works as it does for `track/7`.
   """
-  @spec untrack(name(), pid(), scope(), partition(), key()) :: :ok
-  def untrack(name, pid, scope, partition, key) when is_pid(pid) do
-    Tracker.untrack(name, scope, pid, partition, key)
+  @spec untrack(name(), pid(), scope(), partition(), key(), Keyword.t()) :: :ok
+  def untrack(name, pid, scope, partition, key, opts \\ []) when is_pid(pid) do
+    Tracker.untrack(name, scope, pid, partition, key, opts)
   end
 end

@@ -98,6 +98,8 @@ defmodule PolicyEval.Test.ExamplePolicies do
       select("setting_text", "current_setting('app.claims', true)::jsonb ->> 'k' = 'v'"),
       select("setting_boolean", "(current_setting('app.claims', true)::jsonb ->> 'k')::boolean"),
       select("regex_case_sensitive", "app.team() ~ 'public:lobby'"),
+      select("like", "app.team() LIKE 'public:%'"),
+      select("not_like", "app.team() NOT LIKE 'public:%'"),
       select("true", "true"),
       select("false", "false"),
       select("eq_null", "app.team() = NULL"),

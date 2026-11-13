@@ -9,9 +9,14 @@ defmodule Realtime.PromEx.Plugins.PolicyEval do
   that matters is in the logs instead: `PolicyEvalShadowMismatch`, `PolicyEvalShadowException` and
   `PolicyEvalUnsupportedPolicies` all name the tenant in their message.
 
-  `decisions_total` (counter): how often a decision matched, mismatched, fell back, or had no real
-  answer to compare against (`outcome` and `extension` tags). The `reason` tag is the bounded category
-  of a fallback (`PolicyEval.Reason.category/1`), `none` for every other outcome. `shadow_duration` (distribution): what
+  `decisions_total` (counter): how often a decision matched, mismatched, mismatched only on a stale
+  snapshot (`stale_snapshot`), fell back, or had no real answer to compare against (`outcome` and
+  `extension` tags). The `reason` tag is the bounded category
+  of a fallback (`PolicyEval.Reason.category/1`), `none` for every other outcome. The `role` tag is
+  the caller's role: `anon`, `authenticated`, or one of the platform roles `service_role`,
+  `postgres` and `supabase_admin` by name, `other` for any role the tenant made, `none` without a
+  role (`PolicyEval.Profile.reported_role/2`). Only `anon` and `authenticated` are decided, so the
+  other values only appear with `outcome="fallback", reason="role"`. `shadow_duration` (distribution): what
   deciding locally would have cost. Compare it against the existing
   `realtime_tenants_read_authorization_check`/`write_authorization_check` distributions for what the
   real check actually costs, rather than duplicating that measurement here — note those are
@@ -42,8 +47,9 @@ defmodule Realtime.PromEx.Plugins.PolicyEval do
             event ++ [:decisions, :total],
             event_name: event,
             description:
-              "Count of policy_eval shadow #{operation} decisions, by outcome, extension and (for a fallback) reason category.",
-            tags: [:outcome, :extension, :reason]
+              "Count of policy_eval shadow #{operation} decisions, by outcome, extension, (for a fallback) reason " <>
+                "category and the caller's role.",
+            tags: [:outcome, :extension, :reason, :role]
           ),
           counter(
             event ++ [:unavailable, :total],

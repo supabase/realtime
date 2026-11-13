@@ -9,10 +9,18 @@ defmodule Realtime.Tenants.PolicyEvalShadow do
   ...]`):
 
     * the bare event, one per extension decided: metadata carries `outcome` (`:match`, `:mismatch`,
-      `:fallback` or `:no_real_answer`), `real`, what the real check produced for that extension, and
-      `reason`: for a `:fallback`, the bounded category of why
-      (`PolicyEval.Reason.category/1`), `:none` for every other outcome. A `:mismatch` also logs a warning
-      immediately. `:exception` is the same, for the rare case deciding itself raises.
+      `:stale_snapshot`, `:fallback` or `:no_real_answer`), `real`, what the real check produced for
+      that extension, and `reason`: for a `:fallback`, the bounded category of why
+      (`PolicyEval.Reason.category/1`), `:none` for every other outcome. `role` is the caller's role
+      as `PolicyEval.Profile.reported_role/2` keeps it: `anon`, `authenticated` or a platform role
+      like `service_role` by name, `:other` for a role the tenant made, `:none` without a role. A
+      `:mismatch` also logs a warning immediately. `:exception` is the same, for the rare case deciding itself raises.
+
+      A mismatch on a cached snapshot may only mean the tenant changed its policies within the cache's
+      TTL. So it reloads the snapshot once (`PolicyEvalCache.reload/3`) and decides again: if the fresh
+      snapshot doesn't mismatch, the outcome is `:stale_snapshot`; if it does, `:mismatch`. A mismatch
+      on a snapshot that was itself reloaded for a mismatch is a `:mismatch` right away, so a real bug
+      costs one extra load per tenant and TTL, not one per decision. So does a reload that fails.
 
       `real` is a boolean, or `{:error, sqlstate}` when Postgres raised evaluating the policies for
       this input, like a sub that isn't a uuid. That is Postgres's answer too, so a decided
@@ -35,6 +43,7 @@ defmodule Realtime.Tenants.PolicyEvalShadow do
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.PolicyEvalCache
+  alias Realtime.Tenants.PolicyEvalCache.Entry
   alias Realtime.Tenants.PolicyEvalEnv
 
   @flag "policy_eval_shadow"
@@ -78,8 +87,8 @@ defmodule Realtime.Tenants.PolicyEvalShadow do
         shadow_start = System.monotonic_time()
 
         case PolicyEvalCache.fetch(db_conn, tenant_id) do
-          {:ok, snapshot} ->
-            Enum.each(pairs, fn {extension, real} -> compare(check, snapshot, extension, real) end)
+          {:ok, entry} ->
+            Enum.each(pairs, fn {extension, real} -> compare(check, db_conn, entry, extension, real) end)
 
           {:error, reason} ->
             Telemetry.execute(check.event ++ [:unavailable], %{count: 1}, %{tenant: tenant_id, reason: inspect(reason)})
@@ -93,25 +102,33 @@ defmodule Realtime.Tenants.PolicyEvalShadow do
     :ok
   end
 
-  defp compare(%Check{} = check, snapshot, extension, real) do
+  defp compare(%Check{} = check, db_conn, %Entry{} = entry, extension, real) do
     tenant_id = check.authorization_context.tenant_id
     metadata = %{tenant: tenant_id, extension: extension}
 
     try do
-      outcome =
+      {outcome, decided_with} =
         case PolicyEvalEnv.build(check.authorization_context, extension) do
-          {:ok, env} -> classify(PolicyEval.decide(snapshot, env, check.operation), real)
-          {:error, reason} -> {:fallback, reason}
+          {:ok, env} -> decide(check, db_conn, entry, env, real)
+          {:error, reason} -> {{:fallback, reason}, entry}
         end
 
-      outcome_metadata = Map.merge(metadata, %{outcome: tag(outcome), real: real, reason: reason(outcome)})
+      outcome_metadata =
+        Map.merge(metadata, %{
+          outcome: tag(outcome),
+          real: real,
+          reason: reason(outcome),
+          role: role(decided_with.snapshot, check.authorization_context.role)
+        })
+
       Telemetry.execute(check.event, %{}, outcome_metadata)
 
       case outcome do
         {:mismatch, policy_eval, _real} ->
           # topic/role/operation so a mismatch can be checked against the tenant's current policies by
-          # hand — a stale cached snapshot (up to the cache TTL old) looks identical to a real bug
-          # otherwise.
+          # hand. The snapshot's age and why it was loaded: a :mismatch snapshot is one reloaded for an
+          # earlier mismatch, so a policy change since then still looks like a real mismatch here.
+          # A :ttl one means the reload failed.
           # The tenant id is in the message, not logger metadata to avoid sending the logs to the tenant,
           # it's an experiment and shouldn't confuse them.
           log_warning(
@@ -123,7 +140,9 @@ defmodule Realtime.Tenants.PolicyEvalShadow do
               topic: check.authorization_context.topic,
               role: check.authorization_context.role,
               policy_eval: policy_eval,
-              real: real
+              real: real,
+              snapshot_age_ms: Entry.age_ms(decided_with),
+              snapshot_load_reason: decided_with.load_reason
             }
           )
 
@@ -143,6 +162,38 @@ defmodule Realtime.Tenants.PolicyEvalShadow do
     end
   end
 
+  # Returns the outcome and the entry it was decided with. Only a mismatch on a :ttl entry reloads, see
+  # the moduledoc.
+  defp decide(check, db_conn, %Entry{} = entry, env, real) do
+    case outcome_for(entry, check, env, real) do
+      {:mismatch, _, _} = mismatch when entry.load_reason == :ttl ->
+        decide_after_reload(check, db_conn, entry, env, real, mismatch)
+
+      outcome ->
+        {outcome, entry}
+    end
+  end
+
+  # Let's make sure it wasn't an outdated snapshot that caused our mismatch
+  defp decide_after_reload(check, db_conn, cached, env, real, mismatch) do
+    case PolicyEvalCache.reload(db_conn, check.authorization_context.tenant_id, cached) do
+      {:ok, fresh} ->
+        case outcome_for(fresh, check, env, real) do
+          {:mismatch, _, _} = still_mismatch -> {still_mismatch, fresh}
+          _other -> {:stale_snapshot, fresh}
+        end
+
+      {:error, _} ->
+        {mismatch, cached}
+    end
+  end
+
+  defp outcome_for(%Entry{snapshot: snapshot}, check, env, real) do
+    snapshot
+    |> PolicyEval.decide(env, check.operation)
+    |> classify(real)
+  end
+
   defp classify({:fallback, _} = fallback, _real), do: fallback
   defp classify(:allow, true), do: :match
   defp classify(:deny, false), do: :match
@@ -151,11 +202,20 @@ defmodule Realtime.Tenants.PolicyEvalShadow do
 
   defp tag(:match), do: :match
   defp tag({:mismatch, _, _}), do: :mismatch
+  defp tag(:stale_snapshot), do: :stale_snapshot
   defp tag({:fallback, _}), do: :fallback
   defp tag({:no_real_answer, _}), do: :no_real_answer
 
   defp reason({:fallback, reason}), do: PolicyEval.Reason.category(reason)
   defp reason(_outcome), do: :none
+
+  # Bounded like the role in a fallback reason, see the moduledoc.
+  defp role(snapshot, role) do
+    case PolicyEval.Profile.reported_role(snapshot.profile, role) do
+      nil -> :none
+      reported -> reported
+    end
+  end
 
   # Mirrors Realtime.Tenants.Authorization's own update_write_policy/3 mapping, as a getter.
   defp real_read({:ok, %Policies{broadcast: %{read: v}}}, :broadcast), do: v
