@@ -19,6 +19,20 @@ defmodule Realtime.PromEx.Plugins.Rollcall do
     * `realtime_rollcall_peer_observations_overdue` - the peer observations of a peer that holds
       entries and missed a heartbeat. The share of this sum in the observations is the share of
       overdue peers.
+    * `realtime_rollcall_heartbeat_send_duration` - a distribution, in microseconds, of the time that
+      a tracker spends to build a heartbeat and to call the transport, by `kind` of the message.
+    * `realtime_rollcall_heartbeat_apply_duration` - a distribution, in microseconds, of the time that
+      a tracker spends to apply a message from a peer, by `kind` of the message: `snapshot`, `diff` or
+      `request`. It does not include the publish.
+    * `realtime_rollcall_publish_duration` - a distribution, in microseconds, of one call to publish
+      the changes of a partition, by `source`: `local`, `peer` or `purge`. It depends on the
+      subscribers of the partition, so it is apart from the apply duration.
+    * `realtime_rollcall_heartbeat_send_entries` - a distribution of the entries in each heartbeat
+      that a tracker sends, by `kind`. A snapshot holds all the local entries of the tracker.
+    * `realtime_rollcall_publish_entries` - the joins and the leaves that trackers publish, by
+      `source`. It is the churn of the entries.
+
+  The events carry each `duration` in native time units, and the plugin converts it to microseconds.
   """
   use PromEx.Plugin
 
@@ -29,6 +43,21 @@ defmodule Realtime.PromEx.Plugins.Rollcall do
     # a tick above the value it stands for: 0, 1, 2, 3, 5, 7, 9 and 10 ticks. A healthy peer has 1 silent
     # tick at each tick. The tracker purges a peer at the silence threshold, which is 10 ticks by default.
     use Peep.Buckets.Custom, buckets: [0.5, 1.5, 2.5, 3.5, 5.5, 7.5, 9.5, 10.5]
+  end
+
+  defmodule Duration.Buckets do
+    @moduledoc false
+    # Microseconds. A send calls the PubSub and can take milliseconds. A publish depends on the number
+    # of subscribers of the partition.
+    use Peep.Buckets.Custom, buckets: [10, 25, 50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000, 25_000, 100_000]
+  end
+
+  defmodule Entries.Buckets do
+    @moduledoc false
+    # The values are whole entries. Peep puts a value in a bucket only when the value is below the
+    # bound, so each bound is half an entry above the value it stands for. An empty heartbeat, from a
+    # tracker with no local entry, has its own bucket.
+    use Peep.Buckets.Custom, buckets: [0.5, 1.5, 5.5, 10.5, 50.5, 100.5, 500.5, 1_000.5, 5_000.5, 10_000.5]
   end
 
   @impl true
@@ -74,6 +103,53 @@ defmodule Realtime.PromEx.Plugins.Rollcall do
         measurement: :overdue_count,
         description:
           "Peer observations where the peer holds entries and missed a heartbeat. Divide by realtime_rollcall_peer_observations for the share of overdue peers."
+      ),
+      distribution(
+        [:realtime, :rollcall, :heartbeat, :send, :duration],
+        event_name: Rollcall.Metrics.tracker_heartbeat_send(),
+        measurement: :duration,
+        unit: {:native, :microsecond},
+        description:
+          "Time that a Rollcall tracker spends to send a heartbeat, in microseconds, tagged by the kind of the message (snapshot or diff). It builds the message and calls the transport.",
+        tags: [:kind],
+        reporter_options: [peep_bucket_calculator: Duration.Buckets]
+      ),
+      distribution(
+        [:realtime, :rollcall, :heartbeat, :apply, :duration],
+        event_name: Rollcall.Metrics.tracker_heartbeat_apply(),
+        measurement: :duration,
+        unit: {:native, :microsecond},
+        description:
+          "Time that a Rollcall tracker spends to apply a message from a peer, in microseconds, tagged by the kind of the message (snapshot, diff or request). It changes the peer record, the replica and the view, and does not include the publish. The event also carries the node of the peer, which is not a tag.",
+        tags: [:kind],
+        reporter_options: [peep_bucket_calculator: Duration.Buckets]
+      ),
+      distribution(
+        [:realtime, :rollcall, :publish, :duration],
+        event_name: Rollcall.Metrics.tracker_publish(),
+        measurement: :duration,
+        unit: {:native, :microsecond},
+        description:
+          "Time of one call that publishes the changes of a Rollcall partition, in microseconds, tagged by source (local, peer or purge). It depends on the subscribers of the partition.",
+        tags: [:source],
+        reporter_options: [peep_bucket_calculator: Duration.Buckets]
+      ),
+      distribution(
+        [:realtime, :rollcall, :heartbeat, :send, :entries],
+        event_name: Rollcall.Metrics.tracker_heartbeat_send(),
+        measurement: :entries,
+        description:
+          "The entries in each heartbeat that a Rollcall tracker sends, tagged by the kind of the message (snapshot or diff). A snapshot holds all the local entries of the tracker.",
+        tags: [:kind],
+        reporter_options: [peep_bucket_calculator: Entries.Buckets]
+      ),
+      sum(
+        [:realtime, :rollcall, :publish, :entries],
+        event_name: Rollcall.Metrics.tracker_publish(),
+        measurement: :entries,
+        description:
+          "The joins and the leaves that Rollcall trackers publish, tagged by source: local (clients), peer (a message from a peer) or purge (a peer that was purged).",
+        tags: [:source]
       )
     ])
   end
