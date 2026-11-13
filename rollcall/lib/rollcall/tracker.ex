@@ -298,6 +298,49 @@ defmodule Rollcall.Tracker do
   end
 
   @doc """
+  Returns the usage of the views of the running trackers. See `Rollcall.usage/2`.
+  """
+  @spec usage(Rollcall.name(), Rollcall.usage_buckets()) :: Rollcall.usage()
+  def usage(name, usage_buckets) do
+    empty = %{
+      scope_count: 0,
+      partition_count: 0,
+      entry_count_buckets: Map.new([:infinity | usage_buckets], &{&1, 0})
+    }
+
+    name
+    |> views()
+    |> Enum.reduce(empty, fn view, usage -> add_view(usage, View.partition_counts(view), usage_buckets) end)
+  end
+
+  # The Registry holds `nil` for a tracker that has not made its view yet. It removes the entry of an
+  # exited tracker after a short delay.
+  defp views(name) do
+    name
+    |> Registry.select([{{:_, :"$1", :"$2"}, [], [{{:"$1", :"$2"}}]}])
+    |> Enum.filter(fn {pid, view} -> view != nil and Process.alive?(pid) end)
+    |> Enum.map(fn {_pid, view} -> view end)
+  end
+
+  defp add_view(usage, partition_counts, _usage_buckets) when map_size(partition_counts) == 0, do: usage
+
+  defp add_view(usage, partition_counts, usage_buckets) do
+    buckets =
+      Enum.reduce(partition_counts, usage.entry_count_buckets, fn {_partition, count}, buckets ->
+        Map.update!(buckets, bucket_for(count, usage_buckets), &(&1 + 1))
+      end)
+
+    %{
+      usage
+      | scope_count: usage.scope_count + 1,
+        partition_count: usage.partition_count + map_size(partition_counts),
+        entry_count_buckets: buckets
+    }
+  end
+
+  defp bucket_for(count, usage_buckets), do: Enum.find(usage_buckets, :infinity, &(count <= &1))
+
+  @doc """
   Returns every entry in the view of `scope`. See `Rollcall.state/2`.
   """
   @spec state(Rollcall.name(), Rollcall.scope()) :: [Rollcall.scope_entry()]
