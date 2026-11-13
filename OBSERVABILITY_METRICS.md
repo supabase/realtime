@@ -82,7 +82,7 @@ These metrics track WebSocket connections and tenant activity across the Realtim
 | `realtime_channel_global_joins`                 | Counter | Global rate of channel join attempts per second across all tenants.                                                                               | Global Aggregate | `/metrics`        |
 | `realtime_presence_usage_tenants`               | Gauge   | Count of tenants with at least one live tracked presence member. A dirty read: departed-node members aren't filtered.                             | Global Aggregate | `/metrics`        |
 | `realtime_presence_usage_topics`                | Gauge   | Count of presence topics with at least one live tracked member, from the same periodic scan.                                                      | Global Aggregate | `/metrics`        |
-| `realtime_presence_usage_topics_by_bucket`      | Gauge   | Count of presence topics whose live member count falls in a given bucket, tagged by bucket (5, 10, 25, 50, 100, 200, 500, infinity).              | Global Aggregate | `/metrics`        |
+| `realtime_presence_usage_topics_by_bucket`      | Gauge   | Count of presence topics whose live member count falls in a given bucket, tagged by bucket (5, 10, 25, 50, 100, 200, 500, 1000, infinity).            | Global Aggregate | `/metrics`        |
 
 ## Event Metrics
 

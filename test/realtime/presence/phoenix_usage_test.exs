@@ -1,10 +1,10 @@
-defmodule RealtimeWeb.Presence.UsageTest do
+defmodule Realtime.Presence.PhoenixUsageTest do
   use ExUnit.Case, async: true
 
+  alias Realtime.Presence.PhoenixUsage, as: Usage
   alias Realtime.Tenants
   alias Realtime.Test.PresenceUsageTracker, as: Tracker
   alias RealtimeWeb.Presence
-  alias RealtimeWeb.Presence.Usage
 
   setup context do
     start_supervised!({Tracker, pool_size: context[:pool_size] || 1})
@@ -23,6 +23,7 @@ defmodule RealtimeWeb.Presence.UsageTest do
                100 => 0,
                200 => 0,
                500 => 0,
+               1000 => 0,
                :infinity => 0
              }
            }
@@ -42,6 +43,7 @@ defmodule RealtimeWeb.Presence.UsageTest do
                100 => 0,
                200 => 0,
                500 => 0,
+               1000 => 0,
                :infinity => 0
              }
            }
@@ -62,6 +64,7 @@ defmodule RealtimeWeb.Presence.UsageTest do
                100 => 0,
                200 => 0,
                500 => 0,
+               1000 => 0,
                :infinity => 0
              }
            }
@@ -82,6 +85,7 @@ defmodule RealtimeWeb.Presence.UsageTest do
                100 => 0,
                200 => 0,
                500 => 0,
+               1000 => 0,
                :infinity => 0
              }
            }
@@ -102,6 +106,7 @@ defmodule RealtimeWeb.Presence.UsageTest do
                100 => 0,
                200 => 0,
                500 => 0,
+               1000 => 0,
                :infinity => 0
              }
            }
@@ -126,6 +131,7 @@ defmodule RealtimeWeb.Presence.UsageTest do
                100 => 0,
                200 => 0,
                500 => 0,
+               1000 => 0,
                :infinity => 0
              }
            }
@@ -149,6 +155,7 @@ defmodule RealtimeWeb.Presence.UsageTest do
                100 => 0,
                200 => 0,
                500 => 0,
+               1000 => 0,
                :infinity => 0
              }
            }
@@ -161,7 +168,8 @@ defmodule RealtimeWeb.Presence.UsageTest do
       {100, "tenant100"},
       {200, "tenant200"},
       {500, "tenant500"},
-      {501, "tenant501"}
+      {1000, "tenant1000"},
+      {1001, "tenant1001"}
     ]
 
     for {count, tenant} <- scenarios do
@@ -173,8 +181,8 @@ defmodule RealtimeWeb.Presence.UsageTest do
     end
 
     assert Usage.scan(Tracker) == %{
-             tenant_count: 6,
-             topic_count: 6,
+             tenant_count: 7,
+             topic_count: 7,
              buckets: %{
                5 => 0,
                10 => 0,
@@ -183,6 +191,7 @@ defmodule RealtimeWeb.Presence.UsageTest do
                100 => 1,
                200 => 1,
                500 => 1,
+               1000 => 1,
                :infinity => 1
              }
            }
@@ -207,6 +216,7 @@ defmodule RealtimeWeb.Presence.UsageTest do
                100 => 0,
                200 => 0,
                500 => 0,
+               1000 => 0,
                :infinity => 0
              }
            }
@@ -228,6 +238,7 @@ defmodule RealtimeWeb.Presence.UsageTest do
                100 => 0,
                200 => 0,
                500 => 0,
+               1000 => 0,
                :infinity => 0
              }
            }
@@ -239,7 +250,7 @@ defmodule RealtimeWeb.Presence.UsageTest do
 
     assert is_integer(tenant_count) and tenant_count >= 0
     assert is_integer(topic_count) and topic_count >= 0
-    assert Enum.sort(Map.keys(buckets)) == Enum.sort([5, 10, 25, 50, 100, 200, 500, :infinity])
+    assert Enum.sort(Map.keys(buckets)) == Enum.sort([5, 10, 25, 50, 100, 200, 500, 1000, :infinity])
     assert Enum.all?(buckets, fn {_bucket, count} -> is_integer(count) and count >= 0 end)
   end
 end

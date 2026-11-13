@@ -12,7 +12,7 @@ defmodule Realtime.PromEx.Plugins.Presence do
     * errors that occur when a tracker is running in shadow mode
   """
 
-  alias RealtimeWeb.Presence
+  alias Realtime.Presence.PhoenixUsage
   use PromEx.Plugin
   use Realtime.Logs
 
@@ -160,7 +160,7 @@ defmodule Realtime.PromEx.Plugins.Presence do
   Emits usage metrics by scanning presence buckets.
 
   Runs the scan in an unlinked, supervised task with a timeout: a crash or a hang in
-  `Presence.Usage.scan/1` must never crash or wedge this poller - `:telemetry_poller` permanently
+  `PhoenixUsage.scan/1` must never crash or wedge this poller - `:telemetry_poller` permanently
   stops calling any measurement that raises, so letting that happen here would silently kill this
   metric for the life of the node, not just for one poll.
 
@@ -190,7 +190,7 @@ defmodule Realtime.PromEx.Plugins.Presence do
 
   defp scan_and_measure(tracker) do
     start = System.monotonic_time()
-    scan = Presence.Usage.scan(tracker)
+    scan = PhoenixUsage.scan(tracker)
     duration = System.convert_time_unit(System.monotonic_time() - start, :native, :millisecond)
 
     measurements = scan |> Map.take([:tenant_count, :topic_count]) |> Map.put(:duration, duration)
