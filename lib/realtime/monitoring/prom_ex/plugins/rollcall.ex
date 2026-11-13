@@ -37,6 +37,8 @@ defmodule Realtime.PromEx.Plugins.Rollcall do
       in bytes. A value above 100 MB counts in the `+Inf` bucket only.
     * `realtime_rollcall_tracker_ets_bytes` - a distribution of the memory of the view table of a
       tracker, in bytes. A value above 100 MB counts in the `+Inf` bucket only.
+    * `realtime_rollcall_tracker_reductions` - a distribution of the reductions that a tracker process
+      used since its previous tick.
 
   The events carry each `duration` in native time units, and the plugin converts it to microseconds.
   """
@@ -84,6 +86,13 @@ defmodule Realtime.PromEx.Plugins.Rollcall do
         50_000_000,
         100_000_000
       ]
+  end
+
+  defmodule Reductions.Buckets do
+    @moduledoc false
+    # Reductions of one tick, in powers of ten. The bounds are a first guess. Adjust them when the
+    # metric has data.
+    use Peep.Buckets.Custom, buckets: [100, 1_000, 10_000, 100_000, 1_000_000, 10_000_000]
   end
 
   @impl true
@@ -199,6 +208,14 @@ defmodule Realtime.PromEx.Plugins.Rollcall do
         measurement: :ets_bytes,
         description: "The memory of the view table of a Rollcall tracker, in bytes, counted at each tick.",
         reporter_options: [peep_bucket_calculator: Bytes.Buckets]
+      ),
+      distribution(
+        [:realtime, :rollcall, :tracker, :reductions],
+        event_name: Rollcall.Metrics.tracker_usage(),
+        measurement: :reductions,
+        description:
+          "The reductions that a Rollcall tracker process used since its previous tick. It measures the CPU work of a tracker in each period.",
+        reporter_options: [peep_bucket_calculator: Reductions.Buckets]
       )
     ])
   end
