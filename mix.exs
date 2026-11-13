@@ -31,6 +31,21 @@ defmodule Realtime.MixProject do
     ]
   end
 
+  def cli do
+    [
+      preferred_envs: [
+        coveralls: :test,
+        "coveralls.detail": :test,
+        "coveralls.post": :test,
+        "coveralls.html": :test,
+        "coveralls.lcov": :test,
+        "coveralls.json": :test,
+        "coveralls.xml": :test,
+        "coveralls.github": :test
+      ]
+    ]
+  end
+
   defp dialyzer do
     [
       plt_add_apps: [:mix],
