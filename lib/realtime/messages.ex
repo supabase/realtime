@@ -162,9 +162,15 @@ defmodule Realtime.Messages do
     {latency, value} =
       :timer.tc(Realtime.Tenants.Repo, :all, [conn, query, Message, [timeout: @default_timeout]], :millisecond)
 
-    :telemetry.execute([:realtime, :tenants, :replay], %{latency: latency}, %{tenant: tenant_id})
+    :telemetry.execute([:realtime, :broadcast, :replay], %{latency: latency, messages: replayed_count(value)}, %{
+      tenant: tenant_id
+    })
+
     value
   end
+
+  defp replayed_count({:ok, messages}), do: length(messages)
+  defp replayed_count(_), do: 0
 
   @doc false
   @spec replay_query(String.t(), NaiveDateTime.t(), NaiveDateTime.t(), pos_integer()) :: Ecto.Query.t()

@@ -281,7 +281,7 @@ defmodule Realtime.PromEx.Plugins.Tenant do
         ),
         distribution(
           [:realtime, :tenants, :replay],
-          event_name: [:realtime, :tenants, :replay],
+          event_name: [:realtime, :broadcast, :replay],
           measurement: :latency,
           unit: :millisecond,
           description: "Latency of broadcast replay",
