@@ -167,7 +167,7 @@ defmodule TestTenantDb.Backend.Docker do
 
     case {running, oom, code} do
       {"true", _, _} ->
-        "container is UP but Postgres did not answer from the host — see the process list and logs below"
+        "container is UP — see the process list and logs below"
 
       {_, "true", _} ->
         "OOM-KILLED"
