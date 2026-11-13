@@ -17,9 +17,9 @@ MAX_SNIPPET_CHARS=8000
 
 # Coverage instrumentation is expensive, so only the job that uploads it pays for it.
 if [ "${EXPORT_COVERAGE:-false}" = "true" ]; then
-  TEST_CMD=(mix coveralls.lcov --partitions 4 --export-coverage "$EXPORT_COVERAGE_SUFFIX" --color)
+  TEST_CMD=(mix coveralls.lcov --warnings-as-errors --partitions 4 --export-coverage "$EXPORT_COVERAGE_SUFFIX" --color)
 else
-  TEST_CMD=(mix test --partitions 4 --color)
+  TEST_CMD=(mix test --warnings-as-errors --partitions 4 --color)
 fi
 
 # mix's exit code is data we need to branch on, not an error - suspend
