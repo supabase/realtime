@@ -31,6 +31,8 @@ defmodule Realtime.PromEx.Plugins.Rollcall do
       that a tracker sends, by `kind`. A snapshot holds all the local entries of the tracker.
     * `realtime_rollcall_publish_entries` - the joins and the leaves that trackers publish, by
       `source`. It is the churn of the entries.
+    * `realtime_rollcall_tracker_entries` - a distribution of the entries in the view of a tracker:
+      the local entries plus the entries of the peers. The tracker takes one observation at each tick.
 
   The events carry each `duration` in native time units, and the plugin converts it to microseconds.
   """
@@ -150,6 +152,14 @@ defmodule Realtime.PromEx.Plugins.Rollcall do
         description:
           "The joins and the leaves that Rollcall trackers publish, tagged by source: local (clients), peer (a message from a peer) or purge (a peer that was purged).",
         tags: [:source]
+      ),
+      distribution(
+        [:realtime, :rollcall, :tracker, :entries],
+        event_name: Rollcall.Metrics.tracker_usage(),
+        measurement: :entries,
+        description:
+          "The entries in the view of a Rollcall tracker, counted at each tick: the local entries plus the entries of the peers.",
+        reporter_options: [peep_bucket_calculator: Entries.Buckets]
       )
     ])
   end

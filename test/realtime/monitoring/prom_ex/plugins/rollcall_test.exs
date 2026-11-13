@@ -22,6 +22,7 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
   @publish_duration "realtime_rollcall_publish_duration"
   @send_entries "realtime_rollcall_heartbeat_send_entries"
   @publish_entries "realtime_rollcall_publish_entries"
+  @tracker_entries "realtime_rollcall_tracker_entries"
 
   setup_all do
     start_supervised!(MetricsTest)
@@ -181,6 +182,24 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
     end
   end
 
+  describe "the usage event" do
+    # The values are whole entries, so each bound is half an entry above the value it stands for.
+    test "records the entries of each tracker at each tick in a distribution" do
+      count_before = metric_value(@tracker_entries <> "_count") || 0
+      empty_before = metric_value(@tracker_entries <> "_bucket", le: "0.5") || 0
+      le_100_before = metric_value(@tracker_entries <> "_bucket", le: "100.5") || 0
+      le_500_before = metric_value(@tracker_entries <> "_bucket", le: "500.5") || 0
+
+      usage(entries: 0)
+      usage(entries: 150)
+
+      assert metric_value(@tracker_entries <> "_count") == count_before + 2
+      assert metric_value(@tracker_entries <> "_bucket", le: "0.5") == empty_before + 1
+      assert metric_value(@tracker_entries <> "_bucket", le: "500.5") == le_500_before + 2
+      assert metric_value(@tracker_entries <> "_bucket", le: "100.5") == le_100_before + 1
+    end
+  end
+
   # The metrics are global. A scope label would give each tenant its own series.
   test "no metric has a scope label" do
     scope = "scope-label-check"
@@ -203,7 +222,10 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
 
     :telemetry.execute(Metrics.tracker_publish(), %{duration: native(50), entries: 1}, %{scope: scope, source: :local})
 
+    usage([], scope)
+
     metrics = [
+      @tracker_entries <> "_count",
       @started,
       @stopped,
       @purged,
@@ -223,6 +245,12 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
 
     # The apply event also carries the node of the peer, which is not a label either.
     assert metric_value(@apply_duration <> "_count", node: "a@host") == nil
+  end
+
+  defp usage(measurements, scope \\ "tenant-a") do
+    defaults = %{entries: 1, process_bytes: 20_000, ets_bytes: 2_000, reductions: 1_000}
+
+    :telemetry.execute(Metrics.tracker_usage(), Map.merge(defaults, Map.new(measurements)), %{scope: scope})
   end
 
   defp native(microseconds), do: System.convert_time_unit(microseconds, :microsecond, :native)
