@@ -73,8 +73,8 @@ defmodule RealtimeWeb.Endpoint do
     event_prefix: [:phoenix, :endpoint],
     log: {__MODULE__, :log_level, []}
 
-  # Disables logging for routes /healthcheck and /api/tenants/:tenant_id/health when DISABLE_HEALTHCHECK_LOGGING=true
-  def log_level(%{path_info: ["healthcheck"]}) do
+  # Disables logging for /healthcheck, /ready and /api/tenants/:tenant_id/health when DISABLE_HEALTHCHECK_LOGGING=true
+  def log_level(%{path_info: [path]}) when path in ["healthcheck", "ready"] do
     if Application.get_env(:realtime, :disable_healthcheck_logging, false), do: false, else: :info
   end
 

@@ -139,6 +139,7 @@ presence_latency_sample_rate =
   Env.get_float("PRESENCE_LATENCY_SAMPLE_RATE", if(config_env() == :test, do: 1.0, else: 0.0))
 
 prom_poll_rate = Env.get_integer("PROM_POLL_RATE", 5000)
+readiness_min_nodes_per_region = Env.get_key_positive_integer_list("READINESS_MIN_NODES_PER_REGION")
 realtime_ip_version = System.get_env("REALTIME_IP_VERSION")
 rebalance_check_interval_in_ms = Env.get_integer("REBALANCE_CHECK_INTERVAL_IN_MS", to_timeout(minute: 10))
 region = System.get_env("REGION", "local")
@@ -276,6 +277,7 @@ config :realtime,
   ],
   log_throttle_janitor_interval_ms: log_throttle_janitor_interval_in_ms,
   disable_healthcheck_logging: disable_healthcheck_logging,
+  readiness_min_nodes_per_region: readiness_min_nodes_per_region,
   metrics_pusher_enabled: metrics_pusher_enabled,
   metrics_pusher_url: metrics_pusher_url,
   metrics_pusher_user: metrics_pusher_user,
