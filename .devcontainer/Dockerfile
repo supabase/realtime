@@ -55,12 +55,23 @@ RUN printf 'PATH=/mise/shims:$PATH\n' > /etc/profile.d/00-mise-shims.sh
 # zsh does not need the profile.d fixup above: /etc/zsh/zprofile ships empty on Debian and
 # /etc/zsh/zshenv only overwrites PATH when it is unset or the bare "/bin:/usr/bin" default, so
 # the shims dir survives both login and interactive zsh unmolested (verified in an isolated
-# container). Only the git/command completion below is zsh-specific.
+# container). Only the shell config below is zsh-specific.
+#
+# It is system-wide rather than in ~/.zshrc because /home/vscode is a named volume
+# (devcontainer.json), seeded from the image only when the volume is created: image changes
+# under $HOME never reach an existing one. Keep anything image-managed out of $HOME.
+# - compinit: the zsh package ships completion functions (e.g. _git), but Debian's
+#   /etc/zsh/zshrc only runs compinit on Ubuntu, so a bare shell has no tab-completion.
+# - History: zsh saves none unless HISTFILE is set; in $HOME it survives rebuilds.
+RUN printf '%s\n' \
+      'autoload -Uz compinit && compinit' \
+      'HISTFILE=~/.zsh_history HISTSIZE=50000 SAVEHIST=50000' \
+      'setopt append_history' \
+    >> /etc/zsh/zshrc
 USER $USERNAME
 
-# The zsh package ships completion functions (e.g. _git) but nothing wires them up by default,
-# so a bare new shell has no tab-completion until compinit runs once.
-RUN printf 'autoload -Uz compinit\ncompinit\n' > /home/$USERNAME/.zshrc
+# Only a placeholder: without any ~/.zshrc, zsh starts its interactive new-user wizard.
+RUN touch /home/$USERNAME/.zshrc
 
 # Production containers carry no wx/ODBC/Java either, so skip them and save build time.
 ENV KERL_CONFIGURE_OPTIONS="--without-javac --without-wx --without-odbc --without-observer --without-debugger --without-et"
