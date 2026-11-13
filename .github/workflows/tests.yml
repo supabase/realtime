@@ -15,6 +15,10 @@ on:
       - "dev/**"
       - "mix.exs"
       - "policy_eval/**"
+      - "forum/**"
+      - "rollcall/**"
+      - "mise.toml"
+      - "mise.lock"
       - "compose.dbs.yml"
       - "compose.realtime-db.yml"
       - "compose.tenant-db.yml"
@@ -25,6 +29,7 @@ on:
       - ".github/db-images.json"
       - ".github/scripts/db_images.sh"
       - ".github/scripts/run_tests_with_retry.sh"
+      - ".github/scripts/append_wait_margin_events.sh"
 
   push:
     branches:
