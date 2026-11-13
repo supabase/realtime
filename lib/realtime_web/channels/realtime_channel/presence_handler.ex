@@ -167,6 +167,9 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   only set if a track call caused presence to flip from disabled to enabled for 
   the channel.
 
+  Errors return the socket too, as `{:error, reason, socket}`. It carries the client rate limit count
+  and any policy evaluated by the call, so a denied track is counted and not authorized again.
+
   """
   @spec handle(map(), Socket.t()) ::
           {:ok, Socket.t(), :resync | :no_resync}
@@ -183,15 +186,13 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
              | :unable_to_track_presence
              | :payload_size_exceeded
              | :connect_rate_limit_reached
-             | :tenant_db_too_many_connections}
-          | {:error, :rpc_error, term()}
+             | :tenant_db_too_many_connections
+             | {:rpc_error, term()}, Socket.t()}
   def handle(%{"event" => event} = payload, socket) do
     event = String.downcase(event, :ascii)
 
     with {:ok, socket} <- limit_client_presence_event(socket) do
       handle_presence_event(event, payload, socket)
-    else
-      {:error, :client_rate_limit_exceeded} = error -> error
     end
   end
 
@@ -214,28 +215,28 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     else
       {:error, :rls_policy_error, error} ->
         log_error("RlsPolicyError", error)
-        {:error, :rls_policy_error}
+        {:error, :rls_policy_error, socket}
 
       {:error, :query_canceled, error} ->
         log_error("QueryCanceled", error)
-        {:error, :query_canceled}
+        {:error, :query_canceled, socket}
 
       {:error, :missing_partition} ->
         log_error("MissingPartition", "Realtime was unable to find the expected messages partition")
-        {:error, :missing_partition}
+        {:error, :missing_partition, socket}
 
       {:error, :tenant_database_unavailable} ->
-        {:error, :tenant_database_unavailable}
+        {:error, :tenant_database_unavailable, socket}
 
       {:error, :increase_connection_pool} ->
-        {:error, :increase_connection_pool}
+        {:error, :increase_connection_pool, socket}
 
       {:error, :rpc_error, error} ->
-        {:error, :rpc_error, error}
+        {:error, {:rpc_error, error}, socket}
 
       {:error, error} ->
         log_error("UnableToSetPolicies", error)
-        {:error, :unable_to_set_policies}
+        {:error, :unable_to_set_policies, socket}
     end
   end
 
@@ -244,7 +245,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   end
 
   defp handle_presence_event("track", _, socket) when not can_write_presence?(socket) do
-    {:error, :unauthorized}
+    {:error, :unauthorized, socket}
   end
 
   defp handle_presence_event("untrack", _, socket) do
@@ -253,9 +254,9 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     {:ok, assign(socket, :presence_track_payload, nil), :no_resync}
   end
 
-  defp handle_presence_event(event, _, _) do
+  defp handle_presence_event(event, _, socket) do
     log_error("UnknownPresenceEvent", event)
-    {:error, :unknown_presence_event}
+    {:error, :unknown_presence_event, socket}
   end
 
   # Check whether a client is authorized to read and write to a private presence topic.
@@ -313,14 +314,14 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
 
       {:error, _action, error} ->
         log_error("UnableToTrackPresence", error)
-        {:error, :unable_to_track_presence}
+        {:error, :unable_to_track_presence, socket}
 
       {:error, reason} when reason in [:invalid_payload, :rate_limit_exceeded, :payload_size_exceeded] ->
-        {:error, reason}
+        {:error, reason, socket}
 
       {:error, error} ->
         log_error("UnableToTrackPresence", error)
-        {:error, :unable_to_track_presence}
+        {:error, :unable_to_track_presence, socket}
     end
   end
 
@@ -363,7 +364,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
         {:ok, updated_socket}
 
       limit_config.counter >= limit_config.max_calls ->
-        {:error, :client_rate_limit_exceeded}
+        {:error, :client_rate_limit_exceeded, socket}
 
       true ->
         # Increment counter
