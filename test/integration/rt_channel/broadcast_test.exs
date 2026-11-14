@@ -839,7 +839,7 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
   describe "broadcast fan-out telemetry" do
     setup [:rls_context, :attach_fanout_telemetry]
 
-    test "a broadcast sent by a connected client is measured locally with hit=true", %{
+    test "a broadcast sent by a connected client is not measured on the sending node", %{
       tenant: tenant,
       serializer: serializer,
       fanout_ref: ref
@@ -857,24 +857,23 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
 
       assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 500
 
-      # The sending node dispatches locally without going through the Worker, but must still
-      # emit the fan-out metric. hit=true because the node holds the client's connection.
-      assert_receive {@fanout_event, ^ref, %{local_tenant_users: count}, %{tenant: ^external_id, hit: true}}, 500
-      assert count >= 1
+      # The sending node dispatches to its own subscribers without a cross-node hop, so it
+      # emits no fan-out metric even though it holds the client's connection.
+      refute_receive {@fanout_event, ^ref, _, %{tenant: ^external_id}}
     end
 
-    test "a broadcast with no local subscribers is measured locally with hit=false", %{
+    test "a database broadcast is not measured on the publishing node", %{
       tenant: tenant,
       topic: topic,
       db_conn: db_conn,
       fanout_ref: ref
     } do
       external_id = tenant.external_id
+      db_ref = :telemetry_test.attach_event_handlers(self(), [[:realtime, :tenants, :broadcast_from_database]])
       # No join starts Connect here, and realtime.send needs its replication connection.
       {:ok, _} = Connect.lookup_or_start_connection(external_id)
       assert ReplicationConnection.ready?(external_id)
 
-      # No socket is connected for this tenant, so the publishing node holds no connection -> hit=false.
       value = random_string()
       event = random_string()
 
@@ -884,7 +883,10 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
         [value, event, topic]
       )
 
-      assert_receive {@fanout_event, ^ref, %{local_tenant_users: 0}, %{tenant: ^external_id, hit: false}}, 2000
+      # The replication connection emits this event right after pubsub_broadcast returns. A fan-out
+      # event from inside that call would come from the same process, so it would arrive first.
+      assert_receive {[:realtime, :tenants, :broadcast_from_database], ^db_ref, _, %{tenant: ^external_id}}, 2000
+      refute_received {@fanout_event, ^ref, _, %{tenant: ^external_id}}
     end
   end
 

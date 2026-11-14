@@ -10,6 +10,8 @@ api_token_blocklist = Env.get_list("API_TOKEN_BLOCKLIST", [])
 app_name = System.get_env("APP_NAME", "")
 broadcast_pool_size = Env.get_integer("BROADCAST_POOL_SIZE", 10)
 channel_error_backoff_ms = Env.get_integer("CHANNEL_ERROR_BACKOFF_MS", to_timeout(second: 5))
+client_broadcasts_burst = Env.get_integer("CLIENT_BROADCASTS_BURST", 1_000)
+client_broadcasts_per_second = Env.get_integer("CLIENT_BROADCASTS_PER_SECOND", 100)
 client_joins_per_second = Env.get_integer("CLIENT_JOINS_PER_SECOND", 1)
 client_presence_max_calls = Env.get_integer("CLIENT_PRESENCE_MAX_CALLS", 5)
 client_presence_window_ms = Env.get_integer("CLIENT_PRESENCE_WINDOW_MS", 30_000)
@@ -51,6 +53,17 @@ gen_rpc_socket_recbuf = Env.get_integer("GEN_RPC_SOCKET_RECEIVE_BUFFER")
 gen_rpc_socket_sndbuf = Env.get_integer("GEN_RPC_SOCKET_SEND_BUFFER")
 gen_rpc_ssl_client_port = Env.get_integer("GEN_RPC_SSL_CLIENT_PORT", 6369)
 gen_rpc_ssl_server_port = Env.get_integer("GEN_RPC_SSL_SERVER_PORT")
+
+# TLS versions gen_rpc's SSL driver accepts, e.g. "tlsv1.3"; unset leaves OTP's default.
+gen_rpc_ssl_versions =
+  "GEN_RPC_SSL_VERSIONS"
+  |> Env.get_list([])
+  |> Enum.reject(&(&1 == ""))
+  |> Enum.map(fn
+    "tlsv1.3" -> :"tlsv1.3"
+    "tlsv1.2" -> :"tlsv1.2"
+    other -> raise ArgumentError, "env GEN_RPC_SSL_VERSIONS expected tlsv1.2 or tlsv1.3, got #{inspect(other)}"
+  end)
 
 gen_rpc_default_port = 5369
 gen_rpc_dev_port_range = gen_rpc_default_port..(gen_rpc_default_port + 99)
@@ -145,9 +158,10 @@ request_id_baggage_key = System.get_env("REQUEST_ID_BAGGAGE_KEY", "request-id")
 rpc_timeout = Env.get_integer("RPC_TIMEOUT", to_timeout(second: 30))
 run_janitor = Env.get_boolean("RUN_JANITOR", false)
 slot_name_suffix = System.get_env("SLOT_NAME_SUFFIX")
+socket_kill_delay_ms = Env.get_integer("SOCKET_KILL_DELAY_MS", to_timeout(second: 5))
 
-sql_logex_snapshot_cache_expiration_in_ms =
-  Env.get_integer("SQL_LOGEX_SNAPSHOT_CACHE_EXPIRATION_IN_MS", to_timeout(minute: 5))
+policy_eval_snapshot_cache_expiration_in_ms =
+  Env.get_integer("POLICY_EVAL_SNAPSHOT_CACHE_EXPIRATION_IN_MS", to_timeout(minute: 5))
 
 tenant_cache_expiration_in_ms = Env.get_integer("TENANT_CACHE_EXPIRATION_IN_MS", to_timeout(second: 30))
 tenant_max_bytes_per_second = Env.get_integer("TENANT_MAX_BYTES_PER_SECOND", 100_000)
@@ -195,6 +209,10 @@ if !(db_ip_version in [nil, "ipv6", "ipv4"]),
 
 if client_joins_per_second < 1 or node_join_budget_floor < 1 or node_join_budget_burst_seconds < 1 do
   raise "CLIENT_JOINS_PER_SECOND, NODE_JOIN_BUDGET_FLOOR and NODE_JOIN_BUDGET_BURST_SECONDS must be positive integers"
+end
+
+if client_broadcasts_per_second < 1 or client_broadcasts_burst < 1 do
+  raise "CLIENT_BROADCASTS_PER_SECOND and CLIENT_BROADCASTS_BURST must be positive integers"
 end
 
 if db_enc_key_gcm && byte_size(db_enc_key_gcm) != 32,
@@ -247,7 +265,7 @@ config :realtime,
   metrics_cleaner_schedule_timer_in_ms: metrics_cleaner_schedule_timer_in_ms,
   metrics_rpc_timeout: metrics_rpc_timeout_in_ms,
   tenant_cache_expiration: tenant_cache_expiration_in_ms,
-  sql_logex_snapshot_cache_expiration: sql_logex_snapshot_cache_expiration_in_ms,
+  policy_eval_snapshot_cache_expiration: policy_eval_snapshot_cache_expiration_in_ms,
   rpc_timeout: rpc_timeout,
   no_channel_timeout_in_ms: no_channel_timeout_in_ms,
   platform: platform,
@@ -386,6 +404,9 @@ if config_env() != :test do
       cacertfile: System.fetch_env!("GEN_RPC_CACERTFILE")
     ]
 
+    gen_rpc_ssl_opts =
+      if gen_rpc_ssl_versions == [], do: gen_rpc_ssl_opts, else: gen_rpc_ssl_opts ++ [versions: gen_rpc_ssl_versions]
+
     config :gen_rpc,
       ssl_server_port: gen_rpc_ssl_server_port,
       ssl_client_port: gen_rpc_ssl_client_port,
@@ -451,7 +472,9 @@ if config_env() != :test do
     max_gen_rpc_call_clients: max_gen_rpc_call_clients,
     connect_error_backoff_ms: connect_error_backoff_ms,
     channel_error_backoff_ms: channel_error_backoff_ms,
+    socket_kill_delay_ms: socket_kill_delay_ms,
     client_join_rate_limit: [per_second: client_joins_per_second],
+    client_broadcast_rate_limit: [per_second: client_broadcasts_per_second, burst: client_broadcasts_burst],
     node_join_budget_floor: node_join_budget_floor,
     node_join_budget_burst_seconds: node_join_budget_burst_seconds
 end

@@ -1,8 +1,13 @@
 defmodule Realtime.Presence.RollcallTransportTest do
   use ExUnit.Case, async: true
+  use Mimic
+  use TestHelpers
 
   alias Realtime.Presence.RollcallTransport
+  alias Realtime.UsersCounter
   alias Rollcall.Tracker.Messages
+
+  setup :set_mimic_from_context
 
   setup do
     scope = "rollcall-#{System.unique_integer([:positive])}"
@@ -25,6 +30,46 @@ defmodule Realtime.Presence.RollcallTransportTest do
 
       refute_receive :ping, 100
     end
+  end
+
+  # The tracker asks at the end of its grace period. A node that has users of the tenant connected
+  # keeps the tracker, so the users still get the state and the diffs of their peers.
+  describe "active?/1" do
+    setup %{scope: scope} do
+      {:ok, state} = RollcallTransport.init(scope, pubsub: Realtime.PubSub)
+      {:ok, state: state}
+    end
+
+    test "is false when no user of the scope is connected on the node", %{state: state} do
+      refute RollcallTransport.active?(state)
+    end
+
+    test "is true while a user of the scope is connected on the node", %{state: state, scope: scope} do
+      :ok = UsersCounter.add(connected_user(), scope)
+
+      assert RollcallTransport.active?(state)
+    end
+
+    test "is false after the process of the user exits", %{state: state, scope: scope} do
+      user = connected_user()
+      :ok = UsersCounter.add(user, scope)
+
+      Process.exit(user, :kill)
+
+      assert_eventually(not RollcallTransport.active?(state))
+    end
+
+    test "is false when only a user of another scope is connected on the node", %{state: state, scope: scope} do
+      :ok = UsersCounter.add(connected_user(), "other-#{scope}")
+
+      refute RollcallTransport.active?(state)
+    end
+  end
+
+  # The test supervisor stops the process when the test ends. The process is not linked to the test,
+  # so a test can kill it.
+  defp connected_user do
+    start_supervised!(Supervisor.child_spec({Task, fn -> Process.sleep(:infinity) end}, id: make_ref()))
   end
 
   describe "heartbeat/2" do
@@ -70,6 +115,7 @@ defmodule Realtime.Presence.RollcallTransportTest do
 
   describe "publish/3" do
     setup %{scope: scope} do
+      stub(Realtime.FeatureFlags, :enabled?, fn flag, ^scope -> flag == "presence_rollcall_primary" end)
       {:ok, state} = RollcallTransport.init(scope, pubsub: Realtime.PubSub)
       {:ok, state: state, partition: "realtime:partition-#{scope}"}
     end
@@ -103,6 +149,15 @@ defmodule Realtime.Presence.RollcallTransportTest do
       Phoenix.PubSub.subscribe(Realtime.PubSub, partition <> "-other")
 
       :ok = RollcallTransport.publish(state, partition, {[{"r1", "alice", %{}}], []})
+
+      refute_receive %Phoenix.Socket.Broadcast{}, 100
+    end
+
+    test "sends nothing unless the Rollcall mode is on", %{scope: scope, state: state, partition: partition} do
+      stub(Realtime.FeatureFlags, :enabled?, fn flag, ^scope -> flag == "presence_rollcall_shadow" end)
+      Phoenix.PubSub.subscribe(Realtime.PubSub, partition)
+
+      assert :ok = RollcallTransport.publish(state, partition, {[{"r1", "alice", %{}}], []})
 
       refute_receive %Phoenix.Socket.Broadcast{}, 100
     end

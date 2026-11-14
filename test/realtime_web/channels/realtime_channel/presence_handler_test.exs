@@ -290,7 +290,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     end
 
     test "a sampled track stores the latency envelope in the tracker meta only", %{tenant: tenant, topic: topic} do
-      expect(Realtime.FeatureFlags, :enabled?, fn "presence_latency_metric", _ -> true end)
+      stub(Realtime.FeatureFlags, :enabled?, fn flag, _tenant -> flag == "presence_latency_metric" end)
       key = random_string()
       policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
       socket = socket_fixture(tenant, topic, key, policies: policies)
@@ -309,7 +309,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     end
 
     test "re-tracking the same payload is still a no-op when sampled", %{tenant: tenant, topic: topic} do
-      expect(Realtime.FeatureFlags, :enabled?, 2, fn "presence_latency_metric", _ -> true end)
+      stub(Realtime.FeatureFlags, :enabled?, fn flag, _tenant -> flag == "presence_latency_metric" end)
       key = random_string()
       policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
       socket = socket_fixture(tenant, topic, key, policies: policies)
@@ -323,7 +323,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     end
 
     test "a sampled update stamps the new meta", %{tenant: tenant, topic: topic} do
-      expect(Realtime.FeatureFlags, :enabled?, 2, fn "presence_latency_metric", _ -> true end)
+      stub(Realtime.FeatureFlags, :enabled?, fn flag, _tenant -> flag == "presence_latency_metric" end)
       key = random_string()
       policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
       socket = socket_fixture(tenant, topic, key, policies: policies)
@@ -338,7 +338,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     end
 
     test "an unsampled track stores no envelope", %{tenant: tenant, topic: topic} do
-      expect(Realtime.FeatureFlags, :enabled?, fn "presence_latency_metric", _ -> false end)
+      stub(Realtime.FeatureFlags, :enabled?, fn _flag, _tenant -> false end)
       key = random_string()
       policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
       socket = socket_fixture(tenant, topic, key, policies: policies)
@@ -785,7 +785,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     end
 
     test "strips the latency envelope from the presence state it pushes", %{tenant: tenant, topic: topic} do
-      stub(Realtime.FeatureFlags, :enabled?, fn "presence_latency_metric", _ -> true end)
+      stub(Realtime.FeatureFlags, :enabled?, fn flag, _tenant -> flag == "presence_latency_metric" end)
       key = random_string()
       policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
       socket = socket_fixture(tenant, topic, key, policies: policies, private?: true)
@@ -799,6 +799,72 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       assert %{"event" => "presence_state", "payload" => %{^key => %{"metas" => [meta]}}} = Jason.decode!(msg)
       assert meta["a"] == "b"
       refute Map.has_key?(meta, "_rt")
+    end
+
+    # A socket that reads presence needs a Rollcall tracker on its node, even when it never tracks.
+    # Without one, the node gets no state and no diffs from its peers.
+    @tag without_db: true
+    test "starts the Rollcall tracker of the tenant in Rollcall mode for a public channel", %{
+      tenant: tenant,
+      topic: topic
+    } do
+      stub(Realtime.FeatureFlags, :enabled?, fn flag, _tenant -> flag == "presence_rollcall_primary" end)
+      socket = socket_fixture(tenant, topic, random_string(), private?: false)
+
+      assert {:ok, _socket} = PresenceHandler.sync(socket)
+
+      assert tenant.external_id in Realtime.Presence.Rollcall.scopes()
+    end
+
+    @tag without_db: true
+    test "starts the Rollcall tracker of the tenant in shadow mode for a private channel with read policy true", %{
+      tenant: tenant,
+      topic: topic
+    } do
+      stub(Realtime.FeatureFlags, :enabled?, fn flag, _tenant -> flag == "presence_rollcall_shadow" end)
+      policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
+      socket = socket_fixture(tenant, topic, random_string(), policies: policies, private?: true)
+
+      assert {:ok, _socket} = PresenceHandler.sync(socket)
+
+      assert tenant.external_id in Realtime.Presence.Rollcall.scopes()
+    end
+
+    @tag without_db: true
+    test "starts no Rollcall tracker for a private channel with read policy false", %{tenant: tenant, topic: topic} do
+      stub(Realtime.FeatureFlags, :enabled?, fn flag, _tenant -> flag == "presence_rollcall_primary" end)
+      policies = %Policies{presence: %PresencePolicies{read: false, write: true}}
+      socket = socket_fixture(tenant, topic, random_string(), policies: policies, private?: true)
+
+      assert {:ok, _socket} = PresenceHandler.sync(socket)
+
+      refute tenant.external_id in Realtime.Presence.Rollcall.scopes()
+    end
+
+    @tag without_db: true
+    test "starts no Rollcall tracker when presence is disabled", %{tenant: tenant, topic: topic} do
+      stub(Realtime.FeatureFlags, :enabled?, fn flag, _tenant -> flag == "presence_rollcall_primary" end)
+      socket = socket_fixture(tenant, topic, random_string(), private?: false, enabled?: false)
+
+      assert {:ok, _socket} = PresenceHandler.sync(socket)
+
+      refute tenant.external_id in Realtime.Presence.Rollcall.scopes()
+    end
+
+    # The shadow mode must not change what the client receives, even when Rollcall fails.
+    @tag without_db: true
+    test "pushes the presence state in shadow mode when the Rollcall tracker does not start", %{
+      tenant: tenant,
+      topic: topic
+    } do
+      stub(Realtime.FeatureFlags, :enabled?, fn flag, _tenant -> flag == "presence_rollcall_shadow" end)
+      stub(Realtime.Presence.Rollcall, :ensure_started, fn _tenant -> raise "boom" end)
+      socket = socket_fixture(tenant, topic, random_string(), private?: false)
+
+      assert {:ok, _socket} = PresenceHandler.sync(socket)
+
+      assert_receive {_, :text, msg}
+      assert %{"event" => "presence_state"} = Jason.decode!(msg)
     end
 
     test "ignores sync for private channels with read policy false", %{tenant: tenant, topic: topic} do

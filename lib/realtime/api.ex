@@ -410,7 +410,10 @@ defmodule Realtime.Api do
 
   defp maybe_trigger_disconnect(%Changeset{data: %{external_id: external_id}} = changeset)
        when requires_disconnect(changeset) do
-    UserSocket.disconnect(external_id)
+    # A plain disconnect is best-effort, so make sure no socket outlives a suspension
+    if Changeset.get_change(changeset, :suspend),
+      do: UserSocket.disconnect_and_kill(external_id),
+      else: UserSocket.disconnect(external_id)
   end
 
   defp maybe_trigger_disconnect(_changeset), do: nil

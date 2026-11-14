@@ -217,7 +217,7 @@ defmodule Realtime.GenRpcPubSub.Worker do
   # Forward to local
   def handle_info({:ftl, topic, message, dispatcher} = msg, %__MODULE__{pubsub: pubsub} = state) do
     measure_presence_replication_received(topic, msg)
-    RealtimeWeb.TenantBroadcaster.measure_broadcast_fanout(message)
+    measure_broadcast_fanout(message)
     Phoenix.PubSub.local_broadcast(pubsub, topic, message, dispatcher)
     {:noreply, state}
   end
@@ -226,7 +226,7 @@ defmodule Realtime.GenRpcPubSub.Worker do
   def handle_info({:ftr, topic, message, dispatcher} = msg, %__MODULE__{} = state) do
     %__MODULE__{pubsub: pubsub, worker: worker, my_region: my_region} = state
     measure_presence_replication_received(topic, msg)
-    RealtimeWeb.TenantBroadcaster.measure_broadcast_fanout(message)
+    measure_broadcast_fanout(message)
 
     # Forward to local first
     Phoenix.PubSub.local_broadcast(pubsub, topic, message, dispatcher)
@@ -315,7 +315,23 @@ defmodule Realtime.GenRpcPubSub.Worker do
     })
   end
 
+  defp measure_presence_replication_received("rollcall:" <> _, msg) do
+    :telemetry.execute(@presence_replication_received_event, %{size: :erlang.external_size(msg)}, %{
+      implementation: "rollcall"
+    })
+  end
+
   defp measure_presence_replication_received(_topic, _msg), do: :ok
+
+  @fanout_event [:realtime, :broadcast, :fanout, :node_delivery]
+
+  defp measure_broadcast_fanout({:tb, tenant_id, _message}) do
+    count = Forum.Census.local_member_count(:users, tenant_id)
+
+    :telemetry.execute(@fanout_event, %{local_tenant_users: count}, %{tenant: tenant_id, hit: count > 0})
+  end
+
+  defp measure_broadcast_fanout(_message), do: :ok
 
   # Deliver `message` to `nodes`, excluding `origin` (which already delivered to its
   # own subscribers via Phoenix.PubSub's local dispatch). Delivers locally if this
@@ -333,7 +349,7 @@ defmodule Realtime.GenRpcPubSub.Worker do
       end)
 
     if local? do
-      RealtimeWeb.TenantBroadcaster.measure_broadcast_fanout(message)
+      measure_broadcast_fanout(message)
       Phoenix.PubSub.local_broadcast(pubsub, topic, message, dispatcher)
     end
 

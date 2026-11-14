@@ -51,6 +51,8 @@ defmodule RealtimeWeb.RealtimeChannel do
   @node_join_budget_flag "node_join_budget"
   @node_join_budget_exceeded_event [:realtime, :channel, :node_join_budget_exceeded]
   @socket_join_limit_flag "socket_join_limit"
+  @socket_broadcast_limit_flag "socket_broadcast_limit"
+  @socket_broadcast_limit_exceeded_event [:realtime, :channel, :socket_broadcast_limit_exceeded]
 
   @impl true
   def join("realtime:", _params, socket) do
@@ -114,7 +116,7 @@ defmodule RealtimeWeb.RealtimeChannel do
          socket = assign(socket, PresenceHandler.join(join, tenant)),
          :ok <- only_private?(tenant, socket),
          :ok <- limit_max_users(tenant, transport_pid),
-         :ok <- measure_node_joins(tenant),
+         :ok <- limit_node_joins(tenant),
          :ok <- limit_joins(tenant, socket),
          :ok <- limit_channels(tenant, socket),
          {:ok, claims, confirm_token_ref} <- confirm_token(socket),
@@ -217,6 +219,10 @@ defmodule RealtimeWeb.RealtimeChannel do
         msg = "ClientJoinRateLimitReached: Too many joins per second"
         send(transport_pid, %Phoenix.Socket.Broadcast{event: "disconnect"})
         {:error, %{reason: msg}}
+
+      # Only the join is refused, the socket stays connected
+      {:error, :too_many_node_joins} ->
+        maybe_log_error(socket, "JoinsRateLimitReached", "Too many joins per second", throttle: {1, 10_000})
 
       {:error, :increase_connection_pool} ->
         msg = "Please increase your connection pool size"
@@ -476,12 +482,13 @@ defmodule RealtimeWeb.RealtimeChannel do
         %{assigns: %{tenant: tenant_id}} = socket
       )
       when PresenceHandler.can_read_presence?(socket) do
-    context = RealtimeWeb.Presence.Metrics.context(tenant_id, :channel)
-    {msg, envelopes} = RealtimeWeb.Presence.Metrics.strip_diff(msg)
+    context = Realtime.Presence.Metrics.context(tenant_id, :channel)
+    {msg, envelopes} = Realtime.Presence.Metrics.strip_diff(msg)
 
     push(socket, "presence_diff", msg.payload)
+    GenCounter.add(Tenants.presence_events_per_second_key(tenant_id))
 
-    RealtimeWeb.Presence.Metrics.record(envelopes, context)
+    Realtime.Presence.Metrics.record(envelopes, context)
 
     {:noreply, socket}
   end
@@ -495,6 +502,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   @impl true
   def handle_in("broadcast", payload, %{assigns: %{private?: true}} = socket) do
     %{tenant: tenant_id} = socket.assigns
+    measure_socket_broadcasts(socket)
 
     RequestMetrics.track(:broadcast, :ws, tenant_id, fn ->
       with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id) do
@@ -528,6 +536,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_in("broadcast", payload, %{assigns: %{private?: false}} = socket) do
+    measure_socket_broadcasts(socket)
     RequestMetrics.track(:broadcast, :ws, socket.assigns.tenant, fn -> BroadcastHandler.handle(payload, socket) end)
   end
 
@@ -745,11 +754,20 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  # The node join budget is only measured for now: joins over it are counted, not refused. The flag is read on every
-  # join so switching it off takes effect without sockets reconnecting
-  defp measure_node_joins(tenant) do
+  # Checked before limit_joins so refused joins are not counted as joins. The flag is read on every join so switching it
+  # off takes effect without sockets reconnecting
+  defp limit_node_joins(tenant) do
     if FeatureFlags.enabled?(@node_join_budget_flag, tenant.external_id) and NodeJoinBudget.take(tenant) == :error do
       Telemetry.execute(@node_join_budget_exceeded_event, %{count: 1}, %{tenant: tenant.external_id})
+      {:error, :too_many_node_joins}
+    else
+      :ok
+    end
+  end
+
+  defp measure_socket_broadcasts(%{assigns: %{tenant: tenant_id}, private: %{broadcast_bucket: bucket}}) do
+    if FeatureFlags.enabled?(@socket_broadcast_limit_flag, tenant_id) and TokenBucket.take(bucket) == :error do
+      Telemetry.execute(@socket_broadcast_limit_exceeded_event, %{count: 1}, %{tenant: tenant_id})
     end
 
     :ok
