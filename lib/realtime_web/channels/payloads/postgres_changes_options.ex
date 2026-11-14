@@ -22,7 +22,7 @@ defmodule RealtimeWeb.Channels.Payloads.PostgresChangesOptions do
 
   def changeset(postgres_changes_options, attrs) do
     postgres_changes_options
-    |> cast(attrs, [:wait, :timeout], message: &Join.error_message/2)
+    |> cast(attrs, [:wait, :timeout], empty_values: Join.empty_values(), message: &Join.error_message/2)
     |> validate_number(:timeout, greater_than: 0)
   end
 end

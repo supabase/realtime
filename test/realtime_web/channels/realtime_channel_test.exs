@@ -419,6 +419,18 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert {:ok, %RateCounter{sum: 3}} = RateCounterHelper.tick!(args)
     end
 
+    test "a null private flag joins a public channel that sends broadcasts", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+      config = %{"private" => nil, "broadcast" => %{"ack" => true, "self" => true}}
+      assert {:ok, _, socket} = subscribe_and_join(socket, "realtime:test", %{"config" => config})
+
+      ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{"hello" => "world"}})
+
+      assert_reply ref, :ok, %{}
+      assert_receive %Socket.Message{event: "broadcast", payload: %{"payload" => %{"hello" => "world"}}}
+    end
+
     test "broadcast map payload", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
