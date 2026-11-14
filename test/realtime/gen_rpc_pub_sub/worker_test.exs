@@ -104,10 +104,15 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       refute_receive {@fanout_event, ^ref, _, %{tenant: ^tenant_id}}
     end
 
-    test "does not emit for untagged messages", %{worker: worker, ref: ref, tenant_id: tenant_id} do
+    test "does not emit for untagged messages", %{worker: worker, ref: ref} do
+      broadcast = %Phoenix.Socket.Broadcast{topic: @topic, event: "e", payload: %{}}
+      send(worker, Worker.forward_to_local(@topic, broadcast, Phoenix.PubSub))
       send(worker, Worker.forward_to_local(@topic, "untagged message", Phoenix.PubSub))
 
-      refute_receive {@fanout_event, ^ref, _, %{tenant: ^tenant_id}}
+      # Wait until the worker handled both messages, so any emission is already in the mailbox.
+      # An untagged message carries no tenant to filter on, so match any fan-out event.
+      :sys.get_state(worker)
+      refute_received {@fanout_event, ^ref, _, _}
     end
 
     test "forward to region also measures fan-out on the receiving node",

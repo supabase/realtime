@@ -10,6 +10,9 @@ defmodule Clustered do
   @port_wait_timeout_ms 5_000
   @port_wait_interval_ms 100
 
+  @muster_wait_timeout_ms 20_000
+  @muster_wait_interval_ms 100
+
   @gen_rpc_wait_timeout_ms 15_000
   @gen_rpc_poll_start_ms 20
   @gen_rpc_poll_max_ms 200
@@ -166,6 +169,98 @@ defmodule Clustered do
 
     {:ok, pid, node}
   end
+
+  @doc """
+  Starts one peer node for each name in `names` and waits until Muster is ready on every node.
+
+  See `configure_cluster/1`, `start_peer/2` and `wait_for_muster/1`.
+  """
+  @spec start_peers([atom()]) :: [node()]
+  def start_peers(names) when is_list(names) do
+    configure_cluster(names)
+    nodes = for name <- names, do: start_peer(name)
+    wait_for_muster([node() | nodes])
+    nodes
+  end
+
+  @doc """
+  Tells the test node the `gen_rpc` port of each peer in `names`, before any peer starts.
+
+  Each node needs the `gen_rpc` port of every other node. A test that starts a peer later lists
+  the peer here too. The test node gets its old config back when the test ends. The names are
+  slots of `TestEnv`.
+  """
+  @spec configure_cluster([atom()]) :: :ok
+  def configure_cluster(names) do
+    local_port = Application.fetch_env!(:gen_rpc, :tcp_server_port)
+
+    ports =
+      Map.new([
+        {node(), local_port} | for(name <- names, do: {TestEnv.peer_node(name), TestEnv.peer_gen_rpc_port(name)})
+      ])
+
+    original = Application.fetch_env(:gen_rpc, :client_config_per_node)
+    Application.put_env(:gen_rpc, :client_config_per_node, {:internal, ports})
+    ExUnit.Callbacks.on_exit(fn -> restore_client_config(original) end)
+  end
+
+  @doc """
+  Starts one peer node. `configure_cluster/1` has to list the peer first.
+
+  The option `:rollcall` overrides options of the Rollcall instance of the node. The test config
+  gives the other options.
+  """
+  @spec start_peer(atom(), keyword()) :: node()
+  def start_peer(name, opts \\ []) do
+    {:internal, ports} = Application.fetch_env!(:gen_rpc, :client_config_per_node)
+
+    unless Map.has_key?(ports, TestEnv.peer_node(name)) do
+      raise ArgumentError, "#{inspect(name)} is not in the cluster config, call configure_cluster/1 with it first"
+    end
+
+    rollcall = Keyword.merge(Application.get_env(:realtime, :rollcall, []), Keyword.get(opts, :rollcall, []))
+
+    extra_config = [
+      {:gen_rpc, :tcp_server_port, TestEnv.peer_gen_rpc_port(name)},
+      {:gen_rpc, :client_config_per_node, {:internal, ports}},
+      {:realtime, :rollcall, rollcall}
+    ]
+
+    {:ok, node} = start(nil, name: name, extra_config: extra_config, phoenix_port: TestEnv.peer_http_port(name))
+
+    node
+  end
+
+  @doc """
+  Waits until every node reports Muster as ready and all of them hold the same view.
+  """
+  @spec wait_for_muster([node()]) :: :ok
+  def wait_for_muster(nodes) do
+    scope = Application.get_env(:realtime, :muster_scope)
+
+    ready? =
+      wait(
+        Enum.all?(nodes, &(:erpc.call(&1, Forum.Muster, :status, [scope]) == :ready)) and
+          nodes |> Enum.map(&:erpc.call(&1, Forum.Muster, :view_hash, [scope])) |> Enum.uniq() |> length() == 1,
+        timeout: @muster_wait_timeout_ms,
+        interval: @muster_wait_interval_ms
+      )
+
+    if not ready?, do: raise("Muster is not ready on #{inspect(nodes)} after #{div(@muster_wait_timeout_ms, 1000)}s")
+
+    :ok
+  end
+
+  @doc "Stops the node at once, with no chance to say goodbye."
+  @spec kill(node()) :: :ok
+  def kill(node), do: :erpc.cast(node, :erlang, :halt, [0])
+
+  @doc "Stops the `:realtime` application of the node, as a shutdown does. The call does not wait."
+  @spec stop_application(node()) :: :ok
+  def stop_application(node), do: :erpc.cast(node, Application, :stop, [:realtime])
+
+  defp restore_client_config({:ok, value}), do: Application.put_env(:gen_rpc, :client_config_per_node, value)
+  defp restore_client_config(:error), do: Application.delete_env(:gen_rpc, :client_config_per_node)
 
   defp wait_for_gen_rpc(pid) do
     port = :peer.call(pid, Application, :get_env, [:gen_rpc, :tcp_server_port])

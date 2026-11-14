@@ -33,23 +33,23 @@ jobs:
     steps:
       - name: Generate GitHub App token
         id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@v3.2.0
         with:
           client-id: ${{ secrets.GH_APP_MANAGER_ID }}
           private-key: ${{ secrets.GH_APP_MANAGER_PRIVATE_KEY }}
 
       # The PR branch itself, not the merge commit: whatever comes out is committed back onto it.
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@v6.0.2
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           token: ${{ steps.app-token.outputs.token }}
 
       - name: Setup mise
-        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
+        uses: jdx/mise-action@v4.0.1
 
       - name: Cache Mix
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@v5.0.4
         with:
           path: |
             deps
@@ -67,7 +67,7 @@ jobs:
         run: echo "PG_IMAGES=$(mise run tenant-dump-images | tr '\n' ' ')" >> "$GITHUB_ENV"
 
       - name: Cache Docker images
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@v5.0.4
         id: docker-cache
         with:
           path: /tmp/docker-images

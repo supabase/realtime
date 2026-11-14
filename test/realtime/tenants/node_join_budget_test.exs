@@ -108,6 +108,38 @@ defmodule Realtime.Tenants.NodeJoinBudgetTest do
     end
   end
 
+  describe "exhausted?/2" do
+    test "is false for a tenant without a bucket and does not create one", %{tenant: tenant, now: now} do
+      refute NodeJoinBudget.exhausted?(tenant, now)
+      refute :ets.member(NodeJoinBudget, tenant.external_id)
+    end
+
+    test "takes no join from the bucket", %{tenant: tenant, now: now} do
+      for _ <- 1..19, do: NodeJoinBudget.take(tenant, now)
+      for _ <- 1..5, do: refute(NodeJoinBudget.exhausted?(tenant, now))
+
+      assert joins_at_once(tenant, now) == 1
+    end
+
+    test "is true while the bucket is empty and false again once it refills", %{tenant: tenant, now: now} do
+      for _ <- 1..20, do: NodeJoinBudget.take(tenant, now)
+
+      assert NodeJoinBudget.exhausted?(tenant, now)
+      assert NodeJoinBudget.exhausted?(tenant, now + div(@second, 10) - 1)
+      refute NodeJoinBudget.exhausted?(tenant, now + div(@second, 10))
+    end
+
+    test "follows the budget when the tenant gets more sockets on this node", %{tenant: tenant, now: now} do
+      for _ <- 1..20, do: NodeJoinBudget.take(tenant, now)
+      assert NodeJoinBudget.exhausted?(tenant, now + div(@second, 20))
+
+      # 15 sockets at 2 joins per socket make the budget 30 per second
+      add_sockets(tenant, 15)
+
+      refute NodeJoinBudget.exhausted?(tenant, now + div(@second, 20))
+    end
+  end
+
   describe "sweep" do
     test "deletes buckets that have been full for a second and keeps the others", %{tenant: tenant, now: future} do
       refilling = tenant

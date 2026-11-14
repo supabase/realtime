@@ -6,9 +6,10 @@ defmodule Realtime.PromEx.Plugins.Presence do
     * inter-node replication traffic, measured on the receiving node,
     * the latency from a client's track to each other subscriber being notified,
     * the latency from a client's join to its first presence_state push,
-    * the duration of a client's track or update call on the presence shard,
+    * the duration of a client's track, untrack or update call on the presence shard,
     * periodic usage numbers (tenant/topic counts, member-count distribution)
       read off Phoenix.Tracker's own replicated state.
+    * errors that occur when a tracker is running in shadow mode
   """
 
   alias RealtimeWeb.Presence
@@ -22,6 +23,7 @@ defmodule Realtime.PromEx.Plugins.Presence do
   @event_usage [:realtime, :presence, :usage]
   @event_usage_bucket [:realtime, :presence, :usage, :bucket]
   @event_join_latency [:realtime, :presence, :join, :latency]
+  @event_shadow_error [:realtime, :presence, :shadow, :error]
 
   # Comfortably under the 60s poll interval, so a timed-out scan is never still in flight when
   # the next tick fires.
@@ -62,6 +64,12 @@ defmodule Realtime.PromEx.Plugins.Presence do
         description: "Bytes (:erlang.external_size/1) of Presence state replication received from other nodes",
         tags: [:implementation]
       ),
+      counter(
+        [:realtime, :presence, :replication, :received, :messages],
+        event_name: @event_replication_received,
+        description: "Count of the number of messages received by presence replication",
+        tags: [:implementation]
+      ),
       distribution(
         @event_notify_latency,
         event_name: @event_notify_latency,
@@ -77,7 +85,7 @@ defmodule Realtime.PromEx.Plugins.Presence do
         measurement: :duration,
         unit: :millisecond,
         description:
-          "Duration of a client's presence track or update call on the presence shard, tagged by result (ok, error, exit) and reason",
+          "Duration of a client's presence track, untrack or update call on the presence shard, tagged by result (ok, error, exit) and reason",
         tags: [:action, :result, :reason, :implementation],
         reporter_options: [peep_bucket_calculator: Track.Buckets]
       ),
@@ -95,6 +103,12 @@ defmodule Realtime.PromEx.Plugins.Presence do
         description: "Latency from a client's channel join to receiving its first presence_state push.",
         tags: [:state, :implementation],
         reporter_options: [peep_bucket_calculator: Join.Buckets]
+      ),
+      counter(
+        @event_shadow_error,
+        event_name: @event_shadow_error,
+        description: "Errors that arise from Rollcall when it is running in shadow mode",
+        tags: [:operation, :reason]
       )
     ])
   end

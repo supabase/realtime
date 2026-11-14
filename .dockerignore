@@ -34,8 +34,8 @@
 # Mix artifacts
 /_build/
 /deps/
-/sql_logex/_build/
-/sql_logex/deps/
+/policy_eval/_build/
+/policy_eval/deps/
 /rollcall/_build/
 /rollcall/deps/
 *.ez

@@ -23,10 +23,10 @@ jobs:
     env:
       arch: amd64
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@v6.0.2
 
       - name: Setup Blacksmith Builder
-        uses: useblacksmith/setup-docker-builder@ef12d5b165b596e3aa44ea8198d8fde563eab402 # v1.4.0
+        uses: useblacksmith/setup-docker-builder@v1.4.0
 
       - uses: useblacksmith/build-push-action@30c71162f16ea2c27c3e21523255d209b8b538c1 # v2
         with:
@@ -41,10 +41,10 @@ jobs:
     env:
       arch: arm64
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@v6.0.2
 
       - name: Setup Blacksmith Builder
-        uses: useblacksmith/setup-docker-builder@ef12d5b165b596e3aa44ea8198d8fde563eab402 # v1.4.0
+        uses: useblacksmith/setup-docker-builder@v1.4.0
 
       - uses: useblacksmith/build-push-action@30c71162f16ea2c27c3e21523255d209b8b538c1 # v2
         with:
@@ -57,21 +57,21 @@ jobs:
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@v6.0.2
         with:
           repository: supabase/slim-services
           ref: 4a4073b1e57f4422d203863decc94baa76640cf7
           path: slim-services
           submodules: false
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@v6.0.2
         with:
           path: slim-services/sources/realtime
           submodules: false
 
-      - uses: nixbuild/nix-quick-install-action@9f63be77f412a248c9d9a65a4c82cf066cdf8f0c # v35
+      - uses: nixbuild/nix-quick-install-action@v35
 
-      - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+      - uses: nix-community/cache-nix-action@v7.0.2
         with:
           primary-key: nix-realtime-flake-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('slim-services/flake.nix', 'slim-services/flake.lock', 'slim-services/nix/**', 'slim-services/services/realtime/**', 'slim-services/scripts/**', 'slim-services/sources/realtime/mix.lock', 'slim-services/sources/realtime/Dockerfile') }}
           restore-prefixes-first-match: nix-realtime-flake-${{ runner.os }}-${{ runner.arch }}-
