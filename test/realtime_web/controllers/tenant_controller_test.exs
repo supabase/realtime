@@ -104,6 +104,47 @@ defmodule RealtimeWeb.TenantControllerTest do
     end
   end
 
+  describe "create tenant without an extension" do
+    test "returns 422 with post when extensions is missing", %{conn: conn} do
+      external_id = random_string()
+      attrs = 5000 |> default_tenant_attrs() |> Map.delete("extensions") |> Map.put("external_id", external_id)
+
+      conn = post(conn, ~p"/api/tenants", tenant: attrs)
+
+      assert json_response(conn, 422) == %{
+               "message" => "extensions must have at least one extension with a type and settings"
+             }
+
+      assert nil == Tenants.get_tenant_by_external_id(external_id)
+    end
+
+    test "returns 422 with put when extensions is empty", %{conn: conn} do
+      external_id = random_string()
+      attrs = 5000 |> default_tenant_attrs() |> Map.put("extensions", [])
+
+      conn = put(conn, ~p"/api/tenants/#{external_id}", tenant: attrs)
+
+      assert json_response(conn, 422) == %{
+               "message" => "extensions must have at least one extension with a type and settings"
+             }
+
+      assert nil == Tenants.get_tenant_by_external_id(external_id)
+    end
+
+    test "returns 422 with put when no extension has a type and settings", %{conn: conn} do
+      external_id = random_string()
+      attrs = 5000 |> default_tenant_attrs() |> Map.put("extensions", [%{"type" => "postgres_cdc_rls"}])
+
+      conn = put(conn, ~p"/api/tenants/#{external_id}", tenant: attrs)
+
+      assert json_response(conn, 422) == %{
+               "message" => "extensions must have at least one extension with a type and settings"
+             }
+
+      assert nil == Tenants.get_tenant_by_external_id(external_id)
+    end
+  end
+
   describe "create tenant with put" do
     test "run migrations on creation and encrypts credentials", %{conn: conn} do
       external_id = random_string()
