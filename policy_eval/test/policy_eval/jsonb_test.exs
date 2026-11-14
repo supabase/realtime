@@ -520,4 +520,173 @@ defmodule PolicyEval.JsonbTest do
       assert Jsonb.object_field_text(parse(~S|{"a":1e5}|), t("a")) == {:unsupported, :jsonb_number_token}
     end
   end
+
+  describe "object_field/2" do
+    @fields_json ~S|{"s":"x","t":true,"nul":null,"n":1.50,"big":1.5e2,"o":{"a":{"b":"deep"}},"arr":[1,"x"],"ea":[],"eo":{}}|
+
+    defp object_field(key), do: Jsonb.object_field(parse(@fields_json), t(key))
+
+    test "returns the value of the field as jsonb, whatever its type" do
+      assert object_field("s") == {:jsonb, "x"}
+      assert object_field("t") == {:jsonb, true}
+      assert object_field("o") == {:jsonb, %{"a" => %{"b" => "deep"}}}
+      assert object_field("arr") == {:jsonb, [{:number, "1"}, "x"]}
+      assert object_field("ea") == {:jsonb, []}
+      assert object_field("eo") == {:jsonb, %{}}
+    end
+
+    test "keeps a number as its token, without printing it" do
+      assert object_field("n") == {:jsonb, {:number, "1.50"}}
+      assert object_field("big") == {:jsonb, {:number, "1.5e2"}}
+    end
+
+    test "returns JSON null as the jsonb null, which is not SQL NULL" do
+      assert object_field("nul") == {:jsonb, :null}
+    end
+
+    test "returns NULL for a missing key" do
+      assert object_field("missing") == nil
+      assert object_field("") == nil
+      assert object_field("S") == nil
+    end
+
+    test "sees the last of duplicate keys" do
+      assert Jsonb.object_field(parse(~S|{"a":"first","a":{"b":1}}|), t("a")) == {:jsonb, %{"b" => {:number, "1"}}}
+      assert Jsonb.object_field(parse(~S|{"a":"first","a":null}|), t("a")) == {:jsonb, :null}
+    end
+
+    test "returns NULL when the root is not an object, whatever the key" do
+      for json <- ["[1,2]", ~S|[{"a":"x"}]|, "[]", ~S|"a"|, "1", "true", "null"] do
+        assert Jsonb.object_field(parse(json), t("a")) == nil, json
+        assert Jsonb.object_field(parse(json), t("0")) == nil, json
+      end
+    end
+
+    test "chains, and object_field_text reads the result" do
+      meta = Jsonb.object_field(parse(@fields_json), t("o"))
+      inner = Jsonb.object_field(meta, t("a"))
+
+      assert inner == {:jsonb, %{"b" => "deep"}}
+      assert Jsonb.object_field_text(inner, t("b")) == t("deep")
+      assert Jsonb.object_field(Jsonb.object_field(parse(@fields_json), t("missing")), t("a")) == nil
+      assert Jsonb.object_field(Jsonb.object_field(parse(@fields_json), t("nul")), t("a")) == nil
+      assert Jsonb.object_field_text(Jsonb.object_field(parse(@fields_json), t("s")), t("a")) == nil
+    end
+
+    test "is strict: NULL in either argument is NULL" do
+      assert Jsonb.object_field(nil, t("a")) == nil
+      assert Jsonb.object_field(parse(~S|{"a":"x"}|), nil) == nil
+    end
+
+    test "returns an unsupported argument unchanged, the first one winning, even next to NULL" do
+      assert Jsonb.object_field(@boom, t("a")) == @boom
+      assert Jsonb.object_field(parse("{}"), @boom) == @boom
+      assert Jsonb.object_field(nil, @boom) == @boom
+      assert Jsonb.object_field(@boom, nil) == @boom
+      assert Jsonb.object_field(@boom, @bang) == @boom
+    end
+
+    test "passes through the result of an unsupported parse" do
+      assert Jsonb.object_field(parse(~S|{"a":{"b":"\u0000"}}|), t("a")) == @nul_escape
+      assert Jsonb.object_field(parse(""), t("a")) == @invalid
+    end
+  end
+
+  describe "array_element/2" do
+    defp i(n), do: {:int4, n}
+
+    defp abc, do: parse(~S|["a",{"b":"x"},null]|)
+
+    test "returns the element at a 0-based index as jsonb" do
+      assert Jsonb.array_element(abc(), i(0)) == {:jsonb, "a"}
+      assert Jsonb.array_element(abc(), i(1)) == {:jsonb, %{"b" => "x"}}
+      assert Jsonb.array_element(abc(), i(2)) == {:jsonb, :null}
+    end
+
+    test "counts a negative index from the end" do
+      assert Jsonb.array_element(abc(), i(-1)) == {:jsonb, :null}
+      assert Jsonb.array_element(abc(), i(-2)) == {:jsonb, %{"b" => "x"}}
+      assert Jsonb.array_element(abc(), i(-3)) == {:jsonb, "a"}
+    end
+
+    test "returns NULL for an index outside the array, on either side" do
+      for index <- [3, 4, 2_147_483_647, -4, -5, -2_147_483_648] do
+        assert Jsonb.array_element(abc(), i(index)) == nil, inspect(index)
+      end
+
+      assert Jsonb.array_element(parse("[]"), i(0)) == nil
+      assert Jsonb.array_element(parse("[]"), i(-1)) == nil
+    end
+
+    test "returns NULL for an object root" do
+      assert Jsonb.array_element(parse(~S|{"0":"x"}|), i(0)) == nil
+      assert Jsonb.array_element(parse("{}"), i(-1)) == nil
+    end
+
+    test "treats a scalar root as an array of one element" do
+      for {json, term} <- [{~S|"a"|, "a"}, {"5", {:number, "5"}}, {"true", true}, {"null", :null}] do
+        assert Jsonb.array_element(parse(json), i(0)) == {:jsonb, term}, json
+        assert Jsonb.array_element(parse(json), i(-1)) == {:jsonb, term}, json
+        assert Jsonb.array_element(parse(json), i(1)) == nil, json
+        assert Jsonb.array_element(parse(json), i(-2)) == nil, json
+      end
+    end
+
+    test "is strict: NULL in either argument is NULL" do
+      assert Jsonb.array_element(nil, i(0)) == nil
+      assert Jsonb.array_element(abc(), nil) == nil
+    end
+
+    test "returns an unsupported argument unchanged, the first one winning, even next to NULL" do
+      assert Jsonb.array_element(@boom, i(0)) == @boom
+      assert Jsonb.array_element(abc(), @boom) == @boom
+      assert Jsonb.array_element(nil, @boom) == @boom
+      assert Jsonb.array_element(@boom, nil) == @boom
+      assert Jsonb.array_element(@boom, @bang) == @boom
+    end
+  end
+
+  describe "array_element_text/2" do
+    defp mixed, do: parse(~S|["a\"b",true,false,null,1.50,{"k":"v"},[2]]|)
+
+    test "reads strings and booleans as text, and JSON null as NULL" do
+      assert Jsonb.array_element_text(mixed(), i(0)) == t(~S|a"b|)
+      assert Jsonb.array_element_text(mixed(), i(1)) == t("true")
+      assert Jsonb.array_element_text(mixed(), i(2)) == t("false")
+      assert Jsonb.array_element_text(mixed(), i(3)) == nil
+    end
+
+    test "is unsupported for numbers, objects and arrays, as object_field_text is" do
+      assert Jsonb.array_element_text(mixed(), i(4)) == {:unsupported, :jsonb_number_text}
+      assert Jsonb.array_element_text(mixed(), i(5)) == {:unsupported, :jsonb_container_text}
+      assert Jsonb.array_element_text(mixed(), i(-1)) == {:unsupported, :jsonb_container_text}
+    end
+
+    test "finds the element as array_element does" do
+      assert Jsonb.array_element_text(mixed(), i(-7)) == t(~S|a"b|)
+
+      for index <- [7, -8, 2_147_483_647, -2_147_483_648] do
+        assert Jsonb.array_element_text(mixed(), i(index)) == nil, inspect(index)
+      end
+
+      assert Jsonb.array_element_text(parse(~S|{"0":"x"}|), i(0)) == nil
+      assert Jsonb.array_element_text(parse(~S|"a"|), i(0)) == t("a")
+      assert Jsonb.array_element_text(parse(~S|"a"|), i(-1)) == t("a")
+      assert Jsonb.array_element_text(parse(~S|"a"|), i(1)) == nil
+      assert Jsonb.array_element_text(parse("null"), i(0)) == nil
+    end
+
+    test "is strict: NULL in either argument is NULL" do
+      assert Jsonb.array_element_text(nil, i(0)) == nil
+      assert Jsonb.array_element_text(mixed(), nil) == nil
+    end
+
+    test "returns an unsupported argument unchanged, the first one winning, even next to NULL" do
+      assert Jsonb.array_element_text(@boom, i(0)) == @boom
+      assert Jsonb.array_element_text(mixed(), @boom) == @boom
+      assert Jsonb.array_element_text(nil, @boom) == @boom
+      assert Jsonb.array_element_text(@boom, nil) == @boom
+      assert Jsonb.array_element_text(@boom, @bang) == @boom
+    end
+  end
 end

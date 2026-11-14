@@ -2,7 +2,7 @@ defmodule PolicyEval.Resolver do
   @moduledoc """
   Binds a `PolicyEval.AST` into `PolicyEval.IR`, with the type of every node.
 
-  Types are `:text`, `:uuid`, `:jsonb`, `:bool` and `:unknown`. Operators are bound by name and
+  Types are `:text`, `:uuid`, `:jsonb`, `:bool`, `:int4` and `:unknown`. Operators are bound by name and
   operand types from an allowlist, casts and functions likewise, and the profile's functions
   (`PolicyEval.Profile`) are inlined by `PolicyEval.Catalog` when the definition in the database
   matches.
@@ -32,7 +32,8 @@ defmodule PolicyEval.Resolver do
       `:unknown_definition`
     * `{:column, name}`: a column that is not in the profile
     * `:untyped_string_literal`, `:number_literal`, `:untyped_null`: constants Postgres prints
-      without a type, which it only does where we don't model the type
+      without a type, which it only does where we don't model the type. The exception is an
+      integer, see the notes below, so `:number_literal` is any other number
     * `{:unknown_node, tag}`: not a node of `PolicyEval.AST`, `tag` being the first element of the
       tuple or `:other`
 
@@ -46,7 +47,15 @@ defmodule PolicyEval.Resolver do
       `NOT (text ~~ text)`, which is exact: `textnlike` is the negation of `textlike`, and both
       are NULL when an operand is NULL. `~~*` (`ILIKE`) has no binding, because Postgres folds its
       case with the collation
-    * `->>`: jsonb with text
+    * `->>`: jsonb with text is `jsonb_object_field_text`, jsonb with integer is
+      `jsonb_array_element_text`. Both give text
+    * `->`: jsonb with text is `jsonb_object_field`, jsonb with integer is `jsonb_array_element`.
+      Both give jsonb
+    * an `integer` literal: Postgres prints an `integer` constant as its digits (`0`), or as
+      `'-1'::integer` when it is negative, both in the form of `int4out`. That is an `:int4` literal.
+      A number with a `.` or an exponent is `numeric`, and Postgres prints a larger integer as
+      `'...'::bigint`, so neither is an `:int4`. Only `jsonb -> integer` and `jsonb ->> integer`
+      take an `:int4`
     * `text = ANY (ARRAY[...])` over text elements. `text <> ALL (ARRAY[...])` is resolved as
       `NOT (text = ANY (ARRAY[...]))`, which is exact for text. For non-NULL operands `textne` is
       the negation of `texteq`, and both are NULL when an operand is NULL. So `<> ALL` is false
@@ -64,11 +73,13 @@ defmodule PolicyEval.Resolver do
   alias PolicyEval.Profile
   alias PolicyEval.Value
 
-  @type type :: :text | :uuid | :jsonb | :bool | :unknown
+  @type type :: :text | :uuid | :jsonb | :bool | :int4 | :unknown
   @type resolved :: {IR.t(), type}
 
   # What a literal can be cast to, by the name Postgres prints.
-  @cast_types %{"text" => :text, "uuid" => :uuid, "jsonb" => :jsonb, "boolean" => :bool}
+  @cast_types %{"text" => :text, "uuid" => :uuid, "jsonb" => :jsonb, "boolean" => :bool, "integer" => :int4}
+
+  @int4_range -2_147_483_648..2_147_483_647
 
   @doc """
   Resolves `ast`. `functions` are the function definitions in the database, as in
@@ -108,7 +119,7 @@ defmodule PolicyEval.Resolver do
   # Constants and columns
   defp res({:const, :bool, value}, _ctx), do: {{:lit, value}, :bool}
   defp res({:const, :string, _}, _ctx), do: unsupported(:untyped_string_literal)
-  defp res({:const, :number, _raw}, _ctx), do: unsupported(:number_literal)
+  defp res({:const, :number, raw}, _ctx), do: int4_literal(raw, :number_literal)
   defp res({:const, :null}, _ctx), do: unsupported(:untyped_null)
 
   defp res({:column, name}, ctx) do
@@ -125,6 +136,7 @@ defmodule PolicyEval.Resolver do
       "uuid" -> literal(Value.uuid_in({:text, string}), :uuid)
       "jsonb" -> literal(Jsonb.parse({:text, string}), :jsonb)
       "boolean" -> literal(Value.bool_in({:text, string}), :bool)
+      "integer" -> int4_literal(string, {:cast, :string_literal, "integer"})
       _ -> unsupported({:cast, :string_literal, known_name(type, ctx)})
     end
   end
@@ -267,6 +279,18 @@ defmodule PolicyEval.Resolver do
   defp literal({:unsupported, _} = unsupported, _type), do: {unsupported, :unknown}
   defp literal(value, type), do: {{:lit, value}, type}
 
+  # Postgres folds an integer literal into a constant while it parses the policy, so it prints the
+  # text of int4out. Text in any other form, such as `+1` or `01`, is not what it printed.
+  defp int4_literal(string, reason) do
+    case Integer.parse(string) do
+      {n, ""} when n in @int4_range ->
+        if Integer.to_string(n) == string, do: {{:lit, {:int4, n}}, :int4}, else: unsupported(reason)
+
+      _ ->
+        unsupported(reason)
+    end
+  end
+
   # An operand of AND, OR or NOT: an unsupported one stays, so the evaluator can still decide the
   # rest around it.
   defp boolean(ast, ctx) do
@@ -288,6 +312,9 @@ defmodule PolicyEval.Resolver do
   defp operator("~~", :text, :text, l, r), do: {call(Value, :like, [l, r]), :bool}
   defp operator("!~~", :text, :text, l, r), do: {{:not, call(Value, :like, [l, r])}, :bool}
   defp operator("->>", :jsonb, :text, l, r), do: {call(Jsonb, :object_field_text, [l, r]), :text}
+  defp operator("->>", :jsonb, :int4, l, r), do: {call(Jsonb, :array_element_text, [l, r]), :text}
+  defp operator("->", :jsonb, :text, l, r), do: {call(Jsonb, :object_field, [l, r]), :jsonb}
+  defp operator("->", :jsonb, :int4, l, r), do: {call(Jsonb, :array_element, [l, r]), :jsonb}
   defp operator(op, lt, rt, _l, _r), do: unsupported({:operator, op, lt, rt})
 
   defp regex(l, r, mode), do: call(Value, :regex_match, [l, r, {:lit, mode}])

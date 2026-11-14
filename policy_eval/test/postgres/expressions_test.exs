@@ -61,7 +61,16 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
     {"another uuid", @other}
   ]
 
-  @groups [:three_valued, :text_and_arrays, :user_id_and_role, :claims, :regex, :like, :literals]
+  @groups [
+    :three_valued,
+    :text_and_arrays,
+    :user_id_and_role,
+    :claims,
+    :nested_claims,
+    :regex,
+    :like,
+    :literals
+  ]
 
   setup_all do
     %{collector: Collector.start(:expressions)}
@@ -725,6 +734,104 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
       end
 
     from_jason ++ from_raw ++ usual ++ booleans ++ headers ++ settings
+  end
+
+  # `->` by key and by index, and `->>` by index, on claims of every shape. The policies read the
+  # value that `->` gives through `->>`, a null test or another `->`, because no policy prints a
+  # jsonb value.
+  defp cases(:nested_claims) do
+    shapes = [
+      ~s({"m":{"k":"v"}}),
+      ~s({"m":{"k":"w"}}),
+      ~s({"m":{"k":""}}),
+      ~s({"m":{"k":null}}),
+      ~s({"m":{"k":true}}),
+      ~s({"m":{"k":1}}),
+      ~s({"m":{"k":1.50}}),
+      ~s({"m":{"k":-0}}),
+      ~s({"m":{"k":1e2}}),
+      ~s({"m":{"k":{"a":1}}}),
+      ~s({"m":{"k":[]}}),
+      ~s({"m":{"k":"v","k":"w"}}),
+      ~s({"m":{"k":"w"},"m":{"k":"v"}}),
+      ~s({"m":{"m":{"k":"v"}}}),
+      ~s({"M":{"k":"v"}}),
+      ~s({"m":{}}),
+      ~s({"m":null}),
+      ~s({"m":"v"}),
+      ~s({"m":1}),
+      ~s({"m":true}),
+      ~s({"m":[]}),
+      ~s({"m":["v"]}),
+      ~s({"m":[null]}),
+      ~s({"m":[1,2,3]}),
+      ~s({"m":[{"k":"v"}]}),
+      ~s({"m":[{"k":"v"},{"k":"w"}]}),
+      ~s({"m":[{"k":"w"},{"k":"v"}]}),
+      ~s({"m":[[{"k":"v"}]]}),
+      ~s({"m":["w","v"]}),
+      ~s({"m":[true,false]}),
+      ~s({"m":["v",[1]]}),
+      ~s({"m":[{"k":"v"}],"x":"\\u0000"}),
+      ~s({"m":{"k":"\\u0000"}}),
+      ~s({"":{"k":"v"}}),
+      ~s([{"k":"v"}]),
+      ~s([{"m":{"k":"v"}}]),
+      ~s(["v","w"]),
+      ~s("v"),
+      "true",
+      "5",
+      "null",
+      "{}",
+      "[]",
+      "",
+      nil,
+      "not json"
+    ]
+
+    sqls = [
+      "app.claims() -> 'm' ->> 'k' = 'v'",
+      "(app.claims() -> 'm' ->> 'k') IS NULL",
+      "(app.claims() -> 'm') IS NULL",
+      "(app.claims() -> 'm') IS NOT NULL",
+      "(app.claims() -> 'm' -> 'k') IS NULL",
+      "app.claims() -> 'm' -> 'm' ->> 'k' = 'v'",
+      "app.claims() -> 'm' -> 0 ->> 'k' = 'v'",
+      "app.claims() -> 'm' -> -1 ->> 'k' = 'v'",
+      "app.claims() -> 'm' -> 0 -> 0 ->> 'k' = 'v'",
+      "(app.claims() -> 'm' -> 0) IS NULL",
+      "(app.claims() -> 'm' -> 1) IS NULL",
+      "(app.claims() -> 'm' -> -1) IS NULL",
+      "(app.claims() -> 'm' -> -2) IS NULL",
+      "(app.claims() -> 'm' -> 2147483647) IS NULL",
+      "(app.claims() -> 'm' -> -2147483648) IS NULL",
+      "(app.claims() -> 'm' -> NULL::int) IS NULL",
+      "(app.claims() -> NULL) IS NULL",
+      "(app.claims() -> 0) IS NULL",
+      "app.claims() -> 0 ->> 'k' = 'v'",
+      "(app.claims() -> '') IS NULL",
+      "app.claims() -> 'm' ->> 0 = 'v'",
+      "app.claims() -> 'm' ->> -1 = 'v'",
+      "(app.claims() -> 'm' ->> 0) IS NULL",
+      "(app.claims() -> 'm' ->> 1) IS NULL",
+      "(app.claims() -> 'm' ->> -2) IS NULL",
+      "(app.claims() -> 'm' ->> 2147483647) IS NULL",
+      "(app.claims() -> 'm' ->> -2147483648) IS NULL",
+      "(app.claims() -> 'm' ->> NULL::int) IS NULL",
+      "(app.claims() -> 'm' ->> 0)::boolean",
+      "app.claims() -> 'm' -> 0 ->> 0 = 'v'",
+      "app.claims() ->> 0 = 'v'",
+      "(app.claims() ->> -1) IS NULL",
+      "current_setting('app.claims', true)::jsonb -> 'm' ->> 'k' = 'v'",
+      "(select app.claims() -> 'm') ->> 'k' = 'v'",
+      "coalesce(app.claims() -> 'm', '{}') ->> 'k' = 'v'",
+      "coalesce(app.claims() -> 'm' ->> 'k', '') = ''",
+      "(app.claims() -> 'm' ->> 'k')::boolean",
+      "app.claims() -> 'm' ->> 'k' IN ('v', 'w')",
+      "app.claims() -> 'm' ->> 'k' = kind"
+    ]
+
+    for claims <- shapes, sql <- sqls, do: expression_case(sql, claims: claims, kind: "v")
   end
 
   defp cases(:regex) do

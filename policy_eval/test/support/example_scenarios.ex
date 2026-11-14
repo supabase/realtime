@@ -785,6 +785,69 @@ defmodule PolicyEval.Test.ExampleScenarios do
   end
 
   @doc """
+  Policies that read nested claims with `->`: a field of an object, and the first and the last
+  element of an array. Two more policies read the first and the last element with `->>`. Each
+  policy compares a claim with the team of the row.
+  """
+  @spec nested_claim_scenarios() :: [map()]
+  def nested_claim_scenarios do
+    policies = [
+      policy_sql("read by the team in app_metadata", """
+      FOR SELECT TO member USING (team = app.claims() -> 'app_metadata' ->> 'team')
+      """),
+      policy_sql("read by the first team", """
+      FOR SELECT TO member USING (team = app.claims() -> 'teams' -> 0 ->> 'id')
+      """),
+      policy_sql("write notes by the last team", """
+      FOR INSERT TO member WITH CHECK (team = app.claims() -> 'teams' -> -1 ->> 'id' AND kind = 'note')
+      """),
+      policy_sql("read by the first team id", """
+      FOR SELECT TO member USING (team = app.claims() -> 'team_ids' ->> 0)
+      """),
+      policy_sql("write notes by the last team id", """
+      FOR INSERT TO member WITH CHECK (team = app.claims() -> 'team_ids' ->> -1 AND kind = 'note')
+      """)
+    ]
+
+    claims = [
+      {"the team in app_metadata", ~s({"app_metadata":{"team":"x"}})},
+      {"another team in app_metadata", ~s({"app_metadata":{"team":"y"}})},
+      {"app_metadata without a team", ~s({"app_metadata":{}})},
+      {"app_metadata is null", ~s({"app_metadata":null})},
+      {"app_metadata is a string", ~s({"app_metadata":"x"})},
+      {"a team that is null", ~s({"app_metadata":{"team":null}})},
+      {"a team that is a number", ~s({"app_metadata":{"team":1}})},
+      {"a team that is an object", ~s({"app_metadata":{"team":{"id":"x"}}})},
+      {"duplicate app_metadata, the last wins", ~s({"app_metadata":{"team":"y"},"app_metadata":{"team":"x"}})},
+      {"teams, the team first", ~s({"teams":[{"id":"x"},{"id":"y"}]})},
+      {"teams, the team last", ~s({"teams":[{"id":"y"},{"id":"x"}]})},
+      {"one team", ~s({"teams":[{"id":"x"}]})},
+      {"no teams", ~s({"teams":[]})},
+      {"teams is an object", ~s({"teams":{"id":"x"}})},
+      {"teams is a string", ~s({"teams":"x"})},
+      {"a team in teams that is a number", ~s({"teams":[{"id":1},{"id":"x"}]})},
+      {"both", ~s({"app_metadata":{"team":"x"},"teams":[{"id":"x"}]})},
+      {"team ids, the team first", ~s({"team_ids":["x","y"]})},
+      {"team ids, the team last", ~s({"team_ids":["y","x"]})},
+      {"team ids, null first", ~s({"team_ids":[null,"x"]})},
+      {"team ids, a number last", ~s({"team_ids":["x",1]})},
+      {"team ids, an array first", ~s({"team_ids":[["x"],"x"]})},
+      {"no team ids", ~s({"team_ids":[]})},
+      {"team ids is a string", ~s({"team_ids":"x"})},
+      {"team ids is an object", ~s({"team_ids":{"0":"x"}})},
+      {"NUL escape in the team", ~s({"app_metadata":{"team":"\\u0000"}})},
+      {"empty object", "{}"},
+      {"array root", ~s([{"teams":[{"id":"x"}]}])},
+      {"not json", "not json"},
+      {"empty claims", ""}
+    ]
+
+    for {label, json} <- claims, team <- ["x", "y"] do
+      scenario("nested claims", "#{label}, team #{team}", policies, team: team, claims: json)
+    end
+  end
+
+  @doc """
   A policy that raises next to one that allows. The permissive policies are evaluated in reverse
   name order, so b_raises before a_allow. Whether that makes the call raise depends on what
   Postgres does with `b_raises OR a_allow` before it runs. The library can't tell, so it has to
