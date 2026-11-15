@@ -33,7 +33,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   Handles an outgoing broadcast for a channel.
 
   `db_conn` is `nil` for public channels, which don't run write authorization nor persist messages.
-  Otherwise must pass the tenant database conn used to run write authorization and persist the message.
+  For a private channel it is the tenant database conn used to run write authorization and persist the
+  message, and can be `nil` when `needs_db_conn?/2` is `false`.
   """
   @spec handle(payload, pid() | nil, Socket.t()) :: {ok_reply() | error_reply() | noreply(), RequestMetrics.outcome()}
   def handle(payload, db_conn, %{assigns: %{private?: true}} = socket) do
@@ -95,6 +96,31 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
       {:error, code, socket} -> maybe_reply_error(socket, code)
     end
   end
+
+  @doc """
+  Whether `handle/3` needs the tenant database connection for this broadcast.
+
+  Only a private channel does, and only to run write authorization that is not cached yet or to
+  persist the message. Otherwise the cached policies answer, so the broadcast does not depend on the
+  tenant database being reachable.
+
+  It reads what the sender asked for without the `broadcast_persistence` flag, so a flag turned on
+  before `handle/3` reads it can't ask to persist without a connection.
+  """
+  @spec needs_db_conn?(payload, Socket.t()) :: boolean()
+  def needs_db_conn?(payload, %{assigns: %{private?: true, policies: policies}}) do
+    case payload |> persist_option() |> Messages.parse_persist() do
+      {:ok, persist} ->
+        policies = policies || %Policies{}
+        extensions_to_probe(policies, persist) != [] or persist?(policies, persist)
+
+      # Refused before anything reaches the database
+      {:error, :invalid_ttl} ->
+        false
+    end
+  end
+
+  def needs_db_conn?(_payload, _socket), do: false
 
   @doc """
   Replies with the error `code` when the channel acknowledges broadcasts.

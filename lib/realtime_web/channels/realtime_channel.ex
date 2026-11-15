@@ -505,7 +505,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     measure_socket_broadcasts(socket)
 
     RequestMetrics.track(:broadcast, :ws, tenant_id, fn ->
-      with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id) do
+      with {:ok, db_conn} <- broadcast_db_conn(payload, socket) do
         BroadcastHandler.handle(payload, db_conn, socket)
       else
         {:error, :rpc_error, error} ->
@@ -763,6 +763,13 @@ defmodule RealtimeWeb.RealtimeChannel do
     else
       :ok
     end
+  end
+
+  # Cached write authorization answers a broadcast that is not persisted, so it doesn't wait on the database
+  defp broadcast_db_conn(payload, %{assigns: %{tenant: tenant_id}} = socket) do
+    if BroadcastHandler.needs_db_conn?(payload, socket),
+      do: Connect.lookup_or_start_connection(tenant_id),
+      else: {:ok, nil}
   end
 
   defp measure_socket_broadcasts(%{assigns: %{tenant: tenant_id}, private: %{broadcast_bucket: bucket}}) do

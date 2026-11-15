@@ -1136,6 +1136,48 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     end
   end
 
+  describe "needs_db_conn?/2" do
+    setup do
+      %{plain: {"e", :json, "{}", %{}}, asks_to_persist: {"e", :json, "{}", %{"persist" => true}}}
+    end
+
+    test "a private channel needs it until write is authorized", %{plain: plain} do
+      allowed = %Policies{broadcast: %BroadcastPolicies{write: true}}
+      denied = %Policies{broadcast: %BroadcastPolicies{write: false}}
+
+      refute BroadcastHandler.needs_db_conn?(plain, private_socket(allowed))
+      refute BroadcastHandler.needs_db_conn?(plain, private_socket(denied))
+      assert BroadcastHandler.needs_db_conn?(plain, private_socket(%Policies{}))
+      assert BroadcastHandler.needs_db_conn?(plain, private_socket(nil))
+    end
+
+    test "a message asking to persist needs it unless persistence is denied", %{asks_to_persist: asks} do
+      unchecked = %Policies{broadcast: %BroadcastPolicies{write: true}}
+      allowed = %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}}
+      denied = %Policies{broadcast: %BroadcastPolicies{write: true, persist: false}}
+
+      assert BroadcastHandler.needs_db_conn?(asks, private_socket(unchecked))
+      assert BroadcastHandler.needs_db_conn?(asks, private_socket(allowed))
+      refute BroadcastHandler.needs_db_conn?(asks, private_socket(denied))
+    end
+
+    test "a message asking to persist needs it while broadcast persistence is off", %{asks_to_persist: asks} do
+      stub(FeatureFlags, :enabled?, fn "broadcast_persistence", _ -> false end)
+      policies = %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}}
+
+      assert BroadcastHandler.needs_db_conn?(asks, private_socket(policies))
+    end
+
+    test "an invalid ttl does not need it" do
+      payload = {"e", :json, "{}", %{"persist" => %{"ttl" => 0}}}
+      refute BroadcastHandler.needs_db_conn?(payload, private_socket(%Policies{}))
+    end
+
+    test "a public channel never needs it", %{asks_to_persist: asks} do
+      refute BroadcastHandler.needs_db_conn?(asks, %Phoenix.Socket{assigns: %{private?: false, policies: nil}})
+    end
+  end
+
   describe "persist_option/1" do
     test "reads persist from the frame metadata" do
       assert BroadcastHandler.persist_option({"e", :json, "{}", %{"persist" => true}}) == true
@@ -1164,6 +1206,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       refute BroadcastHandler.persist?(unchecked, asked)
     end
   end
+
+  defp private_socket(policies), do: %Phoenix.Socket{assigns: %{private?: true, policies: policies, tenant: "t"}}
 
   defp match_reply?({:reply, :ok, _}, {:reply, :ok}), do: true
   defp match_reply?({:noreply, _}, :noreply), do: true

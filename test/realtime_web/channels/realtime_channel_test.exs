@@ -826,6 +826,32 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       assert log =~ "UnableToConnectToProject: :tenant_database_unavailable"
     end
+
+    @tag policies: [:authenticated_all_topic_read, :authenticated_all_topic_insert]
+    test "private broadcast with cached write authorization does not need the tenant database", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      config = %{"config" => %{"private" => true, "broadcast" => %{"ack" => true, "self" => true}}}
+      assert %Socket{channel_pid: channel_pid} = socket = subscribe_and_join!(socket, "realtime:test", config)
+
+      # The first broadcast authorizes the write and caches the answer
+      ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{"n" => 1}})
+      assert_reply ref, :ok, %{}
+      assert_receive %Socket.Message{event: "broadcast", payload: %{"payload" => %{"n" => 1}}}
+
+      log =
+        capture_log(fn ->
+          stub(Connect, :lookup_or_start_connection, fn _ -> {:error, :tenant_database_unavailable} end)
+          allow(Connect, self(), channel_pid)
+
+          ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{"n" => 2}})
+          assert_reply ref, :ok, %{}
+          assert_receive %Socket.Message{event: "broadcast", payload: %{"payload" => %{"n" => 2}}}
+        end)
+
+      refute log =~ "UnableToConnectToProject"
+    end
   end
 
   describe "presence" do
