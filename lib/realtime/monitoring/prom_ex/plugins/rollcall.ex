@@ -39,8 +39,10 @@ defmodule Realtime.PromEx.Plugins.Rollcall do
   defmodule SilentTicks.Buckets do
     @moduledoc false
     # The values are whole ticks. Peep puts a value in a bucket only when the value is below the
-    # bound, so a bound equal to a value would put that value in the next bucket. Each bound is half
-    # a tick above the value it stands for: 0, 1, 2, 3, 5, 7, 9 and 10 ticks. A healthy peer has 1 silent
+    # bound (`value < bound`, see `Peep.Buckets.Custom`). The `le` label of Prometheus means "less
+    # than or equal", so a bound equal to a value would count that value in the next bucket.
+    # Each bound is half a tick above the value it stands for: 0, 1, 2, 3, 5, 7, 9 and 10 ticks.
+    # The sum comes from the raw values, not from the bounds. A healthy peer has 1 silent
     # tick at each tick. The tracker purges a peer at the silence threshold, which is 10 ticks by default.
     use Peep.Buckets.Custom, buckets: [0.5, 1.5, 2.5, 3.5, 5.5, 7.5, 9.5, 10.5]
   end
@@ -55,8 +57,11 @@ defmodule Realtime.PromEx.Plugins.Rollcall do
   defmodule Entries.Buckets do
     @moduledoc false
     # The values are whole entries. Peep puts a value in a bucket only when the value is below the
-    # bound, so each bound is half an entry above the value it stands for. An empty heartbeat, from a
-    # tracker with no local entry, has its own bucket.
+    # bound (`value < bound`, see `Peep.Buckets.Custom`). The `le` label of Prometheus means "less
+    # than or equal", so a bound equal to a value would count that value in the next bucket.
+    # Each bound is half an entry above the value it stands for, so the `le` label and the
+    # buckets agree for whole entries. `le="0.5"` holds only the empty heartbeats, from a tracker
+    # with no local entry. The sum comes from the raw values, not from the bounds.
     use Peep.Buckets.Custom, buckets: [0.5, 1.5, 5.5, 10.5, 50.5, 100.5, 500.5, 1_000.5, 5_000.5, 10_000.5]
   end
 
@@ -110,7 +115,7 @@ defmodule Realtime.PromEx.Plugins.Rollcall do
         measurement: :duration,
         unit: {:native, :microsecond},
         description:
-          "Time that a Rollcall tracker spends to send a heartbeat, in microseconds, tagged by the kind of the message (snapshot or diff). It builds the message and calls the transport.",
+          "Time that a Rollcall tracker spends to send a heartbeat, in microseconds, tagged by the kind of the message (snapshot or diff). It builds the message and calls the transport. It does not wait for an answer from a peer.",
         tags: [:kind],
         reporter_options: [peep_bucket_calculator: Duration.Buckets]
       ),
