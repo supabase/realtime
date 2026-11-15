@@ -271,11 +271,12 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
       base = metric_value(@trackers) || 0
 
       for scope <- scopes, do: :ok = TestRollcall.ensure_started(scope)
-      assert_eventually metric_value(@trackers) == base + 3
+      started = base + length(scopes)
+      assert_eventually metric_value(@trackers) == started
 
       pid = Rollcall.Tracker.whereis(TestRollcall, "gauge-#{id}-1")
       GenServer.stop(pid)
-      assert_eventually metric_value(@trackers) == base + 2
+      assert_eventually metric_value(@trackers) == started - 1
     end
 
     # `:telemetry_poller` stops a measurement for good after it raises once.
