@@ -349,6 +349,9 @@ defmodule Realtime.GenRpcPubSub.Worker do
       end)
 
     if local? do
+      # The router is also a target. Its copy does not arrive as an :ftl, so it measures the message
+      # here, with the size of the :ftl that a remote target would receive.
+      measure_presence_replication_received(topic, forward_to_local(topic, message, dispatcher))
       measure_broadcast_fanout(message)
       Phoenix.PubSub.local_broadcast(pubsub, topic, message, dispatcher)
     end
