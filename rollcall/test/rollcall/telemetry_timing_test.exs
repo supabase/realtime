@@ -122,14 +122,14 @@ defmodule Rollcall.TelemetryTimingTest do
     end
 
     test "does not include the publish", %{scope: scope, rollcall: rollcall} do
-      tracker = start_tracker_with(rollcall, scope, {SlowTransport, publish_ms: 50})
+      tracker = start_tracker_with(rollcall, scope, {SlowTransport, publish_ms: 200})
 
       deliver(tracker, scope, snapshot(remote_pid(@node_a, 1), stamp(1, 1), entries(["a"])))
 
       assert_receive {:telemetry, @apply_event, %{duration: apply_duration}, %{scope: ^scope}}
       assert_receive {:telemetry, @publish, %{duration: publish_duration}, %{scope: ^scope, source: :peer}}
-      assert ms(apply_duration) < 50
-      assert ms(publish_duration) >= 50
+      assert ms(apply_duration) < 200
+      assert ms(publish_duration) >= 200
     end
   end
 
