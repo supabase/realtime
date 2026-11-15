@@ -420,7 +420,25 @@ defmodule PolicyEval.JsonbTest do
   end
 
   describe "object_field_text/2" do
-    @doc_json ~S|{"s":"x","empty":"","esc":"a\n\u00e9","t":true,"f":false,"nul":null,"n":1,"fl":1.5,"o":{"a":1},"eo":{},"arr":[1],"ea":[],"str_true":"true","str_null":"null","str_num":"1"}|
+    @doc_json ~S"""
+    {
+      "s": "x",
+      "empty": "",
+      "esc": "a\n\u00e9",
+      "t": true,
+      "f": false,
+      "nul": null,
+      "n": 1,
+      "fl": 1.5,
+      "o": {"a": 1},
+      "eo": {},
+      "arr": [1],
+      "ea": [],
+      "str_true": "true",
+      "str_null": "null",
+      "str_num": "1"
+    }
+    """
 
     defp field(key), do: Jsonb.object_field_text(parse(@doc_json), t(key))
 
@@ -522,7 +540,19 @@ defmodule PolicyEval.JsonbTest do
   end
 
   describe "object_field/2" do
-    @fields_json ~S|{"s":"x","t":true,"nul":null,"n":1.50,"big":1.5e2,"o":{"a":{"b":"deep"}},"arr":[1,"x"],"ea":[],"eo":{}}|
+    @fields_json ~S"""
+    {
+      "s": "x",
+      "t": true,
+      "nul": null,
+      "n": 1.50,
+      "big": 1.5e2,
+      "o": {"a": {"b": "deep"}},
+      "arr": [1, "x"],
+      "ea": [],
+      "eo": {}
+    }
+    """
 
     defp object_field(key), do: Jsonb.object_field(parse(@fields_json), t(key))
 

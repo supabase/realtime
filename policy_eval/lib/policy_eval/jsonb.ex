@@ -81,7 +81,7 @@ defmodule PolicyEval.Jsonb do
   `{:unsupported, :jsonb_container_text}`.
   """
   @spec object_field_text(Value.result(), Value.result()) :: Value.result()
-  def object_field_text(jsonb, key), do: as_text(object_field(jsonb, key))
+  def object_field_text(jsonb, key), do: jsonb |> object_field(key) |> as_text()
 
   @doc """
   `jsonb ->> integer` (`jsonb_array_element_text`, src/backend/utils/adt/jsonfuncs.c). Strict.
@@ -90,7 +90,7 @@ defmodule PolicyEval.Jsonb do
   null gives `nil`, and so does an index outside the array or an object root.
   """
   @spec array_element_text(Value.result(), Value.result()) :: Value.result()
-  def array_element_text(jsonb, index), do: as_text(array_element(jsonb, index))
+  def array_element_text(jsonb, index), do: jsonb |> array_element(index) |> as_text()
 
   @doc """
   `jsonb -> text` (`jsonb_object_field`, src/backend/utils/adt/jsonfuncs.c). Strict.
