@@ -186,6 +186,55 @@ defmodule PolicyEvalTest do
       assert evaluate("((app.claims() ->> 'level'::text) = '1'::text)", claims: ~s({"level":1})) ==
                {:unsupported, :jsonb_number_text}
     end
+
+    test "are read nested with ->, which gives jsonb" do
+      sql = "(((app.claims() -> 'app_metadata'::text) ->> 'team'::text) = 'red'::text)"
+
+      assert evaluate(sql, claims: ~s({"app_metadata":{"team":"red"}})) == true
+      assert evaluate(sql, claims: ~s({"app_metadata":{"team":"blue"}})) == false
+      assert evaluate(sql, claims: ~s({"app_metadata":{}})) == nil
+      assert evaluate(sql, claims: ~s({"app_metadata":"red"})) == nil
+      assert evaluate(sql, claims: ~s({})) == nil
+    end
+
+    test "-> keeps a JSON null, which is not SQL NULL" do
+      sql = "((app.claims() -> 'app_metadata'::text) IS NULL)"
+
+      assert evaluate(sql, claims: ~s({"app_metadata":null})) == false
+      assert evaluate(sql, claims: ~s({})) == true
+    end
+
+    test "-> with an integer reads an array element, a negative one from the end" do
+      first = "((((app.claims() -> 'teams'::text) -> 0) ->> 'id'::text) = 'red'::text)"
+      last = "((((app.claims() -> 'teams'::text) -> '-1'::integer) ->> 'id'::text) = 'red'::text)"
+      claims = ~s({"teams":[{"id":"red"},{"id":"blue"}]})
+
+      assert evaluate(first, claims: claims) == true
+      assert evaluate(last, claims: claims) == false
+      assert evaluate(first, claims: ~s({"teams":[]})) == nil
+    end
+
+    test "->> with an integer reads an array element as text" do
+      first = "(((app.claims() -> 'roles'::text) ->> 0) = 'admin'::text)"
+      last = "(((app.claims() -> 'roles'::text) ->> '-1'::integer) = 'admin'::text)"
+
+      assert evaluate(first, claims: ~s({"roles":["admin","viewer"]})) == true
+      assert evaluate(last, claims: ~s({"roles":["admin","viewer"]})) == false
+      assert evaluate(first, claims: ~s({"roles":[null]})) == nil
+      assert evaluate(first, claims: ~s({"roles":[]})) == nil
+      # A scalar is an array of one element, as in Postgres
+      assert evaluate(first, claims: ~s({"roles":"admin"})) == true
+      assert evaluate(last, claims: ~s({"roles":[1,"admin"]})) == true
+      # Postgres: false
+      assert evaluate(first, claims: ~s({"roles":[1,"admin"]})) == {:unsupported, :jsonb_number_text}
+    end
+
+    test "fall back for a number that -> found, once ->> needs its text" do
+      # Postgres: true
+      assert evaluate("(((app.claims() -> 'meta'::text) ->> 'level'::text) = '1'::text)",
+               claims: ~s({"meta":{"level":1}})
+             ) == {:unsupported, :jsonb_number_text}
+    end
   end
 
   describe "NULL" do
@@ -210,9 +259,9 @@ defmodule PolicyEvalTest do
 
     test "a COALESCE with an unsupported argument, even after a non-NULL one" do
       # Postgres raises division_by_zero: the planner folds the constant 1 / 0 before COALESCE
-      # would stop at app.team(). Here 1 / 0 is unsupported because numbers aren't modelled
-      # at all (hence the reason); what the test shows is that COALESCE doesn't skip it.
-      assert {:unsupported, :number_literal} =
+      # would stop at app.team(). Here 1 / 0 is unsupported because no operator on integers is
+      # modelled (hence the reason); what the test shows is that COALESCE doesn't skip it.
+      assert {:unsupported, {:operator, "/", :int4, :int4}} =
                evaluate("(COALESCE(app.team(), ((1 / 0))::text) = 'x'::text)", team: "x")
     end
 

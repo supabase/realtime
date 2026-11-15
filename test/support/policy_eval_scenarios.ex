@@ -462,6 +462,78 @@ defmodule PolicyEvalScenarios do
   end
 
   @doc """
+  Policies that read a nested claim with `auth.jwt() -> 'app_metadata' ->> ...`, in the plain form
+  and in the initplan form `(select auth.jwt())`.
+
+  The library has to decide the `:well_formed` claims, not fall back. In those claims, `app_metadata`
+  is an object, JSON null, a string or missing, and each value in it is a string or JSON null. The
+  `:other` claims have numbers, objects, duplicate keys or a NUL escape, or they are not an object
+  or not JSON. For those, the library can fall back, but it must not give another answer than Postgres.
+  """
+  @spec nested_claim_scenarios(:well_formed | :other) :: [map()]
+  def nested_claim_scenarios(shapes) when shapes in [:well_formed, :other] do
+    policies = [
+      policy_sql("read the team channel", """
+      FOR SELECT TO authenticated
+      USING (realtime.topic() = 'team:' || (auth.jwt() -> 'app_metadata' ->> 'team'))
+      """),
+      policy_sql("admins read every channel", """
+      FOR SELECT TO authenticated
+      USING ((select auth.jwt()) -> 'app_metadata' ->> 'role' = 'admin')
+      """),
+      policy_sql("broadcast on the team channel", """
+      FOR INSERT TO authenticated
+      WITH CHECK (realtime.topic() = 'team:' || ((select auth.jwt()) -> 'app_metadata' ->> 'team') AND extension = 'broadcast')
+      """)
+    ]
+
+    for {label, env_opts} <- nested_claims(shapes), topic <- ["team:red", "team:blue"] do
+      scenario(
+        "nested claims",
+        "nested claims, #{label}, topic #{inspect(topic)}",
+        policies,
+        [topic: topic] ++ env_opts
+      )
+    end
+  end
+
+  # Added to the claims that env/1 builds, so each has a role and a sub
+  defp nested_claims(:well_formed) do
+    for {label, extra_claims} <- [
+          {"the red team", %{"app_metadata" => %{"team" => "red"}}},
+          {"the red team, admin", %{"app_metadata" => %{"team" => "red", "role" => "admin"}}},
+          {"the blue team", %{"app_metadata" => %{"team" => "blue"}}},
+          {"admin without a team", %{"app_metadata" => %{"role" => "admin"}}},
+          {"app_metadata without a team", %{"app_metadata" => %{}}},
+          {"no app_metadata", %{}},
+          {"app_metadata is null", %{"app_metadata" => nil}},
+          {"app_metadata is a string", %{"app_metadata" => "red"}},
+          {"a team that is null", %{"app_metadata" => %{"team" => nil}}},
+          {"the team in user_metadata", %{"user_metadata" => %{"team" => "red"}}}
+        ] do
+      {label, [extra_claims: extra_claims]}
+    end
+  end
+
+  # The JSON text of the claims, as it is
+  defp nested_claims(:other) do
+    for {label, claims} <- [
+          {"a team that is a number", ~s({"role":"authenticated","app_metadata":{"team":1}})},
+          {"a team that is an object", ~s({"role":"authenticated","app_metadata":{"team":{"id":"red"}}})},
+          {"the red team, a role that is a number",
+           ~s({"role":"authenticated","app_metadata":{"team":"red","role":1}})},
+          {"duplicate app_metadata, the last wins",
+           ~s({"role":"authenticated","app_metadata":{"team":"blue"},"app_metadata":{"team":"red"}})},
+          {"NUL escape in the team", ~s({"role":"authenticated","app_metadata":{"team":"\\u0000"}})},
+          {"array root", ~s([{"app_metadata":{"team":"red"}}])},
+          {"not JSON", "not json"},
+          {"empty claims", ""}
+        ] do
+      {label, [claims: claims]}
+    end
+  end
+
+  @doc """
   Everything the library doesn't model has to be a fallback, not an answer. The setups change the
   database in the transaction of the scenario, and roll back with it.
   """

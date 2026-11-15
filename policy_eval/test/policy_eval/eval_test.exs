@@ -195,6 +195,7 @@ defmodule PolicyEval.EvalTest do
 
       assert eval({:and, [{:lit, uuid}]}) == {:unsupported, {:not_boolean, :uuid}}
       assert eval({:and, [{:lit, {:jsonb, %{"secret" => "x"}}}]}) == {:unsupported, {:not_boolean, :jsonb}}
+      assert eval({:and, [{:lit, {:int4, 7}}]}) == {:unsupported, {:not_boolean, :int4}}
       assert eval({:and, [{:array, [{:lit, true}]}]}) == {:unsupported, {:not_boolean, :unknown}}
     end
   end
