@@ -69,6 +69,16 @@ defmodule Rollcall do
   """
   @type partition_diff :: {[entry()], [entry()]}
 
+  @typedoc "The usage of an instance. See `usage/2`."
+  @type usage :: %{
+          scope_count: non_neg_integer(),
+          partition_count: non_neg_integer(),
+          entry_count_buckets: %{(pos_integer() | :infinity) => non_neg_integer()}
+        }
+
+  @typedoc "The bounds of the buckets for the number of entries in a partition, in ascending order."
+  @type usage_buckets :: [pos_integer()]
+
   @doc """
   Defines an instance of Rollcall named after the module that calls `use`.
 
@@ -121,6 +131,9 @@ defmodule Rollcall do
 
       @spec state(Rollcall.scope()) :: [Rollcall.scope_entry()]
       def state(scope), do: Rollcall.state(__MODULE__, scope)
+
+      @spec usage(Rollcall.usage_buckets()) :: Rollcall.usage()
+      def usage(usage_buckets), do: Rollcall.usage(__MODULE__, usage_buckets)
     end
   end
 
@@ -296,5 +309,29 @@ defmodule Rollcall do
   @spec untrack(name(), pid(), scope(), partition(), key(), Keyword.t()) :: :ok
   def untrack(name, pid, scope, partition, key, opts \\ []) when is_pid(pid) do
     Tracker.untrack(name, scope, pid, partition, key, opts)
+  end
+
+  @doc """
+  Returns the usage of the running trackers of the instance `name`.
+
+  The function reads the views of the trackers on this node. 
+
+  The argument `usage_buckets` is a list of bounds in ascending order. The
+  result has these keys:
+
+    * `scope_count` - the scopes that hold at least one entry. The entries of
+      the peers count.
+    * `partition_count` - the partitions that hold at least one entry, summed
+      over the scopes.
+    * `entry_count_buckets` - the number of partitions in each bucket. The map
+      has one key for each bound, and the key `:infinity`. A partition with `n`
+      entries counts in the first bound that is `n` or more. It counts in
+      `:infinity` when `n` is above the last bound.
+
+  The function skips a tracker that has exited.
+  """
+  @spec usage(name(), usage_buckets()) :: usage()
+  def usage(name, usage_buckets) when is_list(usage_buckets) do
+    Tracker.usage(name, usage_buckets)
   end
 end
