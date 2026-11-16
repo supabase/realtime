@@ -51,9 +51,7 @@ defmodule PolicyEval.Value do
   """
   @spec starts_with(result, result) :: result
   def starts_with(a, b) do
-    strict2(a, b, fn {:text, text}, {:text, prefix} ->
-      byte_size(prefix) <= byte_size(text) and binary_part(text, 0, byte_size(prefix)) == prefix
-    end)
+    strict2(a, b, fn {:text, text}, {:text, prefix} -> String.starts_with?(text, prefix) end)
   end
 
   @doc """
