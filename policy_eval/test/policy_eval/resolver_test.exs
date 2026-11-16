@@ -161,6 +161,15 @@ defmodule PolicyEval.ResolverTest do
       end
     end
 
+    for {op, function} <- [{"=", :bool_eq}, {"<>", :bool_ne}] do
+      test "#{op} on boolean with boolean is #{function}" do
+        ast = {:op, unquote(op), {:cast, team(), "boolean"}, {:const, :bool, true}}
+
+        assert resolve(ast) ==
+                 {call(Value, unquote(function), [call(Value, :bool_in, [{:column, "team"}]), {:lit, true}]), :bool}
+      end
+    end
+
     test "|| on text with text is textcat, and on text with uuid is textanycat" do
       assert resolve({:op, "||", text("a"), text("b")}) ==
                {call(Value, :textcat, [lit_text("a"), lit_text("b")]), :text}
@@ -250,7 +259,8 @@ defmodule PolicyEval.ResolverTest do
             {"=", team(), user_id(), {:text, :uuid}},
             {"=", user_id(), team(), {:uuid, :text}},
             {"<>", claims(), claims(), {:jsonb, :jsonb}},
-            {"=", {:const, :bool, true}, {:const, :bool, true}, {:bool, :bool}},
+            {"<", {:const, :bool, true}, {:const, :bool, true}, {:bool, :bool}},
+            {"=", {:const, :bool, true}, team(), {:bool, :text}},
             {"||", user_id(), text("a"), {:uuid, :text}},
             {"||", claims(), text("a"), {:jsonb, :text}},
             {"~", user_id(), text("a"), {:uuid, :text}},

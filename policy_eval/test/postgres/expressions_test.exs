@@ -543,7 +543,9 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
             "current_setting('app.claims', true)::jsonb ->> 'x' = #{claim_literal(value)}",
             "(select app.claims() ->> 'x') = 'v'",
             "(app.claims() ->> 'x')::boolean",
-            "coalesce((app.claims() ->> 'x')::boolean, false)"
+            "coalesce((app.claims() ->> 'x')::boolean, false)",
+            "(app.claims() ->> 'x')::boolean = true",
+            "coalesce((app.claims() ->> 'x')::boolean, false) = false"
           ] do
         expression_case(sql, extra_claims: %{"x" => value})
       end
@@ -673,7 +675,10 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
           sql <- [
             "(current_setting('app.claims', true)::jsonb ->> 'k')::boolean",
             "coalesce((app.claims() ->> 'k')::boolean, false)",
-            "NOT (app.claims() ->> 'k')::boolean"
+            "NOT (app.claims() ->> 'k')::boolean",
+            "(app.claims() ->> 'k')::boolean = true",
+            "(app.claims() ->> 'k')::boolean <> false",
+            "(app.claims() ->> 'k')::boolean = NULL::boolean"
           ] do
         expression_case(sql, extra_claims: %{"k" => text})
       end
