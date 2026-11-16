@@ -174,6 +174,8 @@ The profile and the env decide which roles, columns, settings and functions a po
   key or JSON `null` gives NULL. Numbers, objects and arrays are a fallback, because Postgres
   prints them in a normalized form that the library does not model. `->> integer` finds the
   element by the rules of `-> integer` below.
+- `json ->> text` where the value is a string or a boolean. For these values, `json` and `jsonb`
+  give the same results, see "json" in `PolicyEval.Resolver`.
 - `jsonb -> text` and `jsonb -> integer`, for example `app.claims() -> 'app_metadata' ->> 'team'`.
   The result is jsonb of any type. A JSON `null` stays the jsonb `null`, which is not NULL. A
   missing key, a root of another type, or an index outside the array gives NULL. A negative index
@@ -187,7 +189,7 @@ The profile and the env decide which roles, columns, settings and functions a po
   makes `COALESCE` a fallback, even after a non-NULL argument. The reason is that Postgres can
   evaluate a later argument while it plans the query. For an example, see the fallback body of
   `app.user_id()` in "The example of the tests".
-- Casts from text to uuid, jsonb and boolean, and from uuid to text. Literals of those types,
+- Casts from text to uuid, jsonb, json and boolean, and from uuid to text. Literals of those types,
   `true`, `false` and typed `NULL`s.
 - Integer literals, as the index of `jsonb -> integer` and `jsonb ->> integer`. No other
   operator takes an integer.
@@ -199,6 +201,9 @@ The profile and the env decide which roles, columns, settings and functions a po
 - boolean input from text: ASCII only.
 - jsonb input: up to 100 levels deep. For duplicate keys, the last value stays. `\u0000` is a
   `{:raises, ...}` fallback.
+- json input: the same as jsonb input. Postgres accepts `\u0000` and a lone surrogate in a json
+  value, but `json ->> text` raises on them. So for `->>`, the library raises where Postgres
+  raises. If no `->>` reads the json value, the library falls back and Postgres gives a value.
 - Text compares byte by byte. That assumes a UTF-8 database with a deterministic default collation.
   Any `COLLATE` is a fallback.
 
@@ -208,9 +213,9 @@ These are examples of what is not supported. Each one is a fallback:
 
 - subqueries with `FROM`, `EXISTS` and `CASE`
 - `IS TRUE` and similar tests, `ILIKE`, `LIKE` with an escape or `ESCAPE`, and `!~`
-- the jsonb operators `?|`, `?&` and `@>`
-- number literals that are not integers, operators on integers, and casts to `integer`, `numeric`
-  or `json`
+- the jsonb operators `?|`, `?&` and `@>`, and all json operators other than `->>`
+- number literals that are not integers, operators on integers, casts to `integer` or `numeric`,
+  and casts from `json`
 - columns that are not in the profile
 - functions that the profile does not know, for example `lower()` and `now()`
 

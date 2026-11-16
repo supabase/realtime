@@ -2,6 +2,8 @@ defmodule PolicyEval.Jsonb do
   @moduledoc """
   The jsonb primitives: `text::jsonb`, `jsonb -> text`, `jsonb -> integer`, `jsonb ->> text`,
   `jsonb ->> integer` and `jsonb ? text`.
+  `PolicyEval.Resolver` binds `text::json` and `json ->> text` to them too, see "json" there for
+  why that is exact.
 
   A jsonb value is `{:jsonb, term}` where `term` is a decoded JSON value:
 

@@ -544,6 +544,8 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
             "app.claims() ->> 'x' = 'v'",
             "app.claims() ->> 'x' IS NULL",
             "current_setting('app.claims', true)::jsonb ->> 'x' = #{claim_literal(value)}",
+            "current_setting('app.claims', true)::json ->> 'x' = #{claim_literal(value)}",
+            "current_setting('app.claims', true)::json ->> 'x' IS NULL",
             "(select app.claims() ->> 'x') = 'v'",
             "(app.claims() ->> 'x')::boolean",
             "coalesce((app.claims() ->> 'x')::boolean, false)",
@@ -558,8 +560,13 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
       {"duplicate keys, last wins", ~s({"x":"first","x":"last"})},
       {"duplicate keys, last is null", ~s({"x":"first","x":null})},
       {"duplicate keys, last is an object", ~s({"x":"first","x":{"a":1}})},
+      {"duplicate keys, first is an object", ~s({"x":{"a":1},"x":"v"})},
+      {"duplicate keys, first is null", ~s({"x":null,"x":"v"})},
       {"duplicate keys of different case", ~s({"X":"1","x":"2"})},
       {"only nested", ~s({"y":{"x":"deep"}})},
+      {"nested before the key", ~s({"y":{"x":"deep"},"x":"v"})},
+      {"nested after the key", ~s({"x":"v","y":{"x":"deep"}})},
+      {"escaped key", ~s({"\\u0078":"v"})},
       {"escaped unicode", ~s({"x":"caf\\u00e9"})},
       {"surrogate pair", ~s({"x":"\\ud83d\\ude00"})},
       {"lone high surrogate", ~s({"x":"\\ud83d"})},
@@ -610,6 +617,9 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
             "app.claims() ->> 'x' = 'v'",
             "app.claims() ->> 'x' IS NULL",
             "current_setting('app.claims', true)::jsonb ->> 'x' IS NULL",
+            "current_setting('app.claims', true)::json ->> 'x' = 'v'",
+            "current_setting('app.claims', true)::json ->> 'x' IS NULL",
+            "current_setting('app.claims', true)::json ->> 'é' = 'v'",
             "app.claims() ->> 'é' = 'v'",
             "app.claims() ->> '' IS NULL"
           ] do
@@ -627,6 +637,9 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
             "(app.claims() -> 'meta') ->> 'role' = 'owner'",
             "(app.claims() -> 'meta' ->> 'role') = 'owner'",
             "app.claims() ->> 'email' = 'a@b.c'",
+            "current_setting('app.claims', true)::json ->> 'email' LIKE '%@b.c'",
+            "current_setting('app.claims', true)::json ->> 'email' NOT LIKE '%@b.c'",
+            "(current_setting('app.claims', true)::json ->> 'role') = 'member'",
             "coalesce(app.claims() ->> 'email', '') = ''",
             "app.claims() ->> 'plan' = 'pro'",
             "(app.claims() ->> 'exp')::bigint > 0",
@@ -705,7 +718,9 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
             "current_setting('app.headers', true)::jsonb ->> 'user-agent' IS NULL",
             "current_setting('app.headers', true) IS NULL",
             "nullif(current_setting('app.headers', true), '') IS NULL",
-            "current_setting('app.headers', true)::json ->> 'user-agent' = 'v'"
+            "current_setting('app.headers', true)::json ->> 'user-agent' = 'v'",
+            "current_setting('app.headers', true)::json ->> 'user-agent' IS NULL",
+            "current_setting('app.headers', true)::json IS NULL"
           ] do
         expression_case(sql, headers: headers)
       end
@@ -1123,7 +1138,23 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
             "#{lit(json)}::jsonb ->> 'x' = 'v'",
             "#{lit(json)}::jsonb ->> 'x' IS NULL",
             "#{lit(json)}::jsonb ->> 'x' = '100'",
-            "#{lit(json)}::jsonb ->> 'x' = 'café'"
+            "#{lit(json)}::jsonb ->> 'x' = 'café'",
+            "#{lit(json)}::json ->> 'x' = 'v'",
+            "#{lit(json)}::json ->> 'x' IS NULL",
+            "#{lit(json)}::json ->> 'x' = '1e2'"
+          ] do
+        expression_case(sql)
+      end
+
+    # json_in accepts what json ->> raises on. Where nothing reads the json, Postgres gives a value
+    # and the library falls back.
+    json_literals =
+      for sql <- [
+            "NULL::json ->> 'x' IS NULL",
+            "#{lit(~s({"x":"\\u0000"}))}::json IS NOT NULL",
+            "#{lit(~s({"x":"\\u0000"}))}::json ->> 'y' IS NULL",
+            "#{lit(~s({"x":"\\ud83d"}))}::json IS NOT NULL",
+            "#{lit(~s({"x":"\\ud83d"}))}::json ->> 'y' IS NULL"
           ] do
         expression_case(sql)
       end
@@ -1169,7 +1200,7 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
         expression_case(sql)
       end
 
-    uuid_literals ++ boolean_literals ++ jsonb_literals ++ raising_operand ++ strings
+    uuid_literals ++ boolean_literals ++ jsonb_literals ++ json_literals ++ raising_operand ++ strings
   end
 
   # Every string against every pattern, with LIKE, NOT LIKE and ILIKE. The string is the value of

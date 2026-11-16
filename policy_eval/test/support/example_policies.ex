@@ -102,6 +102,7 @@ defmodule PolicyEval.Test.ExamplePolicies do
       select("claims_text_negative_index", "app.claims() ->> -1 = 'v'"),
       select("setting_text", "current_setting('app.claims', true)::jsonb ->> 'k' = 'v'"),
       select("setting_boolean", "(current_setting('app.claims', true)::jsonb ->> 'k')::boolean"),
+      select("setting_json", "current_setting('app.claims', true)::json ->> 'email' LIKE '%@example.com'"),
       select("regex_case_sensitive", "app.team() ~ 'public:lobby'"),
       select("like", "app.team() LIKE 'public:%'"),
       select("not_like", "app.team() NOT LIKE 'public:%'"),

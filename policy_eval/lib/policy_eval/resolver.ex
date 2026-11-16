@@ -2,7 +2,7 @@ defmodule PolicyEval.Resolver do
   @moduledoc """
   Binds a `PolicyEval.AST` into `PolicyEval.IR`, with the type of every node.
 
-  Types are `:text`, `:uuid`, `:jsonb`, `:bool`, `:int4` and `:unknown`. Operators are bound by name and
+  Types are `:text`, `:uuid`, `:jsonb`, `:json`, `:bool`, `:int4` and `:unknown`. Operators are bound by name and
   operand types from an allowlist, casts and functions likewise, and the profile's functions
   (`PolicyEval.Profile`) are inlined by `PolicyEval.Catalog` when the definition in the database
   matches.
@@ -49,7 +49,8 @@ defmodule PolicyEval.Resolver do
       are NULL when an operand is NULL. `~~*` (`ILIKE`) has no binding, because Postgres folds its
       case with the collation
     * `->>`: jsonb with text is `jsonb_object_field_text`, jsonb with integer is
-      `jsonb_array_element_text`. Both give text
+      `jsonb_array_element_text`. Both give text. json with text is
+      `PolicyEval.Jsonb.object_field_text/2` too, see "json" below
     * `->`: jsonb with text is `jsonb_object_field`, jsonb with integer is `jsonb_array_element`.
       Both give jsonb
     * `?`: jsonb with text is `jsonb_exists`, which gives a boolean
@@ -68,6 +69,23 @@ defmodule PolicyEval.Resolver do
     * `starts_with(text, text)` and `text ^@ text`, the operator of that function:
       `PolicyEval.Value.starts_with/2`
     * a scalar subselect without FROM yields exactly one row, so `( SELECT x)` is `x`
+
+  ## json
+
+  A json value keeps its input text, and `json ->> text` (`json_object_field_text`) parses that text
+  again. `text::json` is bound to the jsonb parser all the same, and `json ->> text` to the jsonb
+  field lookup, because the two agree on every result that `PolicyEval.Jsonb.object_field_text/2`
+  gives. The last of several equal keys wins in both, JSON null and a missing key are NULL, and a
+  string or a boolean is its text. A root that is not an object is NULL. Numbers, objects and
+  arrays are unsupported for both: `json ->>` returns their text as written (`1e2`), and
+  `jsonb ->>` normalised (`100`).
+
+  The parsers differ in when they raise. `json_in` does not decode escapes, so it accepts `\\u0000`
+  and a lone surrogate, and `json ->>` then raises on them anywhere in the text. The jsonb parser
+  raises on them at the cast. So for `text::json ->> text`, the library raises on the same input as
+  Postgres, only at another step. A json value can still reach a node that does not parse it, such
+  as `IS NULL`. There the library falls back where Postgres gives an answer, which is a fallback and
+  never a wrong answer. No other operator and no cast from json is bound.
   """
 
   alias PolicyEval.AST
@@ -77,11 +95,18 @@ defmodule PolicyEval.Resolver do
   alias PolicyEval.Profile
   alias PolicyEval.Value
 
-  @type type :: :text | :uuid | :jsonb | :bool | :int4 | :unknown
+  @type type :: :text | :uuid | :jsonb | :json | :bool | :int4 | :unknown
   @type resolved :: {IR.t(), type}
 
   # What a literal can be cast to, by the name Postgres prints.
-  @cast_types %{"text" => :text, "uuid" => :uuid, "jsonb" => :jsonb, "boolean" => :bool, "integer" => :int4}
+  @cast_types %{
+    "text" => :text,
+    "uuid" => :uuid,
+    "jsonb" => :jsonb,
+    "json" => :json,
+    "boolean" => :bool,
+    "integer" => :int4
+  }
 
   @int4_range -2_147_483_648..2_147_483_647
 
@@ -139,6 +164,7 @@ defmodule PolicyEval.Resolver do
       "text" -> {{:lit, {:text, string}}, :text}
       "uuid" -> literal(Value.uuid_in({:text, string}), :uuid)
       "jsonb" -> literal(Jsonb.parse({:text, string}), :jsonb)
+      "json" -> literal(Jsonb.parse({:text, string}), :json)
       "boolean" -> literal(Value.bool_in({:text, string}), :bool)
       "integer" -> int4_literal(string, {:cast, :string_literal, "integer"})
       _ -> unsupported({:cast, :string_literal, known_name(type, ctx)})
@@ -249,6 +275,7 @@ defmodule PolicyEval.Resolver do
   defp cast(ir, :uuid, "text", _ctx), do: {call(Value, :uuid_out, [ir]), :text}
   defp cast(ir, :text, "uuid", _ctx), do: {call(Value, :uuid_in, [ir]), :uuid}
   defp cast(ir, :text, "jsonb", _ctx), do: {call(Jsonb, :parse, [ir]), :jsonb}
+  defp cast(ir, :text, "json", _ctx), do: {call(Jsonb, :parse, [ir]), :json}
   defp cast(ir, :text, "boolean", _ctx), do: {call(Value, :bool_in, [ir]), :bool}
   defp cast(_ir, from, type, ctx), do: unsupported({:cast, from, known_name(type, ctx)})
 
@@ -331,6 +358,7 @@ defmodule PolicyEval.Resolver do
   defp operator("->", :jsonb, :text, l, r), do: {call(Jsonb, :object_field, [l, r]), :jsonb}
   defp operator("->", :jsonb, :int4, l, r), do: {call(Jsonb, :array_element, [l, r]), :jsonb}
   defp operator("?", :jsonb, :text, l, r), do: {call(Jsonb, :exists, [l, r]), :bool}
+  defp operator("->>", :json, :text, l, r), do: {call(Jsonb, :object_field_text, [l, r]), :text}
   defp operator(op, lt, rt, _l, _r), do: unsupported({:operator, op, lt, rt})
 
   defp regex(l, r, mode), do: call(Value, :regex_match, [l, r, {:lit, mode}])
