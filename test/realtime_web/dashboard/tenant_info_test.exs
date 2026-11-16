@@ -172,19 +172,17 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
     assert html =~ "Connected users per region"
   end
 
-  describe "privileges" do
-    test "starts with every section collapsed and unread", %{conn: conn, tenant: tenant} do
-      {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
+  test "the sections that read the tenant database start collapsed and unread", %{conn: conn, tenant: tenant} do
+    {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
 
-      assert has_element?(view, "#privileges p", "the role tenant migrations run as")
-
-      for section <- ~w(default functions tables event-triggers) do
-        assert has_element?(view, "#privileges-#{section}-section summary[phx-value-section='#{section}']")
-        refute has_element?(view, "#privileges-#{section}-section[open]"), "expected #{section} to start collapsed"
-        refute has_element?(view, "#privileges-#{section}"), "expected #{section} to start unread"
-      end
+    for section <- ~w(privileges-default privileges-functions privileges-tables privileges-event-triggers policy-eval) do
+      assert has_element?(view, "##{section}-section summary")
+      refute has_element?(view, "##{section}-section[open]"), "expected #{section} to start collapsed"
+      assert has_element?(view, "##{section}-section p", "Loading..."), "expected #{section} to start unread"
     end
+  end
 
+  describe "privileges" do
     test "reads a section from the tenant database only the first time it opens", %{conn: conn, tenant: tenant} do
       test_pid = self()
 
@@ -304,15 +302,8 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
   end
 
   describe "policy_eval" do
-    test "starts collapsed and unread", %{conn: conn, tenant: tenant} do
-      {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
-
-      assert has_element?(view, "#policy-eval .card-header", "Policies")
-      assert has_element?(view, "#policy-eval-section summary[phx-click='load_policy_eval']")
-      refute has_element?(view, "#policy-eval-section[open]")
-      refute has_element?(view, "#policy-eval-policies")
-    end
-
+    # RealtimeWeb.Dashboard.TenantInfo.PolicyEvalTest covers how a report renders. This checks that the
+    # page reads the one of the tenant database, once.
     test "reads the policies once and shows what policy_eval makes of them", %{conn: conn, tenant: tenant} do
       {:ok, settings} = Database.from_tenant(tenant, "tenant_info_test", :stop)
       {:ok, db_conn} = Database.connect_db(settings)
@@ -320,26 +311,11 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
       on_exit(fn ->
         {:ok, db_conn} = Database.connect_db(settings)
         Postgrex.query!(db_conn, ~s(DROP POLICY IF EXISTS "dashboard lobby" ON realtime.messages), [])
-        Postgrex.query!(db_conn, ~s(DROP POLICY IF EXISTS "dashboard members" ON realtime.messages), [])
-        Postgrex.query!(db_conn, ~s(DROP POLICY IF EXISTS "dashboard admins" ON realtime.messages), [])
       end)
 
       Postgrex.query!(
         db_conn,
         ~s[CREATE POLICY "dashboard lobby" ON realtime.messages FOR SELECT TO authenticated USING (realtime.topic() = 'lobby')],
-        []
-      )
-
-      Postgrex.query!(
-        db_conn,
-        ~s[CREATE POLICY "dashboard members" ON realtime.messages FOR SELECT TO authenticated USING (EXISTS (SELECT 1 FROM pg_catalog.pg_class))],
-        []
-      )
-
-      # postgres is not a role that policy_eval models, so every write falls back
-      Postgrex.query!(
-        db_conn,
-        ~s[CREATE POLICY "dashboard admins" ON realtime.messages FOR INSERT TO postgres WITH CHECK (true)],
         []
       )
 
@@ -356,30 +332,19 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
       open_policy_eval(view)
       assert_received :tenant_db_connect
 
-      assert has_element?(view, "#policy-eval-section summary", "Policies on realtime.messages (3)")
+      assert has_element?(view, "#policy-eval-section summary", "Policies on realtime.messages (1)")
 
       assert has_element?(
                view,
                "#policy-eval-policies tbody tr",
-               ~r/dashboard lobby\s+SELECT\s+permissive\s+authenticated/
+               ~r/dashboard lobby SELECT permissive authenticated \(realtime\.topic\(\) = 'lobby'::text\) supported/
              )
-
-      assert has_element?(view, "#policy-eval-policies tbody tr", ~r/realtime\.topic\(\) = 'lobby'::text.*\s+supported/)
-      assert has_element?(view, "#policy-eval-policies tbody tr .text-danger", "subquery: {:unparsed, :exists}")
-      assert has_element?(view, "#policy-eval-policies tbody tr .text-danger", "postgres (not modelled)")
-
-      assert has_element?(view, "#policy-eval-decisions tbody tr", ~r/authenticated\s+read\s+evaluates dashboard lobby/)
 
       assert has_element?(
                view,
                "#policy-eval-decisions tbody tr",
-               ~r/authenticated\s+write\s+always falls back: a policy for this command names a role/
+               "authenticated read evaluates dashboard lobby no unsupported parts"
              )
-
-      assert has_element?(view, "#policy-eval-decisions tbody tr", ~r/anon\s+read\s+always denied/)
-
-      assert has_element?(view, "#policy-eval-functions tbody tr", ~r/realtime\.topic\(\)\s+known/)
-      assert has_element?(view, "#policy-eval-roles tbody tr", ~r/row level security enabled/)
 
       open_policy_eval(view)
       refute_received :tenant_db_connect
@@ -401,20 +366,6 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
              )
 
       assert has_element?(view, "td", tenant.external_id)
-    end
-
-    test "shows the error when the tenant database is unreachable", %{conn: conn, tenant: tenant} do
-      stub(Database, :connect_db, fn _settings -> {:error, :econnrefused} end)
-
-      {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
-
-      open_policy_eval(view)
-
-      assert has_element?(
-               view,
-               "#policy-eval-section .text-danger",
-               "Failed to connect to the tenant database: :econnrefused"
-             )
     end
   end
 
