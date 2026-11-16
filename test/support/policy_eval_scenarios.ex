@@ -775,6 +775,12 @@ defmodule PolicyEvalScenarios do
       {"no INSERT for anon", ["REVOKE INSERT ON realtime.messages FROM anon"]},
       {"authenticated bypasses RLS", ["ALTER ROLE authenticated BYPASSRLS"]},
       {"anon bypasses RLS", ["ALTER ROLE anon BYPASSRLS"]},
+      {"anon is a superuser", ["ALTER ROLE anon SUPERUSER"]},
+      {"service_role does not bypass RLS", ["ALTER ROLE service_role NOBYPASSRLS"]},
+      {"no INSERT for service_role", ["REVOKE INSERT ON realtime.messages FROM service_role"]},
+      {"no SELECT for service_role", ["REVOKE SELECT ON realtime.messages FROM service_role"]},
+      {"a restrictive policy for service_role that denies",
+       [policy_sql("deny", "AS RESTRICTIVE FOR ALL TO service_role USING (false) WITH CHECK (false)")]},
       {"a policy for a role authenticated is a member of",
        [
          "CREATE ROLE policy_eval_team NOLOGIN",

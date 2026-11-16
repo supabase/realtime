@@ -140,9 +140,11 @@ The profile and the env decide which roles, columns, settings and functions a po
   operation that names any other role makes the decision a fallback.
 - Callers with a role in the `roles` of the profile. The env gives the role as the setting `role`.
   Every other role is a fallback.
-- If RLS is off or forced, or the role has `BYPASSRLS`, the decision is a fallback. If the role
-  does not have the `SELECT` grant (reads) or the `INSERT` grant (writes), the decision is also a
-  fallback.
+- If RLS is off or forced, the decision is a fallback. If the role does not have the `SELECT`
+  grant (reads) or the `INSERT` grant (writes), the decision is also a fallback.
+- A role that bypasses RLS (`BYPASSRLS`, or a superuser) and has the grant is allowed. No policy
+  is evaluated: Postgres doesn't apply them to it, see
+  [Row Security Policies](https://www.postgresql.org/docs/current/ddl-rowsecurity.html).
 - A write is a plain `INSERT`, with no `RETURNING`. The `SELECT` grant and the `SELECT` policies
   do not change it, see `PolicyEval.PolicySet`.
 - Expressions up to 4 KB of `pg_get_expr` text.

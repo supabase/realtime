@@ -21,8 +21,15 @@ defmodule Realtime.Tenants.PolicyEvalProfile do
     * `request.jwt.claim.role`
     * `request.headers`
 
-  A probe row has the columns `topic` and `extension`, both text. The decided roles are `anon` and
-  `authenticated`, and a policy can also name `service_role`.
+  A probe row has the columns `topic` and `extension`, both text. The decided roles are `anon`,
+  `authenticated` and `service_role`, and a policy can name any of them.
+
+  Supabase creates `service_role` with `BYPASSRLS` ("Policies never apply to a secret key, because
+  `service_role` has the `BYPASSRLS` attribute",
+  https://supabase.com/docs/guides/getting-started/api-keys), so
+  policy_eval allows it whenever it has the grant, without evaluating a policy. That comes from the
+  snapshot (`rolbypassrls` as the loader reads it), not from the name: a tenant that removed
+  `BYPASSRLS` from `service_role` gets its policies evaluated, like for `anon`.
 
   The known functions are `realtime.topic()`, with the body that Realtime installs, and
   `auth.uid()`, `auth.role()` and `auth.jwt()`. Those three are Supabase's, not only Realtime's:
@@ -44,7 +51,7 @@ defmodule Realtime.Tenants.PolicyEvalProfile do
     %Profile{
       columns: %{"topic" => :text, "extension" => :text},
       functions: realtime_functions() ++ auth_functions(),
-      roles: ["anon", "authenticated"],
+      roles: ["anon", "authenticated", "service_role"],
       policy_roles: ["anon", "authenticated", "service_role"],
       platform_roles: ["service_role", "postgres", "supabase_admin"],
       platform_schemas: ["auth", "realtime"],

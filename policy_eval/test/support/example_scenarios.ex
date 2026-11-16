@@ -677,6 +677,15 @@ defmodule PolicyEval.Test.ExampleScenarios do
       {"no INSERT for guest", ["REVOKE INSERT ON app.docs FROM guest"]},
       {"member bypasses RLS", ["ALTER ROLE member BYPASSRLS"]},
       {"guest bypasses RLS", ["ALTER ROLE guest BYPASSRLS"]},
+      {"member bypasses RLS, no INSERT", ["ALTER ROLE member BYPASSRLS", "REVOKE INSERT ON app.docs FROM member"]},
+      {"member bypasses RLS, RLS forced",
+       ["ALTER ROLE member BYPASSRLS", "ALTER TABLE app.docs FORCE ROW LEVEL SECURITY"]},
+      {"member bypasses RLS, a restrictive policy that denies",
+       [
+         "ALTER ROLE member BYPASSRLS",
+         policy_sql("deny", "AS RESTRICTIVE FOR ALL TO member USING (false) WITH CHECK (false)")
+       ]},
+      {"member is a superuser", ["ALTER ROLE member SUPERUSER"]},
       {"a policy for a role member is a member of",
        [
          "CREATE ROLE policy_eval_team NOLOGIN",

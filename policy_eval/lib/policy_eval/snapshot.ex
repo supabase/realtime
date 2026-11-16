@@ -31,8 +31,10 @@ defmodule PolicyEval.Snapshot do
   (`PolicyEval.Profile`):
 
     * `rls_enabled` and `rls_forced`: `relrowsecurity` and `relforcerowsecurity` of the table
-    * `roles`: for the roles of the profile, a map with `bypass_rls` (`rolbypassrls`) and the
-      table privileges `select` and `insert`
+    * `roles`: for the roles of the profile, a map with `bypass_rls` and the table privileges
+      `select` and `insert` (`has_table_privilege`). `bypass_rls` is `rolsuper or rolbypassrls`:
+      Postgres treats a superuser as having `BYPASSRLS`. A role that bypasses RLS and has the
+      privilege is allowed without any policy, see `PolicyEval.PolicySet`
     * `policies`: maps with `name`, `cmd`, `permissive`, `roles`, `qual` and `with_check`, where
       the last two are the text of `pg_get_expr` (or `nil`). The expressions must have been
       printed with `search_path = ''`, so every name is qualified
