@@ -534,6 +534,64 @@ defmodule PolicyEvalScenarios do
   end
 
   @doc """
+  Policies that read a claim with `current_setting('request.jwt.claims', true)::json`, as json
+  rather than jsonb. They have to be decided by the library, not fall back.
+  """
+  @spec json_claim_scenarios() :: [map()]
+  def json_claim_scenarios do
+    using = "(current_setting('request.jwt.claims', true)::json ->> 'email') LIKE '%@supabase.io'"
+
+    policies = [
+      policy_sql("receive by email domain", "FOR SELECT TO authenticated USING (#{using})"),
+      policy_sql("broadcast by email domain", "FOR INSERT TO authenticated WITH CHECK (#{using})")
+    ]
+
+    # The last two are near misses: another domain that ends the same, and the domain not at the end
+    for {label, claims} <- [
+          {"in the domain", %{"email" => "ada@supabase.io"}},
+          {"another domain", %{"email" => "ada@example.com"}},
+          {"no email", %{}},
+          {"email null", %{"email" => nil}},
+          {"a domain that ends the same", %{"email" => "ada@notsupabase.io"}},
+          {"the domain not at the end", %{"email" => "ada@supabase.io.example.com"}}
+        ] do
+      scenario("json claims", "email domain from json claims, #{label}", policies,
+        role: "authenticated",
+        extra_claims: claims
+      )
+    end ++ json_flag_scenarios()
+  end
+
+  # A boolean flag in the claims, compared as text, and the topic from an initplan
+  defp json_flag_scenarios do
+    using = """
+    ((current_setting('request.jwt.claims', true)::json ->> 'chariot_bridge') = 'true'
+      AND (select realtime.topic()) = 'bridge:print-jobs')
+    """
+
+    policies = [
+      policy_sql("receive print jobs", "FOR SELECT TO authenticated USING #{using}"),
+      policy_sql("send print jobs", "FOR INSERT TO authenticated WITH CHECK #{using}")
+    ]
+
+    for {label, claims} <- [
+          {"flag true", %{"chariot_bridge" => true}},
+          {"flag false", %{"chariot_bridge" => false}},
+          {"flag the string true", %{"chariot_bridge" => "true"}},
+          {"flag the string TRUE", %{"chariot_bridge" => "TRUE"}},
+          {"flag null", %{"chariot_bridge" => nil}},
+          {"no flag", %{}}
+        ],
+        topic <- ["bridge:print-jobs", "bridge:other"] do
+      scenario("json claims", "json flag claim, #{label}, topic #{inspect(topic)}", policies,
+        role: "authenticated",
+        topic: topic,
+        extra_claims: claims
+      )
+    end
+  end
+
+  @doc """
   Everything the library doesn't model has to be a fallback, not an answer. The setups change the
   database in the transaction of the scenario, and roll back with it.
   """

@@ -237,6 +237,38 @@ defmodule PolicyEvalTest do
     end
   end
 
+  describe "claims as json" do
+    @email_rls "(((current_setting('app.claims'::text, true))::json ->> 'email'::text) ~~ '%@example.com'::text)"
+
+    test "are read with current_setting(name, true)::json ->>, as with jsonb" do
+      assert evaluate(@email_rls, claims: ~s({"email":"ada@example.com"})) == true
+      assert evaluate(@email_rls, claims: ~s({"email":"ada@example.org"})) == false
+      assert evaluate(@email_rls, claims: ~s({"email":"ada@x.example.com"})) == false
+      assert evaluate(@email_rls, claims: ~s({"email":null})) == nil
+      assert evaluate(@email_rls, claims: ~s({})) == nil
+    end
+
+    test "the last of duplicate keys wins, as with jsonb" do
+      assert evaluate(@email_rls, claims: ~s({"email":"ada@example.org","email":"ada@example.com"})) == true
+    end
+
+    test "fall back where Postgres raises, which for json is at ->> and not at the cast" do
+      # Postgres: json_in accepts the text, then ->> raises untranslatable_character
+      assert evaluate(@email_rls, claims: ~s({"email":"ada@example.com","x":"\\u0000"})) ==
+               {:unsupported, {:raises, :untranslatable_character, "unsupported Unicode escape sequence"}}
+
+      assert evaluate(@email_rls, claims: "") ==
+               {:unsupported, {:raises, :invalid_text_representation, "invalid input syntax for type json"}}
+    end
+
+    test "fall back for a number" do
+      # Postgres: true. json ->> gives a number as written, jsonb ->> normalised
+      assert evaluate("(((current_setting('app.claims'::text, true))::json ->> 'level'::text) = '1'::text)",
+               claims: ~s({"level":1})
+             ) == {:unsupported, :jsonb_number_text}
+    end
+  end
+
   describe "NULL" do
     test "follows SQL's three-valued logic" do
       null = "(app.team() = NULL::text)"

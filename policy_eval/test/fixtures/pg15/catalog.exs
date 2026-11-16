@@ -317,6 +317,14 @@
     },
     %{
       cmd: "r",
+      name: "grammar_setting_json",
+      permissive: true,
+      qual: "(((current_setting('app.claims'::text, true))::json ->> 'email'::text) ~~ '%@example.com'::text)",
+      roles: ["member"],
+      with_check: nil
+    },
+    %{
+      cmd: "r",
       name: "grammar_setting_text",
       permissive: true,
       qual: "(((current_setting('app.claims'::text, true))::jsonb ->> 'k'::text) = 'v'::text)",

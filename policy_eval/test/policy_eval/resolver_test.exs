@@ -25,6 +25,9 @@ defmodule PolicyEval.ResolverTest do
   defp claims,
     do: {:cast, {:func, nil, "current_setting", [text("app.claims"), {:const, :bool, true}]}, "jsonb"}
 
+  defp claims_json,
+    do: {:cast, {:func, nil, "current_setting", [text("app.claims"), {:const, :bool, true}]}, "json"}
+
   # IR builders
   defp call(module, function, args), do: {:apply, module, function, args}
   defp lit_text(s), do: {:lit, {:text, s}}
@@ -265,6 +268,14 @@ defmodule PolicyEval.ResolverTest do
                 ]), :text}
     end
 
+    test "->> on json with text is object_field_text too, over the jsonb parse" do
+      assert resolve({:op, "->>", claims_json(), text("email")}) ==
+               {call(Jsonb, :object_field_text, [
+                  call(Jsonb, :parse, [{:setting, "app.claims"}]),
+                  lit_text("email")
+                ]), :text}
+    end
+
     test "any other combination is unsupported" do
       int = {:const, :number, "1"}
 
@@ -283,6 +294,10 @@ defmodule PolicyEval.ResolverTest do
             {"#>", claims(), text("{a}"), {:jsonb, :text}},
             {"=", int, int, {:int4, :int4}},
             {"/", int, int, {:int4, :int4}},
+            {"->", claims_json(), text("a"), {:json, :text}},
+            {"->>", claims_json(), user_id(), {:json, :uuid}},
+            {"=", claims_json(), claims_json(), {:json, :json}},
+            {"~~", claims_json(), text("a%"), {:json, :text}},
             {"->>", team(), text("a"), {:text, :text}},
             {"<", team(), text("a"), {:text, :text}},
             {"~~", user_id(), text("a"), {:uuid, :text}},
@@ -404,6 +419,14 @@ defmodule PolicyEval.ResolverTest do
       assert resolve({:cast, {:const, :string, ~s({"a":"b"})}, "jsonb"}) == {{:lit, {:jsonb, %{"a" => "b"}}}, :jsonb}
     end
 
+    test "to json, parsed now by the jsonb parser, with the type json" do
+      assert resolve({:cast, {:const, :string, ~s({"a":"b"})}, "json"}) == {{:lit, {:jsonb, %{"a" => "b"}}}, :json}
+
+      # json_in accepts this, and json ->> raises on it. The cast falls back.
+      assert resolve({:cast, {:const, :string, ~s({"a":"\\u0000"})}, "json"}) ==
+               unsupported({:raises, :untranslatable_character, "unsupported Unicode escape sequence"})
+    end
+
     test "to boolean, parsed now" do
       assert resolve({:cast, {:const, :string, "true"}, "boolean"}) == {{:lit, true}, :bool}
       assert resolve({:cast, {:const, :string, "off"}, "boolean"}) == {{:lit, false}, :bool}
@@ -451,10 +474,11 @@ defmodule PolicyEval.ResolverTest do
       assert resolve({:cast, team(), "app.level"}) == unsupported({:cast, :text, "app.level"})
     end
 
-    test "NULL cast to the five types is a typed NULL literal" do
+    test "NULL cast to the six types is a typed NULL literal" do
       assert resolve(null("text")) == {{:lit, nil}, :text}
       assert resolve(null("uuid")) == {{:lit, nil}, :uuid}
       assert resolve(null("jsonb")) == {{:lit, nil}, :jsonb}
+      assert resolve(null("json")) == {{:lit, nil}, :json}
       assert resolve(null("boolean")) == {{:lit, nil}, :bool}
       assert resolve(null("integer")) == {{:lit, nil}, :int4}
     end
@@ -473,9 +497,10 @@ defmodule PolicyEval.ResolverTest do
       assert {{:apply, Value, :uuid_out, [{:apply, Value, :uuid_in, _}]}, :text} = resolve({:cast, user_id(), "text"})
     end
 
-    test "text to uuid, jsonb and boolean" do
+    test "text to uuid, jsonb, json and boolean" do
       assert resolve({:cast, team(), "uuid"}) == {call(Value, :uuid_in, [{:column, "team"}]), :uuid}
       assert resolve({:cast, team(), "jsonb"}) == {call(Jsonb, :parse, [{:column, "team"}]), :jsonb}
+      assert resolve({:cast, team(), "json"}) == {call(Jsonb, :parse, [{:column, "team"}]), :json}
       assert resolve({:cast, team(), "boolean"}) == {call(Value, :bool_in, [{:column, "team"}]), :bool}
     end
 
@@ -492,6 +517,10 @@ defmodule PolicyEval.ResolverTest do
             {team(), :text, "character varying"},
             {team(), :text, "integer"},
             {claims(), :jsonb, "boolean"},
+            {claims(), :jsonb, "json"},
+            {claims_json(), :json, "text"},
+            {claims_json(), :json, "jsonb"},
+            {claims_json(), :json, "json"},
             {{:const, :bool, true}, :bool, "boolean"},
             {{:const, :number, "1"}, :int4, "text"}
           ] do
@@ -665,6 +694,7 @@ defmodule PolicyEval.ResolverTest do
       "grammar_and_in_or",
       "grammar_user_role",
       "grammar_setting_boolean",
+      "grammar_setting_json",
       "grammar_setting_text",
       "grammar_coalesce",
       "grammar_concat_null",
