@@ -50,7 +50,8 @@ defmodule PolicyEval.ValueTest do
       {"bool_ne", :bool_ne, [true, false], [0, 1]},
       {"regex_match (~)", :regex_match, [{:text, "abc"}, {:text, "b"}, :case_sensitive], [0, 1]},
       {"regex_match (~*)", :regex_match, [{:text, "abc"}, {:text, "B"}, :case_insensitive], [0, 1]},
-      {"like", :like, [{:text, "abc"}, {:text, "a%"}], [0, 1]}
+      {"like", :like, [{:text, "abc"}, {:text, "a%"}], [0, 1]},
+      {"starts_with", :starts_with, [{:text, "abc"}, {:text, "a"}], [0, 1]}
     ]
 
     for {label, fun, args, positions} <- @strict, position <- positions do
@@ -127,6 +128,34 @@ defmodule PolicyEval.ValueTest do
       assert Value.textcat(t(""), t("cd")) == t("cd")
       assert Value.textcat(t("ab"), t("")) == t("ab")
       assert Value.textcat(t(""), t("")) == t("")
+    end
+  end
+
+  describe "starts_with/2" do
+    test "compares the prefix with the start of the text, byte by byte" do
+      assert Value.starts_with(t("notify:1:x"), t("notify:1:")) == true
+      assert Value.starts_with(t("notify:1"), t("notify:1:")) == false
+      assert Value.starts_with(t("xnotify:1:"), t("notify:1:")) == false
+      assert Value.starts_with(t("abc"), t("abc")) == true
+      assert Value.starts_with(t("abc"), t("ABC")) == false
+      assert Value.starts_with(t("abc"), t("")) == true
+      assert Value.starts_with(t(""), t("")) == true
+      assert Value.starts_with(t(""), t("a")) == false
+      # é as one code point, and as e with a combining accent: different bytes
+      assert Value.starts_with(t(<<0xC3, 0xA9, ?x>>), t(<<0xC3, 0xA9>>)) == true
+      assert Value.starts_with(t(<<0xC3, 0xA9>>), t(<<?e, 0xCC, 0x81>>)) == false
+    end
+
+    test "the LIKE wildcards and the backslash in a prefix are plain characters" do
+      assert Value.starts_with(t("user:a"), t("user%")) == false
+      assert Value.starts_with(t("user%a"), t("user%")) == true
+      assert Value.starts_with(t("user:a"), t("user_")) == false
+      assert Value.starts_with(t("user_a"), t("user_")) == true
+      assert Value.starts_with(t("user:a"), t("%")) == false
+      assert Value.starts_with(t("user:a"), t("_")) == false
+      assert Value.starts_with(t("user%a"), t("user\\%")) == false
+      assert Value.starts_with(t("user\\%a"), t("user\\%")) == true
+      assert Value.starts_with(t("user\\"), t("user\\")) == true
     end
   end
 

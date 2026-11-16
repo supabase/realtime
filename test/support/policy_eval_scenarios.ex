@@ -462,6 +462,171 @@ defmodule PolicyEvalScenarios do
   end
 
   @doc """
+  Notification channels: a user reads and broadcasts on the topics that start with
+  `notify:<uid>:`, with `starts_with`, in the initplan form `(select auth.uid())`.
+
+  The library has to decide the `:decided` subs, a uuid in any spelling or none, not fall back.
+  The `:other` subs make `auth.uid()` raise, so the library can fall back there, but it must not
+  give another answer than Postgres.
+  """
+  @spec notify_channel_scenarios(:decided | :other, :legacy | :supabase_auth) :: [map()]
+  def notify_channel_scenarios(subs, flavor) when subs in [:decided, :other] do
+    condition = """
+    extension = 'broadcast'
+    AND (select auth.uid()) IS NOT NULL
+    AND starts_with((select realtime.topic()), 'notify:' || (select auth.uid())::text || ':')
+    """
+
+    policies = [
+      policy_sql("users receive their notifications", "FOR SELECT TO authenticated USING (#{condition})"),
+      policy_sql("users send their notifications", "FOR INSERT TO authenticated WITH CHECK (#{condition})")
+    ]
+
+    topics = [
+      {"own prefix", "notify:#{@own}:inbox"},
+      {"own prefix and nothing", "notify:#{@own}:"},
+      {"own uid without the colon", "notify:#{@own}"},
+      {"own uid in upper case", "notify:#{String.upcase(@own)}:inbox"},
+      {"other uid", "notify:#{@other}:inbox"},
+      {"prefix in upper case", "NOTIFY:#{@own}:inbox"},
+      {"prefix inside another topic", "xnotify:#{@own}:inbox"},
+      {"non-ASCII after the prefix", "notify:#{@own}:é"},
+      {"notify: and nothing", "notify:"},
+      {"empty", ""}
+    ]
+
+    for {role, topic_label, topic, sub_label, sub} <- notify_cases(subs, topics) do
+      scenario(
+        "notify channels, #{flavor_label(flavor)}",
+        "notify channels (#{flavor_label(flavor)}) #{role}, topic: #{topic_label}, sub: #{sub_label}",
+        policies,
+        [role: role, topic: topic, sub: sub],
+        functions: flavor
+      )
+    end
+  end
+
+  defp notify_cases(:decided, topics) do
+    subs = [
+      {"canonical", @own},
+      {"upper case", String.upcase(@own)},
+      {"braced", "{#{@own}}"},
+      {"unhyphenated", String.replace(@own, "-", "")},
+      {"missing", nil},
+      {"another uuid", @other}
+    ]
+
+    authenticated = for {tl, t} <- topics, {sl, s} <- subs, do: {"authenticated", tl, t, sl, s}
+
+    # No policy is for anon, so only a few combinations
+    anon = for {tl, t} <- Enum.take(topics, 2), {sl, s} <- [{"canonical", @own}], do: {"anon", tl, t, sl, s}
+
+    authenticated ++ anon
+  end
+
+  defp notify_cases(:other, topics) do
+    for {tl, t} <- Enum.take(topics, 2),
+        {sl, s} <- [{"empty", ""}, {"not a uuid", "user_2abc"}],
+        do: {"authenticated", tl, t, sl, s}
+  end
+
+  @doc """
+  Organization channels: a member reads and broadcasts on the topics that start with `<org_id>:`,
+  where `org_id` is a text claim. No guard is in front of `starts_with`, so its own NULL decides
+  when the claim is missing or JSON null. An empty claim gives the prefix `:`.
+
+  The library has to decide all of them, not fall back.
+  """
+  @spec org_channel_scenarios() :: [map()]
+  def org_channel_scenarios do
+    prefix = "((select auth.jwt()) ->> 'org_id') || ':'"
+
+    policies = [
+      policy_sql("members receive on their organization", """
+      FOR SELECT TO authenticated USING (starts_with((select realtime.topic()), #{prefix}))
+      """),
+      policy_sql("members send on their organization", """
+      FOR INSERT TO authenticated
+      WITH CHECK (starts_with(realtime.topic(), #{prefix}) AND extension = 'broadcast')
+      """)
+    ]
+
+    topics = [
+      {"own organization", "acme:lobby"},
+      {"own organization and nothing", "acme:"},
+      {"own organization without the colon", "acme"},
+      {"organization in upper case", "ACME:lobby"},
+      {"another organization", "other:lobby"},
+      {"no organization", ":lobby"},
+      {"empty", ""}
+    ]
+
+    claims = [
+      {"acme", %{"org_id" => "acme"}},
+      {"upper case", %{"org_id" => "ACME"}},
+      {"with the colon", %{"org_id" => "acme:"}},
+      {"a LIKE wildcard", %{"org_id" => "%"}},
+      {"empty", %{"org_id" => ""}},
+      {"JSON null", %{"org_id" => nil}},
+      {"missing", %{}}
+    ]
+
+    for {topic_label, topic} <- topics, {claim_label, extra_claims} <- claims do
+      scenario(
+        "organization channels",
+        "organization channels, topic: #{topic_label}, org_id: #{claim_label}",
+        policies,
+        topic: topic,
+        extra_claims: extra_claims
+      )
+    end
+  end
+
+  @doc """
+  Draft channels: a user reads and broadcasts on every topic but the ones that start with
+  `drafts:<uid>:`, with `NOT starts_with` and no guard. Without a sub the prefix is NULL, so the
+  policy is NULL and Postgres denies. An evaluator that gave false for that `starts_with` would
+  allow.
+
+  The library has to decide all of them, not fall back.
+  """
+  @spec draft_channel_scenarios(:legacy | :supabase_auth) :: [map()]
+  def draft_channel_scenarios(flavor) do
+    condition = "NOT starts_with((select realtime.topic()), 'drafts:' || (select auth.uid())::text || ':')"
+
+    policies = [
+      policy_sql("users receive on all but their drafts", "FOR SELECT TO authenticated USING (#{condition})"),
+      policy_sql("users send on all but their drafts", "FOR INSERT TO authenticated WITH CHECK (#{condition})")
+    ]
+
+    topics = [
+      {"own drafts", "drafts:#{@own}:1"},
+      {"own drafts and nothing", "drafts:#{@own}:"},
+      {"own uid without the colon", "drafts:#{@own}"},
+      {"other drafts", "drafts:#{@other}:1"},
+      {"lobby", "public:lobby"},
+      {"empty", ""}
+    ]
+
+    subs = [
+      {"canonical", @own},
+      {"upper case", String.upcase(@own)},
+      {"missing", nil},
+      {"another uuid", @other}
+    ]
+
+    for {topic_label, topic} <- topics, {sub_label, sub} <- subs do
+      scenario(
+        "draft channels, #{flavor_label(flavor)}",
+        "draft channels (#{flavor_label(flavor)}), topic: #{topic_label}, sub: #{sub_label}",
+        policies,
+        [topic: topic, sub: sub],
+        functions: flavor
+      )
+    end
+  end
+
+  @doc """
   Policies that read a nested claim with `auth.jwt() -> 'app_metadata' ->> ...`, in the plain form
   and in the initplan form `(select auth.jwt())`.
 

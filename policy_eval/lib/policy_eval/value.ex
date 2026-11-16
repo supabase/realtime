@@ -44,6 +44,17 @@ defmodule PolicyEval.Value do
   def textcat(a, b), do: strict2(a, b, fn {:text, x}, {:text, y} -> {:text, x <> y} end)
 
   @doc """
+  `starts_with(text, text)` (`text_starts_with`, src/backend/utils/adt/varlena.c). Strict.
+
+  Under a deterministic collation Postgres compares the bytes of the prefix with the start of the
+  text, so the empty prefix matches every text.
+  """
+  @spec starts_with(result, result) :: result
+  def starts_with(a, b) do
+    strict2(a, b, fn {:text, text}, {:text, prefix} -> String.starts_with?(text, prefix) end)
+  end
+
+  @doc """
   `text || uuid` (`textanycat`, oid 2003 in src/include/catalog/pg_proc.dat). Strict.
 
   The function body is `select $1 || $2::text`, so the uuid goes through `uuid_out`. Only uuid is

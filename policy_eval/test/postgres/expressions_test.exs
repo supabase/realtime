@@ -69,6 +69,7 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
     :nested_claims,
     :regex,
     :like,
+    :starts_with,
     :literals
   ]
 
@@ -114,6 +115,7 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
     {deparsed, pg} =
       Postgres.rolled_back(conn, fn conn ->
         prepare_functions!(conn, kase.functions)
+        Enum.each(kase.setup, &Postgrex.query!(conn, &1, []))
         Postgrex.query!(conn, "SET LOCAL search_path = ''", [])
         deparsed = create_policy_and_read_back!(conn, kase)
         {deparsed, postgres_value(conn, deparsed, kase.env)}
@@ -193,7 +195,9 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
       name: sql <> env_summary <> functions_summary,
       sql: sql,
       env: ExampleScenarios.env(env_opts),
-      functions: functions
+      functions: functions,
+      # Statements run before the policy is created, in the transaction that rolls back
+      setup: Keyword.get(opts, :setup, [])
     }
   end
 
@@ -394,7 +398,6 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
             "app.team() LIKE 'user:%'",
             "app.team() ILIKE 'USER:%'",
             "app.team() ~~ 'user:%'",
-            "starts_with(app.team(), 'user:')",
             "split_part(app.team(), ':', 1) = 'user'",
             "app.team() = ANY (string_to_array('a,b', ','))",
             "CASE WHEN kind = 'note' THEN true ELSE false END",
@@ -969,6 +972,93 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
   end
 
   defp cases(:like), do: like_matrix() ++ like_operands() ++ like_long_texts() ++ like_from_postgres()
+
+  # starts_with compares bytes: case, code points against combining accents, the empty prefix, NULL,
+  # and a prefix built from the user id, as a policy builds a topic prefix
+  defp cases(:starts_with) do
+    texts = [
+      "user:a",
+      "user:",
+      "user",
+      "USER:a",
+      "xuser:a",
+      "",
+      nil,
+      "é",
+      "café",
+      "café",
+      "🎉x",
+      "notify:#{@own}:inbox",
+      "notify:#{@own}",
+      "notify:#{@other}:inbox",
+      "user%a",
+      "user_a",
+      "user\\%a",
+      "user\\"
+    ]
+
+    # The LIKE wildcards and the backslash are plain characters in a prefix
+    prefixes = [
+      "user:",
+      "",
+      "é",
+      "e",
+      "caf",
+      "café",
+      "🎉",
+      "user:a",
+      "user:ab",
+      "user%",
+      "user_",
+      "%",
+      "_",
+      "user\\%",
+      "user\\"
+    ]
+
+    # The function, and `^@`, the operator of that function
+    matrix =
+      for text <- texts,
+          prefix <- prefixes,
+          sql <- ["starts_with(app.team(), #{lit(prefix)})", "app.team() ^@ #{lit(prefix)}"] do
+        expression_case(sql, team: text)
+      end
+
+    # A `^@` of the policy author, which gives the opposite answer. Postgres prints it as
+    # `OPERATOR(public.^@)`, and the evaluator has to fall back
+    own_operator_setup = [
+      "CREATE FUNCTION public.not_starts_with(text, text) RETURNS boolean LANGUAGE sql IMMUTABLE AS 'SELECT NOT starts_with($1, $2)'",
+      "CREATE OPERATOR public.^@ (LEFTARG = text, RIGHTARG = text, FUNCTION = public.not_starts_with)"
+    ]
+
+    own_operator =
+      for team <- ["user:a", "other", "", nil] do
+        expression_case("app.team() OPERATOR(public.^@) 'user:'", [team: team], setup: own_operator_setup)
+      end
+
+    operands =
+      for sql <- [
+            "starts_with(app.team(), NULL::text)",
+            "starts_with(NULL::text, 'a')",
+            "starts_with(app.team(), kind)",
+            "starts_with(kind, 'no')",
+            "app.team() ^@ kind",
+            "NOT (app.team() ^@ 'user:')",
+            "app.team() ^@ (('notify:' || (select app.user_id())::text) || ':')",
+            "NOT starts_with(app.team(), 'user:')",
+            "starts_with(app.team(), 'user:') AND kind = 'note'",
+            "starts_with(app.team(), 'user:') OR kind = 'note'",
+            "starts_with(lower(app.team()), 'user:')",
+            "starts_with((select app.team()), (('notify:' || (select app.user_id())::text) || ':'))"
+          ],
+          team <- ["user:a", "notify:#{@own}:inbox", "notify:#{@other}:inbox", "", nil],
+          kind <- ["note", nil],
+          user_id <- [@own, nil] do
+        expression_case(sql, team: team, kind: kind, user_id: user_id)
+      end
+
+    matrix ++ own_operator ++ operands
+  end
 
   defp cases(:literals) do
     # uuid_in's accepted forms, from uuid.sql. A literal is deparsed to its canonical form.
