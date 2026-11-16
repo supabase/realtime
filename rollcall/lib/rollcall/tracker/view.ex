@@ -49,6 +49,25 @@ defmodule Rollcall.Tracker.View do
   end
 
   @doc """
+  Returns the entries in `partition`.
+
+  Returns `[]` when the table does not exist.
+  """
+  @spec entries(t(), Rollcall.partition()) :: [entry()]
+  def entries(table, partition) do
+    # fn {{^partition, ref}, key, meta} -> {ref, key, meta}
+    :ets.select(table, [
+      {
+        {{partition, :"$1"}, :"$2", :"$3"},
+        [],
+        [{{:"$1", :"$2", :"$3"}}]
+      }
+    ])
+  rescue
+    ArgumentError -> []
+  end
+
+  @doc """
   Returns the number of entries in each partition that has an entry.
 
   Returns `%{}` when the table does not exist.
@@ -64,18 +83,40 @@ defmodule Rollcall.Tracker.View do
   end
 
   @doc """
-  Returns the entries in `partition`.
+  Returns the refs of the entries in each partition that has an entry.
+
+  Returns `%{}` when the table does not exist.
+  """
+  @spec refs(t()) :: %{Rollcall.partition() => [Rollcall.ref()]}
+  def refs(table) do
+    # fn {{partition, ref}, _key, _meta} -> {partition, ref}
+    table
+    |> :ets.select([
+      {
+        {{:"$1", :"$2"}, :_, :_},
+        [],
+        [{{:"$1", :"$2"}}]
+      }
+    ])
+    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+  rescue
+    ArgumentError -> %{}
+  end
+
+  @doc """
+  Returns the refs of the entries in `partition`.
 
   Returns `[]` when the table does not exist.
   """
-  @spec entries(t(), Rollcall.partition()) :: [entry()]
-  def entries(table, partition) do
-    # fn {{^partition, ref}, key, meta} -> {ref, key, meta}
-    :ets.select(table, [
+  @spec refs(t(), Rollcall.partition()) :: [Rollcall.ref()]
+  def refs(table, partition) do
+    # fn {{^partition, ref}, _key, _meta} -> ref
+    table
+    |> :ets.select([
       {
-        {{partition, :"$1"}, :"$2", :"$3"},
+        {{partition, :"$1"}, :_, :_},
         [],
-        [{{:"$1", :"$2", :"$3"}}]
+        [:"$1"]
       }
     ])
   rescue
