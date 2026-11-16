@@ -132,6 +132,24 @@ defmodule PolicyEvalTest do
     end
   end
 
+  describe "starts_with" do
+    # The shape of a policy that lets a user read the topics under their own prefix
+    @own_prefix "starts_with(( SELECT app.team() AS team), (('notify:'::text || (( SELECT app.user_id() AS user_id))::text) || ':'::text))"
+
+    test "true when the text starts with the prefix, byte by byte" do
+      assert evaluate(@own_prefix, user_id: @uid, team: "notify:#{@uid}:inbox") == true
+      assert evaluate(@own_prefix, user_id: @uid, team: "notify:#{@uid}:") == true
+      assert evaluate(@own_prefix, user_id: @uid, team: "notify:#{@uid}") == false
+      assert evaluate(@own_prefix, user_id: @uid, team: "notify:#{@other_uid}:inbox") == false
+      assert evaluate(@own_prefix, user_id: @uid, team: "NOTIFY:#{@uid}:inbox") == false
+    end
+
+    test "NULL when the user id or the text is NULL" do
+      assert evaluate(@own_prefix, user_id: nil, team: "notify::inbox") == nil
+      assert evaluate(@own_prefix, user_id: @uid, team: nil) == nil
+    end
+  end
+
   describe "LIKE" do
     test "% matches any run and _ one character, on the whole text" do
       sql = "(app.team() ~~ 'public:%'::text)"

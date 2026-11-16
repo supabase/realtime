@@ -166,9 +166,10 @@ The profile and the env decide which roles, columns, settings and functions a po
   `<> ALL (ARRAY[...])`.
 - `~` and `~*` with a literal pattern that has no regex metacharacters
   (`| * + ? ( ) . ^ $ \ [ {`). For `~*`, the text and the pattern must be ASCII.
-- `LIKE` and `NOT LIKE` on text, with `%` and `_`. A pattern with `\` is a fallback. A `\` at the
-  end raises an error, but only if matching gets that far, so whether it raises depends on the
-  text.
+- `LIKE` and `NOT LIKE` on text, with `%` and `_`. A pattern with `\` is a fallback. If matching
+  gets as far as a `\` at the end of the pattern, Postgres raises an error. So the text decides
+  whether it raises.
+- `starts_with(text, text)` and its operator `text ^@ text`. They compare bytes, like `LIKE`.
 - `jsonb ->> text` and `jsonb ->> integer` where the value is a string or a boolean. A missing
   key or JSON `null` gives NULL. Numbers, objects and arrays are a fallback, because Postgres
   prints them in a normalized form that the library does not model. `->> integer` finds the

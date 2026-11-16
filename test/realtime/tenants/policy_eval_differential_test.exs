@@ -79,6 +79,42 @@ defmodule Realtime.Tenants.PolicyEvalDifferentialTest do
            "fell back: #{inspect(Enum.reject(results, &(&1.class == :match)))}"
   end
 
+  for flavor <- [:legacy, :supabase_auth] do
+    test "notify channels, #{PolicyEvalScenarios.flavor_label(flavor)} auth functions", context do
+      results = run(context, PolicyEvalScenarios.notify_channel_scenarios(:decided, unquote(flavor)))
+
+      assert results != []
+
+      assert Enum.all?(results, &(&1.class == :match)),
+             "fell back: #{inspect(Enum.reject(results, &(&1.class == :match)))}"
+    end
+
+    test "notify channels with a sub that isn't a uuid, #{PolicyEvalScenarios.flavor_label(flavor)} auth functions",
+         context do
+      run(context, PolicyEvalScenarios.notify_channel_scenarios(:other, unquote(flavor)))
+    end
+  end
+
+  test "organization channels, a prefix from a text claim", context do
+    results = run(context, PolicyEvalScenarios.org_channel_scenarios())
+
+    assert results != []
+
+    assert Enum.all?(results, &(&1.class == :match)),
+           "fell back: #{inspect(Enum.reject(results, &(&1.class == :match)))}"
+  end
+
+  for flavor <- [:legacy, :supabase_auth] do
+    test "draft channels, NOT starts_with, #{PolicyEvalScenarios.flavor_label(flavor)} auth functions", context do
+      results = run(context, PolicyEvalScenarios.draft_channel_scenarios(unquote(flavor)))
+
+      assert results != []
+
+      assert Enum.all?(results, &(&1.class == :match)),
+             "fell back: #{inspect(Enum.reject(results, &(&1.class == :match)))}"
+    end
+  end
+
   test "nested claims", context do
     results = run(context, PolicyEvalScenarios.nested_claim_scenarios(:well_formed))
 

@@ -28,8 +28,9 @@ defmodule PolicyEval.Resolver do
     * `{:coalesce_types, types}`: arguments of different types
     * `{:function, name, why}`: `name` is `"schema.name"` for a platform schema, the bare name
       for a built-in and `:other_schema` for anything else. `why` is `:not_allowlisted`,
-      `:not_in_snapshot`, `:overloaded` (more than one definition of the name) or
-      `:unknown_definition`
+      `:not_in_snapshot`, `:overloaded` (more than one definition of the name),
+      `:unknown_definition`, or `{:types, left_type, right_type}` for a built-in we bind with no
+      binding for these argument types
     * `{:column, name}`: a column that is not in the profile
     * `:untyped_string_literal`, `:number_literal`, `:untyped_null`: constants Postgres prints
       without a type, which it only does where we don't model the type. The exception is an
@@ -63,6 +64,8 @@ defmodule PolicyEval.Resolver do
       equal and one is NULL (where `= ANY` is NULL), and true otherwise (where `= ANY` is false).
       An empty array gives true for `<> ALL` and false for `= ANY`, whatever the left side is
     * `current_setting(name, true)` with a literal name is `{:setting, name}`
+    * `starts_with(text, text)` and `text ^@ text`, the operator of that function:
+      `PolicyEval.Value.starts_with/2`
     * a scalar subselect without FROM yields exactly one row, so `( SELECT x)` is `x`
   """
 
@@ -191,6 +194,14 @@ defmodule PolicyEval.Resolver do
   defp res({:func, nil, "current_setting", [{:cast, {:const, :string, name}, "text"}, {:const, :bool, true}]}, _ctx),
     do: {{:setting, name}, :text}
 
+  defp res({:func, nil, "starts_with", [text, prefix]}, ctx) do
+    case propagate([res(text, ctx), res(prefix, ctx)]) do
+      {:unsupported, _} = unsupported -> {unsupported, :unknown}
+      [{l, :text}, {r, :text}] -> {call(Value, :starts_with, [l, r]), :bool}
+      [{_, lt}, {_, rt}] -> unsupported({:function, "starts_with", {:types, lt, rt}})
+    end
+  end
+
   defp res({:func, schema, name, args}, ctx) do
     if args == [] and schema in ctx.platform_schemas do
       case Map.fetch(ctx.functions, {schema, name}) do
@@ -311,6 +322,7 @@ defmodule PolicyEval.Resolver do
   defp operator("~*", :text, :text, l, r), do: {regex(l, r, :case_insensitive), :bool}
   defp operator("~~", :text, :text, l, r), do: {call(Value, :like, [l, r]), :bool}
   defp operator("!~~", :text, :text, l, r), do: {{:not, call(Value, :like, [l, r])}, :bool}
+  defp operator("^@", :text, :text, l, r), do: {call(Value, :starts_with, [l, r]), :bool}
   defp operator("->>", :jsonb, :text, l, r), do: {call(Jsonb, :object_field_text, [l, r]), :text}
   defp operator("->>", :jsonb, :int4, l, r), do: {call(Jsonb, :array_element_text, [l, r]), :text}
   defp operator("->", :jsonb, :text, l, r), do: {call(Jsonb, :object_field, [l, r]), :jsonb}

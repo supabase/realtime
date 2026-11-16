@@ -292,6 +292,12 @@ defmodule PolicyEval.ParserTest do
                {:bool_expr, :and, [{:unsupported, "(EXISTS (x))"}, {:unsupported, "(EXISTS (y))"}]}
     end
 
+    # An operator outside pg_catalog is the policy author's, whatever its name is
+    test "an operator with its schema is unsupported" do
+      assert parse!("(a OPERATOR(public.^@) 'x'::text)") == {:unsupported, "(a OPERATOR(public.^@) 'x'::text)"}
+      assert parse!("(a OPERATOR(public.=) 'x'::text)") == {:unsupported, "(a OPERATOR(public.=) 'x'::text)"}
+    end
+
     test "unsupported inside NOT" do
       assert parse!("(NOT #{@missing_raw})") == {:not, @missing}
       assert parse!("(NOT m.team)") == {:not, {:unsupported, "m.team"}}

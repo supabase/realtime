@@ -185,6 +185,45 @@ defmodule PolicyEval.ResolverTest do
                {{:not, call(Value, :like, [{:column, "team"}, lit_text("a%")])}, :bool}
     end
 
+    test "starts_with on text with text is starts_with" do
+      assert resolve({:func, nil, "starts_with", [team(), text("a")]}) ==
+               {call(Value, :starts_with, [{:column, "team"}, lit_text("a")]), :bool}
+    end
+
+    test "^@ on text with text is starts_with" do
+      assert resolve({:op, "^@", team(), text("a")}) ==
+               {call(Value, :starts_with, [{:column, "team"}, lit_text("a")]), :bool}
+    end
+
+    test "^@ on other types is unsupported" do
+      assert resolve({:op, "^@", user_id(), text("a")}) == unsupported({:operator, "^@", :uuid, :text})
+    end
+
+    test "starts_with with an unsupported argument is unsupported with its reason" do
+      assert resolve({:func, nil, "starts_with", [{:func, nil, "lower", [team()]}, text("a")]}) ==
+               unsupported({:function, "lower", :not_allowlisted})
+    end
+
+    # Postgres prints the built-in without a schema. A function of the policy author with the same
+    # name has its schema in front, and it can do anything.
+    test "starts_with in a schema is not the built-in" do
+      assert resolve({:func, "public", "starts_with", [team(), text("a")]}) ==
+               unsupported({:function, :other_schema, :not_allowlisted})
+
+      assert resolve({:func, "pg_catalog", "starts_with", [team(), text("a")]}) ==
+               unsupported({:function, :other_schema, :not_allowlisted})
+
+      assert resolve({:func, "app", "starts_with", [team(), text("a")]}) ==
+               unsupported({:function, "app.starts_with", :not_allowlisted})
+    end
+
+    test "starts_with with another number of arguments is not allowlisted" do
+      for args <- [[], [team()], [team(), text("a"), text("b")]] do
+        assert resolve({:func, nil, "starts_with", args}) ==
+                 unsupported({:function, "starts_with", :not_allowlisted})
+      end
+    end
+
     test "~~* and !~~* on text with text are unsupported, because ILIKE folds case by the collation" do
       for op <- ["~~*", "!~~*"] do
         assert resolve({:op, op, team(), text("a%")}) == unsupported({:operator, op, :text, :text})
