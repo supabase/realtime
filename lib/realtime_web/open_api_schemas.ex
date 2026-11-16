@@ -38,7 +38,7 @@ defmodule RealtimeWeb.OpenApiSchemas do
               topic: %Schema{
                 type: :string,
                 description:
-                  "Note: libraries will prepend the channel name with 'realtime:' so if you use this endpoint directly you'll need to also prepend 'realtime:' so it's captured by clients properly"
+                  "Channel topic to broadcast to, without the 'realtime:' prefix that client libraries add to channel names. For example, use 'room1' to reach clients subscribed with supabase.channel('room1')"
               },
               payload: %Schema{type: :object},
               event: %Schema{

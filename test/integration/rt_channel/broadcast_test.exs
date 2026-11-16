@@ -69,6 +69,36 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
                      1000
     end
 
+    test "the broadcast API takes the topic without the realtime: prefix", %{tenant: tenant, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:room1"
+      WebsocketClient.join(socket, topic, %{config: %{broadcast: %{self: false}, private: false}})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+
+      api_broadcast = fn api_topic, payload ->
+        now = System.system_time(:second)
+        token = generate_jwt_token(tenant, %{role: "test", iat: now, exp: now + 100})
+
+        build_conn()
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
+        |> post(~p"/api/broadcast", %{"messages" => [%{"topic" => api_topic, "event" => "e", "payload" => payload}]})
+      end
+
+      assert api_broadcast.("realtime:room1", %{"n" => 1}).status == 202
+      refute_receive %Message{event: "broadcast"}, 500
+
+      assert api_broadcast.("room1", %{"n" => 2}).status == 202
+
+      assert_receive %Message{
+                       event: "broadcast",
+                       topic: ^topic,
+                       payload: %{"event" => "e", "payload" => %{"n" => 2}, "type" => "broadcast"}
+                     },
+                     500
+    end
+
     test "broadcast to another tenant does not get mixed up", %{tenant: tenant, serializer: serializer} do
       other_tenant = TestTenantDb.checkout_tenant(run_migrations: true)
 
