@@ -1574,24 +1574,24 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
   end
 
-  @node_join_budget_exceeded_event [:realtime, :channel, :node_join_budget_exceeded]
+  @channel_error_event [:realtime, :channel, :error]
 
   describe "joins per tenant per node" do
     test "counts nothing for a join within the budget", %{tenant: tenant} do
       tenant = enable_node_join_budget_flag!(tenant)
-      ref = :telemetry_test.attach_event_handlers(self(), [@node_join_budget_exceeded_event])
+      ref = :telemetry_test.attach_event_handlers(self(), [@channel_error_event])
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
       assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
 
       tenant_id = tenant.external_id
-      refute_receive {@node_join_budget_exceeded_event, ^ref, _, %{tenant: ^tenant_id}}
+      refute_receive {@channel_error_event, ^ref, _, %{code: "JoinsRateLimitReached", tenant: ^tenant_id}}
     end
 
     test "refuses a join over the budget, counts it and keeps the socket connected", %{tenant: tenant} do
       tenant = enable_node_join_budget_flag!(tenant)
-      ref = :telemetry_test.attach_event_handlers(self(), [@node_join_budget_exceeded_event])
+      ref = :telemetry_test.attach_event_handlers(self(), [@channel_error_event])
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
       use_up_node_join_budget(tenant)
@@ -1600,7 +1600,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                subscribe_and_join(socket, "realtime:test", %{})
 
       tenant_id = tenant.external_id
-      assert_receive {@node_join_budget_exceeded_event, ^ref, %{count: 1}, %{tenant: ^tenant_id}}
+      assert_receive {@channel_error_event, ^ref, %{count: 1}, %{code: "JoinsRateLimitReached", tenant: ^tenant_id}}
       refute_received %Phoenix.Socket.Broadcast{event: "disconnect"}
     end
 
@@ -1614,7 +1614,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
 
     test "connects, joins and counts nothing while the flag is off", %{tenant: tenant} do
-      ref = :telemetry_test.attach_event_handlers(self(), [@node_join_budget_exceeded_event])
+      ref = :telemetry_test.attach_event_handlers(self(), [@channel_error_event])
       jwt = Generators.generate_jwt_token(tenant)
       use_up_node_join_budget(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
@@ -1622,7 +1622,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
 
       tenant_id = tenant.external_id
-      refute_receive {@node_join_budget_exceeded_event, ^ref, _, %{tenant: ^tenant_id}}
+      refute_receive {@channel_error_event, ^ref, _, %{code: "JoinsRateLimitReached", tenant: ^tenant_id}}
     end
 
     # Takes every join a minute ahead, so the bucket stays empty for the rest of the test

@@ -49,7 +49,6 @@ defmodule RealtimeWeb.RealtimeChannel do
   @postgres_cdc_down Realtime.Syn.PostgresCdc.down_event()
   @fullsweep_after Application.compile_env!(:realtime, :websocket_fullsweep_after)
   @node_join_budget_flag "node_join_budget"
-  @node_join_budget_exceeded_event [:realtime, :channel, :node_join_budget_exceeded]
   @socket_join_limit_flag "socket_join_limit"
   @socket_broadcast_limit_flag "socket_broadcast_limit"
   @socket_broadcast_limit_exceeded_event [:realtime, :channel, :socket_broadcast_limit_exceeded]
@@ -758,7 +757,6 @@ defmodule RealtimeWeb.RealtimeChannel do
   # off takes effect without sockets reconnecting
   defp limit_node_joins(tenant) do
     if FeatureFlags.enabled?(@node_join_budget_flag, tenant.external_id) and NodeJoinBudget.take(tenant) == :error do
-      Telemetry.execute(@node_join_budget_exceeded_event, %{count: 1}, %{tenant: tenant.external_id})
       {:error, :too_many_node_joins}
     else
       :ok

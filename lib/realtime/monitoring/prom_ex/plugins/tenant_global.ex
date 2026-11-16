@@ -126,12 +126,6 @@ defmodule Realtime.PromEx.Plugins.TenantGlobal do
           description: "Global sum of Realtime Channel joins."
         ),
         counter(
-          [:realtime, :channel, :global, :node_join_budget_exceeded],
-          event_name: [:realtime, :channel, :node_join_budget_exceeded],
-          measurement: :count,
-          description: "Global count of Realtime Channel joins over their tenant's join budget on the node"
-        ),
-        counter(
           [:realtime, :channel, :global, :socket_broadcast_limit_exceeded],
           event_name: [:realtime, :channel, :socket_broadcast_limit_exceeded],
           measurement: :count,

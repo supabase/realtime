@@ -42,12 +42,12 @@ Channel topics look like `realtime:<sub_topic>` and are all handled by `Realtime
 
 A token bucket (a store of joins that refills at the budget rate) holds `NODE_JOIN_BUDGET_BURST_SECONDS` (default 60) seconds of budget. A tenant with no clients on a node can make 600 joins at once (10 × 60), and then 10 joins per second. A tenant that keeps rejoining empties the bucket. The moduledoc of `Realtime.Tenants.NodeJoinBudget` explains how the bucket works and why its size is in seconds.
 
-The `node_join_budget` feature flag turns the budget on for a tenant. While the flag is on and the bucket is empty, Realtime refuses each channel join with `JoinsRateLimitReached`, and the socket stays connected. Realtime also refuses new WebSocket connections for the tenant with an HTTP 429. Each refused join increments the metrics below. A refused connection does not.
+The `node_join_budget` feature flag turns the budget on for a tenant. While the flag is on and the bucket is empty, Realtime refuses each channel join with `JoinsRateLimitReached`, and the socket stays connected. Realtime also refuses new WebSocket connections for the tenant with an HTTP 429. Each refused join increments the channel error metrics below with the code `JoinsRateLimitReached`. A refused connection does not.
 
-| Metric | Endpoint | Label |
+| Metric | Endpoint | Labels |
 | --- | --- | --- |
-| `realtime_channel_node_join_budget_exceeded` | `/tenant-metrics` | `tenant` |
-| `realtime_channel_global_node_join_budget_exceeded` | `/metrics` | none |
+| `realtime_channel_error` | `/tenant-metrics` | `code`, `tenant` |
+| `realtime_channel_global_error` | `/metrics` | `code` |
 
 ### 2. What a channel carries
 
