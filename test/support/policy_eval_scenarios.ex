@@ -565,24 +565,24 @@ defmodule PolicyEvalScenarios do
   # A boolean flag in the claims, compared as text, and the topic from an initplan
   defp json_flag_scenarios do
     using = """
-    ((current_setting('request.jwt.claims', true)::json ->> 'chariot_bridge') = 'true'
-      AND (select realtime.topic()) = 'bridge:print-jobs')
+    ((current_setting('request.jwt.claims', true)::json ->> 'my_flag') = 'true'
+      AND (select realtime.topic()) = 'flagged:lobby')
     """
 
     policies = [
-      policy_sql("receive print jobs", "FOR SELECT TO authenticated USING #{using}"),
-      policy_sql("send print jobs", "FOR INSERT TO authenticated WITH CHECK #{using}")
+      policy_sql("flagged users receive", "FOR SELECT TO authenticated USING #{using}"),
+      policy_sql("flagged users send", "FOR INSERT TO authenticated WITH CHECK #{using}")
     ]
 
     for {label, claims} <- [
-          {"flag true", %{"chariot_bridge" => true}},
-          {"flag false", %{"chariot_bridge" => false}},
-          {"flag the string true", %{"chariot_bridge" => "true"}},
-          {"flag the string TRUE", %{"chariot_bridge" => "TRUE"}},
-          {"flag null", %{"chariot_bridge" => nil}},
+          {"flag true", %{"my_flag" => true}},
+          {"flag false", %{"my_flag" => false}},
+          {"flag the string true", %{"my_flag" => "true"}},
+          {"flag the string TRUE", %{"my_flag" => "TRUE"}},
+          {"flag null", %{"my_flag" => nil}},
           {"no flag", %{}}
         ],
-        topic <- ["bridge:print-jobs", "bridge:other"] do
+        topic <- ["flagged:lobby", "flagged:other"] do
       scenario("json claims", "json flag claim, #{label}, topic #{inspect(topic)}", policies,
         role: "authenticated",
         topic: topic,
