@@ -179,6 +179,9 @@ The profile and the env decide which roles, columns, settings and functions a po
   counts from the end. On a scalar, `-> 0` and `-> -1` give the scalar, as in Postgres. The library
   never prints the result of `->`. If `->>` then reads a number, an object or an array, the result
   is a fallback.
+- `jsonb ? text`, for example `(app.claims() -> 'channels') ? 'room:1'`. The result is true for a
+  key of an object, or for a string element of an array. Only the top level counts. A number, a
+  boolean or a `null` element never matches. A string scalar matches its own text, as in Postgres.
 - `COALESCE` over arguments of one type, and `NULLIF` on text. An unsupported argument anywhere
   makes `COALESCE` a fallback, even after a non-NULL argument. The reason is that Postgres can
   evaluate a later argument while it plans the query. For an example, see the fallback body of
@@ -204,7 +207,7 @@ These are examples of what is not supported. Each one is a fallback:
 
 - subqueries with `FROM`, `EXISTS` and `CASE`
 - `IS TRUE` and similar tests, `ILIKE`, `LIKE` with an escape or `ESCAPE`, and `!~`
-- the jsonb operators `?` and `@>`
+- the jsonb operators `?|`, `?&` and `@>`
 - number literals that are not integers, operators on integers, and casts to `integer`, `numeric`
   or `json`
 - columns that are not in the profile
@@ -425,7 +428,7 @@ the database, the caller must rule them out or fall back:
     `(claims ->> 'level')::integer`. These are simple, but rare in the policies seen so far. JSON
     numbers read with `->>` and `numeric` need more work, because Postgres normalizes how they
     print (`1e2` becomes `100`, `1.50` keeps its scale).
-  - more of jsonb: `?`, `@>`
+  - more of jsonb: `?|`, `?&`, `@>`
   - `IS TRUE` and similar tests, `lower()`
   - `ILIKE`. Unlike `~*`, Postgres folds its case with the collation (`lower()`), even for ASCII
     letters, so it depends on the locale of the database. A Turkish locale folds `I` to `ı`.

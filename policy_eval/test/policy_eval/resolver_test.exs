@@ -217,6 +217,19 @@ defmodule PolicyEval.ResolverTest do
                {call(Jsonb, :array_element, [parsed, {:lit, nil}]), :jsonb}
     end
 
+    test "? on jsonb with text is exists, which gives a boolean" do
+      assert resolve({:op, "?", {:op, "->", claims(), text("channels")}, text("room:1")}) ==
+               {call(Jsonb, :exists, [
+                  call(Jsonb, :object_field, [call(Jsonb, :parse, [{:setting, "app.claims"}]), lit_text("channels")]),
+                  lit_text("room:1")
+                ]), :bool}
+    end
+
+    test "? is unsupported on other types" do
+      assert resolve({:op, "?", team(), text("a")}) == unsupported({:operator, "?", :text, :text})
+      assert resolve({:op, "?", claims(), {:const, :number, "0"}}) == unsupported({:operator, "?", :jsonb, :int4})
+    end
+
     test "->> on jsonb with an integer is array_element_text, which gives text" do
       parsed = call(Jsonb, :parse, [{:setting, "app.claims"}])
 

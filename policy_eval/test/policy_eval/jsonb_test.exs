@@ -676,6 +676,48 @@ defmodule PolicyEval.JsonbTest do
     end
   end
 
+  describe "exists/2" do
+    test "finds a top-level key of an object, whatever its value" do
+      root = parse(~S|{"a":1,"b":null,"c":{"d":"x"},"é":[]}|)
+
+      for key <- ["a", "b", "c", "é"], do: assert(Jsonb.exists(root, t(key)) == true, key)
+      for key <- ["d", "x", "A", "", "e"], do: assert(Jsonb.exists(root, t(key)) == false, key)
+    end
+
+    test "finds a string element of an array, and no other kind of element" do
+      root = parse(~S|["a","",1,true,null,["b"],{"c":1}]|)
+
+      for key <- ["a", ""], do: assert(Jsonb.exists(root, t(key)) == true, key)
+
+      for key <- ["1", "true", "null", "b", "c", "A"],
+          do: assert(Jsonb.exists(root, t(key)) == false, key)
+
+      assert Jsonb.exists(parse("[]"), t("a")) == false
+    end
+
+    test "treats a scalar root as an array of one element" do
+      assert Jsonb.exists(parse(~S|"a"|), t("a")) == true
+      assert Jsonb.exists(parse(~S|"a"|), t("b")) == false
+
+      for json <- ["5", "true", "null"] do
+        assert Jsonb.exists(parse(json), t(json)) == false, json
+      end
+    end
+
+    test "is strict: NULL in either argument is NULL" do
+      assert Jsonb.exists(nil, t("a")) == nil
+      assert Jsonb.exists(parse("{}"), nil) == nil
+    end
+
+    test "returns an unsupported argument unchanged, the first one winning, even next to NULL" do
+      assert Jsonb.exists(@boom, t("a")) == @boom
+      assert Jsonb.exists(parse("{}"), @boom) == @boom
+      assert Jsonb.exists(nil, @boom) == @boom
+      assert Jsonb.exists(@boom, nil) == @boom
+      assert Jsonb.exists(@boom, @bang) == @boom
+    end
+  end
+
   describe "array_element_text/2" do
     defp mixed, do: parse(~S|["a\"b",true,false,null,1.50,{"k":"v"},[2]]|)
 
