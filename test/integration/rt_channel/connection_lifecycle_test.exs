@@ -606,7 +606,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
       assert Enum.all?(rest, &(match?({"ok", _}, &1) or &1 == refused))
       refused_count = Enum.count(rest, &(&1 == refused))
       assert refused_count in 1..30
-      assert node_join_budget_exceeded(tenant) == refused_count
+      assert joins_rate_limit_reached(tenant) == refused_count
 
       payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
       WebsocketClient.send_event(socket, topic_1, "broadcast", payload)
@@ -776,9 +776,9 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
     on_exit(fn -> Realtime.FeatureFlags.Cache.invalidate_cache(name) end)
   end
 
-  defp node_join_budget_exceeded(tenant) do
+  defp joins_rate_limit_reached(tenant) do
     Realtime.TenantPromEx
     |> PromEx.get_metrics()
-    |> MetricsHelper.search("realtime_channel_node_join_budget_exceeded", tenant: tenant.external_id)
+    |> MetricsHelper.search("realtime_channel_error", code: "JoinsRateLimitReached", tenant: tenant.external_id)
   end
 end
