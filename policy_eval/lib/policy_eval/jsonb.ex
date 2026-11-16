@@ -1,7 +1,7 @@
 defmodule PolicyEval.Jsonb do
   @moduledoc """
-  The jsonb primitives: `text::jsonb`, `jsonb -> text`, `jsonb -> integer`, `jsonb ->> text` and
-  `jsonb ->> integer`.
+  The jsonb primitives: `text::jsonb`, `jsonb -> text`, `jsonb -> integer`, `jsonb ->> text`,
+  `jsonb ->> integer` and `jsonb ? text`.
 
   A jsonb value is `{:jsonb, term}` where `term` is a decoded JSON value:
 
@@ -130,6 +130,25 @@ defmodule PolicyEval.Jsonb do
   def array_element({:jsonb, root}, {:int4, _index}) when is_map(root), do: nil
   def array_element({:jsonb, root}, {:int4, index}) when is_list(root), do: element(root, index)
   def array_element({:jsonb, scalar}, {:int4, index}), do: element([scalar], index)
+
+  @doc """
+  `jsonb ? text` (`jsonb_exists`, src/backend/utils/adt/jsonb_op.c). Strict.
+
+  True if `key` is a key of an object root, or a string element of an array root. Only the top
+  level counts. A number, boolean or null element never matches, even when its text is `key`:
+  `'[1]'::jsonb ? '1'` is false.
+
+  A scalar root is an array of one element, as in `array_element/2`. So `'"a"'::jsonb ? 'a'` is
+  true, and any other scalar root gives false.
+  """
+  @spec exists(Value.result(), Value.result()) :: Value.result()
+  def exists({:unsupported, _} = unsupported, _key), do: unsupported
+  def exists(_jsonb, {:unsupported, _} = unsupported), do: unsupported
+  def exists(nil, _key), do: nil
+  def exists(_jsonb, nil), do: nil
+  def exists({:jsonb, root}, {:text, key}) when is_map(root), do: Map.has_key?(root, key)
+  def exists({:jsonb, root}, {:text, key}) when is_list(root), do: key in root
+  def exists({:jsonb, scalar}, {:text, key}), do: scalar == key
 
   # Enum.at/2 counts a negative index from the end and gives nil outside the list, as
   # jsonb_array_element does. nil can't be an element, because JSON null is :null.

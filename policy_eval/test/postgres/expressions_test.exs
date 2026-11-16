@@ -780,6 +780,11 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
       ~s({"m":[{"k":"v"}],"x":"\\u0000"}),
       ~s({"m":{"k":"\\u0000"}}),
       ~s({"":{"k":"v"}}),
+      ~s({"m":["é"]}),
+      ~s({"m":{"é":1}}),
+      ~s({"m":["1","true","null"]}),
+      ~s({"m":{"v":null}}),
+      ~s({"m":[{"v":1}]}),
       ~s([{"k":"v"}]),
       ~s([{"m":{"k":"v"}}]),
       ~s(["v","w"]),
@@ -833,7 +838,23 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
       "coalesce(app.claims() -> 'm' ->> 'k', '') = ''",
       "(app.claims() -> 'm' ->> 'k')::boolean",
       "app.claims() -> 'm' ->> 'k' IN ('v', 'w')",
-      "app.claims() -> 'm' ->> 'k' = kind"
+      "app.claims() -> 'm' ->> 'k' = kind",
+      "app.claims() ? 'm'",
+      "app.claims() ? 'v'",
+      "app.claims() ? ''",
+      "app.claims() -> 'm' ? 'v'",
+      "app.claims() -> 'm' ? 'k'",
+      "app.claims() -> 'm' ? 'é'",
+      "app.claims() -> 'm' ? 'V'",
+      "app.claims() -> 'm' ? '1'",
+      "app.claims() -> 'm' ? 'true'",
+      "app.claims() -> 'm' ? 'null'",
+      "app.claims() -> 'm' ? NULL::text",
+      "app.claims() -> 'm' ? kind",
+      "NOT (app.claims() -> 'm' ? 'v')",
+      "(app.claims() -> 'm' ? 'v') IS NULL",
+      "app.claims() -> 'm' -> 0 ? 'v'",
+      "current_setting('app.claims', true)::jsonb -> 'm' ? 'v'"
     ]
 
     for claims <- shapes, sql <- sqls, do: expression_case(sql, claims: claims, kind: "v")

@@ -51,6 +51,7 @@ defmodule PolicyEval.Resolver do
       `jsonb_array_element_text`. Both give text
     * `->`: jsonb with text is `jsonb_object_field`, jsonb with integer is `jsonb_array_element`.
       Both give jsonb
+    * `?`: jsonb with text is `jsonb_exists`, which gives a boolean
     * an `integer` literal: Postgres prints an `integer` constant as its digits (`0`), or as
       `'-1'::integer` when it is negative, both in the form of `int4out`. That is an `:int4` literal.
       A number with a `.` or an exponent is `numeric`, and Postgres prints a larger integer as
@@ -317,6 +318,7 @@ defmodule PolicyEval.Resolver do
   defp operator("->>", :jsonb, :int4, l, r), do: {call(Jsonb, :array_element_text, [l, r]), :text}
   defp operator("->", :jsonb, :text, l, r), do: {call(Jsonb, :object_field, [l, r]), :jsonb}
   defp operator("->", :jsonb, :int4, l, r), do: {call(Jsonb, :array_element, [l, r]), :jsonb}
+  defp operator("?", :jsonb, :text, l, r), do: {call(Jsonb, :exists, [l, r]), :bool}
   defp operator(op, lt, rt, _l, _r), do: unsupported({:operator, op, lt, rt})
 
   defp regex(l, r, mode), do: call(Value, :regex_match, [l, r, {:lit, mode}])
