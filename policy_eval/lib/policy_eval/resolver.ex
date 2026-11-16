@@ -305,6 +305,8 @@ defmodule PolicyEval.Resolver do
   defp operator("<>", :text, :text, l, r), do: {call(Value, :text_ne, [l, r]), :bool}
   defp operator("=", :uuid, :uuid, l, r), do: {call(Value, :uuid_eq, [l, r]), :bool}
   defp operator("<>", :uuid, :uuid, l, r), do: {call(Value, :uuid_ne, [l, r]), :bool}
+  defp operator("=", :bool, :bool, l, r), do: {call(Value, :bool_eq, [l, r]), :bool}
+  defp operator("<>", :bool, :bool, l, r), do: {call(Value, :bool_ne, [l, r]), :bool}
   defp operator("||", :text, :text, l, r), do: {call(Value, :textcat, [l, r]), :text}
   defp operator("||", :text, :uuid, l, r), do: {call(Value, :textanycat, [l, r]), :text}
   defp operator("~", :text, :text, l, r), do: {regex(l, r, :case_sensitive), :bool}

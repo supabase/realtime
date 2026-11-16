@@ -160,7 +160,7 @@ The profile and the env decide which roles, columns, settings and functions a po
 
 - `AND`, `OR`, `NOT`, `IS NULL`, `IS NOT NULL`, with three-valued logic. An unsupported part
   anywhere in an `AND` or `OR` makes it a fallback, even `true OR <unsupported>`.
-- `=` and `<>` on text and on uuid.
+- `=` and `<>` on text, on uuid and on boolean.
 - `||` on two texts, and on a text and a uuid.
 - `IN (...)` and `NOT IN (...)` over text. Postgres prints them as `= ANY (ARRAY[...])` and
   `<> ALL (ARRAY[...])`.

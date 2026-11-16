@@ -46,6 +46,8 @@ defmodule PolicyEval.ValueTest do
       {"uuid_out", :uuid_out, [{:uuid, @uuid}], [0]},
       {"bool_in", :bool_in, [{:text, "true"}], [0]},
       {"bool_not", :bool_not, [true], [0]},
+      {"bool_eq", :bool_eq, [true, true], [0, 1]},
+      {"bool_ne", :bool_ne, [true, false], [0, 1]},
       {"regex_match (~)", :regex_match, [{:text, "abc"}, {:text, "b"}, :case_sensitive], [0, 1]},
       {"regex_match (~*)", :regex_match, [{:text, "abc"}, {:text, "B"}, :case_insensitive], [0, 1]},
       {"like", :like, [{:text, "abc"}, {:text, "a%"}], [0, 1]}
@@ -107,6 +109,15 @@ defmodule PolicyEval.ValueTest do
       assert Value.uuid_ne(u(), u()) == false
       assert Value.uuid_eq(u(), u(@other_uuid)) == false
       assert Value.uuid_ne(u(), u(@other_uuid)) == true
+    end
+  end
+
+  describe "bool_eq/2 and bool_ne/2" do
+    test "compare the booleans" do
+      for x <- [true, false], y <- [true, false] do
+        assert Value.bool_eq(x, y) == (x == y)
+        assert Value.bool_ne(x, y) == (x != y)
+      end
     end
   end
 

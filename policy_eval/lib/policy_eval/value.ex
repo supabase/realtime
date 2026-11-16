@@ -170,6 +170,14 @@ defmodule PolicyEval.Value do
   @spec bool_not(result) :: result
   def bool_not(a), do: strict1(a, fn b when is_boolean(b) -> not b end)
 
+  @doc "`boolean = boolean` (`booleq`, src/backend/utils/adt/bool.c). Strict."
+  @spec bool_eq(result, result) :: result
+  def bool_eq(a, b), do: strict2(a, b, fn x, y when is_boolean(x) and is_boolean(y) -> x == y end)
+
+  @doc "`boolean <> boolean` (`boolne`, src/backend/utils/adt/bool.c). Strict."
+  @spec bool_ne(result, result) :: result
+  def bool_ne(a, b), do: strict2(a, b, fn x, y when is_boolean(x) and is_boolean(y) -> x != y end)
+
   @doc """
   `text::boolean` (`boolin` and `parse_bool_with_len`, src/backend/utils/adt/bool.c). Strict.
 
