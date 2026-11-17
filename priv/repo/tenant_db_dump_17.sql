@@ -217,6 +217,11 @@ begin
         )
         from
             jsonb_array_elements(wal -> 'columns') x
+            join pg_catalog.pg_attribute a
+                on a.attrelid = entity_
+                and a.attname = x->>'name'
+                and a.attnum > 0
+                and not a.attisdropped
             left join jsonb_array_elements(wal -> 'pk') pks
                 on (x ->> 'name') = (pks ->> 'name');
 
@@ -239,6 +244,11 @@ begin
         )
         from
             jsonb_array_elements(wal -> 'identity') x
+            join pg_catalog.pg_attribute a
+                on a.attrelid = entity_
+                and a.attname = x->>'name'
+                and a.attnum > 0
+                and not a.attisdropped
             left join jsonb_array_elements(wal -> 'pk') pks
                 on (x ->> 'name') = (pks ->> 'name');
 
@@ -1810,4 +1820,5 @@ INSERT INTO realtime."schema_migrations" (version) VALUES (20261009120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261022120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261027120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261029120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20261117120000);
 REVOKE ALL ON realtime.schema_migrations FROM postgres, dashboard_user, anon, authenticated, service_role, supabase_realtime_admin;

@@ -95,6 +95,68 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
     end
   end
 
+  describe "list_changes after dropping a column" do
+    for operation <- ["INSERT", "UPDATE", "DELETE"], rls <- [false, true] do
+      @tag operation: operation, rls: rls
+      test "delivers queued #{operation} changes with RLS #{rls}", %{conn: conn, operation: operation, rls: rls} do
+        Postgrex.query!(conn, "ALTER TABLE public.test REPLICA IDENTITY FULL")
+        Postgrex.query!(conn, "CREATE TABLE public.unaffected (id int PRIMARY KEY)")
+        Postgrex.query!(conn, "GRANT SELECT ON public.unaffected TO authenticated")
+
+        if rls do
+          Postgrex.query!(conn, "ALTER TABLE public.test ENABLE ROW LEVEL SECURITY")
+          Postgrex.query!(conn, "CREATE POLICY test_read ON public.test FOR SELECT TO authenticated USING (id = 1)")
+        end
+
+        subscriptions =
+          for table <- ["test", "unaffected"] do
+            {:ok, params} = Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => table})
+            %{id: UUID.uuid1(), claims: %{"role" => "authenticated"}, subscription_params: params}
+          end
+
+        assert {:ok, _} = Subscriptions.create(conn, "supabase_realtime_test", subscriptions, self(), self())
+
+        if operation != "INSERT" do
+          Postgrex.query!(conn, "INSERT INTO public.test (id, details) VALUES (1, 'before')")
+        end
+
+        slot = "test_slot_#{System.unique_integer([:positive])}"
+        assert {:ok, _} = Replications.prepare_replication(conn, slot)
+
+        sql =
+          case operation do
+            "INSERT" -> "INSERT INTO public.test (id, details) VALUES (1, 'queued')"
+            "UPDATE" -> "UPDATE public.test SET details = 'queued' WHERE id = 1"
+            "DELETE" -> "DELETE FROM public.test WHERE id = 1"
+          end
+
+        Postgrex.query!(conn, sql)
+        Postgrex.query!(conn, "INSERT INTO public.unaffected VALUES (1)")
+        Postgrex.query!(conn, "ALTER TABLE public.test DROP COLUMN details")
+
+        opts = [slot_name: slot, publication: "supabase_realtime_test", max_changes: 100, max_record_bytes: 1_048_576]
+
+        assert {:ok, %{rows: [changed, unaffected]}} = Replications.list_changes(conn, opts)
+        assert [^operation, "public", "test", columns, record, old_record, _, ids, [], 2] = changed
+        assert UUID.string_to_binary!(hd(subscriptions).id) in ids
+        refute Enum.any?(Jason.decode!(columns), &(&1["name"] == "details"))
+        refute Map.has_key?(Jason.decode!(record), "details")
+        refute Map.has_key?(Jason.decode!(old_record), "details")
+        payload = if operation == "DELETE", do: old_record, else: record
+        assert Jason.decode!(payload)["id"] == 1
+        assert ["INSERT", "public", "unaffected", _, unaffected_record, _, _, _, [], 2] = unaffected
+        assert Jason.decode!(unaffected_record) == %{"id" => 1}
+
+        Postgrex.query!(conn, "INSERT INTO public.unaffected VALUES (2)")
+
+        assert {:ok, %{rows: [["INSERT", "public", "unaffected", _, later, _, _, _, [], 1]]}} =
+                 Replications.list_changes(conn, opts)
+
+        assert Jason.decode!(later) == %{"id" => 2}
+      end
+    end
+  end
+
   describe "list_changes/5" do
     @publication "supabase_realtime_test"
 

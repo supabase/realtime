@@ -80,6 +80,11 @@ begin
         )
         from
             jsonb_array_elements(wal -> 'columns') x
+            join pg_catalog.pg_attribute a
+                on a.attrelid = entity_
+                and a.attname = x->>'name'
+                and a.attnum > 0
+                and not a.attisdropped
             left join jsonb_array_elements(wal -> 'pk') pks
                 on (x ->> 'name') = (pks ->> 'name');
 
@@ -102,6 +107,11 @@ begin
         )
         from
             jsonb_array_elements(wal -> 'identity') x
+            join pg_catalog.pg_attribute a
+                on a.attrelid = entity_
+                and a.attname = x->>'name'
+                and a.attnum > 0
+                and not a.attisdropped
             left join jsonb_array_elements(wal -> 'pk') pks
                 on (x ->> 'name') = (pks ->> 'name');
 

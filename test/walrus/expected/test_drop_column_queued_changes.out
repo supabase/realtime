@@ -1,0 +1,62 @@
+create table public.notes (
+    id int primary key,
+    obsolete text,
+    body text,
+    hidden text
+);
+create table public.unaffected (id int primary key);
+revoke select on public.notes from authenticated;
+grant select (id, obsolete, body) on public.notes to authenticated;
+alter table public.notes enable row level security;
+create policy notes_read on public.notes for select to authenticated using (id = 1);
+insert into realtime.subscription (subscription_id, entity, claims)
+values
+    (seed_uuid(1), 'public.notes', '{"role":"authenticated"}'),
+    (seed_uuid(2), 'public.unaffected', '{"role":"authenticated"}');
+insert into realtime.subscription (subscription_id, entity, claims, filters)
+values (
+    seed_uuid(3),
+    'public.notes',
+    '{"role":"authenticated"}',
+    array[('obsolete', 'eq', 'queued', false)::realtime.user_defined_filter]
+);
+select 1 from pg_create_logical_replication_slot('realtime', 'wal2json', false);
+ ?column? 
+----------
+        1
+(1 row)
+
+insert into public.notes values (1, 'queued', 'visible', 'secret'), (2, 'queued', 'denied', 'secret');
+insert into public.unaffected values (1);
+alter table public.notes drop column obsolete;
+select
+    wal ->> 'table' as table_name,
+    wal -> 'record' as record,
+    cardinality(subscription_ids) as subscribers,
+    errors
+from realtime.list_changes('supabase_realtime', 'realtime', 100, 1048576)
+where wal is not null
+order by table_name;
+ table_name |            record            | subscribers | errors 
+------------+------------------------------+-------------+--------
+ notes      | {"id": 1, "body": "visible"} |           1 | {}
+ unaffected | {"id": 1}                    |           1 | {}
+(2 rows)
+
+insert into public.unaffected values (2);
+select wal ->> 'table' as table_name, wal -> 'record' as record, errors
+from realtime.list_changes('supabase_realtime', 'realtime', 100, 1048576)
+where wal is not null;
+ table_name |  record   | errors 
+------------+-----------+--------
+ unaffected | {"id": 2} | {}
+(1 row)
+
+select pg_drop_replication_slot('realtime');
+ pg_drop_replication_slot 
+--------------------------
+ 
+(1 row)
+
+truncate realtime.subscription;
+drop table public.notes, public.unaffected;
