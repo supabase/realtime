@@ -1363,6 +1363,163 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
   end
 
+  @channel_error_event [:realtime, :channel, :error]
+  @broadcast_limit_code "MessagePerSecondRateLimitReached"
+  @broadcast_ack_config %{"broadcast" => %{"ack" => true, "self" => false}}
+
+  describe "broadcasts per socket" do
+    @describetag policies: [:authenticated_all_topic_read]
+
+    setup %{tenant: tenant} do
+      stub_socket_broadcast_limit_flag(true)
+      telemetry_ref = :telemetry_test.attach_event_handlers(self(), [@channel_error_event])
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      {:ok, socket: socket, telemetry_ref: telemetry_ref, tenant_id: tenant.external_id}
+    end
+
+    test "the bucket holds the configured burst and refills at the configured rate", %{socket: socket} do
+      config = Application.fetch_env!(:realtime, :client_broadcast_rate_limit)
+      interval = div(1_000_000, config[:per_second])
+      tolerance = (config[:burst] - 1) * interval
+
+      assert %TokenBucket{interval: ^interval, tolerance: ^tolerance} = socket.private.broadcast_bucket
+    end
+
+    test "logs nothing for broadcasts within the bucket", context do
+      %{socket: socket, telemetry_ref: telemetry_ref, tenant_id: tenant_id} = context
+      socket = put_broadcast_bucket(socket, 1, 2)
+      assert {:ok, _, socket} = subscribe_and_join(socket, "realtime:test", %{"config" => @broadcast_ack_config})
+
+      for _ <- 1..2 do
+        ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{}})
+        assert_reply ref, :ok, %{}
+      end
+
+      refute_received {@channel_error_event, ^telemetry_ref, _, %{code: @broadcast_limit_code, tenant: ^tenant_id}}
+    end
+
+    test "logs a broadcast over the limit, waits for the bucket to refill and then sends it", context do
+      %{socket: socket, telemetry_ref: telemetry_ref, tenant_id: tenant_id} = context
+      # One token every 200 ms
+      socket = put_broadcast_bucket(socket, 5, 1)
+      config = %{"broadcast" => %{"ack" => true, "self" => true}}
+      assert {:ok, _, socket} = subscribe_and_join(socket, "realtime:test", %{"config" => config})
+
+      ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{"n" => 1}})
+      assert_reply ref, :ok, %{}
+      sent_at = System.monotonic_time(:millisecond)
+
+      log =
+        capture_log(fn ->
+          ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{"n" => 2}})
+          assert_reply ref, :ok, %{}, 1_000
+        end)
+
+      assert System.monotonic_time(:millisecond) - sent_at >= 150
+      assert log =~ "MessagePerSecondRateLimitReached: Too many broadcasts on this socket"
+      assert_receive %Socket.Message{event: "broadcast", payload: %{"payload" => %{"n" => 2}}}
+
+      assert_received {@channel_error_event, ^telemetry_ref, %{count: 1},
+                       %{code: @broadcast_limit_code, tenant: ^tenant_id}}
+    end
+
+    test "logs every delayed broadcast", context do
+      %{socket: socket, telemetry_ref: telemetry_ref, tenant_id: tenant_id} = context
+      socket = put_broadcast_bucket(socket, 10, 1)
+      assert {:ok, _, socket} = subscribe_and_join(socket, "realtime:test", %{"config" => @broadcast_ack_config})
+
+      log =
+        capture_log(fn ->
+          for _ <- 1..4 do
+            ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{}})
+            assert_reply ref, :ok, %{}, 1_000
+          end
+        end)
+
+      assert log |> String.split("Too many broadcasts on this socket") |> length() == 4
+
+      events =
+        for _ <- 1..3 do
+          assert_received {@channel_error_event, ^telemetry_ref, %{count: 1},
+                           %{code: @broadcast_limit_code, tenant: ^tenant_id}}
+        end
+
+      assert length(events) == 3
+    end
+
+    test "limits a private broadcast before it reaches the tenant database", context do
+      %{socket: socket, telemetry_ref: telemetry_ref, tenant_id: tenant_id} = context
+      socket = put_broadcast_bucket(socket, 10, 1)
+      config = %{"private" => true, "broadcast" => %{"ack" => true}}
+
+      assert %Socket{channel_pid: channel_pid} =
+               socket = subscribe_and_join!(socket, "realtime:test", %{"config" => config})
+
+      :ok = TokenBucket.take(socket.private.broadcast_bucket)
+
+      log =
+        capture_log(fn ->
+          expect(Connect, :lookup_or_start_connection, fn _ -> {:error, :rpc_error, :timeout} end)
+          allow(Connect, self(), channel_pid)
+
+          ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{}})
+          assert_receive %Socket.Reply{ref: ^ref, status: :error, payload: %{error: :unable_to_handle_broadcast}}, 500
+        end)
+
+      assert log =~ "UnableToHandleBroadcast"
+
+      assert_received {@channel_error_event, ^telemetry_ref, %{count: 1},
+                       %{code: @broadcast_limit_code, tenant: ^tenant_id}}
+    end
+
+    test "all channels of a socket share its bucket", context do
+      %{socket: socket, telemetry_ref: telemetry_ref, tenant_id: tenant_id} = context
+      socket = put_broadcast_bucket(socket, 10, 1)
+      assert {:ok, _, socket_1} = subscribe_and_join(socket, "realtime:test1", %{"config" => @broadcast_ack_config})
+      assert {:ok, _, socket_2} = subscribe_and_join(socket, "realtime:test2", %{"config" => @broadcast_ack_config})
+
+      ref = push(socket_1, "broadcast", %{"event" => "my_event", "payload" => %{}})
+      assert_reply ref, :ok, %{}
+      refute_received {@channel_error_event, ^telemetry_ref, _, %{code: @broadcast_limit_code, tenant: ^tenant_id}}
+
+      ref = push(socket_2, "broadcast", %{"event" => "my_event", "payload" => %{}})
+      assert_reply ref, :ok, %{}, 1_000
+
+      assert_received {@channel_error_event, ^telemetry_ref, %{count: 1},
+                       %{code: @broadcast_limit_code, tenant: ^tenant_id}}
+    end
+
+    test "each socket has its own bucket", %{tenant: tenant} = context do
+      %{socket: socket_1, telemetry_ref: telemetry_ref, tenant_id: tenant_id} = context
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket_2} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+      empty_broadcast_bucket(socket_1)
+
+      assert {:ok, _, socket_2} = subscribe_and_join(socket_2, "realtime:test", %{"config" => @broadcast_ack_config})
+      ref = push(socket_2, "broadcast", %{"event" => "my_event", "payload" => %{}})
+
+      assert_reply ref, :ok, %{}
+      refute_received {@channel_error_event, ^telemetry_ref, _, %{code: @broadcast_limit_code, tenant: ^tenant_id}}
+    end
+
+    test "logs nothing and takes no token while the flag is off", context do
+      %{socket: socket, telemetry_ref: telemetry_ref, tenant_id: tenant_id} = context
+      stub_socket_broadcast_limit_flag(false)
+      socket = put_broadcast_bucket(socket, 1, 1)
+      assert {:ok, _, socket} = subscribe_and_join(socket, "realtime:test", %{"config" => @broadcast_ack_config})
+
+      for _ <- 1..3 do
+        ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{}})
+        assert_reply ref, :ok, %{}
+      end
+
+      refute_received {@channel_error_event, ^telemetry_ref, _, %{code: @broadcast_limit_code, tenant: ^tenant_id}}
+      assert TokenBucket.take(socket.private.broadcast_bucket) == :ok
+    end
+  end
+
   describe "concurrent connection counting" do
     test "a connected socket is not counted until it joins a channel", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
@@ -1462,45 +1619,55 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
   end
 
-  @node_join_budget_exceeded_event [:realtime, :channel, :node_join_budget_exceeded]
+  @channel_error_event [:realtime, :channel, :error]
 
   describe "joins per tenant per node" do
     test "counts nothing for a join within the budget", %{tenant: tenant} do
       tenant = enable_node_join_budget_flag!(tenant)
-      ref = :telemetry_test.attach_event_handlers(self(), [@node_join_budget_exceeded_event])
+      ref = :telemetry_test.attach_event_handlers(self(), [@channel_error_event])
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
       assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
 
       tenant_id = tenant.external_id
-      refute_receive {@node_join_budget_exceeded_event, ^ref, _, %{tenant: ^tenant_id}}
+      refute_receive {@channel_error_event, ^ref, _, %{code: "JoinsRateLimitReached", tenant: ^tenant_id}}
     end
 
-    test "allows a join over the budget and counts it", %{tenant: tenant} do
+    test "refuses a join over the budget, counts it and keeps the socket connected", %{tenant: tenant} do
       tenant = enable_node_join_budget_flag!(tenant)
-      ref = :telemetry_test.attach_event_handlers(self(), [@node_join_budget_exceeded_event])
+      ref = :telemetry_test.attach_event_handlers(self(), [@channel_error_event])
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
       use_up_node_join_budget(tenant)
 
-      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
+      assert {:error, %{reason: "JoinsRateLimitReached: Too many joins per second"}} =
+               subscribe_and_join(socket, "realtime:test", %{})
 
       tenant_id = tenant.external_id
-      assert_receive {@node_join_budget_exceeded_event, ^ref, %{count: 1}, %{tenant: ^tenant_id}}
+      assert_receive {@channel_error_event, ^ref, %{count: 1}, %{code: "JoinsRateLimitReached", tenant: ^tenant_id}}
       refute_received %Phoenix.Socket.Broadcast{event: "disconnect"}
     end
 
-    test "counts nothing while the flag is off", %{tenant: tenant} do
-      ref = :telemetry_test.attach_event_handlers(self(), [@node_join_budget_exceeded_event])
+    test "refuses to connect while the budget is used up", %{tenant: tenant} do
+      tenant = enable_node_join_budget_flag!(tenant)
       jwt = Generators.generate_jwt_token(tenant)
-      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
       use_up_node_join_budget(tenant)
+
+      assert {:error, :too_many_node_joins} =
+               connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+    end
+
+    test "connects, joins and counts nothing while the flag is off", %{tenant: tenant} do
+      ref = :telemetry_test.attach_event_handlers(self(), [@channel_error_event])
+      jwt = Generators.generate_jwt_token(tenant)
+      use_up_node_join_budget(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
       assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
 
       tenant_id = tenant.external_id
-      refute_receive {@node_join_budget_exceeded_event, ^ref, _, %{tenant: ^tenant_id}}
+      refute_receive {@channel_error_event, ^ref, _, %{code: "JoinsRateLimitReached", tenant: ^tenant_id}}
     end
 
     # Takes every join a minute ahead, so the bucket stays empty for the rest of the test
@@ -2574,6 +2741,23 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     Stream.repeatedly(fn -> TokenBucket.take(bucket) end) |> Enum.find(&(&1 == :error))
   end
 
+  defp put_broadcast_bucket(%Socket{} = socket, per_second, burst) do
+    %{socket | private: Map.put(socket.private, :broadcast_bucket, TokenBucket.new(per_second, burst))}
+  end
+
+  # Takes every token a minute ahead, so the bucket stays empty for the rest of the test
+  defp empty_broadcast_bucket(%Socket{private: %{broadcast_bucket: bucket}}) do
+    future = System.monotonic_time(:microsecond) + 60_000_000
+    Stream.repeatedly(fn -> TokenBucket.take(bucket, future) end) |> Enum.find(&(&1 == :error))
+  end
+
+  defp stub_socket_broadcast_limit_flag(enabled) do
+    stub(Realtime.FeatureFlags, :enabled?, fn
+      "socket_broadcast_limit", _tenant_id -> enabled
+      flag, tenant_id -> Mimic.call_original(Realtime.FeatureFlags, :enabled?, [flag, tenant_id])
+    end)
+  end
+
   defp stub_socket_join_limit_flag(enabled) do
     stub(Realtime.FeatureFlags, :enabled?, fn
       "socket_join_limit", _tenant_id -> enabled
@@ -2694,6 +2878,17 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       assert latency >= 5
       refute_receive {:telemetry, _, _, _}
+    end
+
+    test "counts the pushed diff as a presence event", %{tenant: tenant} do
+      counter_key = Tenants.presence_events_per_second_key(tenant.external_id)
+      Realtime.GenCounter.reset(counter_key)
+      socket = presence_socket(tenant, true)
+      diff = presence_diff_with(%{"alice" => %{metas: [%{"name" => "alice", :phx_ref => "a1"}]}})
+
+      assert {:noreply, _socket} = RealtimeChannel.handle_info({:authorize_presence_diff, diff}, socket)
+
+      assert Realtime.GenCounter.get(counter_key) == 1
     end
 
     test "drops the diff and records nothing when presence.read is denied", %{tenant: tenant} do

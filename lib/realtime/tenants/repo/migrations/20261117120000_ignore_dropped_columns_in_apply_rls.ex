@@ -51,6 +51,24 @@ defmodule Realtime.Tenants.Migrations.IgnoreDroppedColumnsInApplyRls do
         -- previous identity values for update/delete
         old_columns realtime.wal_column[];
 
+        -- the same values as wal2json sent them, which is what filters compare against
+        raw_columns realtime.wal_column[] =
+            array_agg((x->>'name', x->>'type', x->>'typeoid', x->'value', null, null)::realtime.wal_column)
+            from jsonb_array_elements(wal -> 'columns') x
+            join pg_catalog.pg_attribute a
+                on a.attrelid = entity_
+                and a.attname = x->>'name'
+                and a.attnum > 0
+                and not a.attisdropped;
+        raw_old_columns realtime.wal_column[] =
+            array_agg((x->>'name', x->>'type', x->>'typeoid', x->'value', null, null)::realtime.wal_column)
+            from jsonb_array_elements(wal -> 'identity') x
+            join pg_catalog.pg_attribute a
+                on a.attrelid = entity_
+                and a.attname = x->>'name'
+                and a.attnum > 0
+                and not a.attisdropped;
+
         error_record_exceeds_max_size boolean = octet_length(wal::text) > max_record_bytes;
 
         -- Primary jsonb output for record
@@ -219,10 +237,10 @@ defmodule Realtime.Tenants.Migrations.IgnoreDroppedColumnsInApplyRls do
                             subs.entity = entity_
                             and subs.claims_role = working_role
                             and (
-                                realtime.is_visible_through_filters(columns, subs.filters)
+                                realtime.is_visible_through_filters(raw_columns, subs.filters)
                                 or (
                                   action = 'DELETE'
-                                  and realtime.is_visible_through_filters(old_columns, subs.filters)
+                                  and realtime.is_visible_through_filters(raw_old_columns, subs.filters)
                                 )
                             )
                 ) loop

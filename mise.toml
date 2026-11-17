@@ -3,7 +3,7 @@ elixir = "1.19.5-otp-28"
 erlang = "28.5.0.4"
 node = "24"
 supabase = "latest"
-"npm:@supabase/pg-delta" = "1.0.0-alpha.48"
+"npm:@supabase/pg-delta" = "1.0.0-alpha.60"
 
 [env]
 # TENANT names a whole environment, not just the db tasks below: the tenant's database and row,
@@ -15,7 +15,7 @@ TENANT = "{% if env.TENANT %}{{ env.TENANT }}{% else %}{% set dir = config_root 
 # The Postgres majors that get a committed tenant dump (priv/repo/tenant_db_dump_<major>.sql), and
 # the image each one is generated from — both `tenant-dumps` and the workflow that runs it read
 # this list. Keep the images in step with the ones the test workflows run against.
-TENANT_DUMP_IMAGES = "15=supabase/postgres:15.19.0.014 17=supabase/postgres:17.11.0.014"
+TENANT_DUMP_IMAGES = "15=supabase/postgres:15.20.0.000 17=supabase/postgres:17.12.0.000"
 REGION = "us-east-1"
 API_JWT_SECRET = "dev"
 DB_ENC_KEY = "1234567890123456"
@@ -227,6 +227,22 @@ run = "docker compose -f compose.tests.yml stop"
 [tasks.test-rm]
 description = "Remove the integration test stack"
 run = "docker compose -f compose.tests.yml rm -sf"
+
+[tasks.test-changed]
+description = "Run the mix tests for staged, unstaged and untracked test files"
+run = '''
+files=$({
+  git diff --name-only --diff-filter=d HEAD -- 'test/*_test.exs'
+  git ls-files --others --exclude-standard -- 'test/*_test.exs'
+} | sort -u)
+
+if [ -z "$files" ]; then
+  echo "No changed test files"
+  exit 0
+fi
+
+mix test $files
+'''
 
 [tasks.walrus]
 description = "Run the WALRUS pg_regress suite against the tenant realtime schema"

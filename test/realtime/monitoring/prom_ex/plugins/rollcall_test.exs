@@ -1,0 +1,350 @@
+defmodule Realtime.PromEx.Plugins.RollcallTest do
+  use Realtime.DataCase, async: false
+
+  alias Realtime.PromEx.Plugins.Rollcall, as: RollcallPlugin
+  alias Rollcall.Metrics
+
+  # The plugin counts the trackers of this instance, so the count does not depend on the trackers
+  # that other tests start in the Rollcall instance of Realtime.
+  defmodule TestRollcall do
+    @moduledoc false
+    use Rollcall, transport: {Rollcall.Transport.Null, []}
+  end
+
+  defmodule MetricsTest do
+    use PromEx, otp_app: :realtime_test_rollcall
+
+    @impl true
+    def plugins, do: [{RollcallPlugin, poll_rate: 50, rollcall: Realtime.PromEx.Plugins.RollcallTest.TestRollcall}]
+  end
+
+  @started "realtime_rollcall_tracker_started"
+  @stopped "realtime_rollcall_tracker_stopped"
+  @purged "realtime_rollcall_peer_purged"
+  @silent_ticks "realtime_rollcall_peer_silent_ticks"
+  @observations "realtime_rollcall_peer_observations"
+  @overdue "realtime_rollcall_peer_observations_overdue"
+  @send_duration "realtime_rollcall_heartbeat_send_duration"
+  @apply_duration "realtime_rollcall_heartbeat_apply_duration"
+  @publish_duration "realtime_rollcall_publish_duration"
+  @send_entries "realtime_rollcall_heartbeat_send_entries"
+  @publish_entries "realtime_rollcall_publish_entries"
+  @tracker_entries "realtime_rollcall_tracker_entries"
+  @tracker_process_bytes "realtime_rollcall_tracker_process_bytes"
+  @tracker_ets_bytes "realtime_rollcall_tracker_ets_bytes"
+  @tracker_reductions "realtime_rollcall_tracker_reductions"
+
+  @trackers "realtime_rollcall_trackers"
+
+  setup_all do
+    start_supervised!(TestRollcall)
+    start_supervised!(MetricsTest)
+    :ok
+  end
+
+  test "counts each tracker start" do
+    started_before = metric_value(@started) || 0
+
+    :telemetry.execute(Metrics.tracker_start(), %{}, %{scope: "tenant-a"})
+
+    assert metric_value(@started) == started_before + 1
+  end
+
+  test "maps the stop reason to normal, shutdown or crash" do
+    reasons = [
+      {:normal, "normal"},
+      {:shutdown, "shutdown"},
+      {{:shutdown, :closed}, "shutdown"},
+      {:boom, "crash"},
+      {{%RuntimeError{message: "boom"}, []}, "crash"}
+    ]
+
+    for {reason, label} <- reasons do
+      stopped_before = metric_value(@stopped, reason: label) || 0
+
+      :telemetry.execute(Metrics.tracker_stop(), %{}, %{scope: "tenant-a", reason: reason})
+
+      assert metric_value(@stopped, reason: label) == stopped_before + 1
+    end
+  end
+
+  test "counts the purges by whether they removed entries" do
+    clean_before = metric_value(@purged, stale: "false") || 0
+    stale_before = metric_value(@purged, stale: "true") || 0
+
+    :telemetry.execute(Metrics.tracker_peer_purge(), %{entries: 0}, %{scope: "tenant-a", node: :a@host, stale: false})
+    :telemetry.execute(Metrics.tracker_peer_purge(), %{entries: 3}, %{scope: "tenant-a", node: :a@host, stale: true})
+
+    assert metric_value(@purged, stale: "false") == clean_before + 1
+    assert metric_value(@purged, stale: "true") == stale_before + 1
+  end
+
+  describe "the peers event" do
+    test "records the most silent peer of each tick in a distribution" do
+      le_2_before = metric_value(@silent_ticks <> "_bucket", le: "2.5") || 0
+      le_3_before = metric_value(@silent_ticks <> "_bucket", le: "3.5") || 0
+      count_before = metric_value(@silent_ticks <> "_count") || 0
+
+      :telemetry.execute(Metrics.tracker_peers(), %{count: 4, overdue_count: 1, max_silent_ticks: 3}, %{
+        scope: "tenant-a"
+      })
+
+      assert metric_value(@silent_ticks <> "_count") == count_before + 1
+      assert metric_value(@silent_ticks <> "_bucket", le: "3.5") == le_3_before + 1
+      assert (metric_value(@silent_ticks <> "_bucket", le: "2.5") || 0) == le_2_before
+    end
+
+    test "sums the peer observations and the overdue peer observations" do
+      observations_before = metric_value(@observations) || 0
+      overdue_before = metric_value(@overdue) || 0
+
+      :telemetry.execute(Metrics.tracker_peers(), %{count: 4, overdue_count: 1, max_silent_ticks: 3}, %{
+        scope: "tenant-a"
+      })
+
+      assert metric_value(@observations) == observations_before + 4
+      assert metric_value(@overdue) == overdue_before + 1
+    end
+  end
+
+  # The events carry `duration` in native time units. The metrics are in microseconds. A native
+  # value that the plugin does not convert lands far above the last bucket.
+  describe "the durations" do
+    test "records the send duration in microseconds, by kind" do
+      tags = [kind: "snapshot"]
+      le_250_before = metric_value(@send_duration <> "_bucket", tags ++ [le: "250.0"]) || 0
+      le_500_before = metric_value(@send_duration <> "_bucket", tags ++ [le: "500.0"]) || 0
+
+      :telemetry.execute(Metrics.tracker_heartbeat_send(), %{duration: native(300), entries: 2}, %{
+        scope: "tenant-a",
+        kind: :snapshot
+      })
+
+      assert metric_value(@send_duration <> "_bucket", tags ++ [le: "500.0"]) == le_500_before + 1
+      assert (metric_value(@send_duration <> "_bucket", tags ++ [le: "250.0"]) || 0) == le_250_before
+    end
+
+    test "records the apply duration in microseconds, by kind" do
+      tags = [kind: "diff"]
+      count_before = metric_value(@apply_duration <> "_count", tags) || 0
+      le_100_before = metric_value(@apply_duration <> "_bucket", tags ++ [le: "100.0"]) || 0
+
+      :telemetry.execute(Metrics.tracker_heartbeat_apply(), %{duration: native(60)}, %{
+        scope: "tenant-a",
+        node: :a@host,
+        kind: :diff
+      })
+
+      assert metric_value(@apply_duration <> "_count", tags) == count_before + 1
+      assert metric_value(@apply_duration <> "_bucket", tags ++ [le: "100.0"]) == le_100_before + 1
+    end
+
+    test "records the publish duration in microseconds, by source" do
+      tags = [source: "peer"]
+      # Peep writes a bound of 1000 or more in scientific notation.
+      le_1000_before = metric_value(@publish_duration <> "_bucket", tags ++ [le: "1.0e3"]) || 0
+      le_2500_before = metric_value(@publish_duration <> "_bucket", tags ++ [le: "2.5e3"]) || 0
+
+      :telemetry.execute(Metrics.tracker_publish(), %{duration: native(2_000), entries: 3}, %{
+        scope: "tenant-a",
+        source: :peer
+      })
+
+      assert metric_value(@publish_duration <> "_bucket", tags ++ [le: "2.5e3"]) == le_2500_before + 1
+      assert (metric_value(@publish_duration <> "_bucket", tags ++ [le: "1.0e3"]) || 0) == le_1000_before
+    end
+  end
+
+  describe "the entries" do
+    # The values are whole entries. Peep puts a value in a bucket only when it is below the bound, so
+    # each bound is half an entry above the value it stands for.
+    test "records the entries of each heartbeat that a tracker sends, by kind" do
+      tags = [kind: "snapshot"]
+      count_before = metric_value(@send_entries <> "_count", tags) || 0
+      empty_before = metric_value(@send_entries <> "_bucket", tags ++ [le: "0.5"]) || 0
+      le_100_before = metric_value(@send_entries <> "_bucket", tags ++ [le: "100.5"]) || 0
+      le_500_before = metric_value(@send_entries <> "_bucket", tags ++ [le: "500.5"]) || 0
+
+      :telemetry.execute(Metrics.tracker_heartbeat_send(), %{duration: native(50), entries: 0}, %{
+        scope: "tenant-a",
+        kind: :snapshot
+      })
+
+      :telemetry.execute(Metrics.tracker_heartbeat_send(), %{duration: native(50), entries: 150}, %{
+        scope: "tenant-a",
+        kind: :snapshot
+      })
+
+      assert metric_value(@send_entries <> "_count", tags) == count_before + 2
+      assert metric_value(@send_entries <> "_bucket", tags ++ [le: "0.5"]) == empty_before + 1
+      assert metric_value(@send_entries <> "_bucket", tags ++ [le: "500.5"]) == le_500_before + 2
+      assert metric_value(@send_entries <> "_bucket", tags ++ [le: "100.5"]) == le_100_before + 1
+    end
+
+    test "sums the entries that a tracker publishes, by source" do
+      peer_before = metric_value(@publish_entries, source: "peer") || 0
+      local_before = metric_value(@publish_entries, source: "local") || 0
+
+      :telemetry.execute(Metrics.tracker_publish(), %{duration: native(50), entries: 3}, %{
+        scope: "tenant-a",
+        source: :peer
+      })
+
+      assert metric_value(@publish_entries, source: "peer") == peer_before + 3
+      assert (metric_value(@publish_entries, source: "local") || 0) == local_before
+    end
+  end
+
+  describe "the usage event" do
+    # The values are whole entries, so each bound is half an entry above the value it stands for.
+    test "records the entries of each tracker at each tick in a distribution" do
+      count_before = metric_value(@tracker_entries <> "_count") || 0
+      empty_before = metric_value(@tracker_entries <> "_bucket", le: "0.5") || 0
+      le_100_before = metric_value(@tracker_entries <> "_bucket", le: "100.5") || 0
+      le_500_before = metric_value(@tracker_entries <> "_bucket", le: "500.5") || 0
+
+      usage(entries: 0)
+      usage(entries: 150)
+
+      assert metric_value(@tracker_entries <> "_count") == count_before + 2
+      assert metric_value(@tracker_entries <> "_bucket", le: "0.5") == empty_before + 1
+      assert metric_value(@tracker_entries <> "_bucket", le: "500.5") == le_500_before + 2
+      assert metric_value(@tracker_entries <> "_bucket", le: "100.5") == le_100_before + 1
+    end
+
+    # Peep writes a bound of 1000 or more in scientific notation.
+    test "records the process memory in bytes" do
+      count_before = metric_value(@tracker_process_bytes <> "_count") || 0
+      le_10k_before = metric_value(@tracker_process_bytes <> "_bucket", le: "1.0e4") || 0
+      le_50k_before = metric_value(@tracker_process_bytes <> "_bucket", le: "5.0e4") || 0
+
+      usage(process_bytes: 20_000)
+
+      assert metric_value(@tracker_process_bytes <> "_count") == count_before + 1
+      assert metric_value(@tracker_process_bytes <> "_bucket", le: "5.0e4") == le_50k_before + 1
+      assert (metric_value(@tracker_process_bytes <> "_bucket", le: "1.0e4") || 0) == le_10k_before
+    end
+
+    test "records the memory of the view table in bytes" do
+      count_before = metric_value(@tracker_ets_bytes <> "_count") || 0
+      le_1k_before = metric_value(@tracker_ets_bytes <> "_bucket", le: "1.0e3") || 0
+      le_10k_before = metric_value(@tracker_ets_bytes <> "_bucket", le: "1.0e4") || 0
+
+      usage(ets_bytes: 5_000)
+
+      assert metric_value(@tracker_ets_bytes <> "_count") == count_before + 1
+      assert metric_value(@tracker_ets_bytes <> "_bucket", le: "1.0e4") == le_10k_before + 1
+      assert (metric_value(@tracker_ets_bytes <> "_bucket", le: "1.0e3") || 0) == le_1k_before
+    end
+
+    test "records the reductions of each tick in a distribution" do
+      count_before = metric_value(@tracker_reductions <> "_count") || 0
+      le_1k_before = metric_value(@tracker_reductions <> "_bucket", le: "1.0e3") || 0
+      le_10k_before = metric_value(@tracker_reductions <> "_bucket", le: "1.0e4") || 0
+
+      usage(reductions: 5_000)
+
+      assert metric_value(@tracker_reductions <> "_count") == count_before + 1
+      assert metric_value(@tracker_reductions <> "_bucket", le: "1.0e4") == le_10k_before + 1
+      assert (metric_value(@tracker_reductions <> "_bucket", le: "1.0e3") || 0) == le_1k_before
+    end
+
+    # A value above the last bound has no bucket of its own. The distribution counts it in `+Inf`,
+    # `_count` and `_sum` only.
+    test "counts a memory value above the last bound in +Inf only" do
+      count_before = metric_value(@tracker_process_bytes <> "_count") || 0
+      last_before = metric_value(@tracker_process_bytes <> "_bucket", le: "1.0e8") || 0
+      inf_before = metric_value(@tracker_process_bytes <> "_bucket", le: "+Inf") || 0
+
+      usage(process_bytes: 150_000_000)
+
+      assert metric_value(@tracker_process_bytes <> "_count") == count_before + 1
+      assert metric_value(@tracker_process_bytes <> "_bucket", le: "+Inf") == inf_before + 1
+      assert (metric_value(@tracker_process_bytes <> "_bucket", le: "1.0e8") || 0) == last_before
+    end
+  end
+
+  describe "the tracker gauge" do
+    test "is the number of running trackers of the Rollcall instance" do
+      id = System.unique_integer([:positive])
+      scopes = ["gauge-#{id}-1", "gauge-#{id}-2", "gauge-#{id}-3"]
+      base = metric_value(@trackers) || 0
+
+      for scope <- scopes, do: :ok = TestRollcall.ensure_started(scope)
+      started = base + length(scopes)
+      assert_eventually metric_value(@trackers) == started
+
+      pid = Rollcall.Tracker.whereis(TestRollcall, "gauge-#{id}-1")
+      GenServer.stop(pid)
+      assert_eventually metric_value(@trackers) == started - 1
+    end
+
+    # `:telemetry_poller` stops a measurement for good after it raises once.
+    test "does not raise when the Rollcall instance is not running" do
+      assert RollcallPlugin.execute_metrics(Realtime.PromEx.Plugins.RollcallTest.NoSuchRollcall) == :ok
+    end
+  end
+
+  # The metrics are global. A scope label would give each tenant its own series.
+  test "no metric has a scope label" do
+    scope = "scope-label-check"
+
+    :telemetry.execute(Metrics.tracker_start(), %{}, %{scope: scope})
+    :telemetry.execute(Metrics.tracker_stop(), %{}, %{scope: scope, reason: :normal})
+    :telemetry.execute(Metrics.tracker_peer_purge(), %{entries: 1}, %{scope: scope, node: :a@host, stale: true})
+    :telemetry.execute(Metrics.tracker_peers(), %{count: 1, overdue_count: 1, max_silent_ticks: 2}, %{scope: scope})
+
+    :telemetry.execute(Metrics.tracker_heartbeat_send(), %{duration: native(50), entries: 1}, %{
+      scope: scope,
+      kind: :snapshot
+    })
+
+    :telemetry.execute(Metrics.tracker_heartbeat_apply(), %{duration: native(50)}, %{
+      scope: scope,
+      node: :a@host,
+      kind: :snapshot
+    })
+
+    :telemetry.execute(Metrics.tracker_publish(), %{duration: native(50), entries: 1}, %{scope: scope, source: :local})
+
+    usage([], scope)
+
+    metrics = [
+      @trackers,
+      @tracker_entries <> "_count",
+      @tracker_process_bytes <> "_count",
+      @tracker_ets_bytes <> "_count",
+      @tracker_reductions <> "_count",
+      @started,
+      @stopped,
+      @purged,
+      @silent_ticks <> "_count",
+      @observations,
+      @overdue,
+      @send_duration <> "_count",
+      @apply_duration <> "_count",
+      @send_entries <> "_count",
+      @publish_entries,
+      @publish_duration <> "_count"
+    ]
+
+    for metric <- metrics do
+      assert metric_value(metric, scope: scope) == nil
+    end
+
+    # The apply event also carries the node of the peer, which is not a label either.
+    assert metric_value(@apply_duration <> "_count", node: "a@host") == nil
+  end
+
+  defp usage(measurements, scope \\ "tenant-a") do
+    defaults = %{entries: 1, process_bytes: 20_000, ets_bytes: 2_000, reductions: 1_000}
+
+    :telemetry.execute(Metrics.tracker_usage(), Map.merge(defaults, Map.new(measurements)), %{scope: scope})
+  end
+
+  defp native(microseconds), do: System.convert_time_unit(microseconds, :microsecond, :native)
+
+  defp metric_value(metric, tags \\ nil) do
+    MetricsHelper.search(PromEx.get_metrics(MetricsTest), metric, tags)
+  end
+end

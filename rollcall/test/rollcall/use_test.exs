@@ -22,9 +22,28 @@ defmodule Rollcall.UseTest do
 
       assert scope in Instance.scopes()
       assert [%{ref: ^ref}] = Local.entries(Tracker.get_state(Instance, scope).local, "partition")
+      assert Instance.state(scope, "partition") == [{ref, "key", %{}}]
+      assert Instance.state(scope) == [{"partition", ref, "key", %{}}]
 
       assert :ok = Instance.untrack(self(), scope, "partition", "key")
       assert Local.entries(Tracker.get_state(Instance, scope).local, "partition") == []
+    end
+
+    test "ensure_started/1 starts a tracker on the instance named after the module", %{scope: scope} do
+      start_supervised!(Instance)
+
+      assert :ok = Instance.ensure_started(scope)
+
+      assert is_pid(Tracker.whereis(Instance, scope))
+      assert scope in Instance.scopes()
+    end
+
+    test "pass the option :ref of track to the tracker", %{scope: scope} do
+      start_supervised!(Instance)
+
+      assert {:ok, "caller-ref"} = Instance.track(self(), scope, "partition", "key", %{}, ref: "caller-ref")
+
+      assert Instance.state(scope, "partition") == [{"caller-ref", "key", %{}}]
     end
 
     test "give the options of use to the trackers", %{scope: scope} do

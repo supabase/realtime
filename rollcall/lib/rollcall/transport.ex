@@ -1,9 +1,14 @@
 defmodule Rollcall.Transport do
   @moduledoc """
-  Defines the interface a `Rollcall.Tracker` uses to send and receive messages.
+  Defines the interface a `Rollcall.Tracker` uses to send and receive messages,
+  and to publish the diffs of its view.
 
   This behaviour abstracts away the underlying transport and structure of the messages
   so `Rollcall.Tracker`s can work independently of the messaging and network environment.
+
+  The tracker holds no subscribers. The transport delivers the diffs to them.
+  The transport also tells the tracker whether the node still needs it. See
+  `active?/1`.
 
   """
   alias Rollcall.Tracker.Messages
@@ -21,6 +26,21 @@ defmodule Rollcall.Transport do
   Called to send a heartbeat message.
   """
   @callback heartbeat(t :: any, message :: heartbeat_message()) :: :ok
+
+  @doc """
+  Called to publish a diff of a partition to the subscribers of that partition
+  on this node.
+
+  The tracker calls this function in its own process. It calls it after it
+  wrote the change to the view, once for each partition that has a change. It
+  never passes an empty diff. A subscriber that reads the state after it
+  receives a diff finds the change in the state.
+
+  The function returns `:ok`. Any other return crashes the tracker. The tracker
+  waits for the function, so an implementation that does slow work hands the
+  diff to another process.
+  """
+  @callback publish(t :: any, partition :: Rollcall.partition(), diff :: Rollcall.partition_diff()) :: :ok
   @doc """
   Called when a message is received by the tracker.
 
@@ -31,4 +51,23 @@ defmodule Rollcall.Transport do
   If the message is unknown or shouldn't be processed by the tracker, implementations can return `:ignore`.
   """
   @callback unwrap(t :: any, raw :: any) :: {:ok, scope :: Rollcall.scope(), message :: Messages.t()} | :ignore
+
+  @doc """
+  Called when the grace period of a tracker with no entry ends. Returns `true`
+  when the node still needs the tracker, and `false` otherwise.
+
+  The tracker stops when the function returns `false`. It starts the grace
+  period again when the function returns `true`.
+
+  Return `true` while a process on this node reads the scope. 
+
+  The tracker calls this function in its own process, once for each grace
+  period. The tracker waits for the function, so keep it fast.
+
+  The callback is optional. A transport that does not implement it is not
+  active.
+  """
+  @callback active?(t :: any) :: boolean()
+
+  @optional_callbacks active?: 1
 end

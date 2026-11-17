@@ -79,7 +79,7 @@ defmodule TestTenantDb.Backend.External do
         _, _ -> "unknown"
       end
 
-    {"127.0.0.1:#{port}", "external tenant DB on 127.0.0.1:#{port} stopped answering."}
+    {"127.0.0.1:#{port}", "external tenant DB on 127.0.0.1:#{port}, no further diagnostics available."}
   end
 
   # The external servers are supplied to us; throwing the worker away cannot

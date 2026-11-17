@@ -10,6 +10,10 @@ defmodule Rollcall.Transport.InMemory do
   each sender, as it does in a cluster.
 
   The network never delivers a message to its sender.
+
+  `publish/3` delivers a diff to the processes that subscribed to the
+  partition on the node of the tracker. Use `Network.subscribe/5`. A subscriber
+  gets `{:rollcall_diff, scope, partition, diff}`.
   """
 
   @behaviour Rollcall.Transport
@@ -28,6 +32,11 @@ defmodule Rollcall.Transport.InMemory do
   @impl true
   def heartbeat(%{network: network, scope: scope, node: node}, message) do
     Network.broadcast(network, scope, self(), node, message)
+  end
+
+  @impl true
+  def publish(%{network: network, scope: scope, node: node}, partition, diff) do
+    Network.publish(network, node, scope, partition, diff)
   end
 
   @impl true
@@ -53,6 +62,10 @@ defmodule Rollcall.Transport.InMemory.Network do
   network put the message in the mailbox of each recipient. A test can then wait
   for the recipient with `:sys.get_state/1`.
 
+  It also holds the subscribers of each partition on each node. `publish/5`
+  returns after the network put the diff in the mailbox of each subscriber of
+  that node, scope and partition. Drops do not apply to publications.
+
   `drop_next/2` makes the network discard the next deliveries. The count is for
   deliveries, so a broadcast to two recipients uses two.
   """
@@ -71,12 +84,24 @@ defmodule Rollcall.Transport.InMemory.Network do
     GenServer.call(network, {:broadcast, scope, from, node, message})
   end
 
+  @doc "Adds `pid` to the subscribers of `partition` of `scope` on `node`."
+  @spec subscribe(GenServer.server(), node(), term(), term(), pid()) :: :ok
+  def subscribe(network, node, scope, partition, pid) do
+    GenServer.call(network, {:subscribe, node, scope, partition, pid})
+  end
+
+  @doc "Sends `diff` to the subscribers of `partition` of `scope` on `node`."
+  @spec publish(GenServer.server(), node(), term(), term(), term()) :: :ok
+  def publish(network, node, scope, partition, diff) do
+    GenServer.call(network, {:publish, node, scope, partition, diff})
+  end
+
   @doc "Discards the next `count` deliveries."
   @spec drop_next(GenServer.server(), pos_integer()) :: :ok
   def drop_next(network, count \\ 1), do: GenServer.call(network, {:drop_next, count})
 
   @impl true
-  def init(:ok), do: {:ok, %{members: %{}, monitors: %{}, drops: 0}}
+  def init(:ok), do: {:ok, %{members: %{}, subscribers: %{}, monitors: %{}, drops: 0}}
 
   @impl true
   def handle_call({:join, scope, pid}, _from, state) do
@@ -96,6 +121,20 @@ defmodule Rollcall.Transport.InMemory.Network do
     {:reply, :ok, state}
   end
 
+  def handle_call({:subscribe, node, scope, partition, pid}, _from, state) do
+    state = ensure_monitor(state, pid)
+    subscribers = Map.update(state.subscribers, {node, scope, partition}, MapSet.new([pid]), &MapSet.put(&1, pid))
+    {:reply, :ok, %{state | subscribers: subscribers}}
+  end
+
+  def handle_call({:publish, node, scope, partition, diff}, _from, state) do
+    for pid <- Map.get(state.subscribers, {node, scope, partition}, MapSet.new()) do
+      send(pid, {:rollcall_diff, scope, partition, diff})
+    end
+
+    {:reply, :ok, state}
+  end
+
   def handle_call({:drop_next, count}, _from, state) do
     {:reply, :ok, %{state | drops: state.drops + count}}
   end
@@ -103,7 +142,9 @@ defmodule Rollcall.Transport.InMemory.Network do
   @impl true
   def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
     members = Map.new(state.members, fn {scope, pids} -> {scope, MapSet.delete(pids, pid)} end)
-    {:noreply, %{state | members: members, monitors: Map.delete(state.monitors, pid)}}
+    subscribers = Map.new(state.subscribers, fn {key, pids} -> {key, MapSet.delete(pids, pid)} end)
+
+    {:noreply, %{state | members: members, subscribers: subscribers, monitors: Map.delete(state.monitors, pid)}}
   end
 
   defp deliver(%{drops: drops} = state, _pid, _raw) when drops > 0, do: %{state | drops: drops - 1}

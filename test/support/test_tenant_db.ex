@@ -173,6 +173,7 @@ defmodule TestTenantDb do
 
         case probe(port) do
           :ok ->
+            report_if_killed(worker, port)
             {:ok, port}
 
           {:error, reason} ->
@@ -254,6 +255,43 @@ defmodule TestTenantDb do
     Process.exit(worker, :kill)
 
     report
+  end
+
+  # A test whose database connection dies is killed, not failed: Postgrex pools started with
+  # `backoff_type: :stop` give up, `DBConnection.Watcher` kills the pool and the `:killed`
+  # travels the link to the test process. ExUnit then reports a bare
+  # `** (EXIT from #PID<...>) killed`, and the captured log dies with the test process.
+  #
+  # So capture the database's side of the story while the container still exists. The on_exit
+  # is registered after the one releasing the worker, so it runs first.
+  defp report_if_killed(worker, port) do
+    test_pid = self()
+
+    watcher =
+      spawn(fn ->
+        ref = Process.monitor(test_pid)
+
+        receive do
+          {:DOWN, ^ref, :process, ^test_pid, :killed} -> report_killed(test_pid, worker, port)
+          {:DOWN, ^ref, :process, ^test_pid, _reason} -> :ok
+        end
+      end)
+
+    ExUnit.Callbacks.on_exit(fn ->
+      ref = Process.monitor(watcher)
+      receive do: ({:DOWN, ^ref, :process, ^watcher, _reason} -> :ok)
+    end)
+  end
+
+  defp report_killed(test_pid, worker, port) do
+    {label, details} = Backend.current().diagnose(worker)
+    at = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+
+    IO.puts(:stderr, """
+    [TestTenantDb] test process #{inspect(test_pid)} was killed at #{at} while holding tenant database #{label} (port #{port}).
+    If it was not an ExUnit timeout, a database pool linked to it most likely lost its connection.
+    #{details}
+    """)
   end
 
   defp probe(port, attempts \\ @probe_attempts) do

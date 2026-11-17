@@ -76,10 +76,10 @@ defmodule Rollcall.NetworkHelpers do
     pid
   end
 
-  @doc "Tracks an entry in `tracker`, and returns the ref."
-  @spec track(pid(), pid(), Rollcall.partition(), Rollcall.key(), Rollcall.meta()) :: Rollcall.ref()
-  def track(tracker, client, partition, key, meta \\ %{}) do
-    {:ok, ref} = GenServer.call(tracker, {:track, client, partition, key, meta})
+  @doc "Tracks an entry in `tracker`, and returns the ref. `opts` are the options of `Rollcall.track/7`."
+  @spec track(pid(), pid(), Rollcall.partition(), Rollcall.key(), Rollcall.meta(), Keyword.t()) :: Rollcall.ref()
+  def track(tracker, client, partition, key, meta \\ %{}, opts \\ []) do
+    {:ok, ref} = GenServer.call(tracker, {:track, client, partition, key, meta, opts})
     ref
   end
 
@@ -116,6 +116,28 @@ defmodule Rollcall.NetworkHelpers do
   def join_probe(network, scope, node) do
     {:ok, transport} = InMemory.init(scope, network: network, node: node)
     transport
+  end
+
+  @doc """
+  Subscribes the test process to the diffs that the tracker on `node` publishes
+  for `partition` of `scope`.
+  """
+  @spec subscribe(pid(), Rollcall.scope(), node(), Rollcall.partition()) :: :ok
+  def subscribe(network, scope, node, partition) do
+    Network.subscribe(network, node, scope, partition, self())
+  end
+
+  @doc """
+  Returns the next diff that a tracker published for `partition`. Fails the test
+  after `timeout` milliseconds.
+  """
+  @spec receive_diff(Rollcall.partition(), timeout()) :: Rollcall.partition_diff()
+  def receive_diff(partition, timeout \\ 1_000) do
+    receive do
+      {:rollcall_diff, _scope, ^partition, diff} -> diff
+    after
+      timeout -> flunk("No diff for the partition #{inspect(partition)} within #{timeout} ms")
+    end
   end
 
   @doc "Sends `message` from the probe to the trackers of its scope."

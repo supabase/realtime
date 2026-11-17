@@ -43,10 +43,10 @@ jobs:
         # broadcast changes UPDATE and DELETE fail in realtime.broadcast_changes().
         db: [pg15, pg15_latest, pg17, orioledb17, multigres]
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@v6.0.2
 
       - name: Install bun via mise
-        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
+        uses: jdx/mise-action@v4.0.1
         with:
           working_directory: test/e2e
           install_args: "bun"
@@ -65,10 +65,10 @@ jobs:
     name: E2E Tests (Supabase CLI stack)
     runs-on: blacksmith-8vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@v6.0.2
 
       - name: Install bun and the Supabase CLI via mise
-        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
+        uses: jdx/mise-action@v4.0.1
         with:
           working_directory: test/e2e
           install_args: "bun supabase"

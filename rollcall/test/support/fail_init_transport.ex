@@ -26,5 +26,8 @@ defmodule Rollcall.Transport.FailInit do
   defdelegate heartbeat(state, message), to: PassThrough
 
   @impl true
+  defdelegate publish(state, partition, diff), to: PassThrough
+
+  @impl true
   defdelegate unwrap(state, raw), to: PassThrough
 end

@@ -1,8 +1,8 @@
 {
   "pg14": "supabase/postgres:14.1.0.82",
   "pg15": "supabase/postgres:15.1.0.1",
-  "pg15_latest": "supabase/postgres:15.19.0.014",
-  "pg17": "supabase/postgres:17.11.0.014",
-  "orioledb17": "supabase/postgres:17.11.0.014-orioledb",
-  "multigres": "ghcr.io/multigres/multigres-cluster-supabase:sha-56439a4"
+  "pg15_latest": "supabase/postgres:15.20.0.000",
+  "pg17": "supabase/postgres:17.12.0.000",
+  "orioledb17": "supabase/postgres:17.11.0.019-orioledb",
+  "multigres": "ghcr.io/multigres/multigres-cluster-supabase:sha-0d112b2"
 }

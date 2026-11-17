@@ -30,5 +30,31 @@ defmodule RealtimeWeb.TenantRateLimitersTest do
 
       assert TenantRateLimiters.check_tenant(tenant) == {:error, :too_many_joins}
     end
+
+    test "node join budget is used up while the node_join_budget flag is on", %{tenant: tenant} do
+      stub(Realtime.FeatureFlags, :enabled?, fn name, _tenant_id -> name == "node_join_budget" end)
+      use_up_node_join_budget(tenant)
+
+      assert TenantRateLimiters.check_tenant(tenant) == {:error, :too_many_node_joins}
+    end
+
+    test "node join budget is not used up while the node_join_budget flag is on", %{tenant: tenant} do
+      stub(Realtime.FeatureFlags, :enabled?, fn name, _tenant_id -> name == "node_join_budget" end)
+
+      assert TenantRateLimiters.check_tenant(tenant) == :ok
+    end
+
+    test "node join budget is used up while the node_join_budget flag is off", %{tenant: tenant} do
+      stub(Realtime.FeatureFlags, :enabled?, fn _name, _tenant_id -> false end)
+      use_up_node_join_budget(tenant)
+
+      assert TenantRateLimiters.check_tenant(tenant) == :ok
+    end
+  end
+
+  # Takes every join a minute ahead, so the bucket stays empty for the rest of the test
+  defp use_up_node_join_budget(tenant) do
+    future = System.monotonic_time(:microsecond) + 60_000_000
+    Stream.repeatedly(fn -> Realtime.Tenants.NodeJoinBudget.take(tenant, future) end) |> Enum.find(&(&1 == :error))
   end
 end

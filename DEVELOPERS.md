@@ -192,6 +192,14 @@ The image installs the exact toolchain as discussed above and all commands shoul
 To use it, open the repo in VS Code and run **Dev Containers: Reopen in Container**.
 Once the container has built and `postCreateCommand` finishes, follow the same steps as above: `mix setup`, `mise run db-start`, `mise run dev`.
 
+Your home directory in the container is a Docker volume, so shell history, logins and tool state survive rebuilds. `docker volume rm realtime-home-<id>` resets it (`docker volume ls` shows the id).
+
+To see other checkouts from inside the container, e.g. projects next to this one, set `REALTIME_DEVCONTAINER_EXTRA_MOUNT` on your host to a Docker mount with the same path on both sides, then restart VS Code and rebuild:
+
+```sh
+export REALTIME_DEVCONTAINER_EXTRA_MOUNT="type=bind,source=$HOME/code,target=$HOME/code"
+```
+
 > **Note**
 > It uses `--network=host`, which requires a container runtime that supports it. This works natively on Linux and on OrbStack; on Docker Desktop for Mac you need to turn on the host networking beta feature first.
 

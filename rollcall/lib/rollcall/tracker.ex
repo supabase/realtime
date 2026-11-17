@@ -15,7 +15,6 @@ defmodule Rollcall.Tracker do
     * send a request
     * reply to a request with a snapshot
     * hold `sent`, the state at the last heartbeat
-    * hold the view, or publish changes to subscribers
 
   ## Process monitoring
 
@@ -71,7 +70,14 @@ defmodule Rollcall.Tracker do
 
   The tracker waits for a grace period before it stops. It starts a timer when
   it holds no entry. A `track` cancels the timer. When the timer expires, the
-  tracker stops.
+  tracker asks the transport with `c:Rollcall.Transport.active?/1`. The
+  tracker stops when the transport is not active. It starts the timer again
+  when the transport is active. A transport that does not implement the
+  callback is not active.
+
+  The tracker holds the entries of its peers. A node that has listeners and no
+  entry of its own needs them. A stop would leave the listeners with no state
+  and no diffs.
 
   The cost of the wait is an idle tracker. It still sends a heartbeat in each
   period. The best length depends on the heartbeat period.
@@ -123,14 +129,17 @@ defmodule Rollcall.Tracker do
 
   use GenServer, restart: :temporary
   use Snabbkaffex, only: :trace
+  alias Rollcall.Metrics
+  alias Rollcall.Tracker.Changes
   alias Rollcall.Tracker.Entry
   alias Rollcall.Tracker.Local
-  alias Rollcall.Tracker.Changes
   alias Rollcall.Tracker.Messages
   alias Rollcall.Tracker.Peer
   alias Rollcall.Tracker.State
+  alias Rollcall.Tracker.View
 
   @max_retries 3
+  @default_call_timeout :timer.seconds(5)
   @default_empty_grace_in_ms :timer.seconds(5)
   # Default to sending a heartbeat every 1.5 seconds
   @default_heartbeat_period_in_ms 1500
@@ -165,28 +174,49 @@ defmodule Rollcall.Tracker do
   The function sends the message again at most #{@max_retries} times. The limit
   stops an endless loop when a tracker exits without a reply. After the limit,
   the function exits with the reason of the last failure.
+
+  The option `:timeout` sets the milliseconds that the function waits for the
+  reply. The default is #{@default_call_timeout}. The function exits with
+  `{:timeout, _}` when the tracker does not reply in time. 
   """
-  @spec track(Rollcall.name(), Rollcall.scope(), pid(), Rollcall.partition(), Rollcall.key(), Rollcall.meta()) ::
+  @spec track(
+          Rollcall.name(),
+          Rollcall.scope(),
+          pid(),
+          Rollcall.partition(),
+          Rollcall.key(),
+          Rollcall.meta(),
+          Keyword.t()
+        ) ::
           {:ok, Rollcall.ref()} | {:error, term()}
-  def track(name, scope, pid, partition, key, meta) when is_pid(pid) and is_map(meta) do
-    call_or_start(name, scope, {:track, pid, partition, key, meta}, @max_retries)
+  def track(name, scope, pid, partition, key, meta, opts \\ []) when is_pid(pid) and is_map(meta) do
+    timeout = Keyword.get(opts, :timeout, @default_call_timeout)
+
+    call_or_start(name, scope, {:track, pid, partition, key, meta, opts}, timeout, @max_retries)
   end
 
   # Calls the tracker for `scope`. Starts a tracker and sends the message again
   # when none runs, at most `retries` times.
-  defp call_or_start(name, scope, message, retries) do
-    GenServer.call(via(name, scope), message)
+  defp call_or_start(name, scope, message, timeout, retries) do
+    GenServer.call(via(name, scope), message, timeout)
   catch
     :exit, {reason, _} = caught when reason in @gone ->
       if retries == 0, do: exit(caught)
 
       case start(name, scope) do
-        :ok -> call_or_start(name, scope, message, retries - 1)
+        :ok -> call_or_start(name, scope, message, timeout, retries - 1)
         error -> error
       end
   end
 
-  defp start(name, scope) do
+  @doc """
+  Starts the tracker for `scope` in the instance `name`.
+
+  Returns `:ok` also when a tracker runs already. Call `Rollcall.ensure_started/2`
+  instead. It does not start a child when a tracker runs.
+  """
+  @spec start(Rollcall.name(), Rollcall.scope()) :: :ok | {:error, term()}
+  def start(name, scope) do
     # The options of the library, stored in the registry by `Rollcall.start_link/1`.
     {:ok, opts} = Registry.meta(name, :tracker_options)
     {:ok, tracker_supervisor} = Registry.meta(name, :tracker_supervisor)
@@ -208,17 +238,21 @@ defmodule Rollcall.Tracker do
 
   The function does not start a tracker. A tracker that starts only to find
   nothing to remove would stop again after the grace period.
+
+  The option `:timeout` works as it does for `track/7`.
   """
-  @spec untrack(Rollcall.name(), Rollcall.scope(), pid(), Rollcall.partition(), Rollcall.key()) :: :ok
-  def untrack(name, scope, pid, partition, key) do
-    call_if_running(name, scope, {:untrack, pid, partition, key}, :ok)
+  @spec untrack(Rollcall.name(), Rollcall.scope(), pid(), Rollcall.partition(), Rollcall.key(), Keyword.t()) :: :ok
+  def untrack(name, scope, pid, partition, key, opts \\ []) do
+    timeout = Keyword.get(opts, :timeout, @default_call_timeout)
+
+    call_if_running(name, scope, {:untrack, pid, partition, key}, timeout, :ok)
   end
 
   # Calls the tracker for `scope`. Returns `default` when no tracker runs, when
   # the tracker stops before it replies, or when the instance does not run.
-  defp call_if_running(name, scope, message, default) do
+  defp call_if_running(name, scope, message, timeout, default) do
     case lookup(name, scope) do
-      [{pid, _}] -> GenServer.call(pid, message)
+      [{pid, _}] -> GenServer.call(pid, message, timeout)
       [] -> default
     end
   catch
@@ -246,7 +280,7 @@ defmodule Rollcall.Tracker do
   """
   @spec get_state(Rollcall.name(), Rollcall.scope()) :: State.view() | nil
   def get_state(name, scope) do
-    call_if_running(name, scope, :get_state, nil)
+    call_if_running(name, scope, :get_state, @default_call_timeout, nil)
   end
 
   @doc """
@@ -261,6 +295,74 @@ defmodule Rollcall.Tracker do
     |> Registry.select([{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
     |> Enum.filter(fn {_, pid} -> Process.alive?(pid) end)
     |> Enum.map(fn {scope, _} -> scope end)
+  end
+
+  @doc """
+  Returns the usage of the views of the running trackers. See `Rollcall.usage/2`.
+  """
+  @spec usage(Rollcall.name(), Rollcall.usage_buckets()) :: Rollcall.usage()
+  def usage(name, usage_buckets) do
+    empty = %{
+      scope_count: 0,
+      partition_count: 0,
+      entry_count_buckets: Map.new([:infinity | usage_buckets], &{&1, 0})
+    }
+
+    name
+    |> views()
+    |> Enum.reduce(empty, fn view, usage -> add_view(usage, View.partition_counts(view), usage_buckets) end)
+  end
+
+  # The Registry holds `nil` for a tracker that has not made its view yet. It removes the entry of an
+  # exited tracker after a short delay.
+  defp views(name) do
+    name
+    |> Registry.select([{{:_, :"$1", :"$2"}, [], [{{:"$1", :"$2"}}]}])
+    |> Enum.filter(fn {pid, view} -> view != nil and Process.alive?(pid) end)
+    |> Enum.map(fn {_pid, view} -> view end)
+  end
+
+  defp add_view(usage, partition_counts, _usage_buckets) when map_size(partition_counts) == 0, do: usage
+
+  defp add_view(usage, partition_counts, usage_buckets) do
+    buckets =
+      Enum.reduce(partition_counts, usage.entry_count_buckets, fn {_partition, count}, buckets ->
+        Map.update!(buckets, bucket_for(count, usage_buckets), &(&1 + 1))
+      end)
+
+    %{
+      usage
+      | scope_count: usage.scope_count + 1,
+        partition_count: usage.partition_count + map_size(partition_counts),
+        entry_count_buckets: buckets
+    }
+  end
+
+  defp bucket_for(count, usage_buckets), do: Enum.find(usage_buckets, :infinity, &(count <= &1))
+
+  @doc """
+  Returns every entry in the view of `scope`. See `Rollcall.state/2`.
+  """
+  @spec state(Rollcall.name(), Rollcall.scope()) :: [Rollcall.scope_entry()]
+  def state(name, scope) do
+    with_view(name, scope, fn view -> View.entries(view) end)
+  end
+
+  @doc """
+  Returns the entries in `partition` of the view of `scope`. See
+  `Rollcall.state/3`.
+  """
+  @spec state(Rollcall.name(), Rollcall.scope(), Rollcall.partition()) :: [Rollcall.entry()]
+  def state(name, scope, partition) do
+    with_view(name, scope, fn view -> View.entries(view, partition) end)
+  end
+
+  defp with_view(name, scope, fun) do
+    case lookup(name, scope) do
+      [{_tracker, nil}] -> []
+      [{_tracker, view}] -> fun.(view)
+      _ -> []
+    end
   end
 
   @doc """
@@ -324,15 +426,23 @@ defmodule Rollcall.Tracker do
 
     tp(:rollcall_tracker_joined, %{scope: scope, origin: self()})
 
+    view = View.new()
+
+    {_new, _old} = Registry.update_value(Keyword.fetch!(opts, :name), scope, fn _ -> view end)
+
+    {:reductions, reductions} = Process.info(self(), :reductions)
+
     state = %State{
       scope: scope,
       incarnation: System.monotonic_time(:nanosecond),
       local: Local.new(),
+      view: view,
       empty_grace_in_ms: Keyword.get(opts, :empty_grace_in_ms, @default_empty_grace_in_ms),
       silence_threshold: Keyword.get(opts, :silence_threshold, @default_silence_threshold),
       heartbeat_period_in_ms: Keyword.get(opts, :heartbeat_period_in_ms, @default_heartbeat_period_in_ms),
       transport_module: transport_module,
-      transport_state: transport_state
+      transport_state: transport_state,
+      reductions: reductions
     }
 
     # Trap exists in this process so we get terminate/2 callbacks and can send goodbye messages
@@ -345,13 +455,15 @@ defmodule Rollcall.Tracker do
       |> schedule_heartbeat()
       |> start_empty_timer()
 
+    :telemetry.execute(Metrics.tracker_start(), %{}, %{scope: scope})
+
     {:ok, state}
   end
 
-  # The messages that `track/6`, `untrack/5` and `get_state/2` send.
+  # The messages that `track/7`, `untrack/5` and `get_state/2` send.
   @typep call_message ::
            :get_state
-           | {:track, pid(), Rollcall.partition(), Rollcall.key(), Rollcall.meta()}
+           | {:track, pid(), Rollcall.partition(), Rollcall.key(), Rollcall.meta(), Keyword.t()}
            | {:untrack, pid(), Rollcall.partition(), Rollcall.key()}
 
   @impl true
@@ -361,14 +473,16 @@ defmodule Rollcall.Tracker do
     {:reply, State.inspect_view(state), state}
   end
 
-  def handle_call({:track, pid, partition, key, meta}, _from, state) do
-    ref = random_ref()
+  def handle_call({:track, pid, partition, key, meta, opts}, _from, state) do
+    ref = Keyword.get(opts, :ref) || random_ref()
 
     {changes, local} = Local.track(state.local, pid, partition, key, meta, ref)
 
     state =
       state
       |> State.apply_changes(local, changes)
+      |> update_view(changes)
+      |> publish_changes(changes, :local)
       |> cancel_empty_timer()
       |> watch_pid(pid)
 
@@ -395,6 +509,8 @@ defmodule Rollcall.Tracker do
     state =
       state
       |> State.apply_changes(local, changes)
+      |> update_view(changes)
+      |> publish_changes(changes, :local)
       |> maybe_unwatch(pid)
       |> start_empty_timer()
 
@@ -419,9 +535,13 @@ defmodule Rollcall.Tracker do
   @spec handle_info(term(), State.t()) :: {:noreply, State.t()} | {:stop, :normal, State.t()}
   def handle_info({:timeout, ref, :empty_timeout}, %{empty_timer: ref} = state) do
     if Local.empty?(state.local) do
-      tp(:rollcall_tracker_stopped, %{scope: state.scope})
+      if transport_active?(state) do
+        {:noreply, start_empty_timer(%{state | empty_timer: nil})}
+      else
+        tp(:rollcall_tracker_stopped, %{scope: state.scope})
 
-      {:stop, :normal, state}
+        {:stop, :normal, state}
+      end
     else
       tp(:rollcall_tracker_stop_skipped, %{scope: state.scope})
 
@@ -435,6 +555,8 @@ defmodule Rollcall.Tracker do
     state =
       state
       |> State.apply_changes(local, changes)
+      |> update_view(changes)
+      |> publish_changes(changes, :local)
       |> remove_monitor(pid)
       |> start_empty_timer()
 
@@ -444,13 +566,14 @@ defmodule Rollcall.Tracker do
   end
 
   def handle_info(:tick, state) do
-    state =
+    {
+      :noreply,
       state
       |> send_heartbeat()
       |> tick_and_purge_peers()
       |> schedule_heartbeat()
-
-    {:noreply, state}
+      |> emit_usage_metrics()
+    }
   end
 
   # In this catch all handle_info, we see if the message was a message from one
@@ -470,9 +593,11 @@ defmodule Rollcall.Tracker do
           # Valid message from the same scope
           true ->
             origin = node(Messages.origin(msg))
-            new_state = deliver_message(state, origin, State.peer(state, origin), msg)
 
-            {:noreply, new_state}
+            case apply_to_peer(state, origin, State.peer(state, origin), msg) do
+              {state, nil} -> {:noreply, state}
+              {state, changes} -> {:noreply, publish_changes(state, changes, :peer)}
+            end
         end
 
       _ ->
@@ -481,7 +606,7 @@ defmodule Rollcall.Tracker do
   end
 
   @impl true
-  def terminate(_reason, state) do
+  def terminate(reason, state) do
     # When terminating we send a goodbye message, which is an empty snapshot.
     #
     # We need to bump the version on a goodbye to make sure any peer holding our current
@@ -490,6 +615,8 @@ defmodule Rollcall.Tracker do
     {:stamp, _incarnation, goodbye_version} = stamp
     snapshot = Messages.snapshot(self(), stamp, [])
 
+    :telemetry.execute(Metrics.tracker_stop(), %{}, %{scope: state.scope, reason: reason})
+
     :ok = state.transport_module.heartbeat(state.transport_state, snapshot)
 
     tp(:rollcall_tracker_goodbye_sent, %{scope: state.scope, origin: self(), version: goodbye_version})
@@ -497,22 +624,48 @@ defmodule Rollcall.Tracker do
 
   # The transport does not send a message to its own node. The clause makes a
   # tracker safe when it does.
-  defp deliver_message(state, node, _peer, _msg) when node == node() do
-    drop_message(state, :local_origin, state.scope, node)
+  defp apply_to_peer(state, node, _peer, _msg) when node == node() do
+    {drop_message(state, :local_origin, state.scope, node), nil}
   end
 
   # A request carries no state, so a request from an unknown node creates no
   # record.
-  defp deliver_message(state, _node, nil, {:request, _origin}), do: state
+  defp apply_to_peer(state, _node, nil, {:request, _origin}), do: {state, nil}
 
-  defp deliver_message(state, node, nil, msg) do
-    {peer, changes} = Peer.new(msg)
-    put_peer(state, node, peer, changes)
+  defp apply_to_peer(state, node, nil, msg) do
+    measure_peer_apply(
+      fn ->
+        {peer, changes} = Peer.new(msg)
+        {put_peer(state, node, peer, changes), changes}
+      end,
+      state.scope,
+      node,
+      Messages.kind(msg)
+    )
   end
 
-  defp deliver_message(state, node, %Peer{} = peer, msg) do
-    {peer, changes} = Peer.apply(peer, msg)
-    put_peer(state, node, peer, changes)
+  defp apply_to_peer(state, node, %Peer{} = peer, msg) do
+    measure_peer_apply(
+      fn ->
+        {peer, changes} = Peer.apply(peer, msg)
+        {put_peer(state, node, peer, changes), changes}
+      end,
+      state.scope,
+      node,
+      Messages.kind(msg)
+    )
+  end
+
+  defp measure_peer_apply(f, scope, node, kind) do
+    {duration, result} = :timer.tc(f, :native)
+
+    :telemetry.execute(
+      Metrics.tracker_heartbeat_apply(),
+      %{duration: duration},
+      %{scope: scope, node: node, kind: kind}
+    )
+
+    result
   end
 
   defp drop_message(state, reason, message_scope, origin_node) do
@@ -527,15 +680,21 @@ defmodule Rollcall.Tracker do
   end
 
   defp put_peer(state, node, peer, changes) do
-    tp(:rollcall_tracker_peer_message, %{
-      scope: state.scope,
-      node: node,
-      joins: Changes.join_refs(changes),
-      leaves: Changes.leave_refs(changes),
-      behind: Peer.behind?(peer)
-    })
+    tp(
+      :rollcall_tracker_peer_message,
+      %{
+        scope: state.scope,
+        node: node,
+        joins: Changes.join_refs(changes),
+        leaves: Changes.leave_refs(changes),
+        behind: Peer.behind?(peer)
+      },
+      ignore_side_effects: true
+    )
 
-    State.put_peer(state, node, peer)
+    state
+    |> State.put_peer(node, peer)
+    |> update_view(changes)
   end
 
   defp tick_and_purge_peers(%State{} = state) do
@@ -547,35 +706,158 @@ defmodule Rollcall.Tracker do
               Map.put(kept, node, peer)
 
             {:purge, changes} ->
-              tp(:rollcall_tracker_peer_purged, %{
-                scope: state.scope,
-                node: node,
-                joins: Changes.join_refs(changes),
-                leaves: Changes.leave_refs(changes)
-              })
+              state
+              |> update_view(changes)
+              |> publish_changes(changes, :purge)
+
+              tp(
+                :rollcall_tracker_peer_purged,
+                %{
+                  scope: state.scope,
+                  node: node,
+                  joins: Changes.join_refs(changes),
+                  leaves: Changes.leave_refs(changes)
+                },
+                ignore_side_effects: true
+              )
+
+              purge_count = length(changes.leaves)
+
+              :telemetry.execute(
+                Metrics.tracker_peer_purge(),
+                %{entries: purge_count},
+                %{node: node, scope: state.scope, stale: purge_count > 0}
+              )
 
               kept
           end
       end)
 
+    emit_peer_metric(state, peers)
+
     %{state | peers: peers}
   end
 
+  defp emit_peer_metric(state, peers) do
+    peer_list = Map.values(peers)
+
+    max_silent_ticks =
+      peer_list
+      |> Stream.reject(&Peer.empty?/1)
+      |> Stream.map(& &1.silent_ticks)
+      |> Enum.max(fn -> 0 end)
+
+    :telemetry.execute(
+      Metrics.tracker_peers(),
+      %{
+        count: map_size(peers),
+        overdue_count: Enum.count(peer_list, &Peer.overdue?/1),
+        max_silent_ticks: max_silent_ticks
+      },
+      %{
+        scope: state.scope
+      }
+    )
+  end
+
+  defp emit_usage_metrics(state) do
+    {:memory, process_bytes} = Process.info(self(), :memory)
+    {:reductions, reductions} = Process.info(self(), :reductions)
+
+    :telemetry.execute(
+      Metrics.tracker_usage(),
+      %{
+        entries: :ets.info(state.view, :size),
+        process_bytes: process_bytes,
+        ets_bytes: :ets.info(state.view, :memory) * :erlang.system_info(:wordsize),
+        reductions: reductions - state.reductions
+      },
+      %{scope: state.scope}
+    )
+
+    %{state | reductions: reductions}
+  end
+
+  defp update_view(state, changes) do
+    View.write(state.view, changes)
+
+    state
+  end
+
+  defp transport_active?(state) do
+    function_exported?(state.transport_module, :active?, 1) and
+      state.transport_module.active?(state.transport_state)
+  end
+
+  defp publish_changes(state, changes, source) do
+    for {partition, {joins, leaves} = diff} <- Changes.partition_diffs(changes) do
+      {duration, _} =
+        :timer.tc(
+          fn ->
+            :ok = state.transport_module.publish(state.transport_state, partition, diff)
+          end,
+          :native
+        )
+
+      :telemetry.execute(
+        Metrics.tracker_publish(),
+        %{
+          duration: duration,
+          entries: length(joins) + length(leaves)
+        },
+        %{
+          scope: state.scope,
+          source: source
+        }
+      )
+
+      tp(
+        :rollcall_tracker_published,
+        %{
+          scope: state.scope,
+          partition: partition,
+          joins: diff |> elem(0) |> Enum.map(&elem(&1, 0)),
+          leaves: diff |> elem(1) |> Enum.map(&elem(&1, 0))
+        },
+        ignore_side_effects: true
+      )
+    end
+
+    state
+  end
+
   defp send_heartbeat(%State{} = state) do
-    local_entries = Local.entries(state.local)
+    {duration, entry_count} =
+      :timer.tc(
+        fn ->
+          local_entries = Local.entries(state.local)
 
-    snapshot_entries = Enum.map(local_entries, &Entry.to_wire_entry/1)
-    snapshot = Messages.snapshot(self(), State.current_stamp(state), snapshot_entries)
+          snapshot_entries = Enum.map(local_entries, &Entry.to_wire_entry/1)
+          snapshot = Messages.snapshot(self(), State.current_stamp(state), snapshot_entries)
 
-    :ok = state.transport_module.heartbeat(state.transport_state, snapshot)
+          :ok = state.transport_module.heartbeat(state.transport_state, snapshot)
 
-    tp(:rollcall_tracker_heartbeat_sent, %{
+          length(snapshot_entries)
+        end,
+        :native
+      )
+
+    :telemetry.execute(Metrics.tracker_heartbeat_send(), %{duration: duration, entries: entry_count}, %{
       scope: state.scope,
-      origin: self(),
-      kind: :snapshot,
-      version: state.version,
-      refs: Enum.map(local_entries, & &1.ref)
+      kind: :snapshot
     })
+
+    tp(
+      :rollcall_tracker_heartbeat_sent,
+      %{
+        scope: state.scope,
+        origin: self(),
+        kind: :snapshot,
+        version: state.version,
+        refs: Enum.map(Local.entries(state.local), & &1.ref)
+      },
+      ignore_side_effects: true
+    )
 
     state
   end

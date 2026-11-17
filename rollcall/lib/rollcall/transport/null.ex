@@ -1,6 +1,6 @@
 defmodule Rollcall.Transport.Null do
   @moduledoc """
-  A null transport that sends no messages. 
+  A null transport that sends no messages and publishes no diffs. 
 
   You probably don't actually want to use this, but it's the default for now.
 
@@ -16,6 +16,11 @@ defmodule Rollcall.Transport.Null do
 
   @impl true
   def heartbeat(_scope, _message) do
+    :ok
+  end
+
+  @impl true
+  def publish(_scope, _partition, _diff) do
     :ok
   end
 

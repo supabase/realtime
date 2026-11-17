@@ -20,7 +20,8 @@ defmodule Rollcall.Tracker.StateTest do
       silence_threshold: 10,
       heartbeat_period_in_ms: :manual,
       transport_module: Rollcall.Transport.Null,
-      transport_state: nil
+      transport_state: nil,
+      reductions: 0
     }
 
     %{state: state}

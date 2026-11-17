@@ -144,4 +144,22 @@ defmodule Rollcall.TrackerTraceTest do
       )
     end
   end
+
+  describe "publish" do
+    test "emits an event for each published diff", %{scope: scope, rollcall: rollcall} do
+      check_trace(
+        fn ->
+          {:ok, ref_1} = Rollcall.track(rollcall, self(), scope, "p1", "key", %{})
+          :ok = Rollcall.untrack(rollcall, self(), scope, "p1", "key")
+          ref_1
+        end,
+        fn ref, trace ->
+          assert [
+                   %{partition: "p1", joins: [^ref], leaves: []},
+                   %{partition: "p1", joins: [], leaves: [^ref]}
+                 ] = events(trace, :rollcall_tracker_published, scope)
+        end
+      )
+    end
+  end
 end
