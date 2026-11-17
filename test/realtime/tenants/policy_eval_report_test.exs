@@ -270,6 +270,7 @@ defmodule Realtime.Tenants.PolicyEvalReportTest do
                "realtime.topic" => :known,
                "auth.uid" => :unknown_definition,
                "auth.role" => :overloaded,
+               "auth.email" => :not_in_snapshot,
                "auth.jwt" => :not_in_snapshot
              }
 
@@ -285,7 +286,7 @@ defmodule Realtime.Tenants.PolicyEvalReportTest do
           })
         )
 
-      assert [%{name: "realtime.topic", status: :unknown_definition}, _, _, _] = report.functions
+      assert [%{name: "realtime.topic", status: :unknown_definition}, _, _, _, _] = report.functions
 
       assert outcome(report, "anon", :read) ==
                {:evaluates, ["lobby"], [{:function, {:function, "realtime.topic", :unknown_definition}}]}

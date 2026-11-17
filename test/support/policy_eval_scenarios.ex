@@ -20,10 +20,10 @@ defmodule PolicyEvalScenarios do
 
   @headers ~s({"x-client-info":"supabase-js/2.0"})
 
-  # How the bodies of auth.uid()/auth.role() are called in test names
+  # How the bodies of auth.uid()/auth.role()/auth.email() are called in test names
   @flavor_labels %{legacy: "legacy", supabase_auth: "supabase/auth"}
 
-  @doc "How a body of `auth.uid()` and `auth.role()` is called in test names."
+  @doc "How a body of `auth.uid()`, `auth.role()` and `auth.email()` is called in test names."
   @spec flavor_label(:legacy | :supabase_auth) :: String.t()
   def flavor_label(flavor), do: Map.fetch!(@flavor_labels, flavor)
 
@@ -93,7 +93,7 @@ defmodule PolicyEvalScenarios do
   #   policies:   CREATE POLICY statements, run after the ones that are on the table are dropped
   #   setup:      statements run before them
   #   env:        see env/1
-  #   functions:  :legacy | :supabase_auth, the bodies of auth.uid() and auth.role()
+  #   functions:  :legacy | :supabase_auth, the bodies of auth.uid(), auth.role() and auth.email()
   #   extensions: what is asked for, both as read and write extensions
   defp scenario(group, name, policies, env_opts, opts \\ []) do
     env = env(env_opts)
@@ -117,7 +117,7 @@ defmodule PolicyEvalScenarios do
     }
   end
 
-  # The legacy bodies of auth.uid() and auth.role() are the ones of the supabase/postgres image,
+  # The legacy bodies of auth.uid(), auth.role() and auth.email() are the ones of the supabase/postgres image,
   # supabase/auth's are what production projects run
   defp functions_setup(:legacy), do: [PolicyEvalPolicies.auth_jwt_statement()]
 
@@ -426,12 +426,18 @@ defmodule PolicyEvalScenarios do
        [policy_sql("a", "FOR ALL TO authenticated USING (event IS NULL OR realtime.topic() = 'x')")]},
       {"another column and the topic",
        [policy_sql("a", "FOR ALL TO authenticated USING (event IS NOT NULL AND realtime.topic() = 'x')")]},
+      # The loader reads only the functions the profile knows, so auth.team() is not in the snapshot
       {"a function the snapshot doesn't have",
-       [policy_sql("a", "FOR ALL TO authenticated USING (auth.email() IS NULL)")]}
+       [policy_sql("a", "FOR ALL TO authenticated USING (auth.team() IS NULL)")],
+       ["CREATE FUNCTION auth.team() RETURNS text LANGUAGE sql STABLE AS $$ select null::text $$"]}
     ]
 
-    for {label, policies} <- sets, role <- ["authenticated", "anon"], topic <- ["x", "y", "z", ""] do
-      scenario("combination", "#{label}, #{role}, topic #{inspect(topic)}", policies, role: role, topic: topic)
+    for set <- sets, role <- ["authenticated", "anon"], topic <- ["x", "y", "z", ""] do
+      {label, policies, setup} = with {label, policies} <- set, do: {label, policies, []}
+
+      scenario("combination", "#{label}, #{role}, topic #{inspect(topic)}", policies, [role: role, topic: topic],
+        setup: setup
+      )
     end
   end
 
@@ -653,6 +659,49 @@ defmodule PolicyEvalScenarios do
         "draft channels (#{flavor_label(flavor)}), topic: #{topic_label}, sub: #{sub_label}",
         policies,
         [topic: topic, sub: sub],
+        functions: flavor
+      )
+    end
+  end
+
+  @doc """
+  Inbox channels: a user reads and broadcasts on `inbox:<email>`, with `auth.email()`.
+
+  Realtime does not set `request.jwt.claim.email`, so the legacy `auth.email()` is always NULL and
+  every join is denied. supabase/auth's reads the `email` field of the claims. The library has to
+  decide all of them, not fall back.
+  """
+  @spec email_channel_scenarios(:legacy | :supabase_auth) :: [map()]
+  def email_channel_scenarios(flavor) do
+    condition = "realtime.topic() = 'inbox:' || auth.email()"
+
+    policies = [
+      policy_sql("users receive on their inbox", "FOR SELECT TO authenticated USING (#{condition})"),
+      policy_sql("users send on their inbox", "FOR INSERT TO authenticated WITH CHECK ((select #{condition}))")
+    ]
+
+    topics = [
+      {"own inbox", "inbox:ana@example.com"},
+      {"own inbox in upper case", "inbox:ANA@EXAMPLE.COM"},
+      {"another inbox", "inbox:bob@example.com"},
+      {"inbox: and nothing", "inbox:"},
+      {"empty", ""}
+    ]
+
+    claims = [
+      {"own", %{"email" => "ana@example.com"}},
+      {"upper case", %{"email" => "ANA@EXAMPLE.COM"}},
+      {"empty", %{"email" => ""}},
+      {"JSON null", %{"email" => nil}},
+      {"missing", %{}}
+    ]
+
+    for {topic_label, topic} <- topics, {claim_label, extra_claims} <- claims do
+      scenario(
+        "inbox channels, #{flavor_label(flavor)}",
+        "inbox channels (#{flavor_label(flavor)}), topic: #{topic_label}, email: #{claim_label}",
+        policies,
+        [topic: topic, extra_claims: extra_claims],
         functions: flavor
       )
     end
