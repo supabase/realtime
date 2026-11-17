@@ -92,6 +92,20 @@ defmodule Realtime.Nodes do
 
   def region_nodes(nil), do: []
 
+  @doc "Marks this node as draining, so `launch_node/3` stops picking it for new tenant processes."
+  @spec mark_draining(pid()) :: :ok | {:error, term()}
+  def mark_draining(pid) when is_pid(pid), do: :syn.join(DrainingNodes, region(), pid, node: node())
+
+  @doc """
+  Lists the nodes of a region that are draining. See `mark_draining/1`.
+  """
+  @spec draining_nodes(String.t() | nil) :: MapSet.t(node())
+  def draining_nodes(region) when is_binary(region) do
+    for {_pid, meta} <- :syn.members(DrainingNodes, region), into: MapSet.new(), do: Keyword.fetch!(meta, :node)
+  end
+
+  def draining_nodes(nil), do: MapSet.new()
+
   @doc """
   Picks a node from a region based on the provided key
   """
@@ -128,8 +142,12 @@ defmodule Realtime.Nodes do
   If the uptime of the node is below the configured threshold for load balancing,
   a consistent node is picked based on hashing the tenant ID.
 
-  If there are not two nodes in a region, the connection is established from
-  the `default` node given.
+  Draining nodes (see `mark_draining/1`) are left out, unless every node in the
+  region is draining. Then the picker uses all of them, so the tenant stays in
+  its region.
+
+  If the region has no nodes, the connection is established from the `default`
+  node given.
   """
   @spec launch_node(String.t() | nil, atom(), String.t()) :: atom()
   def launch_node(region, default, tenant_id) when is_binary(tenant_id) do
@@ -142,7 +160,19 @@ defmodule Realtime.Nodes do
         single_node
 
       nodes ->
-        load_aware_node_picker(nodes, tenant_id)
+        case without_draining_nodes(nodes, region) do
+          [single_node] -> single_node
+          nodes -> load_aware_node_picker(nodes, tenant_id)
+        end
+    end
+  end
+
+  defp without_draining_nodes(nodes, region) do
+    draining = draining_nodes(region)
+
+    case Enum.reject(nodes, &MapSet.member?(draining, &1)) do
+      [] -> nodes
+      not_draining -> not_draining
     end
   end
 
