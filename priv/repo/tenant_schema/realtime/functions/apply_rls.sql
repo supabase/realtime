@@ -50,19 +50,11 @@ declare
     raw_columns realtime.wal_column[] =
         array_agg((x->>'name', x->>'type', x->>'typeoid', x->'value', null, null)::realtime.wal_column)
         from jsonb_array_elements(wal -> 'columns') x
-        join pg_catalog.pg_attribute a
-            on a.attrelid = entity_
-            and a.attname = x->>'name'
-            and a.attnum > 0
-            and not a.attisdropped;
+        join pg_catalog.pg_attribute a on a.attrelid = entity_ and a.attname = x->>'name' and not a.attisdropped;
     raw_old_columns realtime.wal_column[] =
         array_agg((x->>'name', x->>'type', x->>'typeoid', x->'value', null, null)::realtime.wal_column)
         from jsonb_array_elements(wal -> 'identity') x
-        join pg_catalog.pg_attribute a
-            on a.attrelid = entity_
-            and a.attname = x->>'name'
-            and a.attnum > 0
-            and not a.attisdropped;
+        join pg_catalog.pg_attribute a on a.attrelid = entity_ and a.attname = x->>'name' and not a.attisdropped;
 
     error_record_exceeds_max_size boolean = octet_length(wal::text) > max_record_bytes;
 
@@ -98,11 +90,7 @@ begin
         )
         from
             jsonb_array_elements(wal -> 'columns') x
-            join pg_catalog.pg_attribute a
-                on a.attrelid = entity_
-                and a.attname = x->>'name'
-                and a.attnum > 0
-                and not a.attisdropped
+            join pg_catalog.pg_attribute a on a.attrelid = entity_ and a.attname = x->>'name' and not a.attisdropped
             left join jsonb_array_elements(wal -> 'pk') pks
                 on (x ->> 'name') = (pks ->> 'name');
 
@@ -125,11 +113,7 @@ begin
         )
         from
             jsonb_array_elements(wal -> 'identity') x
-            join pg_catalog.pg_attribute a
-                on a.attrelid = entity_
-                and a.attname = x->>'name'
-                and a.attnum > 0
-                and not a.attisdropped
+            join pg_catalog.pg_attribute a on a.attrelid = entity_ and a.attname = x->>'name' and not a.attisdropped
             left join jsonb_array_elements(wal -> 'pk') pks
                 on (x ->> 'name') = (pks ->> 'name');
 
