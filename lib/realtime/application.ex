@@ -224,7 +224,7 @@ defmodule Realtime.Application do
   def prep_stop(state) do
     case Realtime.Nodes.mark_draining(self()) do
       :ok ->
-        settle_ms = Application.get_env(:realtime, :node_drain_settle_ms, 1_000)
+        settle_ms = Application.fetch_env!(:realtime, :node_drain_settle_ms)
         Logger.info("Marked node as draining, waiting #{settle_ms}ms before shutdown continues")
         Process.sleep(settle_ms)
 
