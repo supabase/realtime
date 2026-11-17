@@ -135,12 +135,14 @@ defmodule RealtimeWeb.OpenApiSchemas do
             },
             max_client_presence_events_per_window: %Schema{
               type: :number,
-              description: "Maximum client presence events (overrides environment default when set)",
+              description:
+                "Presence messages each channel can send at once, refilled over client_presence_window_ms (overrides environment default when set)",
               nullable: true
             },
             client_presence_window_ms: %Schema{
               type: :number,
-              description: "Client presence rate limit window in milliseconds (overrides environment default when set)",
+              description:
+                "Time in milliseconds for a channel to get back all of its presence messages (overrides environment default when set)",
               nullable: true
             },
             presence_enabled: %Schema{
@@ -252,12 +254,14 @@ defmodule RealtimeWeb.OpenApiSchemas do
         },
         max_client_presence_events_per_window: %Schema{
           type: :number,
-          description: "Maximum client presence events (overrides environment default when set)",
+          description:
+            "Presence messages each channel can send at once, refilled over client_presence_window_ms (overrides environment default when set)",
           nullable: true
         },
         client_presence_window_ms: %Schema{
           type: :number,
-          description: "Client presence rate limit window in milliseconds (overrides environment default when set)",
+          description:
+            "Time in milliseconds for a channel to get back all of its presence messages (overrides environment default when set)",
           nullable: true
         },
         inserted_at: %Schema{type: :string, format: "date-time", description: "Insert timestamp"},
