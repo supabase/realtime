@@ -60,4 +60,34 @@ defmodule Realtime.TokenBucketTest do
       assert Enum.count(results, &(&1 == :error)) == 100
     end
   end
+
+  describe "wait_time/2" do
+    test "is 0 while the bucket has a token" do
+      bucket = TokenBucket.new(2, 2, 0)
+
+      assert TokenBucket.wait_time(bucket, 0) == 0
+      assert :ok = TokenBucket.take(bucket, 0)
+      assert TokenBucket.wait_time(bucket, 0) == 0
+    end
+
+    test "is the time until the next take fits" do
+      bucket = TokenBucket.new(2, 2, 0)
+
+      assert :ok = TokenBucket.take(bucket, 0)
+      assert :ok = TokenBucket.take(bucket, 0)
+      assert TokenBucket.wait_time(bucket, 0) == div(@second, 2)
+      assert TokenBucket.wait_time(bucket, div(@second, 4)) == div(@second, 4)
+
+      assert :error = TokenBucket.take(bucket, div(@second, 2) - 1)
+      assert :ok = TokenBucket.take(bucket, div(@second, 2))
+    end
+
+    test "a rejection does not make the wait longer" do
+      bucket = TokenBucket.new(1, 1, 0)
+
+      assert :ok = TokenBucket.take(bucket, 0)
+      for _ <- 1..10, do: assert(:error = TokenBucket.take(bucket, 0))
+      assert TokenBucket.wait_time(bucket, 0) == @second
+    end
+  end
 end

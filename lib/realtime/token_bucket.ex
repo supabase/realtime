@@ -64,5 +64,15 @@ defmodule Realtime.TokenBucket do
     end
   end
 
+  @doc """
+  Returns the microseconds until the bucket has a token again, or 0 when it has one now.
+
+  Another process holding the bucket can take that token first, so a take after the wait can still return `:error`.
+  """
+  @spec wait_time(t(), integer()) :: non_neg_integer()
+  def wait_time(%__MODULE__{ref: ref, tolerance: tolerance}, now \\ now()) do
+    max(:atomics.get(ref, 1) - now - tolerance, 0)
+  end
+
   defp now, do: System.monotonic_time(:microsecond)
 end
