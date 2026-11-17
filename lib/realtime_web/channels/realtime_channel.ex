@@ -19,7 +19,6 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Realtime.PostgresCdc
   alias Realtime.RateCounter
   alias Realtime.SignalHandler
-  alias Realtime.Telemetry
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
@@ -51,7 +50,6 @@ defmodule RealtimeWeb.RealtimeChannel do
   @node_join_budget_flag "node_join_budget"
   @socket_join_limit_flag "socket_join_limit"
   @socket_broadcast_limit_flag "socket_broadcast_limit"
-  @socket_broadcast_limit_exceeded_event [:realtime, :channel, :socket_broadcast_limit_exceeded]
 
   @impl true
   def join("realtime:", _params, socket) do
@@ -501,7 +499,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   @impl true
   def handle_in("broadcast", payload, %{assigns: %{private?: true}} = socket) do
     %{tenant: tenant_id} = socket.assigns
-    measure_socket_broadcasts(socket)
+    limit_socket_broadcasts(socket)
 
     RequestMetrics.track(:broadcast, :ws, tenant_id, fn ->
       with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id) do
@@ -535,7 +533,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_in("broadcast", payload, %{assigns: %{private?: false}} = socket) do
-    measure_socket_broadcasts(socket)
+    limit_socket_broadcasts(socket)
     RequestMetrics.track(:broadcast, :ws, socket.assigns.tenant, fn -> BroadcastHandler.handle(payload, socket) end)
   end
 
@@ -763,12 +761,24 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp measure_socket_broadcasts(%{assigns: %{tenant: tenant_id}, private: %{broadcast_bucket: bucket}}) do
+  # A broadcast over the socket's limit is delayed, not refused: the channel sleeps until the bucket has a token for
+  # it. While it sleeps, the channel reads no more messages from the client, so the client cannot go faster than
+  # the bucket refills. The flag is read on every broadcast so switching it off takes effect without reconnects
+  defp limit_socket_broadcasts(%{assigns: %{tenant: tenant_id}, private: %{broadcast_bucket: bucket}} = socket) do
     if FeatureFlags.enabled?(@socket_broadcast_limit_flag, tenant_id) and TokenBucket.take(bucket) == :error do
-      Telemetry.execute(@socket_broadcast_limit_exceeded_event, %{count: 1}, %{tenant: tenant_id})
+      log_error(socket, "MessagePerSecondRateLimitReached", "Too many broadcasts on this socket")
+
+      wait_for_broadcast_token(bucket)
     end
 
     :ok
+  end
+
+  # Other channels of the socket share the bucket and can take the token first, so the take after the sleep can fail
+  defp wait_for_broadcast_token(bucket) do
+    bucket |> TokenBucket.wait_time() |> div(1_000) |> Kernel.+(1) |> Process.sleep()
+
+    if TokenBucket.take(bucket) == :error, do: wait_for_broadcast_token(bucket), else: :ok
   end
 
   # channels_count is the number of channels the transport already holds, set by UserSocket

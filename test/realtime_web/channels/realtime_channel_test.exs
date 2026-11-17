@@ -1363,7 +1363,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
   end
 
-  @socket_broadcast_limit_exceeded_event [:realtime, :channel, :socket_broadcast_limit_exceeded]
+  @channel_error_event [:realtime, :channel, :error]
+  @broadcast_limit_code "MessagePerSecondRateLimitReached"
   @broadcast_ack_config %{"broadcast" => %{"ack" => true, "self" => false}}
 
   describe "broadcasts per socket" do
@@ -1371,7 +1372,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
     setup %{tenant: tenant} do
       stub_socket_broadcast_limit_flag(true)
-      telemetry_ref = :telemetry_test.attach_event_handlers(self(), [@socket_broadcast_limit_exceeded_event])
+      telemetry_ref = :telemetry_test.attach_event_handlers(self(), [@channel_error_event])
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
@@ -1386,7 +1387,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert %TokenBucket{interval: ^interval, tolerance: ^tolerance} = socket.private.broadcast_bucket
     end
 
-    test "counts nothing for broadcasts within the bucket", context do
+    test "logs nothing for broadcasts within the bucket", context do
       %{socket: socket, telemetry_ref: telemetry_ref, tenant_id: tenant_id} = context
       socket = put_broadcast_bucket(socket, 1, 2)
       assert {:ok, _, socket} = subscribe_and_join(socket, "realtime:test", %{"config" => @broadcast_ack_config})
@@ -1396,30 +1397,67 @@ defmodule RealtimeWeb.RealtimeChannelTest do
         assert_reply ref, :ok, %{}
       end
 
-      refute_received {@socket_broadcast_limit_exceeded_event, ^telemetry_ref, _, %{tenant: ^tenant_id}}
+      refute_received {@channel_error_event, ^telemetry_ref, _, %{code: @broadcast_limit_code, tenant: ^tenant_id}}
     end
 
-    test "sends a broadcast over the limit and counts it", context do
+    test "logs a broadcast over the limit, waits for the bucket to refill and then sends it", context do
       %{socket: socket, telemetry_ref: telemetry_ref, tenant_id: tenant_id} = context
+      # One token every 200 ms
+      socket = put_broadcast_bucket(socket, 5, 1)
       config = %{"broadcast" => %{"ack" => true, "self" => true}}
       assert {:ok, _, socket} = subscribe_and_join(socket, "realtime:test", %{"config" => config})
-      empty_broadcast_bucket(socket)
 
-      ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{"hello" => "world"}})
-
+      ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{"n" => 1}})
       assert_reply ref, :ok, %{}
-      assert_receive %Socket.Message{event: "broadcast", payload: %{"payload" => %{"hello" => "world"}}}
-      assert_received {@socket_broadcast_limit_exceeded_event, ^telemetry_ref, %{count: 1}, %{tenant: ^tenant_id}}
+      sent_at = System.monotonic_time(:millisecond)
+
+      log =
+        capture_log(fn ->
+          ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{"n" => 2}})
+          assert_reply ref, :ok, %{}, 1_000
+        end)
+
+      assert System.monotonic_time(:millisecond) - sent_at >= 150
+      assert log =~ "MessagePerSecondRateLimitReached: Too many broadcasts on this socket"
+      assert_receive %Socket.Message{event: "broadcast", payload: %{"payload" => %{"n" => 2}}}
+
+      assert_received {@channel_error_event, ^telemetry_ref, %{count: 1},
+                       %{code: @broadcast_limit_code, tenant: ^tenant_id}}
     end
 
-    test "counts a private broadcast before it reaches the tenant database", context do
+    test "logs every delayed broadcast", context do
       %{socket: socket, telemetry_ref: telemetry_ref, tenant_id: tenant_id} = context
+      socket = put_broadcast_bucket(socket, 10, 1)
+      assert {:ok, _, socket} = subscribe_and_join(socket, "realtime:test", %{"config" => @broadcast_ack_config})
+
+      log =
+        capture_log(fn ->
+          for _ <- 1..4 do
+            ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{}})
+            assert_reply ref, :ok, %{}, 1_000
+          end
+        end)
+
+      assert log |> String.split("Too many broadcasts on this socket") |> length() == 4
+
+      events =
+        for _ <- 1..3 do
+          assert_received {@channel_error_event, ^telemetry_ref, %{count: 1},
+                           %{code: @broadcast_limit_code, tenant: ^tenant_id}}
+        end
+
+      assert length(events) == 3
+    end
+
+    test "limits a private broadcast before it reaches the tenant database", context do
+      %{socket: socket, telemetry_ref: telemetry_ref, tenant_id: tenant_id} = context
+      socket = put_broadcast_bucket(socket, 10, 1)
       config = %{"private" => true, "broadcast" => %{"ack" => true}}
 
       assert %Socket{channel_pid: channel_pid} =
                socket = subscribe_and_join!(socket, "realtime:test", %{"config" => config})
 
-      empty_broadcast_bucket(socket)
+      :ok = TokenBucket.take(socket.private.broadcast_bucket)
 
       log =
         capture_log(fn ->
@@ -1431,19 +1469,26 @@ defmodule RealtimeWeb.RealtimeChannelTest do
         end)
 
       assert log =~ "UnableToHandleBroadcast"
-      assert_received {@socket_broadcast_limit_exceeded_event, ^telemetry_ref, %{count: 1}, %{tenant: ^tenant_id}}
+
+      assert_received {@channel_error_event, ^telemetry_ref, %{count: 1},
+                       %{code: @broadcast_limit_code, tenant: ^tenant_id}}
     end
 
     test "all channels of a socket share its bucket", context do
       %{socket: socket, telemetry_ref: telemetry_ref, tenant_id: tenant_id} = context
-      empty_broadcast_bucket(socket)
+      socket = put_broadcast_bucket(socket, 10, 1)
+      assert {:ok, _, socket_1} = subscribe_and_join(socket, "realtime:test1", %{"config" => @broadcast_ack_config})
+      assert {:ok, _, socket_2} = subscribe_and_join(socket, "realtime:test2", %{"config" => @broadcast_ack_config})
 
-      for topic <- ["realtime:test1", "realtime:test2"] do
-        assert {:ok, _, socket} = subscribe_and_join(socket, topic, %{"config" => @broadcast_ack_config})
-        ref = push(socket, "broadcast", %{"event" => "my_event", "payload" => %{}})
-        assert_reply ref, :ok, %{}
-        assert_received {@socket_broadcast_limit_exceeded_event, ^telemetry_ref, %{count: 1}, %{tenant: ^tenant_id}}
-      end
+      ref = push(socket_1, "broadcast", %{"event" => "my_event", "payload" => %{}})
+      assert_reply ref, :ok, %{}
+      refute_received {@channel_error_event, ^telemetry_ref, _, %{code: @broadcast_limit_code, tenant: ^tenant_id}}
+
+      ref = push(socket_2, "broadcast", %{"event" => "my_event", "payload" => %{}})
+      assert_reply ref, :ok, %{}, 1_000
+
+      assert_received {@channel_error_event, ^telemetry_ref, %{count: 1},
+                       %{code: @broadcast_limit_code, tenant: ^tenant_id}}
     end
 
     test "each socket has its own bucket", %{tenant: tenant} = context do
@@ -1456,10 +1501,10 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       ref = push(socket_2, "broadcast", %{"event" => "my_event", "payload" => %{}})
 
       assert_reply ref, :ok, %{}
-      refute_received {@socket_broadcast_limit_exceeded_event, ^telemetry_ref, _, %{tenant: ^tenant_id}}
+      refute_received {@channel_error_event, ^telemetry_ref, _, %{code: @broadcast_limit_code, tenant: ^tenant_id}}
     end
 
-    test "counts nothing and takes no token while the flag is off", context do
+    test "logs nothing and takes no token while the flag is off", context do
       %{socket: socket, telemetry_ref: telemetry_ref, tenant_id: tenant_id} = context
       stub_socket_broadcast_limit_flag(false)
       socket = put_broadcast_bucket(socket, 1, 1)
@@ -1470,7 +1515,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
         assert_reply ref, :ok, %{}
       end
 
-      refute_received {@socket_broadcast_limit_exceeded_event, ^telemetry_ref, _, %{tenant: ^tenant_id}}
+      refute_received {@channel_error_event, ^telemetry_ref, _, %{code: @broadcast_limit_code, tenant: ^tenant_id}}
       assert TokenBucket.take(socket.private.broadcast_bucket) == :ok
     end
   end
