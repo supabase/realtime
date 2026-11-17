@@ -64,53 +64,6 @@ defmodule Realtime.Presence.Comparison do
         }
 
   @doc """
-  Returns the candidates of two views: the refs that one view holds and the other view does not.
-
-  `phoenix` and `rollcall` map each topic to its refs. A ref in `phoenix` only is `:missing`.
-  A ref in `rollcall` only is `:ghost`. All the refs of a topic that only one view holds are
-  candidates. The order of the result is not defined.
-  """
-  @spec diff(refs(), refs()) :: [candidate()]
-  def diff(phoenix, rollcall) do
-    topics = MapSet.new(Enum.concat(Map.keys(phoenix), Map.keys(rollcall)))
-
-    topics
-    |> Stream.flat_map(fn topic ->
-      phoenix_refs = MapSet.new(Map.get(phoenix, topic, []))
-      rollcall_refs = MapSet.new(Map.get(rollcall, topic, []))
-
-      ghosts = MapSet.difference(rollcall_refs, phoenix_refs)
-      missings = MapSet.difference(phoenix_refs, rollcall_refs)
-
-      ghost_candidates = ghosts |> Stream.map(fn ghost -> {topic, ghost, :ghost} end)
-      missing_candidates = missings |> Stream.map(fn missing -> {topic, missing, :missing} end)
-
-      Stream.concat(ghost_candidates, missing_candidates)
-    end)
-    |> Enum.to_list()
-  end
-
-  @doc """
-  Checks each of `candidates` against fresh views, and returns each candidate with its outcome.
-
-    * `:converged`: both views hold the ref now, or only the other view holds it. The kind
-      changed, and the original difference ended.
-    * `:open`: the view that held the ref still holds it, and the other view does not.
-    * `:gone`: neither view holds the ref, or neither view holds the topic.
-
-  The views need only the topics of the candidates. A check adds no new candidate.
-  """
-  @spec step([candidate()], refs(), refs()) :: [{candidate(), outcome()}]
-  def step(candidates, phoenix, rollcall) do
-    phoenix = ref_sets(phoenix)
-    rollcall = ref_sets(rollcall)
-
-    Enum.map(candidates, fn {topic, ref, kind} = candidate ->
-      {candidate, outcome(kind, holds?(phoenix, topic, ref), holds?(rollcall, topic, ref))}
-    end)
-  end
-
-  @doc """
   Starts a comparison from the first reads of both views.
 
   The candidates are the result of `diff/2` for `phoenix` and `rollcall`. `persistent_rung` is the
@@ -232,6 +185,53 @@ defmodule Realtime.Presence.Comparison do
       state.candidates == %{missing: 0, ghost: 0} -> :clean
       true -> :transient
     end
+  end
+
+  @doc """
+  Returns the candidates of two views: the refs that one view holds and the other view does not.
+
+  `phoenix` and `rollcall` map each topic to its refs. A ref in `phoenix` only is `:missing`.
+  A ref in `rollcall` only is `:ghost`. All the refs of a topic that only one view holds are
+  candidates. The order of the result is not defined.
+  """
+  @spec diff(refs(), refs()) :: [candidate()]
+  def diff(phoenix, rollcall) do
+    topics = MapSet.new(Enum.concat(Map.keys(phoenix), Map.keys(rollcall)))
+
+    topics
+    |> Stream.flat_map(fn topic ->
+      phoenix_refs = MapSet.new(Map.get(phoenix, topic, []))
+      rollcall_refs = MapSet.new(Map.get(rollcall, topic, []))
+
+      ghosts = MapSet.difference(rollcall_refs, phoenix_refs)
+      missings = MapSet.difference(phoenix_refs, rollcall_refs)
+
+      ghost_candidates = ghosts |> Stream.map(fn ghost -> {topic, ghost, :ghost} end)
+      missing_candidates = missings |> Stream.map(fn missing -> {topic, missing, :missing} end)
+
+      Stream.concat(ghost_candidates, missing_candidates)
+    end)
+    |> Enum.to_list()
+  end
+
+  @doc """
+  Checks each of `candidates` against fresh views, and returns each candidate with its outcome.
+
+    * `:converged`: both views hold the ref now, or only the other view holds it. The kind
+      changed, and the original difference ended.
+    * `:open`: the view that held the ref still holds it, and the other view does not.
+    * `:gone`: neither view holds the ref, or neither view holds the topic.
+
+  The views need only the topics of the candidates. A check adds no new candidate.
+  """
+  @spec step([candidate()], refs(), refs()) :: [{candidate(), outcome()}]
+  def step(candidates, phoenix, rollcall) do
+    phoenix = ref_sets(phoenix)
+    rollcall = ref_sets(rollcall)
+
+    Enum.map(candidates, fn {topic, ref, kind} = candidate ->
+      {candidate, outcome(kind, holds?(phoenix, topic, ref), holds?(rollcall, topic, ref))}
+    end)
   end
 
   defp ref_sets(refs), do: Map.new(refs, fn {topic, refs} -> {topic, MapSet.new(refs)} end)
