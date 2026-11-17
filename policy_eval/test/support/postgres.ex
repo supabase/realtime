@@ -19,7 +19,7 @@ defmodule PolicyEval.Test.Postgres do
   @table_query "select relrowsecurity, relforcerowsecurity from pg_class where oid = $1::text::regclass"
 
   @roles_query """
-  select r.rolname, r.rolbypassrls,
+  select r.rolname, r.rolsuper or r.rolbypassrls,
          has_table_privilege(r.rolname, $1::text::regclass, 'SELECT'),
          has_table_privilege(r.rolname, $1::text::regclass, 'INSERT')
   from pg_roles r where r.rolname = any($2)
@@ -106,7 +106,8 @@ defmodule PolicyEval.Test.Postgres do
 
   @doc """
   Reads what `PolicyEval.Snapshot.new/2` takes for `table`: the row-level security flags of the
-  table, the grants and `BYPASSRLS` of the roles of the profile, the policies, and the functions
+  table, the grants of the roles of the profile and whether they bypass RLS (`BYPASSRLS` or
+  superuser), the policies, and the functions
   of the profile as the database defines them.
 
   Run it in a transaction. It sets `search_path` to `''` with `SET LOCAL`, so that names print

@@ -462,6 +462,38 @@ defmodule PolicyEvalScenarios do
   end
 
   @doc """
+  `service_role` as the tenant database sets it up, with `BYPASSRLS` and its grants, and no setup
+  that changes it. The policies would deny, fall back or raise for any other role, and some name
+  `service_role` itself. Postgres applies none of them to a role that bypasses RLS, so every join
+  is allowed, and the library has to decide that, not fall back.
+  """
+  @spec service_role_scenarios() :: [map()]
+  def service_role_scenarios do
+    sets = [
+      {"no policy", []},
+      {"a policy for other roles", [policy_sql("a", "FOR ALL TO authenticated USING (true) WITH CHECK (true)")]},
+      {"a restrictive policy that denies service_role",
+       [
+         policy_sql("a", "FOR ALL TO service_role USING (true) WITH CHECK (true)"),
+         policy_sql("r", "AS RESTRICTIVE FOR ALL TO service_role USING (false) WITH CHECK (false)")
+       ]},
+      {"a policy the library can't evaluate",
+       [policy_sql("a", "FOR ALL USING (exists (select 1 from pg_class)) WITH CHECK (true)")]},
+      {"a policy for a role the library doesn't model",
+       [policy_sql("a", "FOR ALL TO postgres USING (true) WITH CHECK (true)")]},
+      {"a policy that raises", [policy_sql("a", "FOR ALL USING (auth.uid() is null) WITH CHECK (true)")]}
+    ]
+
+    for {label, policies} <- sets, topic <- ["x", ""] do
+      scenario("service_role", "#{label}, topic #{inspect(topic)}", policies,
+        role: "service_role",
+        topic: topic,
+        sub: "user_2abc"
+      )
+    end
+  end
+
+  @doc """
   Notification channels: a user reads and broadcasts on the topics that start with
   `notify:<uid>:`, with `starts_with`, in the initplan form `(select auth.uid())`.
 
@@ -775,6 +807,12 @@ defmodule PolicyEvalScenarios do
       {"no INSERT for anon", ["REVOKE INSERT ON realtime.messages FROM anon"]},
       {"authenticated bypasses RLS", ["ALTER ROLE authenticated BYPASSRLS"]},
       {"anon bypasses RLS", ["ALTER ROLE anon BYPASSRLS"]},
+      {"anon is a superuser", ["ALTER ROLE anon SUPERUSER"]},
+      {"service_role does not bypass RLS", ["ALTER ROLE service_role NOBYPASSRLS"]},
+      {"no INSERT for service_role", ["REVOKE INSERT ON realtime.messages FROM service_role"]},
+      {"no SELECT for service_role", ["REVOKE SELECT ON realtime.messages FROM service_role"]},
+      {"a restrictive policy for service_role that denies",
+       [policy_sql("deny", "AS RESTRICTIVE FOR ALL TO service_role USING (false) WITH CHECK (false)")]},
       {"a policy for a role authenticated is a member of",
        [
          "CREATE ROLE policy_eval_team NOLOGIN",

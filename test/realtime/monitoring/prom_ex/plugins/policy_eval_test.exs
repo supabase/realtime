@@ -82,11 +82,11 @@ defmodule Realtime.PromEx.Plugins.PolicyEvalTest do
     expect(PolicyEvalCache, :fetch, fn :fake_conn, ^tenant_id -> {:ok, cached(always_allow_snapshot())} end)
 
     decision = "realtime_tenants_policy_eval_shadow_read_decisions_total"
-    tags = [outcome: "fallback", extension: "broadcast", reason: "role", role: "service_role"]
+    tags = [outcome: "fallback", extension: "broadcast", reason: "role", role: "postgres"]
     before = metric_value(decision, tags)
 
-    # service_role isn't a role policy_eval models, so it falls back with {:role, "service_role"}
-    ctx = %{context(tenant_id) | role: "service_role", claims: %{"role" => "service_role"}}
+    # postgres isn't a role policy_eval models, so it falls back with {:role, "postgres"}
+    ctx = %{context(tenant_id) | role: "postgres", claims: %{"role" => "postgres"}}
     result = {:ok, %Policies{broadcast: %BroadcastPolicies{read: true}}}
     assert :ok = PolicyEvalShadow.read(:fake_conn, ctx, [:broadcast], result)
 

@@ -35,6 +35,8 @@ defmodule Realtime.Tenants.PolicyEvalReport do
 
     * `{:always_fallback, {category, reason}}`: a check before any policy fails, so every join falls
       back. The reason is the first one that `PolicyEval.PolicySet` checks
+    * `:bypasses_rls`: the role bypasses RLS and has the grant, so every join is allowed and no
+      policy is evaluated
     * `:no_permissive_policy`: no permissive policy applies, so every join is denied and no
       policy is evaluated
     * `{:evaluates, policy_names, unsupported}`: the decision evaluates these policies. A join falls
@@ -42,7 +44,10 @@ defmodule Realtime.Tenants.PolicyEvalReport do
       input
   """
   @type outcome ::
-          {:always_fallback, unsupported} | :no_permissive_policy | {:evaluates, [String.t()], [unsupported]}
+          {:always_fallback, unsupported}
+          | :bypasses_rls
+          | :no_permissive_policy
+          | {:evaluates, [String.t()], [unsupported]}
 
   @type expression :: %{text: String.t(), unsupported: [unsupported]}
 
@@ -95,7 +100,7 @@ defmodule Realtime.Tenants.PolicyEvalReport do
   def describe(:rls_disabled), do: "row level security is off on realtime.messages"
   def describe(:rls_forced), do: "row level security is forced on realtime.messages"
   def describe({:role_not_in_snapshot, role}), do: "the role #{role} does not exist"
-  def describe({:bypass_rls, role}), do: "#{role} bypasses row level security"
+  def describe({:bypass_rls, role}), do: "the snapshot does not say whether #{role} bypasses row level security"
 
   def describe({:missing_grant, role, grant}),
     do: "#{role} does not have #{grant |> Atom.to_string() |> String.upcase()} on realtime.messages"
@@ -128,6 +133,7 @@ defmodule Realtime.Tenants.PolicyEvalReport do
         :no_permissive_policy
       end
     else
+      :bypasses_rls -> :bypasses_rls
       {:fallback, reason} -> {:always_fallback, {Reason.category(reason), reason}}
     end
   end
@@ -149,15 +155,29 @@ defmodule Realtime.Tenants.PolicyEvalReport do
       :error ->
         {:fallback, {:role_not_in_snapshot, role}}
 
+      {:ok, %{bypass_rls: true} = info} ->
+        check_grants(info, role, operation, :bypasses_rls)
+
       {:ok, %{bypass_rls: false} = info} ->
-        case Enum.find(grants(operation), &(info[&1] != true)) do
-          nil -> :ok
-          grant -> {:fallback, {:missing_grant, role, grant}}
-        end
+        check_grants(info, role, operation, :ok)
 
       {:ok, _info} ->
         {:fallback, {:bypass_rls, role}}
     end
+  end
+
+  # Bypassing RLS skips the policies, not the privileges, see `PolicyEval.PolicySet`.
+  defp check_grants(info, role, operation, granted) do
+    case missing_grant(info, operation) do
+      nil -> granted
+      grant -> {:fallback, {:missing_grant, role, grant}}
+    end
+  end
+
+  defp missing_grant(info, operation) do
+    operation
+    |> grants()
+    |> Enum.find(fn grant -> info[grant] != true end)
   end
 
   defp check_policy_roles(policies, profile) do

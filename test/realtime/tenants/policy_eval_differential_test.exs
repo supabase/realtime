@@ -79,6 +79,16 @@ defmodule Realtime.Tenants.PolicyEvalDifferentialTest do
            "fell back: #{inspect(Enum.reject(results, &(&1.class == :match)))}"
   end
 
+  # Not only "no mismatch": service_role, as the tenant database sets it up, is decided and allowed
+  test "service_role bypasses RLS", context do
+    results = run(context, PolicyEvalScenarios.service_role_scenarios())
+
+    assert results != []
+
+    assert Enum.all?(results, &(&1.class == :match and &1.postgres == {:ok, true})),
+           "not decided or not allowed: #{inspect(Enum.reject(results, &(&1.class == :match and &1.postgres == {:ok, true})))}"
+  end
+
   for flavor <- [:legacy, :supabase_auth] do
     test "notify channels, #{PolicyEvalScenarios.flavor_label(flavor)} auth functions", context do
       results = run(context, PolicyEvalScenarios.notify_channel_scenarios(:decided, unquote(flavor)))
