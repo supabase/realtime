@@ -696,6 +696,14 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
     """
   end
 
+  defp outcome_cell(:bypasses_rls) do
+    assigns = %{}
+
+    ~H"""
+    always allowed: the role bypasses row level security
+    """
+  end
+
   defp outcome_cell(:no_permissive_policy) do
     assigns = %{}
 

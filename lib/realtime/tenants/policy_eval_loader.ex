@@ -21,7 +21,7 @@ defmodule Realtime.Tenants.PolicyEvalLoader do
   from pg_proc p
   join pg_namespace n on n.oid = p.pronamespace
   join pg_language l on l.oid = p.prolang
-  where p.pronargs = 0 and (n.nspname, p.proname) in (('auth', 'uid'), ('auth', 'jwt'), ('auth', 'role'), ('realtime', 'topic'))
+  where p.pronargs = 0 and (n.nspname, p.proname) in (('auth', 'uid'), ('auth', 'jwt'), ('auth', 'role'), ('auth', 'email'), ('realtime', 'topic'))
   order by n.nspname, p.proname
   """
 
@@ -34,11 +34,13 @@ defmodule Realtime.Tenants.PolicyEvalLoader do
 
   @table_query "select relrowsecurity, relforcerowsecurity from pg_class where oid = 'realtime.messages'::regclass"
 
+  # A superuser always bypasses RLS, like a role with BYPASSRLS, and has every privilege
+  # (https://www.postgresql.org/docs/current/ddl-rowsecurity.html).
   @roles_query """
-  select r.rolname, r.rolbypassrls,
+  select r.rolname, r.rolsuper or r.rolbypassrls,
          has_table_privilege(r.rolname, 'realtime.messages', 'SELECT'),
          has_table_privilege(r.rolname, 'realtime.messages', 'INSERT')
-  from pg_roles r where r.rolname in ('anon', 'authenticated')
+  from pg_roles r where r.rolname = any($1)
   """
 
   @doc """
@@ -103,7 +105,7 @@ defmodule Realtime.Tenants.PolicyEvalLoader do
   def read(conn) do
     with_empty_search_path(conn, fn ->
       %{rows: [[rls_enabled, rls_forced]]} = Postgrex.query!(conn, @table_query, [])
-      %{rows: roles} = Postgrex.query!(conn, @roles_query, [])
+      %{rows: roles} = Postgrex.query!(conn, @roles_query, [PolicyEvalProfile.profile().roles])
       %{rows: policies} = Postgrex.query!(conn, @policies_query, [])
 
       %{
@@ -123,7 +125,7 @@ defmodule Realtime.Tenants.PolicyEvalLoader do
   end
 
   @doc """
-  Reads the tenant's definitions of `auth.uid/jwt/role` and `realtime.topic`, the ones
+  Reads the tenant's definitions of `auth.uid/jwt/role/email` and `realtime.topic`, the ones
   `Realtime.Tenants.PolicyEvalProfile` knows, from an already-open connection, inside a transaction.
   """
   @spec read_functions(DBConnection.t()) :: [map()]

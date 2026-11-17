@@ -66,6 +66,7 @@ defmodule Realtime.Tenants.PolicyEvalReportTest do
 
       case outcome do
         {:always_fallback, _} -> assert {:fallback, _} = decision, "#{role} #{operation} #{topic}"
+        :bypasses_rls -> assert decision == :allow, "#{role} #{operation} #{topic}"
         :no_permissive_policy -> assert decision == :deny, "#{role} #{operation} #{topic}"
         {:evaluates, _, _} -> :ok
       end
@@ -130,11 +131,11 @@ defmodule Realtime.Tenants.PolicyEvalReportTest do
       assert Enum.all?(disabled.decisions, &(&1.outcome == {:always_fallback, {:setup, :rls_disabled}}))
     end
 
-    test "a role without a grant, that bypasses RLS or does not exist falls back on every join" do
+    test "a role without a grant or that does not exist falls back on every join" do
       report =
         assert_matches_decide(
           input(%{
-            roles: %{"anon" => %{@granted | insert: false}, "authenticated" => %{@granted | bypass_rls: true}},
+            roles: %{"anon" => %{@granted | insert: false}, "authenticated" => %{@granted | bypass_rls: nil}},
             policies: [policy("lobby", "*", ["public"], @supported)]
           })
         )
@@ -146,7 +147,29 @@ defmodule Realtime.Tenants.PolicyEvalReportTest do
       missing = assert_matches_decide(input(%{roles: %{"authenticated" => @granted}}))
 
       assert outcome(missing, "anon", :read) == {:always_fallback, {:setup, {:role_not_in_snapshot, "anon"}}}
-      assert [%{name: "anon", info: nil}, %{name: "authenticated", info: @granted}] = missing.roles
+
+      assert [%{name: "anon", info: nil}, %{name: "authenticated", info: @granted}, %{name: "service_role", info: nil}] =
+               missing.roles
+    end
+
+    test "a role that bypasses RLS is allowed on every join it has the grant for" do
+      bypass = %{@granted | bypass_rls: true}
+
+      report =
+        assert_matches_decide(
+          input(%{
+            roles: %{"anon" => @granted, "authenticated" => @granted, "service_role" => %{bypass | insert: false}},
+            # Unsupported for the other roles, and doesn't matter for service_role
+            policies: [policy("builtin", "*", ["public"], @builtin)]
+          })
+        )
+
+      assert outcome(report, "service_role", :read) == :bypasses_rls
+
+      assert outcome(report, "service_role", :write) ==
+               {:always_fallback, {:setup, {:missing_grant, "service_role", :insert}}}
+
+      assert {:evaluates, ["builtin"], [_ | _]} = outcome(report, "anon", :read)
     end
 
     test "a policy for a role policy_eval does not model makes its command fall back" do
@@ -247,6 +270,7 @@ defmodule Realtime.Tenants.PolicyEvalReportTest do
                "realtime.topic" => :known,
                "auth.uid" => :unknown_definition,
                "auth.role" => :overloaded,
+               "auth.email" => :not_in_snapshot,
                "auth.jwt" => :not_in_snapshot
              }
 
@@ -262,7 +286,7 @@ defmodule Realtime.Tenants.PolicyEvalReportTest do
           })
         )
 
-      assert [%{name: "realtime.topic", status: :unknown_definition}, _, _, _] = report.functions
+      assert [%{name: "realtime.topic", status: :unknown_definition}, _, _, _, _] = report.functions
 
       assert outcome(report, "anon", :read) ==
                {:evaluates, ["lobby"], [{:function, {:function, "realtime.topic", :unknown_definition}}]}
