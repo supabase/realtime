@@ -115,6 +115,17 @@ defmodule Realtime.Tenants.PolicyEvalDifferentialTest do
     end
   end
 
+  for flavor <- [:legacy, :supabase_auth] do
+    test "inbox channels, auth.email(), #{PolicyEvalScenarios.flavor_label(flavor)} auth functions", context do
+      results = run(context, PolicyEvalScenarios.email_channel_scenarios(unquote(flavor)))
+
+      assert results != []
+
+      assert Enum.all?(results, &(&1.class == :match)),
+             "fell back: #{inspect(Enum.reject(results, &(&1.class == :match)))}"
+    end
+  end
+
   test "nested claims", context do
     results = run(context, PolicyEvalScenarios.nested_claim_scenarios(:well_formed))
 

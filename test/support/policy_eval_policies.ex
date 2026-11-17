@@ -36,10 +36,10 @@ defmodule PolicyEvalPolicies do
   end
 
   @doc """
-  Replaces `auth.uid()` and `auth.role()` with the bodies supabase/auth has installed since its migration
-  20220224000811, which production projects run (github.com/supabase/auth). They fall back to the
-  claims when the `request.jwt.claim.sub`/`.role` setting is empty, where the ones of the
-  supabase/postgres image only read the setting.
+  Replaces `auth.uid()`, `auth.role()` and `auth.email()` with the bodies supabase/auth has installed
+  since its migration 20220224000811, which production projects run (github.com/supabase/auth). They
+  fall back to the claims when the `request.jwt.claim.sub`/`.role`/`.email` setting is empty, where
+  the ones of the supabase/postgres image only read the setting.
 
   Whitespace aside, these are the bodies `Realtime.Tenants.PolicyEvalProfile` knows. Run it in a transaction that is
   rolled back.
@@ -62,6 +62,14 @@ defmodule PolicyEvalPolicies do
         coalesce(
           nullif(current_setting('request.jwt.claim.role', true), ''),
           (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role')
+        )::text
+      $body$;
+
+      CREATE OR REPLACE FUNCTION auth.email() RETURNS text LANGUAGE sql STABLE AS $body$
+        select
+        coalesce(
+          nullif(current_setting('request.jwt.claim.email', true), ''),
+          (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'email')
         )::text
       $body$;
     END

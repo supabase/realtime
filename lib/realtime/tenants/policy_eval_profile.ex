@@ -25,10 +25,13 @@ defmodule Realtime.Tenants.PolicyEvalProfile do
   `authenticated`, and a policy can also name `service_role`.
 
   The known functions are `realtime.topic()`, with the body that Realtime installs, and
-  `auth.uid()`, `auth.role()` and `auth.jwt()`. Those three are Supabase's, not only Realtime's:
-  the supabase/postgres image installs one version, and supabase/auth migrations install another.
-  The older supabase/auth versions of `auth.uid()` (migrations 20211124214934 and 20211202183645)
-  are not known: a body we don't know is never assumed to behave like one we do.
+  `auth.uid()`, `auth.role()`, `auth.email()` and `auth.jwt()`. Those four are Supabase's, not only
+  Realtime's: the supabase/postgres image installs one version, and supabase/auth migrations install
+  another. The older supabase/auth versions of `auth.uid()` (migrations 20211124214934 and
+  20211202183645) are not known: a body we don't know is never assumed to behave like one we do.
+
+  Realtime does not set `request.jwt.claim.email`, so the image's `auth.email()` is always NULL on its
+  connections, and supabase/auth's reads the `email` field of the claims.
 
   The platform names are the `auth` and `realtime` schemas, the settings that start with
   `request.` or `realtime.`, and the roles `service_role`, `postgres` and `supabase_admin`.
@@ -57,6 +60,7 @@ defmodule Realtime.Tenants.PolicyEvalProfile do
   # The versions in the supabase/postgres image.
   @uid_legacy "select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;"
   @role_legacy "select nullif(current_setting('request.jwt.claim.role', true), '')::text;"
+  @email_legacy "select nullif(current_setting('request.jwt.claim.email', true), '')::text;"
 
   # supabase/auth migration 20220224000811, which production projects run.
   @uid_supabase_auth """
@@ -72,6 +76,14 @@ defmodule Realtime.Tenants.PolicyEvalProfile do
   coalesce(
     nullif(current_setting('request.jwt.claim.role', true), ''),
     (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role')
+  )::text
+  """
+
+  @email_supabase_auth """
+  select
+  coalesce(
+    nullif(current_setting('request.jwt.claim.email', true), ''),
+    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'email')
   )::text
   """
 
@@ -94,6 +106,14 @@ defmodule Realtime.Tenants.PolicyEvalProfile do
       new("auth", "uid", "uuid", @uid_supabase_auth, to_uuid(claim_or_field("request.jwt.claim.sub", "sub"))),
       new("auth", "role", "text", @role_legacy, nullif_empty("request.jwt.claim.role")),
       new("auth", "role", "text", @role_supabase_auth, claim_or_field("request.jwt.claim.role", "role")),
+      new("auth", "email", "text", @email_legacy, claim_email()),
+      new(
+        "auth",
+        "email",
+        "text",
+        @email_supabase_auth,
+        coalesce([claim_email(), field_text(to_jsonb(claims()), "email")])
+      ),
       new("auth", "jwt", "jsonb", @jwt_supabase_auth, to_jsonb(coalesce([claim_singular(), claims()])))
     ]
   end
@@ -102,6 +122,10 @@ defmodule Realtime.Tenants.PolicyEvalProfile do
   # current_setting returns NULL (never set) or '' (set earlier on that backend), and
   # nullif(..., '') turns both into NULL. This argument is therefore always NULL.
   defp claim_singular, do: null()
+
+  # nullif(current_setting('request.jwt.claim.email', true), ''): Realtime does not set it either,
+  # so it is always NULL for the same reason as claim_singular/0.
+  defp claim_email, do: null()
 
   # nullif(current_setting(name, true), '')
   defp nullif_empty(name), do: nullif(setting(name), text(""))
