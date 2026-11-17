@@ -17,6 +17,52 @@ defmodule Realtime.Presence.Comparison do
 
   @type outcome :: :open | :converged | :gone
 
+  @typedoc """
+  A rung of the ladder: the delay of a check after the first read. The functions of this module
+  use a rung as a label. They do not read the clock.
+  """
+  @type rung :: pos_integer()
+
+  @typedoc "The counts of the candidates of one kind that were checked at one rung."
+  @type rung_row :: %{
+          rung: rung(),
+          kind: kind(),
+          open: non_neg_integer(),
+          converged: non_neg_integer(),
+          gone: non_neg_integer()
+        }
+
+  @typedoc """
+  The state of one comparison. `open` is the list of the candidates that no check has closed.
+  `rungs` is the list of the rows of the checks so far.
+  """
+  @type t :: %{
+          open: [candidate()],
+          rungs: [rung_row()],
+          persistent: [candidate()],
+          persistent_rung: rung(),
+          entries: non_neg_integer(),
+          candidates: %{kind() => non_neg_integer()}
+        }
+
+  @typedoc """
+  The result of a comparison.
+
+    * `outcome`: `:clean` when the views had no candidate. `:persistent` when a candidate was
+      open after the persistent rung. `:transient` in all other cases.
+    * `entries`: the number of refs in the union of the two views at the first read.
+    * `candidates`: the number of candidates at the first read, by kind.
+    * `persistent`: the candidates that were open after the persistent rung.
+    * `rungs`: the rows of all the checks.
+  """
+  @type summary :: %{
+          outcome: :clean | :transient | :persistent,
+          entries: non_neg_integer(),
+          candidates: %{kind() => non_neg_integer()},
+          persistent: [candidate()],
+          rungs: [rung_row()]
+        }
+
   @doc """
   Returns the candidates of two views: the refs that one view holds and the other view does not.
 
@@ -62,6 +108,130 @@ defmodule Realtime.Presence.Comparison do
     Enum.map(candidates, fn {topic, ref, kind} = candidate ->
       {candidate, outcome(kind, holds?(phoenix, topic, ref), holds?(rollcall, topic, ref))}
     end)
+  end
+
+  @doc """
+  Starts a comparison from the first reads of both views.
+
+  The candidates are the result of `diff/2` for `phoenix` and `rollcall`. `persistent_rung` is the
+  rung that decides if a candidate is persistent. The state counts `entries` and the candidates
+  by kind at this point.
+  """
+  @spec start(refs(), refs(), rung()) :: t()
+  def start(phoenix, rollcall, persistent_rung) do
+    open_candidates = diff(phoenix, rollcall)
+
+    candidates =
+      open_candidates
+      |> Enum.frequencies_by(fn {_topic, _ref, kind} -> kind end)
+
+    candidates = Map.merge(%{missing: 0, ghost: 0}, candidates)
+
+    entry_count =
+      phoenix
+      |> Enum.reduce(Map.get(candidates, :ghost, 0), fn
+        {_topic, refs}, acc -> Enum.count(refs) + acc
+      end)
+
+    %{
+      open: open_candidates,
+      persistent_rung: persistent_rung,
+      persistent: [],
+      rungs: [],
+      entries: entry_count,
+      candidates: candidates
+    }
+  end
+
+  @doc """
+  Returns the topics of the open candidates of `state`, each topic once.
+
+  Read only these topics to get the views for `advance/4`.
+  """
+  @spec open_topics(t()) :: [topic()]
+  def open_topics(state) do
+    state.open
+    |> Enum.map(fn {topic, _ref, _kind} -> topic end)
+    |> Enum.uniq()
+  end
+
+  @doc """
+  Checks the open candidates of `state` at `rung` and returns the new state.
+
+  `phoenix` and `rollcall` hold the fresh refs of the topics from `open_topics/1`. The outcome of
+  each open candidate comes from `step/3`.
+
+    * An `:open` candidate stays in `open`.
+    * A `:converged` or `:gone` candidate leaves `open`. No later check reads it.
+    * `rungs` gets one row for each kind that had an open candidate at this rung.
+    * When `rung` is the persistent rung, the candidates that are still open are persistent.
+      A later check does not change this list.
+  """
+  @spec advance(t(), rung(), refs(), refs()) :: t()
+  def advance(state, rung, phoenix, rollcall) do
+    {state, rung_outcomes} =
+      state.open
+      |> step(phoenix, rollcall)
+      |> Enum.reduce(
+        {%{state | open: []}, %{}},
+        fn {{_topic, _ref, kind} = candidate, outcome}, {state, rung_outcomes} ->
+          {
+            case outcome do
+              :open -> %{state | open: [candidate | state.open]}
+              :converged -> state
+              :gone -> state
+            end,
+            increment_rung_outcome(rung_outcomes, kind, outcome)
+          }
+        end
+      )
+
+    %{
+      state
+      | rungs:
+          Enum.concat(
+            state.rungs,
+            Enum.map(rung_outcomes, fn {kind, outcome} ->
+              Map.merge(%{rung: rung, kind: kind, gone: 0, converged: 0, open: 0}, outcome)
+            end)
+          ),
+        persistent:
+          if rung == state.persistent_rung do
+            state.open
+          else
+            state.persistent
+          end
+    }
+  end
+
+  defp increment_rung_outcome(rung_outcomes, kind, outcome) do
+    Map.update(rung_outcomes, kind, Map.put(%{}, outcome, 1), fn outcomes ->
+      Map.update(outcomes, outcome, 1, &(&1 + 1))
+    end)
+  end
+
+  @doc """
+  Returns the summary of the comparison in `state`.
+
+  Call it when no candidate is open or after the last rung.
+  """
+  @spec summarize(t()) :: summary()
+  def summarize(state) do
+    %{
+      outcome: summary_outcome(state),
+      candidates: state.candidates,
+      persistent: state.persistent,
+      rungs: state.rungs,
+      entries: state.entries
+    }
+  end
+
+  defp summary_outcome(state) do
+    cond do
+      not Enum.empty?(state.persistent) -> :persistent
+      state.candidates == %{missing: 0, ghost: 0} -> :clean
+      true -> :transient
+    end
   end
 
   defp ref_sets(refs), do: Map.new(refs, fn {topic, refs} -> {topic, MapSet.new(refs)} end)
