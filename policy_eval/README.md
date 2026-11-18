@@ -172,6 +172,10 @@ The profile and the env decide which roles, columns, settings and functions a po
   gets as far as a `\` at the end of the pattern, Postgres raises an error. So the text decides
   whether it raises.
 - `starts_with(text, text)` and its operator `text ^@ text`. They compare bytes, like `LIKE`.
+- `split_part(text, text, integer)` with an integer literal as the field, for example
+  `split_part((select app.team()), ':', 2)`. The delimiter is found by its bytes, which in
+  UTF-8 gives the same fields as a search by characters. A negative field counts from the end.
+  Field `0` makes Postgres raise an error, so it is a fallback.
 - `jsonb ->> text` and `jsonb ->> integer` where the value is a string or a boolean. A missing
   key or JSON `null` gives NULL. Numbers, objects and arrays are a fallback, because Postgres
   prints them in a normalized form that the library does not model. `->> integer` finds the
@@ -193,8 +197,8 @@ The profile and the env decide which roles, columns, settings and functions a po
   `app.user_id()` in "The example of the tests".
 - Casts from text to uuid, jsonb, json and boolean, and from uuid to text. Literals of those types,
   `true`, `false` and typed `NULL`s.
-- Integer literals, as the index of `jsonb -> integer` and `jsonb ->> integer`. No other
-  operator takes an integer.
+- Integer literals, as the index of `jsonb -> integer` and `jsonb ->> integer`, and as the field
+  of `split_part`. Nothing else takes an integer.
 
 ### Values
 

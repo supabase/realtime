@@ -150,6 +150,34 @@ defmodule PolicyEvalTest do
     end
   end
 
+  describe "split_part" do
+    # The shape of a policy that lets a client use the topics `cursors:<its claim>:<room>`
+    @cursors """
+    ((COALESCE(((current_setting('app.claims'::text, true))::jsonb ->> 'cursor_client'::text), ''::text) <> ''::text) \
+    AND (split_part(( SELECT app.team() AS team), ':'::text, 1) = 'cursors'::text) \
+    AND (split_part(( SELECT app.team() AS team), ':'::text, 2) = ((current_setting('app.claims'::text, true))::jsonb ->> 'cursor_client'::text)) \
+    AND (split_part(( SELECT app.team() AS team), ':'::text, 3) <> ''::text) \
+    AND (split_part(( SELECT app.team() AS team), ':'::text, 4) = ''::text))\
+    """
+
+    test "decides each field of the topic" do
+      claims = ~s({"cursor_client":"c1"})
+
+      assert evaluate(@cursors, claims: claims, team: "cursors:c1:room") == true
+      assert evaluate(@cursors, claims: claims, team: "cursors:c2:room") == false
+      assert evaluate(@cursors, claims: claims, team: "cursors:c1:") == false
+      assert evaluate(@cursors, claims: claims, team: "cursors:c1:room:x") == false
+      assert evaluate(@cursors, claims: claims, team: "presence:c1:room") == false
+      assert evaluate(@cursors, claims: ~s({"cursor_client":"é🎉"}), team: "cursors:é🎉:sala") == true
+      assert evaluate(@cursors, claims: ~s({}), team: "cursors::room") == false
+    end
+
+    test "field 0 falls back, because Postgres raises" do
+      assert evaluate("(split_part(app.team(), ':'::text, 0) = 'a'::text)", team: "a:b") ==
+               {:unsupported, {:raises, :invalid_parameter_value, "field position must not be zero"}}
+    end
+  end
+
   describe "LIKE" do
     test "% matches any run and _ one character, on the whole text" do
       sql = "(app.team() ~~ 'public:%'::text)"
