@@ -3,6 +3,11 @@ defmodule Realtime.Presence.Comparison do
   Compares the presence views of Phoenix and Rollcall for a tenant in shadow mode.
   """
 
+  alias Realtime.Presence.Comparison.PhoenixReader
+
+  @default_rungs [1_000, 3_000, 5_000, 10_000, 15_000]
+  @default_persistent_rung 10_000
+
   @typedoc "A topic of a tenant."
   @type topic :: String.t()
 
@@ -62,6 +67,90 @@ defmodule Realtime.Presence.Comparison do
           persistent: [candidate()],
           rungs: [rung_row()]
         }
+
+  @doc """
+  Compares the views of `tenant` in Phoenix and in Rollcall, and returns the result.
+
+  Reads both views, then checks the open candidates at each rung. The function sleeps until the
+  rung is due, measured from the first read. It stops when no candidate is open or after the last
+  rung. 
+
+  Returns `:discarded` when the Rollcall tracker of `tenant` does not run after a read. An absent
+  tracker reads as an empty view, so the result would show every Phoenix ref as `:missing`.
+
+  Options:
+
+    * `:phoenix` - the Phoenix tracker module. The default is `RealtimeWeb.Presence`.
+    * `:rollcall` - the name of the Rollcall instance. The default is `Realtime.Presence.Rollcall`.
+    * `:rungs` - the rungs in milliseconds, in ascending order. The default is
+      `[1_000, 3_000, 5_000, 10_000, 15_000]`.
+    * `:persistent_rung` - the rung for `start/3`. The default is `10_000`.
+    * `:sleep` - a function that waits. `run/2` calls it with the milliseconds until the next
+      rung is due, before each rung. The default is `Process.sleep/1`.
+  """
+  @spec run(String.t(),
+          phoenix: module(),
+          rollcall: Rollcall.name(),
+          rungs: [rung()],
+          persistent_rung: rung(),
+          sleep: (non_neg_integer() -> any())
+        ) :: {:ok, summary()} | :discarded
+  def run(tenant, opts \\ []) do
+    phoenix = Keyword.get(opts, :phoenix, RealtimeWeb.Presence)
+    rollcall = Keyword.get(opts, :rollcall, Realtime.Presence.Rollcall)
+    rungs = Keyword.get(opts, :rungs, @default_rungs)
+    persistent_rung = Keyword.get(opts, :persistent_rung, @default_persistent_rung)
+    sleep = Keyword.get(opts, :sleep, &Process.sleep/1)
+
+    initial_phoenix_view = PhoenixReader.tenant_refs(phoenix, tenant)
+    initial_rollcall_view = Rollcall.refs(rollcall, tenant)
+
+    if is_pid(Rollcall.Tracker.whereis(rollcall, tenant)) do
+      t0 = System.monotonic_time(:millisecond)
+
+      state = start(initial_phoenix_view, initial_rollcall_view, persistent_rung)
+
+      do_run(state, tenant, phoenix, rollcall, rungs, sleep, t0)
+    else
+      :discarded
+    end
+  end
+
+  defp do_run(state, _tenant, _phoenix, _rollcall, [], _sleep, _t0) do
+    {:ok, summarize(state)}
+  end
+
+  defp do_run(state, tenant, phoenix, rollcall, [rung | rungs], sleep, t0) do
+    if state.open == [] do
+      {:ok, summarize(state)}
+    else
+      sleep.(max(t0 + rung - System.monotonic_time(:millisecond), 0))
+
+      {phoenix_refs, rollcall_refs} =
+        state
+        |> open_topics()
+        |> Enum.reduce({%{}, %{}}, fn topic, {phx, rc} ->
+          {
+            Map.put(phx, topic, PhoenixReader.topic_refs(phoenix, topic)),
+            Map.put(rc, topic, Rollcall.refs(rollcall, tenant, topic))
+          }
+        end)
+
+      if is_pid(Rollcall.Tracker.whereis(rollcall, tenant)) do
+        do_run(
+          advance(state, rung, phoenix_refs, rollcall_refs),
+          tenant,
+          phoenix,
+          rollcall,
+          rungs,
+          sleep,
+          t0
+        )
+      else
+        :discarded
+      end
+    end
+  end
 
   @doc """
   Starts a comparison from the first reads of both views.
