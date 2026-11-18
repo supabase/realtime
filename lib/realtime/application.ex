@@ -202,7 +202,8 @@ defmodule Realtime.Application do
          pool_size: presence_pool_size,
          broadcast_period: presence_broadcast_period,
          permdown_period: presence_permdown_period},
-        {Realtime.Presence.Rollcall, Application.get_env(:realtime, :rollcall, [])}
+        {Realtime.Presence.Rollcall, Application.get_env(:realtime, :rollcall, [])},
+        Realtime.Presence.Comparison.Scheduler
       ] ++
         extensions_supervisors() ++
         janitor_tasks() ++ latency_pinger() ++ Realtime.MetricsPusher.child_specs() ++ zta_children
