@@ -341,6 +341,24 @@ defmodule Rollcall.Tracker do
   defp bucket_for(count, usage_buckets), do: Enum.find(usage_buckets, :infinity, &(count <= &1))
 
   @doc """
+  Returns the refs of the entries in the view of `scope`, by partition. See
+  `Rollcall.refs/2`.
+  """
+  @spec refs(Rollcall.name(), Rollcall.scope()) :: %{Rollcall.partition() => [Rollcall.ref()]}
+  def refs(name, scope) do
+    with_view(name, scope, fn view -> View.refs(view) end, %{})
+  end
+
+  @doc """
+  Returns the refs of the entries in `partition` of the view of `scope`. See
+  `Rollcall.refs/3`.
+  """
+  @spec refs(Rollcall.name(), Rollcall.scope(), Rollcall.partition()) :: [Rollcall.ref()]
+  def refs(name, scope, partition) do
+    with_view(name, scope, fn view -> View.refs(view, partition) end)
+  end
+
+  @doc """
   Returns every entry in the view of `scope`. See `Rollcall.state/2`.
   """
   @spec state(Rollcall.name(), Rollcall.scope()) :: [Rollcall.scope_entry()]
@@ -357,11 +375,11 @@ defmodule Rollcall.Tracker do
     with_view(name, scope, fn view -> View.entries(view, partition) end)
   end
 
-  defp with_view(name, scope, fun) do
+  defp with_view(name, scope, fun, default \\ []) do
     case lookup(name, scope) do
-      [{_tracker, nil}] -> []
+      [{_tracker, nil}] -> default
       [{_tracker, view}] -> fun.(view)
-      _ -> []
+      _ -> default
     end
   end
 

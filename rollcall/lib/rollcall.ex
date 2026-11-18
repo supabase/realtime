@@ -132,6 +132,12 @@ defmodule Rollcall do
       @spec state(Rollcall.scope()) :: [Rollcall.scope_entry()]
       def state(scope), do: Rollcall.state(__MODULE__, scope)
 
+      @spec refs(Rollcall.scope()) :: %{Rollcall.partition() => [Rollcall.ref()]}
+      def refs(scope), do: Rollcall.refs(__MODULE__, scope)
+
+      @spec refs(Rollcall.scope(), Rollcall.partition()) :: [Rollcall.ref()]
+      def refs(scope, partition), do: Rollcall.refs(__MODULE__, scope, partition)
+
       @spec usage(Rollcall.usage_buckets()) :: Rollcall.usage()
       def usage(usage_buckets), do: Rollcall.usage(__MODULE__, usage_buckets)
     end
@@ -259,6 +265,35 @@ defmodule Rollcall do
   @spec state(name(), scope(), partition()) :: [entry()]
   def state(name, scope, partition) do
     Tracker.state(name, scope, partition)
+  end
+
+  @doc """
+  Returns the refs of the entries in `scope`, grouped by partition. A partition
+  with no entry is not in the map. The order of the refs is not defined.
+
+  The refs are the local entries plus the replica of each peer. Use `refs/3` to
+  read one partition.
+
+  Returns `%{}` when no tracker runs for `scope`, or when the instance does not
+  run. The function reads a table of the tracker. It sends no message to the
+  tracker and it does not start a tracker.
+  """
+  @spec refs(name(), scope()) :: %{partition() => [ref()]}
+  def refs(name, scope) do
+    Tracker.refs(name, scope)
+  end
+
+  @doc """
+  Returns the refs of the entries in `partition` of `scope`. The order is not
+  defined. The result is the value of `partition` in the map of `refs/2`.
+
+  Returns `[]` when no tracker runs for `scope`, or when the instance does not
+  run. The function sends no message to the tracker and it does not start a
+  tracker.
+  """
+  @spec refs(name(), scope(), partition()) :: [ref()]
+  def refs(name, scope, partition) do
+    Tracker.refs(name, scope, partition)
   end
 
   @doc """
