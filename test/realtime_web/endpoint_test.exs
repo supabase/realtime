@@ -1,5 +1,5 @@
 defmodule RealtimeWeb.EndpointTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias RealtimeWeb.Endpoint
 
