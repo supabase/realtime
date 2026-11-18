@@ -154,11 +154,9 @@ defmodule Realtime.Presence.Comparison do
 
     candidates = Map.merge(%{missing: 0, ghost: 0}, candidates)
 
-    entry_count =
-      phoenix
-      |> Enum.reduce(Map.get(candidates, :ghost, 0), fn
-        {_topic, refs}, acc -> Enum.count(refs) + acc
-      end)
+    # The union of the views is every ref of Phoenix and every ref of Rollcall that Phoenix lacks.
+    phoenix_ref_count = phoenix |> Map.values() |> Enum.map(&length/1) |> Enum.sum()
+    entry_count = phoenix_ref_count + candidates.ghost
 
     %{
       open: open_candidates,
