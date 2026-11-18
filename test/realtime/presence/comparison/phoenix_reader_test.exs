@@ -1,5 +1,6 @@
 defmodule Realtime.Presence.Comparison.PhoenixReaderTest do
-  use ExUnit.Case, async: true
+  # The tracker module is named, so these tests cannot run at the same time as other users of it.
+  use ExUnit.Case, async: false
 
   alias Phoenix.Tracker.Shard
   alias Realtime.Presence.Comparison.PhoenixReader
