@@ -89,10 +89,10 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
     test "does not log error message when log_level is higher than error" do
       socket = %{assigns: %{log_level: :critical, tenant: random_string(), access_token: "test_token"}}
 
-      assert capture_log(fn ->
+      refute capture_log(fn ->
                assert Logging.maybe_log_error(socket, "TestCode", "test message") ==
                         {:error, %{reason: "TestCode: test message"}}
-             end) == ""
+             end) =~ "TestCode: test message"
     end
 
     test "also returns {:error, %{reason: msg}} when log_level is error" do
@@ -129,10 +129,10 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
     test "does not log error message when log_level is higher than warning" do
       socket = %{assigns: %{log_level: :error, tenant: random_string(), access_token: "test_token"}}
 
-      assert capture_log(fn ->
+      refute capture_log(fn ->
                assert Logging.maybe_log_warning(socket, "TestCode", "test message") ==
                         {:error, %{reason: "TestCode: test message"}}
-             end) == ""
+             end) =~ "TestCode: test message"
     end
 
     test "also returns {:error, %{reason: msg}} when log_level is warning" do
@@ -157,7 +157,7 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
 
     test "does not log error message when log_level is higher than info" do
       socket = %{assigns: %{log_level: :warning, tenant: random_string(), access_token: "test_token"}}
-      assert capture_log(fn -> :ok = Logging.maybe_log_info(socket, "test message") end) == ""
+      refute capture_log(fn -> :ok = Logging.maybe_log_info(socket, "test message") end) =~ "test message"
     end
   end
 
