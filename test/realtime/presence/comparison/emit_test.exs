@@ -90,16 +90,5 @@ defmodule Realtime.Presence.Comparison.EmitTest do
   defp by_kind(events), do: Enum.sort_by(events, fn {_measurements, meta} -> meta.kind end)
 
   # The events arrive before emit/3 returns, because telemetry calls the handler in the caller.
-  defp emitted(ref, name) do
-    event = @prefix ++ [name]
-
-    Stream.repeatedly(fn ->
-      receive do
-        {^event, ^ref, measurements, metadata} -> {measurements, metadata}
-      after
-        0 -> :done
-      end
-    end)
-    |> Enum.take_while(&(&1 != :done))
-  end
+  defp emitted(ref, name), do: TelemetryHelper.drain(ref, @prefix ++ [name])
 end

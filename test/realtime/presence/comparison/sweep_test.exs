@@ -136,16 +136,5 @@ defmodule Realtime.Presence.Comparison.SweepTest do
 
   defp sweep_events(ref), do: events(ref, :sweep)
 
-  defp events(ref, name) do
-    event = @event ++ [name]
-
-    Stream.repeatedly(fn ->
-      receive do
-        {^event, ^ref, measurements, metadata} -> {measurements, metadata}
-      after
-        0 -> :done
-      end
-    end)
-    |> Enum.take_while(&(&1 != :done))
-  end
+  defp events(ref, name), do: TelemetryHelper.drain(ref, @event ++ [name])
 end
