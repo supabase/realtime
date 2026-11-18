@@ -117,39 +117,23 @@ defmodule Realtime.Presence.Comparison do
     end
   end
 
-  defp do_run(state, _tenant, _phoenix, _rollcall, [], _sleep, _t0) do
-    {:ok, summarize(state)}
-  end
+  defp do_run(%{open: []} = state, _tenant, _phoenix, _rollcall, _rungs, _sleep, _t0), do: {:ok, summarize(state)}
+
+  defp do_run(state, _tenant, _phoenix, _rollcall, [], _sleep, _t0), do: {:ok, summarize(state)}
 
   defp do_run(state, tenant, phoenix, rollcall, [rung | rungs], sleep, t0) do
-    if state.open == [] do
-      {:ok, summarize(state)}
+    sleep.(max(t0 + rung - System.monotonic_time(:millisecond), 0))
+
+    topics = open_topics(state)
+    phoenix_refs = Map.new(topics, &{&1, PhoenixReader.topic_refs(phoenix, &1)})
+    rollcall_refs = Map.new(topics, &{&1, Rollcall.refs(rollcall, tenant, &1)})
+
+    if is_pid(Rollcall.Tracker.whereis(rollcall, tenant)) do
+      state = advance(state, rung, phoenix_refs, rollcall_refs)
+
+      do_run(state, tenant, phoenix, rollcall, rungs, sleep, t0)
     else
-      sleep.(max(t0 + rung - System.monotonic_time(:millisecond), 0))
-
-      {phoenix_refs, rollcall_refs} =
-        state
-        |> open_topics()
-        |> Enum.reduce({%{}, %{}}, fn topic, {phx, rc} ->
-          {
-            Map.put(phx, topic, PhoenixReader.topic_refs(phoenix, topic)),
-            Map.put(rc, topic, Rollcall.refs(rollcall, tenant, topic))
-          }
-        end)
-
-      if is_pid(Rollcall.Tracker.whereis(rollcall, tenant)) do
-        do_run(
-          advance(state, rung, phoenix_refs, rollcall_refs),
-          tenant,
-          phoenix,
-          rollcall,
-          rungs,
-          sleep,
-          t0
-        )
-      else
-        :discarded
-      end
+      :discarded
     end
   end
 
