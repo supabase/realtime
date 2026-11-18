@@ -8,6 +8,7 @@ defmodule Realtime.PromEx do
   alias Realtime.PromEx.Plugins.Phoenix
   alias Realtime.PromEx.Plugins.PolicyEval
   alias Realtime.PromEx.Plugins.Presence
+  alias Realtime.PromEx.Plugins.PresenceComparison
   alias Realtime.PromEx.Plugins.Rollcall
   alias Realtime.PromEx.Plugins.TenantGlobal
   alias Realtime.PromEx.Plugins.Tenants
@@ -127,6 +128,7 @@ defmodule Realtime.PromEx do
       {Muster, poll_rate: poll_rate},
       {Presence, poll_rate: presence_usage_poll_rate},
       {Rollcall, poll_rate: poll_rate},
+      PresenceComparison,
       {PolicyEval, poll_rate: poll_rate},
       ClientRequests
     ]
