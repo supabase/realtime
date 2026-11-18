@@ -5,8 +5,8 @@ defmodule Realtime.Presence.Comparison do
 
   alias Realtime.Presence.Comparison.PhoenixReader
 
-  @default_rungs [1_000, 3_000, 5_000, 10_000, 15_000]
-  @default_persistent_rung 10_000
+  @rungs [1_000, 3_000, 5_000, 10_000, 15_000]
+  @persistent_rung 10_000
   @event [:realtime, :presence, :compare]
 
   @typedoc "A topic of a tenant."
@@ -72,9 +72,10 @@ defmodule Realtime.Presence.Comparison do
   @doc """
   Compares the views of `tenant` in Phoenix and in Rollcall, and returns the result.
 
-  Reads both views, then checks the open candidates at each rung. The function sleeps until the
-  rung is due, measured from the first read. It stops when no candidate is open or after the last
-  rung. 
+  Reads both views, then checks the open candidates at each rung. The rungs are 1, 3, 5, 10 and 15
+  seconds after the first read. A candidate that is still open at the rung of 10 seconds is
+  persistent. The function sleeps until the rung is due. It stops when no candidate is open or
+  after the last rung.
 
   Returns `:discarded` when the Rollcall tracker of `tenant` does not run after a read. An absent
   tracker reads as an empty view, so the result would show every Phoenix ref as `:missing`.
@@ -83,24 +84,17 @@ defmodule Realtime.Presence.Comparison do
 
     * `:phoenix` - the Phoenix tracker module. The default is `RealtimeWeb.Presence`.
     * `:rollcall` - the name of the Rollcall instance. The default is `Realtime.Presence.Rollcall`.
-    * `:rungs` - the rungs in milliseconds, in ascending order. The default is
-      `[1_000, 3_000, 5_000, 10_000, 15_000]`.
-    * `:persistent_rung` - the rung for `start/3`. The default is `10_000`.
     * `:sleep` - a function that waits. `run/2` calls it with the milliseconds until the next
       rung is due, before each rung. The default is `Process.sleep/1`.
   """
   @spec run(String.t(),
           phoenix: module(),
           rollcall: Rollcall.name(),
-          rungs: [rung()],
-          persistent_rung: rung(),
           sleep: (non_neg_integer() -> any())
         ) :: {:ok, summary()} | :discarded
   def run(tenant, opts \\ []) do
     phoenix = Keyword.get(opts, :phoenix, RealtimeWeb.Presence)
     rollcall = Keyword.get(opts, :rollcall, Realtime.Presence.Rollcall)
-    rungs = Keyword.get(opts, :rungs, @default_rungs)
-    persistent_rung = Keyword.get(opts, :persistent_rung, @default_persistent_rung)
     sleep = Keyword.get(opts, :sleep, &Process.sleep/1)
 
     initial_phoenix_view = PhoenixReader.tenant_refs(phoenix, tenant)
@@ -109,9 +103,9 @@ defmodule Realtime.Presence.Comparison do
     if is_pid(Rollcall.Tracker.whereis(rollcall, tenant)) do
       t0 = System.monotonic_time(:millisecond)
 
-      state = start(initial_phoenix_view, initial_rollcall_view, persistent_rung)
+      state = start(initial_phoenix_view, initial_rollcall_view, @persistent_rung)
 
-      do_run(state, tenant, phoenix, rollcall, rungs, sleep, t0)
+      do_run(state, tenant, phoenix, rollcall, @rungs, sleep, t0)
     else
       :discarded
     end

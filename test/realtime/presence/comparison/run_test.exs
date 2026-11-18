@@ -24,26 +24,25 @@ defmodule Realtime.Presence.Comparison.RunTest do
 
       sleep = fn _ms -> flunk("run/2 waited when no candidate was open") end
 
-      assert {:ok, %{outcome: :clean, entries: 1, rungs: [], persistent: []}} =
-               run(ctx, rungs: [200, 400], persistent_rung: 400, sleep: sleep)
+      assert {:ok, %{outcome: :clean, entries: 1, rungs: [], persistent: []}} = run(ctx, sleep: sleep)
     end
 
     test "gives the outcome transient and stops at the rung where the views agree", ctx do
       {:ok, ref} = Tracker.track(self(), ctx.topic, "k1", %{})
       :ok = Rollcall.ensure_started(ctx.rollcall, ctx.tenant)
 
-      # Rollcall gets the ref during the second wait, so the rung at 200 finds it.
+      # Rollcall gets the ref during the second wait, so the rung at 3000 finds it.
       sleep = script([fn -> :ok end, fn -> track_rollcall(ctx, ctx.topic, ref) end])
 
-      assert {:ok, summary} = run(ctx, rungs: [50, 200, 400], persistent_rung: 400, sleep: sleep)
+      assert {:ok, summary} = run(ctx, sleep: sleep)
 
       assert summary.outcome == :transient
       assert summary.candidates == %{missing: 1, ghost: 0}
 
-      # No row for the rung at 400: the loop ends when no candidate is open.
+      # No row for the rung at 5000: the loop ends when no candidate is open.
       assert summary.rungs == [
-               %{rung: 50, kind: :missing, open: 1, converged: 0, gone: 0},
-               %{rung: 200, kind: :missing, open: 0, converged: 1, gone: 0}
+               %{rung: 1_000, kind: :missing, open: 1, converged: 0, gone: 0},
+               %{rung: 3_000, kind: :missing, open: 0, converged: 1, gone: 0}
              ]
     end
 
@@ -54,32 +53,16 @@ defmodule Realtime.Presence.Comparison.RunTest do
       {:ok, missing_ref} = Tracker.track(self(), missing_topic, "k1", %{})
       track_rollcall(ctx, ghost_topic, "ghost-ref")
 
-      assert {:ok, summary} = run(ctx, rungs: [50, 100, 150], persistent_rung: 100)
+      assert {:ok, summary} = run(ctx, [])
 
       assert summary.outcome == :persistent
 
       assert Enum.sort(summary.persistent) ==
                [{ghost_topic, "ghost-ref", :ghost}, {missing_topic, missing_ref, :missing}]
 
+      # Both candidates stay open at every rung of the ladder.
       assert summary.rungs |> Enum.map(&{&1.rung, &1.kind, &1.open}) |> Enum.sort() ==
-               [
-                 {50, :ghost, 1},
-                 {50, :missing, 1},
-                 {100, :ghost, 1},
-                 {100, :missing, 1},
-                 {150, :ghost, 1},
-                 {150, :missing, 1}
-               ]
-    end
-
-    test "uses the default ladder, and a ref that stays open to the last rung is persistent", ctx do
-      {:ok, _ref} = Tracker.track(self(), ctx.topic, "k1", %{})
-      :ok = Rollcall.ensure_started(ctx.rollcall, ctx.tenant)
-
-      assert {:ok, summary} = run(ctx, [])
-
-      assert Enum.map(summary.rungs, & &1.rung) == [1_000, 3_000, 5_000, 10_000, 15_000]
-      assert summary.outcome == :persistent
+               for(rung <- [1_000, 3_000, 5_000, 10_000, 15_000], kind <- [:ghost, :missing], do: {rung, kind, 1})
     end
 
     test "returns :discarded when no Rollcall tracker runs at the first read, even with no Phoenix entry", ctx do
@@ -97,11 +80,11 @@ defmodule Realtime.Presence.Comparison.RunTest do
       tracker = Rollcall.Tracker.whereis(ctx.rollcall, ctx.tenant)
       assert is_pid(tracker)
 
-      # The tracker stops during the second wait. The read at rung 200 finds an empty view, which
+      # The tracker stops during the second wait. The read at rung 3000 finds an empty view, which
       # looks like a persistent divergence.
       sleep = script([fn -> :ok end, fn -> GenServer.stop(tracker) end])
 
-      assert run(ctx, rungs: [50, 200, 400], persistent_rung: 200, sleep: sleep) == :discarded
+      assert run(ctx, sleep: sleep) == :discarded
     end
   end
 
@@ -114,27 +97,28 @@ defmodule Realtime.Presence.Comparison.RunTest do
 
       sleep = script([fn -> GenServer.stop(tracker) end])
 
-      assert run(ctx, rungs: [50, 200], persistent_rung: 200, sleep: sleep) == :discarded
+      assert run(ctx, sleep: sleep) == :discarded
     end
 
     test "waits for the time that is left until the rung is due, not for the rung", ctx do
       {:ok, _ref} = Tracker.track(self(), ctx.topic, "k1", %{})
       :ok = Rollcall.ensure_started(ctx.rollcall, ctx.tenant)
 
+      # A real wait of 60 ms, instead of the 1000 ms of the first rung, keeps the test short.
       sleep = fn ms ->
         send(self(), {:wait, ms})
-        Process.sleep(ms)
+        Process.sleep(60)
       end
 
-      assert {:ok, _summary} = run(ctx, rungs: [50, 100], persistent_rung: 100, sleep: sleep)
+      assert {:ok, _summary} = run(ctx, sleep: sleep)
 
       assert_received {:wait, first}
       assert_received {:wait, second}
 
-      # The first wait is at most 50 ms. The first wait took that long, so the time left to 100 is
-      # at most 50 ms. A wait for the whole rung would be 100.
-      assert first in 1..50
-      assert second in 0..50
+      # The first wait is at most 1000 ms. At least 60 ms passed before the second wait, so the time
+      # left to the rung at 3000 is at most 2940 ms. A wait for the whole rung would be 3000.
+      assert first in 1..1_000
+      assert second in 0..2_940
     end
   end
 

@@ -40,8 +40,7 @@ defmodule Realtime.Presence.Comparison.Sweep do
       A tenant task sleeps between the rungs and holds its place, so a low number makes a long sweep.
     * `:timeout` - the time in milliseconds that a tenant task can run. The default is 30 000. It
       must exceed the last rung.
-    * `:phoenix`, `:rungs`, `:persistent_rung` and `:sleep` - passed to
-      `Realtime.Presence.Comparison.run/2`.
+    * `:phoenix` and `:sleep` - passed to `Realtime.Presence.Comparison.run/2`.
   """
   @spec run(non_neg_integer(), Keyword.t()) :: :ok
   def run(sweep_number, opts \\ []) do
@@ -56,7 +55,7 @@ defmodule Realtime.Presence.Comparison.Sweep do
 
     run_opts =
       opts
-      |> Keyword.take([:phoenix, :rungs, :persistent_rung, :sleep])
+      |> Keyword.take([:phoenix, :sleep])
       |> Keyword.put(:rollcall, rollcall)
 
     started_at = System.monotonic_time()
