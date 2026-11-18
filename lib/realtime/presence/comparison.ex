@@ -70,6 +70,15 @@ defmodule Realtime.Presence.Comparison do
         }
 
   @doc """
+  Returns the name of a telemetry event of the comparison.
+
+  `emit/3` emits `:comparison`, `:candidates`, `:rung` and `:persistent`.
+  `Realtime.Presence.Comparison.Sweep` emits `:sweep`.
+  """
+  @spec event(:comparison | :candidates | :rung | :persistent | :sweep) :: [atom()]
+  def event(name), do: @event ++ [name]
+
+  @doc """
   Compares the views of `tenant` in Phoenix and in Rollcall, and returns the result.
 
   Reads both views, then checks the open candidates at each rung. The rungs are 1, 3, 5, 10 and 15
@@ -270,31 +279,31 @@ defmodule Realtime.Presence.Comparison do
   """
   @spec emit(String.t(), {:ok, summary()} | :discarded, integer()) :: :ok
   def emit(tenant, :discarded, duration) do
-    :telemetry.execute(@event ++ [:comparison], %{duration: duration}, %{
+    :telemetry.execute(event(:comparison), %{duration: duration}, %{
       outcome: :discarded,
       tenant: tenant
     })
   end
 
   def emit(tenant, {:ok, result}, duration) do
-    :telemetry.execute(@event ++ [:comparison], %{entries: result.entries, duration: duration}, %{
+    :telemetry.execute(event(:comparison), %{entries: result.entries, duration: duration}, %{
       outcome: result.outcome,
       tenant: tenant
     })
 
     Enum.each(result.candidates, fn {kind, count} ->
-      :telemetry.execute(@event ++ [:candidates], %{count: count}, %{kind: kind, tenant: tenant})
+      :telemetry.execute(event(:candidates), %{count: count}, %{kind: kind, tenant: tenant})
     end)
 
     result.persistent
     |> Enum.frequencies_by(fn {_topic, _ref, kind} -> kind end)
     |> Enum.each(fn {kind, count} ->
-      :telemetry.execute(@event ++ [:persistent], %{count: count}, %{kind: kind, tenant: tenant})
+      :telemetry.execute(event(:persistent), %{count: count}, %{kind: kind, tenant: tenant})
     end)
 
     Enum.each(result.rungs, fn rung ->
       :telemetry.execute(
-        @event ++ [:rung],
+        event(:rung),
         Map.take(rung, [:open, :converged, :gone]),
         Map.take(rung, [:rung, :kind])
       )

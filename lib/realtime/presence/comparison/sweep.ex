@@ -12,7 +12,6 @@ defmodule Realtime.Presence.Comparison.Sweep do
   alias Realtime.Presence.Comparison
 
   @flag "presence_comparison"
-  @event [:realtime, :presence, :compare]
   @default_timeout 30_000
   @default_groups 8
   @default_concurrency 32
@@ -67,7 +66,7 @@ defmodule Realtime.Presence.Comparison.Sweep do
       |> compare_all(run_opts, concurrency, timeout)
 
     :telemetry.execute(
-      @event ++ [:sweep],
+      Comparison.event(:sweep),
       %{
         tenants_listed: length(listed),
         tenants_compared: compared,
