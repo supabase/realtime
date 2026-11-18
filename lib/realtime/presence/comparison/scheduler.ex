@@ -13,7 +13,6 @@ defmodule Realtime.Presence.Comparison.Scheduler do
   alias Realtime.Presence.Comparison.Sweep
 
   @default_period 300_000
-  @sweep_options [:groups, :concurrency, :timeout, :rungs, :persistent_rung]
 
   @doc """
   Starts the scheduler.
@@ -21,11 +20,9 @@ defmodule Realtime.Presence.Comparison.Scheduler do
   Options:
 
     * `:name` - the name of the process. The default is the name of this module.
-    * `:period` - the time in milliseconds between the ticks.
-    * `:jitter` - the upper bound in milliseconds of a random time that is added to each period.
-      The default is 0.
-    * `:sweep` - a function that takes the sweep number and runs the sweep. The default calls
-      `Realtime.Presence.Comparison.Sweep.run/2` with the settings of the application.
+    * `:period` - the time in milliseconds between the ticks. The default is 5 minutes.
+    * `:sweep` - a function that takes the sweep number and runs the sweep. The default is
+      `Realtime.Presence.Comparison.Sweep.run/1`. That function checks the feature flag.
   """
   @spec start_link(Keyword.t()) :: GenServer.on_start()
   def start_link(opts) do
@@ -34,12 +31,9 @@ defmodule Realtime.Presence.Comparison.Scheduler do
 
   @impl true
   def init(opts) do
-    settings = Application.get_env(:realtime, :presence_comparison, [])
-
     state = %{
-      period: Keyword.get(opts, :period, Keyword.get(settings, :period, @default_period)),
-      jitter: Keyword.get(opts, :jitter, Keyword.get(settings, :jitter, 0)),
-      sweep: Keyword.get(opts, :sweep, &Sweep.run(&1, Keyword.take(settings, @sweep_options))),
+      period: Keyword.get(opts, :period, @default_period),
+      sweep: Keyword.get(opts, :sweep, &Sweep.run/1),
       number: 0,
       task: nil
     }
@@ -79,7 +73,7 @@ defmodule Realtime.Presence.Comparison.Scheduler do
     %{state | task: task, number: number + 1}
   end
 
-  defp schedule(%{period: period, jitter: jitter}) do
-    Process.send_after(self(), :tick, period + :rand.uniform(jitter + 1) - 1)
+  defp schedule(%{period: period}) do
+    Process.send_after(self(), :tick, period)
   end
 end

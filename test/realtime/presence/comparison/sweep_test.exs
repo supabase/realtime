@@ -20,10 +20,22 @@ defmodule Realtime.Presence.Comparison.SweepTest do
 
     ref = :telemetry_test.attach_event_handlers(self(), [@event ++ [:comparison], @event ++ [:sweep]])
 
+    stub(Realtime.FeatureFlags, :enabled?, fn "presence_comparison" -> true end)
+
     {:ok, rollcall: rollcall, ref: ref}
   end
 
   describe "run/2" do
+    test "compares nothing and emits no event when the presence_comparison flag is off", ctx do
+      start_tenants(ctx, %{"shadow-tenant" => :shadow})
+      stub(Realtime.FeatureFlags, :enabled?, fn "presence_comparison" -> false end)
+
+      assert :ok = sweep(ctx, 0)
+
+      assert compared(ctx.ref) == []
+      assert sweep_events(ctx.ref) == []
+    end
+
     test "compares only the tenants in the shadow mode, and counts every scope as listed", ctx do
       modes = %{"shadow-tenant" => :shadow, "phoenix-tenant" => :phoenix, "rollcall-tenant" => :rollcall}
       start_tenants(ctx, modes)

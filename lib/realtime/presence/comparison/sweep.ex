@@ -7,15 +7,21 @@ defmodule Realtime.Presence.Comparison.Sweep do
   them in its own task, and emits the events of each result with
   `Realtime.Presence.Comparison.emit/3`. A sweep keeps no state for the next sweep.
   """
+  alias Realtime.FeatureFlags
   alias Realtime.Presence
   alias Realtime.Presence.Comparison
 
+  @flag "presence_comparison"
   @event [:realtime, :presence, :compare]
   @default_timeout 30_000
   @default_groups 8
+  @default_concurrency 32
 
   @doc """
   Runs sweep number `sweep_number` and returns `:ok` when every tenant task has ended.
+
+  The sweep does nothing, and emits no event, when the global feature flag `presence_comparison` is
+  off. The flag is off when it does not exist.
 
   The tenant is in the sampling group `sweep_number` when `:erlang.phash2(tenant, groups)` is
   equal to `rem(sweep_number, groups)`. `groups` consecutive sweeps cover every tenant once.
@@ -30,16 +36,22 @@ defmodule Realtime.Presence.Comparison.Sweep do
     * `:rollcall` - the name of the Rollcall instance. The default is `Realtime.Presence.Rollcall`.
     * `:groups` - the number of sampling groups. The default is 8: a sweep covers one eighth of the
       tenants. Set 1 to cover every tenant in every sweep.
-    * `:concurrency` - the number of tenant tasks that run at the same time.
-    * `:timeout` - the time in milliseconds that a tenant task can run. It must exceed the last rung.
+    * `:concurrency` - the number of tenant tasks that run at the same time. The default is 32.
+      A tenant task sleeps between the rungs and holds its place, so a low number makes a long sweep.
+    * `:timeout` - the time in milliseconds that a tenant task can run. The default is 30 000. It
+      must exceed the last rung.
     * `:phoenix`, `:rungs`, `:persistent_rung` and `:sleep` - passed to
       `Realtime.Presence.Comparison.run/2`.
   """
   @spec run(non_neg_integer(), Keyword.t()) :: :ok
   def run(sweep_number, opts \\ []) do
+    if FeatureFlags.enabled?(@flag), do: compare_tenants(sweep_number, opts), else: :ok
+  end
+
+  defp compare_tenants(sweep_number, opts) do
     rollcall = Keyword.get(opts, :rollcall, Realtime.Presence.Rollcall)
     groups = Keyword.get(opts, :groups, @default_groups)
-    concurrency = Keyword.get(opts, :concurrency, System.schedulers_online())
+    concurrency = Keyword.get(opts, :concurrency, @default_concurrency)
     timeout = Keyword.get(opts, :timeout, @default_timeout)
 
     run_opts =
