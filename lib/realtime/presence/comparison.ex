@@ -7,6 +7,7 @@ defmodule Realtime.Presence.Comparison do
 
   @default_rungs [1_000, 3_000, 5_000, 10_000, 15_000]
   @default_persistent_rung 10_000
+  @event [:realtime, :presence, :compare]
 
   @typedoc "A topic of a tenant."
   @type topic :: String.t()
@@ -274,6 +275,54 @@ defmodule Realtime.Presence.Comparison do
       state.candidates == %{missing: 0, ghost: 0} -> :clean
       true -> :transient
     end
+  end
+
+  @doc """
+  Emits the telemetry events of one comparison of `tenant`.
+
+  `result` is the return value of `run/2`. `duration` is the time of the comparison in native time
+  units. The events are under `[:realtime, :presence, :compare, ...]`:
+
+    * `:comparison`: once. Measurements: `entries` and `duration`. Metadata: `tenant` and `outcome`.
+      A discarded comparison has the outcome `:discarded` and no `entries`, and it emits no other event.
+    * `:candidates`: once for each kind, also with a count of 0. Measurement: `count`.
+      Metadata: `tenant` and `kind`.
+    * `:rung`: once for each row of `rungs`. Measurements: `open`, `converged` and `gone`.
+      Metadata: `rung` and `kind`. It has no `tenant`.
+    * `:persistent`: once for each kind that has a persistent candidate. Measurement: `count`.
+      Metadata: `tenant` and `kind`.
+  """
+  @spec emit(String.t(), {:ok, summary()} | :discarded, integer()) :: :ok
+  def emit(tenant, :discarded, duration) do
+    :telemetry.execute(@event ++ [:comparison], %{duration: duration}, %{
+      outcome: :discarded,
+      tenant: tenant
+    })
+  end
+
+  def emit(tenant, {:ok, result}, duration) do
+    :telemetry.execute(@event ++ [:comparison], %{entries: result.entries, duration: duration}, %{
+      outcome: result.outcome,
+      tenant: tenant
+    })
+
+    Enum.each(result.candidates, fn {kind, count} ->
+      :telemetry.execute(@event ++ [:candidates], %{count: count}, %{kind: kind, tenant: tenant})
+    end)
+
+    result.persistent
+    |> Enum.frequencies_by(fn {_topic, _ref, kind} -> kind end)
+    |> Enum.each(fn {kind, count} ->
+      :telemetry.execute(@event ++ [:persistent], %{count: count}, %{kind: kind, tenant: tenant})
+    end)
+
+    Enum.each(result.rungs, fn rung ->
+      :telemetry.execute(
+        @event ++ [:rung],
+        Map.take(rung, [:open, :converged, :gone]),
+        Map.take(rung, [:rung, :kind])
+      )
+    end)
   end
 
   @doc """
