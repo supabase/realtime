@@ -236,6 +236,32 @@ defmodule PolicyEval.ResolverTest do
       end
     end
 
+    test "split_part on text, text and an integer literal is split_part" do
+      assert resolve({:func, nil, "split_part", [team(), text(":"), {:const, :number, "2"}]}) ==
+               {call(Value, :split_part, [{:column, "team"}, lit_text(":"), {:lit, {:int4, 2}}]), :text}
+    end
+
+    test "split_part on other types is unsupported with the types" do
+      assert resolve({:func, nil, "split_part", [user_id(), text(":"), {:const, :number, "2"}]}) ==
+               unsupported({:function, "split_part", {:types, :uuid, :text, :int4}})
+
+      assert resolve({:func, nil, "split_part", [team(), text(":"), text("2")]}) ==
+               unsupported({:function, "split_part", {:types, :text, :text, :text}})
+    end
+
+    test "split_part with an unsupported argument is unsupported with its reason" do
+      assert resolve({:func, nil, "split_part", [team(), text(":"), {:const, :number, "1.5"}]}) ==
+               unsupported(:number_literal)
+    end
+
+    test "split_part in a schema or with another number of arguments is not the built-in" do
+      assert resolve({:func, "public", "split_part", [team(), text(":"), {:const, :number, "1"}]}) ==
+               unsupported({:function, :other_schema, :not_allowlisted})
+
+      assert resolve({:func, nil, "split_part", [team(), text(":")]}) ==
+               unsupported({:function, "split_part", :not_allowlisted})
+    end
+
     test "~~* and !~~* on text with text are unsupported, because ILIKE folds case by the collation" do
       for op <- ["~~*", "!~~*"] do
         assert resolve({:op, op, team(), text("a%")}) == unsupported({:operator, op, :text, :text})

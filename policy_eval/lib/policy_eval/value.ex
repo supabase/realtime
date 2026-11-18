@@ -55,6 +55,41 @@ defmodule PolicyEval.Value do
   end
 
   @doc """
+  `split_part(text, text, integer)` (`split_part`, src/backend/utils/adt/varlena.c). Strict.
+
+  Splits the text at each occurrence of the delimiter, from left to right and without overlaps, and
+  gives field `n`. Fields count from 1, and a negative `n` counts from the end (Postgres 14 and
+  later). A field that does not exist gives `''`, and so does an empty text. With an empty
+  delimiter, or one that does not occur, the whole text is the only field, so `1` and `-1` give the
+  text and other fields give `''`. Field `0` raises `invalid_parameter_value`.
+
+  Under a deterministic collation Postgres finds the delimiter by its bytes. In valid UTF-8, a match
+  of a valid UTF-8 delimiter always starts and ends on a character boundary, so splitting the bytes
+  gives the same fields as splitting the characters. Text that is not valid UTF-8 is
+  `{:unsupported, :invalid_utf8}`.
+  """
+  @spec split_part(result, result, result) :: result
+  def split_part({:unsupported, _} = unsupported, _delimiter, _field), do: unsupported
+  def split_part(_text, {:unsupported, _} = unsupported, _field), do: unsupported
+  def split_part(_text, _delimiter, {:unsupported, _} = unsupported), do: unsupported
+  def split_part(text, delimiter, field) when nil in [text, delimiter, field], do: nil
+
+  def split_part({:text, text}, {:text, delimiter}, {:int4, field}) do
+    cond do
+      field == 0 ->
+        {:unsupported, {:raises, :invalid_parameter_value, "field position must not be zero"}}
+
+      not (String.valid?(text) and String.valid?(delimiter)) ->
+        {:unsupported, :invalid_utf8}
+
+      true ->
+        fields = if delimiter == "", do: [text], else: :binary.split(text, delimiter, [:global])
+        index = if field > 0, do: field - 1, else: length(fields) + field
+        {:text, if(index >= 0, do: Enum.at(fields, index, ""), else: "")}
+    end
+  end
+
+  @doc """
   `text || uuid` (`textanycat`, oid 2003 in src/include/catalog/pg_proc.dat). Strict.
 
   The function body is `select $1 || $2::text`, so the uuid goes through `uuid_out`. Only uuid is
