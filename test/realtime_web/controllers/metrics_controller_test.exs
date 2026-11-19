@@ -112,7 +112,7 @@ defmodule RealtimeWeb.MetricsControllerTest do
       tenant_meta
     )
 
-    :telemetry.execute([:realtime, :tenants, :replay], %{latency: 20}, tenant_meta)
+    :telemetry.execute([:realtime, :broadcast, :replay], %{latency: 20}, tenant_meta)
     :telemetry.execute([:realtime, :rpc], %{latency: 5}, %{success: true, mechanism: :erpc})
 
     :telemetry.execute([:phoenix, :channel_joined], %{}, %{

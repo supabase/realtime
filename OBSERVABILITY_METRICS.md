@@ -109,6 +109,7 @@ These metrics provide insight into data volume, message sizes, and network I/O c
 | `realtime_channel_output_bytes`        | Counter   | Total egress bytes per tenant.                                                                                                  | **Per-Tenant**   | `/tenant-metrics` |
 | `realtime_channel_global_input_bytes`  | Counter   | Global total ingress bytes across all tenants.                                                                                  | Global Aggregate | `/metrics`        |
 | `realtime_channel_global_output_bytes` | Counter   | Global total egress bytes across all tenants.                                                                                   | Global Aggregate | `/metrics`        |
+| `realtime_broadcast_global_replay_messages` | Counter | Global total of broadcast messages read from `realtime.messages` to replay on private channel joins. Counted on the node that holds the tenant's database connection. | Global Aggregate | `/metrics` |
 
 ## Latency & Performance Metrics
 
