@@ -205,6 +205,34 @@ defmodule Realtime.EnvTest do
     end
   end
 
+  describe "get_key_positive_integer_list/1" do
+    test "returns an empty list when env is unset or blank", %{env: env} do
+      assert Env.get_key_positive_integer_list(env) == []
+      System.put_env(env, " ")
+      assert Env.get_key_positive_integer_list(env) == []
+    end
+
+    test "parses pairs in order, trimming whitespace", %{env: env} do
+      System.put_env(env, " us-east-1 = 2 ,eu-west-1=1")
+      assert Env.get_key_positive_integer_list(env) == [{"us-east-1", 2}, {"eu-west-1", 1}]
+    end
+
+    test "raises on a pair without a positive integer", %{env: env} do
+      for value <- ["us-east-1", "us-east-1=", "us-east-1=two", "us-east-1=0", "us-east-1=-1", "=2", "a=1,,b=2"] do
+        System.put_env(env, value)
+
+        assert_raise ArgumentError, ~r/expected key=positive integer pairs/, fn ->
+          Env.get_key_positive_integer_list(env)
+        end
+      end
+    end
+
+    test "raises on a repeated key", %{env: env} do
+      System.put_env(env, "us-east-1=1,eu-west-1=1,us-east-1=2")
+      assert_raise ArgumentError, ~r/repeats key "us-east-1"/, fn -> Env.get_key_positive_integer_list(env) end
+    end
+  end
+
   describe "get_non_empty_binary/1" do
     test "returns nil when env is unset", %{env: env} do
       assert Env.get_non_empty_binary(env) == nil

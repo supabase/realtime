@@ -58,6 +58,7 @@ defmodule RealtimeWeb.Router do
 
   scope "/", RealtimeWeb do
     get("/healthcheck", PageController, :healthcheck)
+    get("/ready", PageController, :ready)
   end
 
   scope "/", RealtimeWeb do
