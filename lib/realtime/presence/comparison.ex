@@ -1,6 +1,42 @@
 defmodule Realtime.Presence.Comparison do
   @moduledoc """
   Compares the presence views of Phoenix and Rollcall for a tenant in shadow mode.
+
+  Comparing the state of Phoenix and Rollcall is non-trivial because we have two 
+  eventually consistent systems running in parallel, with their own replication protocols,
+  and they're running on live data, so we need a mechanism that can test that they eventually 
+  converge. Fortunately, the refs in each system are the same in shadow mode, so we can actually 
+  compare the states, we just need to do it in a way that compares them over time.
+
+  This is what this module handles, and it does it the following way:
+
+  Firstly, some terminology:
+
+  * `Comparison` - This is a point in time comparison of one tenant's state in both Phoenix and Rollcall. 
+                   A comparison starts at a point in time, `t0`.
+  * `View` - What a backend, Phoenix or Rollcall, currently has for a tenant's entriesy.
+  * `Candidate` - An entry in a tenant's state that is in one view and not the other. Candidates have a `kind` which can be:
+    * `ghost` - A Candidate that's in Rollcall but not Phoenix. 
+    * `missing` - A Candidate that's in Phoenix but not Rollcall
+  * `Rungs` - A list of elapsed times, in ms, each being a point in time after which we'll check for convergence across the candidates.
+  * `Persistent` - A candidate that has not converged after the peristent rung, which by default is 10 seconds.
+
+  A Comparison run looks like this:
+
+  1. At the start of the run, we snapshot the state for the tenant in both Phoenix and Rollcall. This
+     captures each systems view of the tenant's state at that point it time, call it `t0`. 
+  2. From the snapshot we generate the list of candidates, i.e the differences between Phoenix and Rollcall.
+     If the list is empty, we're done, the tenant is converged and there's nothing to check. 
+     Low churn tenants will hit this fairly often.
+  3. If we do have candidates, we wait for the next rung and do another check, using `step/3`.
+  4. When doing a step, we get the updated state in Phoenix and Rollcall for all the open candiates. Any candidates 
+     that have converged, get removed from the list.
+  5. If our list of open candidates is empty, we're done and end with a `:converged` outcome. If not, we go back to 
+     (3) and wait for the next rung. If we were on the persistent_rung we record how many candidates were still diverged.
+     If we're all out of rungs, we end and the outcome is an `:open` comparison that did not converge.
+
+  If at any point in the above, the Rollcall Tracker disappears, we end the comparison with a `:gone` outcome, 
+  because we can't reliably compare.
   """
 
   alias Realtime.Presence.Comparison.PhoenixReader
