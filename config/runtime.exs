@@ -8,11 +8,19 @@ api_jwt_secret =
 
 api_token_blocklist = Env.get_list("API_TOKEN_BLOCKLIST", [])
 app_name = System.get_env("APP_NAME", "")
+broadcast_persistence_flush_interval_ms = Env.get_integer("BROADCAST_PERSISTENCE_FLUSH_INTERVAL_MS", 10)
 broadcast_pool_size = Env.get_integer("BROADCAST_POOL_SIZE", 10)
 channel_error_backoff_ms = Env.get_integer("CHANNEL_ERROR_BACKOFF_MS", to_timeout(second: 5))
 client_broadcasts_burst = Env.get_integer("CLIENT_BROADCASTS_BURST", 1_000)
 client_broadcasts_per_second = Env.get_integer("CLIENT_BROADCASTS_PER_SECOND", 100)
 client_joins_per_second = Env.get_integer("CLIENT_JOINS_PER_SECOND", 1)
+
+client_persisted_broadcasts_burst =
+  Env.get_integer("CLIENT_PERSISTED_BROADCASTS_BURST", max(div(client_broadcasts_burst, 2), 1))
+
+client_persisted_broadcasts_per_second =
+  Env.get_integer("CLIENT_PERSISTED_BROADCASTS_PER_SECOND", max(div(client_broadcasts_per_second, 2), 1))
+
 client_presence_max_calls = Env.get_integer("CLIENT_PRESENCE_MAX_CALLS", 5)
 client_presence_window_ms = Env.get_integer("CLIENT_PRESENCE_WINDOW_MS", 30_000)
 access_token_throttle_ms = Env.get_integer("ACCESS_TOKEN_THROTTLE_MS", to_timeout(second: 10))
@@ -216,6 +224,14 @@ end
 
 if client_broadcasts_per_second < 1 or client_broadcasts_burst < 1 do
   raise "CLIENT_BROADCASTS_PER_SECOND and CLIENT_BROADCASTS_BURST must be positive integers"
+end
+
+if client_persisted_broadcasts_per_second < 1 or client_persisted_broadcasts_burst < 1 do
+  raise "CLIENT_PERSISTED_BROADCASTS_PER_SECOND and CLIENT_PERSISTED_BROADCASTS_BURST must be positive integers"
+end
+
+if broadcast_persistence_flush_interval_ms < 1 do
+  raise "BROADCAST_PERSISTENCE_FLUSH_INTERVAL_MS must be a positive integer"
 end
 
 if db_enc_key_gcm && byte_size(db_enc_key_gcm) != 32,
@@ -478,9 +494,15 @@ if config_env() != :test do
     socket_kill_delay_ms: socket_kill_delay_ms,
     client_join_rate_limit: [per_second: client_joins_per_second],
     client_broadcast_rate_limit: [per_second: client_broadcasts_per_second, burst: client_broadcasts_burst],
+    client_persist_rate_limit: [
+      per_second: client_persisted_broadcasts_per_second,
+      burst: client_persisted_broadcasts_burst
+    ],
     node_join_budget_floor: node_join_budget_floor,
     node_join_budget_burst_seconds: node_join_budget_burst_seconds,
     node_drain_settle_ms: node_drain_settle_ms
+
+  config :realtime, Realtime.Messages, flush_interval_ms: broadcast_persistence_flush_interval_ms
 end
 
 # Setup Production

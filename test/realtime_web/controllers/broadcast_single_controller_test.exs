@@ -6,11 +6,9 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
 
   import Ecto.Query, only: [from: 2]
 
-  alias Realtime.Api
   alias Realtime.Api.Message
   alias Realtime.Crypto
   alias Realtime.Database
-  alias Realtime.FeatureFlags
   alias Realtime.GenCounter
   alias Realtime.Messages
   alias Realtime.RateCounter
@@ -752,7 +750,6 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
 
   describe "broadcast persistence" do
     setup %{conn: conn, tenant: tenant} do
-      enable_broadcast_persistence_flag!(tenant)
       jwt_secret = Crypto.decrypt!(tenant.jwt_secret)
 
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
@@ -973,17 +970,6 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
         assert Jason.decode!(conn.resp_body)["message"] =~ "persist ttl must be a positive integer"
       end
     end
-  end
-
-  # Enables the `broadcast_persistence` flag for real: the flag is created and pushed into the local
-  # FeatureFlags cache so the replication connection process reads it synchronously, and torn down
-  # afterwards so it does not leak into other tests via the shared in-memory cache.
-  defp enable_broadcast_persistence_flag!(tenant) do
-    {:ok, flag} = Api.upsert_feature_flag(%{name: "broadcast_persistence", enabled: false})
-    FeatureFlags.Cache.update_cache(flag)
-    {:ok, tenant} = FeatureFlags.set_tenant_flag("broadcast_persistence", tenant.external_id, true)
-    Realtime.Tenants.Cache.update_cache(tenant)
-    on_exit(fn -> FeatureFlags.Cache.invalidate_cache("broadcast_persistence") end)
   end
 
   defp messages_for(topic), do: from(m in Message, where: m.topic == ^topic)

@@ -217,6 +217,74 @@ defmodule RealtimeWeb.RealtimeChannel.RequestOutcomeTest do
     end
   end
 
+  describe "persisted broadcast with ack" do
+    @persist_payload {"test", :json, ~s({"a":"b"}), %{"persist" => %{}}}
+
+    test "is recorded when the persisted result is replied to", %{
+      telemetry_ref: telemetry_ref,
+      tenant: tenant,
+      tenant_id: tenant_id,
+      topic: topic
+    } do
+      socket =
+        socket_fixture(tenant, topic, policies: %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}})
+
+      assert {:noreply, socket} = RealtimeChannel.handle_in("broadcast", @persist_payload, socket)
+      refute_received {@event, ^telemetry_ref, _, %{tenant: ^tenant_id}}
+
+      assert_receive {{:persisted, _ref}, {:ok, id}} = message, 1_000
+      assert {:noreply, _socket} = RealtimeChannel.handle_info(message, socket)
+
+      assert_receive {:ack_reply, %Phoenix.Socket.Reply{status: :ok, payload: %{id: ^id}}}
+      assert_receive {@event, ^telemetry_ref, _, %{tenant: ^tenant_id, outcome: :success, reason: :none}}
+    end
+
+    test "with no result within the ack timeout is recorded as persistence_timeout", %{
+      telemetry_ref: telemetry_ref,
+      tenant: tenant,
+      tenant_id: tenant_id,
+      topic: topic
+    } do
+      socket =
+        socket_fixture(tenant, topic, policies: %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}})
+
+      assert {:noreply, socket} = RealtimeChannel.handle_in("broadcast", @persist_payload, socket)
+      assert [{ref, {_socket_ref, timer}}] = Map.to_list(socket.assigns.pending_acks)
+      assert Process.read_timer(timer) > 0
+
+      assert {:noreply, _socket} = RealtimeChannel.handle_info({:persist_timeout, ref}, socket)
+
+      assert_receive {:ack_reply, %Phoenix.Socket.Reply{status: :error, payload: %{error: :persistence_timeout}}}
+
+      assert_receive {@event, ^telemetry_ref, _,
+                      %{tenant: ^tenant_id, outcome: :upstream_failure, reason: :persistence_timeout}}
+    end
+
+    test "ignores a result that comes after the ack timeout", %{
+      telemetry_ref: telemetry_ref,
+      tenant: tenant,
+      tenant_id: tenant_id,
+      topic: topic
+    } do
+      socket =
+        socket_fixture(tenant, topic, policies: %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}})
+
+      assert {:noreply, socket} = RealtimeChannel.handle_in("broadcast", @persist_payload, socket)
+      [ref] = Map.keys(socket.assigns.pending_acks)
+
+      # The timeout is handled before the persisted result, as when the write takes longer than the ack timeout.
+      assert {:noreply, socket} = RealtimeChannel.handle_info({:persist_timeout, ref}, socket)
+      assert_receive {:ack_reply, _}
+      assert_receive {@event, ^telemetry_ref, _, %{tenant: ^tenant_id}}
+
+      assert_receive {{:persisted, ^ref}, {:ok, _id}} = message, 1_000
+      assert {:noreply, socket} = RealtimeChannel.handle_info(message, socket)
+      assert socket.assigns.pending_acks == %{}
+      refute_receive {:ack_reply, _}
+      refute_received {@event, ^telemetry_ref, _, %{tenant: ^tenant_id}}
+    end
+  end
+
   test "requests other than broadcast are not tracked yet", %{
     telemetry_ref: telemetry_ref,
     tenant: tenant,
@@ -228,6 +296,10 @@ defmodule RealtimeWeb.RealtimeChannel.RequestOutcomeTest do
     assert {:noreply, _} = RealtimeChannel.handle_in("unknown_type", %{}, socket)
 
     refute_receive {@event, ^telemetry_ref, _, %{tenant: ^tenant_id}}
+  end
+
+  defmodule AckSerializer do
+    def encode!(reply), do: {:ack_reply, reply}
   end
 
   defp oversized_payload(tenant) do
@@ -254,6 +326,12 @@ defmodule RealtimeWeb.RealtimeChannel.RequestOutcomeTest do
       })
 
     %Phoenix.Socket{
+      joined: true,
+      ref: "1",
+      join_ref: "1",
+      topic: "realtime:#{topic}",
+      transport_pid: self(),
+      serializer: AckSerializer,
       assigns: %{
         tenant_topic: "realtime:#{topic}",
         ack_broadcast: ack_broadcast,
@@ -263,8 +341,11 @@ defmodule RealtimeWeb.RealtimeChannel.RequestOutcomeTest do
         private?: private?,
         tenant: tenant.external_id
       },
-      # `RealtimeWeb.UserSocket.connect/3` gives every socket one
-      private: %{broadcast_bucket: Realtime.TokenBucket.new(100, 1_000)}
+      # `RealtimeWeb.UserSocket.connect/3` gives every socket these
+      private: %{
+        broadcast_bucket: Realtime.TokenBucket.new(100, 1_000),
+        persist_bucket: Realtime.TokenBucket.new(50, 500)
+      }
     }
   end
 end

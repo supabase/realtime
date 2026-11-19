@@ -4,7 +4,7 @@ defmodule Realtime.GenRpc do
 
   Two separate connection pools are maintained per remote node:
 
-  - Cast pool: used by `cast/5`, `abcast/4`, `multicast/4`. Size controlled by
+  - Cast pool: used by `cast/5`, `ordered_cast/5`, `abcast/4`, `multicast/4`. Size controlled by
     `MAX_GEN_RPC_CLIENTS` env var (default 5). Client tags: `{:cast, 1..N}`.
 
   - Call pool: used by `call/5`, `multicall/4`. Size controlled by
@@ -62,6 +62,25 @@ defmodule Realtime.GenRpc do
       node_key = cast_rpc_node(node, key)
 
       :gen_rpc.cast(node_key, mod, func, args)
+    end
+
+    :ok
+  end
+
+  @doc """
+  Like `cast/5`, but the casts with the same `:key` from this node are applied one at a time, in the order
+  they were sent. The target node finishes each apply before it starts the next cast on that gen_rpc client,
+  so `func` must return quickly. `:key` is required, and selects the gen_rpc client whose casts keep their
+  order.
+
+  It is for remote nodes only, because gen_rpc does not cast to the local node. Passing `node()` raises
+  `FunctionClauseError`.
+  """
+  @spec ordered_cast(node, module, atom, list(any), keyword()) :: :ok
+  def ordered_cast(node, mod, func, args, opts)
+      when is_atom(node) and node != node() and is_atom(mod) and is_atom(func) and is_list(args) and is_list(opts) do
+    if node in Node.list() do
+      :gen_rpc.ordered_cast(cast_rpc_node(node, Keyword.fetch!(opts, :key)), mod, func, args)
     end
 
     :ok
