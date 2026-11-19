@@ -124,10 +124,23 @@ defmodule Realtime.Api.Tenant do
   end
 
   def encrypt_jwt_secret(%Ecto.Changeset{valid?: true, changes: %{jwt_secret: plaintext}} = changeset)
-      when is_binary(plaintext),
-      do: put_change(changeset, :jwt_secret, Crypto.encrypt!(plaintext))
+      when is_binary(plaintext) do
+    if same_jwt_secret?(changeset.data.jwt_secret, plaintext),
+      do: delete_change(changeset, :jwt_secret),
+      else: put_change(changeset, :jwt_secret, Crypto.encrypt!(plaintext))
+  end
 
   def encrypt_jwt_secret(changeset), do: changeset
+
+  # GCM ciphertext differs on every write, so an unchanged secret is caught by comparing plaintexts.
+  # A stored secret that cannot be decrypted counts as different, so an update can still replace it.
+  defp same_jwt_secret?(nil, _plaintext), do: false
+
+  defp same_jwt_secret?(ciphertext, plaintext) do
+    Crypto.decrypt!(ciphertext) == plaintext
+  rescue
+    _ -> false
+  end
 
   def decrypt_jwt_secret(nil), do: nil
   def decrypt_jwt_secret(jwt_secret), do: Crypto.decrypt!(jwt_secret)

@@ -220,6 +220,26 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert 100 = json_response(conn, 200)["data"]["max_joins_per_second"]
     end
 
+    test "disconnects clients only when jwt_secret changes", %{tenant: tenant, conn: conn} do
+      external_id = tenant.external_id
+      port = tenant_db_port(tenant)
+      attrs = default_tenant_attrs(port)
+      assert Crypto.decrypt!(tenant.jwt_secret) == attrs["jwt_secret"]
+      :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> external_id)
+
+      conn = put(conn, ~p"/api/tenants/#{external_id}", tenant: attrs)
+      assert json_response(conn, 200)
+      refute_receive %Phoenix.Socket.Broadcast{event: "system"}
+
+      conn = put(conn, ~p"/api/tenants/#{external_id}", tenant: %{attrs | "jwt_secret" => "another secret"})
+      assert json_response(conn, 200)
+
+      assert_receive %Phoenix.Socket.Broadcast{
+        event: "system",
+        payload: %{message: "Server requested disconnect", status: "ok", extension: "system"}
+      }
+    end
+
     test "can update max_client_presence_events_per_window", %{tenant: tenant, conn: conn} do
       external_id = tenant.external_id
       port = tenant_db_port(tenant)

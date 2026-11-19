@@ -27,6 +27,26 @@ defmodule Realtime.Api.TenantTest do
       assert Ecto.Changeset.get_change(changeset, :jwt_secret) == nil
     end
 
+    for cipher <- [:gcm, :ecb] do
+      test "keeps an unchanged jwt_secret stored with #{cipher} out of the changes" do
+        tenant = %Tenant{external_id: "tenant", jwt_secret: Crypto.encrypt!("my-secret", cipher: unquote(cipher))}
+
+        refute Map.has_key?(Tenant.changeset(tenant, %{jwt_secret: "my-secret"}).changes, :jwt_secret)
+
+        jwt_secret = tenant |> Tenant.changeset(%{jwt_secret: "new-secret"}) |> Ecto.Changeset.get_change(:jwt_secret)
+        assert Crypto.decrypt!(jwt_secret) == "new-secret"
+      end
+    end
+
+    test "replaces a stored jwt_secret that cannot be decrypted" do
+      undecryptable = "g1:" <> Base.encode64(:binary.copy(<<0>>, 40))
+      tenant = %Tenant{external_id: "tenant", jwt_secret: undecryptable}
+
+      jwt_secret = tenant |> Tenant.changeset(%{jwt_secret: "new-secret"}) |> Ecto.Changeset.get_change(:jwt_secret)
+
+      assert Crypto.decrypt!(jwt_secret) == "new-secret"
+    end
+
     test "leaves jwt_secret unencrypted on an invalid changeset" do
       changeset = Tenant.changeset(%Tenant{}, %{jwt_secret: "my-secret"})
 
