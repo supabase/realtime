@@ -8,7 +8,6 @@ defmodule Realtime.Messages do
 
   import Ecto.Query, only: [from: 2]
 
-  @hard_limit 25
   @default_timeout 5_000
 
   # The janitor drops partitions older than 72 hours, so nothing can outlive that.
@@ -127,6 +126,8 @@ defmodule Realtime.Messages do
   @doc """
   Fetch last `limit ` messages for a given `topic` inserted after `since`
 
+  `limit` is clamped between 1 and `BROADCAST_REPLAY_MAX_MESSAGES` (1000 by default)
+
   Automatically uses RPC if the database connection is not in the same node
 
   Only allowed for private channels
@@ -135,7 +136,10 @@ defmodule Realtime.Messages do
           {:ok, Message.t(), [String.t()]} | {:error, term} | {:error, :rpc_error, term}
   def replay(conn, tenant_id, topic, since, limit)
       when node(conn) == node() and is_integer(since) and is_integer(limit) do
-    limit = max(min(limit, @hard_limit), 1)
+    limit =
+      limit
+      |> min(Application.fetch_env!(:realtime, :broadcast_replay_max_messages))
+      |> max(1)
 
     with {:ok, since} <- DateTime.from_unix(since, :millisecond),
          {:ok, messages} <- messages(conn, tenant_id, topic, since, limit) do

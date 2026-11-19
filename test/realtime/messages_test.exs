@@ -325,7 +325,9 @@ defmodule Realtime.MessagesTest do
       assert Messages.replay(conn, tenant.external_id, "test", since, 10) == {:ok, [m1, m2], MapSet.new([m1.id, m2.id])}
     end
 
-    test "replay respects hard max limit of 25", %{conn: conn, tenant: tenant} do
+    test "replay returns more than 25 messages with the default max of 1000", %{conn: conn, tenant: tenant} do
+      assert Application.get_env(:realtime, :broadcast_replay_max_messages) == 1_000
+
       for _i <- 1..30 do
         message_fixture(tenant, %{
           "inserted_at" => NaiveDateTime.utc_now(),
@@ -338,8 +340,29 @@ defmodule Realtime.MessagesTest do
       end
 
       assert {:ok, messages, set} = Messages.replay(conn, tenant.external_id, "test", 0, 30)
-      assert length(messages) == 25
-      assert MapSet.size(set) == 25
+      assert length(messages) == 30
+      assert MapSet.size(set) == 30
+    end
+
+    test "replay caps limit at broadcast_replay_max_messages", %{conn: conn, tenant: tenant} do
+      previous = Application.get_env(:realtime, :broadcast_replay_max_messages)
+      Application.put_env(:realtime, :broadcast_replay_max_messages, 5)
+      on_exit(fn -> Application.put_env(:realtime, :broadcast_replay_max_messages, previous) end)
+
+      for _i <- 1..8 do
+        message_fixture(tenant, %{
+          "inserted_at" => NaiveDateTime.utc_now(),
+          "event" => "event",
+          "extension" => "broadcast",
+          "topic" => "test",
+          "private" => true,
+          "payload" => %{"value" => "message"}
+        })
+      end
+
+      assert {:ok, messages, set} = Messages.replay(conn, tenant.external_id, "test", 0, 30)
+      assert length(messages) == 5
+      assert MapSet.size(set) == 5
     end
 
     test "replay respects hard min limit of 1", %{conn: conn, tenant: tenant} do
