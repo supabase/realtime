@@ -1,5 +1,5 @@
 defmodule RealtimeWeb.EndpointTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias RealtimeWeb.Endpoint
 
@@ -33,6 +33,22 @@ defmodule RealtimeWeb.EndpointTest do
       on_exit(fn -> Application.put_env(:realtime, :disable_healthcheck_logging, false) end)
 
       assert Endpoint.log_level(%{path_info: ["healthcheck"], status: 200}) == false
+    end
+  end
+
+  describe "request id from baggage" do
+    test "uses the baggage key set when the application boots" do
+      # config/runtime.exs sets the key from REQUEST_ID_BAGGAGE_KEY after the endpoint is compiled
+      previous = Application.get_env(:realtime, :request_id_baggage_key)
+      Application.put_env(:realtime, :request_id_baggage_key, "runtime-request-id")
+      on_exit(fn -> Application.put_env(:realtime, :request_id_baggage_key, previous) end)
+
+      conn =
+        Phoenix.ConnTest.build_conn()
+        |> Plug.Conn.put_req_header("baggage", "runtime-request-id=1234567890")
+        |> Phoenix.ConnTest.dispatch(Endpoint, :get, "/healthcheck")
+
+      assert Plug.Conn.get_resp_header(conn, "x-request-id") == ["1234567890"]
     end
   end
 end
