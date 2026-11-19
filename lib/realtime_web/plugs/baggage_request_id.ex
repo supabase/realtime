@@ -1,7 +1,8 @@
 defmodule RealtimeWeb.Plugs.BaggageRequestId do
   @moduledoc """
   Populates request ID based on trace baggage.
-  It looks for the specified `baggage_key` (default to 'request-id').
+  It looks for the specified `baggage_key`. Without that option it reads the key from the
+  `:request_id_baggage_key` application env on each request, and the default is 'request-id'.
 
   Otherwise generates a request ID using `Plug.RequestId`
   """
@@ -13,13 +14,14 @@ defmodule RealtimeWeb.Plugs.BaggageRequestId do
 
   @impl true
   @doc false
-  def init(opts) do
-    Keyword.get(opts, :baggage_key, "request-id")
-  end
+  def init(opts), do: Keyword.get(opts, :baggage_key)
 
   @impl true
   @doc false
-  @spec call(Conn.t(), String.t()) :: Conn.t()
+  @spec call(Conn.t(), String.t() | nil) :: Conn.t()
+  # config/runtime.exs sets the application env after compile time, so read it on each request
+  def call(conn, nil), do: call(conn, baggage_key())
+
   def call(conn, baggage_key) do
     :otel_propagator_text_map.extract(conn.req_headers)
 
