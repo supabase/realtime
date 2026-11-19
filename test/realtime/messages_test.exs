@@ -31,7 +31,7 @@ defmodule Realtime.MessagesTest do
     test "inserts a message marked as already broadcast", %{conn: conn, tenant: tenant} do
       topic = random_string()
 
-      assert {:ok, id} = Messages.persist(conn, tenant.id, topic, "test", {:json, %{"a" => "b"}})
+      assert {:ok, id} = persist_and_wait(conn, tenant.id, topic, "test", {:json, %{"a" => "b"}})
 
       assert {:ok,
               [
@@ -49,7 +49,7 @@ defmodule Realtime.MessagesTest do
       topic = random_string()
       binary = ~s({"a":"b"})
 
-      assert {:ok, id} = Messages.persist(conn, tenant.id, topic, "test", {:binary, binary})
+      assert {:ok, id} = persist_and_wait(conn, tenant.id, topic, "test", {:binary, binary})
 
       assert {:ok, [%Message{id: ^id, payload: nil, binary_payload: ^binary}]} = Repo.all(conn, Message, Message)
     end
@@ -60,10 +60,23 @@ defmodule Realtime.MessagesTest do
       {:ok, node} = Clustered.start()
 
       # Call remote node passing the database connection that is local to this node
-      assert {:ok, id} =
-               :erpc.call(node, Messages, :persist, [conn, tenant.id, topic, "test", {:json, %{"a" => "b"}}])
+      ref = make_ref()
+      args = [conn, tenant.id, topic, "test", {:json, %{"a" => "b"}}, [reply_to: {self(), ref}]]
+      assert :ok = :erpc.call(node, Messages, :persist, args)
+      assert_receive {^ref, {:ok, id}}, 5_000
 
       assert {:ok, [%Message{id: ^id, topic: ^topic}]} = Repo.all(conn, Message, Message)
+    end
+
+    test "distributed store without reply_to", %{conn: conn, tenant: tenant} do
+      topic = random_string()
+
+      {:ok, node} = Clustered.start()
+
+      args = [conn, tenant.id, topic, "test", {:json, %{"a" => "b"}}, []]
+      assert :ok = :erpc.call(node, Messages, :persist, args)
+
+      assert_eventually {:ok, [%Message{topic: ^topic}]} = Repo.all(conn, Message, Message)
     end
   end
 
@@ -581,6 +594,13 @@ defmodule Realtime.MessagesTest do
   end
 
   def handle_telemetry(event, measures, metadata, pid: pid), do: send(pid, {:telemetry, event, measures, metadata})
+
+  defp persist_and_wait(conn, tenant_id, topic, event, payload) do
+    ref = make_ref()
+    :ok = Messages.persist(conn, tenant_id, topic, event, payload, reply_to: {self(), ref})
+    assert_receive {^ref, result}, 5_000
+    result
+  end
 
   defp plan_nodes(%{"Plans" => children} = plan), do: [plan | Enum.flat_map(children, &plan_nodes/1)]
   defp plan_nodes(plan), do: [plan]

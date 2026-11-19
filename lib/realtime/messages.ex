@@ -1,14 +1,60 @@
 defmodule Realtime.Messages do
   @moduledoc """
   Handles `realtime.messages` table operations
+
+  ## Persistence
+
+  `persist/6` writes messages in batches, with one `GenStage` pipeline per tenant database connection, on
+  the node that owns it.
+
+      [Producer] -> [Consumer]
+
+  `Realtime.Messages.Producer` queues messages and emits each batch as one event.
+  `Realtime.Messages.Consumer` writes each batch with `insert_batch/5`, then sends demand upstream for the
+  next one. A batch is emitted as soon as it reaches `:max_batch_size` messages or `:max_batch_bytes`,
+  and otherwise once `:flush_interval_ms` passed since the previous one. Idle stages hibernate after
+  `:hibernate_after`. A pipeline that stopped is started again by the next message.
+
+  The guardrails below are all read from `config :realtime, Realtime.Messages`.
+
+    * `:max_pending` and `:max_pending_bytes` - messages, and their bytes, queued or being written
+    * `:breaker_threshold` and `:breaker_cooldown_ms` - consecutive failed batches after which the
+      consumer stops asking for events, and for how long. The producer buffers messages meanwhile, up to
+      `:max_pending`
+    * `:max_queue_ms` - how long a broadcast with `ack` waits for earlier batches, see `ack_timeout/0`
+
+  A message over a limit is not persisted, and `persist/6` returns the error, or sends it to `:reply_to`.
+  Messages that are not persisted are logged once per reason every `:drops_report_interval_ms` with their
+  number, as `PersistenceLimitReached` when a limit was reached and as `UnableToPersistMessage` otherwise.
+
+  Persisted messages per socket are limited before they reach the producer, by
+  `RealtimeWeb.RealtimeChannel.BroadcastHandler`, which fails them with `persistence_rate_limit`.
   """
+  use Realtime.Logs
 
   alias Realtime.Api.Message
-  alias Realtime.Tenants.Repo
+  alias Realtime.Messages.Producer
+  alias Realtime.Telemetry
 
   import Ecto.Query, only: [from: 2]
 
   @default_timeout 5_000
+  @registry Realtime.Registry.Unique
+  @supervisor Producer.DynamicSupervisor
+
+  @persist_defaults [
+    max_batch_size: 200,
+    max_batch_bytes: 8 * 1024 * 1024,
+    flush_interval_ms: 10,
+    max_pending: 5_000,
+    max_pending_bytes: 64 * 1024 * 1024,
+    breaker_threshold: 3,
+    breaker_cooldown_ms: 5_000,
+    max_queue_ms: 2_000,
+    drops_report_interval_ms: 1_000,
+    query_timeout: 5_000,
+    hibernate_after: 15_000
+  ]
 
   # The janitor drops partitions older than 72 hours, so nothing can outlive that.
   @max_ttl_seconds 72 * 60 * 60
@@ -63,6 +109,51 @@ defmodule Realtime.Messages do
 
   @type payload :: {:json, term()} | {:binary, binary()}
 
+  @type persist_error ::
+          :persistence_buffer_full
+          | :persistence_rate_limit
+          | :persistence_unavailable
+          | :persistence_timeout
+          | :persistence_failed
+
+  @typedoc """
+  Who gets the result of a message, a `:reply_to` or `nil` for no one.
+  """
+  @type caller :: {pid(), term()} | nil
+  @type reply :: {caller, {:ok, String.t()} | {:error, persist_error}}
+
+  @typedoc """
+  A message waiting to be written. `bytes` is the size of its payload.
+  """
+  @type entry :: %{
+          id: String.t(),
+          topic: String.t(),
+          event: String.t(),
+          json: %Jason.Fragment{} | nil,
+          binary: binary() | nil,
+          bytes: non_neg_integer(),
+          expires_at: NaiveDateTime.t() | nil
+        }
+
+  @doc """
+  The persistence config, with `config :realtime, Realtime.Messages` merged into the defaults.
+  """
+  @spec config() :: keyword()
+  def config, do: Keyword.merge(@persist_defaults, Application.get_env(:realtime, __MODULE__, []))
+
+  @doc """
+  How long a broadcast with `ack` waits for its message to be written, see
+  `RealtimeWeb.RealtimeChannel.BroadcastHandler`. It is the flush interval, plus up to `:max_queue_ms`
+  waiting for earlier batches, plus `:query_timeout` for the write.
+
+  A broadcast that stops waiting gets `persistence_timeout`, and its message may still be written.
+  """
+  @spec ack_timeout() :: pos_integer()
+  def ack_timeout do
+    config = config()
+    config[:flush_interval_ms] + config[:max_queue_ms] + config[:query_timeout]
+  end
+
   @doc """
   Persists a broadcast for `topic`, either sent over WebSocket or through the single broadcast API.
 
@@ -75,6 +166,14 @@ defmodule Realtime.Messages do
   Set `skip_broadcast` because the message was already delivered to the subscribers, so it must not be
   broadcast again when it appears on the replication stream.
 
+  Writes are batched, see "Persistence" in the moduledoc. Returns `:ok` once the message is queued, or its
+  error when it is over a limit. Over RPC it returns `:ok` without waiting. It accepts the options below.
+
+    * `:reply_to` - `{pid, tag}` that gets `{tag, {:ok, id}}` or `{tag, {:error, reason}}` once the message
+      is written or dropped. Its errors are sent there too, and `persist/6` returns `:ok`. `pid` can be on
+      another node
+    * `:expires_at` - when the message stops being replayed, see `expires_at/1`
+
   Automatically uses RPC if the database connection is not on the same node.
   """
   @spec persist(
@@ -83,45 +182,208 @@ defmodule Realtime.Messages do
           topic :: String.t(),
           event :: String.t(),
           payload :: payload(),
-          expires_at :: NaiveDateTime.t() | nil
-        ) :: {:ok, binary()} | {:error, any()} | {:error, :rpc_error, term}
-  def persist(conn, tenant_id, topic, event, payload, expires_at \\ nil)
+          opts :: keyword()
+        ) :: :ok | {:error, persist_error}
+  def persist(conn, tenant_id, topic, event, payload, opts \\ [])
 
-  def persist(conn, _tenant_id, topic, event, payload, expires_at) when node(conn) == node() do
-    insert(conn, topic, event, payload, expires_at)
+  def persist(conn, tenant_id, topic, event, payload, opts) when node(conn) == node() do
+    caller = Keyword.get(opts, :reply_to)
+    entry = %{entry(topic, event, payload) | expires_at: Keyword.get(opts, :expires_at)}
+
+    result =
+      with {:ok, pid} <- lookup_or_start_producer(conn, tenant_id) do
+        call(pid, entry, caller)
+      end
+
+    reply_error(result, caller)
   end
 
-  def persist(conn, tenant_id, topic, event, payload, expires_at) do
-    Realtime.GenRpc.call(
-      node(conn),
-      __MODULE__,
-      :persist,
-      [conn, tenant_id, topic, event, payload, expires_at],
-      key: topic,
-      tenant_id: tenant_id
-    )
+  def persist(conn, tenant_id, topic, event, payload, opts) do
+    args = [conn, tenant_id, topic, event, payload, opts]
+    Realtime.GenRpc.ordered_cast(node(conn), __MODULE__, :persist, args, key: topic)
   end
 
-  defp insert(conn, topic, event, payload, expires_at) do
-    attrs = %{
+  @doc false
+  @spec emit_dropped(String.t(), persist_error, pos_integer()) :: :ok
+  def emit_dropped(tenant_id, reason, count) do
+    Telemetry.execute([:realtime, :tenants, :persist, :dropped], %{count: count}, %{tenant: tenant_id, reason: reason})
+  end
+
+  @doc false
+  @spec log_dropped(String.t(), persist_error, pos_integer()) :: :ok
+  def log_dropped(code, reason, 1) do
+    log_error(code, "1 message was broadcast but not persisted: #{reason}")
+  end
+
+  def log_dropped(code, reason, count) do
+    log_error(code, "#{count} messages were broadcast but not persisted: #{reason}")
+  end
+
+  @doc false
+  @spec reply([reply]) :: :ok
+  def reply(replies) do
+    Enum.each(replies, fn
+      {nil, _result} -> :ok
+      {{pid, tag}, result} -> send(pid, {tag, result})
+    end)
+  end
+
+  defp entry(topic, event, {:json, payload}) do
+    iodata = Jason.encode_to_iodata!(payload)
+    %{new_entry(topic, event) | json: Jason.Fragment.new(iodata), bytes: IO.iodata_length(iodata)}
+  end
+
+  defp entry(topic, event, {:binary, payload}) do
+    %{new_entry(topic, event) | binary: payload, bytes: byte_size(payload)}
+  end
+
+  defp new_entry(topic, event) do
+    %{
+      id: Ecto.UUID.generate(),
       topic: topic,
-      extension: :broadcast,
       event: event,
-      private: true,
-      skip_broadcast: true,
-      expires_at: expires_at
+      json: nil,
+      binary: nil,
+      bytes: 0,
+      expires_at: nil
     }
+  end
 
-    changeset = Message.changeset(%Message{}, Map.merge(attrs, payload_attr(payload)))
-
-    case Repo.insert(conn, changeset, Message) do
-      {:ok, %Message{id: id}} -> {:ok, id}
-      {:error, reason} -> {:error, reason}
+  defp lookup_or_start_producer(conn, tenant_id) do
+    case Registry.lookup(@registry, {Producer, conn}) do
+      [{pid, _}] -> {:ok, pid}
+      [] -> start_producer(conn, tenant_id)
     end
   end
 
-  defp payload_attr({:json, payload}), do: %{payload: payload}
-  defp payload_attr({:binary, payload}), do: %{binary_payload: payload}
+  defp start_producer(conn, tenant_id) do
+    opts = [db_conn: conn, tenant_id: tenant_id]
+
+    case DynamicSupervisor.start_child({:via, PartitionSupervisor, {@supervisor, tenant_id}}, {Producer, opts}) do
+      {:ok, pid} ->
+        {:ok, pid}
+
+      {:error, {:already_started, pid}} ->
+        {:ok, pid}
+
+      {:error, reason} ->
+        log_error("UnableToStartMessagesProducer", reason, external_id: tenant_id, project: tenant_id)
+        emit_dropped(tenant_id, :persistence_unavailable, 1)
+        {:error, :persistence_unavailable}
+    end
+  end
+
+  defp call(pid, entry, caller) do
+    GenServer.call(pid, {:persist, entry, caller})
+  catch
+    :exit, {:timeout, _} -> {:error, :persistence_timeout}
+    :exit, _ -> {:error, :persistence_unavailable}
+  end
+
+  defp reply_error({:error, _reason} = error, {_pid, _tag} = caller), do: reply([{caller, error}])
+  defp reply_error(result, _caller), do: result
+
+  @doc """
+  Writes `entries` with one `INSERT` after `last_inserted_at`, and returns the result of each entry, in
+  order, with the last `inserted_at` it wrote.
+
+  `inserted_at` is strictly increasing. The batch starts at the later of now and `last_inserted_at` plus
+  1 microsecond, and each entry adds 1 microsecond, so messages written in the same microsecond keep their
+  send order on replay.
+
+  A batch that fails with a data exception (SQLSTATE class 22, e.g. invalid JSON) is written one entry at
+  a time, so only the bad entries fail. Any other error fails the whole batch.
+  """
+  @spec insert_batch(pid(), String.t(), [entry, ...], NaiveDateTime.t() | nil, timeout()) ::
+          {:ok, [{:ok, String.t()} | {:error, :persistence_failed}], NaiveDateTime.t() | nil}
+          | {:error, :persistence_failed}
+  def insert_batch(conn, tenant_id, entries, last_inserted_at, timeout) do
+    start = System.monotonic_time()
+
+    count = length(entries)
+
+    {inserted, result} =
+      case insert(conn, entries, last_inserted_at, timeout) do
+        {:ok, last_inserted_at} ->
+          {count, {:ok, Enum.map(entries, &{:ok, &1.id}), last_inserted_at}}
+
+        {:error, %Postgrex.Error{postgres: %{pg_code: "22" <> _}}} ->
+          {:ok, results, _last_inserted_at} = result = insert_one_by_one(conn, entries, last_inserted_at, timeout)
+          {Enum.count(results, &match?({:ok, _}, &1)), result}
+
+        {:error, error} ->
+          log_error("UnableToPersistMessage", error)
+          {0, {:error, :persistence_failed}}
+      end
+
+    Telemetry.execute(
+      [:realtime, :tenants, :persist, :flush],
+      %{
+        count: count,
+        inserted: inserted,
+        bytes: Enum.sum_by(entries, & &1.bytes),
+        duration: System.monotonic_time() - start
+      },
+      %{tenant: tenant_id}
+    )
+
+    result
+  end
+
+  defp insert_one_by_one(conn, entries, last_inserted_at, timeout) do
+    {results, last_inserted_at} =
+      Enum.map_reduce(entries, last_inserted_at, fn entry, last ->
+        case insert(conn, [entry], last, timeout) do
+          {:ok, last} ->
+            {{:ok, entry.id}, last}
+
+          {:error, error} ->
+            log_error("UnableToPersistMessage", error)
+            {{:error, :persistence_failed}, last}
+        end
+      end)
+
+    {:ok, results, last_inserted_at}
+  end
+
+  defp insert(conn, entries, last_inserted_at, timeout) do
+    first = first_inserted_at(last_inserted_at)
+    inserted_ats = Enum.with_index(entries, fn _entry, i -> NaiveDateTime.add(first, i, :microsecond) end)
+
+    query = """
+    INSERT INTO realtime.messages
+      (id, topic, event, payload, binary_payload, expires_at, inserted_at, extension, private, skip_broadcast)
+    SELECT *, 'broadcast', true, true
+    FROM unnest($1::uuid[], $2::text[], $3::text[], $4::jsonb[], $5::bytea[], $6::timestamp[], $7::timestamp[])
+    """
+
+    params = [
+      Enum.map(entries, &Ecto.UUID.dump!(&1.id)),
+      Enum.map(entries, & &1.topic),
+      Enum.map(entries, & &1.event),
+      Enum.map(entries, & &1.json),
+      Enum.map(entries, & &1.binary),
+      Enum.map(entries, & &1.expires_at),
+      inserted_ats
+    ]
+
+    case Postgrex.query(conn, query, params, timeout: timeout) do
+      {:ok, _result} -> {:ok, List.last(inserted_ats)}
+      {:error, _} = error -> error
+    end
+  rescue
+    e -> {:error, e}
+  catch
+    :exit, reason -> {:error, reason}
+  end
+
+  defp first_inserted_at(nil), do: NaiveDateTime.utc_now(:microsecond)
+
+  defp first_inserted_at(last_inserted_at) do
+    now = NaiveDateTime.utc_now(:microsecond)
+    next = NaiveDateTime.add(last_inserted_at, 1, :microsecond)
+    if NaiveDateTime.after?(next, now), do: next, else: now
+  end
 
   @doc """
   Fetch last `limit ` messages for a given `topic` inserted after `since`

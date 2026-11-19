@@ -342,6 +342,30 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       assert_eventually metric_value(metric, hit: false) >= metric_value + 1
     end
 
+    test "global broadcast persistence metrics", %{tenant: %{external_id: external_id}} do
+      dropped = metric_value("realtime_persistence_global_dropped", reason: "persistence_rate_limit") || 0
+      inserted = metric_value("realtime_persistence_global_inserted") || 0
+      inserts = metric_value("realtime_persistence_global_insert_duration_count") || 0
+
+      :telemetry.execute([:realtime, :tenants, :persist, :dropped], %{count: 3}, %{
+        tenant: external_id,
+        reason: :persistence_rate_limit
+      })
+
+      :telemetry.execute(
+        [:realtime, :tenants, :persist, :flush],
+        %{count: 5, inserted: 4, bytes: 10, duration: System.convert_time_unit(20, :millisecond, :native)},
+        %{tenant: external_id}
+      )
+
+      assert_eventually metric_value("realtime_persistence_global_dropped", reason: "persistence_rate_limit") >=
+                          dropped + 3
+
+      assert metric_value("realtime_persistence_global_inserted") >= inserted + 4
+      assert metric_value("realtime_persistence_global_insert_duration_count") >= inserts + 1
+      assert metric_value("realtime_persistence_global_insert_duration_bucket", le: "25.0") >= 1
+    end
+
     test "channel input bytes", context do
       external_id = context.tenant.external_id
 
