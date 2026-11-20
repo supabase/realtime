@@ -789,6 +789,16 @@ begin
     ) into res;
 
     return case when negate then not res else res end;
+exception
+    -- The filter value was valid for the column type when the subscription was created, but
+    -- a later schema change can leave it unreadable as the current type, or leave an operator
+    -- that no longer applies. Raising here would abort apply_rls for every subscriber of the
+    -- tenant, so a filter that can no longer be evaluated does not match.
+    when data_exception
+        or integrity_constraint_violation
+        or datatype_mismatch
+        or undefined_function then
+        return false;
 end;
 $$;
 
@@ -1822,4 +1832,5 @@ INSERT INTO realtime."schema_migrations" (version) VALUES (20261027120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261029120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261103130000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261111120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20261119120000);
 REVOKE ALL ON realtime.schema_migrations FROM postgres, dashboard_user, anon, authenticated, service_role, supabase_realtime_admin;
