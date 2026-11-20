@@ -14,12 +14,12 @@ defmodule Realtime.Presence.Comparison do
 
   * `Comparison` - This is a point in time comparison of one tenant's state in both Phoenix and Rollcall. 
                    A comparison starts at a point in time, `t0`.
-  * `View` - What a backend, Phoenix or Rollcall, currently has for a tenant's entriesy.
+  * `View` - What a backend, Phoenix or Rollcall, currently has for a tenant's entries.
   * `Candidate` - An entry in a tenant's state that is in one view and not the other. Candidates have a `kind` which can be:
     * `ghost` - A Candidate that's in Rollcall but not Phoenix. 
     * `missing` - A Candidate that's in Phoenix but not Rollcall
   * `Rungs` - A list of elapsed times, in ms, each being a point in time after which we'll check for convergence across the candidates.
-  * `Persistent` - A candidate that has not converged after the peristent rung, which by default is 10 seconds.
+  * `Persistent` - A candidate that has not converged after the persistent rung, which by default is 10 seconds.
 
   A Comparison run looks like this:
 
