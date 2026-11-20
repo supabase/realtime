@@ -204,10 +204,14 @@ for tenant <- Api.list_tenants(), do: Api.delete_tenant_by_external_id(tenant.ex
 # to Phoenix in the middle of the test. An entry with no expiry is never refilled, so the flags are
 # in the cache with no expiry. The insert does not use `Api.upsert_feature_flag/1`, because that
 # function updates the cache with a cast that lands later and gives the entry an expiry again.
-for name <- ["presence_rollcall_primary", "presence_rollcall_shadow"] do
+for {name, enabled} <- [
+      {"presence_rollcall_primary", false},
+      {"presence_rollcall_shadow", false},
+      {"broadcast_persistence", true}
+    ] do
   {:ok, flag} =
     %Realtime.Api.FeatureFlag{}
-    |> Realtime.Api.FeatureFlag.changeset(%{name: name, enabled: false})
+    |> Realtime.Api.FeatureFlag.changeset(%{name: name, enabled: enabled})
     |> Realtime.Repo.insert(
       on_conflict: {:replace, [:enabled, :rollout_percentage, :bucket_key, :updated_at]},
       conflict_target: :name,

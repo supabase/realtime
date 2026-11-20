@@ -494,6 +494,18 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
+  def handle_info({{:persisted, ref}, result}, socket) do
+    BroadcastHandler.handle_persisted(ref, result, socket)
+  end
+
+  def handle_info({:persist_timeout, ref}, socket) do
+    BroadcastHandler.handle_persisted(ref, {:error, :persistence_timeout}, socket)
+  end
+
+  def handle_info(:report_persist_rate_limited, socket) do
+    BroadcastHandler.report_rate_limited(socket)
+  end
+
   def handle_info(_, socket), do: {:noreply, socket}
 
   @impl true

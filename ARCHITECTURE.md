@@ -63,6 +63,23 @@ The `node_join_budget` feature flag turns the budget on for a tenant. While the 
 
 The limit delays a broadcast. It never refuses one. If the bucket is empty, the channel logs a `MessagePerSecondRateLimitReached` error, and the error increments `realtime_channel_error`. Then the channel sleeps until the bucket has a token, and it sends the broadcast. While the channel sleeps, it reads no more messages from the client. The client can therefore not send faster than the bucket refills.
 
+#### Broadcast persistence
+
+A private broadcast sent with `persist`, and allowed by the `persistence` policy, is also written to `realtime.messages`. The channel broadcasts the message, then enqueues it for writing in the same call, so the broadcast never waits for the write. `Realtime.Messages` runs one GenStage pipeline per tenant database connection, on the node that owns it. A producer queues messages and emits them in batches, and a consumer writes each batch with one `INSERT`. Persistence therefore uses at most one connection of the tenant pool.
+
+- Each socket has a second `Realtime.TokenBucket`, for the broadcasts it persists. It holds `CLIENT_PERSISTED_BROADCASTS_BURST` (default 500, half of `CLIENT_BROADCASTS_BURST`) and refills at `CLIENT_PERSISTED_BROADCASTS_PER_SECOND` (default 50, half of `CLIENT_BROADCASTS_PER_SECOND`). If the bucket is empty, the message is still delivered to subscribers but not persisted.
+- The producer refuses new messages while 5,000 messages or 64 MB wait to be written. Payloads have the same size limit as any broadcast, checked before the message is persisted.
+- After 3 failed batches in a row, the consumer stops asking for batches for 5 s. The producer buffers messages meanwhile, up to the limits above.
+- A batch that isn't full is written at most once per `BROADCAST_PERSISTENCE_FLUSH_INTERVAL_MS` (default 10).
+
+With `ack`, the client gets the message id or one of the [Broadcast Persistence errors](ERROR_CODES.md#broadcast-persistence-errors). Without `ack`, the messages that aren't persisted are logged once per reason per second, as `PersistenceLimitReached` or `UnableToPersistMessage`.
+
+| Metric | Endpoint | Label |
+| --- | --- | --- |
+| `realtime_persistence_global_dropped` | `/metrics` | `reason` |
+| `realtime_persistence_global_inserted` | `/metrics` | none |
+| `realtime_persistence_global_insert_duration` | `/metrics` | none |
+
 ### 3. Fan-out and receive
 
 `Realtime.PubSub` reaches other nodes through `Realtime.GenRpcPubSub`, an adapter built on [`gen_rpc`](https://github.com/emqx/gen_rpc) (wrapped locally by `Realtime.GenRpc`) instead of Erlang distribution, so nodes can have more than one TCP connection between them for more bandwidth. How it picks which nodes to send to is the subject of [Broadcast fan-out](#broadcast-fan-out). Erlang distribution is still used for other types of communications including being Muster & [`:syn`](https://github.com/ostinelli/syn) transport layer.

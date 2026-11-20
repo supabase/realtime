@@ -11,8 +11,9 @@ defmodule RealtimeWeb.RequestMetrics do
     * `:upstream_failure` - a dependency failed: tenant database or connection pool
 
   An outcome is a value, either `:success` or `{kind, reason}`. The code that handles a request
-  returns its outcome next to its result, and `track/4` records it. Nothing is stored on the
-  socket. A success has no reason of its own, so the reason `:none` appears only on a success.
+  returns its outcome next to its result, and `track/4` records it. A request that replies later
+  returns `:deferred` instead, and records its outcome with `record/4` when it replies. A success
+  has no reason of its own, so the reason `:none` appears only on a success.
   """
 
   @type request :: :join | :broadcast | :presence | :access_token | :postgres_changes
@@ -32,7 +33,8 @@ defmodule RealtimeWeb.RequestMetrics do
   def event, do: @event
 
   @doc """
-  Runs `fun.()`, which must return `{result, outcomes}`, and emits one event for each outcome.
+  Runs `fun.()`, which must return `{result, outcomes}`, and emits one event for each outcome,
+  unless it returns `:deferred`.
 
   `outcomes` is one outcome, or a list of them for a request that carries several messages. The
   outcomes are recorded and `result` is returned untouched, so the caller gets the same result it
@@ -42,7 +44,7 @@ defmodule RealtimeWeb.RequestMetrics do
   `:exit` or `:throw`. The exception is re-raised with `:erlang.raise/3` so the caller crashes
   exactly as it does today.
   """
-  @spec track(request(), transport(), tenant(), (-> {result, outcomes()})) :: result when result: term()
+  @spec track(request(), transport(), tenant(), (-> {result, outcomes() | :deferred})) :: result when result: term()
   def track(request, transport, tenant, fun) do
     fun.()
   catch
@@ -50,6 +52,9 @@ defmodule RealtimeWeb.RequestMetrics do
       record(request, transport, tenant, {:internal_failure, kind})
       :erlang.raise(kind, reason, __STACKTRACE__)
   else
+    {result, :deferred} ->
+      result
+
     {result, outcomes} ->
       outcomes |> List.wrap() |> Enum.each(&record(request, transport, tenant, &1))
       result
@@ -84,6 +89,8 @@ defmodule RealtimeWeb.RequestMetrics do
       :persistence_invalid_ttl -> {:rejected, code}
       :persistence_unauthorized -> {:rejected, code}
       :batch_rejected -> {:rejected, code}
+      :persistence_buffer_full -> {:rejected, code}
+      :persistence_rate_limit -> {:rejected, code}
       :rls_policy_error -> {:upstream_failure, code}
       :query_canceled -> {:upstream_failure, code}
       :unable_to_connect_to_project -> {:upstream_failure, code}
@@ -92,6 +99,8 @@ defmodule RealtimeWeb.RequestMetrics do
       :initializing_project_connection -> {:upstream_failure, code}
       :increase_connection_pool -> {:upstream_failure, code}
       :persistence_failed -> {:upstream_failure, code}
+      :persistence_unavailable -> {:upstream_failure, code}
+      :persistence_timeout -> {:upstream_failure, code}
       _ -> {:internal_failure, code}
     end
   end
