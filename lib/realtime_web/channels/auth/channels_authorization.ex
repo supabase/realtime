@@ -5,19 +5,19 @@ defmodule RealtimeWeb.ChannelsAuthorization do
 
   @vercel_oidc_issuer_prefix "https://integrations.vercel.com/"
 
-  @doc """
-  Authorize connection to access channel
-  """
   @spec authorize(binary(), binary() | nil, binary() | nil) ::
           {:ok, map()} | {:error, any()} | {:error, :expired_token, String.t()}
-  def authorize(token, jwt_secret, jwt_jwks) when is_binary(token) do
+  defp authorize(token, jwt_secret, jwt_jwks) when is_binary(token) do
     token
     |> clean_token()
     |> RealtimeWeb.JwtVerification.verify(jwt_secret, jwt_jwks)
   end
 
-  def authorize(_token, _jwt_secret, _jwt_jwks), do: {:error, :invalid_token}
+  defp authorize(_token, _jwt_secret, _jwt_jwks), do: {:error, :invalid_token}
 
+  @doc """
+  Authorize connection to access channel
+  """
   def authorize_conn(token, jwt_secret, jwt_jwks, tenant_external_id) do
     case authorize(token, jwt_secret, jwt_jwks) do
       {:ok, claims} ->
