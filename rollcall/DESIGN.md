@@ -167,9 +167,11 @@ join for a live entry.
 
 ## Lifecycle
 
-When a tracker starts, `local` is empty, `version` is 0, `incarnation` is
-new, and it has no peer records. A restart gives a new incarnation. The peers replace the old entries when they receive the first
-heartbeat of the new incarnation.
+When a tracker starts, `local` is empty, `version` is 0, and it has no peer
+records. The first snapshot of a newer incarnation replaces the old entries.
+After a VM restart, the startup clock can give the tracker a lower
+incarnation. Its rejected snapshots do not keep the previous replica alive.
+Once the old replica expires, a later snapshot can restore the peer.
 
 The tracker links to each channel that tracks an entry. The tracker traps
 exits. When a channel exits, the tracker untracks its entry. When the
