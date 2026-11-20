@@ -25,6 +25,8 @@ defmodule Rollcall.Tracker.Peer do
     * `origin` - the pid of the tracker of the newest incarnation that sent a
       message. The tracker sends its request to this pid.
     * `origin_incarnation` - the incarnation of the origin.
+    * `replica_origin` - the pid that supplied the installed replica. A
+      newer diff can move `origin` without replacing the replica.
 
   ## Order of messages
 
@@ -52,10 +54,17 @@ defmodule Rollcall.Tracker.Peer do
           silent_ticks: non_neg_integer(),
           behind: boolean(),
           origin: pid() | nil,
-          origin_incarnation: integer() | nil
+          origin_incarnation: integer() | nil,
+          replica_origin: pid() | nil
         }
 
-  defstruct origin: nil, origin_incarnation: nil, mark: nil, silent_ticks: 0, behind: false, replica: %{}
+  defstruct origin: nil,
+            origin_incarnation: nil,
+            replica_origin: nil,
+            mark: nil,
+            silent_ticks: 0,
+            behind: false,
+            replica: %{}
 
   @doc """
   Returns the peer for the first snapshot or diff from a node, and the changes
@@ -73,8 +82,8 @@ defmodule Rollcall.Tracker.Peer do
   Applies `message` to `peer`. Returns the new peer and the changes that the
   message made to the replica.
 
-  An accepted heartbeat or a message from the current origin resets the
-  silent count. A rejected heartbeat from a different origin does not keep
+  An accepted heartbeat or a message from the installed replica's origin
+  resets the silent count. A rejected heartbeat from a different origin does not keep
   the old replica alive. If a peer restarts its VM and its incarnation sorts
   earlier, the old replica can expire and a later snapshot can replace it.
 
@@ -95,7 +104,7 @@ defmodule Rollcall.Tracker.Peer do
   @spec apply(t(), Messages.t()) :: {t(), Changes.t()}
   def apply(%__MODULE__{} = peer, message) do
     origin = Messages.origin(message)
-    peer = if origin == peer.origin, do: %{peer | silent_ticks: 0}, else: peer
+    peer = if origin == peer.replica_origin, do: %{peer | silent_ticks: 0}, else: peer
 
     case message do
       {:snapshot, origin, stamp, entries} ->
@@ -114,7 +123,7 @@ defmodule Rollcall.Tracker.Peer do
     if newer?(stamp, peer.mark) do
       {peer, changes} = apply_snapshot(peer, origin, entries)
 
-      peer = %{peer | mark: stamp, behind: false, silent_ticks: 0}
+      peer = %{peer | mark: stamp, behind: false, silent_ticks: 0, replica_origin: origin}
 
       {put_origin(peer, origin, stamp), changes}
     else
@@ -135,7 +144,7 @@ defmodule Rollcall.Tracker.Peer do
       :applicable ->
         {peer, changes} = apply_diff(peer, origin, joins, leaves)
 
-        {put_origin(%{peer | mark: stamp, silent_ticks: 0}, origin, stamp), changes}
+        {put_origin(%{peer | mark: stamp, silent_ticks: 0, replica_origin: origin}, origin, stamp), changes}
 
       :behind ->
         {put_origin(%{peer | behind: true, silent_ticks: 0}, origin, stamp), Changes.new()}

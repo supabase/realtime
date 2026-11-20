@@ -87,6 +87,22 @@ defmodule Rollcall.StateReadTest do
       assert Rollcall.state(rollcall, scope, "p1") == [{"b", "new", %{}}]
     end
 
+    test "keeps current presence alive after a late diff from a retired tracker", %{scope: scope, rollcall: rollcall} do
+      old_origin = remote_pid(@node_a, 1)
+      current_origin = remote_pid(@node_a, 2)
+      tracker = start_tracker(rollcall, scope, @threshold)
+      heartbeat = snapshot(current_origin, stamp(1, 1), [wire_entry("p1", "current", "a", %{})])
+      deliver(tracker, scope, heartbeat)
+      deliver(tracker, scope, diff(old_origin, stamp(2, 2), 1, [], []))
+
+      for _ <- 1..@threshold do
+        deliver(tracker, scope, heartbeat)
+        tick(tracker, 1)
+      end
+
+      assert Rollcall.state(rollcall, scope, "p1") == [{"a", "current", %{}}]
+    end
+
     test "applies the joins and the leaves of a diff", %{scope: scope, rollcall: rollcall} do
       origin = remote_pid(@node_a, 1)
       tracker = start_tracker(rollcall, scope, @threshold)
