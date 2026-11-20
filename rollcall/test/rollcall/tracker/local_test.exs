@@ -16,11 +16,10 @@ defmodule Rollcall.Tracker.LocalTest do
       pid = new_pid()
       ref = unique_ref()
 
-      assert {%{joins: [entry], leaves: []}, _local} =
+      assert {%{joins: [{"partition", ^ref, "key", %{a: 1}}], leaves: []}, local} =
                Local.track(Local.new(), pid, "partition", "key", %{a: 1}, ref)
 
-      assert %{ref: ^ref, pid: ^pid, partition: "partition", key: "key"} = entry
-      assert entry.meta == %{a: 1}
+      assert [%{ref: ^ref, pid: ^pid}] = Local.entries(local, "partition")
     end
 
     test "adds the entry to its partition" do
@@ -63,7 +62,7 @@ defmodule Rollcall.Tracker.LocalTest do
 
     # The result does not depend on the meta. The second meta is equal to the
     # meta of the existing entry.
-    test "returns the old entry as a leave and the new entry as a join", %{
+    test "returns the id of the old entry as a leave and the new entry as a join", %{
       pid: pid,
       entry: old,
       local: local
@@ -71,35 +70,40 @@ defmodule Rollcall.Tracker.LocalTest do
       for meta <- [%{a: 2}, %{a: 1}] do
         ref = unique_ref()
         expected_meta = Map.put(meta, :rc_prev_ref, old.ref)
+        old_key = {"partition", old.ref}
 
-        assert {%{joins: [new], leaves: [^old]}, _local} =
+        assert {%{joins: [{"partition", ^ref, "key", ^expected_meta}], leaves: [^old_key]}, local} =
                  Local.track(local, pid, "partition", "key", meta, ref)
 
-        assert %{ref: ^ref, pid: ^pid, partition: "partition", key: "key", meta: ^expected_meta} = new
-        refute new.ref == old.ref
+        assert [%{ref: ^ref, pid: ^pid}] = Local.entries(local, "partition")
       end
     end
 
     test "overwrites :rc_prev_ref in the meta of the caller", %{pid: pid, entry: old, local: local} do
       meta = %{a: 2, rc_prev_ref: "from-the-caller"}
 
-      {%{joins: [new]}, _local} = Local.track(local, pid, "partition", "key", meta, unique_ref())
+      {%{joins: [{_partition, _ref, _key, new_meta}]}, _local} =
+        Local.track(local, pid, "partition", "key", meta, unique_ref())
 
-      assert new.meta.rc_prev_ref == old.ref
+      assert new_meta.rc_prev_ref == old.ref
     end
 
     test "replaces the entry", %{pid: pid, local: local} do
-      {%{joins: [new]}, local} = Local.track(local, pid, "partition", "key", %{a: 2}, unique_ref())
+      ref = unique_ref()
 
-      assert Local.entries(local, "partition") == [new]
+      {_changes, local} = Local.track(local, pid, "partition", "key", %{a: 2}, ref)
+
+      assert [%{ref: ^ref}] = Local.entries(local, "partition")
     end
 
     test "keeps the entry of another pid for the same key", %{pid: pid, local: local} do
       {other, local} = track!(local, new_pid(), "partition", "key", %{a: 1})
+      ref = unique_ref()
 
-      {%{joins: [new]}, local} = Local.track(local, pid, "partition", "key", %{a: 2}, unique_ref())
+      {_changes, local} = Local.track(local, pid, "partition", "key", %{a: 2}, ref)
 
-      assert sorted(Local.entries(local, "partition")) == sorted([other, new])
+      assert local |> Local.entries("partition") |> Enum.map(& &1.ref) |> Enum.sort() ==
+               Enum.sort([other.ref, ref])
     end
   end
 
@@ -117,11 +121,12 @@ defmodule Rollcall.Tracker.LocalTest do
   end
 
   describe "untrack/4" do
-    test "returns the removed entry as a leave" do
+    test "returns the id of the removed entry as a leave" do
       pid = new_pid()
       {entry, local} = track!(Local.new(), pid, "partition", "key")
+      leave = {"partition", entry.ref}
 
-      assert {%{joins: [], leaves: [^entry]}, _local} =
+      assert {%{joins: [], leaves: [^leave]}, _local} =
                Local.untrack(local, pid, "partition", "key")
     end
 
@@ -166,20 +171,20 @@ defmodule Rollcall.Tracker.LocalTest do
       {_entry, local} = track!(Local.new(), pid, "partition", "key")
       {_changes, local} = Local.untrack(local, pid, "partition", "key")
 
-      assert {%{joins: [_entry], leaves: []}, _local} =
+      assert {%{joins: [_join], leaves: []}, _local} =
                Local.track(local, pid, "partition", "key", %{}, unique_ref())
     end
   end
 
   describe "untrack_pid/2" do
-    test "returns the entries of the pid in all partitions as leaves" do
+    test "returns the ids of the entries of the pid in all partitions as leaves" do
       pid = new_pid()
       {entry_1, local} = track!(Local.new(), pid, "partition_1", "key_1")
       {entry_2, local} = track!(local, pid, "partition_2", "key_2")
 
       {%{joins: [], leaves: leaves}, _local} = Local.untrack_pid(local, pid)
 
-      assert sorted(leaves) == sorted([entry_1, entry_2])
+      assert Enum.sort(leaves) == Enum.sort([{"partition_1", entry_1.ref}, {"partition_2", entry_2.ref}])
     end
 
     test "keeps the entries of other pids" do
@@ -333,8 +338,14 @@ defmodule Rollcall.Tracker.LocalTest do
 
   # Tracks a key that is new to the set and returns the new entry.
   defp track!(local, pid, partition, key, meta \\ %{}) do
-    {%{joins: [entry], leaves: []}, local} =
-      Local.track(local, pid, partition, key, meta, unique_ref())
+    ref = unique_ref()
+
+    {changes, local} = Local.track(local, pid, partition, key, meta, ref)
+
+    assert changes.joins == [{partition, ref, key, meta}]
+    assert changes.leaves == []
+
+    [entry] = local |> Local.entries(partition) |> Enum.filter(&(&1.ref == ref))
 
     {entry, local}
   end

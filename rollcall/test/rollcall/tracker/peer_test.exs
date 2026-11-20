@@ -66,7 +66,7 @@ defmodule Rollcall.Tracker.PeerTest do
 
       expected = Entry.new(origin, "partition_2", "key_1", %{b: 2}, "b")
       assert Enum.to_list(Peer.entries(peer)) == [expected]
-      assert changes.joins == [expected]
+      assert changes.joins == [{"partition_2", "b", "key_1", %{b: 2}}]
     end
 
     test "a leave removes the entry with its ref and keeps the entry with the same key",
@@ -79,11 +79,47 @@ defmodule Rollcall.Tracker.PeerTest do
 
       kept = Entry.new(origin, "partition", "key", %{a: 2}, "b")
       assert Enum.to_list(Peer.entries(peer)) == [kept]
-      assert changes.leaves == [Entry.new(origin, "partition", "key", %{a: 1}, "a")]
+      assert changes.leaves == [{"partition", "a"}]
     end
 
     test "a wire entry of the wrong shape is rejected", %{origin: origin} do
       assert catch_error(Peer.new(snapshot(origin, stamp(1, 3), [{"partition", "key", "a"}])))
+    end
+  end
+
+  # A diff names a leave by its ref. The replica gives the partition. Each path
+  # that returns leaves builds the key from the replica, so each path has a test.
+  describe "the partition of a leave" do
+    setup %{origin: origin} do
+      wire = [
+        wire_entry("p1", "k1", "a", %{}),
+        wire_entry("p2", "k2", "b", %{}),
+        wire_entry("p1", "k3", "c", %{})
+      ]
+
+      {peer, _changes} = Peer.new(snapshot(origin, stamp(1, 3), wire))
+
+      %{peer: peer}
+    end
+
+    test "a diff leave takes the partition from the replica", %{origin: origin, peer: peer} do
+      {_peer, changes} = Peer.apply(peer, diff(origin, stamp(1, 4), 3, [], ["b", "c"]))
+
+      assert leave_ids(changes) == [{"p1", "c"}, {"p2", "b"}]
+    end
+
+    test "a snapshot that drops entries returns their partitions", %{origin: origin, peer: peer} do
+      kept = wire_entry("p1", "k1", "a", %{})
+
+      {_peer, changes} = Peer.apply(peer, snapshot(origin, stamp(1, 4), [kept]))
+
+      assert leave_ids(changes) == [{"p1", "c"}, {"p2", "b"}]
+    end
+
+    test "a purge returns the partition of every entry", %{peer: peer} do
+      assert {:purge, changes} = Peer.tick(peer, 1)
+
+      assert leave_ids(changes) == [{"p1", "a"}, {"p1", "c"}, {"p2", "b"}]
     end
   end
 
