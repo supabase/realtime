@@ -16,25 +16,27 @@ defmodule RealtimeWeb.ChannelsAuthorizationTest do
       input_token = "\n token %20 1 %20 2 %20 3   "
       expected_token = "token123"
 
+      claims = %{"role" => "authenticated", "exp" => 1}
+
       expect(JwtVerification, :verify, 1, fn token, @secret, _jwks ->
         assert token == expected_token
-        {:ok, %{}}
+        {:ok, claims}
       end)
 
-      assert {:ok, %{}} = ChannelsAuthorization.authorize(input_token, @secret, nil)
+      assert {:ok, ^claims} = ChannelsAuthorization.authorize_conn(input_token, @secret, nil, "tenant")
     end
 
     test "when token is unauthorized" do
-      expect(JwtVerification, :verify, 1, fn _token, @secret, _jwks -> :error end)
-      assert :error = ChannelsAuthorization.authorize("bad_token", @secret, nil)
+      expect(JwtVerification, :verify, 1, fn _token, @secret, _jwks -> {:error, :signature_error} end)
+      assert {:error, :signature_error} = ChannelsAuthorization.authorize_conn("bad_token", @secret, nil, "tenant")
     end
 
     test "when token is not a jwt token" do
-      assert {:error, :token_malformed} = ChannelsAuthorization.authorize("bad_token", @secret, nil)
+      assert {:error, :token_malformed} = ChannelsAuthorization.authorize_conn("bad_token", @secret, nil, "tenant")
     end
 
     test "when token is not a string" do
-      assert {:error, :invalid_token} = ChannelsAuthorization.authorize([], @secret, nil)
+      assert {:error, :invalid_token} = ChannelsAuthorization.authorize_conn([], @secret, nil, "tenant")
     end
 
     test "authorize_conn/4 fails when has missing headers" do
@@ -73,6 +75,13 @@ defmodule RealtimeWeb.ChannelsAuthorizationTest do
       jwt = token(%{"iss" => @vercel_iss})
 
       assert {:error, [message: "Invalid token", claim: "sub", claim_val: nil]} =
+               ChannelsAuthorization.authorize_conn(jwt, @vercel_secret, nil, @tenant_ref)
+    end
+
+    test "rejects a Vercel token with an empty sub" do
+      jwt = token(%{"iss" => @vercel_iss, "sub" => ""})
+
+      assert {:error, [message: "Invalid token", claim: "sub", claim_val: ""]} =
                ChannelsAuthorization.authorize_conn(jwt, @vercel_secret, nil, @tenant_ref)
     end
 
