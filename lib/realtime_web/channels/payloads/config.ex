@@ -30,7 +30,7 @@ defmodule RealtimeWeb.Channels.Payloads.Config do
       |> Map.new()
 
     config
-    |> cast(attrs, [:private], message: &Join.error_message/2)
+    |> cast(attrs, [:private], empty_values: Join.empty_values(), message: &Join.error_message/2)
     |> cast_embed(:broadcast, invalid_message: "unable to parse, expected a map")
     |> cast_embed(:presence, invalid_message: "unable to parse, expected a map")
     |> cast_embed(:postgres_changes, invalid_message: "unable to parse, expected an array of maps")

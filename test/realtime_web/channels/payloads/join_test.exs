@@ -60,6 +60,28 @@ defmodule RealtimeWeb.Channels.Payloads.JoinTest do
       assert is_binary(key)
     end
 
+    test "null options fall back to their defaults" do
+      config = %{
+        "config" => %{
+          "private" => nil,
+          "broadcast" => %{"ack" => nil, "self" => nil, "replication_ready" => nil},
+          "presence" => %{"enabled" => nil},
+          "postgres_changes_options" => %{"wait" => nil, "timeout" => nil}
+        }
+      }
+
+      assert {:ok, %Join{config: config} = join} = Join.validate(config)
+
+      assert %Config{
+               private: false,
+               broadcast: %Broadcast{ack: false, self: false, replication_ready: false},
+               presence: %Presence{enabled: false},
+               postgres_changes_options: %PostgresChangesOptions{wait: false, timeout: 15_000}
+             } = config
+
+      assert Join.private?(join) == false
+    end
+
     test "presence key can be number" do
       config = %{"config" => %{"presence" => %{"enabled" => true, "key" => 123}}}
 

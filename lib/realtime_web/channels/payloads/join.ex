@@ -82,6 +82,15 @@ defmodule RealtimeWeb.Channels.Payloads.Join do
 
   def postgres_changes_wait_timeout(_), do: nil
 
+  @doc """
+  Values that `cast/4` replaces with the field's default.
+
+  Ecto casts `null` to `nil` without calling the field's type, so without this a client sending
+  `"private": null` would override the `false` default with `nil`.
+  """
+  @spec empty_values() :: list()
+  def empty_values, do: [nil | Ecto.Changeset.empty_values()]
+
   def error_message(_field, meta) do
     type = Keyword.get(meta, :type)
 
