@@ -375,6 +375,9 @@ defmodule Extensions.PostgresCdcRlsTest do
       }
     end
 
+    # Flaky on OrioleDB: decoding the slot can PANIC Postgres, which kills this test.
+    # Decided not to skip for now, as we recover from flakies and then we can't forget to turn it back on.
+    # See https://github.com/orioledb/orioledb/issues/1589
     test "db events rate limit works", %{tenant: tenant, conn: conn} do
       on_exit(fn -> PostgresCdcRls.handle_stop(tenant.external_id, 10_000) end)
 
