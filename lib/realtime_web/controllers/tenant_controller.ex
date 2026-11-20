@@ -143,13 +143,8 @@ defmodule RealtimeWeb.TenantController do
       nil ->
         tenant_params = tenant_params |> Map.put("external_id", external_id) |> Map.put("name", external_id)
 
-        extensions =
-          Enum.reduce(tenant_params["extensions"], [], fn
-            %{"type" => type, "settings" => settings}, acc -> [%{"type" => type, "settings" => settings} | acc]
-            _e, acc -> acc
-          end)
-
-        with {:ok, %Tenant{} = tenant} <- Api.create_tenant(%{tenant_params | "extensions" => extensions}),
+        with {:ok, extensions} <- creation_extensions(tenant_params),
+             {:ok, %Tenant{} = tenant} <- Api.create_tenant(Map.put(tenant_params, "extensions", extensions)),
              res when res in [:ok, :noop] <- Migrations.run_migrations(tenant) do
           Logger.metadata(external_id: tenant.external_id, project: tenant.external_id)
 
@@ -355,6 +350,24 @@ defmodule RealtimeWeb.TenantController do
       do: :ok,
       else: {:error, :unprocessable_entity, "refs exceeds the maximum of #{@max_refs}"}
   end
+
+  # The tenant's database settings live in its extension, and migrations run against them right after
+  # the tenant is inserted. A tenant without one could never reach its database, so it is refused
+  # before anything is inserted.
+  defp creation_extensions(%{"extensions" => extensions}) when is_list(extensions) do
+    extensions =
+      Enum.reduce(extensions, [], fn
+        %{"type" => type, "settings" => settings}, acc -> [%{"type" => type, "settings" => settings} | acc]
+        _e, acc -> acc
+      end)
+
+    if extensions == [], do: missing_extension_error(), else: {:ok, extensions}
+  end
+
+  defp creation_extensions(_params), do: missing_extension_error()
+
+  defp missing_extension_error,
+    do: {:error, :unprocessable_entity, "extensions must have at least one extension with a type and settings"}
 
   # `postgres_changes_pool` is the public facing name for this setting to make it more explicit on intent
   defp translate_postgres_changes_pool(%{"extensions" => extensions} = params) when is_list(extensions),
