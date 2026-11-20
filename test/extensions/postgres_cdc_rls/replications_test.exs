@@ -275,6 +275,48 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
       [nil, nil, nil, "[]", "{}", "{}", nil, nil, nil, slot_changes_count] = sentinel
       assert slot_changes_count == 2
     end
+
+    for {action, sql} <- [
+          {"INSERT", "INSERT INTO public.test (details) VALUES ('queued')"},
+          {"UPDATE", "UPDATE public.test SET details = 'queued'"},
+          {"DELETE", "DELETE FROM public.test"}
+        ] do
+      test "#{action} queued before a column is dropped is still returned", %{conn: conn} do
+        slot_name = "test_slot_#{System.unique_integer([:positive])}"
+
+        Postgrex.query!(conn, "ALTER TABLE public.test REPLICA IDENTITY FULL", [])
+        Postgrex.query!(conn, "INSERT INTO public.test (details) VALUES ('before')", [])
+
+        {:ok, subscription_params} =
+          Subscriptions.parse_subscription_params(%{"event" => "*", "schema" => "public", "table" => "test"})
+
+        Subscriptions.create(
+          conn,
+          @publication,
+          [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}],
+          self(),
+          self()
+        )
+
+        {:ok, _} = Replications.prepare_replication(conn, slot_name)
+
+        Postgrex.query!(conn, unquote(sql), [])
+        Postgrex.query!(conn, "ALTER TABLE public.test DROP COLUMN details", [])
+
+        assert {:ok, %Postgrex.Result{rows: [row]}} =
+                 Replications.list_changes(conn,
+                   slot_name: slot_name,
+                   publication: @publication,
+                   max_changes: 100,
+                   max_record_bytes: 1_048_576
+                 )
+
+        assert [unquote(action), "public", "test", columns, record, old_record, _, [_], [], 1] = row
+        refute columns =~ "details"
+        refute record =~ "details"
+        refute old_record =~ "details"
+      end
+    end
   end
 
   describe "drop_replication_slot/2" do
