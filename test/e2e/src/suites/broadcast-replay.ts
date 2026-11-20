@@ -72,6 +72,38 @@ export const broadcastReplay: SuiteDescriptor = {
       }
     });
 
+    await test("replayed messages with a payload that isn't an object are delivered on join", async () => {
+      const supabase = await authedClient();
+      try {
+        const event = crypto.randomUUID();
+        const topic = randomTopic();
+        const payload = [1, 2, 3];
+        let result: any = null;
+        let receivedMeta: any = null;
+
+        const since = Date.now() - 1000;
+        await supabase.from("replay_check").insert({ id: crypto.randomUUID(), topic, event, payload });
+
+        await sleep(500);
+
+        const receiver = supabase.channel(topic, {
+          config: { private: true, broadcast: { replay: { since, limit: 1 } } },
+        }).on("broadcast", { event }, (msg) => {
+          result = msg.payload;
+          receivedMeta = msg.meta;
+        });
+        const subscribeMs = await openChannel(receiver);
+
+        const { latencyMs: replayMs } = await waitFor(() => result, "replayed broadcast event");
+
+        assert.deepStrictEqual(result, payload);
+        assert.strictEqual(receivedMeta?.replayed, true, "expected meta.replayed on replayed message");
+        return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "replay", value: replayMs, unit: "ms" }];
+      } finally {
+        await stopClient(supabase);
+      }
+    });
+
     await test("replayed messages carry meta.replayed flag", async () => {
       const supabase = await authedClient();
       try {
