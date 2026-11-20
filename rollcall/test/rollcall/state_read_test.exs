@@ -69,6 +69,24 @@ defmodule Rollcall.StateReadTest do
       assert Rollcall.state(rollcall, scope) == [{"p1", "c", "k1", %{n: 2}}]
     end
 
+    test "recovers presence after a peer restarts with a lower incarnation", %{scope: scope, rollcall: rollcall} do
+      old_origin = remote_pid(@node_a, 1)
+      new_origin = remote_pid(@node_a, 2)
+      tracker = start_tracker(rollcall, scope, @threshold)
+      deliver(tracker, scope, snapshot(old_origin, stamp(2, 1), [wire_entry("p1", "old", "a", %{})]))
+      assert Rollcall.state(rollcall, scope, "p1") == [{"a", "old", %{}}]
+
+      heartbeat = snapshot(new_origin, stamp(1, 1), [wire_entry("p1", "new", "b", %{})])
+
+      for _ <- 1..@threshold do
+        deliver(tracker, scope, heartbeat)
+        tick(tracker, 1)
+      end
+
+      deliver(tracker, scope, heartbeat)
+      assert Rollcall.state(rollcall, scope, "p1") == [{"b", "new", %{}}]
+    end
+
     test "applies the joins and the leaves of a diff", %{scope: scope, rollcall: rollcall} do
       origin = remote_pid(@node_a, 1)
       tracker = start_tracker(rollcall, scope, @threshold)
