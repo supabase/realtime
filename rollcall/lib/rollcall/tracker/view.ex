@@ -130,11 +130,8 @@ defmodule Rollcall.Tracker.View do
   Applies `changes` to the view and returns the committed changes.
 
   The function deletes the entry of each leave and returns it in the `leaves`
-  of the result, with its key and meta. Then it inserts the joins. The order is
-  the order of the design: remove the leaves, then add the joins. A join with
-  the id of a leave stays in the view.
+  of the result, with its key and meta. Then it inserts the joins. 
 
-  A leave always names an entry with a ref that an earlier change joined.
   Raises when a leave has no entry.
   """
   @spec write(t(), Changes.t()) :: CommittedChanges.t()
