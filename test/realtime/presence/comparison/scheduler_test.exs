@@ -14,10 +14,11 @@ defmodule Realtime.Presence.Comparison.SchedulerTest do
       assert_receive {:swept, 2}, 1_000
     end
 
-    test "starts no sweep while the previous sweep runs, and starts one at a later tick after it ends" do
+    test "starts the next sweep one period after the previous sweep ends" do
       parent = self()
 
       start_scheduler(
+        period: 100,
         sweep: fn number ->
           send(parent, {:started, number, self()})
           receive do: (:finish -> :ok)
@@ -26,13 +27,14 @@ defmodule Realtime.Presence.Comparison.SchedulerTest do
 
       assert_receive {:started, 0, sweep}, 1_000
 
-      # Many ticks pass while sweep 0 runs.
-      refute_receive {:started, 1, _}, 20 * @period
+      # No sweep overlaps sweep 0. The hold is 1.5 periods long.
+      refute_receive {:started, 1, _}, 150
 
       send(sweep, :finish)
 
-      # The scheduler starts no sweep at the end of sweep 0. The next tick starts sweep 1. This fails
-      # when the scheduler never clears the state of the sweep that ended.
+      # A fixed rate starts sweep 1 at the next tick, 50 ms after the end of sweep 0. A fixed delay
+      # waits a full period from the end of sweep 0.
+      refute_receive {:started, 1, _}, 80
       assert_receive {:started, 1, _}, 1_000
     end
 
