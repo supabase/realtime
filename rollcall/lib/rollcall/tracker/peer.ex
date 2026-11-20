@@ -186,7 +186,7 @@ defmodule Rollcall.Tracker.Peer do
     if new_ticks < threshold do
       {:keep, %{peer | silent_ticks: new_ticks}}
     else
-      {:purge, Changes.new([], Map.values(peer.replica))}
+      {:purge, Changes.new([], peer.replica |> Map.values() |> Enum.map(&to_id/1))}
     end
   end
 
@@ -207,8 +207,8 @@ defmodule Rollcall.Tracker.Peer do
 
     new = wire_entries_to_entries(entries, origin)
 
-    joins = for {ref, entry} <- new, not is_map_key(old, ref), do: entry
-    leaves = for {ref, entry} <- old, not is_map_key(new, ref), do: entry
+    joins = for {ref, entry} <- new, not is_map_key(old, ref), do: to_partitioned_entry(entry)
+    leaves = for {ref, entry} <- old, not is_map_key(new, ref), do: to_id(entry)
 
     {%{peer | replica: new}, Changes.new(joins, leaves)}
   end
@@ -222,13 +222,21 @@ defmodule Rollcall.Tracker.Peer do
     # The changes come from the refs in the message, so a diff costs the size of
     # the diff and not the size of the replica. A join wins over a leave of the
     # same ref.
-    joined = for {ref, entry} <- join_entries, not is_map_key(old, ref), do: entry
-    left = old |> Map.take(leaves) |> Map.drop(Map.keys(join_entries)) |> Map.values()
+    joined = for {ref, entry} <- join_entries, not is_map_key(old, ref), do: to_partitioned_entry(entry)
+    left = old |> Map.take(leaves) |> Map.drop(Map.keys(join_entries)) |> Map.values() |> Enum.map(&to_id/1)
 
     new = old |> Map.drop(leaves) |> Map.merge(join_entries)
 
     {%{peer | replica: new}, Changes.new(joined, left)}
   end
+
+  @spec to_partitioned_entry(Entry.t()) :: Rollcall.partitioned_entry()
+  defp to_partitioned_entry(%Entry{} = entry) do
+    {entry.partition, entry.ref, entry.key, entry.meta}
+  end
+
+  @spec to_id(Entry.t()) :: Rollcall.Tracker.View.id()
+  defp to_id(%Entry{} = entry), do: {entry.partition, entry.ref}
 
   @spec wire_entries_to_entries([Messages.wire_entry()], pid()) :: replica()
   defp wire_entries_to_entries(wire_entries, origin) do

@@ -131,7 +131,7 @@ defmodule Rollcall.Tracker.Local do
       end)
 
     {
-      Changes.join(changes, entry),
+      Changes.join(changes, {entry.partition, entry.ref, entry.key, entry.meta}),
       %{
         local
         | entries_by_id: Map.put(local.entries_by_id, entry_id, entry),
@@ -149,7 +149,7 @@ defmodule Rollcall.Tracker.Local do
       pids = remove_from_set_and_drop_if_empty(local.pids, pid, entry_id)
 
       {
-        Changes.leave(changes, removed_entry),
+        Changes.leave(changes, {removed_entry.partition, removed_entry.ref}),
         %{
           local
           | entries_by_id: Map.delete(local.entries_by_id, entry_id),
