@@ -7,8 +7,8 @@
 #     mise run db-start
 #     dev/scripts/presence-bench.sh --tenants 20 --entries 100 --changes-per-s 60
 #
-# A default run takes about 6 minutes. The results go to _build/presence_bench/latest.json and the
-# report to _build/presence_bench/report.html.
+# A default run takes about 6 minutes. The results go to _build/presence_bench/latest.json, or to
+# the file of `--out`. The report goes next to the results, with the extension .html.
 #
 # What a run does
 #
@@ -35,9 +35,9 @@
 #
 # Comparing with an earlier run
 #
-#     cp _build/presence_bench/latest.json baseline.json
+#     dev/scripts/presence-bench.sh --out _build/presence_bench/baseline.json
 #     # change the code
-#     dev/scripts/presence-bench.sh --backends rollcall --compare baseline.json
+#     dev/scripts/presence-bench.sh --backends rollcall --compare _build/presence_bench/baseline.json
 #
 # The report shows each number before and after, with the change in percent, and draws the earlier
 # Rollcall figures next to the new ones. The repeats of one run differ from each other, and more so
@@ -437,14 +437,19 @@ defmodule PresenceBench do
 
     for {app, key, value} <- overrides, do: call.(Application, :put_env, [app, key, value])
 
-    # The peers log at :info by default. The log lines would bury the progress lines.
-    call.(Application, :put_env, [:logger, :level, :warning])
+    # The peers log at :info by default. The log lines would bury the progress lines. While the app
+    # starts, the metric pollers log errors because the tables they read do not exist yet. Only
+    # errors that stop the start matter, and `ensure_all_started` raises those.
+    call.(Application, :put_env, [:logger, :level, :critical])
     {:ok, _} = call.(Application, :ensure_all_started, [:realtime])
+    call.(Logger, :configure, [[level: :warning]])
 
     pid
   end
 
   defp stop_cluster(%{peers: peers, nodes: nodes}) do
+    # A node that stops closes its gen_rpc channels, and the other nodes log an error for each one.
+    for node <- nodes, do: rpc(node, Logger, :configure, [[level: :critical]])
     for pid <- peers, do: :peer.stop(pid)
     for node <- nodes, do: Node.disconnect(node)
     :ok
