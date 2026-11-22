@@ -1818,9 +1818,13 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
       token = vercel_oidc_token(tenant, "otherref")
 
-      capture_log(fn ->
-        assert {:error, _} = subscribe_and_join(socket, "realtime:test", %{"access_token" => token})
-      end)
+      log =
+        capture_log(fn ->
+          assert {:error, %{reason: "InvalidJWTToken: JWT claim `sub` is invalid"}} =
+                   subscribe_and_join(socket, "realtime:test", %{"access_token" => token})
+        end)
+
+      refute log =~ "UnknownErrorOnChannel"
     end
 
     test "accepts a refreshed Vercel OIDC access_token issued for this tenant", %{tenant: tenant} do

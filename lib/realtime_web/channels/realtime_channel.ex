@@ -202,6 +202,9 @@ defmodule RealtimeWeb.RealtimeChannel do
         msg = "Fields `role` and `exp` are required in JWT"
         maybe_log_warning(socket, "InvalidJWTToken", msg)
 
+      {:error, [message: _, claim: claim, claim_val: _]} ->
+        maybe_log_warning(socket, "InvalidJWTToken", "JWT claim `#{claim}` is invalid")
+
       {:error, :unauthorized, msg} ->
         log_error(socket, "Unauthorized", msg)
 
