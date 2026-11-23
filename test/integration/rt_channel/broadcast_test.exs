@@ -720,7 +720,7 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
       db_conn: db_conn,
       serializer: serializer
     } do
-      values = [[1, 2, 3], "hello", 42, true, nil]
+      values = [[1, 2, 3], "hello", 42, true, nil, false, 0, "", [], 1.5]
 
       for value <- values do
         Postgrex.query!(db_conn, "SELECT realtime.send($1::text::jsonb, 'event', $2::text, TRUE::bool)", [
@@ -732,7 +732,10 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
       {socket, _} = get_connection(tenant, serializer, role: "authenticated")
       topic = "realtime:#{topic}"
 
-      WebsocketClient.join(socket, topic, %{config: %{private: true, broadcast: %{replay: %{limit: 10, since: 0}}}})
+      WebsocketClient.join(socket, topic, %{
+        config: %{private: true, broadcast: %{replay: %{limit: length(values), since: 0}}}
+      })
+
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
 
       replayed =
@@ -740,10 +743,11 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
           assert_receive %Message{
                            event: "broadcast",
                            topic: ^topic,
-                           payload: %{"payload" => payload, "meta" => %{"replayed" => true}}
+                           payload: %{"payload" => payload, "meta" => %{"id" => id, "replayed" => true}}
                          },
                          1000
 
+          assert is_binary(id)
           payload
         end
 
@@ -1229,7 +1233,7 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert ReplicationConnection.ready?(tenant.external_id)
 
-      for value <- [[1, 2, 3], "hello", 42, true, nil] do
+      for value <- [[1, 2, 3], "hello", 42, true, nil, false, 0, "", [], 1.5] do
         Postgrex.query!(db_conn, "SELECT realtime.send($1::text::jsonb, 'event', $2, FALSE)", [
           Jason.encode!(value),
           topic
@@ -1237,10 +1241,17 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
 
         assert_receive %Message{
                          event: "broadcast",
-                         payload: %{"event" => "event", "payload" => ^value, "type" => "broadcast"},
+                         payload: %{
+                           "event" => "event",
+                           "payload" => ^value,
+                           "type" => "broadcast",
+                           "meta" => %{"id" => id}
+                         },
                          topic: ^full_topic
                        },
                        1000
+
+        assert is_binary(id)
       end
     end
   end
