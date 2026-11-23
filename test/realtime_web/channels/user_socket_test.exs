@@ -319,7 +319,7 @@ defmodule RealtimeWeb.UserSocketTest do
       secret = "user-socket-test-secret-long-enough-for-hs256"
       exp = System.system_time(:second) + 1000
       jwt = Generators.generate_jwt_token(secret, %{role: "authenticated", exp: exp, iat: "yesterday"})
-      error = RealtimeWeb.ChannelsAuthorization.authorize_conn(jwt, secret, nil)
+      error = RealtimeWeb.ChannelsAuthorization.authorize_conn(jwt, secret, nil, "tenant")
 
       conn = UserSocket.handle_error(conn(:get, "/socket/websocket"), error)
 
@@ -332,7 +332,7 @@ defmodule RealtimeWeb.UserSocketTest do
       jwt = Generators.generate_jwt_token(secret, %{role: "authenticated", exp: System.system_time(:second) + 1000})
       [_header, claims, signature] = String.split(jwt, ".")
       jwt = Enum.join([Base.url_encode64("[]", padding: false), claims, signature], ".")
-      error = RealtimeWeb.ChannelsAuthorization.authorize_conn(jwt, secret, nil)
+      error = RealtimeWeb.ChannelsAuthorization.authorize_conn(jwt, secret, nil, "tenant")
 
       conn = UserSocket.handle_error(conn(:get, "/socket/websocket"), error)
 

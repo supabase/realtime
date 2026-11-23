@@ -218,6 +218,18 @@ defmodule PolicyEval.ParserTest do
       {"(\"User\" = ANY (tags))", {:scalar_array_op, "=", :any, col("User"), col("tags")}},
       {"(a <> ALL ('{a,b}'::text[]))",
        {:scalar_array_op, "<>", :all, col("a"), {:cast, {:const, :string, "{a,b}"}, "text[]"}}},
+      # (j -> 'app_metadata' ->> 'team') = 'x'
+      {"(((j -> 'app_metadata'::text) ->> 'team'::text) = 'x'::text)",
+       {:op, "=", {:op, "->>", {:op, "->", col("j"), text("app_metadata")}, text("team")}, text("x")}},
+      # j -> 'a' -> 0 ->> 'k' = 'v'
+      {"((((j -> 'a'::text) -> 0) ->> 'k'::text) = 'v'::text)",
+       {:op, "=", {:op, "->>", {:op, "->", {:op, "->", col("j"), text("a")}, number("0")}, text("k")}, text("v")}},
+      # (j -> -1) IS NULL
+      {"((j -> '-1'::integer) IS NULL)",
+       {:null_test, :is_null, {:op, "->", col("j"), {:cast, {:const, :string, "-1"}, "integer"}}}},
+      # j -> 'a' ->> 0 = 'v'
+      {"(((j -> 'a'::text) ->> 0) = 'v'::text)",
+       {:op, "=", {:op, "->>", {:op, "->", col("j"), text("a")}, number("0")}, text("v")}},
       # operators are read generically, the resolver decides which of them exist
       {"(a #>> b)", {:op, "#>>", col("a"), col("b")}},
       {"(a !~* 'x'::text)", {:op, "!~*", col("a"), text("x")}},
@@ -278,6 +290,12 @@ defmodule PolicyEval.ParserTest do
     test "every operand unsupported" do
       assert parse!("((EXISTS (x)) AND (EXISTS (y)))") ==
                {:bool_expr, :and, [{:unsupported, "(EXISTS (x))"}, {:unsupported, "(EXISTS (y))"}]}
+    end
+
+    # An operator outside pg_catalog is the policy author's, whatever its name is
+    test "an operator with its schema is unsupported" do
+      assert parse!("(a OPERATOR(public.^@) 'x'::text)") == {:unsupported, "(a OPERATOR(public.^@) 'x'::text)"}
+      assert parse!("(a OPERATOR(public.=) 'x'::text)") == {:unsupported, "(a OPERATOR(public.=) 'x'::text)"}
     end
 
     test "unsupported inside NOT" do

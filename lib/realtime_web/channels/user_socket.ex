@@ -126,7 +126,7 @@ defmodule RealtimeWeb.UserSocket do
           } = tenant} <- Tenants.Cache.fetch_tenant_by_external_id(external_id),
          {:ok, token} <- validate_token(token),
          jwt_secret_dec <- Tenant.decrypt_jwt_secret(jwt_secret),
-         {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec, jwt_jwks),
+         {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec, jwt_jwks, external_id),
          :ok <- TenantRateLimiters.check_tenant(tenant) do
       assigns = %RealtimeChannel.Assigns{
         claims: claims,
@@ -257,14 +257,14 @@ defmodule RealtimeWeb.UserSocket do
   defp put_join_bucket(socket, %Tenant{max_channels_per_client: max_channels}) do
     per_second = Application.fetch_env!(:realtime, :client_join_rate_limit)[:per_second]
     # A cap below 1 already refuses every join in `RealtimeChannel`, but a bucket needs a burst of at least 1
-    bucket = TokenBucket.new(per_second, max(max_channels, 1))
+    bucket = TokenBucket.per_second(max(max_channels, 1), per_second)
 
     %{socket | private: Map.put(socket.private, :join_bucket, bucket)}
   end
 
   defp put_broadcast_bucket(socket) do
     config = Application.fetch_env!(:realtime, :client_broadcast_rate_limit)
-    bucket = TokenBucket.new(config[:per_second], config[:burst])
+    bucket = TokenBucket.per_second(config[:burst], config[:per_second])
 
     %{socket | private: Map.put(socket.private, :broadcast_bucket, bucket)}
   end

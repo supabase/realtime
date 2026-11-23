@@ -81,6 +81,6 @@ defmodule PolicyEval.Eval do
   # type, not the value, which can come from a JWT.
   defp classify(value) when is_boolean(value) or is_nil(value), do: value
   defp classify({:unsupported, _} = unsupported), do: unsupported
-  defp classify({type, _value}) when type in [:text, :uuid, :jsonb], do: {:unsupported, {:not_boolean, type}}
+  defp classify({type, _value}) when type in [:text, :uuid, :jsonb, :int4], do: {:unsupported, {:not_boolean, type}}
   defp classify(_other), do: {:unsupported, {:not_boolean, :unknown}}
 end

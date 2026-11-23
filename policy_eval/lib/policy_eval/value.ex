@@ -3,9 +3,10 @@ defmodule PolicyEval.Value do
   Postgres value primitives: one function per Postgres function or operator the evaluator needs.
 
   Values are `{:text, binary}`, `{:uuid, <<_::128>>}`, `{:jsonb, term}` (see `PolicyEval.Jsonb`),
-  a bare `true`/`false`, and `nil` for SQL NULL. Every function returns a value, `nil`, or
-  `{:unsupported, reason}`. Where Postgres raises, the reason is `{:raises, sqlstate_name, detail}`,
-  so the caller asks the database instead.
+  `{:int4, integer}`, a bare `true`/`false`, and `nil` for SQL NULL. An `{:int4, _}` comes only from
+  an integer literal, and only `jsonb -> integer` and `jsonb ->> integer` take one. Every function
+  returns a value, `nil`, or `{:unsupported, reason}`. Where Postgres raises, the reason is
+  `{:raises, sqlstate_name, detail}`, so the caller asks the database instead.
 
   Arguments are already evaluated, so any of them may itself be `{:unsupported, _}`. Postgres
   evaluates all arguments of a function before calling it, so unless stated otherwise the first
@@ -15,7 +16,7 @@ defmodule PolicyEval.Value do
   without NUL bytes (Postgres text can't hold them).
   """
 
-  @type t :: {:text, binary()} | {:uuid, <<_::128>>} | {:jsonb, term()} | boolean() | nil
+  @type t :: {:text, binary()} | {:uuid, <<_::128>>} | {:jsonb, term()} | {:int4, integer()} | boolean() | nil
   @type result :: t | {:unsupported, term()}
 
   # Characters that make a pattern more than a literal in a Postgres advanced regular expression.
@@ -41,6 +42,52 @@ defmodule PolicyEval.Value do
   @doc "`text || text` (`textcat`, src/backend/utils/adt/varlena.c). Strict."
   @spec textcat(result, result) :: result
   def textcat(a, b), do: strict2(a, b, fn {:text, x}, {:text, y} -> {:text, x <> y} end)
+
+  @doc """
+  `starts_with(text, text)` (`text_starts_with`, src/backend/utils/adt/varlena.c). Strict.
+
+  Under a deterministic collation Postgres compares the bytes of the prefix with the start of the
+  text, so the empty prefix matches every text.
+  """
+  @spec starts_with(result, result) :: result
+  def starts_with(a, b) do
+    strict2(a, b, fn {:text, text}, {:text, prefix} -> String.starts_with?(text, prefix) end)
+  end
+
+  @doc """
+  `split_part(text, text, integer)` (`split_part`, src/backend/utils/adt/varlena.c). Strict.
+
+  Splits the text at each occurrence of the delimiter, from left to right and without overlaps, and
+  gives field `n`. Fields count from 1, and a negative `n` counts from the end (Postgres 14 and
+  later). A field that does not exist gives `''`, and so does an empty text. With an empty
+  delimiter, or one that does not occur, the whole text is the only field, so `1` and `-1` give the
+  text and other fields give `''`. Field `0` raises `invalid_parameter_value`.
+
+  Under a deterministic collation Postgres finds the delimiter by its bytes. In valid UTF-8, a match
+  of a valid UTF-8 delimiter always starts and ends on a character boundary, so splitting the bytes
+  gives the same fields as splitting the characters. Text that is not valid UTF-8 is
+  `{:unsupported, :invalid_utf8}`.
+  """
+  @spec split_part(result, result, result) :: result
+  def split_part({:unsupported, _} = unsupported, _delimiter, _field), do: unsupported
+  def split_part(_text, {:unsupported, _} = unsupported, _field), do: unsupported
+  def split_part(_text, _delimiter, {:unsupported, _} = unsupported), do: unsupported
+  def split_part(text, delimiter, field) when nil in [text, delimiter, field], do: nil
+
+  def split_part({:text, text}, {:text, delimiter}, {:int4, field}) do
+    cond do
+      field == 0 ->
+        {:unsupported, {:raises, :invalid_parameter_value, "field position must not be zero"}}
+
+      not (String.valid?(text) and String.valid?(delimiter)) ->
+        {:unsupported, :invalid_utf8}
+
+      true ->
+        fields = if delimiter == "", do: [text], else: :binary.split(text, delimiter, [:global])
+        index = if field > 0, do: field - 1, else: length(fields) + field
+        {:text, if(index >= 0, do: Enum.at(fields, index, ""), else: "")}
+    end
+  end
 
   @doc """
   `text || uuid` (`textanycat`, oid 2003 in src/include/catalog/pg_proc.dat). Strict.
@@ -168,6 +215,14 @@ defmodule PolicyEval.Value do
   """
   @spec bool_not(result) :: result
   def bool_not(a), do: strict1(a, fn b when is_boolean(b) -> not b end)
+
+  @doc "`boolean = boolean` (`booleq`, src/backend/utils/adt/bool.c). Strict."
+  @spec bool_eq(result, result) :: result
+  def bool_eq(a, b), do: strict2(a, b, fn x, y when is_boolean(x) and is_boolean(y) -> x == y end)
+
+  @doc "`boolean <> boolean` (`boolne`, src/backend/utils/adt/bool.c). Strict."
+  @spec bool_ne(result, result) :: result
+  def bool_ne(a, b), do: strict2(a, b, fn x, y when is_boolean(x) and is_boolean(y) -> x != y end)
 
   @doc """
   `text::boolean` (`boolin` and `parse_bool_with_len`, src/backend/utils/adt/bool.c). Strict.

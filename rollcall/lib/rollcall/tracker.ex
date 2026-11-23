@@ -298,6 +298,67 @@ defmodule Rollcall.Tracker do
   end
 
   @doc """
+  Returns the usage of the views of the running trackers. See `Rollcall.usage/2`.
+  """
+  @spec usage(Rollcall.name(), Rollcall.usage_buckets()) :: Rollcall.usage()
+  def usage(name, usage_buckets) do
+    empty = %{
+      scope_count: 0,
+      partition_count: 0,
+      entry_count_buckets: Map.new([:infinity | usage_buckets], &{&1, 0})
+    }
+
+    name
+    |> views()
+    |> Enum.reduce(empty, fn view, usage -> add_view(usage, View.partition_counts(view), usage_buckets) end)
+  end
+
+  # The Registry holds `nil` for a tracker that has not made its view yet. It removes the entry of an
+  # exited tracker after a short delay.
+  defp views(name) do
+    name
+    |> Registry.select([{{:_, :"$1", :"$2"}, [], [{{:"$1", :"$2"}}]}])
+    |> Enum.filter(fn {pid, view} -> view != nil and Process.alive?(pid) end)
+    |> Enum.map(fn {_pid, view} -> view end)
+  end
+
+  defp add_view(usage, partition_counts, _usage_buckets) when map_size(partition_counts) == 0, do: usage
+
+  defp add_view(usage, partition_counts, usage_buckets) do
+    buckets =
+      Enum.reduce(partition_counts, usage.entry_count_buckets, fn {_partition, count}, buckets ->
+        Map.update!(buckets, bucket_for(count, usage_buckets), &(&1 + 1))
+      end)
+
+    %{
+      usage
+      | scope_count: usage.scope_count + 1,
+        partition_count: usage.partition_count + map_size(partition_counts),
+        entry_count_buckets: buckets
+    }
+  end
+
+  defp bucket_for(count, usage_buckets), do: Enum.find(usage_buckets, :infinity, &(count <= &1))
+
+  @doc """
+  Returns the refs of the entries in the view of `scope`, by partition. See
+  `Rollcall.refs/2`.
+  """
+  @spec refs(Rollcall.name(), Rollcall.scope()) :: %{Rollcall.partition() => [Rollcall.ref()]}
+  def refs(name, scope) do
+    with_view(name, scope, fn view -> View.refs(view) end, %{})
+  end
+
+  @doc """
+  Returns the refs of the entries in `partition` of the view of `scope`. See
+  `Rollcall.refs/3`.
+  """
+  @spec refs(Rollcall.name(), Rollcall.scope(), Rollcall.partition()) :: [Rollcall.ref()]
+  def refs(name, scope, partition) do
+    with_view(name, scope, fn view -> View.refs(view, partition) end)
+  end
+
+  @doc """
   Returns every entry in the view of `scope`. See `Rollcall.state/2`.
   """
   @spec state(Rollcall.name(), Rollcall.scope()) :: [Rollcall.scope_entry()]
@@ -314,11 +375,11 @@ defmodule Rollcall.Tracker do
     with_view(name, scope, fn view -> View.entries(view, partition) end)
   end
 
-  defp with_view(name, scope, fun) do
+  defp with_view(name, scope, fun, default \\ []) do
     case lookup(name, scope) do
-      [{_tracker, nil}] -> []
+      [{_tracker, nil}] -> default
       [{_tracker, view}] -> fun.(view)
-      _ -> []
+      _ -> default
     end
   end
 
@@ -387,6 +448,8 @@ defmodule Rollcall.Tracker do
 
     {_new, _old} = Registry.update_value(Keyword.fetch!(opts, :name), scope, fn _ -> view end)
 
+    {:reductions, reductions} = Process.info(self(), :reductions)
+
     state = %State{
       scope: scope,
       incarnation: System.monotonic_time(:nanosecond),
@@ -396,7 +459,8 @@ defmodule Rollcall.Tracker do
       silence_threshold: Keyword.get(opts, :silence_threshold, @default_silence_threshold),
       heartbeat_period_in_ms: Keyword.get(opts, :heartbeat_period_in_ms, @default_heartbeat_period_in_ms),
       transport_module: transport_module,
-      transport_state: transport_state
+      transport_state: transport_state,
+      reductions: reductions
     }
 
     # Trap exists in this process so we get terminate/2 callbacks and can send goodbye messages
@@ -436,7 +500,7 @@ defmodule Rollcall.Tracker do
       state
       |> State.apply_changes(local, changes)
       |> update_view(changes)
-      |> publish_changes(changes)
+      |> publish_changes(changes, :local)
       |> cancel_empty_timer()
       |> watch_pid(pid)
 
@@ -464,7 +528,7 @@ defmodule Rollcall.Tracker do
       state
       |> State.apply_changes(local, changes)
       |> update_view(changes)
-      |> publish_changes(changes)
+      |> publish_changes(changes, :local)
       |> maybe_unwatch(pid)
       |> start_empty_timer()
 
@@ -510,7 +574,7 @@ defmodule Rollcall.Tracker do
       state
       |> State.apply_changes(local, changes)
       |> update_view(changes)
-      |> publish_changes(changes)
+      |> publish_changes(changes, :local)
       |> remove_monitor(pid)
       |> start_empty_timer()
 
@@ -520,13 +584,14 @@ defmodule Rollcall.Tracker do
   end
 
   def handle_info(:tick, state) do
-    state =
+    {
+      :noreply,
       state
       |> send_heartbeat()
       |> tick_and_purge_peers()
       |> schedule_heartbeat()
-
-    {:noreply, state}
+      |> emit_usage_metrics()
+    }
   end
 
   # In this catch all handle_info, we see if the message was a message from one
@@ -546,9 +611,11 @@ defmodule Rollcall.Tracker do
           # Valid message from the same scope
           true ->
             origin = node(Messages.origin(msg))
-            new_state = deliver_message(state, origin, State.peer(state, origin), msg)
 
-            {:noreply, new_state}
+            case apply_to_peer(state, origin, State.peer(state, origin), msg) do
+              {state, nil} -> {:noreply, state}
+              {state, changes} -> {:noreply, publish_changes(state, changes, :peer)}
+            end
         end
 
       _ ->
@@ -575,22 +642,48 @@ defmodule Rollcall.Tracker do
 
   # The transport does not send a message to its own node. The clause makes a
   # tracker safe when it does.
-  defp deliver_message(state, node, _peer, _msg) when node == node() do
-    drop_message(state, :local_origin, state.scope, node)
+  defp apply_to_peer(state, node, _peer, _msg) when node == node() do
+    {drop_message(state, :local_origin, state.scope, node), nil}
   end
 
   # A request carries no state, so a request from an unknown node creates no
   # record.
-  defp deliver_message(state, _node, nil, {:request, _origin}), do: state
+  defp apply_to_peer(state, _node, nil, {:request, _origin}), do: {state, nil}
 
-  defp deliver_message(state, node, nil, msg) do
-    {peer, changes} = Peer.new(msg)
-    put_peer(state, node, peer, changes)
+  defp apply_to_peer(state, node, nil, msg) do
+    measure_peer_apply(
+      fn ->
+        {peer, changes} = Peer.new(msg)
+        {put_peer(state, node, peer, changes), changes}
+      end,
+      state.scope,
+      node,
+      Messages.kind(msg)
+    )
   end
 
-  defp deliver_message(state, node, %Peer{} = peer, msg) do
-    {peer, changes} = Peer.apply(peer, msg)
-    put_peer(state, node, peer, changes)
+  defp apply_to_peer(state, node, %Peer{} = peer, msg) do
+    measure_peer_apply(
+      fn ->
+        {peer, changes} = Peer.apply(peer, msg)
+        {put_peer(state, node, peer, changes), changes}
+      end,
+      state.scope,
+      node,
+      Messages.kind(msg)
+    )
+  end
+
+  defp measure_peer_apply(f, scope, node, kind) do
+    {duration, result} = :timer.tc(f, :native)
+
+    :telemetry.execute(
+      Metrics.tracker_heartbeat_apply(),
+      %{duration: duration},
+      %{scope: scope, node: node, kind: kind}
+    )
+
+    result
   end
 
   defp drop_message(state, reason, message_scope, origin_node) do
@@ -620,7 +713,6 @@ defmodule Rollcall.Tracker do
     state
     |> State.put_peer(node, peer)
     |> update_view(changes)
-    |> publish_changes(changes)
   end
 
   defp tick_and_purge_peers(%State{} = state) do
@@ -634,7 +726,7 @@ defmodule Rollcall.Tracker do
             {:purge, changes} ->
               state
               |> update_view(changes)
-              |> publish_changes(changes)
+              |> publish_changes(changes, :purge)
 
               tp(
                 :rollcall_tracker_peer_purged,
@@ -686,6 +778,24 @@ defmodule Rollcall.Tracker do
     )
   end
 
+  defp emit_usage_metrics(state) do
+    {:memory, process_bytes} = Process.info(self(), :memory)
+    {:reductions, reductions} = Process.info(self(), :reductions)
+
+    :telemetry.execute(
+      Metrics.tracker_usage(),
+      %{
+        entries: :ets.info(state.view, :size),
+        process_bytes: process_bytes,
+        ets_bytes: :ets.info(state.view, :memory) * :erlang.system_info(:wordsize),
+        reductions: reductions - state.reductions
+      },
+      %{scope: state.scope}
+    )
+
+    %{state | reductions: reductions}
+  end
+
   defp update_view(state, changes) do
     View.write(state.view, changes)
 
@@ -697,9 +807,27 @@ defmodule Rollcall.Tracker do
       state.transport_module.active?(state.transport_state)
   end
 
-  defp publish_changes(state, changes) do
-    for {partition, diff} <- Changes.partition_diffs(changes) do
-      :ok = state.transport_module.publish(state.transport_state, partition, diff)
+  defp publish_changes(state, changes, source) do
+    for {partition, {joins, leaves} = diff} <- Changes.partition_diffs(changes) do
+      {duration, _} =
+        :timer.tc(
+          fn ->
+            :ok = state.transport_module.publish(state.transport_state, partition, diff)
+          end,
+          :native
+        )
+
+      :telemetry.execute(
+        Metrics.tracker_publish(),
+        %{
+          duration: duration,
+          entries: length(joins) + length(leaves)
+        },
+        %{
+          scope: state.scope,
+          source: source
+        }
+      )
 
       tp(
         :rollcall_tracker_published,
@@ -717,12 +845,25 @@ defmodule Rollcall.Tracker do
   end
 
   defp send_heartbeat(%State{} = state) do
-    local_entries = Local.entries(state.local)
+    {duration, entry_count} =
+      :timer.tc(
+        fn ->
+          local_entries = Local.entries(state.local)
 
-    snapshot_entries = Enum.map(local_entries, &Entry.to_wire_entry/1)
-    snapshot = Messages.snapshot(self(), State.current_stamp(state), snapshot_entries)
+          snapshot_entries = Enum.map(local_entries, &Entry.to_wire_entry/1)
+          snapshot = Messages.snapshot(self(), State.current_stamp(state), snapshot_entries)
 
-    :ok = state.transport_module.heartbeat(state.transport_state, snapshot)
+          :ok = state.transport_module.heartbeat(state.transport_state, snapshot)
+
+          length(snapshot_entries)
+        end,
+        :native
+      )
+
+    :telemetry.execute(Metrics.tracker_heartbeat_send(), %{duration: duration, entries: entry_count}, %{
+      scope: state.scope,
+      kind: :snapshot
+    })
 
     tp(
       :rollcall_tracker_heartbeat_sent,
@@ -731,7 +872,7 @@ defmodule Rollcall.Tracker do
         origin: self(),
         kind: :snapshot,
         version: state.version,
-        refs: Enum.map(local_entries, & &1.ref)
+        refs: Enum.map(Local.entries(state.local), & &1.ref)
       },
       ignore_side_effects: true
     )

@@ -14,8 +14,9 @@ defmodule PolicyEval.PolicySet do
       with `:other` for a role that isn't a platform role
     * RLS is off (`:rls_disabled`) or forced (`:rls_forced`), or the role isn't in the snapshot
       (`{:role_not_in_snapshot, role}`)
-    * the role bypasses RLS (`{:bypass_rls, role}`) or lacks a privilege the operation needs
-      (`{:missing_grant, role, :select | :insert}`): `select` for a read, `insert` for a write
+    * the role lacks a privilege the operation needs (`{:missing_grant, role, :select | :insert}`):
+      `select` for a read, `insert` for a write. Or the snapshot doesn't say whether the role
+      bypasses RLS (`{:bypass_rls, role}`)
     * a policy of the right command names a role other than `public` and the profile's
       `policy_roles` (`:unmodelled_policy_role`). Policies match by inherited role membership,
       which isn't modelled
@@ -27,6 +28,15 @@ defmodule PolicyEval.PolicySet do
   author chose (functions, types, settings) or input values, so they can be logged and used as
   metric tags. The platform names of the profile are kept, even for a function that the policy
   author created in a platform schema.
+
+  ## Roles that bypass RLS
+
+  A role that bypasses RLS (`BYPASSRLS` or a superuser, `bypass_rls` in `PolicyEval.Snapshot`) and
+  has the privilege is allowed, without looking at any policy: "Superusers and roles with the
+  `BYPASSRLS` attribute always bypass the row security system when accessing a table"
+  (https://www.postgresql.org/docs/current/ddl-rowsecurity.html). `FORCE ROW LEVEL SECURITY` only
+  affects the table's owner, so it doesn't change that. RLS off or forced still falls back first,
+  for every role: both are rare, and a table in either state isn't what this library models.
 
   ## Which policies, which expressions
 
@@ -105,22 +115,32 @@ defmodule PolicyEval.PolicySet do
   defp grants(:read), do: [:select]
   defp grants(:write), do: [:insert]
 
-  # Anything but the expected boolean is treated as the unsafe answer.
+  # Anything but the expected boolean is treated as the unsafe answer. `:allow` for a role that
+  # bypasses RLS ends the `with` in run/3: no policy applies to it, see "Roles that bypass RLS".
   defp check_snapshot(snapshot, role, operation) do
     cond do
       snapshot.rls_enabled != true -> {:fallback, :rls_disabled}
       snapshot.rls_forced != false -> {:fallback, :rls_forced}
       not is_map_key(snapshot.roles, role) -> {:fallback, {:role_not_in_snapshot, role}}
-      snapshot.roles[role][:bypass_rls] != false -> {:fallback, {:bypass_rls, role}}
-      true -> check_grants(snapshot.roles[role], role, grants(operation))
+      snapshot.roles[role][:bypass_rls] == true -> check_grants(snapshot.roles[role], role, operation, :allow)
+      snapshot.roles[role][:bypass_rls] == false -> check_grants(snapshot.roles[role], role, operation, :ok)
+      true -> {:fallback, {:bypass_rls, role}}
     end
   end
 
-  defp check_grants(privileges, role, grants) do
-    case Enum.find(grants, &(privileges[&1] != true)) do
-      nil -> :ok
+  # Bypassing RLS skips the policies, not the privileges: Postgres checks those first, for every
+  # role, and a missing one raises (42501) instead of denying.
+  defp check_grants(privileges, role, operation, granted) do
+    case missing_grant(privileges, operation) do
+      nil -> granted
       grant -> {:fallback, {:missing_grant, role, grant}}
     end
+  end
+
+  defp missing_grant(privileges, operation) do
+    operation
+    |> grants()
+    |> Enum.find(fn grant -> privileges[grant] != true end)
   end
 
   defp check_policy_roles(policies, profile) do

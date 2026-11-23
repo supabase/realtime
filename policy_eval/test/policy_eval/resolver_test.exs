@@ -25,6 +25,9 @@ defmodule PolicyEval.ResolverTest do
   defp claims,
     do: {:cast, {:func, nil, "current_setting", [text("app.claims"), {:const, :bool, true}]}, "jsonb"}
 
+  defp claims_json,
+    do: {:cast, {:func, nil, "current_setting", [text("app.claims"), {:const, :bool, true}]}, "json"}
+
   # IR builders
   defp call(module, function, args), do: {:apply, module, function, args}
   defp lit_text(s), do: {:lit, {:text, s}}
@@ -38,10 +41,23 @@ defmodule PolicyEval.ResolverTest do
       assert resolve({:const, :bool, false}) == {{:lit, false}, :bool}
     end
 
-    test "untyped strings, numbers and NULL are unsupported" do
+    test "untyped strings, numbers other than an integer, and NULL are unsupported" do
       assert resolve({:const, :string, "x"}) == unsupported(:untyped_string_literal)
-      assert resolve({:const, :number, "1"}) == unsupported(:number_literal)
+      assert resolve({:const, :number, "1.5"}) == unsupported(:number_literal)
       assert resolve({:const, :null}) == unsupported(:untyped_null)
+    end
+
+    test "an integer is an int4 literal, up to the largest int4" do
+      assert resolve({:const, :number, "0"}) == {{:lit, {:int4, 0}}, :int4}
+      assert resolve({:const, :number, "1"}) == {{:lit, {:int4, 1}}, :int4}
+      assert resolve({:const, :number, "2147483647"}) == {{:lit, {:int4, 2_147_483_647}}, :int4}
+    end
+
+    test "digits that int4out doesn't print are unsupported" do
+      # Postgres prints a larger integer as '2147483648'::bigint, and never prints a leading zero
+      for raw <- ["2147483648", "01", "00"] do
+        assert resolve({:const, :number, raw}) == unsupported(:number_literal), raw
+      end
     end
 
     test "text the parser couldn't read is unsupported, with its first keyword and nothing else" do
@@ -148,6 +164,15 @@ defmodule PolicyEval.ResolverTest do
       end
     end
 
+    for {op, function} <- [{"=", :bool_eq}, {"<>", :bool_ne}] do
+      test "#{op} on boolean with boolean is #{function}" do
+        ast = {:op, unquote(op), {:cast, team(), "boolean"}, {:const, :bool, true}}
+
+        assert resolve(ast) ==
+                 {call(Value, unquote(function), [call(Value, :bool_in, [{:column, "team"}]), {:lit, true}]), :bool}
+      end
+    end
+
     test "|| on text with text is textcat, and on text with uuid is textanycat" do
       assert resolve({:op, "||", text("a"), text("b")}) ==
                {call(Value, :textcat, [lit_text("a"), lit_text("b")]), :text}
@@ -172,6 +197,71 @@ defmodule PolicyEval.ResolverTest do
                {{:not, call(Value, :like, [{:column, "team"}, lit_text("a%")])}, :bool}
     end
 
+    test "starts_with on text with text is starts_with" do
+      assert resolve({:func, nil, "starts_with", [team(), text("a")]}) ==
+               {call(Value, :starts_with, [{:column, "team"}, lit_text("a")]), :bool}
+    end
+
+    test "^@ on text with text is starts_with" do
+      assert resolve({:op, "^@", team(), text("a")}) ==
+               {call(Value, :starts_with, [{:column, "team"}, lit_text("a")]), :bool}
+    end
+
+    test "^@ on other types is unsupported" do
+      assert resolve({:op, "^@", user_id(), text("a")}) == unsupported({:operator, "^@", :uuid, :text})
+    end
+
+    test "starts_with with an unsupported argument is unsupported with its reason" do
+      assert resolve({:func, nil, "starts_with", [{:func, nil, "lower", [team()]}, text("a")]}) ==
+               unsupported({:function, "lower", :not_allowlisted})
+    end
+
+    # Postgres prints the built-in without a schema. A function of the policy author with the same
+    # name has its schema in front, and it can do anything.
+    test "starts_with in a schema is not the built-in" do
+      assert resolve({:func, "public", "starts_with", [team(), text("a")]}) ==
+               unsupported({:function, :other_schema, :not_allowlisted})
+
+      assert resolve({:func, "pg_catalog", "starts_with", [team(), text("a")]}) ==
+               unsupported({:function, :other_schema, :not_allowlisted})
+
+      assert resolve({:func, "app", "starts_with", [team(), text("a")]}) ==
+               unsupported({:function, "app.starts_with", :not_allowlisted})
+    end
+
+    test "starts_with with another number of arguments is not allowlisted" do
+      for args <- [[], [team()], [team(), text("a"), text("b")]] do
+        assert resolve({:func, nil, "starts_with", args}) ==
+                 unsupported({:function, "starts_with", :not_allowlisted})
+      end
+    end
+
+    test "split_part on text, text and an integer literal is split_part" do
+      assert resolve({:func, nil, "split_part", [team(), text(":"), {:const, :number, "2"}]}) ==
+               {call(Value, :split_part, [{:column, "team"}, lit_text(":"), {:lit, {:int4, 2}}]), :text}
+    end
+
+    test "split_part on other types is unsupported with the types" do
+      assert resolve({:func, nil, "split_part", [user_id(), text(":"), {:const, :number, "2"}]}) ==
+               unsupported({:function, "split_part", {:types, :uuid, :text, :int4}})
+
+      assert resolve({:func, nil, "split_part", [team(), text(":"), text("2")]}) ==
+               unsupported({:function, "split_part", {:types, :text, :text, :text}})
+    end
+
+    test "split_part with an unsupported argument is unsupported with its reason" do
+      assert resolve({:func, nil, "split_part", [team(), text(":"), {:const, :number, "1.5"}]}) ==
+               unsupported(:number_literal)
+    end
+
+    test "split_part in a schema or with another number of arguments is not the built-in" do
+      assert resolve({:func, "public", "split_part", [team(), text(":"), {:const, :number, "1"}]}) ==
+               unsupported({:function, :other_schema, :not_allowlisted})
+
+      assert resolve({:func, nil, "split_part", [team(), text(":")]}) ==
+               unsupported({:function, "split_part", :not_allowlisted})
+    end
+
     test "~~* and !~~* on text with text are unsupported, because ILIKE folds case by the collation" do
       for op <- ["~~*", "!~~*"] do
         assert resolve({:op, op, team(), text("a%")}) == unsupported({:operator, op, :text, :text})
@@ -186,16 +276,93 @@ defmodule PolicyEval.ResolverTest do
                 ]), :text}
     end
 
+    test "-> on jsonb with text is object_field, which gives jsonb" do
+      assert resolve({:op, "->", claims(), text("meta")}) ==
+               {call(Jsonb, :object_field, [call(Jsonb, :parse, [{:setting, "app.claims"}]), lit_text("meta")]), :jsonb}
+    end
+
+    test "-> on jsonb with an integer is array_element, which gives jsonb" do
+      parsed = call(Jsonb, :parse, [{:setting, "app.claims"}])
+
+      assert resolve({:op, "->", claims(), {:const, :number, "0"}}) ==
+               {call(Jsonb, :array_element, [parsed, {:lit, {:int4, 0}}]), :jsonb}
+
+      assert resolve({:op, "->", claims(), {:cast, {:const, :string, "-1"}, "integer"}}) ==
+               {call(Jsonb, :array_element, [parsed, {:lit, {:int4, -1}}]), :jsonb}
+
+      assert resolve({:op, "->", claims(), null("integer")}) ==
+               {call(Jsonb, :array_element, [parsed, {:lit, nil}]), :jsonb}
+    end
+
+    test "? on jsonb with text is exists, which gives a boolean" do
+      assert resolve({:op, "?", {:op, "->", claims(), text("channels")}, text("room:1")}) ==
+               {call(Jsonb, :exists, [
+                  call(Jsonb, :object_field, [call(Jsonb, :parse, [{:setting, "app.claims"}]), lit_text("channels")]),
+                  lit_text("room:1")
+                ]), :bool}
+    end
+
+    test "? is unsupported on other types" do
+      assert resolve({:op, "?", team(), text("a")}) == unsupported({:operator, "?", :text, :text})
+      assert resolve({:op, "?", claims(), {:const, :number, "0"}}) == unsupported({:operator, "?", :jsonb, :int4})
+    end
+
+    test "->> on jsonb with an integer is array_element_text, which gives text" do
+      parsed = call(Jsonb, :parse, [{:setting, "app.claims"}])
+
+      assert resolve({:op, "->>", claims(), {:const, :number, "0"}}) ==
+               {call(Jsonb, :array_element_text, [parsed, {:lit, {:int4, 0}}]), :text}
+
+      assert resolve({:op, "->>", claims(), {:cast, {:const, :string, "-1"}, "integer"}}) ==
+               {call(Jsonb, :array_element_text, [parsed, {:lit, {:int4, -1}}]), :text}
+
+      assert resolve({:op, "->>", claims(), null("integer")}) ==
+               {call(Jsonb, :array_element_text, [parsed, {:lit, nil}]), :text}
+    end
+
+    test "-> chains, and ->> reads the result" do
+      ast = {:op, "->>", {:op, "->", {:op, "->", claims(), text("teams")}, {:const, :number, "0"}}, text("id")}
+
+      assert resolve(ast) ==
+               {call(Jsonb, :object_field_text, [
+                  call(Jsonb, :array_element, [
+                    call(Jsonb, :object_field, [call(Jsonb, :parse, [{:setting, "app.claims"}]), lit_text("teams")]),
+                    {:lit, {:int4, 0}}
+                  ]),
+                  lit_text("id")
+                ]), :text}
+    end
+
+    test "->> on json with text is object_field_text too, over the jsonb parse" do
+      assert resolve({:op, "->>", claims_json(), text("email")}) ==
+               {call(Jsonb, :object_field_text, [
+                  call(Jsonb, :parse, [{:setting, "app.claims"}]),
+                  lit_text("email")
+                ]), :text}
+    end
+
     test "any other combination is unsupported" do
+      int = {:const, :number, "1"}
+
       for {op, left, right, types} <- [
             {"=", team(), user_id(), {:text, :uuid}},
             {"=", user_id(), team(), {:uuid, :text}},
             {"<>", claims(), claims(), {:jsonb, :jsonb}},
-            {"=", {:const, :bool, true}, {:const, :bool, true}, {:bool, :bool}},
+            {"<", {:const, :bool, true}, {:const, :bool, true}, {:bool, :bool}},
+            {"=", {:const, :bool, true}, team(), {:bool, :text}},
             {"||", user_id(), text("a"), {:uuid, :text}},
             {"||", claims(), text("a"), {:jsonb, :text}},
             {"~", user_id(), text("a"), {:uuid, :text}},
-            {"->", claims(), text("a"), {:jsonb, :text}},
+            {"->", team(), text("a"), {:text, :text}},
+            {"->", team(), int, {:text, :int4}},
+            {"->>", team(), int, {:text, :int4}},
+            {"#>", claims(), text("{a}"), {:jsonb, :text}},
+            {"=", int, int, {:int4, :int4}},
+            {"/", int, int, {:int4, :int4}},
+            {"->", claims_json(), text("a"), {:json, :text}},
+            {"->>", claims_json(), user_id(), {:json, :uuid}},
+            {"=", claims_json(), claims_json(), {:json, :json}},
+            {"~~", claims_json(), text("a%"), {:json, :text}},
             {"->>", team(), text("a"), {:text, :text}},
             {"<", team(), text("a"), {:text, :text}},
             {"~~", user_id(), text("a"), {:uuid, :text}},
@@ -317,6 +484,14 @@ defmodule PolicyEval.ResolverTest do
       assert resolve({:cast, {:const, :string, ~s({"a":"b"})}, "jsonb"}) == {{:lit, {:jsonb, %{"a" => "b"}}}, :jsonb}
     end
 
+    test "to json, parsed now by the jsonb parser, with the type json" do
+      assert resolve({:cast, {:const, :string, ~s({"a":"b"})}, "json"}) == {{:lit, {:jsonb, %{"a" => "b"}}}, :json}
+
+      # json_in accepts this, and json ->> raises on it. The cast falls back.
+      assert resolve({:cast, {:const, :string, ~s({"a":"\\u0000"})}, "json"}) ==
+               unsupported({:raises, :untranslatable_character, "unsupported Unicode escape sequence"})
+    end
+
     test "to boolean, parsed now" do
       assert resolve({:cast, {:const, :string, "true"}, "boolean"}) == {{:lit, true}, :bool}
       assert resolve({:cast, {:const, :string, "off"}, "boolean"}) == {{:lit, false}, :bool}
@@ -333,8 +508,23 @@ defmodule PolicyEval.ResolverTest do
                unsupported({:raises, :invalid_text_representation, "invalid input syntax for type boolean"})
     end
 
+    test "to integer, in the form int4out prints, which is how Postgres prints a negative integer" do
+      for {string, n} <- [{"-1", -1}, {"-2147483648", -2_147_483_648}, {"0", 0}, {"2147483647", 2_147_483_647}] do
+        assert resolve({:cast, {:const, :string, string}, "integer"}) == {{:lit, {:int4, n}}, :int4}, string
+      end
+    end
+
+    test "to integer, in any other form, is unsupported" do
+      # Postgres folds the literal while it parses the policy, so it never prints these
+      for string <- ["+1", "01", "-0", " 1", "1 ", "1_000", "0x10", "1.0", "", "x", "2147483648", "-2147483649"] do
+        assert resolve({:cast, {:const, :string, string}, "integer"}) ==
+                 unsupported({:cast, :string_literal, "integer"}),
+               inspect(string)
+      end
+    end
+
     test "to any other type is unsupported" do
-      for type <- ["integer", "date", "character varying", "text[]", "bytea", "bool"] do
+      for type <- ["bigint", "date", "character varying", "text[]", "bytea", "bool"] do
         assert resolve({:cast, {:const, :string, "1"}, type}) == unsupported({:cast, :string_literal, type})
       end
     end
@@ -349,15 +539,17 @@ defmodule PolicyEval.ResolverTest do
       assert resolve({:cast, team(), "app.level"}) == unsupported({:cast, :text, "app.level"})
     end
 
-    test "NULL cast to the four types is a typed NULL literal" do
+    test "NULL cast to the six types is a typed NULL literal" do
       assert resolve(null("text")) == {{:lit, nil}, :text}
       assert resolve(null("uuid")) == {{:lit, nil}, :uuid}
       assert resolve(null("jsonb")) == {{:lit, nil}, :jsonb}
+      assert resolve(null("json")) == {{:lit, nil}, :json}
       assert resolve(null("boolean")) == {{:lit, nil}, :bool}
+      assert resolve(null("integer")) == {{:lit, nil}, :int4}
     end
 
     test "NULL cast to another type is unsupported" do
-      assert resolve(null("integer")) == unsupported({:cast, :null, "integer"})
+      assert resolve(null("bigint")) == unsupported({:cast, :null, "bigint"})
     end
   end
 
@@ -370,9 +562,10 @@ defmodule PolicyEval.ResolverTest do
       assert {{:apply, Value, :uuid_out, [{:apply, Value, :uuid_in, _}]}, :text} = resolve({:cast, user_id(), "text"})
     end
 
-    test "text to uuid, jsonb and boolean" do
+    test "text to uuid, jsonb, json and boolean" do
       assert resolve({:cast, team(), "uuid"}) == {call(Value, :uuid_in, [{:column, "team"}]), :uuid}
       assert resolve({:cast, team(), "jsonb"}) == {call(Jsonb, :parse, [{:column, "team"}]), :jsonb}
+      assert resolve({:cast, team(), "json"}) == {call(Jsonb, :parse, [{:column, "team"}]), :json}
       assert resolve({:cast, team(), "boolean"}) == {call(Value, :bool_in, [{:column, "team"}]), :bool}
     end
 
@@ -389,7 +582,12 @@ defmodule PolicyEval.ResolverTest do
             {team(), :text, "character varying"},
             {team(), :text, "integer"},
             {claims(), :jsonb, "boolean"},
-            {{:const, :bool, true}, :bool, "boolean"}
+            {claims(), :jsonb, "json"},
+            {claims_json(), :json, "text"},
+            {claims_json(), :json, "jsonb"},
+            {claims_json(), :json, "json"},
+            {{:const, :bool, true}, :bool, "boolean"},
+            {{:const, :number, "1"}, :int4, "text"}
           ] do
         assert resolve({:cast, expr, to}) == unsupported({:cast, from, to}), inspect({expr, to})
       end
@@ -561,6 +759,7 @@ defmodule PolicyEval.ResolverTest do
       "grammar_and_in_or",
       "grammar_user_role",
       "grammar_setting_boolean",
+      "grammar_setting_json",
       "grammar_setting_text",
       "grammar_coalesce",
       "grammar_concat_null",
@@ -572,6 +771,11 @@ defmodule PolicyEval.ResolverTest do
       "grammar_is_null",
       "grammar_claims_text",
       "grammar_claims_text_initplan",
+      "grammar_claims_nested",
+      "grammar_claims_index",
+      "grammar_claims_negative_index",
+      "grammar_claims_text_index",
+      "grammar_claims_text_negative_index",
       "grammar_neq",
       "grammar_not",
       "grammar_not_in",

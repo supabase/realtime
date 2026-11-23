@@ -61,7 +61,18 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
     {"another uuid", @other}
   ]
 
-  @groups [:three_valued, :text_and_arrays, :user_id_and_role, :claims, :regex, :like, :literals]
+  @groups [
+    :three_valued,
+    :text_and_arrays,
+    :user_id_and_role,
+    :claims,
+    :nested_claims,
+    :regex,
+    :like,
+    :starts_with,
+    :split_part,
+    :literals
+  ]
 
   setup_all do
     %{collector: Collector.start(:expressions)}
@@ -105,6 +116,7 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
     {deparsed, pg} =
       Postgres.rolled_back(conn, fn conn ->
         prepare_functions!(conn, kase.functions)
+        Enum.each(kase.setup, &Postgrex.query!(conn, &1, []))
         Postgrex.query!(conn, "SET LOCAL search_path = ''", [])
         deparsed = create_policy_and_read_back!(conn, kase)
         {deparsed, postgres_value(conn, deparsed, kase.env)}
@@ -184,7 +196,9 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
       name: sql <> env_summary <> functions_summary,
       sql: sql,
       env: ExampleScenarios.env(env_opts),
-      functions: functions
+      functions: functions,
+      # Statements run before the policy is created, in the transaction that rolls back
+      setup: Keyword.get(opts, :setup, [])
     }
   end
 
@@ -385,7 +399,6 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
             "app.team() LIKE 'user:%'",
             "app.team() ILIKE 'USER:%'",
             "app.team() ~~ 'user:%'",
-            "starts_with(app.team(), 'user:')",
             "split_part(app.team(), ':', 1) = 'user'",
             "app.team() = ANY (string_to_array('a,b', ','))",
             "CASE WHEN kind = 'note' THEN true ELSE false END",
@@ -532,9 +545,13 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
             "app.claims() ->> 'x' = 'v'",
             "app.claims() ->> 'x' IS NULL",
             "current_setting('app.claims', true)::jsonb ->> 'x' = #{claim_literal(value)}",
+            "current_setting('app.claims', true)::json ->> 'x' = #{claim_literal(value)}",
+            "current_setting('app.claims', true)::json ->> 'x' IS NULL",
             "(select app.claims() ->> 'x') = 'v'",
             "(app.claims() ->> 'x')::boolean",
-            "coalesce((app.claims() ->> 'x')::boolean, false)"
+            "coalesce((app.claims() ->> 'x')::boolean, false)",
+            "(app.claims() ->> 'x')::boolean = true",
+            "coalesce((app.claims() ->> 'x')::boolean, false) = false"
           ] do
         expression_case(sql, extra_claims: %{"x" => value})
       end
@@ -544,8 +561,13 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
       {"duplicate keys, last wins", ~s({"x":"first","x":"last"})},
       {"duplicate keys, last is null", ~s({"x":"first","x":null})},
       {"duplicate keys, last is an object", ~s({"x":"first","x":{"a":1}})},
+      {"duplicate keys, first is an object", ~s({"x":{"a":1},"x":"v"})},
+      {"duplicate keys, first is null", ~s({"x":null,"x":"v"})},
       {"duplicate keys of different case", ~s({"X":"1","x":"2"})},
       {"only nested", ~s({"y":{"x":"deep"}})},
+      {"nested before the key", ~s({"y":{"x":"deep"},"x":"v"})},
+      {"nested after the key", ~s({"x":"v","y":{"x":"deep"}})},
+      {"escaped key", ~s({"\\u0078":"v"})},
       {"escaped unicode", ~s({"x":"caf\\u00e9"})},
       {"surrogate pair", ~s({"x":"\\ud83d\\ude00"})},
       {"lone high surrogate", ~s({"x":"\\ud83d"})},
@@ -596,6 +618,9 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
             "app.claims() ->> 'x' = 'v'",
             "app.claims() ->> 'x' IS NULL",
             "current_setting('app.claims', true)::jsonb ->> 'x' IS NULL",
+            "current_setting('app.claims', true)::json ->> 'x' = 'v'",
+            "current_setting('app.claims', true)::json ->> 'x' IS NULL",
+            "current_setting('app.claims', true)::json ->> 'é' = 'v'",
             "app.claims() ->> 'é' = 'v'",
             "app.claims() ->> '' IS NULL"
           ] do
@@ -613,6 +638,9 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
             "(app.claims() -> 'meta') ->> 'role' = 'owner'",
             "(app.claims() -> 'meta' ->> 'role') = 'owner'",
             "app.claims() ->> 'email' = 'a@b.c'",
+            "current_setting('app.claims', true)::json ->> 'email' LIKE '%@b.c'",
+            "current_setting('app.claims', true)::json ->> 'email' NOT LIKE '%@b.c'",
+            "(current_setting('app.claims', true)::json ->> 'role') = 'member'",
             "coalesce(app.claims() ->> 'email', '') = ''",
             "app.claims() ->> 'plan' = 'pro'",
             "(app.claims() ->> 'exp')::bigint > 0",
@@ -664,7 +692,10 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
           sql <- [
             "(current_setting('app.claims', true)::jsonb ->> 'k')::boolean",
             "coalesce((app.claims() ->> 'k')::boolean, false)",
-            "NOT (app.claims() ->> 'k')::boolean"
+            "NOT (app.claims() ->> 'k')::boolean",
+            "(app.claims() ->> 'k')::boolean = true",
+            "(app.claims() ->> 'k')::boolean <> false",
+            "(app.claims() ->> 'k')::boolean = NULL::boolean"
           ] do
         expression_case(sql, extra_claims: %{"k" => text})
       end
@@ -688,7 +719,9 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
             "current_setting('app.headers', true)::jsonb ->> 'user-agent' IS NULL",
             "current_setting('app.headers', true) IS NULL",
             "nullif(current_setting('app.headers', true), '') IS NULL",
-            "current_setting('app.headers', true)::json ->> 'user-agent' = 'v'"
+            "current_setting('app.headers', true)::json ->> 'user-agent' = 'v'",
+            "current_setting('app.headers', true)::json ->> 'user-agent' IS NULL",
+            "current_setting('app.headers', true)::json IS NULL"
           ] do
         expression_case(sql, headers: headers)
       end
@@ -725,6 +758,125 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
       end
 
     from_jason ++ from_raw ++ usual ++ booleans ++ headers ++ settings
+  end
+
+  # `->` by key and by index, and `->>` by index, on claims of every shape. The policies read the
+  # value that `->` gives through `->>`, a null test or another `->`, because no policy prints a
+  # jsonb value.
+  defp cases(:nested_claims) do
+    shapes = [
+      ~s({"m":{"k":"v"}}),
+      ~s({"m":{"k":"w"}}),
+      ~s({"m":{"k":""}}),
+      ~s({"m":{"k":null}}),
+      ~s({"m":{"k":true}}),
+      ~s({"m":{"k":1}}),
+      ~s({"m":{"k":1.50}}),
+      ~s({"m":{"k":-0}}),
+      ~s({"m":{"k":1e2}}),
+      ~s({"m":{"k":{"a":1}}}),
+      ~s({"m":{"k":[]}}),
+      ~s({"m":{"k":"v","k":"w"}}),
+      ~s({"m":{"k":"w"},"m":{"k":"v"}}),
+      ~s({"m":{"m":{"k":"v"}}}),
+      ~s({"M":{"k":"v"}}),
+      ~s({"m":{}}),
+      ~s({"m":null}),
+      ~s({"m":"v"}),
+      ~s({"m":1}),
+      ~s({"m":true}),
+      ~s({"m":[]}),
+      ~s({"m":["v"]}),
+      ~s({"m":[null]}),
+      ~s({"m":[1,2,3]}),
+      ~s({"m":[{"k":"v"}]}),
+      ~s({"m":[{"k":"v"},{"k":"w"}]}),
+      ~s({"m":[{"k":"w"},{"k":"v"}]}),
+      ~s({"m":[[{"k":"v"}]]}),
+      ~s({"m":["w","v"]}),
+      ~s({"m":[true,false]}),
+      ~s({"m":["v",[1]]}),
+      ~s({"m":[{"k":"v"}],"x":"\\u0000"}),
+      ~s({"m":{"k":"\\u0000"}}),
+      ~s({"":{"k":"v"}}),
+      ~s({"m":["é"]}),
+      ~s({"m":{"é":1}}),
+      ~s({"m":["1","true","null"]}),
+      ~s({"m":{"v":null}}),
+      ~s({"m":[{"v":1}]}),
+      ~s([{"k":"v"}]),
+      ~s([{"m":{"k":"v"}}]),
+      ~s(["v","w"]),
+      ~s("v"),
+      "true",
+      "5",
+      "null",
+      "{}",
+      "[]",
+      "",
+      nil,
+      "not json"
+    ]
+
+    sqls = [
+      "app.claims() -> 'm' ->> 'k' = 'v'",
+      "(app.claims() -> 'm' ->> 'k') IS NULL",
+      "(app.claims() -> 'm') IS NULL",
+      "(app.claims() -> 'm') IS NOT NULL",
+      "(app.claims() -> 'm' -> 'k') IS NULL",
+      "app.claims() -> 'm' -> 'm' ->> 'k' = 'v'",
+      "app.claims() -> 'm' -> 0 ->> 'k' = 'v'",
+      "app.claims() -> 'm' -> -1 ->> 'k' = 'v'",
+      "app.claims() -> 'm' -> 0 -> 0 ->> 'k' = 'v'",
+      "(app.claims() -> 'm' -> 0) IS NULL",
+      "(app.claims() -> 'm' -> 1) IS NULL",
+      "(app.claims() -> 'm' -> -1) IS NULL",
+      "(app.claims() -> 'm' -> -2) IS NULL",
+      "(app.claims() -> 'm' -> 2147483647) IS NULL",
+      "(app.claims() -> 'm' -> -2147483648) IS NULL",
+      "(app.claims() -> 'm' -> NULL::int) IS NULL",
+      "(app.claims() -> NULL) IS NULL",
+      "(app.claims() -> 0) IS NULL",
+      "app.claims() -> 0 ->> 'k' = 'v'",
+      "(app.claims() -> '') IS NULL",
+      "app.claims() -> 'm' ->> 0 = 'v'",
+      "app.claims() -> 'm' ->> -1 = 'v'",
+      "(app.claims() -> 'm' ->> 0) IS NULL",
+      "(app.claims() -> 'm' ->> 1) IS NULL",
+      "(app.claims() -> 'm' ->> -2) IS NULL",
+      "(app.claims() -> 'm' ->> 2147483647) IS NULL",
+      "(app.claims() -> 'm' ->> -2147483648) IS NULL",
+      "(app.claims() -> 'm' ->> NULL::int) IS NULL",
+      "(app.claims() -> 'm' ->> 0)::boolean",
+      "app.claims() -> 'm' -> 0 ->> 0 = 'v'",
+      "app.claims() ->> 0 = 'v'",
+      "(app.claims() ->> -1) IS NULL",
+      "current_setting('app.claims', true)::jsonb -> 'm' ->> 'k' = 'v'",
+      "(select app.claims() -> 'm') ->> 'k' = 'v'",
+      "coalesce(app.claims() -> 'm', '{}') ->> 'k' = 'v'",
+      "coalesce(app.claims() -> 'm' ->> 'k', '') = ''",
+      "(app.claims() -> 'm' ->> 'k')::boolean",
+      "app.claims() -> 'm' ->> 'k' IN ('v', 'w')",
+      "app.claims() -> 'm' ->> 'k' = kind",
+      "app.claims() ? 'm'",
+      "app.claims() ? 'v'",
+      "app.claims() ? ''",
+      "app.claims() -> 'm' ? 'v'",
+      "app.claims() -> 'm' ? 'k'",
+      "app.claims() -> 'm' ? 'é'",
+      "app.claims() -> 'm' ? 'V'",
+      "app.claims() -> 'm' ? '1'",
+      "app.claims() -> 'm' ? 'true'",
+      "app.claims() -> 'm' ? 'null'",
+      "app.claims() -> 'm' ? NULL::text",
+      "app.claims() -> 'm' ? kind",
+      "NOT (app.claims() -> 'm' ? 'v')",
+      "(app.claims() -> 'm' ? 'v') IS NULL",
+      "app.claims() -> 'm' -> 0 ? 'v'",
+      "current_setting('app.claims', true)::jsonb -> 'm' ? 'v'"
+    ]
+
+    for claims <- shapes, sql <- sqls, do: expression_case(sql, claims: claims, kind: "v")
   end
 
   defp cases(:regex) do
@@ -837,6 +989,162 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
 
   defp cases(:like), do: like_matrix() ++ like_operands() ++ like_long_texts() ++ like_from_postgres()
 
+  # split_part finds the delimiter by its bytes: fields from both ends, missing fields, empty and
+  # repeated delimiters, delimiters of several bytes that could overlap, and UTF-8 on both sides
+  defp cases(:split_part) do
+    texts = [
+      "cursors:c1:room",
+      "cursors:c1:room:x",
+      "cursors:c1:",
+      "cursors::room",
+      ":a:",
+      "a::::b",
+      "a:::b",
+      "no-delimiter",
+      "",
+      nil,
+      "café:🎉:sala",
+      "a🎉b🎉c",
+      "aébéc",
+      "e\u0301:x"
+    ]
+
+    delimiters = [":", "::", "", "🎉", "é", "x"]
+    fields = [1, 2, 3, 4, -1, -2, -4, 0]
+
+    matrix =
+      for text <- texts, delimiter <- delimiters, field <- fields do
+        expression_case("split_part(app.team(), #{lit(delimiter)}, #{field}) = 'room'", team: text)
+      end
+
+    # The policy of the cursors topics, with the claim and the topic as the inputs
+    cursors =
+      "COALESCE(current_setting('app.claims', true)::jsonb ->> 'cursor_client', '') <> '' " <>
+        "AND split_part((select app.team()), ':', 1) = 'cursors' " <>
+        "AND split_part((select app.team()), ':', 2) = (current_setting('app.claims', true)::jsonb ->> 'cursor_client') " <>
+        "AND split_part((select app.team()), ':', 3) <> '' " <>
+        "AND split_part((select app.team()), ':', 4) = ''"
+
+    policy =
+      for team <- [
+            "cursors:c1:room",
+            "cursors:c2:room",
+            "cursors:c1:",
+            "cursors:c1:room:x",
+            "presence:c1:room",
+            "",
+            nil
+          ],
+          claim <- ["c1", "", nil] do
+        claims = if claim, do: %{"cursor_client" => claim}, else: %{}
+        expression_case(cursors, team: team, claims: claims)
+      end
+
+    operands =
+      for sql <- [
+            "split_part(app.team(), NULL::text, 1) = 'a'",
+            "split_part(NULL::text, ':', 0) IS NULL",
+            "split_part(app.team(), kind, 2) = 'b'",
+            "split_part(kind, 'o', 1) = 'n'",
+            "split_part(app.team(), ':', -2147483648) = ''",
+            "split_part(app.team(), ':', 2147483647) = ''",
+            "split_part(app.team(), ':', 2) IS NULL"
+          ],
+          team <- ["a:b", "", nil],
+          kind <- ["note", nil] do
+        expression_case(sql, team: team, kind: kind)
+      end
+
+    matrix ++ policy ++ operands
+  end
+
+  # starts_with compares bytes: case, code points against combining accents, the empty prefix, NULL,
+  # and a prefix built from the user id, as a policy builds a topic prefix
+  defp cases(:starts_with) do
+    texts = [
+      "user:a",
+      "user:",
+      "user",
+      "USER:a",
+      "xuser:a",
+      "",
+      nil,
+      "é",
+      "café",
+      "café",
+      "🎉x",
+      "notify:#{@own}:inbox",
+      "notify:#{@own}",
+      "notify:#{@other}:inbox",
+      "user%a",
+      "user_a",
+      "user\\%a",
+      "user\\"
+    ]
+
+    # The LIKE wildcards and the backslash are plain characters in a prefix
+    prefixes = [
+      "user:",
+      "",
+      "é",
+      "e",
+      "caf",
+      "café",
+      "🎉",
+      "user:a",
+      "user:ab",
+      "user%",
+      "user_",
+      "%",
+      "_",
+      "user\\%",
+      "user\\"
+    ]
+
+    # The function, and `^@`, the operator of that function
+    matrix =
+      for text <- texts,
+          prefix <- prefixes,
+          sql <- ["starts_with(app.team(), #{lit(prefix)})", "app.team() ^@ #{lit(prefix)}"] do
+        expression_case(sql, team: text)
+      end
+
+    # A `^@` of the policy author, which gives the opposite answer. Postgres prints it as
+    # `OPERATOR(public.^@)`, and the evaluator has to fall back
+    own_operator_setup = [
+      "CREATE FUNCTION public.not_starts_with(text, text) RETURNS boolean LANGUAGE sql IMMUTABLE AS 'SELECT NOT starts_with($1, $2)'",
+      "CREATE OPERATOR public.^@ (LEFTARG = text, RIGHTARG = text, FUNCTION = public.not_starts_with)"
+    ]
+
+    own_operator =
+      for team <- ["user:a", "other", "", nil] do
+        expression_case("app.team() OPERATOR(public.^@) 'user:'", [team: team], setup: own_operator_setup)
+      end
+
+    operands =
+      for sql <- [
+            "starts_with(app.team(), NULL::text)",
+            "starts_with(NULL::text, 'a')",
+            "starts_with(app.team(), kind)",
+            "starts_with(kind, 'no')",
+            "app.team() ^@ kind",
+            "NOT (app.team() ^@ 'user:')",
+            "app.team() ^@ (('notify:' || (select app.user_id())::text) || ':')",
+            "NOT starts_with(app.team(), 'user:')",
+            "starts_with(app.team(), 'user:') AND kind = 'note'",
+            "starts_with(app.team(), 'user:') OR kind = 'note'",
+            "starts_with(lower(app.team()), 'user:')",
+            "starts_with((select app.team()), (('notify:' || (select app.user_id())::text) || ':'))"
+          ],
+          team <- ["user:a", "notify:#{@own}:inbox", "notify:#{@other}:inbox", "", nil],
+          kind <- ["note", nil],
+          user_id <- [@own, nil] do
+        expression_case(sql, team: team, kind: kind, user_id: user_id)
+      end
+
+    matrix ++ own_operator ++ operands
+  end
+
   defp cases(:literals) do
     # uuid_in's accepted forms, from uuid.sql. A literal is deparsed to its canonical form.
     uuid_forms = [
@@ -900,7 +1208,23 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
             "#{lit(json)}::jsonb ->> 'x' = 'v'",
             "#{lit(json)}::jsonb ->> 'x' IS NULL",
             "#{lit(json)}::jsonb ->> 'x' = '100'",
-            "#{lit(json)}::jsonb ->> 'x' = 'café'"
+            "#{lit(json)}::jsonb ->> 'x' = 'café'",
+            "#{lit(json)}::json ->> 'x' = 'v'",
+            "#{lit(json)}::json ->> 'x' IS NULL",
+            "#{lit(json)}::json ->> 'x' = '1e2'"
+          ] do
+        expression_case(sql)
+      end
+
+    # json_in accepts what json ->> raises on. Where nothing reads the json, Postgres gives a value
+    # and the library falls back.
+    json_literals =
+      for sql <- [
+            "NULL::json ->> 'x' IS NULL",
+            "#{lit(~s({"x":"\\u0000"}))}::json IS NOT NULL",
+            "#{lit(~s({"x":"\\u0000"}))}::json ->> 'y' IS NULL",
+            "#{lit(~s({"x":"\\ud83d"}))}::json IS NOT NULL",
+            "#{lit(~s({"x":"\\ud83d"}))}::json ->> 'y' IS NULL"
           ] do
         expression_case(sql)
       end
@@ -946,7 +1270,7 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
         expression_case(sql)
       end
 
-    uuid_literals ++ boolean_literals ++ jsonb_literals ++ raising_operand ++ strings
+    uuid_literals ++ boolean_literals ++ jsonb_literals ++ json_literals ++ raising_operand ++ strings
   end
 
   # Every string against every pattern, with LIKE, NOT LIKE and ILIKE. The string is the value of

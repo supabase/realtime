@@ -20,10 +20,10 @@ defmodule PolicyEvalScenarios do
 
   @headers ~s({"x-client-info":"supabase-js/2.0"})
 
-  # How the bodies of auth.uid()/auth.role() are called in test names
+  # How the bodies of auth.uid()/auth.role()/auth.email() are called in test names
   @flavor_labels %{legacy: "legacy", supabase_auth: "supabase/auth"}
 
-  @doc "How a body of `auth.uid()` and `auth.role()` is called in test names."
+  @doc "How a body of `auth.uid()`, `auth.role()` and `auth.email()` is called in test names."
   @spec flavor_label(:legacy | :supabase_auth) :: String.t()
   def flavor_label(flavor), do: Map.fetch!(@flavor_labels, flavor)
 
@@ -93,7 +93,7 @@ defmodule PolicyEvalScenarios do
   #   policies:   CREATE POLICY statements, run after the ones that are on the table are dropped
   #   setup:      statements run before them
   #   env:        see env/1
-  #   functions:  :legacy | :supabase_auth, the bodies of auth.uid() and auth.role()
+  #   functions:  :legacy | :supabase_auth, the bodies of auth.uid(), auth.role() and auth.email()
   #   extensions: what is asked for, both as read and write extensions
   defp scenario(group, name, policies, env_opts, opts \\ []) do
     env = env(env_opts)
@@ -117,7 +117,7 @@ defmodule PolicyEvalScenarios do
     }
   end
 
-  # The legacy bodies of auth.uid() and auth.role() are the ones of the supabase/postgres image,
+  # The legacy bodies of auth.uid(), auth.role() and auth.email() are the ones of the supabase/postgres image,
   # supabase/auth's are what production projects run
   defp functions_setup(:legacy), do: [PolicyEvalPolicies.auth_jwt_statement()]
 
@@ -426,12 +426,18 @@ defmodule PolicyEvalScenarios do
        [policy_sql("a", "FOR ALL TO authenticated USING (event IS NULL OR realtime.topic() = 'x')")]},
       {"another column and the topic",
        [policy_sql("a", "FOR ALL TO authenticated USING (event IS NOT NULL AND realtime.topic() = 'x')")]},
+      # The loader reads only the functions the profile knows, so auth.team() is not in the snapshot
       {"a function the snapshot doesn't have",
-       [policy_sql("a", "FOR ALL TO authenticated USING (auth.email() IS NULL)")]}
+       [policy_sql("a", "FOR ALL TO authenticated USING (auth.team() IS NULL)")],
+       ["CREATE FUNCTION auth.team() RETURNS text LANGUAGE sql STABLE AS $$ select null::text $$"]}
     ]
 
-    for {label, policies} <- sets, role <- ["authenticated", "anon"], topic <- ["x", "y", "z", ""] do
-      scenario("combination", "#{label}, #{role}, topic #{inspect(topic)}", policies, role: role, topic: topic)
+    for set <- sets, role <- ["authenticated", "anon"], topic <- ["x", "y", "z", ""] do
+      {label, policies, setup} = with {label, policies} <- set, do: {label, policies, []}
+
+      scenario("combination", "#{label}, #{role}, topic #{inspect(topic)}", policies, [role: role, topic: topic],
+        setup: setup
+      )
     end
   end
 
@@ -462,6 +468,376 @@ defmodule PolicyEvalScenarios do
   end
 
   @doc """
+  `service_role` as the tenant database sets it up, with `BYPASSRLS` and its grants, and no setup
+  that changes it. The policies would deny, fall back or raise for any other role, and some name
+  `service_role` itself. Postgres applies none of them to a role that bypasses RLS, so every join
+  is allowed, and the library has to decide that, not fall back.
+  """
+  @spec service_role_scenarios() :: [map()]
+  def service_role_scenarios do
+    sets = [
+      {"no policy", []},
+      {"a policy for other roles", [policy_sql("a", "FOR ALL TO authenticated USING (true) WITH CHECK (true)")]},
+      {"a restrictive policy that denies service_role",
+       [
+         policy_sql("a", "FOR ALL TO service_role USING (true) WITH CHECK (true)"),
+         policy_sql("r", "AS RESTRICTIVE FOR ALL TO service_role USING (false) WITH CHECK (false)")
+       ]},
+      {"a policy the library can't evaluate",
+       [policy_sql("a", "FOR ALL USING (exists (select 1 from pg_class)) WITH CHECK (true)")]},
+      {"a policy for a role the library doesn't model",
+       [policy_sql("a", "FOR ALL TO postgres USING (true) WITH CHECK (true)")]},
+      {"a policy that raises", [policy_sql("a", "FOR ALL USING (auth.uid() is null) WITH CHECK (true)")]}
+    ]
+
+    for {label, policies} <- sets, topic <- ["x", ""] do
+      scenario("service_role", "#{label}, topic #{inspect(topic)}", policies,
+        role: "service_role",
+        topic: topic,
+        sub: "user_2abc"
+      )
+    end
+  end
+
+  @doc """
+  Notification channels: a user reads and broadcasts on the topics that start with
+  `notify:<uid>:`, with `starts_with`, in the initplan form `(select auth.uid())`.
+
+  The library has to decide the `:decided` subs, a uuid in any spelling or none, not fall back.
+  The `:other` subs make `auth.uid()` raise, so the library can fall back there, but it must not
+  give another answer than Postgres.
+  """
+  @spec notify_channel_scenarios(:decided | :other, :legacy | :supabase_auth) :: [map()]
+  def notify_channel_scenarios(subs, flavor) when subs in [:decided, :other] do
+    condition = """
+    extension = 'broadcast'
+    AND (select auth.uid()) IS NOT NULL
+    AND starts_with((select realtime.topic()), 'notify:' || (select auth.uid())::text || ':')
+    """
+
+    policies = [
+      policy_sql("users receive their notifications", "FOR SELECT TO authenticated USING (#{condition})"),
+      policy_sql("users send their notifications", "FOR INSERT TO authenticated WITH CHECK (#{condition})")
+    ]
+
+    topics = [
+      {"own prefix", "notify:#{@own}:inbox"},
+      {"own prefix and nothing", "notify:#{@own}:"},
+      {"own uid without the colon", "notify:#{@own}"},
+      {"own uid in upper case", "notify:#{String.upcase(@own)}:inbox"},
+      {"other uid", "notify:#{@other}:inbox"},
+      {"prefix in upper case", "NOTIFY:#{@own}:inbox"},
+      {"prefix inside another topic", "xnotify:#{@own}:inbox"},
+      {"non-ASCII after the prefix", "notify:#{@own}:é"},
+      {"notify: and nothing", "notify:"},
+      {"empty", ""}
+    ]
+
+    for {role, topic_label, topic, sub_label, sub} <- notify_cases(subs, topics) do
+      scenario(
+        "notify channels, #{flavor_label(flavor)}",
+        "notify channels (#{flavor_label(flavor)}) #{role}, topic: #{topic_label}, sub: #{sub_label}",
+        policies,
+        [role: role, topic: topic, sub: sub],
+        functions: flavor
+      )
+    end
+  end
+
+  defp notify_cases(:decided, topics) do
+    subs = [
+      {"canonical", @own},
+      {"upper case", String.upcase(@own)},
+      {"braced", "{#{@own}}"},
+      {"unhyphenated", String.replace(@own, "-", "")},
+      {"missing", nil},
+      {"another uuid", @other}
+    ]
+
+    authenticated = for {tl, t} <- topics, {sl, s} <- subs, do: {"authenticated", tl, t, sl, s}
+
+    # No policy is for anon, so only a few combinations
+    anon = for {tl, t} <- Enum.take(topics, 2), {sl, s} <- [{"canonical", @own}], do: {"anon", tl, t, sl, s}
+
+    authenticated ++ anon
+  end
+
+  defp notify_cases(:other, topics) do
+    for {tl, t} <- Enum.take(topics, 2),
+        {sl, s} <- [{"empty", ""}, {"not a uuid", "user_2abc"}],
+        do: {"authenticated", tl, t, sl, s}
+  end
+
+  @doc """
+  Organization channels: a member reads and broadcasts on the topics that start with `<org_id>:`,
+  where `org_id` is a text claim. No guard is in front of `starts_with`, so its own NULL decides
+  when the claim is missing or JSON null. An empty claim gives the prefix `:`.
+
+  The library has to decide all of them, not fall back.
+  """
+  @spec org_channel_scenarios() :: [map()]
+  def org_channel_scenarios do
+    prefix = "((select auth.jwt()) ->> 'org_id') || ':'"
+
+    policies = [
+      policy_sql("members receive on their organization", """
+      FOR SELECT TO authenticated USING (starts_with((select realtime.topic()), #{prefix}))
+      """),
+      policy_sql("members send on their organization", """
+      FOR INSERT TO authenticated
+      WITH CHECK (starts_with(realtime.topic(), #{prefix}) AND extension = 'broadcast')
+      """)
+    ]
+
+    topics = [
+      {"own organization", "acme:lobby"},
+      {"own organization and nothing", "acme:"},
+      {"own organization without the colon", "acme"},
+      {"organization in upper case", "ACME:lobby"},
+      {"another organization", "other:lobby"},
+      {"no organization", ":lobby"},
+      {"empty", ""}
+    ]
+
+    claims = [
+      {"acme", %{"org_id" => "acme"}},
+      {"upper case", %{"org_id" => "ACME"}},
+      {"with the colon", %{"org_id" => "acme:"}},
+      {"a LIKE wildcard", %{"org_id" => "%"}},
+      {"empty", %{"org_id" => ""}},
+      {"JSON null", %{"org_id" => nil}},
+      {"missing", %{}}
+    ]
+
+    for {topic_label, topic} <- topics, {claim_label, extra_claims} <- claims do
+      scenario(
+        "organization channels",
+        "organization channels, topic: #{topic_label}, org_id: #{claim_label}",
+        policies,
+        topic: topic,
+        extra_claims: extra_claims
+      )
+    end
+  end
+
+  @doc """
+  Draft channels: a user reads and broadcasts on every topic but the ones that start with
+  `drafts:<uid>:`, with `NOT starts_with` and no guard. Without a sub the prefix is NULL, so the
+  policy is NULL and Postgres denies. An evaluator that gave false for that `starts_with` would
+  allow.
+
+  The library has to decide all of them, not fall back.
+  """
+  @spec draft_channel_scenarios(:legacy | :supabase_auth) :: [map()]
+  def draft_channel_scenarios(flavor) do
+    condition = "NOT starts_with((select realtime.topic()), 'drafts:' || (select auth.uid())::text || ':')"
+
+    policies = [
+      policy_sql("users receive on all but their drafts", "FOR SELECT TO authenticated USING (#{condition})"),
+      policy_sql("users send on all but their drafts", "FOR INSERT TO authenticated WITH CHECK (#{condition})")
+    ]
+
+    topics = [
+      {"own drafts", "drafts:#{@own}:1"},
+      {"own drafts and nothing", "drafts:#{@own}:"},
+      {"own uid without the colon", "drafts:#{@own}"},
+      {"other drafts", "drafts:#{@other}:1"},
+      {"lobby", "public:lobby"},
+      {"empty", ""}
+    ]
+
+    subs = [
+      {"canonical", @own},
+      {"upper case", String.upcase(@own)},
+      {"missing", nil},
+      {"another uuid", @other}
+    ]
+
+    for {topic_label, topic} <- topics, {sub_label, sub} <- subs do
+      scenario(
+        "draft channels, #{flavor_label(flavor)}",
+        "draft channels (#{flavor_label(flavor)}), topic: #{topic_label}, sub: #{sub_label}",
+        policies,
+        [topic: topic, sub: sub],
+        functions: flavor
+      )
+    end
+  end
+
+  @doc """
+  Inbox channels: a user reads and broadcasts on `inbox:<email>`, with `auth.email()`.
+
+  Realtime does not set `request.jwt.claim.email`, so the legacy `auth.email()` is always NULL and
+  every join is denied. supabase/auth's reads the `email` field of the claims. The library has to
+  decide all of them, not fall back.
+  """
+  @spec email_channel_scenarios(:legacy | :supabase_auth) :: [map()]
+  def email_channel_scenarios(flavor) do
+    condition = "realtime.topic() = 'inbox:' || auth.email()"
+
+    policies = [
+      policy_sql("users receive on their inbox", "FOR SELECT TO authenticated USING (#{condition})"),
+      policy_sql("users send on their inbox", "FOR INSERT TO authenticated WITH CHECK ((select #{condition}))")
+    ]
+
+    topics = [
+      {"own inbox", "inbox:ana@example.com"},
+      {"own inbox in upper case", "inbox:ANA@EXAMPLE.COM"},
+      {"another inbox", "inbox:bob@example.com"},
+      {"inbox: and nothing", "inbox:"},
+      {"empty", ""}
+    ]
+
+    claims = [
+      {"own", %{"email" => "ana@example.com"}},
+      {"upper case", %{"email" => "ANA@EXAMPLE.COM"}},
+      {"empty", %{"email" => ""}},
+      {"JSON null", %{"email" => nil}},
+      {"missing", %{}}
+    ]
+
+    for {topic_label, topic} <- topics, {claim_label, extra_claims} <- claims do
+      scenario(
+        "inbox channels, #{flavor_label(flavor)}",
+        "inbox channels (#{flavor_label(flavor)}), topic: #{topic_label}, email: #{claim_label}",
+        policies,
+        [topic: topic, extra_claims: extra_claims],
+        functions: flavor
+      )
+    end
+  end
+
+  @doc """
+  Policies that read a nested claim with `auth.jwt() -> 'app_metadata' ->> ...`, in the plain form
+  and in the initplan form `(select auth.jwt())`.
+
+  The library has to decide the `:well_formed` claims, not fall back. In those claims, `app_metadata`
+  is an object, JSON null, a string or missing, and each value in it is a string or JSON null. The
+  `:other` claims have numbers, objects, duplicate keys or a NUL escape, or they are not an object
+  or not JSON. For those, the library can fall back, but it must not give another answer than Postgres.
+  """
+  @spec nested_claim_scenarios(:well_formed | :other) :: [map()]
+  def nested_claim_scenarios(shapes) when shapes in [:well_formed, :other] do
+    policies = [
+      policy_sql("read the team channel", """
+      FOR SELECT TO authenticated
+      USING (realtime.topic() = 'team:' || (auth.jwt() -> 'app_metadata' ->> 'team'))
+      """),
+      policy_sql("admins read every channel", """
+      FOR SELECT TO authenticated
+      USING ((select auth.jwt()) -> 'app_metadata' ->> 'role' = 'admin')
+      """),
+      policy_sql("broadcast on the team channel", """
+      FOR INSERT TO authenticated
+      WITH CHECK (realtime.topic() = 'team:' || ((select auth.jwt()) -> 'app_metadata' ->> 'team') AND extension = 'broadcast')
+      """)
+    ]
+
+    for {label, env_opts} <- nested_claims(shapes), topic <- ["team:red", "team:blue"] do
+      scenario(
+        "nested claims",
+        "nested claims, #{label}, topic #{inspect(topic)}",
+        policies,
+        [topic: topic] ++ env_opts
+      )
+    end
+  end
+
+  # Added to the claims that env/1 builds, so each has a role and a sub
+  defp nested_claims(:well_formed) do
+    for {label, extra_claims} <- [
+          {"the red team", %{"app_metadata" => %{"team" => "red"}}},
+          {"the red team, admin", %{"app_metadata" => %{"team" => "red", "role" => "admin"}}},
+          {"the blue team", %{"app_metadata" => %{"team" => "blue"}}},
+          {"admin without a team", %{"app_metadata" => %{"role" => "admin"}}},
+          {"app_metadata without a team", %{"app_metadata" => %{}}},
+          {"no app_metadata", %{}},
+          {"app_metadata is null", %{"app_metadata" => nil}},
+          {"app_metadata is a string", %{"app_metadata" => "red"}},
+          {"a team that is null", %{"app_metadata" => %{"team" => nil}}},
+          {"the team in user_metadata", %{"user_metadata" => %{"team" => "red"}}}
+        ] do
+      {label, [extra_claims: extra_claims]}
+    end
+  end
+
+  # The JSON text of the claims, as it is
+  defp nested_claims(:other) do
+    for {label, claims} <- [
+          {"a team that is a number", ~s({"role":"authenticated","app_metadata":{"team":1}})},
+          {"a team that is an object", ~s({"role":"authenticated","app_metadata":{"team":{"id":"red"}}})},
+          {"the red team, a role that is a number",
+           ~s({"role":"authenticated","app_metadata":{"team":"red","role":1}})},
+          {"duplicate app_metadata, the last wins",
+           ~s({"role":"authenticated","app_metadata":{"team":"blue"},"app_metadata":{"team":"red"}})},
+          {"NUL escape in the team", ~s({"role":"authenticated","app_metadata":{"team":"\\u0000"}})},
+          {"array root", ~s([{"app_metadata":{"team":"red"}}])},
+          {"not JSON", "not json"},
+          {"empty claims", ""}
+        ] do
+      {label, [claims: claims]}
+    end
+  end
+
+  @doc """
+  Policies that read a claim with `current_setting('request.jwt.claims', true)::json`, as json
+  rather than jsonb. They have to be decided by the library, not fall back.
+  """
+  @spec json_claim_scenarios() :: [map()]
+  def json_claim_scenarios do
+    using = "(current_setting('request.jwt.claims', true)::json ->> 'email') LIKE '%@supabase.io'"
+
+    policies = [
+      policy_sql("receive by email domain", "FOR SELECT TO authenticated USING (#{using})"),
+      policy_sql("broadcast by email domain", "FOR INSERT TO authenticated WITH CHECK (#{using})")
+    ]
+
+    # The last two are near misses: another domain that ends the same, and the domain not at the end
+    for {label, claims} <- [
+          {"in the domain", %{"email" => "ada@supabase.io"}},
+          {"another domain", %{"email" => "ada@example.com"}},
+          {"no email", %{}},
+          {"email null", %{"email" => nil}},
+          {"a domain that ends the same", %{"email" => "ada@notsupabase.io"}},
+          {"the domain not at the end", %{"email" => "ada@supabase.io.example.com"}}
+        ] do
+      scenario("json claims", "email domain from json claims, #{label}", policies,
+        role: "authenticated",
+        extra_claims: claims
+      )
+    end ++ json_flag_scenarios()
+  end
+
+  # A boolean flag in the claims, compared as text, and the topic from an initplan
+  defp json_flag_scenarios do
+    using = """
+    ((current_setting('request.jwt.claims', true)::json ->> 'my_flag') = 'true'
+      AND (select realtime.topic()) = 'flagged:lobby')
+    """
+
+    policies = [
+      policy_sql("flagged users receive", "FOR SELECT TO authenticated USING #{using}"),
+      policy_sql("flagged users send", "FOR INSERT TO authenticated WITH CHECK #{using}")
+    ]
+
+    for {label, claims} <- [
+          {"flag true", %{"my_flag" => true}},
+          {"flag false", %{"my_flag" => false}},
+          {"flag the string true", %{"my_flag" => "true"}},
+          {"flag the string TRUE", %{"my_flag" => "TRUE"}},
+          {"flag null", %{"my_flag" => nil}},
+          {"no flag", %{}}
+        ],
+        topic <- ["flagged:lobby", "flagged:other"] do
+      scenario("json claims", "json flag claim, #{label}, topic #{inspect(topic)}", policies,
+        role: "authenticated",
+        topic: topic,
+        extra_claims: claims
+      )
+    end
+  end
+
+  @doc """
   Everything the library doesn't model has to be a fallback, not an answer. The setups change the
   database in the transaction of the scenario, and roll back with it.
   """
@@ -480,6 +856,12 @@ defmodule PolicyEvalScenarios do
       {"no INSERT for anon", ["REVOKE INSERT ON realtime.messages FROM anon"]},
       {"authenticated bypasses RLS", ["ALTER ROLE authenticated BYPASSRLS"]},
       {"anon bypasses RLS", ["ALTER ROLE anon BYPASSRLS"]},
+      {"anon is a superuser", ["ALTER ROLE anon SUPERUSER"]},
+      {"service_role does not bypass RLS", ["ALTER ROLE service_role NOBYPASSRLS"]},
+      {"no INSERT for service_role", ["REVOKE INSERT ON realtime.messages FROM service_role"]},
+      {"no SELECT for service_role", ["REVOKE SELECT ON realtime.messages FROM service_role"]},
+      {"a restrictive policy for service_role that denies",
+       [policy_sql("deny", "AS RESTRICTIVE FOR ALL TO service_role USING (false) WITH CHECK (false)")]},
       {"a policy for a role authenticated is a member of",
        [
          "CREATE ROLE policy_eval_team NOLOGIN",

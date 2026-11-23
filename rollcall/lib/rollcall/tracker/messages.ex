@@ -49,6 +49,11 @@ defmodule Rollcall.Tracker.Messages do
   @typedoc "A snapshot, a diff or a request."
   @type t :: snapshot() | diff() | request()
 
+  @spec kind(t()) :: :diff | :request | :snapshot
+  def kind({:snapshot, _origin, _stamp, _entries}), do: :snapshot
+  def kind({:diff, _origin, _stamp, _from, _joins, _leaves}), do: :diff
+  def kind({:request, _origin}), do: :request
+
   @doc "Checks if a parameter is a valid message"
   @spec message?(term()) :: boolean()
   def message?({:snapshot, origin, {:stamp, incarnation, version}, entries})

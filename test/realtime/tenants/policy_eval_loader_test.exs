@@ -33,7 +33,12 @@ defmodule Realtime.Tenants.PolicyEvalLoaderTest do
       assert {:ok, snapshot} = PolicyEvalLoader.load(db_conn, tenant.external_id)
 
       assert %PolicyEval.Snapshot{rls_enabled: true, rls_forced: false} = snapshot
-      assert %{"authenticated" => %{bypass_rls: false}} = snapshot.roles
+      # As the tenant database sets them up: only service_role bypasses RLS
+      assert %{
+               "anon" => %{bypass_rls: false, select: true, insert: true},
+               "authenticated" => %{bypass_rls: false, select: true, insert: true},
+               "service_role" => %{bypass_rls: true, select: true, insert: true}
+             } == snapshot.roles
 
       assert snapshot.policies |> Enum.map(& &1.name) |> Enum.sort() == [
                "lobby",

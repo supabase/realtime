@@ -9,8 +9,8 @@ defmodule PolicyEval.Reason do
 
     * the role, and the table with its policies as a whole (see `PolicyEval.PolicySet`)
       * `:role`: the role isn't one the profile decides for (`PolicyEval.Profile`)
-      * `:setup`: RLS is off or forced; the role bypasses RLS, lacks a grant or isn't in the
-        snapshot; or a policy names a role other than `public` and the profile's policy roles, or
+      * `:setup`: RLS is off or forced; the role lacks a grant or isn't in the snapshot, or the
+        snapshot doesn't say whether it bypasses RLS; or a policy names a role other than `public` and the profile's policy roles, or
         lacks the expression to evaluate
     * the input
       * `:raises`: Postgres raises on it too, like a sub that isn't a uuid

@@ -29,8 +29,8 @@ END $$;
 --
 
 
--- Dumped from database version 17.11
--- Dumped by pg_dump version 17.11
+-- Dumped from database version 17.12
+-- Dumped by pg_dump version 17.12
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;

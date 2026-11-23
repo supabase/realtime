@@ -1,11 +1,11 @@
-defmodule RealtimeWeb.Presence.Usage do
+defmodule Realtime.Presence.PhoenixUsage do
   @moduledoc """
   Provides data on Presence usage.
 
   This metric is currently tied to Phoenix.Presence internals.
   """
 
-  @buckets [5, 10, 25, 50, 100, 200, 500, :infinity]
+  @buckets Realtime.Presence.Usage.buckets() ++ [:infinity]
   @default_bucket_map Enum.reduce(@buckets, Map.new(), fn k, map -> Map.put(map, k, 0) end)
 
   @match_spec [{{{:"$1", :_, :_}, :_, :_}, [], [:"$1"]}]

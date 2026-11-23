@@ -2,7 +2,7 @@ defmodule PolicyEval.Resolver do
   @moduledoc """
   Binds a `PolicyEval.AST` into `PolicyEval.IR`, with the type of every node.
 
-  Types are `:text`, `:uuid`, `:jsonb`, `:bool` and `:unknown`. Operators are bound by name and
+  Types are `:text`, `:uuid`, `:jsonb`, `:json`, `:bool`, `:int4` and `:unknown`. Operators are bound by name and
   operand types from an allowlist, casts and functions likewise, and the profile's functions
   (`PolicyEval.Profile`) are inlined by `PolicyEval.Catalog` when the definition in the database
   matches.
@@ -28,11 +28,13 @@ defmodule PolicyEval.Resolver do
     * `{:coalesce_types, types}`: arguments of different types
     * `{:function, name, why}`: `name` is `"schema.name"` for a platform schema, the bare name
       for a built-in and `:other_schema` for anything else. `why` is `:not_allowlisted`,
-      `:not_in_snapshot`, `:overloaded` (more than one definition of the name) or
-      `:unknown_definition`
+      `:not_in_snapshot`, `:overloaded` (more than one definition of the name),
+      `:unknown_definition`, or `{:types, type, ...}`, with the type of each argument, for a
+      built-in we bind with no binding for these argument types
     * `{:column, name}`: a column that is not in the profile
     * `:untyped_string_literal`, `:number_literal`, `:untyped_null`: constants Postgres prints
-      without a type, which it only does where we don't model the type
+      without a type, which it only does where we don't model the type. The exception is an
+      integer, see the notes below, so `:number_literal` is any other number
     * `{:unknown_node, tag}`: not a node of `PolicyEval.AST`, `tag` being the first element of the
       tuple or `:other`
 
@@ -46,7 +48,17 @@ defmodule PolicyEval.Resolver do
       `NOT (text ~~ text)`, which is exact: `textnlike` is the negation of `textlike`, and both
       are NULL when an operand is NULL. `~~*` (`ILIKE`) has no binding, because Postgres folds its
       case with the collation
-    * `->>`: jsonb with text
+    * `->>`: jsonb with text is `jsonb_object_field_text`, jsonb with integer is
+      `jsonb_array_element_text`. Both give text. json with text is
+      `PolicyEval.Jsonb.object_field_text/2` too, see "json" below
+    * `->`: jsonb with text is `jsonb_object_field`, jsonb with integer is `jsonb_array_element`.
+      Both give jsonb
+    * `?`: jsonb with text is `jsonb_exists`, which gives a boolean
+    * an `integer` literal: Postgres prints an `integer` constant as its digits (`0`), or as
+      `'-1'::integer` when it is negative, both in the form of `int4out`. That is an `:int4` literal.
+      A number with a `.` or an exponent is `numeric`, and Postgres prints a larger integer as
+      `'...'::bigint`, so neither is an `:int4`. Only `jsonb -> integer` and `jsonb ->> integer`
+      take an `:int4`
     * `text = ANY (ARRAY[...])` over text elements. `text <> ALL (ARRAY[...])` is resolved as
       `NOT (text = ANY (ARRAY[...]))`, which is exact for text. For non-NULL operands `textne` is
       the negation of `texteq`, and both are NULL when an operand is NULL. So `<> ALL` is false
@@ -54,7 +66,28 @@ defmodule PolicyEval.Resolver do
       equal and one is NULL (where `= ANY` is NULL), and true otherwise (where `= ANY` is false).
       An empty array gives true for `<> ALL` and false for `= ANY`, whatever the left side is
     * `current_setting(name, true)` with a literal name is `{:setting, name}`
+    * `starts_with(text, text)` and `text ^@ text`, the operator of that function:
+      `PolicyEval.Value.starts_with/2`
+    * `split_part(text, text, integer)`: `PolicyEval.Value.split_part/3`. The field is an `:int4`,
+      so in practice an integer literal
     * a scalar subselect without FROM yields exactly one row, so `( SELECT x)` is `x`
+
+  ## json
+
+  A json value keeps its input text, and `json ->> text` (`json_object_field_text`) parses that text
+  again. `text::json` is bound to the jsonb parser all the same, and `json ->> text` to the jsonb
+  field lookup, because the two agree on every result that `PolicyEval.Jsonb.object_field_text/2`
+  gives. The last of several equal keys wins in both, JSON null and a missing key are NULL, and a
+  string or a boolean is its text. A root that is not an object is NULL. Numbers, objects and
+  arrays are unsupported for both: `json ->>` returns their text as written (`1e2`), and
+  `jsonb ->>` normalised (`100`).
+
+  The parsers differ in when they raise. `json_in` does not decode escapes, so it accepts `\\u0000`
+  and a lone surrogate, and `json ->>` then raises on them anywhere in the text. The jsonb parser
+  raises on them at the cast. So for `text::json ->> text`, the library raises on the same input as
+  Postgres, only at another step. A json value can still reach a node that does not parse it, such
+  as `IS NULL`. There the library falls back where Postgres gives an answer, which is a fallback and
+  never a wrong answer. No other operator and no cast from json is bound.
   """
 
   alias PolicyEval.AST
@@ -64,11 +97,20 @@ defmodule PolicyEval.Resolver do
   alias PolicyEval.Profile
   alias PolicyEval.Value
 
-  @type type :: :text | :uuid | :jsonb | :bool | :unknown
+  @type type :: :text | :uuid | :jsonb | :json | :bool | :int4 | :unknown
   @type resolved :: {IR.t(), type}
 
   # What a literal can be cast to, by the name Postgres prints.
-  @cast_types %{"text" => :text, "uuid" => :uuid, "jsonb" => :jsonb, "boolean" => :bool}
+  @cast_types %{
+    "text" => :text,
+    "uuid" => :uuid,
+    "jsonb" => :jsonb,
+    "json" => :json,
+    "boolean" => :bool,
+    "integer" => :int4
+  }
+
+  @int4_range -2_147_483_648..2_147_483_647
 
   @doc """
   Resolves `ast`. `functions` are the function definitions in the database, as in
@@ -108,7 +150,7 @@ defmodule PolicyEval.Resolver do
   # Constants and columns
   defp res({:const, :bool, value}, _ctx), do: {{:lit, value}, :bool}
   defp res({:const, :string, _}, _ctx), do: unsupported(:untyped_string_literal)
-  defp res({:const, :number, _raw}, _ctx), do: unsupported(:number_literal)
+  defp res({:const, :number, raw}, _ctx), do: int4_literal(raw, :number_literal)
   defp res({:const, :null}, _ctx), do: unsupported(:untyped_null)
 
   defp res({:column, name}, ctx) do
@@ -124,7 +166,9 @@ defmodule PolicyEval.Resolver do
       "text" -> {{:lit, {:text, string}}, :text}
       "uuid" -> literal(Value.uuid_in({:text, string}), :uuid)
       "jsonb" -> literal(Jsonb.parse({:text, string}), :jsonb)
+      "json" -> literal(Jsonb.parse({:text, string}), :json)
       "boolean" -> literal(Value.bool_in({:text, string}), :bool)
+      "integer" -> int4_literal(string, {:cast, :string_literal, "integer"})
       _ -> unsupported({:cast, :string_literal, known_name(type, ctx)})
     end
   end
@@ -179,6 +223,22 @@ defmodule PolicyEval.Resolver do
   defp res({:func, nil, "current_setting", [{:cast, {:const, :string, name}, "text"}, {:const, :bool, true}]}, _ctx),
     do: {{:setting, name}, :text}
 
+  defp res({:func, nil, "starts_with", [text, prefix]}, ctx) do
+    case propagate([res(text, ctx), res(prefix, ctx)]) do
+      {:unsupported, _} = unsupported -> {unsupported, :unknown}
+      [{l, :text}, {r, :text}] -> {call(Value, :starts_with, [l, r]), :bool}
+      [{_, lt}, {_, rt}] -> unsupported({:function, "starts_with", {:types, lt, rt}})
+    end
+  end
+
+  defp res({:func, nil, "split_part", [text, delimiter, field]}, ctx) do
+    case propagate([res(text, ctx), res(delimiter, ctx), res(field, ctx)]) do
+      {:unsupported, _} = unsupported -> {unsupported, :unknown}
+      [{t, :text}, {d, :text}, {f, :int4}] -> {call(Value, :split_part, [t, d, f]), :text}
+      [{_, tt}, {_, dt}, {_, ft}] -> unsupported({:function, "split_part", {:types, tt, dt, ft}})
+    end
+  end
+
   defp res({:func, schema, name, args}, ctx) do
     if args == [] and schema in ctx.platform_schemas do
       case Map.fetch(ctx.functions, {schema, name}) do
@@ -225,6 +285,7 @@ defmodule PolicyEval.Resolver do
   defp cast(ir, :uuid, "text", _ctx), do: {call(Value, :uuid_out, [ir]), :text}
   defp cast(ir, :text, "uuid", _ctx), do: {call(Value, :uuid_in, [ir]), :uuid}
   defp cast(ir, :text, "jsonb", _ctx), do: {call(Jsonb, :parse, [ir]), :jsonb}
+  defp cast(ir, :text, "json", _ctx), do: {call(Jsonb, :parse, [ir]), :json}
   defp cast(ir, :text, "boolean", _ctx), do: {call(Value, :bool_in, [ir]), :bool}
   defp cast(_ir, from, type, ctx), do: unsupported({:cast, from, known_name(type, ctx)})
 
@@ -267,6 +328,18 @@ defmodule PolicyEval.Resolver do
   defp literal({:unsupported, _} = unsupported, _type), do: {unsupported, :unknown}
   defp literal(value, type), do: {{:lit, value}, type}
 
+  # Postgres folds an integer literal into a constant while it parses the policy, so it prints the
+  # text of int4out. Text in any other form, such as `+1` or `01`, is not what it printed.
+  defp int4_literal(string, reason) do
+    case Integer.parse(string) do
+      {n, ""} when n in @int4_range ->
+        if Integer.to_string(n) == string, do: {{:lit, {:int4, n}}, :int4}, else: unsupported(reason)
+
+      _ ->
+        unsupported(reason)
+    end
+  end
+
   # An operand of AND, OR or NOT: an unsupported one stays, so the evaluator can still decide the
   # rest around it.
   defp boolean(ast, ctx) do
@@ -281,13 +354,21 @@ defmodule PolicyEval.Resolver do
   defp operator("<>", :text, :text, l, r), do: {call(Value, :text_ne, [l, r]), :bool}
   defp operator("=", :uuid, :uuid, l, r), do: {call(Value, :uuid_eq, [l, r]), :bool}
   defp operator("<>", :uuid, :uuid, l, r), do: {call(Value, :uuid_ne, [l, r]), :bool}
+  defp operator("=", :bool, :bool, l, r), do: {call(Value, :bool_eq, [l, r]), :bool}
+  defp operator("<>", :bool, :bool, l, r), do: {call(Value, :bool_ne, [l, r]), :bool}
   defp operator("||", :text, :text, l, r), do: {call(Value, :textcat, [l, r]), :text}
   defp operator("||", :text, :uuid, l, r), do: {call(Value, :textanycat, [l, r]), :text}
   defp operator("~", :text, :text, l, r), do: {regex(l, r, :case_sensitive), :bool}
   defp operator("~*", :text, :text, l, r), do: {regex(l, r, :case_insensitive), :bool}
   defp operator("~~", :text, :text, l, r), do: {call(Value, :like, [l, r]), :bool}
   defp operator("!~~", :text, :text, l, r), do: {{:not, call(Value, :like, [l, r])}, :bool}
+  defp operator("^@", :text, :text, l, r), do: {call(Value, :starts_with, [l, r]), :bool}
   defp operator("->>", :jsonb, :text, l, r), do: {call(Jsonb, :object_field_text, [l, r]), :text}
+  defp operator("->>", :jsonb, :int4, l, r), do: {call(Jsonb, :array_element_text, [l, r]), :text}
+  defp operator("->", :jsonb, :text, l, r), do: {call(Jsonb, :object_field, [l, r]), :jsonb}
+  defp operator("->", :jsonb, :int4, l, r), do: {call(Jsonb, :array_element, [l, r]), :jsonb}
+  defp operator("?", :jsonb, :text, l, r), do: {call(Jsonb, :exists, [l, r]), :bool}
+  defp operator("->>", :json, :text, l, r), do: {call(Jsonb, :object_field_text, [l, r]), :text}
   defp operator(op, lt, rt, _l, _r), do: unsupported({:operator, op, lt, rt})
 
   defp regex(l, r, mode), do: call(Value, :regex_match, [l, r, {:lit, mode}])
