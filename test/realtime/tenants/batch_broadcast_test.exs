@@ -42,7 +42,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       }
 
       expect(GenCounter, :add, 3, fn ^broadcast_events_key -> :ok end)
-      expect(TenantBroadcaster, :pubsub_broadcast, 3, fn _, _, _, _, _ -> :ok end)
+      expect(TenantBroadcaster, :pubsub_broadcast, 3, fn _, _, _, _ -> :ok end)
 
       assert :ok = broadcast(nil, tenant, messages, false)
     end
@@ -57,7 +57,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       expect(GenCounter, :add, fn ^broadcast_events_key -> :ok end)
 
-      expect(TenantBroadcaster, :pubsub_broadcast, fn _, topic, _, _, _ ->
+      expect(TenantBroadcaster, :pubsub_broadcast, fn _, topic, _, _ ->
         refute String.contains?(topic, "-private")
       end)
 
@@ -76,7 +76,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       expect(GenCounter, :add, fn ^broadcast_events_key -> :ok end)
 
-      expect(TenantBroadcaster, :pubsub_broadcast, fn _, _, broadcast, _, _ ->
+      expect(TenantBroadcaster, :pubsub_broadcast, fn _, _, broadcast, _ ->
         assert %Phoenix.Socket.Broadcast{
                  payload: %{
                    "payload" => %{"data" => "test"},
@@ -105,7 +105,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       }
 
       expect(GenCounter, :add, 2, fn ^broadcast_events_key -> :ok end)
-      expect(TenantBroadcaster, :pubsub_broadcast, 2, fn _, _, _, _, _ -> :ok end)
+      expect(TenantBroadcaster, :pubsub_broadcast, 2, fn _, _, _, _ -> :ok end)
 
       assert :ok = broadcast(nil, tenant, messages, true)
     end
@@ -120,7 +120,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       expect(GenCounter, :add, fn ^broadcast_events_key -> :ok end)
 
-      expect(TenantBroadcaster, :pubsub_broadcast, fn _, topic, _, _, _ ->
+      expect(TenantBroadcaster, :pubsub_broadcast, fn _, topic, _, _ ->
         assert String.contains?(topic, "-private")
       end)
 
@@ -155,7 +155,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
       end)
 
-      expect(TenantBroadcaster, :pubsub_broadcast, 1, fn _, _, _, _, _ -> :ok end)
+      expect(TenantBroadcaster, :pubsub_broadcast, 1, fn _, _, _, _ -> :ok end)
 
       assert :ok = broadcast(auth_params, tenant, messages, false)
     end
@@ -180,7 +180,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: false}}}
       end)
 
-      reject(&TenantBroadcaster.pubsub_broadcast/5)
+      reject(&TenantBroadcaster.pubsub_broadcast/4)
 
       messages = %{
         messages: [%{topic: topic, payload: %{"data" => "test"}, event: "event1", private: true}]
@@ -188,7 +188,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       assert :ok = broadcast(auth_params, tenant, messages, false)
 
-      assert calls(&TenantBroadcaster.pubsub_broadcast/5) == []
+      assert calls(&TenantBroadcaster.pubsub_broadcast/4) == []
     end
 
     test "broadcasts only authorized topics in mixed authorization batch", %{tenant: tenant} do
@@ -223,7 +223,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       end)
 
       # Only one topic will actually be broadcasted
-      expect(TenantBroadcaster, :pubsub_broadcast, 1, fn _, _, %Phoenix.Socket.Broadcast{topic: ^topic}, _, _ ->
+      expect(TenantBroadcaster, :pubsub_broadcast, 1, fn _, _, %Phoenix.Socket.Broadcast{topic: ^topic}, _ ->
         :ok
       end)
 
@@ -262,7 +262,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
       end)
 
-      expect(TenantBroadcaster, :pubsub_broadcast, 3, fn _, _, _, _, _ -> :ok end)
+      expect(TenantBroadcaster, :pubsub_broadcast, 3, fn _, _, _, _ -> :ok end)
 
       assert :ok = broadcast(auth_params, tenant, messages, false)
     end
@@ -274,7 +274,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       |> stub(:new, fn _ -> {:ok, nil} end)
       |> stub(:get, fn ^events_per_second_rate -> {:ok, %RateCounter{avg: 0}} end)
 
-      reject(&TenantBroadcaster.pubsub_broadcast/5)
+      reject(&TenantBroadcaster.pubsub_broadcast/4)
       reject(&Connect.lookup_or_start_connection/1)
 
       messages = %{
@@ -283,7 +283,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       assert :ok = broadcast(nil, tenant, messages, false)
 
-      assert calls(&TenantBroadcaster.pubsub_broadcast/5) == []
+      assert calls(&TenantBroadcaster.pubsub_broadcast/4) == []
     end
   end
 
@@ -335,7 +335,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
         {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}}
       end)
 
-      expect(TenantBroadcaster, :pubsub_broadcast, 3, fn _, _, _, _, _ -> :ok end)
+      expect(TenantBroadcaster, :pubsub_broadcast, 3, fn _, _, _, _ -> :ok end)
 
       messages = %{
         messages: [
@@ -347,7 +347,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       assert :ok = broadcast(auth_params, tenant, messages, false)
 
-      broadcast_calls = calls(&TenantBroadcaster.pubsub_broadcast/5)
+      broadcast_calls = calls(&TenantBroadcaster.pubsub_broadcast/4)
       assert length(broadcast_calls) == 3
     end
   end
@@ -359,7 +359,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       messages = %{messages: [%{topic: topic, payload: %{"data" => "test"}, event: "event1"}]}
 
       expect(GenCounter, :add, fn ^broadcast_events_key -> :ok end)
-      expect(TenantBroadcaster, :pubsub_broadcast, 1, fn _, _, _, _, _ -> :ok end)
+      expect(TenantBroadcaster, :pubsub_broadcast, 1, fn _, _, _, _ -> :ok end)
 
       conn =
         build_conn()
@@ -378,7 +378,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
     test "returns changeset error when topic is missing", %{tenant: tenant} do
       messages = %{messages: [%{payload: %{"data" => "test"}, event: "event1"}]}
 
-      reject(&TenantBroadcaster.pubsub_broadcast/5)
+      reject(&TenantBroadcaster.pubsub_broadcast/4)
 
       result = broadcast(nil, tenant, messages, false)
       assert {:error, %Ecto.Changeset{valid?: false}} = result
@@ -388,7 +388,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       topic = random_string()
       messages = %{messages: [%{topic: topic, event: "event1"}]}
 
-      reject(&TenantBroadcaster.pubsub_broadcast/5)
+      reject(&TenantBroadcaster.pubsub_broadcast/4)
 
       result = broadcast(nil, tenant, messages, false)
       assert {:error, %Ecto.Changeset{valid?: false}} = result
@@ -398,14 +398,14 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       topic = random_string()
       messages = %{messages: [%{topic: topic, payload: %{"data" => "test"}}]}
 
-      reject(&TenantBroadcaster.pubsub_broadcast/5)
+      reject(&TenantBroadcaster.pubsub_broadcast/4)
       result = broadcast(nil, tenant, messages, false)
       assert {:error, %Ecto.Changeset{valid?: false}} = result
     end
 
     test "returns changeset error when messages array is empty", %{tenant: tenant} do
       messages = %{messages: []}
-      reject(&TenantBroadcaster.pubsub_broadcast/5)
+      reject(&TenantBroadcaster.pubsub_broadcast/4)
       result = broadcast(nil, tenant, messages, false)
       assert {:error, %Ecto.Changeset{valid?: false}} = result
     end
@@ -421,7 +421,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       |> stub(:new, fn _ -> {:ok, nil} end)
       |> stub(:get, fn ^events_per_second_rate -> {:ok, %RateCounter{avg: tenant.max_events_per_second + 1}} end)
 
-      reject(&TenantBroadcaster.pubsub_broadcast/5)
+      reject(&TenantBroadcaster.pubsub_broadcast/4)
 
       result = broadcast(nil, tenant, messages, false)
       assert {:error, :too_many_requests, "You have exceeded your rate limit"} = result
@@ -443,7 +443,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
         {:ok, %RateCounter{avg: tenant.max_events_per_second - 5}}
       end)
 
-      reject(&TenantBroadcaster.pubsub_broadcast/5)
+      reject(&TenantBroadcaster.pubsub_broadcast/4)
 
       result = broadcast(nil, tenant, messages, false)
 
@@ -469,7 +469,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       end)
 
       expect(GenCounter, :add, 2, fn ^broadcast_events_key -> :ok end)
-      expect(TenantBroadcaster, :pubsub_broadcast, 2, fn _, _, _, _, _ -> :ok end)
+      expect(TenantBroadcaster, :pubsub_broadcast, 2, fn _, _, _, _ -> :ok end)
 
       assert :ok = broadcast(nil, tenant, messages, false)
     end
@@ -485,7 +485,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
         ]
       }
 
-      reject(&TenantBroadcaster.pubsub_broadcast/5)
+      reject(&TenantBroadcaster.pubsub_broadcast/4)
 
       result = broadcast(nil, tenant, messages, false)
 
@@ -532,7 +532,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       messages = %{messages: [%{topic: topic, payload: %{"data" => "x"}, event: "event1", private: true}]}
 
       expect(GenCounter, :add, fn _ -> :ok end)
-      expect(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _, _ -> :ok end)
+      expect(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _ -> :ok end)
       expect(Connect, :lookup_or_start_connection, fn _ -> {:ok, db_conn} end)
 
       Authorization
@@ -557,10 +557,10 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       tenant = %{tenant | suspend: true}
       messages = %{messages: [%{topic: "topic1", payload: %{"data" => "test"}, event: "event1"}]}
 
-      reject(&TenantBroadcaster.pubsub_broadcast/5)
+      reject(&TenantBroadcaster.pubsub_broadcast/4)
 
       assert {:error, :forbidden, "Tenant is suspended"} = broadcast(nil, tenant, messages, false)
-      assert calls(&TenantBroadcaster.pubsub_broadcast/5) == []
+      assert calls(&TenantBroadcaster.pubsub_broadcast/4) == []
     end
 
     test "gracefully handles database connection errors for private messages", %{tenant: tenant} do
@@ -584,7 +584,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       expect(Connect, :lookup_or_start_connection, fn _ -> {:error, :connection_failed} end)
 
-      reject(&TenantBroadcaster.pubsub_broadcast/5)
+      reject(&TenantBroadcaster.pubsub_broadcast/4)
 
       messages = %{
         messages: [%{topic: topic, payload: %{"data" => "test"}, event: "event1", private: true}]
@@ -592,14 +592,14 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       assert :ok = broadcast(auth_params, tenant, messages, false)
 
-      assert calls(&TenantBroadcaster.pubsub_broadcast/5) == []
+      assert calls(&TenantBroadcaster.pubsub_broadcast/4) == []
     end
   end
 
   describe "outcomes" do
     test "has one outcome for each message", %{tenant: tenant} do
       expect(GenCounter, :add, 2, fn _ -> :ok end)
-      expect(TenantBroadcaster, :pubsub_broadcast, 2, fn _, _, _, _, _ -> :ok end)
+      expect(TenantBroadcaster, :pubsub_broadcast, 2, fn _, _, _, _ -> :ok end)
 
       messages = %{
         messages: [

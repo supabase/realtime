@@ -33,7 +33,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias RealtimeWeb.Channels.Payloads.Join
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.RealtimeChannel.BroadcastHandler
-  alias RealtimeWeb.RealtimeChannel.MessageDispatcher
+  alias RealtimeWeb.RealtimeChannel.FastlaneSender
   alias RealtimeWeb.RealtimeChannel.PresenceHandler
   alias RealtimeWeb.RequestMetrics
 
@@ -128,8 +128,8 @@ defmodule RealtimeWeb.RealtimeChannel do
       # fastlane subscription
       metadata = fastlane_metadata(socket, replayed_message_ids)
 
-      RealtimeWeb.Endpoint.subscribe(tenant_topic, metadata: metadata)
-      RealtimeWeb.Endpoint.subscribe("realtime:operations:" <> tenant_id, metadata: metadata)
+      RealtimeWeb.Endpoint.subscribe(tenant_topic, sender: FastlaneSender.sender(metadata))
+      RealtimeWeb.Endpoint.subscribe("realtime:operations:" <> tenant_id, sender: FastlaneSender.sender(metadata))
 
       replication_ready_opt_in? = Join.replication_ready?(join)
 
@@ -1172,7 +1172,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   defp fastlane_metadata(socket, replayed_message_ids) do
     %{assigns: %{tenant: tenant_id, log_level: log_level, policies: policies}} = socket
 
-    MessageDispatcher.fastlane_metadata(
+    FastlaneSender.fastlane_metadata(
       socket.transport_pid,
       socket.serializer,
       socket.topic,
@@ -1194,7 +1194,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       updated ->
         for pubsub_topic <- [tenant_topic, "realtime:operations:" <> tenant_id] do
           RealtimeWeb.Endpoint.unsubscribe(pubsub_topic)
-          RealtimeWeb.Endpoint.subscribe(pubsub_topic, metadata: updated)
+          RealtimeWeb.Endpoint.subscribe(pubsub_topic, sender: FastlaneSender.sender(updated))
         end
 
         assign(socket, :fastlane_metadata, updated)

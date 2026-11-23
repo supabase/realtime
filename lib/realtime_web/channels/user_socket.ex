@@ -17,7 +17,6 @@ defmodule RealtimeWeb.UserSocket do
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.RealtimeChannel
   alias RealtimeWeb.RealtimeChannel.Logging
-  alias RealtimeWeb.RealtimeChannel.MessageDispatcher
 
   ## Channels
   channel "realtime:*", RealtimeChannel
@@ -361,8 +360,7 @@ defmodule RealtimeWeb.UserSocket do
     Phoenix.PubSub.broadcast!(
       Realtime.PubSub,
       "realtime:operations:" <> tenant_external_id,
-      @disconnect_msg,
-      MessageDispatcher
+      @disconnect_msg
     )
 
     Phoenix.PubSub.broadcast(Realtime.PubSub, subscribers_id(tenant_external_id), :socket_drain)
@@ -390,8 +388,7 @@ defmodule RealtimeWeb.UserSocket do
     Phoenix.PubSub.local_broadcast(
       Realtime.PubSub,
       "realtime:operations:" <> tenant_external_id,
-      @disconnect_msg,
-      MessageDispatcher
+      @disconnect_msg
     )
 
     Phoenix.PubSub.local_broadcast(Realtime.PubSub, subscribers_id(tenant_external_id), :socket_drain)

@@ -1,7 +1,7 @@
-defmodule Extensions.PostgresCdcRls.MessageDispatcherTest do
+defmodule Extensions.PostgresCdcRls.FastlaneSenderTest do
   use ExUnit.Case, async: true
 
-  alias Extensions.PostgresCdcRls.MessageDispatcher
+  alias Extensions.PostgresCdcRls.FastlaneSender
   alias Phoenix.Socket.Broadcast
 
   defmodule FakeSerializer do
@@ -22,7 +22,7 @@ defmodule Extensions.PostgresCdcRls.MessageDispatcherTest do
     end
   end
 
-  describe "dispatch/3" do
+  describe "send/4" do
     test "uses each subscriber's serializer when the outgoing messages match" do
       parent = self()
       topic = "realtime:topic"
@@ -48,7 +48,7 @@ defmodule Extensions.PostgresCdcRls.MessageDispatcherTest do
             {self(), {:subscriber_fastlane, fastlane_pid, serializer, [{sub_id, 1}], topic, new_api?}}
           end)
 
-        assert :ok = MessageDispatcher.dispatch(subscriptions, self(), {"INSERT", payload, sub_ids})
+        assert :ok = dispatch(subscriptions, self(), {"INSERT", payload, sub_ids})
 
         event = if new_api?, do: "postgres_changes", else: "INSERT"
         expected_payload = if new_api?, do: %{"ids" => [1], "data" => data}, else: data
@@ -82,7 +82,7 @@ defmodule Extensions.PostgresCdcRls.MessageDispatcherTest do
 
       payload = Jason.encode!(%{data: "test"})
 
-      assert :ok = MessageDispatcher.dispatch(subscriptions, self(), {"INSERT", payload, sub_ids})
+      assert :ok = dispatch(subscriptions, self(), {"INSERT", payload, sub_ids})
 
       assert_receive {:received, {:encoded, %Broadcast{topic: "realtime:topic", event: "postgres_changes"}}}
     end
@@ -106,7 +106,7 @@ defmodule Extensions.PostgresCdcRls.MessageDispatcherTest do
 
       payload = Jason.encode!(%{data: "test"})
 
-      assert :ok = MessageDispatcher.dispatch(subscriptions, self(), {"INSERT", payload, sub_ids})
+      assert :ok = dispatch(subscriptions, self(), {"INSERT", payload, sub_ids})
 
       assert_receive {:received, {:encoded, %Broadcast{topic: "realtime:topic", event: "INSERT"}}}
     end
@@ -130,7 +130,7 @@ defmodule Extensions.PostgresCdcRls.MessageDispatcherTest do
         {self(), {:subscriber_fastlane, fastlane_pid, FakeSerializer, ids, "realtime:topic", true}}
       ]
 
-      assert :ok = MessageDispatcher.dispatch(subscriptions, self(), {"INSERT", "payload", sub_ids})
+      assert :ok = dispatch(subscriptions, self(), {"INSERT", "payload", sub_ids})
 
       refute_receive {:received, _}
     end
@@ -155,7 +155,7 @@ defmodule Extensions.PostgresCdcRls.MessageDispatcherTest do
           {self(), {:subscriber_fastlane, pid, CountingSerializer, ids, "realtime:topic", true}}
         end)
 
-      assert :ok = MessageDispatcher.dispatch(subscriptions, self(), {"INSERT", "payload", sub_ids})
+      assert :ok = dispatch(subscriptions, self(), {"INSERT", "payload", sub_ids})
 
       assert_receive {:received, {:encoded, %Broadcast{}}}
       assert_receive {:received, {:encoded, %Broadcast{}}}
@@ -171,7 +171,7 @@ defmodule Extensions.PostgresCdcRls.MessageDispatcherTest do
           {self(), {:subscriber_fastlane, self(), CountingSerializer, ids, "realtime:topic", new_api?}}
         end
 
-      assert :ok = MessageDispatcher.dispatch(subscriptions, self(), {"INSERT", "{}", sub_ids})
+      assert :ok = dispatch(subscriptions, self(), {"INSERT", "{}", sub_ids})
 
       assert_received {:encoded, %Broadcast{event: "INSERT"}}
       assert_received {:encoded, %Broadcast{event: "INSERT"}}
@@ -192,7 +192,7 @@ defmodule Extensions.PostgresCdcRls.MessageDispatcherTest do
         {self(), {:subscriber_fastlane, self(), FakeSerializer, ids, "realtime:topic", true}}
       ]
 
-      assert :ok = MessageDispatcher.dispatch(subscriptions, self(), {"INSERT", "{}", sub_ids})
+      assert :ok = dispatch(subscriptions, self(), {"INSERT", "{}", sub_ids})
 
       assert_received :encode_attempted
       refute_received :encode_attempted
@@ -202,4 +202,16 @@ defmodule Extensions.PostgresCdcRls.MessageDispatcherTest do
   end
 
   defp decode!(frame), do: frame |> IO.iodata_to_binary() |> Jason.decode!()
+
+  # Delivers like Phoenix.PubSub does for one Registry partition of subscriptions created with
+  # FastlaneSender.sender/1. The tests subscribe self(), so nothing is excluded as the origin.
+  defp dispatch(subscriptions, _from, msg) do
+    entries =
+      Enum.map(subscriptions, fn {pid, metadata} ->
+        {module, metadata} = FastlaneSender.sender(metadata)
+        {pid, [module | metadata]}
+      end)
+
+    Phoenix.PubSub.dispatch(entries, :none, msg)
+  end
 end

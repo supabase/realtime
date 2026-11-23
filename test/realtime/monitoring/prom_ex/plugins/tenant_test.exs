@@ -291,7 +291,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       metric_value = metric_value(metric, message_type: "presence", tenant: external_id) || 0
 
       message = %{topic: "a topic", event: "an event", payload: ["a", %{"b" => "c"}, 1, 23]}
-      RealtimeWeb.TenantBroadcaster.pubsub_broadcast(external_id, "a topic", message, Phoenix.PubSub, :presence)
+      RealtimeWeb.TenantBroadcaster.pubsub_broadcast(external_id, "a topic", message, :presence)
 
       assert_eventually metric_value(metric, message_type: "presence", tenant: external_id) == metric_value + 1
 
@@ -305,7 +305,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       metric_value = metric_value(metric, message_type: "broadcast") || 0
 
       message = %{topic: "a topic", event: "an event", payload: ["a", %{"b" => "c"}, 1, 23]}
-      RealtimeWeb.TenantBroadcaster.pubsub_broadcast(external_id, "a topic", message, Phoenix.PubSub, :broadcast)
+      RealtimeWeb.TenantBroadcaster.pubsub_broadcast(external_id, "a topic", message, :broadcast)
 
       assert_eventually metric_value(metric, message_type: "broadcast") == metric_value + 1
 

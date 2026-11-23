@@ -81,6 +81,11 @@ exclude =
   Enum.reject(
     [
       :failing,
+      # Phoenix.PubSubTest (shared adapter suite) asserts the PG2 worker names in :persistent_term.
+      # Realtime.GenRpcPubSub names its workers differently. Realtime.GenRpcPubSubTest has its own
+      # copies of these two tests with our names.
+      {:test, "test PubSub pool size can be configured separately from the Registry partitions"},
+      {:test, "test Registry partitions are configured with the same pool size as PubSub if not specified"},
       requires_pg_140006,
       requires_pg_150000,
       requires_pgdelta_shadow_cleanup,

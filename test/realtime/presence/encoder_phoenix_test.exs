@@ -207,7 +207,9 @@ defmodule Realtime.Presence.EncoderPhoenixTest do
 
   defp receive_diff(topic) do
     receive do
-      %Broadcast{topic: ^topic, event: "presence_diff", payload: payload} -> payload
+      # Only the channel sender strips the metric envelopes, and this test subscribes without it.
+      %Broadcast{topic: ^topic, event: "presence_diff"} = diff ->
+        diff |> Metrics.strip_diff() |> elem(0) |> Map.get(:payload)
     after
       @timeout -> flunk("No presence_diff on #{topic} within #{@timeout} ms")
     end

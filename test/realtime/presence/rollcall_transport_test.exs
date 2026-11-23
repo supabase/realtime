@@ -5,7 +5,7 @@ defmodule Realtime.Presence.RollcallTransportTest do
 
   alias Realtime.Presence.RollcallTransport
   alias Realtime.UsersCounter
-  alias RealtimeWeb.RealtimeChannel.MessageDispatcher
+  alias RealtimeWeb.RealtimeChannel.FastlaneSender
   alias Rollcall.Tracker.Messages
 
   @latency_event [:realtime, :presence, :notify, :latency]
@@ -231,8 +231,8 @@ defmodule Realtime.Presence.RollcallTransportTest do
       {:ok, state} = RollcallTransport.init(scope, pubsub: Realtime.PubSub)
       partition = "realtime:partition-#{scope}"
 
-      fastlane = MessageDispatcher.fastlane_metadata(self(), Phoenix.Socket.V1.JSONSerializer, partition, :error, scope)
-      subscribe_from_other_process(partition, metadata: fastlane)
+      fastlane = FastlaneSender.fastlane_metadata(self(), Phoenix.Socket.V1.JSONSerializer, partition, :error, scope)
+      subscribe_from_other_process(partition, sender: FastlaneSender.sender(fastlane))
 
       {:ok, state: state, partition: partition}
     end

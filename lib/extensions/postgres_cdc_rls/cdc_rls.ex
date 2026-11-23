@@ -111,7 +111,8 @@ defmodule Extensions.PostgresCdcRls do
 
   @impl true
   def handle_subscribe(_, tenant, metadata) do
-    Endpoint.subscribe("realtime:postgres:" <> tenant, metadata)
+    sender = Rls.FastlaneSender.sender(Keyword.fetch!(metadata, :metadata))
+    Endpoint.subscribe("realtime:postgres:" <> tenant, sender: sender)
   end
 
   @impl true

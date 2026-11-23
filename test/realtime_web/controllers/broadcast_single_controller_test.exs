@@ -39,9 +39,9 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
   end
 
   defp subscribe(tenant_topic, topic, serializer \\ Phoenix.Socket.V1.JSONSerializer) do
-    fastlane = RealtimeChannel.MessageDispatcher.fastlane_metadata(self(), serializer, topic, :error, "tenant_id")
+    fastlane = RealtimeChannel.FastlaneSender.fastlane_metadata(self(), serializer, topic, :error, "tenant_id")
 
-    Endpoint.subscribe(tenant_topic, metadata: fastlane)
+    Endpoint.subscribe(tenant_topic, sender: RealtimeChannel.FastlaneSender.sender(fastlane))
   end
 
   defp assert_receive_message do

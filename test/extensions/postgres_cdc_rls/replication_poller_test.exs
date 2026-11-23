@@ -7,7 +7,6 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
   import ExUnit.CaptureLog
   import WaitForIt
 
-  alias Extensions.PostgresCdcRls.MessageDispatcher
   alias Extensions.PostgresCdcRls.ReplicationPoller, as: Poller
   alias Extensions.PostgresCdcRls.Replications
   alias Extensions.PostgresCdcRls.Subscriptions
@@ -177,8 +176,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
 
     test "handles no new changes", %{args: args, tenant: tenant} do
       tenant_id = args["id"]
-      reject(&TenantBroadcaster.pubsub_direct_broadcast/6)
-      reject(&TenantBroadcaster.pubsub_broadcast/5)
+      reject(&TenantBroadcaster.pubsub_direct_broadcast/5)
+      reject(&TenantBroadcaster.pubsub_broadcast/4)
       start_link_supervised!({Poller, args})
 
       assert_receive {
@@ -216,13 +215,12 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
         ])
 
       expect(Replications, :list_changes, fn _, _ -> results end)
-      reject(&TenantBroadcaster.pubsub_direct_broadcast/6)
+      reject(&TenantBroadcaster.pubsub_direct_broadcast/5)
 
       # Broadcast to the whole cluster due to missing node information
       expect(TenantBroadcaster, :pubsub_broadcast, fn ^tenant_id,
                                                       "realtime:postgres:" <> ^tenant_id,
                                                       {"INSERT", change_json, _sub_ids},
-                                                      MessageDispatcher,
                                                       :postgres_changes ->
         assert Jason.decode!(change_json) == Jason.decode!(@change_json)
         :ok
@@ -263,13 +261,12 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
         ])
 
       expect(Replications, :list_changes, fn _, _ -> results end)
-      reject(&TenantBroadcaster.pubsub_direct_broadcast/6)
+      reject(&TenantBroadcaster.pubsub_direct_broadcast/5)
 
       # Broadcast to the whole cluster due to missing node information
       expect(TenantBroadcaster, :pubsub_broadcast, fn ^tenant_id,
                                                       "realtime:postgres:" <> ^tenant_id,
                                                       {"INSERT", change_json, _sub_ids},
-                                                      MessageDispatcher,
                                                       :postgres_changes ->
         assert Jason.decode!(change_json) == Jason.decode!(@change_json)
         :ok
@@ -312,13 +309,12 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
       :ets.insert(args["subscribers_nodes_table"], {sub1, node()})
 
       expect(Replications, :list_changes, fn _, _ -> results end)
-      reject(&TenantBroadcaster.pubsub_direct_broadcast/6)
+      reject(&TenantBroadcaster.pubsub_direct_broadcast/5)
 
       # Broadcast to the whole cluster due to missing node information
       expect(TenantBroadcaster, :pubsub_broadcast, fn ^tenant_id,
                                                       "realtime:postgres:" <> ^tenant_id,
                                                       {"INSERT", change_json, _sub_ids},
-                                                      MessageDispatcher,
                                                       :postgres_changes ->
         assert Jason.decode!(change_json) == Jason.decode!(@change_json)
         :ok
@@ -365,13 +361,13 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
       :ets.insert(args["subscribers_nodes_table"], {sub3, node()})
 
       expect(Replications, :list_changes, fn _, _ -> results end)
-      reject(&TenantBroadcaster.pubsub_broadcast/5)
+      reject(&TenantBroadcaster.pubsub_broadcast/4)
 
       topic = "realtime:postgres:" <> tenant_id
 
       # # Broadcast to the exact nodes only
       expect(TenantBroadcaster, :pubsub_direct_broadcast, 2, fn
-        _node, ^tenant_id, ^topic, {"INSERT", change_json, _sub_ids}, MessageDispatcher, :postgres_changes ->
+        _node, ^tenant_id, ^topic, {"INSERT", change_json, _sub_ids}, :postgres_changes ->
           assert Jason.decode!(change_json) == Jason.decode!(@change_json)
           :ok
       end)
@@ -396,11 +392,11 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
                      },
                      500
 
-      calls = calls(TenantBroadcaster, :pubsub_direct_broadcast, 6)
+      calls = calls(TenantBroadcaster, :pubsub_direct_broadcast, 5)
 
       assert Enum.count(calls) == 2
 
-      node_subs = Enum.map(calls, fn [node, _, _, {"INSERT", _change_json, sub_ids}, _, _] -> {node, sub_ids} end)
+      node_subs = Enum.map(calls, fn [node, _, _, {"INSERT", _change_json, sub_ids}, _] -> {node, sub_ids} end)
 
       assert {node(), MapSet.new([sub1, sub3])} in node_subs
       assert {:"someothernode@127.0.0.1", MapSet.new([sub2])} in node_subs
@@ -412,7 +408,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
 
     test "restarts the rate counter with a raised max_events_per_second", %{args: args, tenant: tenant} do
       tenant_id = args["id"]
-      stub(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _, _ -> :ok end)
+      stub(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _ -> :ok end)
 
       start_link_supervised!({Poller, args})
       assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 500

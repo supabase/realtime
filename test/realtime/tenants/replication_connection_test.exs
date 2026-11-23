@@ -590,12 +590,13 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
         [binary, event, topic]
       )
 
-      assert_receive %RealtimeWeb.Socket.UserBroadcast{
-                       user_event: ^event,
-                       user_payload_encoding: :binary,
-                       user_payload: ^binary,
-                       metadata: %{"id" => _id}
-                     },
+      assert_receive {:tb, _tenant_id,
+                      %RealtimeWeb.Socket.UserBroadcast{
+                        user_event: ^event,
+                        user_payload_encoding: :binary,
+                        user_payload: ^binary,
+                        metadata: %{"id" => _id}
+                      }},
                      500
     end
 
@@ -648,12 +649,13 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
         [<<>>, event, topic]
       )
 
-      assert_receive %RealtimeWeb.Socket.UserBroadcast{
-                       user_event: ^event,
-                       user_payload_encoding: :binary,
-                       user_payload: <<>>,
-                       metadata: %{"id" => _id}
-                     },
+      assert_receive {:tb, _tenant_id,
+                      %RealtimeWeb.Socket.UserBroadcast{
+                        user_event: ^event,
+                        user_payload_encoding: :binary,
+                        user_payload: <<>>,
+                        metadata: %{"id" => _id}
+                      }},
                      500
     end
 
@@ -1133,7 +1135,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
   defp subscribe(tenant_topic, topic) do
     fastlane =
-      RealtimeWeb.RealtimeChannel.MessageDispatcher.fastlane_metadata(
+      RealtimeWeb.RealtimeChannel.FastlaneSender.fastlane_metadata(
         self(),
         Phoenix.Socket.V1.JSONSerializer,
         topic,
@@ -1141,7 +1143,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
         "tenant_id"
       )
 
-    Endpoint.subscribe(tenant_topic, metadata: fastlane)
+    Endpoint.subscribe(tenant_topic, sender: RealtimeWeb.RealtimeChannel.FastlaneSender.sender(fastlane))
   end
 
   defp assert_process_down(pid, timeout \\ 100) do

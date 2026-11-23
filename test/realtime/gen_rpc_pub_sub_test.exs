@@ -9,7 +9,6 @@ defmodule Realtime.GenRpcPubSubTest do
   alias Forum.Muster
   alias Realtime.GenRpcPubSub.RegionRings
   alias Realtime.GenRpcPubSub.Worker
-  alias RealtimeWeb.RealtimeChannel.MessageDispatcher
 
   @cluster_wait [timeout: 15_000, interval: 100]
 
@@ -25,6 +24,33 @@ defmodule Realtime.GenRpcPubSubTest do
     assert Realtime.PubSubElixir.Realtime.PubSub.Adapter_1
            |> Process.whereis()
            |> Process.info(:fullsweep_after) == {:fullsweep_after, 20}
+  end
+
+  # Our versions of the two Phoenix.PubSubTest tests that test_helper.exs excludes. The shared
+  # tests expect PG2 worker names (`adapter_name`, `adapter_name_2`, ...). Realtime.GenRpcPubSub
+  # prefixes every worker name with the PubSub name and numbers all of them, starting at 1.
+  # The PubSub names are short because the test names would make worker names over the atom limit.
+  describe "pool and Registry partitions" do
+    test "PubSub pool size can be configured separately from the Registry partitions" do
+      name = PoolSizeSeparateFromRegistry
+      adapter_name = start_pubsub(name, pool_size: 4, registry_size: 2)
+
+      assert_ets_duplicate_count(name, 2)
+
+      assert :persistent_term.get(adapter_name) ==
+               {:"#{name}#{adapter_name}_1", :"#{name}#{adapter_name}_2", :"#{name}#{adapter_name}_3",
+                :"#{name}#{adapter_name}_4"}
+    end
+
+    test "Registry partitions are configured with the same pool size as PubSub if not specified" do
+      name = RegistrySizeFromPoolSize
+      adapter_name = start_pubsub(name, pool_size: 3)
+
+      assert_ets_duplicate_count(name, 3)
+
+      assert :persistent_term.get(adapter_name) ==
+               {:"#{name}#{adapter_name}_1", :"#{name}#{adapter_name}_2", :"#{name}#{adapter_name}_3"}
+    end
   end
 
   @aux_mod (quote do
@@ -290,12 +316,12 @@ defmodule Realtime.GenRpcPubSubTest do
       RealtimeWeb.Endpoint.subscribe(topic)
 
       message = %Phoenix.Socket.Broadcast{topic: topic, event: "an event", payload: %{"a" => "b"}}
-      Phoenix.PubSub.broadcast(Realtime.PubSub, topic, {:tb, tenant_id, message}, MessageDispatcher)
+      Phoenix.PubSub.broadcast(Realtime.PubSub, topic, {:tb, tenant_id, message})
 
-      # Phoenix's local dispatch delivers the (tag-stripped) struct on the origin...
-      assert_receive ^message
+      # Phoenix's local dispatch delivers the tagged struct to this plain subscriber on the origin...
+      assert_receive {:tb, ^tenant_id, ^message}
       # ...and the routed path must NOT fan a second copy back to the origin.
-      refute_receive %Phoenix.Socket.Broadcast{topic: ^topic}, 200
+      refute_receive {:tb, _, %Phoenix.Socket.Broadcast{topic: ^topic}}, 200
     end
 
     test "prunes intra-region fanout to the tenant's holders for every router placement" do
@@ -320,11 +346,15 @@ defmodule Realtime.GenRpcPubSubTest do
         subscribe_region_relays(holder_node, bystander_node, topic)
 
         message = %Phoenix.Socket.Broadcast{topic: topic, event: "e", payload: %{"router" => label}}
-        Phoenix.PubSub.broadcast(Realtime.PubSub, topic, {:tb, tenant_id, message}, MessageDispatcher)
+        Phoenix.PubSub.broadcast(Realtime.PubSub, topic, {:tb, tenant_id, message})
 
         # Origin always delivers locally; the holder is routed to; the bystander is pruned.
-        assert_receive ^message, 1000, "origin should receive locally (router=#{label})"
-        assert_receive {:relay, ^holder_node, ^message}, 5000, "holder should receive (router=#{label})"
+        assert_receive {:tb, ^tenant_id, ^message}, 1000, "origin should receive locally (router=#{label})"
+
+        assert_receive {:relay, ^holder_node, {:tb, ^tenant_id, ^message}},
+                       5000,
+                       "holder should receive (router=#{label})"
+
         refute_receive {:relay, ^bystander_node, _}, 500
       end
     end
@@ -348,11 +378,11 @@ defmodule Realtime.GenRpcPubSubTest do
       # The routed message carries the tenant tag, exactly as the adapter forwards it.
       route_to_worker(
         holder_node,
-        Worker.route(tenant_id, topic1, {:tb, tenant_id, message1}, MessageDispatcher, node(), stale_view_hash)
+        Worker.route(tenant_id, topic1, {:tb, tenant_id, message1}, Phoenix.PubSub, node(), stale_view_hash)
       )
 
-      assert_receive {:relay, ^holder_node, ^message1}, 5000
-      assert_receive {:relay, ^bystander_node, ^message1}, 5000
+      assert_receive {:relay, ^holder_node, {:tb, ^tenant_id, ^message1}}, 5000
+      assert_receive {:relay, ^bystander_node, {:tb, ^tenant_id, ^message1}}, 5000
 
       # Case 2: the router changed under us. We send the route to the bystander, which
       # is NOT the router for this tenant (the origin thought it was, but the ring
@@ -365,11 +395,11 @@ defmodule Realtime.GenRpcPubSubTest do
 
       route_to_worker(
         bystander_node,
-        Worker.route(tenant_id, topic2, {:tb, tenant_id, message2}, MessageDispatcher, node(), view_hash)
+        Worker.route(tenant_id, topic2, {:tb, tenant_id, message2}, Phoenix.PubSub, node(), view_hash)
       )
 
-      assert_receive {:relay, ^holder_node, ^message2}, 5000
-      assert_receive {:relay, ^bystander_node, ^message2}, 5000
+      assert_receive {:relay, ^holder_node, {:tb, ^tenant_id, ^message2}}, 5000
+      assert_receive {:relay, ^bystander_node, {:tb, ^tenant_id, ^message2}}, 5000
     end
 
     test "routes across regions to the remote region's expected router, pruning bystanders" do
@@ -401,16 +431,32 @@ defmodule Realtime.GenRpcPubSubTest do
       subscribe_region_relays(ap_holder, ap_bystander, topic)
 
       message = %Phoenix.Socket.Broadcast{topic: topic, event: "e", payload: %{"scope" => "cross-region"}}
-      Phoenix.PubSub.broadcast(Realtime.PubSub, topic, {:tb, tenant_id, message}, MessageDispatcher)
+      Phoenix.PubSub.broadcast(Realtime.PubSub, topic, {:tb, tenant_id, message})
 
       # The holder (in the remote region) is routed to; the bystander is pruned.
-      assert_receive {:relay, ^ap_holder, ^message}, 5000
+      assert_receive {:relay, ^ap_holder, {:tb, ^tenant_id, ^message}}, 5000
       refute_receive {:relay, ^ap_bystander, _}, 500
     end
   end
 
   # Start two extra us-east-1 nodes (holder + bystander) so the origin makes three,
   # and wait until the region's Muster ring is :ready and agrees on a single view.
+  defp start_pubsub(name, opts) do
+    start_supervised!({Phoenix.PubSub, [name: name, adapter: Realtime.GenRpcPubSub] ++ opts})
+    Module.concat(name, "Adapter")
+  end
+
+  # Same check as Phoenix.PubSubTest: the Registry stores its partition count under key -2.
+  defp assert_ets_duplicate_count(pubsub, count) do
+    result = :ets.lookup_element(pubsub, -2, 2)
+
+    if Version.match?(System.version(), ">= 1.19.0") do
+      assert {{:duplicate, :pid}, ^count, _} = result
+    else
+      assert {:duplicate, ^count, _} = result
+    end
+  end
+
   defp start_us_east_region_cluster do
     start_region_cluster("us-east-1", holder: :holder_us, bystander: :bystander_us)
   end

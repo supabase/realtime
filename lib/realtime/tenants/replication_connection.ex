@@ -21,7 +21,6 @@ defmodule Realtime.Tenants.ReplicationConnection do
   alias Realtime.Tenants.Cache
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.ReplicationConnection.Watchdog
-  alias RealtimeWeb.RealtimeChannel
   alias RealtimeWeb.Socket.UserBroadcast
   alias RealtimeWeb.TenantBroadcaster
 
@@ -444,7 +443,6 @@ defmodule Realtime.Tenants.ReplicationConnection do
         tenant.external_id,
         tenant_topic,
         broadcast,
-        RealtimeChannel.MessageDispatcher,
         :broadcast
       )
 
