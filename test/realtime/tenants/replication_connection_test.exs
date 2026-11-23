@@ -709,6 +709,46 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
              } = message
     end
 
+    test "payload that isn't an object carries the id only in metadata", %{tenant: tenant, db_conn: db_conn} do
+      start_link_supervised!(
+        {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
+        restart: :transient
+      )
+
+      topic = random_string()
+      tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
+      assert :ok = Endpoint.subscribe(tenant_topic)
+
+      values = [[1, 2, 3], "hello", 42, true, false, 0, "", [], nil, 1.5]
+
+      for {value, index} <- Enum.with_index(values) do
+        event = "event_#{index}"
+
+        Postgrex.query!(
+          db_conn,
+          "SELECT realtime.send($1::text::jsonb, $2::text, $3::text, TRUE::bool);",
+          [Jason.encode!(value), event, topic]
+        )
+
+        %{rows: [[id]]} =
+          Postgrex.query!(
+            db_conn,
+            "SELECT id::text FROM realtime.messages WHERE topic = $1 AND event = $2",
+            [topic, event]
+          )
+
+        assert_receive %RealtimeWeb.Socket.UserBroadcast{
+                         user_event: ^event,
+                         user_payload_encoding: :json,
+                         user_payload: user_payload,
+                         metadata: %{"id" => ^id}
+                       },
+                       500
+
+        assert Jason.decode!(user_payload) == value
+      end
+    end
+
     test "fails on existing replication slot", %{tenant: tenant} do
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
       name = @replication_slot_name
