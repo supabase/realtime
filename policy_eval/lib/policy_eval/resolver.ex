@@ -29,8 +29,8 @@ defmodule PolicyEval.Resolver do
     * `{:function, name, why}`: `name` is `"schema.name"` for a platform schema, the bare name
       for a built-in and `:other_schema` for anything else. `why` is `:not_allowlisted`,
       `:not_in_snapshot`, `:overloaded` (more than one definition of the name),
-      `:unknown_definition`, or `{:types, left_type, right_type}` for a built-in we bind with no
-      binding for these argument types
+      `:unknown_definition`, or `{:types, type, ...}`, with the type of each argument, for a
+      built-in we bind with no binding for these argument types
     * `{:column, name}`: a column that is not in the profile
     * `:untyped_string_literal`, `:number_literal`, `:untyped_null`: constants Postgres prints
       without a type, which it only does where we don't model the type. The exception is an
@@ -68,6 +68,8 @@ defmodule PolicyEval.Resolver do
     * `current_setting(name, true)` with a literal name is `{:setting, name}`
     * `starts_with(text, text)` and `text ^@ text`, the operator of that function:
       `PolicyEval.Value.starts_with/2`
+    * `split_part(text, text, integer)`: `PolicyEval.Value.split_part/3`. The field is an `:int4`,
+      so in practice an integer literal
     * a scalar subselect without FROM yields exactly one row, so `( SELECT x)` is `x`
 
   ## json
@@ -226,6 +228,14 @@ defmodule PolicyEval.Resolver do
       {:unsupported, _} = unsupported -> {unsupported, :unknown}
       [{l, :text}, {r, :text}] -> {call(Value, :starts_with, [l, r]), :bool}
       [{_, lt}, {_, rt}] -> unsupported({:function, "starts_with", {:types, lt, rt}})
+    end
+  end
+
+  defp res({:func, nil, "split_part", [text, delimiter, field]}, ctx) do
+    case propagate([res(text, ctx), res(delimiter, ctx), res(field, ctx)]) do
+      {:unsupported, _} = unsupported -> {unsupported, :unknown}
+      [{t, :text}, {d, :text}, {f, :int4}] -> {call(Value, :split_part, [t, d, f]), :text}
+      [{_, tt}, {_, dt}, {_, ft}] -> unsupported({:function, "split_part", {:types, tt, dt, ft}})
     end
   end
 

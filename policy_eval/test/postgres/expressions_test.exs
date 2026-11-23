@@ -70,6 +70,7 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
     :regex,
     :like,
     :starts_with,
+    :split_part,
     :literals
   ]
 
@@ -987,6 +988,75 @@ defmodule PolicyEval.Postgres.ExpressionsTest do
   end
 
   defp cases(:like), do: like_matrix() ++ like_operands() ++ like_long_texts() ++ like_from_postgres()
+
+  # split_part finds the delimiter by its bytes: fields from both ends, missing fields, empty and
+  # repeated delimiters, delimiters of several bytes that could overlap, and UTF-8 on both sides
+  defp cases(:split_part) do
+    texts = [
+      "cursors:c1:room",
+      "cursors:c1:room:x",
+      "cursors:c1:",
+      "cursors::room",
+      ":a:",
+      "a::::b",
+      "a:::b",
+      "no-delimiter",
+      "",
+      nil,
+      "café:🎉:sala",
+      "a🎉b🎉c",
+      "aébéc",
+      "e\u0301:x"
+    ]
+
+    delimiters = [":", "::", "", "🎉", "é", "x"]
+    fields = [1, 2, 3, 4, -1, -2, -4, 0]
+
+    matrix =
+      for text <- texts, delimiter <- delimiters, field <- fields do
+        expression_case("split_part(app.team(), #{lit(delimiter)}, #{field}) = 'room'", team: text)
+      end
+
+    # The policy of the cursors topics, with the claim and the topic as the inputs
+    cursors =
+      "COALESCE(current_setting('app.claims', true)::jsonb ->> 'cursor_client', '') <> '' " <>
+        "AND split_part((select app.team()), ':', 1) = 'cursors' " <>
+        "AND split_part((select app.team()), ':', 2) = (current_setting('app.claims', true)::jsonb ->> 'cursor_client') " <>
+        "AND split_part((select app.team()), ':', 3) <> '' " <>
+        "AND split_part((select app.team()), ':', 4) = ''"
+
+    policy =
+      for team <- [
+            "cursors:c1:room",
+            "cursors:c2:room",
+            "cursors:c1:",
+            "cursors:c1:room:x",
+            "presence:c1:room",
+            "",
+            nil
+          ],
+          claim <- ["c1", "", nil] do
+        claims = if claim, do: %{"cursor_client" => claim}, else: %{}
+        expression_case(cursors, team: team, claims: claims)
+      end
+
+    operands =
+      for sql <- [
+            "split_part(app.team(), NULL::text, 1) = 'a'",
+            "split_part(NULL::text, ':', 0) IS NULL",
+            "split_part(app.team(), kind, 2) = 'b'",
+            "split_part(kind, 'o', 1) = 'n'",
+            "split_part(app.team(), ':', -2147483648) = ''",
+            "split_part(app.team(), ':', 2147483647) = ''",
+            "split_part(app.team(), ':', 2) IS NULL"
+          ],
+          team <- ["a:b", "", nil],
+          kind <- ["note", nil] do
+        expression_case(sql, team: team, kind: kind)
+      end
+
+    matrix ++ policy ++ operands
+  end
 
   # starts_with compares bytes: case, code points against combining accents, the empty prefix, NULL,
   # and a prefix built from the user id, as a policy builds a topic prefix

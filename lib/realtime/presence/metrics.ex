@@ -98,6 +98,22 @@ defmodule Realtime.Presence.Metrics do
 
   def stamp(v, _tenant_id, _implementation), do: v
 
+  def strip_expired_stamp(meta, expired_at) when is_integer(expired_at) do
+    case stamped_at(meta) do
+      ts when is_integer(ts) and ts < expired_at -> Map.delete(meta, @envelope_key)
+      _ -> meta
+    end
+  end
+
+  def strip_expired_stamp(meta, _expired_at), do: meta
+
+  def stamped_at(meta) do
+    case Map.get(meta, @envelope_key) do
+      %{ts: ts} -> ts
+      _ -> nil
+    end
+  end
+
   @doc false
   @spec sample?(String.t(), float()) :: boolean()
   def sample?(tenant_id, rate \\ sample_rate()) do

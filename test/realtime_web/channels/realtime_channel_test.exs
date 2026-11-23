@@ -1790,6 +1790,65 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert log =~ "key-id-1"
     end
 
+    test "connects with a Vercel OIDC token issued for this tenant", %{tenant: tenant} do
+      token = vercel_oidc_token(tenant, tenant.external_id)
+
+      assert {:ok, %Socket{}} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, token))
+    end
+
+    test "refuses to connect with a Vercel OIDC token issued for another project", %{tenant: tenant} do
+      token = vercel_oidc_token(tenant, "otherref")
+
+      capture_log(fn ->
+        assert {:error, {:error, [message: "Invalid token", claim: "sub", claim_val: "otherref"]}} =
+                 connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, token))
+      end)
+    end
+
+    test "joins with a Vercel OIDC access_token issued for this tenant", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+      token = vercel_oidc_token(tenant, tenant.external_id)
+
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{"access_token" => token})
+    end
+
+    test "refuses to join with a Vercel OIDC access_token issued for another project", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+      token = vercel_oidc_token(tenant, "otherref")
+
+      log =
+        capture_log(fn ->
+          assert {:error, %{reason: "InvalidJWTToken: JWT claim `sub` is invalid"}} =
+                   subscribe_and_join(socket, "realtime:test", %{"access_token" => token})
+        end)
+
+      refute log =~ "UnknownErrorOnChannel"
+    end
+
+    test "accepts a refreshed Vercel OIDC access_token issued for this tenant", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+      socket = subscribe_and_join!(socket, "realtime:test", %{})
+      token = vercel_oidc_token(tenant, tenant.external_id)
+
+      push(socket, "access_token", %{"access_token" => token})
+
+      assert Server.socket(socket.channel_pid).assigns.access_token == token
+    end
+
+    test "shuts down when refreshed with a Vercel OIDC access_token issued for another project", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+      socket = subscribe_and_join!(socket, "realtime:test", %{})
+
+      capture_log(fn ->
+        push(socket, "access_token", %{"access_token" => vercel_oidc_token(tenant, "otherref")})
+        assert_process_down(socket.channel_pid)
+      end)
+    end
+
     @tag policies: [:authenticated_all_topic_read]
     test "new valid access_token", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
@@ -2108,7 +2167,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
         capture_log(fn ->
           # The periodic re-confirmation re-validates the token; simulate the JWK backing the
           # token's kid disappearing, which makes authorization fail to build a signer.
-          expect(RealtimeWeb.ChannelsAuthorization, :authorize_conn, fn _, _, _ ->
+          expect(RealtimeWeb.ChannelsAuthorization, :authorize_conn, fn _, _, _, _ ->
             {:error, {:error_generating_signer, "key-id-1"}}
           end)
 
@@ -2188,7 +2247,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       socket = join_public_channel(tenant)
       channel_pid = socket.channel_pid
 
-      stub(RealtimeWeb.ChannelsAuthorization, :authorize_conn, fn _token, _, _ ->
+      stub(RealtimeWeb.ChannelsAuthorization, :authorize_conn, fn _token, _, _, _ ->
         {:ok, %{"role" => "authenticated", "exp" => System.system_time(:second) + 10_000, "sub" => "rotating"}}
       end)
 
@@ -2650,7 +2709,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       log =
         capture_log(fn ->
-          expect(RealtimeWeb.ChannelsAuthorization, :authorize_conn, fn _, _, _ ->
+          expect(RealtimeWeb.ChannelsAuthorization, :authorize_conn, fn _, _, _, _ ->
             {:error, :error_generating_signer}
           end)
 
@@ -2734,7 +2793,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
   # The tests run async, so they cannot change the configured defaults and swap in their own bucket instead
   defp put_join_bucket(%Socket{} = socket, per_second, burst) do
-    %{socket | private: Map.put(socket.private, :join_bucket, TokenBucket.new(per_second, burst))}
+    %{socket | private: Map.put(socket.private, :join_bucket, TokenBucket.per_second(burst, per_second))}
   end
 
   defp drain_join_bucket(%Socket{private: %{join_bucket: bucket}}) do
@@ -2742,7 +2801,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   end
 
   defp put_broadcast_bucket(%Socket{} = socket, per_second, burst) do
-    %{socket | private: Map.put(socket.private, :broadcast_bucket, TokenBucket.new(per_second, burst))}
+    %{socket | private: Map.put(socket.private, :broadcast_bucket, TokenBucket.per_second(burst, per_second))}
   end
 
   # Takes every token a minute ahead, so the bucket stays empty for the rest of the test
@@ -2795,6 +2854,15 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
   end
 
+  defp vercel_oidc_token(tenant, sub) do
+    Generators.generate_jwt_token(tenant, %{
+      iss: "https://integrations.vercel.com/oidc/oac_test",
+      sub: sub,
+      role: "service_role",
+      exp: System.system_time(:second) + 10_000
+    })
+  end
+
   defp assert_process_down(pid) do
     ref = Process.monitor(pid)
     assert_receive {:DOWN, ^ref, :process, ^pid, _reason}
@@ -2810,7 +2878,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   # reading it, so each call reports only what was verified since the previous one.
   defp newly_verified_tokens do
     RealtimeWeb.ChannelsAuthorization
-    |> Mimic.calls(:authorize_conn, 3)
+    |> Mimic.calls(:authorize_conn, 4)
     |> Enum.map(fn [token | _] -> token end)
   end
 

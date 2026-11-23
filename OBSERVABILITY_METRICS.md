@@ -11,6 +11,7 @@
 - [Authorization & Error Metrics](#authorization--error-metrics)
 - [Subscription Pooler Metrics](#subscription-pooler-metrics)
 - [Rollcall Metrics](#rollcall-metrics)
+- [Presence Comparison Metrics](#presence-comparison-metrics)
 - [Tenant Migration Metrics](#tenant-migration-metrics)
 - [BEAM/Erlang VM Metrics](#beamerlang-vm-metrics)
   - [Memory Metrics](#memory-metrics)
@@ -182,6 +183,25 @@ These metrics come from the telemetry events of Rollcall, the presence tracker. 
 | `realtime_rollcall_tracker_ets_bytes_bucket` | Histogram | The memory of the view table of a Rollcall tracker, in bytes, counted at each tick. The last bound is 100 MB. A larger value counts in the `+Inf` bucket only. | Global Aggregate | `/metrics` |
 | `realtime_rollcall_tracker_reductions_bucket` | Histogram | The reductions that a Rollcall tracker process used since its previous tick. It measures the CPU work of a tracker in each period. | Global Aggregate | `/metrics` |
 | `realtime_rollcall_trackers` | Gauge | The Rollcall trackers that run on this node. Each tenant with presence has one tracker. | Per-Node | `/metrics` |
+
+## Presence Comparison Metrics
+
+These metrics come from the comparison of the presence views of Phoenix and Rollcall in shadow mode. A sweep samples the shadow tenants of a node and compares the refs of each tenant. A ref that only one view holds is a candidate. A check at 1, 3, 5, 10 and 15 seconds after the first read marks each candidate as open, converged or gone. A candidate that is open at the 10 second rung is persistent. The comparison runs while the `presence_comparison` feature flag is on. It reports and does not alert. No metric has a tenant label.
+
+| Metric                                                     | Type      | Description                                                                                                                                                                                                     | Scope            | Endpoint   |
+| ---------------------------------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ---------- |
+| `realtime_presence_compare_comparisons`                    | Counter   | Comparisons, tagged by `outcome`: `clean`, `transient`, `persistent` or `discarded`. A comparison is discarded when the Rollcall tracker of the tenant does not run after a read.                              | Global Aggregate | `/metrics` |
+| `realtime_presence_compare_entries`                        | Counter   | The refs in the union of the two views at the first read. A discarded comparison adds nothing.                                                                                                                  | Global Aggregate | `/metrics` |
+| `realtime_presence_compare_candidates`                     | Counter   | The refs that one view holds and the other view does not, at the first read, tagged by `kind`: `missing` (Phoenix only) or `ghost` (Rollcall only). Divide by `realtime_presence_compare_entries` for the churn. | Global Aggregate | `/metrics` |
+| `realtime_presence_compare_persistent_candidates`          | Counter   | The candidates that were open at the persistent rung, tagged by `kind`.                                                                                                                                         | Global Aggregate | `/metrics` |
+| `realtime_presence_compare_candidate_rungs_open`           | Counter   | The candidates that were still open at a check, tagged by `rung` (milliseconds) and `kind`. The share of the open candidates at a rung is `open / (open + converged)`.                                          | Global Aggregate | `/metrics` |
+| `realtime_presence_compare_candidate_rungs_converged`      | Counter   | The candidates that converged at a check, tagged by `rung` and `kind`. The ref is in both views, or only in the other view.                                                                                     | Global Aggregate | `/metrics` |
+| `realtime_presence_compare_candidate_rungs_gone`           | Counter   | The candidates that were in neither view at a check, tagged by `rung` and `kind`.                                                                                                                               | Global Aggregate | `/metrics` |
+| `realtime_presence_compare_duration_bucket`                | Histogram | Time of one comparison, in milliseconds. A comparison with a candidate lasts until its last rung.                                                                                                               | Global Aggregate | `/metrics` |
+| `realtime_presence_compare_sweeps`                         | Counter   | Sweeps that ended on this node.                                                                                                                                                                                 | Global Aggregate | `/metrics` |
+| `realtime_presence_compare_sweep_tenants_listed`           | Counter   | The scopes that the sweeps listed, in all the presence modes.                                                                                                                                                   | Global Aggregate | `/metrics` |
+| `realtime_presence_compare_sweep_tenants_compared`         | Counter   | The tenants that the sweeps compared. A tenant task that crashed or ran past the timeout is not in this count.                                                                                                  | Global Aggregate | `/metrics` |
+| `realtime_presence_compare_sweep_duration_bucket`          | Histogram | Time of one sweep, in milliseconds. A long sweep means that the tenant tasks wait for a place: a task holds its place until its last rung.                                                                      | Global Aggregate | `/metrics` |
 
 ## Tenant Migration Metrics
 

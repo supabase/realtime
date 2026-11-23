@@ -41,7 +41,9 @@ defmodule Realtime.Integration.GcmEncryptionBackfillTest do
       token = generate_jwt_token(jwt_secret)
 
       # Before: legacy ciphertext authenticates and connects.
-      assert {:ok, _claims} = ChannelsAuthorization.authorize(token, Crypto.decrypt!(tenant.jwt_secret), nil)
+      assert {:ok, _claims} =
+               ChannelsAuthorization.authorize_conn(token, Crypto.decrypt!(tenant.jwt_secret), nil, external_id)
+
       assert {:ok, _conn} = Database.connect(tenant, "realtime_backfill_before", :stop)
 
       read_through_cache(external_id)
@@ -58,7 +60,9 @@ defmodule Realtime.Integration.GcmEncryptionBackfillTest do
         refute Crypto.legacy_settings?(extension.settings, encrypted_settings_keys())
       end
 
-      assert {:ok, _claims} = ChannelsAuthorization.authorize(token, Crypto.decrypt!(migrated.jwt_secret), nil)
+      assert {:ok, _claims} =
+               ChannelsAuthorization.authorize_conn(token, Crypto.decrypt!(migrated.jwt_secret), nil, external_id)
+
       assert {:ok, _conn} = Database.connect(migrated, "realtime_backfill_after", :stop)
     end
 

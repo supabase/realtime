@@ -1,14 +1,10 @@
 defmodule RealtimeWeb.Dashboard.MusterTest do
-  # async: false - non-async so `set_mimic_from_context` runs Mimic in global mode
-  # (stubs then apply inside the spawned LiveView process), and because the no-scope
-  # test briefly mutates the shared :muster_scope app env.
+  # async: false - the rendered-page tests need Mimic in global mode, also manipulates the env
   use RealtimeWeb.ConnCase, async: false
   import Phoenix.LiveViewTest
   import Mimic
 
   alias RealtimeWeb.Dashboard.Muster
-
-  setup :set_mimic_from_context
 
   setup do
     Application.put_env(:realtime, :dashboard_auth, :basic_auth)
@@ -23,6 +19,10 @@ defmodule RealtimeWeb.Dashboard.MusterTest do
   end
 
   describe "gather_local_info/0" do
+    # Called directly from the test process, so private mode isolates the expectations
+    # from app processes that also call Forum.Muster leading to flakies.
+    setup :set_mimic_private
+
     test "returns an error when the coordinator is unavailable" do
       expect(Forum.Muster, :summary, fn _scope -> exit(:noproc) end)
 
@@ -65,6 +65,9 @@ defmodule RealtimeWeb.Dashboard.MusterTest do
   end
 
   describe "gather_local_group_info/1" do
+    # Same as `gather_local_info/0` above.
+    setup :set_mimic_private
+
     test "returns the inspected node's scope, view hash, router and local count" do
       # Local-only reads (no router RPC); each happens once, so expect pins the count.
       expect(Forum.Muster, :view_hash, fn _scope -> 123_456 end)
@@ -91,6 +94,12 @@ defmodule RealtimeWeb.Dashboard.MusterTest do
   end
 
   describe "rendered page" do
+    # Global mode: the group lookup reads run in gen_rpc acceptor processes (GenRpc.call
+    # goes through gen_rpc even for node()), which private mode can't reach. Global
+    # stubs are also seen by app processes, e.g. tenant-tagged broadcasts call
+    # Forum.Muster.router/view_hash/targets, so these tests stub to avoid creating flakies.
+    setup :set_mimic_global
+
     test "renders the live summary for the current node", %{conn: conn} do
       # No stub: Muster runs in the test app, so the real summary renders.
       {:ok, view, html} = live(conn, "/admin/dashboard/muster")
@@ -143,14 +152,12 @@ defmodule RealtimeWeb.Dashboard.MusterTest do
     end
 
     test "the group lookup form renders the router, targets and counts", %{conn: conn} do
-      # summary runs on every render (static + connected mount, refreshes), so it
-      # stays a stub; the group reads fire exactly once, on the submit below.
       stub(Forum.Muster, :summary, fn _scope -> summary() end)
-      expect(Forum.Muster, :view_hash, fn _scope -> 123_456 end)
-      expect(Forum.Muster, :router, fn _scope, _group -> {:ok, node()} end)
-      expect(Forum.Muster, :local_member_count, fn _scope, _group -> 7 end)
-      expect(Forum.Muster, :targets, fn _scope, _group, _vh -> {:ok, [:"a@127.0.0.1", :"z@127.0.0.1"]} end)
-      expect(Forum.Muster, :occupancy, fn _scope, _group -> [:"a@127.0.0.1", :"z@127.0.0.1"] end)
+      stub(Forum.Muster, :view_hash, fn _scope -> 123_456 end)
+      stub(Forum.Muster, :router, fn _scope, _group -> {:ok, node()} end)
+      stub(Forum.Muster, :local_member_count, fn _scope, _group -> 7 end)
+      stub(Forum.Muster, :targets, fn _scope, _group, _vh -> {:ok, [:"a@127.0.0.1", :"z@127.0.0.1"]} end)
+      stub(Forum.Muster, :occupancy, fn _scope, _group -> [:"a@127.0.0.1", :"z@127.0.0.1"] end)
 
       {:ok, view, _html} = live(conn, "/admin/dashboard/muster")
 
@@ -167,13 +174,12 @@ defmodule RealtimeWeb.Dashboard.MusterTest do
     end
 
     test "the Clear button resets the group lookup", %{conn: conn} do
-      # Group reads fire once on submit; clearing takes the nil path (no reads).
       stub(Forum.Muster, :summary, fn _scope -> summary() end)
-      expect(Forum.Muster, :view_hash, fn _scope -> 123_456 end)
-      expect(Forum.Muster, :router, fn _scope, _group -> {:ok, node()} end)
-      expect(Forum.Muster, :local_member_count, fn _scope, _group -> 7 end)
-      expect(Forum.Muster, :targets, fn _scope, _group, _vh -> {:ok, [:"a@127.0.0.1"]} end)
-      expect(Forum.Muster, :occupancy, fn _scope, _group -> [:"a@127.0.0.1"] end)
+      stub(Forum.Muster, :view_hash, fn _scope -> 123_456 end)
+      stub(Forum.Muster, :router, fn _scope, _group -> {:ok, node()} end)
+      stub(Forum.Muster, :local_member_count, fn _scope, _group -> 7 end)
+      stub(Forum.Muster, :targets, fn _scope, _group, _vh -> {:ok, [:"a@127.0.0.1"]} end)
+      stub(Forum.Muster, :occupancy, fn _scope, _group -> [:"a@127.0.0.1"] end)
 
       {:ok, view, _html} = live(conn, "/admin/dashboard/muster")
 
@@ -188,11 +194,11 @@ defmodule RealtimeWeb.Dashboard.MusterTest do
 
     test "the group lookup form surfaces a flood result", %{conn: conn} do
       stub(Forum.Muster, :summary, fn _scope -> summary() end)
-      expect(Forum.Muster, :view_hash, fn _scope -> 1 end)
-      expect(Forum.Muster, :router, fn _scope, _group -> {:ok, node()} end)
-      expect(Forum.Muster, :local_member_count, fn _scope, _group -> 0 end)
-      expect(Forum.Muster, :targets, fn _scope, _group, _vh -> {:error, :flood} end)
-      expect(Forum.Muster, :occupancy, fn _scope, _group -> [] end)
+      stub(Forum.Muster, :view_hash, fn _scope -> 1 end)
+      stub(Forum.Muster, :router, fn _scope, _group -> {:ok, node()} end)
+      stub(Forum.Muster, :local_member_count, fn _scope, _group -> 0 end)
+      stub(Forum.Muster, :targets, fn _scope, _group, _vh -> {:error, :flood} end)
+      stub(Forum.Muster, :occupancy, fn _scope, _group -> [] end)
 
       {:ok, view, _html} = live(conn, "/admin/dashboard/muster")
       html = view |> form("form[phx-submit='lookup_group']", %{group: "tenant-1"}) |> render_submit()
@@ -203,10 +209,12 @@ defmodule RealtimeWeb.Dashboard.MusterTest do
     test "the group lookup surfaces a rebalancing router without asking any router", %{conn: conn} do
       nodes = [:"a@127.0.0.1", :"b@127.0.0.1"]
       stub(Forum.Muster, :summary, fn _scope -> summary() end)
-      expect(Forum.Muster, :view_hash, fn _scope -> 1 end)
-      expect(Forum.Muster, :router, fn _scope, _group -> {:rebalancing, nodes} end)
-      expect(Forum.Muster, :local_member_count, fn _scope, _group -> 0 end)
+      stub(Forum.Muster, :view_hash, fn _scope -> 1 end)
+      stub(Forum.Muster, :router, fn _scope, _group -> {:rebalancing, nodes} end)
+      stub(Forum.Muster, :local_member_count, fn _scope, _group -> 0 end)
       # No single router while rebalancing, so neither router RPC is consulted.
+      # App processes don't reach targets/occupancy either: with this router stub a
+      # tenant-tagged broadcast takes the flood branch.
       reject(&Forum.Muster.targets/3)
       reject(&Forum.Muster.occupancy/2)
 

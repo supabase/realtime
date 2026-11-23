@@ -271,6 +271,25 @@ defmodule Realtime.MessagesTest do
       assert updated_at == Enum.sort(updated_at, NaiveDateTime)
     end
 
+    test "replay payloads that aren't objects in the order they were sent", %{conn: conn, tenant: tenant} do
+      values = [[1, 2, 3], "hello", 42, true, false, 0, "", [], nil, 1.5]
+
+      {:ok, _} =
+        Postgrex.transaction(conn, fn conn ->
+          for value <- values do
+            Postgrex.query!(
+              conn,
+              "SELECT realtime.send($1::text::jsonb, 'event', 'test', TRUE::bool)",
+              [Jason.encode!(value)]
+            )
+          end
+        end)
+
+      assert {:ok, messages, ids} = Messages.replay(conn, tenant.external_id, "test", 0, 25)
+      assert Enum.map(messages, & &1.payload) == values
+      assert MapSet.size(ids) == length(values)
+    end
+
     test "replay messages sent from a session that is not in UTC", %{conn: conn, tenant: tenant} do
       {:ok, _} =
         Postgrex.transaction(conn, fn conn ->

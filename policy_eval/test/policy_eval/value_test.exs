@@ -51,7 +51,8 @@ defmodule PolicyEval.ValueTest do
       {"regex_match (~)", :regex_match, [{:text, "abc"}, {:text, "b"}, :case_sensitive], [0, 1]},
       {"regex_match (~*)", :regex_match, [{:text, "abc"}, {:text, "B"}, :case_insensitive], [0, 1]},
       {"like", :like, [{:text, "abc"}, {:text, "a%"}], [0, 1]},
-      {"starts_with", :starts_with, [{:text, "abc"}, {:text, "a"}], [0, 1]}
+      {"starts_with", :starts_with, [{:text, "abc"}, {:text, "a"}], [0, 1]},
+      {"split_part", :split_part, [{:text, "a:b"}, {:text, ":"}, {:int4, 1}], [0, 1, 2]}
     ]
 
     for {label, fun, args, positions} <- @strict, position <- positions do
@@ -128,6 +129,68 @@ defmodule PolicyEval.ValueTest do
       assert Value.textcat(t(""), t("cd")) == t("cd")
       assert Value.textcat(t("ab"), t("")) == t("ab")
       assert Value.textcat(t(""), t("")) == t("")
+    end
+  end
+
+  describe "split_part/3" do
+    defp sp(text, delimiter, field), do: Value.split_part(t(text), t(delimiter), {:int4, field})
+
+    test "gives field n, counting from 1" do
+      assert sp("cursors:abc:room", ":", 1) == t("cursors")
+      assert sp("cursors:abc:room", ":", 2) == t("abc")
+      assert sp("cursors:abc:room", ":", 3) == t("room")
+      assert sp("cursors:abc:room", ":", 4) == t("")
+      assert sp("a::b", ":", 2) == t("")
+      assert sp(":a:", ":", 1) == t("")
+      assert sp(":a:", ":", 3) == t("")
+    end
+
+    test "a negative field counts from the end" do
+      assert sp("a:b:c", ":", -1) == t("c")
+      assert sp("a:b:c", ":", -3) == t("a")
+      assert sp("a:b:c", ":", -4) == t("")
+    end
+
+    test "matches of a delimiter of several bytes do not overlap" do
+      assert sp("a::::b", "::", 2) == t("")
+      assert sp("a::::b", "::", 3) == t("b")
+      assert sp("a:::b", "::", 2) == t(":b")
+    end
+
+    test "with no match or an empty delimiter, the text is the only field" do
+      for delimiter <- ["", "/"], field <- [1, -1] do
+        assert sp("a:b", delimiter, field) == t("a:b")
+      end
+
+      for delimiter <- ["", "/"], field <- [2, -2] do
+        assert sp("a:b", delimiter, field) == t("")
+      end
+    end
+
+    test "an empty text gives an empty field" do
+      assert sp("", ":", 1) == t("")
+      assert sp("", "", 1) == t("")
+    end
+
+    test "splits UTF-8 by characters" do
+      # é as one code point (C3 A9), and a delimiter that is the last byte of it is not a character
+      assert sp("café:🎉:x", ":", 2) == t("🎉")
+      assert sp("a🎉b🎉c", "🎉", 3) == t("c")
+      assert sp("aébéc", "é", -1) == t("c")
+    end
+
+    test "field 0 raises" do
+      assert sp("a:b", ":", 0) ==
+               {:unsupported, {:raises, :invalid_parameter_value, "field position must not be zero"}}
+    end
+
+    test "field 0 with a NULL argument is NULL, because the function is strict" do
+      assert Value.split_part(nil, t(":"), {:int4, 0}) == nil
+    end
+
+    test "text that is not valid UTF-8 is unsupported" do
+      assert sp(<<?a, 0xFF, ?:, ?b>>, ":", 2) == {:unsupported, :invalid_utf8}
+      assert sp("a:b", <<0xA9>>, 1) == {:unsupported, :invalid_utf8}
     end
   end
 

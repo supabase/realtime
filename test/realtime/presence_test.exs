@@ -486,8 +486,12 @@ defmodule Realtime.PresenceTest do
 
   # Subscribes the test process as a channel does, tracks one entry and waits for its presence_diff.
   # The dispatcher records the notify latency only for a fastlane subscriber.
+  # The transport drops the stamp of an entry that is older than its tracker. The first track
+  # stamps the entry before it starts the tracker, so it loses its Rollcall observation when the
+  # start falls in a later millisecond. `watch/1` starts the tracker before the stamp.
   defp track_with_fastlane_subscriber(%{tenant: tenant, topic: topic, client: client}, flags) do
     enable(flags)
+    :ok = Presence.watch(tenant)
     metadata = MessageDispatcher.fastlane_metadata(self(), V2Serializer, topic, :error, tenant)
     :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, topic, metadata: metadata)
 

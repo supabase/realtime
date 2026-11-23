@@ -202,6 +202,9 @@ defmodule RealtimeWeb.RealtimeChannel do
         msg = "Fields `role` and `exp` are required in JWT"
         maybe_log_warning(socket, "InvalidJWTToken", msg)
 
+      {:error, [message: _, claim: claim, claim_val: _]} ->
+        maybe_log_warning(socket, "InvalidJWTToken", "JWT claim `#{claim}` is invalid")
+
       {:error, :unauthorized, msg} ->
         log_error(socket, "Unauthorized", msg)
 
@@ -881,13 +884,13 @@ defmodule RealtimeWeb.RealtimeChannel do
   # disconnected (JWT expiry). Keep client JWT expiry short: see
   # https://supabase.com/docs/guides/realtime/authorization#updating-rls-policies
   defp confirm_token(%{assigns: assigns}) do
-    %{jwt_secret: jwt_secret, access_token: access_token} = assigns
+    %{jwt_secret: jwt_secret, access_token: access_token, tenant: tenant_id} = assigns
 
     jwt_jwks = Map.get(assigns, :jwt_jwks)
 
     with jwt_secret_dec <- Tenant.decrypt_jwt_secret(jwt_secret),
          {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
-           ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec, jwt_jwks),
+           ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec, jwt_jwks, tenant_id),
          exp_diff when exp_diff > 0 <- exp - Joken.current_time() do
       if ref = assigns[:confirm_token_ref], do: Helpers.cancel_timer(ref)
 
