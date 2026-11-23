@@ -466,7 +466,7 @@ defmodule Rollcall.TrackerPeersTest do
         end,
         fn {ref, state}, _trace ->
           assert state.version == 1
-          assert [%{ref: ^ref}] = Local.entries(state.local, "partition")
+          assert Local.ids(state.local) == [{"partition", ref}]
           assert state.peers == %{}
         end
       )

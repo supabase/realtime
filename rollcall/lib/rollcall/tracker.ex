@@ -132,7 +132,6 @@ defmodule Rollcall.Tracker do
   alias Rollcall.Metrics
   alias Rollcall.Tracker.Changes
   alias Rollcall.Tracker.CommittedChanges
-  alias Rollcall.Tracker.Entry
   alias Rollcall.Tracker.Local
   alias Rollcall.Tracker.Messages
   alias Rollcall.Tracker.Peer
@@ -843,9 +842,8 @@ defmodule Rollcall.Tracker do
     {duration, entry_count} =
       :timer.tc(
         fn ->
-          local_entries = Local.entries(state.local)
+          snapshot_entries = View.fetch(state.view, Local.ids(state.local))
 
-          snapshot_entries = Enum.map(local_entries, &Entry.to_wire_entry/1)
           snapshot = Messages.snapshot(self(), State.current_stamp(state), snapshot_entries)
 
           :ok = state.transport_module.heartbeat(state.transport_state, snapshot)
@@ -867,7 +865,7 @@ defmodule Rollcall.Tracker do
         origin: self(),
         kind: :snapshot,
         version: state.version,
-        refs: Enum.map(Local.entries(state.local), & &1.ref)
+        refs: Enum.map(Local.ids(state.local), &elem(&1, 1))
       },
       ignore_side_effects: true
     )

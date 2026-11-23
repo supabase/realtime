@@ -20,8 +20,8 @@ defmodule Rollcall.InstancesTest do
       assert is_pid(tracker_a)
       assert is_pid(tracker_b)
       refute tracker_a == tracker_b
-      assert [%{ref: ^ref_a}] = Local.entries(Tracker.get_state(a, scope).local, "partition")
-      assert [%{ref: ^ref_b}] = Local.entries(Tracker.get_state(b, scope).local, "partition")
+      assert Local.ids(Tracker.get_state(a, scope).local) == [{"partition", ref_a}]
+      assert Local.ids(Tracker.get_state(b, scope).local) == [{"partition", ref_b}]
     end
 
     test "list only the scopes of their own tracker", %{scope: scope} do

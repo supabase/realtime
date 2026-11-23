@@ -66,6 +66,24 @@ defmodule Rollcall.Tracker.ViewTest do
     end
   end
 
+  describe "fetch/2" do
+    test "returns the partitioned entries of the ids with their key and meta", %{table: table} do
+      first = partitioned_entry("p1", "k1", "a", %{n: 1})
+      second = partitioned_entry("p2", "k2", "b", %{n: 2})
+      unrequested = partitioned_entry("p1", "k3", "c", %{n: 3})
+      View.write(table, joins([first, second, unrequested]))
+
+      assert Enum.sort(View.fetch(table, [id(first), id(second)])) == [first, second]
+    end
+
+    test "raises when an id has no entry", %{table: table} do
+      View.write(table, joins([partitioned_entry("p1", "k1", "a")]))
+
+      assert [_entry] = View.fetch(table, [{"p1", "a"}])
+      assert catch_error(View.fetch(table, [{"p1", "missing"}]))
+    end
+  end
+
   # The tracker publishes the leaves with their key and meta. The view deletes
   # them in the same call, so the return value is the only place that has them.
   describe "write/2 return value" do
