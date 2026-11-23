@@ -126,7 +126,7 @@ defmodule Realtime.Messages do
   @doc """
   Fetch last `limit ` messages for a given `topic` inserted after `since`
 
-  `limit` is clamped between 1 and `BROADCAST_REPLAY_MAX_MESSAGES` (1000 by default)
+  `limit` is clamped between 1 and `BROADCAST_REPLAY_MAX_MESSAGES` (200 by default)
 
   Automatically uses RPC if the database connection is not in the same node
 

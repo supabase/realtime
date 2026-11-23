@@ -325,8 +325,8 @@ defmodule Realtime.MessagesTest do
       assert Messages.replay(conn, tenant.external_id, "test", since, 10) == {:ok, [m1, m2], MapSet.new([m1.id, m2.id])}
     end
 
-    test "replay returns more than 25 messages with the default max of 1000", %{conn: conn, tenant: tenant} do
-      assert Application.get_env(:realtime, :broadcast_replay_max_messages) == 1_000
+    test "replay returns more than 25 messages with the default max of 200", %{conn: conn, tenant: tenant} do
+      assert Application.get_env(:realtime, :broadcast_replay_max_messages) == 200
 
       for _i <- 1..30 do
         message_fixture(tenant, %{
