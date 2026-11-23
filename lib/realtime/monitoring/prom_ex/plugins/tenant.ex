@@ -273,6 +273,13 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           description: "Latency of broadcast replay",
           tags: [:tenant],
           reporter_options: [peep_bucket_calculator: Latency.Buckets]
+        ),
+        sum(
+          [:realtime, :broadcast, :replay, :messages],
+          event_name: [:realtime, :broadcast, :replay],
+          measurement: :messages,
+          description: "Sum of broadcast messages read from realtime.messages to replay on private channel joins.",
+          tags: [:tenant]
         )
       ]
     )
