@@ -247,7 +247,7 @@ defmodule Rollcall.LifecycleTraceTest do
 
           assert Process.alive?(tracker)
           assert Tracker.whereis(rollcall, scope) == tracker
-          assert [%{ref: ^ref}] = Local.entries(Tracker.get_state(rollcall, scope).local, "partition")
+          assert Local.ids(Tracker.get_state(rollcall, scope).local) == [{"partition", ref}]
         end,
         fn trace ->
           assert [_] = expect_events(trace, :rollcall_tracker_stop_skipped, scope, 1)
@@ -400,8 +400,7 @@ defmodule Rollcall.LifecycleTraceTest do
           end
 
           local = Tracker.get_state(rollcall, scope).local
-          assert Local.entries(local, "partition_1") == []
-          assert Local.entries(local, "partition_2") == []
+          assert Local.ids(local) == []
         end,
         fn _trace -> :ok end
       )
@@ -419,7 +418,7 @@ defmodule Rollcall.LifecycleTraceTest do
             Process.exit(pid, :kill)
           end
 
-          assert [%{ref: ^other_ref}] = Local.entries(Tracker.get_state(rollcall, scope).local, "partition")
+          assert Local.ids(Tracker.get_state(rollcall, scope).local) == [{"partition", other_ref}]
           assert monitor_count(Tracker.whereis(rollcall, scope), other) == 1
         end,
         fn trace ->

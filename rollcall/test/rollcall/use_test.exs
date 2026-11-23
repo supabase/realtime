@@ -21,14 +21,14 @@ defmodule Rollcall.UseTest do
       {:ok, ref} = Instance.track(self(), scope, "partition", "key", %{})
 
       assert scope in Instance.scopes()
-      assert [%{ref: ^ref}] = Local.entries(Tracker.get_state(Instance, scope).local, "partition")
+      assert Local.ids(Tracker.get_state(Instance, scope).local) == [{"partition", ref}]
       assert Instance.state(scope, "partition") == [{ref, "key", %{}}]
       assert Instance.state(scope) == [{"partition", ref, "key", %{}}]
       assert Instance.refs(scope, "partition") == [ref]
       assert Instance.refs(scope) == %{"partition" => [ref]}
 
       assert :ok = Instance.untrack(self(), scope, "partition", "key")
-      assert Local.entries(Tracker.get_state(Instance, scope).local, "partition") == []
+      assert Local.ids(Tracker.get_state(Instance, scope).local) == []
     end
 
     test "ensure_started/1 starts a tracker on the instance named after the module", %{scope: scope} do
