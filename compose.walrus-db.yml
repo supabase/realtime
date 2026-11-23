@@ -5,7 +5,7 @@
 # cluster with `mix test` would make both flaky.
 services:
   walrus_db:
-    image: ${POSTGRES_IMAGE:-supabase/postgres:17.12.0.000}
+    image: ${POSTGRES_IMAGE:-supabase/postgres:17.12.0.002}
     ports:
       - "${WALRUS_DB_PORT:-5534}:5432"
     volumes:
