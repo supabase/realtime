@@ -1867,4 +1867,5 @@ INSERT INTO realtime."schema_migrations" (version) VALUES (20261029120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261103130000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261107120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261111120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20261123120000);
 REVOKE ALL ON realtime.schema_migrations FROM postgres, dashboard_user, anon, authenticated, service_role, supabase_realtime_admin;
