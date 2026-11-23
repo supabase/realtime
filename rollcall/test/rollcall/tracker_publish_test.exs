@@ -66,7 +66,7 @@ defmodule Rollcall.TrackerPublishTest do
     test "a snapshot publishes one diff for each partition", %{probe: probe} do
       send_from_probe(
         probe,
-        snapshot(self(), stamp(1, 1), [wire_entry("p1", "k1", "a", %{n: 1}), wire_entry("p2", "k2", "b", %{})])
+        snapshot(self(), stamp(1, 1), [wire_entry("p1", "a", "k1", %{n: 1}), wire_entry("p2", "b", "k2", %{})])
       )
 
       assert {[{"a", "k1", %{n: 1}}], []} = receive_diff("p1")
@@ -74,10 +74,10 @@ defmodule Rollcall.TrackerPublishTest do
     end
 
     test "a diff publishes its joins and its leaves", %{probe: probe} do
-      send_from_probe(probe, snapshot(self(), stamp(1, 1), [wire_entry("p1", "k1", "a", %{m: 1})]))
+      send_from_probe(probe, snapshot(self(), stamp(1, 1), [wire_entry("p1", "a", "k1", %{m: 1})]))
       receive_diff("p1")
 
-      send_from_probe(probe, diff(self(), stamp(1, 2), 1, [wire_entry("p1", "k2", "b", %{n: 1})], ["a"]))
+      send_from_probe(probe, diff(self(), stamp(1, 2), 1, [wire_entry("p1", "b", "k2", %{n: 1})], ["a"]))
 
       assert {[{"b", "k2", %{n: 1}}], [{"a", "k1", %{m: 1}}]} = receive_diff("p1")
     end
@@ -85,13 +85,13 @@ defmodule Rollcall.TrackerPublishTest do
     test "a snapshot that drops an entry publishes it as a leave with its meta", %{probe: probe} do
       send_from_probe(
         probe,
-        snapshot(self(), stamp(1, 1), [wire_entry("p1", "k1", "a", %{n: 1}), wire_entry("p2", "k2", "b", %{n: 2})])
+        snapshot(self(), stamp(1, 1), [wire_entry("p1", "a", "k1", %{n: 1}), wire_entry("p2", "b", "k2", %{n: 2})])
       )
 
       receive_diff("p1")
       receive_diff("p2")
 
-      send_from_probe(probe, snapshot(self(), stamp(1, 2), [wire_entry("p1", "k1", "a", %{n: 1})]))
+      send_from_probe(probe, snapshot(self(), stamp(1, 2), [wire_entry("p1", "a", "k1", %{n: 1})]))
 
       assert {[], [{"b", "k2", %{n: 2}}]} = receive_diff("p2")
     end
@@ -99,7 +99,7 @@ defmodule Rollcall.TrackerPublishTest do
     test "the purge of a silent peer publishes its entries as leaves", %{probe: probe, tracker: tracker} do
       send_from_probe(
         probe,
-        snapshot(self(), stamp(1, 1), [wire_entry("p1", "k1", "a", %{n: 1}), wire_entry("p1", "k2", "b", %{n: 2})])
+        snapshot(self(), stamp(1, 1), [wire_entry("p1", "a", "k1", %{n: 1}), wire_entry("p1", "b", "k2", %{n: 2})])
       )
 
       receive_diff("p1")
@@ -114,11 +114,11 @@ defmodule Rollcall.TrackerPublishTest do
   describe "a change that does nothing" do
     test "publishes no diff", %{tracker: tracker, scope: scope, network: network} do
       probe = join_probe(network, scope, @probe)
-      send_from_probe(probe, snapshot(self(), stamp(1, 1), [wire_entry("p1", "k1", "a", %{})]))
+      send_from_probe(probe, snapshot(self(), stamp(1, 1), [wire_entry("p1", "a", "k1", %{})]))
       receive_diff("p1")
 
       untrack(tracker, start_client(), "p1", "missing")
-      send_from_probe(probe, snapshot(self(), stamp(1, 2), [wire_entry("p1", "k1", "a", %{})]))
+      send_from_probe(probe, snapshot(self(), stamp(1, 2), [wire_entry("p1", "a", "k1", %{})]))
       tick(tracker, 1)
 
       refute_receive {:rollcall_diff, _, _, _}, 100
@@ -141,7 +141,7 @@ defmodule Rollcall.TrackerPublishTest do
       assert_receive {:published, "p1", {[], [{^ref, "key", %{}}]}, []}
 
       origin = remote_pid(@node_a, 1)
-      send(tracker, {:deliver, scope, snapshot(origin, stamp(1, 1), [wire_entry("p1", "k", "a", %{})])})
+      send(tracker, {:deliver, scope, snapshot(origin, stamp(1, 1), [wire_entry("p1", "a", "k", %{})])})
       assert_receive {:published, "p1", {[{"a", "k", %{}}], []}, [{"a", "k", %{}}]}
     end
   end

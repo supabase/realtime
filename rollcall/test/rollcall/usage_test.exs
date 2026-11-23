@@ -160,7 +160,7 @@ defmodule Rollcall.UsageTest do
     :ok
   end
 
-  defp peer_entries(partition, refs), do: Enum.map(refs, &wire_entry(partition, "key-#{&1}", &1, %{}))
+  defp peer_entries(partition, refs), do: Enum.map(refs, &wire_entry(partition, &1, "key-#{&1}", %{}))
 
   defp deliver(tracker, scope, message) do
     send(tracker, {:deliver, scope, message})

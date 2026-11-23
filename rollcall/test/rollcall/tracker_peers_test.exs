@@ -474,7 +474,7 @@ defmodule Rollcall.TrackerPeersTest do
   end
 
   defp entries(refs) do
-    Enum.map(refs, &wire_entry("partition", "key", &1, %{}))
+    Enum.map(refs, &wire_entry("partition", &1, "key", %{}))
   end
 
   # Delivers `message` with the scope of the tracker, as a sender does.

@@ -45,7 +45,7 @@ defmodule Rollcall.TrackerTransportTest do
       tracker = start_node(scope, network, @node_a)
       probe = join_probe(network, scope, @probe)
 
-      send_from_probe(probe, snapshot(self(), stamp(1, 3), [wire_entry("partition", "key", "ref", %{})]))
+      send_from_probe(probe, snapshot(self(), stamp(1, 3), [wire_entry("partition", "ref", "key", %{})]))
       sync(tracker)
 
       assert Map.keys(tracker_state(tracker).peers) == [@probe]

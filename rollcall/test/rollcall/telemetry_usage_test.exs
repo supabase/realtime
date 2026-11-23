@@ -115,7 +115,7 @@ defmodule Rollcall.TelemetryUsageTest do
     end
   end
 
-  defp entries(range), do: Enum.map(range, &wire_entry("partition", "key", "ref_#{&1}", %{}))
+  defp entries(range), do: Enum.map(range, &wire_entry("partition", "ref_#{&1}", "key", %{}))
 
   defp deliver(tracker, scope, message) do
     send(tracker, {:deliver, scope, message})

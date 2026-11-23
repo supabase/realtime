@@ -167,7 +167,7 @@ defmodule Rollcall.Tracker.PeerPropertyTest do
   end
 
   defp entries(refs) do
-    Enum.map(refs, &wire_entry("partition", "key", &1, %{}))
+    Enum.map(refs, &wire_entry("partition", &1, "key", %{}))
   end
 
   defp deliver(peer, message) do

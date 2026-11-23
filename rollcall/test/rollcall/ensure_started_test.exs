@@ -75,7 +75,7 @@ defmodule Rollcall.EnsureStartedTest do
       :ok = Rollcall.ensure_started(rollcall, scope)
       tracker = Tracker.whereis(rollcall, scope)
       origin = remote_pid(:peer@host, 1)
-      send(tracker, {:deliver, scope, snapshot(origin, stamp(1, 1), [wire_entry("partition", "key", "ref", %{n: 1})])})
+      send(tracker, {:deliver, scope, snapshot(origin, stamp(1, 1), [wire_entry("partition", "ref", "key", %{n: 1})])})
 
       expire_grace(tracker)
       _ = :sys.get_state(tracker)
