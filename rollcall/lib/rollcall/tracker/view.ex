@@ -11,15 +11,18 @@ defmodule Rollcall.Tracker.View do
   """
 
   alias Rollcall.Tracker.Changes
+  alias Rollcall.Tracker.CommittedChanges
 
   @typedoc "The ETS table of a view."
   @type t :: :ets.tid()
 
-  @typedoc "An entry in one partition."
-  @type entry :: {Rollcall.ref(), Rollcall.key(), Rollcall.meta()}
+  @typedoc """
+  The id of an entry in the view: its partition and its ref.
 
-  @typedoc "An entry in the scope, with its partition."
-  @type scope_entry :: {Rollcall.partition(), Rollcall.ref(), Rollcall.key(), Rollcall.meta()}
+  The id is the key of the ETS row. It is not the `Rollcall.key()` that a
+  process tracks.
+  """
+  @type id :: {Rollcall.partition(), Rollcall.ref()}
 
   @doc """
   Returns a new, empty view table. 
@@ -34,7 +37,7 @@ defmodule Rollcall.Tracker.View do
 
   Returns `[]` when the table does not exist. 
   """
-  @spec entries(t()) :: [scope_entry()]
+  @spec entries(t()) :: [Rollcall.partitioned_entry()]
   def entries(table) do
     # fn {{partition, ref}, key, meta} -> {partition, ref, key, meta}
     :ets.select(table, [
@@ -53,7 +56,7 @@ defmodule Rollcall.Tracker.View do
 
   Returns `[]` when the table does not exist.
   """
-  @spec entries(t(), Rollcall.partition()) :: [entry()]
+  @spec entries(t(), Rollcall.partition()) :: [Rollcall.entry()]
   def entries(table, partition) do
     # fn {{^partition, ref}, key, meta} -> {ref, key, meta}
     :ets.select(table, [
@@ -124,21 +127,29 @@ defmodule Rollcall.Tracker.View do
   end
 
   @doc """
-  Applies `changes` to the view. 
+  Applies `changes` to the view and returns the committed changes.
+
+  The function deletes the entry of each leave and returns it in the `leaves`
+  of the result, with its key and meta. Then it inserts the joins. 
+
+  Raises when a leave has no entry.
   """
-  @spec write(t(), Changes.t()) :: :ok
+  @spec write(t(), Changes.t()) :: CommittedChanges.t()
   def write(table, %Changes{joins: joins, leaves: leaves}) do
+    left =
+      for id <- leaves do
+        {partition, ref} = id
+        [{^id, key, meta}] = :ets.take(table, id)
+        {partition, ref, key, meta}
+      end
+
     :ets.insert(
       table,
-      for join <- joins do
-        {{join.partition, join.ref}, join.key, join.meta}
+      for {partition, ref, key, meta} <- joins do
+        {{partition, ref}, key, meta}
       end
     )
 
-    for leave <- leaves do
-      :ets.delete(table, {leave.partition, leave.ref})
-    end
-
-    :ok
+    %CommittedChanges{joins: joins, leaves: left}
   end
 end

@@ -56,8 +56,8 @@ defmodule Rollcall do
   @typedoc "An entry in one partition: its ref, its key and its meta."
   @type entry :: {ref(), key(), meta()}
 
-  @typedoc "An entry in a scope: its partition, its ref, its key and its meta."
-  @type scope_entry :: {partition(), ref(), key(), meta()}
+  @typedoc "An entry with its partition: its partition, its ref, its key and its meta."
+  @type partitioned_entry :: {partition(), ref(), key(), meta()}
 
   @typedoc """
   A set of changes to a partition.
@@ -129,7 +129,7 @@ defmodule Rollcall do
       @spec state(Rollcall.scope(), Rollcall.partition()) :: [Rollcall.entry()]
       def state(scope, partition), do: Rollcall.state(__MODULE__, scope, partition)
 
-      @spec state(Rollcall.scope()) :: [Rollcall.scope_entry()]
+      @spec state(Rollcall.scope()) :: [Rollcall.partitioned_entry()]
       def state(scope), do: Rollcall.state(__MODULE__, scope)
 
       @spec refs(Rollcall.scope()) :: %{Rollcall.partition() => [Rollcall.ref()]}
@@ -242,7 +242,7 @@ defmodule Rollcall do
   you probably don't want this and should use `state/3` instead, which returns
   a single partition, but it's here for ergonomics when testing.
   """
-  @spec state(name(), scope()) :: [scope_entry()]
+  @spec state(name(), scope()) :: [partitioned_entry()]
   def state(name, scope) do
     Tracker.state(name, scope)
   end

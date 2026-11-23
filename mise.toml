@@ -3,7 +3,7 @@ elixir = "1.19.5-otp-28"
 erlang = "28.5.0.4"
 node = "24"
 supabase = "latest"
-"npm:@supabase/pg-delta" = "1.0.0-alpha.60"
+"npm:@supabase/pg-delta" = "1.0.0-alpha.61"
 
 [env]
 # TENANT names a whole environment, not just the db tasks below: the tenant's database and row,
@@ -15,7 +15,7 @@ TENANT = "{% if env.TENANT %}{{ env.TENANT }}{% else %}{% set dir = config_root 
 # The Postgres majors that get a committed tenant dump (priv/repo/tenant_db_dump_<major>.sql), and
 # the image each one is generated from — both `tenant-dumps` and the workflow that runs it read
 # this list. Keep the images in step with the ones the test workflows run against.
-TENANT_DUMP_IMAGES = "15=supabase/postgres:15.20.0.000 17=supabase/postgres:17.12.0.000"
+TENANT_DUMP_IMAGES = "15=supabase/postgres:15.20.0.002 17=supabase/postgres:17.12.0.002"
 REGION = "us-east-1"
 API_JWT_SECRET = "dev"
 DB_ENC_KEY = "1234567890123456"

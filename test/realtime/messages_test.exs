@@ -19,7 +19,7 @@ defmodule Realtime.MessagesTest do
 
     :telemetry.attach(
       __MODULE__,
-      [:realtime, :tenants, :replay],
+      [:realtime, :broadcast, :replay],
       &__MODULE__.handle_telemetry/4,
       pid: self()
     )
@@ -151,10 +151,30 @@ defmodule Realtime.MessagesTest do
 
       assert_receive {
         :telemetry,
-        [:realtime, :tenants, :replay],
-        %{latency: _},
+        [:realtime, :broadcast, :replay],
+        %{latency: _, messages: 1},
         %{tenant: ^external_id}
       }
+    end
+
+    test "replay telemetry counts every replayed message", %{conn: conn, tenant: tenant} do
+      external_id = tenant.external_id
+
+      for i <- 1..3 do
+        message_fixture(tenant, %{
+          "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-i, :minute),
+          "event" => "event_#{i}",
+          "extension" => "broadcast",
+          "topic" => "test",
+          "private" => true,
+          "payload" => %{"value" => i}
+        })
+      end
+
+      assert {:ok, messages, _} = Messages.replay(conn, external_id, "test", 0, 10)
+      assert length(messages) == 3
+
+      assert_receive {:telemetry, [:realtime, :broadcast, :replay], %{messages: 3}, %{tenant: ^external_id}}
     end
 
     test "replay private topic only", %{conn: conn, tenant: tenant} do
@@ -344,7 +364,9 @@ defmodule Realtime.MessagesTest do
       assert Messages.replay(conn, tenant.external_id, "test", since, 10) == {:ok, [m1, m2], MapSet.new([m1.id, m2.id])}
     end
 
-    test "replay respects hard max limit of 25", %{conn: conn, tenant: tenant} do
+    test "replay returns more than 25 messages with the default max of 200", %{conn: conn, tenant: tenant} do
+      assert Application.get_env(:realtime, :broadcast_replay_max_messages) == 200
+
       for _i <- 1..30 do
         message_fixture(tenant, %{
           "inserted_at" => NaiveDateTime.utc_now(),
@@ -357,8 +379,29 @@ defmodule Realtime.MessagesTest do
       end
 
       assert {:ok, messages, set} = Messages.replay(conn, tenant.external_id, "test", 0, 30)
-      assert length(messages) == 25
-      assert MapSet.size(set) == 25
+      assert length(messages) == 30
+      assert MapSet.size(set) == 30
+    end
+
+    test "replay caps limit at broadcast_replay_max_messages", %{conn: conn, tenant: tenant} do
+      previous = Application.get_env(:realtime, :broadcast_replay_max_messages)
+      Application.put_env(:realtime, :broadcast_replay_max_messages, 5)
+      on_exit(fn -> Application.put_env(:realtime, :broadcast_replay_max_messages, previous) end)
+
+      for _i <- 1..8 do
+        message_fixture(tenant, %{
+          "inserted_at" => NaiveDateTime.utc_now(),
+          "event" => "event",
+          "extension" => "broadcast",
+          "topic" => "test",
+          "private" => true,
+          "payload" => %{"value" => "message"}
+        })
+      end
+
+      assert {:ok, messages, set} = Messages.replay(conn, tenant.external_id, "test", 0, 30)
+      assert length(messages) == 5
+      assert MapSet.size(set) == 5
     end
 
     test "replay respects hard min limit of 1", %{conn: conn, tenant: tenant} do
@@ -411,6 +454,9 @@ defmodule Realtime.MessagesTest do
 
       assert :erpc.call(node, Messages, :replay, [pid, tenant.external_id, "test", 0, 30]) ==
                {:error, :failed_to_replay_messages}
+
+      external_id = tenant.external_id
+      assert_receive {:telemetry, [:realtime, :broadcast, :replay], %{messages: 0}, %{tenant: ^external_id}}
     end
   end
 

@@ -4,7 +4,7 @@ defmodule Realtime.MixProject do
   def project do
     [
       app: :realtime,
-      version: "2.174.4",
+      version: "2.177.0",
       elixir: "~> 1.19",
       elixirc_paths: elixirc_paths(Mix.env()),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
@@ -122,7 +122,7 @@ defmodule Realtime.MixProject do
       {:opentelemetry_phoenix, "~> 2.0"},
       {:opentelemetry_cowboy, "~> 1.0"},
       {:opentelemetry_ecto, "~> 1.2"},
-      {:gen_rpc, git: "https://github.com/emqx/gen_rpc.git", tag: "4.0.2"},
+      {:gen_rpc, git: "https://github.com/emqx/gen_rpc.git", tag: "4.0.3"},
       # gen_rpc uses a git dependency
       {:snabbkaffe, "~> 1.0", override: true},
       {:req, "~> 0.7.4"},

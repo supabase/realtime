@@ -13,7 +13,7 @@
 #   test/walrus/run.sh                                  # every test, from the dump
 #   test/walrus/run.sh --migrations                     # every test, from the migrations
 #   test/walrus/run.sh test_simple_insert               # named tests, passed to pg_regress
-#   POSTGRES_IMAGE=supabase/postgres:15.20.0.000 test/walrus/run.sh
+#   POSTGRES_IMAGE=supabase/postgres:15.20.0.002 test/walrus/run.sh
 #
 # --migrations needs Elixir on the host (it runs `mix run`); --dump needs only docker.
 #

@@ -306,7 +306,7 @@ defmodule Realtime.Presence.RollcallTransportTest do
   defp message(:request), do: Messages.request(self())
 
   defp snapshot do
-    Messages.snapshot(self(), Messages.stamp(1, 1), [Messages.wire_entry("partition", "key", make_ref(), %{})])
+    Messages.snapshot(self(), Messages.stamp(1, 1), [Messages.wire_entry("partition", make_ref(), "key", %{})])
   end
 
   # Subscribes a new process to `topic`, and returns when the subscription is

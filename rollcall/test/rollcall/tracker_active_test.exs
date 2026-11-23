@@ -57,7 +57,7 @@ defmodule Rollcall.TrackerActiveTest do
       client = start_client()
       {:ok, _ref} = Rollcall.track(rollcall, client, scope, "partition", "local_key", %{})
       tracker = Tracker.whereis(rollcall, scope)
-      deliver_peer_snapshot(tracker, scope, [wire_entry("partition", "peer_key", "peer-ref", %{n: 1})])
+      deliver_peer_snapshot(tracker, scope, [wire_entry("partition", "peer-ref", "peer_key", %{n: 1})])
       :ok = Rollcall.untrack(rollcall, client, scope, "partition", "local_key")
 
       expire_grace_and_sync(tracker)

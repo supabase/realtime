@@ -179,7 +179,7 @@ defmodule Rollcall.TelemetryTest do
     end
   end
 
-  defp entries(refs), do: Enum.map(refs, &wire_entry("partition", "key", &1, %{}))
+  defp entries(refs), do: Enum.map(refs, &wire_entry("partition", &1, "key", %{}))
 
   defp deliver(tracker, scope, message) do
     send(tracker, {:deliver, scope, message})
