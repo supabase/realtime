@@ -85,6 +85,34 @@ defmodule Realtime.Tenants.CacheTest do
     end
   end
 
+  test "restarts only local counters after updating the local tenant snapshot", %{tenant: tenant} do
+    {:ok, node} = Clustered.start()
+    tenant = %{tenant | max_events_per_second: 1}
+    updated_tenant = %{tenant | max_events_per_second: 1000}
+    rate = Tenants.events_per_second_rate(tenant)
+
+    Cache.update_cache(tenant)
+    Rpc.enhanced_call(node, Cache, :update_cache, [tenant])
+    local_counter = RateCounterHelper.new!(rate)
+    remote_counter = Rpc.enhanced_call(node, RateCounterHelper, :new!, [rate])
+    local_monitor = Process.monitor(local_counter)
+    remote_monitor = Process.monitor(remote_counter)
+
+    assert {:ok, true} = Cache.update_cache(updated_tenant, [rate.id])
+    assert_receive {:DOWN, ^local_monitor, :process, ^local_counter, :normal}
+    refute_receive {:DOWN, ^remote_monitor, :process, ^remote_counter, _}, 100
+    assert %{max_events_per_second: 1000} = Cache.get_tenant_by_external_id(tenant.external_id)
+
+    assert %{max_events_per_second: 1} =
+             Rpc.enhanced_call(node, Cache, :get_tenant_by_external_id, [tenant.external_id])
+
+    assert {:ok, true} = Rpc.enhanced_call(node, Cache, :update_cache, [updated_tenant, [rate.id]])
+    assert_receive {:DOWN, ^remote_monitor, :process, ^remote_counter, :normal}
+
+    assert %{max_events_per_second: 1000} =
+             Rpc.enhanced_call(node, Cache, :get_tenant_by_external_id, [tenant.external_id])
+  end
+
   describe "distributed_invalidate_tenant_cache/1" do
     setup do
       {:ok, node} = Clustered.start()
