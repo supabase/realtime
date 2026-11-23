@@ -896,7 +896,7 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
 
       {:ok, _} =
         Database.transaction(conn, fn db_conn ->
-          Postgrex.query!(db_conn, "drop publication if exists supabase_realtime_test")
+          Postgrex.query!(db_conn, "drop publication if exists #{Integrations.publication()}")
         end)
 
       {socket, _} = get_connection(tenant, serializer)

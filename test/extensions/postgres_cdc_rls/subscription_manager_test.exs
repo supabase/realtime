@@ -33,7 +33,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManagerTest do
       "subscribers_pids_table" => subscribers_pids_table
     }
 
-    publication = "supabase_realtime_test"
+    publication = Integrations.publication()
 
     # register this process with syn as if this was the WorkersSupervisor
 
