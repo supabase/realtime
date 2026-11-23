@@ -1,6 +1,6 @@
-# Developing Supabase Realtime
+# Developing Supabase Realtime <!-- omit in toc -->
 
-## Table of contents
+## Table of contents <!-- omit in toc -->
 
 - [Client](#client)
   - [Client libraries](#client-libraries)
@@ -8,6 +8,8 @@
   - [Architecture](#architecture)
   - [Server setup](#server-setup)
   - [Tenants](#tenants)
+    - [Using the Inspector](#using-the-inspector)
+  - [Supabase stack with your build](#supabase-stack-with-your-build)
   - [Tenant migrations and snapshots](#tenant-migrations-and-snapshots)
   - [WALRUS regression suite](#walrus-regression-suite)
   - [Devcontainer](#devcontainer)
@@ -21,14 +23,14 @@
 
 ### Client libraries
 
-| Language     | Source                                                                                                    | Package                                                                                         |
-| ------------ | --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| JavaScript   | [supabase-js](https://github.com/supabase/supabase-js/tree/master/packages/core/realtime-js)              | [@supabase/realtime-js](https://www.npmjs.com/package/@supabase/realtime-js)                    |
-| Flutter/Dart | [supabase-flutter](https://github.com/supabase/supabase-flutter/tree/main/packages/supabase_realtime)     | [supabase_realtime](https://pub.dev/packages/supabase_realtime)                                 |
-| Python       | [supabase-py](https://github.com/supabase/supabase-py/tree/main/src/realtime)                             | [realtime](https://pypi.org/project/realtime)                                                   |
-| Swift        | [supabase-swift](https://github.com/supabase/supabase-swift/tree/main/Sources/Realtime)                   | [supabase-swift](https://swiftpackageindex.com/supabase/supabase-swift)                         |
-| C#           | [supabase-csharp](https://github.com/supabase-community/supabase-csharp/tree/master/packages/Realtime)    | [Supabase.Realtime](https://www.nuget.org/packages/Supabase.Realtime)                           |
-| Kotlin       | [supabase-kt](https://github.com/supabase-community/supabase-kt/tree/master/Realtime)                     | [realtime-kt](https://central.sonatype.com/artifact/io.github.jan-tennert.supabase/realtime-kt) |
+| Language     | Source                                                                                                 | Package                                                                                         |
+| ------------ | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| JavaScript   | [supabase-js](https://github.com/supabase/supabase-js/tree/master/packages/core/realtime-js)           | [@supabase/realtime-js](https://www.npmjs.com/package/@supabase/realtime-js)                    |
+| Flutter/Dart | [supabase-flutter](https://github.com/supabase/supabase-flutter/tree/main/packages/supabase_realtime)  | [supabase_realtime](https://pub.dev/packages/supabase_realtime)                                 |
+| Python       | [supabase-py](https://github.com/supabase/supabase-py/tree/main/src/realtime)                          | [realtime](https://pypi.org/project/realtime)                                                   |
+| Swift        | [supabase-swift](https://github.com/supabase/supabase-swift/tree/main/Sources/Realtime)                | [supabase-swift](https://swiftpackageindex.com/supabase/supabase-swift)                         |
+| C#           | [supabase-csharp](https://github.com/supabase-community/supabase-csharp/tree/master/packages/Realtime) | [Supabase.Realtime](https://www.nuget.org/packages/Supabase.Realtime)                           |
+| Kotlin       | [supabase-kt](https://github.com/supabase-community/supabase-kt/tree/master/Realtime)                  | [realtime-kt](https://central.sonatype.com/artifact/io.github.jan-tennert.supabase/realtime-kt) |
 
 See the [SDK capability matrix](https://supabase.github.io/sdk/#area-realtime).
 
@@ -144,6 +146,24 @@ Or fill in the connect line at the top yourself:
 - **Channel**: anything, e.g. `room_a`
 
 Toggle on **presence** and/or **postgres changes** if you want to exercise them, then hit **Connect**. The event log at the bottom shows everything on the socket as it happens; the form below it sends a broadcast. For Postgres Changes, point the table field at `test` (created above) and insert a row from `psql` to see it land.
+
+### Supabase stack with your build
+
+To try a demo or test app against your changes run a [Supabase CLI](https://supabase.com/docs/guides/local-development)
+stack with Realtime built from this checkout:
+
+```bash
+mise run supabase-stack                         # the e2e suite's project (test/e2e)
+mise run supabase-stack ~/code/my-demo          # any directory holding supabase/config.toml
+mise run supabase-stack --stop ~/code/my-demo   # stop the stack
+```
+
+It runs `supabase start`, then replaces the CLI's Realtime container with one running your build, under the same
+name, network and env. Clients use the URL and keys `supabase status` prints. After a change, run it again to
+rebuild and swap Realtime.
+Stopping and starting the stack brings back the CLI's own Realtime image, so run the task again after.
+
+For day-to-day work `mise run dev` and the tests are quicker. Each run of `mise run supabase-stack` builds the Docker image.
 
 ### Tenant migrations and snapshots
 
