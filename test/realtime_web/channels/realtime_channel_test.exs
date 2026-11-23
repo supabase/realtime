@@ -2793,7 +2793,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
   # The tests run async, so they cannot change the configured defaults and swap in their own bucket instead
   defp put_join_bucket(%Socket{} = socket, per_second, burst) do
-    %{socket | private: Map.put(socket.private, :join_bucket, TokenBucket.new(per_second, burst))}
+    %{socket | private: Map.put(socket.private, :join_bucket, TokenBucket.per_second(burst, per_second))}
   end
 
   defp drain_join_bucket(%Socket{private: %{join_bucket: bucket}}) do
@@ -2801,7 +2801,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   end
 
   defp put_broadcast_bucket(%Socket{} = socket, per_second, burst) do
-    %{socket | private: Map.put(socket.private, :broadcast_bucket, TokenBucket.new(per_second, burst))}
+    %{socket | private: Map.put(socket.private, :broadcast_bucket, TokenBucket.per_second(burst, per_second))}
   end
 
   # Takes every token a minute ahead, so the bucket stays empty for the rest of the test
