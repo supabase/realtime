@@ -131,6 +131,7 @@ defmodule Rollcall.Tracker do
   use Snabbkaffex, only: :trace
   alias Rollcall.Metrics
   alias Rollcall.Tracker.Changes
+  alias Rollcall.Tracker.CommittedChanges
   alias Rollcall.Tracker.Entry
   alias Rollcall.Tracker.Local
   alias Rollcall.Tracker.Messages
@@ -361,7 +362,7 @@ defmodule Rollcall.Tracker do
   @doc """
   Returns every entry in the view of `scope`. See `Rollcall.state/2`.
   """
-  @spec state(Rollcall.name(), Rollcall.scope()) :: [Rollcall.scope_entry()]
+  @spec state(Rollcall.name(), Rollcall.scope()) :: [Rollcall.partitioned_entry()]
   def state(name, scope) do
     with_view(name, scope, fn view -> View.entries(view) end)
   end
@@ -495,12 +496,12 @@ defmodule Rollcall.Tracker do
     ref = Keyword.get(opts, :ref) || random_ref()
 
     {changes, local} = Local.track(state.local, pid, partition, key, meta, ref)
+    committed = View.write(state.view, changes)
 
     state =
       state
       |> State.apply_changes(local, changes)
-      |> update_view(changes)
-      |> publish_changes(changes, :local)
+      |> publish_changes(committed, :local)
       |> cancel_empty_timer()
       |> watch_pid(pid)
 
@@ -523,12 +524,12 @@ defmodule Rollcall.Tracker do
 
   def handle_call({:untrack, pid, partition, key}, _from, state) do
     {changes, local} = Local.untrack(state.local, pid, partition, key)
+    committed = View.write(state.view, changes)
 
     state =
       state
       |> State.apply_changes(local, changes)
-      |> update_view(changes)
-      |> publish_changes(changes, :local)
+      |> publish_changes(committed, :local)
       |> maybe_unwatch(pid)
       |> start_empty_timer()
 
@@ -569,12 +570,12 @@ defmodule Rollcall.Tracker do
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
     {changes, local} = Local.untrack_pid(state.local, pid)
+    committed = View.write(state.view, changes)
 
     state =
       state
       |> State.apply_changes(local, changes)
-      |> update_view(changes)
-      |> publish_changes(changes, :local)
+      |> publish_changes(committed, :local)
       |> remove_monitor(pid)
       |> start_empty_timer()
 
@@ -614,7 +615,7 @@ defmodule Rollcall.Tracker do
 
             case apply_to_peer(state, origin, State.peer(state, origin), msg) do
               {state, nil} -> {:noreply, state}
-              {state, changes} -> {:noreply, publish_changes(state, changes, :peer)}
+              {state, committed} -> {:noreply, publish_changes(state, committed, :peer)}
             end
         end
 
@@ -654,7 +655,7 @@ defmodule Rollcall.Tracker do
     measure_peer_apply(
       fn ->
         {peer, changes} = Peer.new(msg)
-        {put_peer(state, node, peer, changes), changes}
+        put_peer(state, node, peer, changes)
       end,
       state.scope,
       node,
@@ -666,7 +667,7 @@ defmodule Rollcall.Tracker do
     measure_peer_apply(
       fn ->
         {peer, changes} = Peer.apply(peer, msg)
-        {put_peer(state, node, peer, changes), changes}
+        put_peer(state, node, peer, changes)
       end,
       state.scope,
       node,
@@ -697,6 +698,7 @@ defmodule Rollcall.Tracker do
     state
   end
 
+  @spec put_peer(State.t(), node(), Peer.t(), Changes.t()) :: {State.t(), CommittedChanges.t()}
   defp put_peer(state, node, peer, changes) do
     tp(
       :rollcall_tracker_peer_message,
@@ -710,9 +712,9 @@ defmodule Rollcall.Tracker do
       ignore_side_effects: true
     )
 
-    state
-    |> State.put_peer(node, peer)
-    |> update_view(changes)
+    state = State.put_peer(state, node, peer)
+
+    {state, View.write(state.view, changes)}
   end
 
   defp tick_and_purge_peers(%State{} = state) do
@@ -724,9 +726,8 @@ defmodule Rollcall.Tracker do
               Map.put(kept, node, peer)
 
             {:purge, changes} ->
-              state
-              |> update_view(changes)
-              |> publish_changes(changes, :purge)
+              committed = View.write(state.view, changes)
+              publish_changes(state, committed, :purge)
 
               tp(
                 :rollcall_tracker_peer_purged,
@@ -796,19 +797,13 @@ defmodule Rollcall.Tracker do
     %{state | reductions: reductions}
   end
 
-  defp update_view(state, changes) do
-    View.write(state.view, changes)
-
-    state
-  end
-
   defp transport_active?(state) do
     function_exported?(state.transport_module, :active?, 1) and
       state.transport_module.active?(state.transport_state)
   end
 
-  defp publish_changes(state, changes, source) do
-    for {partition, {joins, leaves} = diff} <- Changes.partition_diffs(changes) do
+  defp publish_changes(state, %CommittedChanges{} = committed, source) do
+    for {partition, {joins, leaves} = diff} <- CommittedChanges.partition_diffs(committed) do
       {duration, _} =
         :timer.tc(
           fn ->
