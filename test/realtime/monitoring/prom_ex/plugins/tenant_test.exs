@@ -257,6 +257,15 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       assert metric_value("realtime_tenants_replay_bucket", tenant: external_id, le: "250.0") > 0
     end
 
+    test "global replay messages sum adds the replayed message count", %{tenant: %{external_id: external_id}} do
+      metric = "realtime_broadcast_global_replay_messages"
+      metric_value = metric_value(metric) || 0
+
+      :telemetry.execute([:realtime, :broadcast, :replay], %{latency: 1, messages: 3}, %{tenant: external_id})
+
+      assert_eventually metric_value(metric) >= metric_value + 3
+    end
+
     test "metric realtime_tenants_broadcast_from_database_latency_committed_at exists after check", context do
       external_id = context.tenant.external_id
       metric = "realtime_tenants_broadcast_from_database_latency_committed_at_count"

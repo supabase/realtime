@@ -47,8 +47,23 @@ defmodule Realtime.PromEx.Plugins.TenantGlobal do
     [
       channel_global_events(),
       payload_global_size_metrics(),
-      broadcast_fanout_global_metrics()
+      broadcast_fanout_global_metrics(),
+      broadcast_replay_global_metrics()
     ]
+  end
+
+  defp broadcast_replay_global_metrics do
+    Event.build(
+      :realtime_global_broadcast_replay_metrics,
+      [
+        sum(
+          [:realtime, :broadcast, :global, :replay, :messages],
+          event_name: [:realtime, :broadcast, :replay],
+          measurement: :messages,
+          description: "Global sum of broadcast messages read from realtime.messages to replay on channel join."
+        )
+      ]
+    )
   end
 
   defp broadcast_fanout_global_metrics do
