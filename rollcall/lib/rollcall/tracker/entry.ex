@@ -57,6 +57,6 @@ defmodule Rollcall.Tracker.Entry do
   """
   @spec to_wire_entry(t()) :: Rollcall.Tracker.Messages.wire_entry()
   def to_wire_entry(%__MODULE__{} = entry) do
-    Rollcall.Tracker.Messages.wire_entry(entry.partition, entry.key, entry.ref, entry.meta)
+    Rollcall.Tracker.Messages.wire_entry(entry.partition, entry.ref, entry.key, entry.meta)
   end
 end

@@ -412,13 +412,47 @@ defmodule PolicyEval.PolicySetTest do
       assert PolicyEval.decide(snapshot, env(team: "t", user_id: @uid), :write) == {:fallback, :rls_forced}
     end
 
-    test "a role that bypasses RLS", %{catalog: catalog, policies: policies} do
+    test "a role that bypasses RLS is allowed without any policy", %{catalog: catalog, policies: policies} do
       roles = %{@roles | "member" => %{bypass_rls: true, select: true, insert: true}}
+      # Policies that would deny, fall back or name a role that isn't modelled don't matter
+      policies =
+        policies ++
+          [
+            policy("deny", cmd: "*", permissive: false, qual: "false", with_check: "false"),
+            policy("for_team", cmd: "*", roles: ["team_member"], qual: "(app.email() = 'a'::text)")
+          ]
+
       snapshot = snapshot(policies, catalog.functions, %{roles: roles})
 
-      assert PolicyEval.decide(snapshot, env(team: "t", user_id: @uid), :read) == {:fallback, {:bypass_rls, "member"}}
+      assert PolicyEval.decide(snapshot, env(team: "t", user_id: @uid), :read) == :allow
+      assert PolicyEval.decide(snapshot, env(team: "t", user_id: @uid), :write) == :allow
       # another role isn't affected
-      assert PolicyEval.decide(snapshot, env(team: "t", user_id: @uid, role: "guest"), :read) == @deny
+      assert PolicyEval.decide(snapshot, env(team: "t", user_id: @uid, role: "guest"), :read) ==
+               {:fallback, :unmodelled_policy_role}
+    end
+
+    test "a role that bypasses RLS still needs the privilege", %{catalog: catalog, policies: policies} do
+      no_insert = %{@roles | "member" => %{bypass_rls: true, select: true, insert: false}}
+      snapshot = snapshot(policies, catalog.functions, %{roles: no_insert})
+
+      assert PolicyEval.decide(snapshot, env(team: "t", user_id: @uid), :read) == :allow
+
+      assert PolicyEval.decide(snapshot, env(team: "t", user_id: @uid), :write) ==
+               {:fallback, {:missing_grant, "member", :insert}}
+    end
+
+    test "RLS off or forced falls back first, also for a role that bypasses RLS", %{
+      catalog: catalog,
+      policies: policies
+    } do
+      roles = %{@roles | "member" => %{bypass_rls: true, select: true, insert: true}}
+      env = env(team: "t", user_id: @uid)
+
+      assert PolicyEval.decide(snapshot(policies, catalog.functions, %{roles: roles, rls_enabled: false}), env, :read) ==
+               {:fallback, :rls_disabled}
+
+      assert PolicyEval.decide(snapshot(policies, catalog.functions, %{roles: roles, rls_forced: true}), env, :read) ==
+               {:fallback, :rls_forced}
     end
 
     test "a role missing from the snapshot", %{catalog: catalog, policies: policies} do

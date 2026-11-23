@@ -9,7 +9,7 @@ defmodule Rollcall.Tracker.Messages do
   A snapshot and a diff carry the stamp of the sender. A request carries no
   stamp.
 
-  An entry on the wire is a tuple of the partition, the key, the ref and the
+  An entry on the wire is a tuple of the partition, the ref, the key and the
   meta. The wire entry has no pid. The receiver sets the pid of the entry to the
   origin of the message. A diff lists its leaves as refs, because the receiver
   holds the entries already.
@@ -29,8 +29,8 @@ defmodule Rollcall.Tracker.Messages do
   """
   @type stamp :: {:stamp, integer(), non_neg_integer()}
 
-  @typedoc "An entry on the wire: the partition, the key, the ref and the meta."
-  @type wire_entry :: {Rollcall.partition(), Rollcall.key(), Rollcall.ref(), Rollcall.meta()}
+  @typedoc "An entry on the wire: the partition, the ref, the key and the meta."
+  @type wire_entry :: Rollcall.partitioned_entry()
 
   @typedoc "The full `local` set of the sender."
   @type snapshot :: {:snapshot, origin(), stamp(), [wire_entry()]}
@@ -48,6 +48,11 @@ defmodule Rollcall.Tracker.Messages do
 
   @typedoc "A snapshot, a diff or a request."
   @type t :: snapshot() | diff() | request()
+
+  @spec kind(t()) :: :diff | :request | :snapshot
+  def kind({:snapshot, _origin, _stamp, _entries}), do: :snapshot
+  def kind({:diff, _origin, _stamp, _from, _joins, _leaves}), do: :diff
+  def kind({:request, _origin}), do: :request
 
   @doc "Checks if a parameter is a valid message"
   @spec message?(term()) :: boolean()
@@ -67,8 +72,8 @@ defmodule Rollcall.Tracker.Messages do
   def stamp(incarnation, version), do: {:stamp, incarnation, version}
 
   @doc "Returns the entry on the wire."
-  @spec wire_entry(Rollcall.partition(), Rollcall.key(), Rollcall.ref(), Rollcall.meta()) :: wire_entry()
-  def wire_entry(partition, key, ref, meta), do: {partition, key, ref, meta}
+  @spec wire_entry(Rollcall.partition(), Rollcall.ref(), Rollcall.key(), Rollcall.meta()) :: wire_entry()
+  def wire_entry(partition, ref, key, meta), do: {partition, ref, key, meta}
 
   @doc "Returns a snapshot with `entries`."
   @spec snapshot(origin(), stamp(), [wire_entry()]) :: snapshot()

@@ -143,7 +143,9 @@ defmodule Realtime.Tenants.PolicyEvalShadowTest do
             {"anon", :none, "anon"},
             # Not an official role name we support
             {"anonymous", :role, :other},
-            {"service_role", :role, "service_role"},
+            # Decided for, but not in this snapshot
+            {"service_role", :setup, "service_role"},
+            {"postgres", :role, "postgres"},
             {"app_writer", :role, :other},
             {nil, :role, :none}
           ] do
@@ -172,8 +174,8 @@ defmodule Realtime.Tenants.PolicyEvalShadowTest do
       decision_ref = attach(@read_decision)
       timing_ref = attach(@read_timing)
 
-      # service_role isn't one of the roles policy_eval models: {:fallback, {:role, "service_role"}}
-      ctx = context(tenant_id: tenant_id, role: "service_role", claims: %{"role" => "service_role"})
+      # postgres isn't one of the roles policy_eval models: {:fallback, {:role, "postgres"}}
+      ctx = context(tenant_id: tenant_id, role: "postgres", claims: %{"role" => "postgres"})
       result = {:ok, %Policies{broadcast: %BroadcastPolicies{read: true}}}
 
       log =
@@ -371,7 +373,7 @@ defmodule Realtime.Tenants.PolicyEvalShadowTest do
 
       decision_ref = attach(@read_decision)
       timing_ref = attach(@read_timing)
-      ctx = context(tenant_id: tenant_id, role: "service_role", claims: %{"role" => "service_role"})
+      ctx = context(tenant_id: tenant_id, role: "postgres", claims: %{"role" => "postgres"})
       result = policy_error(:invalid_text_representation, "22P02", "invalid input syntax for type uuid")
 
       assert :ok = PolicyEvalShadow.read(:fake_conn, ctx, [:broadcast], result)

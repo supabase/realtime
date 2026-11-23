@@ -19,13 +19,13 @@ defmodule Realtime.Tenants.ReconnectorTest do
 
   describe "periodic reconnect check" do
     test "restarts Connect when this node still has connected users", %{tenant: tenant} do
-      {:ok, reconnector} = Reconnector.start_link([])
+      reconnector = start_reconnector(tenant)
 
       assert {:ok, _} = Connect.lookup_or_start_connection(tenant.external_id)
       pid = Connect.whereis(tenant.external_id)
 
-      user_pid = spawn(fn -> Process.sleep(:infinity) end)
-      UsersCounter.add(user_pid, tenant.external_id)
+      # The test process is the user, so it stops counting once the test ends.
+      UsersCounter.add(self(), tenant.external_id)
 
       Endpoint.subscribe(Connect.syn_topic(tenant.external_id))
 
@@ -40,7 +40,7 @@ defmodule Realtime.Tenants.ReconnectorTest do
     end
 
     test "does not restart Connect when this node has no connected users", %{tenant: tenant} do
-      {:ok, reconnector} = Reconnector.start_link([])
+      reconnector = start_reconnector(tenant)
 
       assert {:ok, _} = Connect.lookup_or_start_connection(tenant.external_id)
       pid = Connect.whereis(tenant.external_id)
@@ -58,21 +58,16 @@ defmodule Realtime.Tenants.ReconnectorTest do
 
     test "logs a warning when Connect had an RPC error", %{tenant: tenant} do
       %{external_id: tenant_id} = tenant
-      {:ok, reconnector} = Reconnector.start_link([])
+      reconnector = start_reconnector(tenant)
 
-      user_pid = spawn(fn -> Process.sleep(:infinity) end)
-      UsersCounter.add(user_pid, tenant_id)
+      UsersCounter.add(self(), tenant_id)
 
       test_pid = self()
 
       # Holds the reconnect task until it is monitored, so its exit reason can be asserted
-      stub(Connect, :lookup_or_start_connection, fn
-        ^tenant_id ->
-          send(test_pid, {:reconnecting, self()})
-          receive do: (:continue -> {:error, :rpc_error, :timeout})
-
-        other_tenant_id ->
-          call_original(Connect, :lookup_or_start_connection, [other_tenant_id])
+      stub(Connect, :lookup_or_start_connection, fn ^tenant_id ->
+        send(test_pid, {:reconnecting, self()})
+        receive do: (:continue -> {:error, :rpc_error, :timeout})
       end)
 
       allow(Connect, self(), reconnector)
@@ -89,5 +84,20 @@ defmodule Realtime.Tenants.ReconnectorTest do
 
       assert log =~ "Reconnector could not restart connection for #{tenant_id}: :timeout"
     end
+  end
+
+  # Reconnector's `:check` restarts `Connect` for every tenant in `UsersCounter.local_tenant_counts/0`
+  # that has none, which includes the tenants of other tests running concurrently. Restarting a
+  # `Connect` their test already stopped leaks it: it stays on a database that is handed to later
+  # tests and recreates its replication slot there. So we only show it this test's tenant to isolate it.
+  # This also keeps the test async.
+  defp start_reconnector(%{external_id: tenant_id}) do
+    stub(UsersCounter, :local_tenant_counts, fn ->
+      UsersCounter |> call_original(:local_tenant_counts, []) |> Map.take([tenant_id])
+    end)
+
+    {:ok, reconnector} = Reconnector.start_link([])
+    allow(UsersCounter, self(), reconnector)
+    reconnector
   end
 end

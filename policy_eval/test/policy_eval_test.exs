@@ -132,6 +132,52 @@ defmodule PolicyEvalTest do
     end
   end
 
+  describe "starts_with" do
+    # The shape of a policy that lets a user read the topics under their own prefix
+    @own_prefix "starts_with(( SELECT app.team() AS team), (('notify:'::text || (( SELECT app.user_id() AS user_id))::text) || ':'::text))"
+
+    test "true when the text starts with the prefix, byte by byte" do
+      assert evaluate(@own_prefix, user_id: @uid, team: "notify:#{@uid}:inbox") == true
+      assert evaluate(@own_prefix, user_id: @uid, team: "notify:#{@uid}:") == true
+      assert evaluate(@own_prefix, user_id: @uid, team: "notify:#{@uid}") == false
+      assert evaluate(@own_prefix, user_id: @uid, team: "notify:#{@other_uid}:inbox") == false
+      assert evaluate(@own_prefix, user_id: @uid, team: "NOTIFY:#{@uid}:inbox") == false
+    end
+
+    test "NULL when the user id or the text is NULL" do
+      assert evaluate(@own_prefix, user_id: nil, team: "notify::inbox") == nil
+      assert evaluate(@own_prefix, user_id: @uid, team: nil) == nil
+    end
+  end
+
+  describe "split_part" do
+    # The shape of a policy that lets a client use the topics `cursors:<its claim>:<room>`
+    @cursors """
+    ((COALESCE(((current_setting('app.claims'::text, true))::jsonb ->> 'cursor_client'::text), ''::text) <> ''::text) \
+    AND (split_part(( SELECT app.team() AS team), ':'::text, 1) = 'cursors'::text) \
+    AND (split_part(( SELECT app.team() AS team), ':'::text, 2) = ((current_setting('app.claims'::text, true))::jsonb ->> 'cursor_client'::text)) \
+    AND (split_part(( SELECT app.team() AS team), ':'::text, 3) <> ''::text) \
+    AND (split_part(( SELECT app.team() AS team), ':'::text, 4) = ''::text))\
+    """
+
+    test "decides each field of the topic" do
+      claims = ~s({"cursor_client":"c1"})
+
+      assert evaluate(@cursors, claims: claims, team: "cursors:c1:room") == true
+      assert evaluate(@cursors, claims: claims, team: "cursors:c2:room") == false
+      assert evaluate(@cursors, claims: claims, team: "cursors:c1:") == false
+      assert evaluate(@cursors, claims: claims, team: "cursors:c1:room:x") == false
+      assert evaluate(@cursors, claims: claims, team: "presence:c1:room") == false
+      assert evaluate(@cursors, claims: ~s({"cursor_client":"é🎉"}), team: "cursors:é🎉:sala") == true
+      assert evaluate(@cursors, claims: ~s({}), team: "cursors::room") == false
+    end
+
+    test "field 0 falls back, because Postgres raises" do
+      assert evaluate("(split_part(app.team(), ':'::text, 0) = 'a'::text)", team: "a:b") ==
+               {:unsupported, {:raises, :invalid_parameter_value, "field position must not be zero"}}
+    end
+  end
+
   describe "LIKE" do
     test "% matches any run and _ one character, on the whole text" do
       sql = "(app.team() ~~ 'public:%'::text)"
@@ -186,6 +232,87 @@ defmodule PolicyEvalTest do
       assert evaluate("((app.claims() ->> 'level'::text) = '1'::text)", claims: ~s({"level":1})) ==
                {:unsupported, :jsonb_number_text}
     end
+
+    test "are read nested with ->, which gives jsonb" do
+      sql = "(((app.claims() -> 'app_metadata'::text) ->> 'team'::text) = 'red'::text)"
+
+      assert evaluate(sql, claims: ~s({"app_metadata":{"team":"red"}})) == true
+      assert evaluate(sql, claims: ~s({"app_metadata":{"team":"blue"}})) == false
+      assert evaluate(sql, claims: ~s({"app_metadata":{}})) == nil
+      assert evaluate(sql, claims: ~s({"app_metadata":"red"})) == nil
+      assert evaluate(sql, claims: ~s({})) == nil
+    end
+
+    test "-> keeps a JSON null, which is not SQL NULL" do
+      sql = "((app.claims() -> 'app_metadata'::text) IS NULL)"
+
+      assert evaluate(sql, claims: ~s({"app_metadata":null})) == false
+      assert evaluate(sql, claims: ~s({})) == true
+    end
+
+    test "-> with an integer reads an array element, a negative one from the end" do
+      first = "((((app.claims() -> 'teams'::text) -> 0) ->> 'id'::text) = 'red'::text)"
+      last = "((((app.claims() -> 'teams'::text) -> '-1'::integer) ->> 'id'::text) = 'red'::text)"
+      claims = ~s({"teams":[{"id":"red"},{"id":"blue"}]})
+
+      assert evaluate(first, claims: claims) == true
+      assert evaluate(last, claims: claims) == false
+      assert evaluate(first, claims: ~s({"teams":[]})) == nil
+    end
+
+    test "->> with an integer reads an array element as text" do
+      first = "(((app.claims() -> 'roles'::text) ->> 0) = 'admin'::text)"
+      last = "(((app.claims() -> 'roles'::text) ->> '-1'::integer) = 'admin'::text)"
+
+      assert evaluate(first, claims: ~s({"roles":["admin","viewer"]})) == true
+      assert evaluate(last, claims: ~s({"roles":["admin","viewer"]})) == false
+      assert evaluate(first, claims: ~s({"roles":[null]})) == nil
+      assert evaluate(first, claims: ~s({"roles":[]})) == nil
+      # A scalar is an array of one element, as in Postgres
+      assert evaluate(first, claims: ~s({"roles":"admin"})) == true
+      assert evaluate(last, claims: ~s({"roles":[1,"admin"]})) == true
+      # Postgres: false
+      assert evaluate(first, claims: ~s({"roles":[1,"admin"]})) == {:unsupported, :jsonb_number_text}
+    end
+
+    test "fall back for a number that -> found, once ->> needs its text" do
+      # Postgres: true
+      assert evaluate("(((app.claims() -> 'meta'::text) ->> 'level'::text) = '1'::text)",
+               claims: ~s({"meta":{"level":1}})
+             ) == {:unsupported, :jsonb_number_text}
+    end
+  end
+
+  describe "claims as json" do
+    @email_rls "(((current_setting('app.claims'::text, true))::json ->> 'email'::text) ~~ '%@example.com'::text)"
+
+    test "are read with current_setting(name, true)::json ->>, as with jsonb" do
+      assert evaluate(@email_rls, claims: ~s({"email":"ada@example.com"})) == true
+      assert evaluate(@email_rls, claims: ~s({"email":"ada@example.org"})) == false
+      assert evaluate(@email_rls, claims: ~s({"email":"ada@x.example.com"})) == false
+      assert evaluate(@email_rls, claims: ~s({"email":null})) == nil
+      assert evaluate(@email_rls, claims: ~s({})) == nil
+    end
+
+    test "the last of duplicate keys wins, as with jsonb" do
+      assert evaluate(@email_rls, claims: ~s({"email":"ada@example.org","email":"ada@example.com"})) == true
+    end
+
+    test "fall back where Postgres raises, which for json is at ->> and not at the cast" do
+      # Postgres: json_in accepts the text, then ->> raises untranslatable_character
+      assert evaluate(@email_rls, claims: ~s({"email":"ada@example.com","x":"\\u0000"})) ==
+               {:unsupported, {:raises, :untranslatable_character, "unsupported Unicode escape sequence"}}
+
+      assert evaluate(@email_rls, claims: "") ==
+               {:unsupported, {:raises, :invalid_text_representation, "invalid input syntax for type json"}}
+    end
+
+    test "fall back for a number" do
+      # Postgres: true. json ->> gives a number as written, jsonb ->> normalised
+      assert evaluate("(((current_setting('app.claims'::text, true))::json ->> 'level'::text) = '1'::text)",
+               claims: ~s({"level":1})
+             ) == {:unsupported, :jsonb_number_text}
+    end
   end
 
   describe "NULL" do
@@ -210,9 +337,9 @@ defmodule PolicyEvalTest do
 
     test "a COALESCE with an unsupported argument, even after a non-NULL one" do
       # Postgres raises division_by_zero: the planner folds the constant 1 / 0 before COALESCE
-      # would stop at app.team(). Here 1 / 0 is unsupported because numbers aren't modelled
-      # at all (hence the reason); what the test shows is that COALESCE doesn't skip it.
-      assert {:unsupported, :number_literal} =
+      # would stop at app.team(). Here 1 / 0 is unsupported because no operator on integers is
+      # modelled (hence the reason); what the test shows is that COALESCE doesn't skip it.
+      assert {:unsupported, {:operator, "/", :int4, :int4}} =
                evaluate("(COALESCE(app.team(), ((1 / 0))::text) = 'x'::text)", team: "x")
     end
 

@@ -264,7 +264,7 @@ defmodule RealtimeWeb.RealtimeChannel.RequestOutcomeTest do
         tenant: tenant.external_id
       },
       # `RealtimeWeb.UserSocket.connect/3` gives every socket one
-      private: %{broadcast_bucket: Realtime.TokenBucket.new(100, 1_000)}
+      private: %{broadcast_bucket: Realtime.TokenBucket.per_second(1_000, 100)}
     }
   end
 end

@@ -112,7 +112,8 @@ defmodule Realtime.Telemetry.LoggerTest do
           :telemetry.execute([:phoenix, :endpoint, :stop], %{duration: 1}, %{conn: conn, options: [log: false]})
         end)
 
-      assert log == ""
+      # capture_log also picks up logs from other processes, so only look for this request's line
+      refute log =~ "GET /healthcheck"
     end
   end
 end

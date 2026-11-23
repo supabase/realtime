@@ -1,6 +1,9 @@
 defmodule PolicyEval.Jsonb do
   @moduledoc """
-  The jsonb primitives: `text::jsonb` and `jsonb ->> text`.
+  The jsonb primitives: `text::jsonb`, `jsonb -> text`, `jsonb -> integer`, `jsonb ->> text`,
+  `jsonb ->> integer` and `jsonb ? text`.
+  `PolicyEval.Resolver` binds `text::json` and `json ->> text` to them too, see "json" there for
+  why that is exact.
 
   A jsonb value is `{:jsonb, term}` where `term` is a decoded JSON value:
 
@@ -11,6 +14,10 @@ defmodule PolicyEval.Jsonb do
     * JSON null is `:null`, which is not SQL NULL (`nil`)
     * numbers are `{:number, raw_token}`; jsonb re-normalises numbers (`1e2` becomes `100`) and we
       don't model that, so numbers are only ever carried around, never interpreted
+
+  No primitive here prints a jsonb value. `->` passes on a part of the decoded tree, so a number,
+  an object or an array keeps its form until a primitive needs its text. The only one that does is
+  `->>`, and it is unsupported for those three.
 
   Results follow `PolicyEval.Value`: a value, `nil`, or `{:unsupported, reason}`.
   """
@@ -76,23 +83,94 @@ defmodule PolicyEval.Jsonb do
   `{:unsupported, :jsonb_container_text}`.
   """
   @spec object_field_text(Value.result(), Value.result()) :: Value.result()
-  def object_field_text({:unsupported, _} = unsupported, _key), do: unsupported
-  def object_field_text(_jsonb, {:unsupported, _} = unsupported), do: unsupported
-  def object_field_text(nil, _key), do: nil
-  def object_field_text(_jsonb, nil), do: nil
+  def object_field_text(jsonb, key), do: jsonb |> object_field(key) |> as_text()
 
-  def object_field_text({:jsonb, root}, {:text, key}) when is_map(root) do
+  @doc """
+  `jsonb ->> integer` (`jsonb_array_element_text`, src/backend/utils/adt/jsonfuncs.c). Strict.
+
+  The element that `array_element/2` finds, as text by the rules of `object_field_text/2`. A JSON
+  null gives `nil`, and so does an index outside the array or an object root.
+  """
+  @spec array_element_text(Value.result(), Value.result()) :: Value.result()
+  def array_element_text(jsonb, index), do: jsonb |> array_element(index) |> as_text()
+
+  @doc """
+  `jsonb -> text` (`jsonb_object_field`, src/backend/utils/adt/jsonfuncs.c). Strict.
+
+  The value of the field as jsonb, whatever its type. A JSON null is the jsonb value `null`, which
+  is not SQL NULL. A root that isn't an object and a missing key give `nil`.
+  """
+  @spec object_field(Value.result(), Value.result()) :: Value.result()
+  def object_field({:unsupported, _} = unsupported, _key), do: unsupported
+  def object_field(_jsonb, {:unsupported, _} = unsupported), do: unsupported
+  def object_field(nil, _key), do: nil
+  def object_field(_jsonb, nil), do: nil
+
+  def object_field({:jsonb, root}, {:text, key}) when is_map(root) do
     case Map.fetch(root, key) do
+      {:ok, value} -> {:jsonb, value}
       :error -> nil
-      {:ok, :null} -> nil
-      {:ok, string} when is_binary(string) -> {:text, string}
-      {:ok, bool} when is_boolean(bool) -> {:text, Atom.to_string(bool)}
-      {:ok, {:number, _}} -> {:unsupported, :jsonb_number_text}
-      {:ok, container} when is_map(container) or is_list(container) -> {:unsupported, :jsonb_container_text}
     end
   end
 
-  def object_field_text({:jsonb, _root}, {:text, _key}), do: nil
+  def object_field({:jsonb, _root}, {:text, _key}), do: nil
+
+  @doc """
+  `jsonb -> integer` (`jsonb_array_element`, src/backend/utils/adt/jsonfuncs.c). Strict.
+
+  The element at `index` as jsonb, counted from 0. A negative index counts from the end, so `-1` is
+  the last element. An index outside the array gives `nil`, and so does an object root.
+
+  A scalar root is an array of one element, because jsonb stores a scalar that way and the
+  function only checks for an array: `'"a"'::jsonb -> 0` and `'"a"'::jsonb -> -1` are both `"a"`.
+  """
+  @spec array_element(Value.result(), Value.result()) :: Value.result()
+  def array_element({:unsupported, _} = unsupported, _index), do: unsupported
+  def array_element(_jsonb, {:unsupported, _} = unsupported), do: unsupported
+  def array_element(nil, _index), do: nil
+  def array_element(_jsonb, nil), do: nil
+  def array_element({:jsonb, root}, {:int4, _index}) when is_map(root), do: nil
+  def array_element({:jsonb, root}, {:int4, index}) when is_list(root), do: element(root, index)
+  def array_element({:jsonb, scalar}, {:int4, index}), do: element([scalar], index)
+
+  @doc """
+  `jsonb ? text` (`jsonb_exists`, src/backend/utils/adt/jsonb_op.c). Strict.
+
+  True if `key` is a key of an object root, or a string element of an array root. Only the top
+  level counts. A number, boolean or null element never matches, even when its text is `key`:
+  `'[1]'::jsonb ? '1'` is false.
+
+  A scalar root is an array of one element, as in `array_element/2`. So `'"a"'::jsonb ? 'a'` is
+  true, and any other scalar root gives false.
+  """
+  @spec exists(Value.result(), Value.result()) :: Value.result()
+  def exists({:unsupported, _} = unsupported, _key), do: unsupported
+  def exists(_jsonb, {:unsupported, _} = unsupported), do: unsupported
+  def exists(nil, _key), do: nil
+  def exists(_jsonb, nil), do: nil
+  def exists({:jsonb, root}, {:text, key}) when is_map(root), do: Map.has_key?(root, key)
+  def exists({:jsonb, root}, {:text, key}) when is_list(root), do: key in root
+  def exists({:jsonb, scalar}, {:text, key}), do: scalar == key
+
+  # Enum.at/2 counts a negative index from the end and gives nil outside the list, as
+  # jsonb_array_element does. nil can't be an element, because JSON null is :null.
+  defp element(elements, index) do
+    case Enum.at(elements, index) do
+      nil -> nil
+      value -> {:jsonb, value}
+    end
+  end
+
+  # JsonbValueAsText for the value that `->` found. A JSON null is SQL NULL here.
+  defp as_text({:jsonb, :null}), do: nil
+  defp as_text({:jsonb, string}) when is_binary(string), do: {:text, string}
+  defp as_text({:jsonb, bool}) when is_boolean(bool), do: {:text, Atom.to_string(bool)}
+  defp as_text({:jsonb, {:number, _}}), do: {:unsupported, :jsonb_number_text}
+
+  defp as_text({:jsonb, container}) when is_map(container) or is_list(container),
+    do: {:unsupported, :jsonb_container_text}
+
+  defp as_text(nil_or_unsupported), do: nil_or_unsupported
 
   ## Decoding
 

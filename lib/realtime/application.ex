@@ -74,7 +74,7 @@ defmodule Realtime.Application do
     set_persist_storage(RealtimeWeb.RealtimeChannel, :realtime, :channel_error_backoff_ms)
 
     :syn.set_event_handler(Realtime.SynHandler)
-    :ok = :syn.add_node_to_scopes([RegionNodes, Realtime.Tenants.Connect])
+    :ok = :syn.add_node_to_scopes([RegionNodes, DrainingNodes, Realtime.Tenants.Connect])
 
     region = Realtime.Nodes.region()
     broadcast_pool_size = Application.get_env(:realtime, :broadcast_pool_size, 10)
@@ -202,7 +202,8 @@ defmodule Realtime.Application do
          pool_size: presence_pool_size,
          broadcast_period: presence_broadcast_period,
          permdown_period: presence_permdown_period},
-        {Realtime.Presence.Rollcall, Application.get_env(:realtime, :rollcall, [])}
+        {Realtime.Presence.Rollcall, Application.get_env(:realtime, :rollcall, [])},
+        Realtime.Presence.Comparison.Scheduler
       ] ++
         extensions_supervisors() ++
         janitor_tasks() ++ latency_pinger() ++ Realtime.MetricsPusher.child_specs() ++ zta_children
@@ -215,6 +216,24 @@ defmodule Realtime.Application do
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: Realtime.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  # OTP calls prep_stop/1 before it stops the supervision tree, in the same process that ran
+  # start/2. That process lives until the tree is gone, so the draining mark stays up for the
+  # whole shutdown. The sleep gives the mark time to reach every node before this node stops
+  # the tenant processes that other nodes would then restart.
+  def prep_stop(state) do
+    case Realtime.Nodes.mark_draining(self()) do
+      :ok ->
+        settle_ms = Application.fetch_env!(:realtime, :node_drain_settle_ms)
+        Logger.info("Marked node as draining, waiting #{settle_ms}ms before shutdown continues")
+        Process.sleep(settle_ms)
+
+      {:error, reason} ->
+        Logger.error("Unable to mark node as draining: #{inspect(reason)}")
+    end
+
+    state
   end
 
   defp extensions_supervisors do

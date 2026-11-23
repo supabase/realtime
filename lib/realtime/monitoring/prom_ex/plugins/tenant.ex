@@ -215,20 +215,6 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           description: "Sum of Realtime Channel joins.",
           tags: [:tenant]
         ),
-        counter(
-          [:realtime, :channel, :node_join_budget_exceeded],
-          event_name: [:realtime, :channel, :node_join_budget_exceeded],
-          measurement: :count,
-          description: "Count of Realtime Channel joins over the tenant's join budget on the node",
-          tags: [:tenant]
-        ),
-        counter(
-          [:realtime, :channel, :socket_broadcast_limit_exceeded],
-          event_name: [:realtime, :channel, :socket_broadcast_limit_exceeded],
-          measurement: :count,
-          description: "Count of Realtime Channel broadcasts over their socket's broadcast limit",
-          tags: [:tenant]
-        ),
         sum(
           [:realtime, :channel, :input_bytes],
           event_name: [:realtime, :channel, :input_bytes],
@@ -281,7 +267,7 @@ defmodule Realtime.PromEx.Plugins.Tenant do
         ),
         distribution(
           [:realtime, :tenants, :replay],
-          event_name: [:realtime, :tenants, :replay],
+          event_name: [:realtime, :broadcast, :replay],
           measurement: :latency,
           unit: :millisecond,
           description: "Latency of broadcast replay",

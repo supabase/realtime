@@ -4,7 +4,6 @@ defmodule Rollcall.Tracker.PeerTest do
   import Rollcall.PeerHelpers
   import Rollcall.Tracker.Messages, only: [diff: 5, request: 1, snapshot: 3, stamp: 2, wire_entry: 4]
 
-  alias Rollcall.Tracker.Entry
   alias Rollcall.Tracker.Peer
 
   setup do
@@ -23,12 +22,6 @@ defmodule Rollcall.Tracker.PeerTest do
       assert Peer.origin(peer) == origin
     end
 
-    test "a snapshot sets the pid of each entry to the origin", %{origin: origin} do
-      {peer, _changes} = Peer.new(snapshot(origin, stamp(1, 3), entries(["a", "b"])))
-
-      assert origins(peer) == [origin, origin]
-    end
-
     test "a diff gives an empty replica that is behind", %{origin: origin} do
       {peer, changes} = Peer.new(diff(origin, stamp(1, 4), 3, entries(["a"]), []))
 
@@ -41,49 +34,84 @@ defmodule Rollcall.Tracker.PeerTest do
   end
 
   describe "the payload of an entry" do
-    test "a snapshot keeps the partition, key and meta", %{origin: origin} do
+    test "a snapshot holds the id of each entry and returns the partition, key and meta in the joins",
+         %{origin: origin} do
       wire = [
-        wire_entry("partition_1", "key_1", "a", %{a: 1}),
-        wire_entry("partition_2", "key_1", "b", %{b: 2}),
-        wire_entry("partition_1", "key_2", "c", %{})
+        wire_entry("partition_1", "a", "key_1", %{a: 1}),
+        wire_entry("partition_2", "b", "key_1", %{b: 2}),
+        wire_entry("partition_1", "c", "key_2", %{})
       ]
 
-      {peer, _changes} = Peer.new(snapshot(origin, stamp(1, 3), wire))
+      {peer, changes} = Peer.new(snapshot(origin, stamp(1, 3), wire))
 
-      assert sorted(Peer.entries(peer)) ==
-               [
-                 Entry.new(origin, "partition_1", "key_1", %{a: 1}, "a"),
-                 Entry.new(origin, "partition_2", "key_1", %{b: 2}, "b"),
-                 Entry.new(origin, "partition_1", "key_2", %{}, "c")
-               ]
+      assert Enum.sort(Peer.entries(peer)) == [{"partition_1", "a"}, {"partition_1", "c"}, {"partition_2", "b"}]
+
+      assert Enum.sort(changes.joins) == [
+               {"partition_1", "a", "key_1", %{a: 1}},
+               {"partition_1", "c", "key_2", %{}},
+               {"partition_2", "b", "key_1", %{b: 2}}
+             ]
     end
 
-    test "a diff join keeps the partition, key and meta", %{origin: origin} do
+    test "a diff join returns the partition, key and meta in the joins", %{origin: origin} do
       peer = snapshot_peer(origin, 1, 3, [])
-      joined = wire_entry("partition_2", "key_1", "b", %{b: 2})
+      joined = wire_entry("partition_2", "b", "key_1", %{b: 2})
 
-      {peer, changes} = Peer.apply(peer, diff(origin, stamp(1, 4), 3, [joined], []))
+      {_peer, changes} = Peer.apply(peer, diff(origin, stamp(1, 4), 3, [joined], []))
 
-      expected = Entry.new(origin, "partition_2", "key_1", %{b: 2}, "b")
-      assert Enum.to_list(Peer.entries(peer)) == [expected]
-      assert changes.joins == [expected]
+      assert changes.joins == [{"partition_2", "b", "key_1", %{b: 2}}]
     end
 
     test "a leave removes the entry with its ref and keeps the entry with the same key",
          %{origin: origin} do
-      first = wire_entry("partition", "key", "a", %{a: 1})
-      second = wire_entry("partition", "key", "b", %{a: 2})
+      first = wire_entry("partition", "a", "key", %{a: 1})
+      second = wire_entry("partition", "b", "key", %{a: 2})
       {peer, _changes} = Peer.new(snapshot(origin, stamp(1, 3), [first, second]))
 
       {peer, changes} = Peer.apply(peer, diff(origin, stamp(1, 4), 3, [], ["a"]))
 
-      kept = Entry.new(origin, "partition", "key", %{a: 2}, "b")
-      assert Enum.to_list(Peer.entries(peer)) == [kept]
-      assert changes.leaves == [Entry.new(origin, "partition", "key", %{a: 1}, "a")]
+      assert Peer.entries(peer) == [{"partition", "b"}]
+      assert changes.leaves == [{"partition", "a"}]
     end
 
     test "a wire entry of the wrong shape is rejected", %{origin: origin} do
       assert catch_error(Peer.new(snapshot(origin, stamp(1, 3), [{"partition", "key", "a"}])))
+    end
+  end
+
+  # A diff names a leave by its ref. The replica gives the partition. Each path
+  # that returns leaves builds the key from the replica, so each path has a test.
+  describe "the partition of a leave" do
+    setup %{origin: origin} do
+      wire = [
+        wire_entry("p1", "a", "k1", %{}),
+        wire_entry("p2", "b", "k2", %{}),
+        wire_entry("p1", "c", "k3", %{})
+      ]
+
+      {peer, _changes} = Peer.new(snapshot(origin, stamp(1, 3), wire))
+
+      %{peer: peer}
+    end
+
+    test "a diff leave takes the partition from the replica", %{origin: origin, peer: peer} do
+      {_peer, changes} = Peer.apply(peer, diff(origin, stamp(1, 4), 3, [], ["b", "c"]))
+
+      assert leave_ids(changes) == [{"p1", "c"}, {"p2", "b"}]
+    end
+
+    test "a snapshot that drops entries returns their partitions", %{origin: origin, peer: peer} do
+      kept = wire_entry("p1", "a", "k1", %{})
+
+      {_peer, changes} = Peer.apply(peer, snapshot(origin, stamp(1, 4), [kept]))
+
+      assert leave_ids(changes) == [{"p1", "c"}, {"p2", "b"}]
+    end
+
+    test "a purge returns the partition of every entry", %{peer: peer} do
+      assert {:purge, changes} = Peer.tick(peer, 1)
+
+      assert leave_ids(changes) == [{"p1", "a"}, {"p1", "c"}, {"p2", "b"}]
     end
   end
 
@@ -160,14 +188,6 @@ defmodule Rollcall.Tracker.PeerTest do
       assert mark_tuple(peer) == {1, 5}
       assert joins(changes) == ["c"]
       assert leaves(changes) == ["a"]
-    end
-
-    test "sets the pid of a joined entry to the origin", %{origin: origin} do
-      peer = snapshot_peer(origin, 1, 3, [])
-
-      {peer, _changes} = Peer.apply(peer, diff(origin, stamp(1, 4), 3, entries(["a"]), []))
-
-      assert origins(peer) == [origin]
     end
 
     test "an entry in the joins and the leaves stays", %{origin: origin} do
@@ -288,7 +308,6 @@ defmodule Rollcall.Tracker.PeerTest do
       {peer, _changes} = Peer.apply(peer, snapshot(other_origin, stamp(2, 0), entries(["b"])))
 
       assert Peer.origin(peer) == other_origin
-      assert origins(peer) == [other_origin]
     end
 
     test "a diff that applies sets the origin", %{origin: origin, other_origin: other_origin} do
@@ -454,10 +473,8 @@ defmodule Rollcall.Tracker.PeerTest do
   end
 
   defp entries(refs) do
-    Enum.map(refs, &wire_entry("partition", "key", &1, %{}))
+    Enum.map(refs, &wire_entry("partition", &1, "key", %{}))
   end
-
-  defp sorted(entries), do: Enum.sort_by(entries, & &1.ref)
 
   defp snapshot_peer(origin, incarnation, version, refs) do
     {peer, _changes} = Peer.new(snapshot(origin, stamp(incarnation, version), entries(refs)))
@@ -476,7 +493,6 @@ defmodule Rollcall.Tracker.PeerTest do
   defp observe(peer) do
     %{
       refs: refs(peer),
-      origins: origins(peer),
       behind: Peer.behind?(peer),
       mark: mark_tuple(peer),
       origin: Peer.origin(peer)

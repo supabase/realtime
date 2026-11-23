@@ -79,6 +79,86 @@ defmodule Realtime.Tenants.PolicyEvalDifferentialTest do
            "fell back: #{inspect(Enum.reject(results, &(&1.class == :match)))}"
   end
 
+  # Not only "no mismatch": service_role, as the tenant database sets it up, is decided and allowed
+  test "service_role bypasses RLS", context do
+    results = run(context, PolicyEvalScenarios.service_role_scenarios())
+
+    assert results != []
+
+    assert Enum.all?(results, &(&1.class == :match and &1.postgres == {:ok, true})),
+           "not decided or not allowed: #{inspect(Enum.reject(results, &(&1.class == :match and &1.postgres == {:ok, true})))}"
+  end
+
+  for flavor <- [:legacy, :supabase_auth] do
+    test "notify channels, #{PolicyEvalScenarios.flavor_label(flavor)} auth functions", context do
+      results = run(context, PolicyEvalScenarios.notify_channel_scenarios(:decided, unquote(flavor)))
+
+      assert results != []
+
+      assert Enum.all?(results, &(&1.class == :match)),
+             "fell back: #{inspect(Enum.reject(results, &(&1.class == :match)))}"
+    end
+
+    test "notify channels with a sub that isn't a uuid, #{PolicyEvalScenarios.flavor_label(flavor)} auth functions",
+         context do
+      run(context, PolicyEvalScenarios.notify_channel_scenarios(:other, unquote(flavor)))
+    end
+  end
+
+  test "organization channels, a prefix from a text claim", context do
+    results = run(context, PolicyEvalScenarios.org_channel_scenarios())
+
+    assert results != []
+
+    assert Enum.all?(results, &(&1.class == :match)),
+           "fell back: #{inspect(Enum.reject(results, &(&1.class == :match)))}"
+  end
+
+  for flavor <- [:legacy, :supabase_auth] do
+    test "draft channels, NOT starts_with, #{PolicyEvalScenarios.flavor_label(flavor)} auth functions", context do
+      results = run(context, PolicyEvalScenarios.draft_channel_scenarios(unquote(flavor)))
+
+      assert results != []
+
+      assert Enum.all?(results, &(&1.class == :match)),
+             "fell back: #{inspect(Enum.reject(results, &(&1.class == :match)))}"
+    end
+  end
+
+  for flavor <- [:legacy, :supabase_auth] do
+    test "inbox channels, auth.email(), #{PolicyEvalScenarios.flavor_label(flavor)} auth functions", context do
+      results = run(context, PolicyEvalScenarios.email_channel_scenarios(unquote(flavor)))
+
+      assert results != []
+
+      assert Enum.all?(results, &(&1.class == :match)),
+             "fell back: #{inspect(Enum.reject(results, &(&1.class == :match)))}"
+    end
+  end
+
+  test "nested claims", context do
+    results = run(context, PolicyEvalScenarios.nested_claim_scenarios(:well_formed))
+
+    assert results != []
+
+    assert Enum.all?(results, &(&1.class == :match)),
+           "fell back: #{inspect(Enum.reject(results, &(&1.class == :match)))}"
+  end
+
+  test "nested claims of other shapes", context do
+    run(context, PolicyEvalScenarios.nested_claim_scenarios(:other))
+  end
+
+  # Not only "no mismatch": current_setting cast to json is decided by the library
+  test "json claim policies", context do
+    results = run(context, PolicyEvalScenarios.json_claim_scenarios())
+
+    assert results != []
+
+    assert Enum.all?(results, &(&1.class == :match)),
+           "fell back: #{inspect(Enum.reject(results, &(&1.class == :match)))}"
+  end
+
   test "what the snapshot has to rule out", %{db_conn: db_conn} = context do
     %{rows: [[version_num]]} = Postgrex.query!(db_conn, "SELECT current_setting('server_version_num')::int", [])
     run(context, PolicyEvalScenarios.snapshot_scenarios(version_num))

@@ -19,7 +19,7 @@ defmodule Realtime.Presence.RollcallTransport do
 
     Phoenix.PubSub.subscribe(pubsub, topic_for(scope))
 
-    {:ok, %{scope: scope, pubsub: pubsub}}
+    {:ok, %{scope: scope, pubsub: pubsub, start_time: System.system_time(:millisecond)}}
   end
 
   @impl true
@@ -34,18 +34,18 @@ defmodule Realtime.Presence.RollcallTransport do
   end
 
   @impl true
-  def publish(%{scope: scope, pubsub: pubsub}, partition, diff) do
+  def publish(%{scope: scope, pubsub: pubsub} = state, partition, diff) do
     case Realtime.Presence.mode(scope) do
       :rollcall ->
         Phoenix.PubSub.local_broadcast(
           pubsub,
           partition,
-          broadcast_message(partition, diff),
+          broadcast_message(partition, diff, Map.get(state, :start_time)),
           RealtimeWeb.RealtimeChannel.MessageDispatcher
         )
 
       :shadow ->
-        {_msg, metrics_envelopes} = Metrics.strip_diff(broadcast_message(partition, diff))
+        {_msg, metrics_envelopes} = Metrics.strip_diff(broadcast_message(partition, diff, Map.get(state, :start_time)))
 
         context = Metrics.context(scope, :transport)
         Metrics.record(metrics_envelopes, context)
@@ -68,11 +68,25 @@ defmodule Realtime.Presence.RollcallTransport do
 
   defp topic_for(scope), do: "rollcall:" <> scope
 
-  defp broadcast_message(partition, diff) do
+  defp broadcast_message(partition, diff, start_time) do
     %Phoenix.Socket.Broadcast{
       topic: partition,
       event: "presence_diff",
-      payload: Realtime.Presence.Encoder.diff(diff)
+      payload:
+        diff
+        |> strip_expired_stamps(start_time)
+        |> Realtime.Presence.Encoder.diff()
     }
+  end
+
+  defp strip_expired_stamps({joins, leaves}, start_time) do
+    {
+      Enum.map(joins, &strip_expired_stamp(&1, start_time)),
+      Enum.map(leaves, &strip_expired_stamp(&1, start_time))
+    }
+  end
+
+  defp strip_expired_stamp({ref, key, meta}, start_time) do
+    {ref, key, Metrics.strip_expired_stamp(meta, start_time)}
   end
 end

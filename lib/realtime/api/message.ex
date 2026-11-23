@@ -13,7 +13,7 @@ defmodule Realtime.Api.Message do
   schema "messages" do
     field(:topic, :string)
     field(:extension, Ecto.Enum, values: [:broadcast, :presence, :persistence])
-    field(:payload, :map)
+    field(:payload, Realtime.Api.JsonPayload)
     field(:binary_payload, :binary)
     field(:event, :string)
     field(:private, :boolean)

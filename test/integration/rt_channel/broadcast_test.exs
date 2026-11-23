@@ -69,6 +69,36 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
                      1000
     end
 
+    test "the broadcast API takes the topic without the realtime: prefix", %{tenant: tenant, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:room1"
+      WebsocketClient.join(socket, topic, %{config: %{broadcast: %{self: false}, private: false}})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+
+      api_broadcast = fn api_topic, payload ->
+        now = System.system_time(:second)
+        token = generate_jwt_token(tenant, %{role: "test", iat: now, exp: now + 100})
+
+        build_conn()
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
+        |> post(~p"/api/broadcast", %{"messages" => [%{"topic" => api_topic, "event" => "e", "payload" => payload}]})
+      end
+
+      assert api_broadcast.("realtime:room1", %{"n" => 1}).status == 202
+      refute_receive %Message{event: "broadcast"}, 500
+
+      assert api_broadcast.("room1", %{"n" => 2}).status == 202
+
+      assert_receive %Message{
+                       event: "broadcast",
+                       topic: ^topic,
+                       payload: %{"event" => "e", "payload" => %{"n" => 2}, "type" => "broadcast"}
+                     },
+                     500
+    end
+
     test "broadcast to another tenant does not get mixed up", %{tenant: tenant, serializer: serializer} do
       other_tenant = TestTenantDb.checkout_tenant(run_migrations: true)
 
@@ -683,6 +713,47 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
       assert replayed == [1, 2, 3, 4, 5]
     end
 
+    @tag policies: [:authenticated_read_broadcast_and_presence]
+    test "replays a payload that isn't an object", %{
+      tenant: tenant,
+      topic: topic,
+      db_conn: db_conn,
+      serializer: serializer
+    } do
+      values = [[1, 2, 3], "hello", 42, true, nil, false, 0, "", [], 1.5]
+
+      for value <- values do
+        Postgrex.query!(db_conn, "SELECT realtime.send($1::text::jsonb, 'event', $2::text, TRUE::bool)", [
+          Jason.encode!(value),
+          topic
+        ])
+      end
+
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, topic, %{
+        config: %{private: true, broadcast: %{replay: %{limit: length(values), since: 0}}}
+      })
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+
+      replayed =
+        for _ <- values do
+          assert_receive %Message{
+                           event: "broadcast",
+                           topic: ^topic,
+                           payload: %{"payload" => payload, "meta" => %{"id" => id, "replayed" => true}}
+                         },
+                         1000
+
+          assert is_binary(id)
+          payload
+        end
+
+      assert replayed == values
+    end
+
     @tag policies: [:authenticated_read_broadcast_and_presence], serializer: RealtimeWeb.Socket.V2Serializer
     test "replays binary messages as binary frames", %{
       tenant: tenant,
@@ -1146,6 +1217,42 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
                        topic: ^full_topic
                      },
                      1000
+    end
+
+    test "broadcast event when function 'send' is called with a payload that isn't an object", %{
+      tenant: tenant,
+      topic: topic,
+      db_conn: db_conn,
+      serializer: serializer
+    } do
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      full_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, full_topic, %{config: %{broadcast: %{self: true}, private: false}})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
+      assert ReplicationConnection.ready?(tenant.external_id)
+
+      for value <- [[1, 2, 3], "hello", 42, true, nil, false, 0, "", [], 1.5] do
+        Postgrex.query!(db_conn, "SELECT realtime.send($1::text::jsonb, 'event', $2, FALSE)", [
+          Jason.encode!(value),
+          topic
+        ])
+
+        assert_receive %Message{
+                         event: "broadcast",
+                         payload: %{
+                           "event" => "event",
+                           "payload" => ^value,
+                           "type" => "broadcast",
+                           "meta" => %{"id" => id}
+                         },
+                         topic: ^full_topic
+                       },
+                       1000
+
+        assert is_binary(id)
+      end
     end
   end
 

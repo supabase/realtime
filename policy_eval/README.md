@@ -140,9 +140,11 @@ The profile and the env decide which roles, columns, settings and functions a po
   operation that names any other role makes the decision a fallback.
 - Callers with a role in the `roles` of the profile. The env gives the role as the setting `role`.
   Every other role is a fallback.
-- If RLS is off or forced, or the role has `BYPASSRLS`, the decision is a fallback. If the role
-  does not have the `SELECT` grant (reads) or the `INSERT` grant (writes), the decision is also a
-  fallback.
+- If RLS is off or forced, the decision is a fallback. If the role does not have the `SELECT`
+  grant (reads) or the `INSERT` grant (writes), the decision is also a fallback.
+- A role that bypasses RLS (`BYPASSRLS`, or a superuser) and has the grant is allowed. No policy
+  is evaluated: Postgres doesn't apply them to it, see
+  [Row Security Policies](https://www.postgresql.org/docs/current/ddl-rowsecurity.html).
 - A write is a plain `INSERT`, with no `RETURNING`. The `SELECT` grant and the `SELECT` policies
   do not change it, see `PolicyEval.PolicySet`.
 - Expressions up to 4 KB of `pg_get_expr` text.
@@ -160,23 +162,43 @@ The profile and the env decide which roles, columns, settings and functions a po
 
 - `AND`, `OR`, `NOT`, `IS NULL`, `IS NOT NULL`, with three-valued logic. An unsupported part
   anywhere in an `AND` or `OR` makes it a fallback, even `true OR <unsupported>`.
-- `=` and `<>` on text and on uuid.
+- `=` and `<>` on text, on uuid and on boolean.
 - `||` on two texts, and on a text and a uuid.
 - `IN (...)` and `NOT IN (...)` over text. Postgres prints them as `= ANY (ARRAY[...])` and
   `<> ALL (ARRAY[...])`.
 - `~` and `~*` with a literal pattern that has no regex metacharacters
   (`| * + ? ( ) . ^ $ \ [ {`). For `~*`, the text and the pattern must be ASCII.
-- `LIKE` and `NOT LIKE` on text, with `%` and `_`. A pattern with `\` is a fallback. A `\` at the
-  end raises an error, but only if matching gets that far, so whether it raises depends on the
-  text.
-- `jsonb ->> text` where the value is a string or a boolean. A missing key or JSON `null` gives
-  NULL. Numbers, objects and arrays are a fallback.
+- `LIKE` and `NOT LIKE` on text, with `%` and `_`. A pattern with `\` is a fallback. If matching
+  gets as far as a `\` at the end of the pattern, Postgres raises an error. So the text decides
+  whether it raises.
+- `starts_with(text, text)` and its operator `text ^@ text`. They compare bytes, like `LIKE`.
+- `split_part(text, text, integer)` with an integer literal as the field, for example
+  `split_part((select app.team()), ':', 2)`. The delimiter is found by its bytes, which in
+  UTF-8 gives the same fields as a search by characters. A negative field counts from the end.
+  Field `0` makes Postgres raise an error, so it is a fallback.
+- `jsonb ->> text` and `jsonb ->> integer` where the value is a string or a boolean. A missing
+  key or JSON `null` gives NULL. Numbers, objects and arrays are a fallback, because Postgres
+  prints them in a normalized form that the library does not model. `->> integer` finds the
+  element by the rules of `-> integer` below.
+- `json ->> text` where the value is a string or a boolean. For these values, `json` and `jsonb`
+  give the same results, see "json" in `PolicyEval.Resolver`.
+- `jsonb -> text` and `jsonb -> integer`, for example `app.claims() -> 'app_metadata' ->> 'team'`.
+  The result is jsonb of any type. A JSON `null` stays the jsonb `null`, which is not NULL. A
+  missing key, a root of another type, or an index outside the array gives NULL. A negative index
+  counts from the end. On a scalar, `-> 0` and `-> -1` give the scalar, as in Postgres. The library
+  never prints the result of `->`. If `->>` then reads a number, an object or an array, the result
+  is a fallback.
+- `jsonb ? text`, for example `(app.claims() -> 'channels') ? 'room:1'`. The result is true for a
+  key of an object, or for a string element of an array. Only the top level counts. A number, a
+  boolean or a `null` element never matches. A string scalar matches its own text, as in Postgres.
 - `COALESCE` over arguments of one type, and `NULLIF` on text. An unsupported argument anywhere
   makes `COALESCE` a fallback, even after a non-NULL argument. The reason is that Postgres can
   evaluate a later argument while it plans the query. For an example, see the fallback body of
   `app.user_id()` in "The example of the tests".
-- Casts from text to uuid, jsonb and boolean, and from uuid to text. Literals of those types,
+- Casts from text to uuid, jsonb, json and boolean, and from uuid to text. Literals of those types,
   `true`, `false` and typed `NULL`s.
+- Integer literals, as the index of `jsonb -> integer` and `jsonb ->> integer`, and as the field
+  of `split_part`. Nothing else takes an integer.
 
 ### Values
 
@@ -185,6 +207,9 @@ The profile and the env decide which roles, columns, settings and functions a po
 - boolean input from text: ASCII only.
 - jsonb input: up to 100 levels deep. For duplicate keys, the last value stays. `\u0000` is a
   `{:raises, ...}` fallback.
+- json input: the same as jsonb input. Postgres accepts `\u0000` and a lone surrogate in a json
+  value, but `json ->> text` raises on them. So for `->>`, the library raises where Postgres
+  raises. If no `->>` reads the json value, the library falls back and Postgres gives a value.
 - Text compares byte by byte. That assumes a UTF-8 database with a deterministic default collation.
   Any `COLLATE` is a fallback.
 
@@ -194,8 +219,9 @@ These are examples of what is not supported. Each one is a fallback:
 
 - subqueries with `FROM`, `EXISTS` and `CASE`
 - `IS TRUE` and similar tests, `ILIKE`, `LIKE` with an escape or `ESCAPE`, and `!~`
-- the jsonb operators `->`, `?` and `@>`
-- number literals, and casts to `integer`, `numeric` or `json`
+- the jsonb operators `?|`, `?&` and `@>`, and all json operators other than `->>`
+- number literals that are not integers, operators on integers, casts to `integer` or `numeric`,
+  and casts from `json`
 - columns that are not in the profile
 - functions that the profile does not know, for example `lower()` and `now()`
 
@@ -410,11 +436,11 @@ the database, the caller must rule them out or fall back:
 - Evaluate more of SQL, driven by what real policies use. The fallback reasons that a caller
   records show which unsupported constructs cost coverage. So they pick what to add next, and a
   differential test against Postgres makes sure that each addition is correct. Candidates:
-  - numbers: integer literals, comparisons (`<`, `>`, ...) and casts like
+  - numbers: comparisons (`<`, `>`, ...) and casts like
     `(claims ->> 'level')::integer`. These are simple, but rare in the policies seen so far. JSON
     numbers read with `->>` and `numeric` need more work, because Postgres normalizes how they
     print (`1e2` becomes `100`, `1.50` keeps its scale).
-  - more of jsonb: `->`, `?`, `@>`
+  - more of jsonb: `?|`, `?&`, `@>`
   - `IS TRUE` and similar tests, `lower()`
   - `ILIKE`. Unlike `~*`, Postgres folds its case with the collation (`lower()`), even for ASCII
     letters, so it depends on the locale of the database. A Turkish locale folds `I` to `ı`.

@@ -9,6 +9,7 @@ api_jwt_secret =
 api_token_blocklist = Env.get_list("API_TOKEN_BLOCKLIST", [])
 app_name = System.get_env("APP_NAME", "")
 broadcast_pool_size = Env.get_integer("BROADCAST_POOL_SIZE", 10)
+broadcast_replay_max_messages = Env.get_integer("BROADCAST_REPLAY_MAX_MESSAGES", 200)
 channel_error_backoff_ms = Env.get_integer("CHANNEL_ERROR_BACKOFF_MS", to_timeout(second: 5))
 client_broadcasts_burst = Env.get_integer("CLIENT_BROADCASTS_BURST", 1_000)
 client_broadcasts_per_second = Env.get_integer("CLIENT_BROADCASTS_PER_SECOND", 100)
@@ -180,6 +181,9 @@ muster_scope_shards = Env.get_integer("MUSTER_SCOPE_SHARDS", 5)
 # SIGTERM grace period must exceed timeout + settle + the rest of shutdown.
 muster_drain_timeout_ms = Env.get_integer("MUSTER_DRAIN_TIMEOUT_MS", :timer.seconds(10))
 muster_drain_settle_ms = Env.get_integer("MUSTER_DRAIN_SETTLE_MS", 7_500)
+# How long shutdown waits after it marks this node as draining (see Realtime.Nodes.mark_draining/1),
+# so every node sees the mark before this node stops its tenant processes. Adds to shutdown time.
+node_drain_settle_ms = Env.get_integer("NODE_DRAIN_SETTLE_MS", :timer.seconds(1))
 websocket_max_heap_size = div(Env.get_integer("WEBSOCKET_MAX_HEAP_SIZE", 50_000_000), :erlang.system_info(:wordsize))
 
 cluster_strategies = Env.get_binary("CLUSTER_STRATEGIES", "POSTGRES")
@@ -213,6 +217,10 @@ end
 
 if client_broadcasts_per_second < 1 or client_broadcasts_burst < 1 do
   raise "CLIENT_BROADCASTS_PER_SECOND and CLIENT_BROADCASTS_BURST must be positive integers"
+end
+
+if broadcast_replay_max_messages < 1 do
+  raise "BROADCAST_REPLAY_MAX_MESSAGES must be a positive integer"
 end
 
 if db_enc_key_gcm && byte_size(db_enc_key_gcm) != 32,
@@ -270,6 +278,7 @@ config :realtime,
   no_channel_timeout_in_ms: no_channel_timeout_in_ms,
   platform: platform,
   broadcast_pool_size: broadcast_pool_size,
+  broadcast_replay_max_messages: broadcast_replay_max_messages,
   presence_pool_size: presence_pool_size,
   presence_broadcast_period: presence_broadcast_period_in_ms,
   presence_permdown_period: presence_permdown_period_in_ms,
@@ -476,7 +485,8 @@ if config_env() != :test do
     client_join_rate_limit: [per_second: client_joins_per_second],
     client_broadcast_rate_limit: [per_second: client_broadcasts_per_second, burst: client_broadcasts_burst],
     node_join_budget_floor: node_join_budget_floor,
-    node_join_budget_burst_seconds: node_join_budget_burst_seconds
+    node_join_budget_burst_seconds: node_join_budget_burst_seconds,
+    node_drain_settle_ms: node_drain_settle_ms
 end
 
 # Setup Production

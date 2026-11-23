@@ -14,8 +14,8 @@ BEGIN
   BEGIN
     generated_id := gen_random_uuid();
 
-    -- Check if payload has an 'id' key, if not, add the generated UUID
-    IF payload ? 'id' THEN
+    -- Add the generated UUID as 'id' to object payloads that don't have one
+    IF jsonb_typeof(payload) <> 'object' OR payload ? 'id' THEN
       final_payload := payload;
     ELSE
       final_payload := jsonb_set(payload, '{id}', to_jsonb(generated_id));
