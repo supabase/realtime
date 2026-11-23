@@ -13,9 +13,10 @@ defmodule Rollcall.Tracker.Peer do
 
   ## Fields
 
-    * `replica` - the entries of the peer node, by ref. Each entry has the origin
-      as its pid, because the pid of a remote process has no use on this node.
-      The ref is the identity.
+    * `replica` - the partition of each entry of the peer node, by ref. The ref
+      is the identity. The replica holds no key and no meta. The view holds them.
+      A diff names a leave by its ref. The replica gives the partition for the
+      id of the leave.
     * `mark` - the stamp of the message that gave the replica. It is `nil` until
       the first snapshot. A diff cannot set it on an empty replica, because the
       mark says that the replica is the state of the peer at that stamp.
@@ -39,11 +40,11 @@ defmodule Rollcall.Tracker.Peer do
   set the flag. The replica is still short of the peer.
   """
   alias Rollcall.Tracker.Changes
-  alias Rollcall.Tracker.Entry
   alias Rollcall.Tracker.Messages
+  alias Rollcall.Tracker.View
 
-  @typedoc "The entries that a peer holds, by ref."
-  @type replica :: %{Rollcall.ref() => Entry.t()}
+  @typedoc "The partition of each entry that the peer holds, by ref."
+  @type replica :: %{Rollcall.ref() => Rollcall.partition()}
 
   @typedoc "The replication state of one peer node."
   @type t :: %__MODULE__{
@@ -109,7 +110,7 @@ defmodule Rollcall.Tracker.Peer do
   @spec handle_snapshot(t(), pid(), Messages.stamp(), [Messages.wire_entry()]) :: {t(), Changes.t()}
   defp handle_snapshot(%__MODULE__{} = peer, origin, stamp, entries) do
     if newer?(stamp, peer.mark) do
-      {peer, changes} = apply_snapshot(peer, origin, entries)
+      {peer, changes} = apply_snapshot(peer, entries)
 
       peer = %{peer | mark: stamp, behind: false}
 
@@ -130,7 +131,7 @@ defmodule Rollcall.Tracker.Peer do
   defp handle_diff(%__MODULE__{} = peer, origin, stamp, from, joins, leaves) do
     case diff_status(stamp, from, peer.mark) do
       :applicable ->
-        {peer, changes} = apply_diff(peer, origin, joins, leaves)
+        {peer, changes} = apply_diff(peer, joins, leaves)
 
         {put_origin(%{peer | mark: stamp}, origin, stamp), changes}
 
@@ -145,9 +146,9 @@ defmodule Rollcall.Tracker.Peer do
   @spec handle_request(t()) :: {t(), Changes.t()}
   defp handle_request(%__MODULE__{} = peer), do: {peer, Changes.new()}
 
-  @doc "Returns the entries in the replica."
-  @spec entries(t()) :: [Entry.t()]
-  def entries(%__MODULE__{replica: replica}), do: Map.values(replica)
+  @doc "Returns the ids of the entries in the replica. The order is not defined."
+  @spec entries(t()) :: [View.id()]
+  def entries(%__MODULE__{replica: replica}), do: to_view_ids(replica)
 
   @doc "Returns true when the peer is holds no entries"
   @spec empty?(t()) :: boolean()
@@ -186,7 +187,7 @@ defmodule Rollcall.Tracker.Peer do
     if new_ticks < threshold do
       {:keep, %{peer | silent_ticks: new_ticks}}
     else
-      {:purge, Changes.new([], peer.replica |> Map.values() |> Enum.map(&to_id/1))}
+      {:purge, Changes.new([], to_view_ids(peer.replica))}
     end
   end
 
@@ -201,49 +202,39 @@ defmodule Rollcall.Tracker.Peer do
 
   defp put_origin(%__MODULE__{} = peer, _origin, _stamp), do: peer
 
-  @spec apply_snapshot(t(), pid(), [Messages.wire_entry()]) :: {t(), Changes.t()}
-  defp apply_snapshot(%__MODULE__{} = peer, origin, entries) do
-    old = peer.replica
-
-    new = wire_entries_to_entries(entries, origin)
-
-    joins = for {ref, entry} <- new, not is_map_key(old, ref), do: to_partitioned_entry(entry)
-    leaves = for {ref, entry} <- old, not is_map_key(new, ref), do: to_id(entry)
+  @spec apply_snapshot(t(), [Messages.wire_entry()]) :: {t(), Changes.t()}
+  defp apply_snapshot(%__MODULE__{replica: old} = peer, entries) do
+    joins = wire_to_new_entries(entries, old)
+    new = wire_to_ref_map(entries)
+    leaves = old |> Map.drop(Map.keys(new)) |> to_view_ids()
 
     {%{peer | replica: new}, Changes.new(joins, leaves)}
   end
 
-  @spec apply_diff(t(), pid(), [Messages.wire_entry()], [Rollcall.ref()]) :: {t(), Changes.t()}
-  defp apply_diff(%__MODULE__{} = peer, origin, joins, leaves) do
-    old = peer.replica
-
-    join_entries = wire_entries_to_entries(joins, origin)
+  @spec apply_diff(t(), [Messages.wire_entry()], [Rollcall.ref()]) :: {t(), Changes.t()}
+  defp apply_diff(%__MODULE__{replica: old} = peer, joins, leaves) do
+    joined_refs_to_partition = wire_to_ref_map(joins)
+    joined_entries = wire_to_new_entries(joins, old)
 
     # The changes come from the refs in the message, so a diff costs the size of
     # the diff and not the size of the replica. A join wins over a leave of the
     # same ref.
-    joined = for {ref, entry} <- join_entries, not is_map_key(old, ref), do: to_partitioned_entry(entry)
-    left = old |> Map.take(leaves) |> Map.drop(Map.keys(join_entries)) |> Map.values() |> Enum.map(&to_id/1)
+    left =
+      old
+      |> Map.take(leaves)
+      |> Map.drop(Map.keys(joined_refs_to_partition))
 
-    new = old |> Map.drop(leaves) |> Map.merge(join_entries)
+    new = old |> Map.drop(Map.keys(left)) |> Map.merge(joined_refs_to_partition)
 
-    {%{peer | replica: new}, Changes.new(joined, left)}
+    {%{peer | replica: new},
+     Changes.new(
+       joined_entries,
+       to_view_ids(left)
+     )}
   end
 
-  @spec to_partitioned_entry(Entry.t()) :: Rollcall.partitioned_entry()
-  defp to_partitioned_entry(%Entry{} = entry) do
-    {entry.partition, entry.ref, entry.key, entry.meta}
-  end
-
-  @spec to_id(Entry.t()) :: Rollcall.Tracker.View.id()
-  defp to_id(%Entry{} = entry), do: {entry.partition, entry.ref}
-
-  @spec wire_entries_to_entries([Messages.wire_entry()], pid()) :: replica()
-  defp wire_entries_to_entries(wire_entries, origin) do
-    Map.new(wire_entries, fn {partition, key, ref, meta} ->
-      {ref, Entry.new(origin, partition, key, meta, ref)}
-    end)
-  end
+  @spec to_view_ids(replica()) :: [View.id()]
+  defp to_view_ids(replica), do: Enum.map(replica, fn {ref, partition} -> {partition, ref} end)
 
   @spec newer?(Messages.stamp(), Messages.stamp() | nil) :: boolean()
   defp newer?(_stamp, nil), do: true
@@ -270,5 +261,15 @@ defmodule Rollcall.Tracker.Peer do
       true ->
         :stale
     end
+  end
+
+  @spec wire_to_ref_map([Messages.wire_entry()]) :: replica()
+  defp wire_to_ref_map(entries) do
+    Map.new(entries, fn {partition, _key, ref, _meta} -> {ref, partition} end)
+  end
+
+  @spec wire_to_new_entries([Messages.wire_entry()], replica()) :: [Rollcall.partitioned_entry()]
+  defp wire_to_new_entries(entries, old) do
+    for {partition, key, ref, meta} <- entries, not is_map_key(old, ref), do: {partition, ref, key, meta}
   end
 end
