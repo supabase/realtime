@@ -56,7 +56,7 @@ defmodule Rollcall.StateReadTest do
       deliver(
         tracker,
         scope,
-        snapshot(origin, stamp(1, 1), [wire_entry("p1", "k1", "a", %{n: 1}), wire_entry("p2", "k2", "b", %{})])
+        snapshot(origin, stamp(1, 1), [wire_entry("p1", "a", "k1", %{n: 1}), wire_entry("p2", "b", "k2", %{})])
       )
 
       assert Rollcall.state(rollcall, scope, "p1") == [{"a", "k1", %{n: 1}}]
@@ -64,7 +64,7 @@ defmodule Rollcall.StateReadTest do
       assert Enum.sort(Rollcall.state(rollcall, scope)) ==
                [{"p1", "a", "k1", %{n: 1}}, {"p2", "b", "k2", %{}}]
 
-      deliver(tracker, scope, snapshot(origin, stamp(1, 2), [wire_entry("p1", "k1", "c", %{n: 2})]))
+      deliver(tracker, scope, snapshot(origin, stamp(1, 2), [wire_entry("p1", "c", "k1", %{n: 2})]))
 
       assert Rollcall.state(rollcall, scope) == [{"p1", "c", "k1", %{n: 2}}]
     end
@@ -72,9 +72,9 @@ defmodule Rollcall.StateReadTest do
     test "applies the joins and the leaves of a diff", %{scope: scope, rollcall: rollcall} do
       origin = remote_pid(@node_a, 1)
       tracker = start_tracker(rollcall, scope, @threshold)
-      deliver(tracker, scope, snapshot(origin, stamp(1, 1), [wire_entry("p1", "k1", "a", %{})]))
+      deliver(tracker, scope, snapshot(origin, stamp(1, 1), [wire_entry("p1", "a", "k1", %{})]))
 
-      deliver(tracker, scope, diff(origin, stamp(1, 2), 1, [wire_entry("p1", "k2", "b", %{})], ["a"]))
+      deliver(tracker, scope, diff(origin, stamp(1, 2), 1, [wire_entry("p1", "b", "k2", %{})], ["a"]))
 
       assert Rollcall.state(rollcall, scope, "p1") == [{"b", "k2", %{}}]
     end
@@ -83,7 +83,7 @@ defmodule Rollcall.StateReadTest do
       origin = remote_pid(@node_a, 1)
       tracker = start_tracker(rollcall, scope, @threshold)
       {:ok, local_ref} = Rollcall.track(rollcall, self(), scope, "p1", "local", %{})
-      deliver(tracker, scope, snapshot(origin, stamp(1, 1), [wire_entry("p1", "remote", "a", %{})]))
+      deliver(tracker, scope, snapshot(origin, stamp(1, 1), [wire_entry("p1", "a", "remote", %{})]))
       assert length(Rollcall.state(rollcall, scope, "p1")) == 2
 
       tick(tracker, @threshold)

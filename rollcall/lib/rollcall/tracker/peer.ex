@@ -265,11 +265,11 @@ defmodule Rollcall.Tracker.Peer do
 
   @spec wire_to_ref_map([Messages.wire_entry()]) :: replica()
   defp wire_to_ref_map(entries) do
-    Map.new(entries, fn {partition, _key, ref, _meta} -> {ref, partition} end)
+    Map.new(entries, fn {partition, ref, _key, _meta} -> {ref, partition} end)
   end
 
   @spec wire_to_new_entries([Messages.wire_entry()], replica()) :: [Rollcall.partitioned_entry()]
   defp wire_to_new_entries(entries, old) do
-    for {partition, key, ref, meta} <- entries, not is_map_key(old, ref), do: {partition, ref, key, meta}
+    for {_partition, ref, _key, _meta} = entry <- entries, not is_map_key(old, ref), do: entry
   end
 end

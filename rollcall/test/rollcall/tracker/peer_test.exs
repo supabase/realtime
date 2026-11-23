@@ -37,9 +37,9 @@ defmodule Rollcall.Tracker.PeerTest do
     test "a snapshot holds the id of each entry and returns the partition, key and meta in the joins",
          %{origin: origin} do
       wire = [
-        wire_entry("partition_1", "key_1", "a", %{a: 1}),
-        wire_entry("partition_2", "key_1", "b", %{b: 2}),
-        wire_entry("partition_1", "key_2", "c", %{})
+        wire_entry("partition_1", "a", "key_1", %{a: 1}),
+        wire_entry("partition_2", "b", "key_1", %{b: 2}),
+        wire_entry("partition_1", "c", "key_2", %{})
       ]
 
       {peer, changes} = Peer.new(snapshot(origin, stamp(1, 3), wire))
@@ -55,7 +55,7 @@ defmodule Rollcall.Tracker.PeerTest do
 
     test "a diff join returns the partition, key and meta in the joins", %{origin: origin} do
       peer = snapshot_peer(origin, 1, 3, [])
-      joined = wire_entry("partition_2", "key_1", "b", %{b: 2})
+      joined = wire_entry("partition_2", "b", "key_1", %{b: 2})
 
       {_peer, changes} = Peer.apply(peer, diff(origin, stamp(1, 4), 3, [joined], []))
 
@@ -64,8 +64,8 @@ defmodule Rollcall.Tracker.PeerTest do
 
     test "a leave removes the entry with its ref and keeps the entry with the same key",
          %{origin: origin} do
-      first = wire_entry("partition", "key", "a", %{a: 1})
-      second = wire_entry("partition", "key", "b", %{a: 2})
+      first = wire_entry("partition", "a", "key", %{a: 1})
+      second = wire_entry("partition", "b", "key", %{a: 2})
       {peer, _changes} = Peer.new(snapshot(origin, stamp(1, 3), [first, second]))
 
       {peer, changes} = Peer.apply(peer, diff(origin, stamp(1, 4), 3, [], ["a"]))
@@ -84,9 +84,9 @@ defmodule Rollcall.Tracker.PeerTest do
   describe "the partition of a leave" do
     setup %{origin: origin} do
       wire = [
-        wire_entry("p1", "k1", "a", %{}),
-        wire_entry("p2", "k2", "b", %{}),
-        wire_entry("p1", "k3", "c", %{})
+        wire_entry("p1", "a", "k1", %{}),
+        wire_entry("p2", "b", "k2", %{}),
+        wire_entry("p1", "c", "k3", %{})
       ]
 
       {peer, _changes} = Peer.new(snapshot(origin, stamp(1, 3), wire))
@@ -101,7 +101,7 @@ defmodule Rollcall.Tracker.PeerTest do
     end
 
     test "a snapshot that drops entries returns their partitions", %{origin: origin, peer: peer} do
-      kept = wire_entry("p1", "k1", "a", %{})
+      kept = wire_entry("p1", "a", "k1", %{})
 
       {_peer, changes} = Peer.apply(peer, snapshot(origin, stamp(1, 4), [kept]))
 
@@ -473,7 +473,7 @@ defmodule Rollcall.Tracker.PeerTest do
   end
 
   defp entries(refs) do
-    Enum.map(refs, &wire_entry("partition", "key", &1, %{}))
+    Enum.map(refs, &wire_entry("partition", &1, "key", %{}))
   end
 
   defp snapshot_peer(origin, incarnation, version, refs) do

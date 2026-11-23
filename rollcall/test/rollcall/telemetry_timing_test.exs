@@ -174,7 +174,7 @@ defmodule Rollcall.TelemetryTimingTest do
     test "is emitted for each partition that changed", %{scope: scope, rollcall: rollcall} do
       tracker = start_tracker(rollcall, scope, @threshold)
 
-      entries = [wire_entry("partition_1", "key", "a", %{}), wire_entry("partition_2", "key", "b", %{})]
+      entries = [wire_entry("partition_1", "a", "key", %{}), wire_entry("partition_2", "b", "key", %{})]
       deliver(tracker, scope, snapshot(remote_pid(@node_a, 1), stamp(1, 1), entries))
 
       assert_receive {:telemetry, @publish, %{entries: 1}, %{scope: ^scope, source: :peer}}
@@ -212,7 +212,7 @@ defmodule Rollcall.TelemetryTimingTest do
     )
   end
 
-  defp entries(refs), do: Enum.map(refs, &wire_entry("partition", "key", &1, %{}))
+  defp entries(refs), do: Enum.map(refs, &wire_entry("partition", &1, "key", %{}))
 
   defp deliver(tracker, scope, message) do
     send(tracker, {:deliver, scope, message})

@@ -8,7 +8,7 @@ defmodule Rollcall.Tracker.MessagesTest do
   describe "message?/1" do
     test "is true for each kind of message" do
       origin = self()
-      entries = [wire_entry("partition", "key", "ref", %{})]
+      entries = [wire_entry("partition", "ref", "key", %{})]
 
       assert Messages.message?(snapshot(origin, stamp(1, 3), entries))
       assert Messages.message?(diff(origin, stamp(1, 4), 3, entries, ["ref"]))

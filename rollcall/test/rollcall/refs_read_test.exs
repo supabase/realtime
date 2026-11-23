@@ -19,8 +19,8 @@ defmodule Rollcall.RefsReadTest do
       tracker,
       scope,
       snapshot(remote_pid(@node_a, 1), stamp(1, 1), [
-        wire_entry("p1", "k3", "peer-1", %{n: 3}),
-        wire_entry("p3", "k4", "peer-3", %{n: 4})
+        wire_entry("p1", "peer-1", "k3", %{n: 3}),
+        wire_entry("p3", "peer-3", "k4", %{n: 4})
       ])
     )
 
