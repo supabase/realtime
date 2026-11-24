@@ -40,8 +40,7 @@ defmodule Realtime.Presence.RollcallTransport do
         Phoenix.PubSub.local_broadcast(
           pubsub,
           partition,
-          broadcast_message(partition, diff, Map.get(state, :start_time)),
-          RealtimeWeb.RealtimeChannel.MessageDispatcher
+          broadcast_message(partition, diff, Map.get(state, :start_time))
         )
 
       :shadow ->

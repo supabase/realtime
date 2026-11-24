@@ -12,7 +12,7 @@ defmodule Realtime.PresenceTest do
   alias Realtime.Presence
   alias Realtime.Presence.PhoenixBackend
   alias Realtime.Presence.RollcallBackend
-  alias RealtimeWeb.RealtimeChannel.MessageDispatcher
+  alias RealtimeWeb.RealtimeChannel.FastlaneSender
   alias RealtimeWeb.Socket.V2Serializer
 
   @shadow "presence_rollcall_shadow"
@@ -492,8 +492,8 @@ defmodule Realtime.PresenceTest do
   defp track_with_fastlane_subscriber(%{tenant: tenant, topic: topic, client: client}, flags) do
     enable(flags)
     :ok = Presence.watch(tenant)
-    metadata = MessageDispatcher.fastlane_metadata(self(), V2Serializer, topic, :error, tenant)
-    :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, topic, metadata: metadata)
+    metadata = FastlaneSender.fastlane_metadata(self(), V2Serializer, topic, :error, tenant)
+    :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, topic, sender: FastlaneSender.sender(metadata))
 
     {:ok, :track, _ref} = Presence.track(client, tenant, topic, "alice", %{})
 

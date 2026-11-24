@@ -1181,7 +1181,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     topic = random_string()
     # Simulate fastlane
     fastlane =
-      RealtimeWeb.RealtimeChannel.MessageDispatcher.fastlane_metadata(
+      RealtimeWeb.RealtimeChannel.FastlaneSender.fastlane_metadata(
         self(),
         context.serializer,
         "realtime:#{topic}",
@@ -1189,7 +1189,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         "tenant_id"
       )
 
-    Endpoint.subscribe("realtime:#{topic}", metadata: fastlane)
+    Endpoint.subscribe("realtime:#{topic}", sender: RealtimeWeb.RealtimeChannel.FastlaneSender.sender(fastlane))
 
     if policies = context[:policies] do
       sub = context[:sub]

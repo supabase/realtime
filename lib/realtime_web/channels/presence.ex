@@ -8,5 +8,6 @@ defmodule RealtimeWeb.Presence do
   use Phoenix.Presence,
     otp_app: :realtime,
     pubsub_server: Realtime.PubSub,
-    dispatcher: RealtimeWeb.RealtimeChannel.MessageDispatcher
+    # Phoenix.Presence defaults to Phoenix.Channel.Server, which does not call senders.
+    dispatcher: Phoenix.PubSub
 end

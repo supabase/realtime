@@ -67,7 +67,7 @@ The limit delays a broadcast. It never refuses one. If the bucket is empty, the 
 
 `Realtime.PubSub` reaches other nodes through `Realtime.GenRpcPubSub`, an adapter built on [`gen_rpc`](https://github.com/emqx/gen_rpc) (wrapped locally by `Realtime.GenRpc`) instead of Erlang distribution, so nodes can have more than one TCP connection between them for more bandwidth. How it picks which nodes to send to is the subject of [Broadcast fan-out](#broadcast-fan-out). Erlang distribution is still used for other types of communications including being Muster & [`:syn`](https://github.com/ostinelli/syn) transport layer.
 
-On each receiving node the local PubSub registry calls `MessageDispatcher.dispatch/3` with the topic's subscribers.
+On each receiving node the default `Phoenix.PubSub` dispatcher delivers to the topic's subscribers. Channels subscribe with `RealtimeWeb.RealtimeChannel.FastlaneSender` as their sender, so it encodes each message once per Registry partition and sends it to the socket.
 
 ### The two per-tenant singletons
 

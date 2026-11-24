@@ -10,7 +10,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   alias Realtime.Messages
   alias Realtime.RateCounter
   alias Realtime.Tenants
-  alias RealtimeWeb.RealtimeChannel
   alias RealtimeWeb.RequestMetrics
   alias RealtimeWeb.TenantBroadcaster
   alias Phoenix.Socket
@@ -133,7 +132,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
         tenant_id,
         tenant_topic,
         broadcast,
-        RealtimeChannel.MessageDispatcher,
         :broadcast
       )
     else
@@ -142,7 +140,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
         self(),
         tenant_topic,
         broadcast,
-        RealtimeChannel.MessageDispatcher,
         :broadcast
       )
     end

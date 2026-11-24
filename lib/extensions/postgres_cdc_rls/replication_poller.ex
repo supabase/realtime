@@ -2,7 +2,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   @moduledoc """
   Polls the write-ahead log via a temporary logical replication slot, applies row
   level security policies for each subscriber, and broadcasts records to the
-  `MessageDispatcher`.
+  `FastlaneSender`.
 
   ## Lifecycle
 
@@ -68,7 +68,6 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   alias DBConnection.Backoff
 
-  alias Extensions.PostgresCdcRls.MessageDispatcher
   alias Extensions.PostgresCdcRls.Replications
   alias Extensions.PostgresCdcRls.Subscriptions
 
@@ -481,7 +480,6 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
                   topic,
                   # Send only the subscription IDs relevant to this node
                   {change.type, payload, MapSet.new(subscription_ids)},
-                  MessageDispatcher,
                   :postgres_changes
                 )
               end
@@ -491,7 +489,6 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
                 tenant_id,
                 topic,
                 {change.type, payload, change.subscription_ids},
-                MessageDispatcher,
                 :postgres_changes
               )
           end

@@ -14,7 +14,6 @@ defmodule Realtime.Tenants.BatchBroadcast do
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Connect
 
-  alias RealtimeWeb.RealtimeChannel
   alias RealtimeWeb.RequestMetrics
   alias RealtimeWeb.TenantBroadcaster
 
@@ -158,7 +157,6 @@ defmodule Realtime.Tenants.BatchBroadcast do
       tenant.external_id,
       tenant_topic,
       broadcast,
-      RealtimeChannel.MessageDispatcher,
       :broadcast
     )
   end
