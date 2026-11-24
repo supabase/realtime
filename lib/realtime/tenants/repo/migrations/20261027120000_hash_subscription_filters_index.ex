@@ -29,9 +29,12 @@ defmodule Realtime.Tenants.Migrations.HashSubscriptionFiltersIndex do
 
     execute("ALTER FUNCTION realtime.filters_hash(realtime.user_defined_filter[]) OWNER TO supabase_realtime_admin")
 
+    # The index below is built as the table owner, supabase_realtime_admin. On some tenants the new
+    # function comes out without EXECUTE for its owner and the build fails with 42501, so grant it
+    # here rather than rely on the function's initial ACL.
     execute("""
     grant execute on function realtime.filters_hash(realtime.user_defined_filter[])
-    to postgres, anon, authenticated, service_role;
+    to postgres, anon, authenticated, service_role, supabase_realtime_admin;
     """)
 
     execute("""
