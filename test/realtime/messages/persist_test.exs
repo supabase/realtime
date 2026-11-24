@@ -392,6 +392,25 @@ defmodule Realtime.Messages.PersistTest do
     end
   end
 
+  describe "enqueue/6" do
+    @tag config: [max_pending: 1, flush_interval_ms: 60_000]
+    test "sends a rejected message's error to reply_to", %{conn: conn, tenant_id: tenant_id} do
+      start_flush_interval(conn, tenant_id)
+      first = make_ref()
+      second = make_ref()
+
+      :ok = Messages.enqueue(conn, tenant_id, "t", "e", {:json, %{}}, reply_to: {self(), first})
+      :ok = Messages.enqueue(conn, tenant_id, "t", "e", {:json, %{}}, reply_to: {self(), second})
+
+      assert_receive {^second, {:error, :persistence_buffer_full}}
+
+      assert_receive {:telemetry, [:realtime, :tenants, :persist, :dropped], %{count: 1},
+                      %{reason: :persistence_buffer_full}}
+
+      refute_receive {^first, _}
+    end
+  end
+
   # Consumes the failed flush, so a test can wait for the next one
   defp fail_write(conn, tenant_id) do
     Postgrex.query!(conn, "DROP TABLE realtime.messages_#{partition_suffix()}", [])

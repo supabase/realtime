@@ -190,17 +190,32 @@ defmodule Realtime.Messages do
     caller = Keyword.get(opts, :reply_to)
     entry = %{entry(topic, event, payload) | expires_at: Keyword.get(opts, :expires_at)}
 
-    result =
-      with {:ok, pid} <- lookup_or_start_producer(conn, tenant_id) do
-        call(pid, entry, caller)
-      end
-
-    reply_error(result, caller)
+    with {:ok, pid} <- lookup_or_start_producer(conn, tenant_id),
+         :ok <- call(pid, entry, caller) do
+      :ok
+    else
+      error when caller != nil -> reply([{caller, error}])
+      error -> error
+    end
   end
 
   def persist(conn, tenant_id, topic, event, payload, opts) do
     args = [conn, tenant_id, topic, event, payload, opts]
-    Realtime.GenRpc.ordered_cast(node(conn), __MODULE__, :persist, args, key: topic)
+    Realtime.GenRpc.ordered_cast(node(conn), __MODULE__, :enqueue, args, key: topic)
+  end
+
+  # Applied by `ordered_cast/5` on the node of `conn`. It casts to the producer, so it never holds the gen_rpc client
+  @doc false
+  def enqueue(conn, tenant_id, topic, event, payload, opts) do
+    caller = Keyword.get(opts, :reply_to)
+    entry = %{entry(topic, event, payload) | expires_at: Keyword.get(opts, :expires_at)}
+
+    case lookup_or_start_producer(conn, tenant_id) do
+      {:ok, pid} -> GenStage.cast(pid, {:persist, entry, caller})
+      error -> reply([{caller, error}])
+    end
+
+    :ok
   end
 
   @doc false
@@ -279,9 +294,6 @@ defmodule Realtime.Messages do
     :exit, {:timeout, _} -> {:error, :persistence_timeout}
     :exit, _ -> {:error, :persistence_unavailable}
   end
-
-  defp reply_error({:error, _reason} = error, {_pid, _tag} = caller), do: reply([{caller, error}])
-  defp reply_error(result, _caller), do: result
 
   @doc """
   Writes `entries` with one `INSERT` after `last_inserted_at`, and returns the result of each entry, in

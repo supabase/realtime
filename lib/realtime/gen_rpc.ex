@@ -69,9 +69,9 @@ defmodule Realtime.GenRpc do
 
   @doc """
   Like `cast/5`, but the casts with the same `:key` from this node are applied one at a time, in the order
-  they were sent. The target node finishes each apply before it starts the next cast on that gen_rpc client,
-  so `func` must return quickly. `:key` is required, and selects the gen_rpc client whose casts keep their
-  order.
+  they were sent. The target node finishes each apply before it reads anything else from that gen_rpc client,
+  including the other casts of this node, so `func` must not block. `:key` is required, and selects the
+  gen_rpc client whose casts keep their order.
 
   It is for remote nodes only, because gen_rpc does not cast to the local node. Passing `node()` raises
   `FunctionClauseError`.
@@ -79,8 +79,11 @@ defmodule Realtime.GenRpc do
   @spec ordered_cast(node, module, atom, list(any), keyword()) :: :ok
   def ordered_cast(node, mod, func, args, opts)
       when is_atom(node) and node != node() and is_atom(mod) and is_atom(func) and is_list(args) and is_list(opts) do
+    key = Keyword.fetch!(opts, :key)
+
     if node in Node.list() do
-      :gen_rpc.ordered_cast(cast_rpc_node(node, Keyword.fetch!(opts, :key)), mod, func, args)
+      node_key = cast_rpc_node(node, key)
+      :gen_rpc.ordered_cast(node_key, mod, func, args)
     end
 
     :ok

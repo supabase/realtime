@@ -9,7 +9,8 @@ defmodule Realtime.Messages.Producer do
   soon as it is full, and otherwise once `:flush_interval_ms` passed since the previous one.
 
   A message is rejected when `:max_pending` messages or `:max_pending_bytes` are queued or being written.
-  A `:reply_to` gets the result once the message is written.
+  A `:reply_to` gets the result once the message is written. Senders on other nodes cast to it, and get
+  their errors at their `:reply_to`.
 
   The producer logs the messages that were not persisted, its own and the ones the consumer reports, once
   per reason every `:drops_report_interval_ms`.
@@ -71,6 +72,11 @@ defmodule Realtime.Messages.Producer do
      }}
   end
 
+  @doc """
+  Queues a message from `Realtime.Messages.persist/6`, which persists for senders on the node of the
+  connection. It replies `:ok` once the message is admitted, without waiting for the write, or the
+  rejection. The message's `:reply_to` gets the result once it is written.
+  """
   @impl true
   def handle_call({:persist, entry, caller}, from, state) do
     case admit(state, entry) do
@@ -80,6 +86,23 @@ defmodule Realtime.Messages.Producer do
 
       {:error, reason} = error ->
         {:reply, error, [], drop(state, reason, 1)}
+    end
+  end
+
+  @doc """
+  Queues a message cast by `Realtime.Messages.enqueue/6`, which persists for senders on other nodes without
+  waiting on the producer. It admits the message like `handle_call/3`, but sends a rejection to the
+  message's `:reply_to`, since nobody waits for a reply.
+  """
+  @impl true
+  def handle_cast({:persist, entry, caller}, state) do
+    case admit(state, entry) do
+      :ok ->
+        state |> enqueue(entry, caller) |> dispatch_events()
+
+      {:error, reason} = error ->
+        Messages.reply([{caller, error}])
+        {:noreply, [], drop(state, reason, 1)}
     end
   end
 
