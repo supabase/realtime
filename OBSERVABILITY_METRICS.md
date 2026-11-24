@@ -184,6 +184,9 @@ These metrics come from the telemetry events of Rollcall, the presence tracker. 
 | `realtime_rollcall_tracker_process_bytes_bucket` | Histogram | The memory of a Rollcall tracker process, in bytes, counted at each tick. It is the memory value of `Process.info/2`: the heap, the stack and the mailbox. The last bound is 100 MB. A larger value counts in the `+Inf` bucket only. | Global Aggregate | `/metrics` |
 | `realtime_rollcall_tracker_ets_bytes_bucket` | Histogram | The memory of the view table of a Rollcall tracker, in bytes, counted at each tick. The last bound is 100 MB. A larger value counts in the `+Inf` bucket only. | Global Aggregate | `/metrics` |
 | `realtime_rollcall_tracker_reductions_bucket` | Histogram | The reductions that a Rollcall tracker process used since its previous tick. It measures the CPU work of a tracker in each period. | Global Aggregate | `/metrics` |
+| `realtime_rollcall_request_sent` | Counter | Requests for a snapshot that Rollcall trackers sent to a peer that was behind. A tracker sends one request in each tick while the peer is behind. | Global Aggregate | `/metrics` |
+| `realtime_rollcall_reply_send_duration_bucket` | Histogram | Time that a Rollcall tracker spends to reply to a request, in microseconds. It builds the snapshot of the local entries and calls the transport. It does not wait for an answer from the peer. | Global Aggregate | `/metrics` |
+| `realtime_rollcall_reply_send_entries_bucket` | Histogram | The entries in each snapshot that a Rollcall tracker sends as the reply to a request. The bucket bounds are half an entry above a value, so an empty snapshot is in the `le="0.5"` bucket. | Global Aggregate | `/metrics` |
 | `realtime_rollcall_trackers` | Gauge | The Rollcall trackers that run on this node. Each tenant with presence has one tracker. | Per-Node | `/metrics` |
 
 ## Presence Comparison Metrics
