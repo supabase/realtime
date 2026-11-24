@@ -13,7 +13,11 @@
 defmodule Report do
   @moduledoc false
 
-  @metrics [{"reductions_per_s", "Reductions per second", :count}, {"memory_bytes", "Memory", :bytes}]
+  @metrics [
+    {"reductions_per_s", "Reductions per second", :count},
+    {"cpu_s_per_s", "CPU seconds per second", :cpu},
+    {"memory_bytes", "Memory", :bytes}
+  ]
   @windows [{"join", "Join"}, {"steady", "Steady"}]
 
   def main([results_path, out_path]) do
@@ -58,10 +62,12 @@ defmodule Report do
 
     [
       "#{w["nodes"]} nodes",
+      w["schedulers_per_node"] && "#{w["schedulers_per_node"]} schedulers on each node",
       "Phoenix: #{w["shards"]} shards on each node",
       "every tenant on all #{w["nodes"]} nodes",
       "#{now["settings"]["repeats"]} repeats of each backend"
     ]
+    |> Enum.filter(& &1)
     |> Enum.map_join(&~s|<span class="chip">#{esc(&1)}</span>|)
   end
 
@@ -81,6 +87,10 @@ defmodule Report do
 
   defp caption("reductions_per_s", now) do
     "Work done by the Phoenix shards or the Rollcall trackers, all #{now["workload"]["nodes"]} nodes added together."
+  end
+
+  defp caption("cpu_s_per_s", now) do
+    "CPU time of the schedulers for each second of the window, all #{now["workload"]["nodes"]} nodes added together. It covers the whole node, including the clients."
   end
 
   defp caption("memory_bytes", now) do
@@ -109,8 +119,8 @@ defmodule Report do
 
   defp section({window, title}, now) do
     charts =
-      for {metric, label, unit} <- @metrics do
-        ~s|<div class="card"><h3>#{esc(label)}</h3><p class="caption">#{esc(caption(metric, now))}</p>#{chart(bars(now, window, metric), unit)}</div>|
+      for {metric, label, unit} <- @metrics, bars = bars(now, window, metric), bars != [] do
+        ~s|<div class="card"><h3>#{esc(label)}</h3><p class="caption">#{esc(caption(metric, now))}</p>#{chart(bars, unit)}</div>|
       end
 
     ~s|<section><h2>#{title}</h2><p class="note">#{esc(what_happened(window, now))}</p><div class="pair">#{Enum.join(charts)}</div></section>|
@@ -237,6 +247,7 @@ defmodule Report do
   defp fmt(v, :bytes) when v >= 1_048_576, do: "#{trim(v / 1_048_576)} MiB"
   defp fmt(v, :bytes) when v >= 1024, do: "#{trim(v / 1024)} KiB"
   defp fmt(v, :bytes), do: "#{trim(v)} B"
+  defp fmt(v, :cpu), do: :erlang.float_to_binary(v / 1, decimals: 2)
   defp fmt(v, :count) when v >= 1_000_000, do: "#{trim(v / 1_000_000)}M"
   defp fmt(v, :count) when v >= 1000, do: "#{trim(v / 1000)}k"
   defp fmt(v, :count), do: trim(v)
@@ -293,6 +304,8 @@ defmodule Report do
     .chip { padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel-2); color: var(--muted); font: 12px var(--mono); }
     .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
     .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
+    .pair .card { display: flex; flex-direction: column; }
+    .pair .caption { flex: 1; }
     svg { display: block; width: 100%; height: auto; }
     line.gl { stroke: var(--grid); stroke-width: 1; }
     .tick { fill: var(--muted); font: 11px var(--mono); }
