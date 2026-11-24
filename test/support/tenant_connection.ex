@@ -48,4 +48,22 @@ defmodule TenantConnection do
   after
     Endpoint.unsubscribe("connect:#{tenant_id}")
   end
+
+  @doc """
+  True once no further replication connection can start on the server: every WAL
+  sender is in use or every replication slot exists.
+  """
+  def wal_budget_spent?(conn) do
+    %{rows: [[spent?]]} =
+      Postgrex.query!(
+        conn,
+        """
+        SELECT (SELECT count(*) FROM pg_stat_replication) >= current_setting('max_wal_senders')::int
+            OR (SELECT count(*) FROM pg_replication_slots) >= current_setting('max_replication_slots')::int
+        """,
+        []
+      )
+
+    spent?
+  end
 end

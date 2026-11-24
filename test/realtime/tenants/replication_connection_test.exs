@@ -768,7 +768,6 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     test "handle standby connections exceeds max_wal_senders", %{tenant: tenant} do
       {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
       opts = Database.opts(settings)
-      parent = self()
 
       {:ok, table_conn} = Database.connect(tenant, "realtime_test", :stop)
 
@@ -776,7 +775,6 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       # rather than hardcoded: the budget differs per image, and a Multigres
       # cluster spends some of it on its own replication.
       %{rows: [[max_wal_senders]]} = Postgrex.query!(table_conn, "SELECT current_setting('max_wal_senders')::int", [])
-      GenServer.stop(table_conn)
 
       pids =
         for i <- 0..max_wal_senders do
@@ -793,7 +791,6 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
           spawn(fn ->
             {:ok, pid} = PostgresReplication.start_link(replication_slot_opts)
-            send(parent, :ready)
 
             receive do
               :stop -> Process.exit(pid, :kill)
@@ -806,10 +803,12 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
         Process.sleep(2000)
       end)
 
-      assert_receive :ready, 5000
-      assert_receive :ready, 5000
-      assert_receive :ready, 5000
-      assert_receive :ready, 5000
+      # start_link/1 returns {:ok, pid} even for the connections that don't get a WAL
+      # sender (they keep reconnecting), so it says nothing about the budget. Wait on
+      # the server until it is spent; starting earlier lets ReplicationConnection take
+      # a sender that one of ours hasn't claimed yet and succeed.
+      assert_eventually wal_budget_spent?(table_conn), timeout: 30_000, interval: 100
+      GenServer.stop(table_conn)
 
       assert {:error, :max_wal_senders_reached} = ReplicationConnection.start(tenant, self())
     end

@@ -27,22 +27,6 @@ defmodule Realtime.Tenants.ConnectTest do
     %{tenant: tenant}
   end
 
-  # True once no further replication connection can start on the server: every WAL
-  # sender is in use or every replication slot exists.
-  defp wal_budget_spent?(conn) do
-    %{rows: [[spent?]]} =
-      Postgrex.query!(
-        conn,
-        """
-        SELECT (SELECT count(*) FROM pg_stat_replication) >= current_setting('max_wal_senders')::int
-            OR (SELECT count(*) FROM pg_replication_slots) >= current_setting('max_replication_slots')::int
-        """,
-        []
-      )
-
-    spent?
-  end
-
   defp assert_process_down(pid, timeout \\ 100, reason \\ nil) do
     ref = Process.monitor(pid)
 
