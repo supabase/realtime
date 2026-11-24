@@ -10,6 +10,8 @@
 - [Latency & Performance Metrics](#latency--performance-metrics)
 - [Authorization & Error Metrics](#authorization--error-metrics)
 - [Subscription Pooler Metrics](#subscription-pooler-metrics)
+- [Rollcall Metrics](#rollcall-metrics)
+- [Presence Comparison Metrics](#presence-comparison-metrics)
 - [Tenant Migration Metrics](#tenant-migration-metrics)
 - [BEAM/Erlang VM Metrics](#beamerlang-vm-metrics)
   - [Memory Metrics](#memory-metrics)
@@ -79,9 +81,9 @@ These metrics track WebSocket connections and tenant activity across the Realtim
 | `phoenix_connections_max`                       | Gauge   | The configured Ranch connection limit. When `phoenix_connections_total` approaches this the node is saturated and new connections will be queued. | Per-Node         | `/metrics`        |
 | `realtime_channel_joins`                        | Counter | Rate of channel join attempts per second per tenant.                                                                                              | **Per-Tenant**   | `/tenant-metrics` |
 | `realtime_channel_global_joins`                 | Counter | Global rate of channel join attempts per second across all tenants.                                                                               | Global Aggregate | `/metrics`        |
-| `realtime_presence_usage_tenants`               | Gauge   | Count of tenants with at least one live tracked presence member. A dirty read: departed-node members aren't filtered.                             | Global Aggregate | `/metrics`        |
-| `realtime_presence_usage_topics`                | Gauge   | Count of presence topics with at least one live tracked member, from the same periodic scan.                                                      | Global Aggregate | `/metrics`        |
-| `realtime_presence_usage_topics_by_bucket`      | Gauge   | Count of presence topics whose live member count falls in a given bucket, tagged by bucket (5, 10, 25, 50, 100, 200, 500, infinity).              | Global Aggregate | `/metrics`        |
+| `realtime_presence_usage_tenants`               | Gauge   | Count of tenants with at least one live tracked presence member, tagged by `implementation` (`phoenix` or `rollcall`). Phoenix: a dirty read, departed-node members aren't filtered. Rollcall: the scopes that have a tracker with entries on this node. | Global Aggregate | `/metrics`        |
+| `realtime_presence_usage_topics`                | Gauge   | Count of presence topics with at least one live tracked member, from the same periodic scan, tagged by `implementation` (`phoenix` or `rollcall`). In shadow mode both values exist, so a `sum` over the tag counts each topic twice. | Global Aggregate | `/metrics`        |
+| `realtime_presence_usage_topics_by_bucket`      | Gauge   | Count of presence topics whose live member count falls in a given bucket, tagged by bucket (1, 2, 3, 5, 10, 25, 50, 100, 200, 500, 1000, infinity) and by `implementation` (`phoenix` or `rollcall`). Both backends use the same buckets. | Global Aggregate | `/metrics`        |
 
 ## Event Metrics
 
@@ -108,6 +110,8 @@ These metrics provide insight into data volume, message sizes, and network I/O c
 | `realtime_channel_output_bytes`        | Counter   | Total egress bytes per tenant.                                                                                                  | **Per-Tenant**   | `/tenant-metrics` |
 | `realtime_channel_global_input_bytes`  | Counter   | Global total ingress bytes across all tenants.                                                                                  | Global Aggregate | `/metrics`        |
 | `realtime_channel_global_output_bytes` | Counter   | Global total egress bytes across all tenants.                                                                                   | Global Aggregate | `/metrics`        |
+| `realtime_broadcast_global_replay_messages` | Counter | Global total of broadcast messages read from `realtime.messages` to replay on private channel joins. Counted on the node that holds the tenant's database connection. | Global Aggregate | `/metrics` |
+| `realtime_broadcast_replay_messages` | Counter | Broadcast messages read from `realtime.messages` to replay on private channel joins, per tenant. Counted on the node that holds the tenant's database connection. | **Per-Tenant** | `/tenant-metrics` |
 
 ## Latency & Performance Metrics
 
@@ -121,10 +125,10 @@ These metrics measure end-to-end latency and processing performance across diffe
 | `realtime_tenants_broadcast_from_database_latency_inserted_at_bucket`  | Histogram | Alternative latency using insert timestamp per tenant.                                                           | **Per-Tenant**   | `/tenant-metrics` |
 | `realtime_tenants_replay_bucket`                                       | Histogram | Broadcast replay latency per tenant.                                                                             | **Per-Tenant**   | `/tenant-metrics` |
 | `realtime_presence_notify_latency_bucket`                              | Histogram | Time from a presence `track` to each other subscriber being sent the `presence_diff`, sampled; tagged by `action`, `origin` (`local`/`remote`), `path` and `implementation`. | Global Aggregate | `/metrics`        |
-| `realtime_presence_track_duration_bucket`                              | Histogram | Time for a client's presence `track` or `update` call on the presence shard, tagged by `action`, `result` (`ok`/`error`/`exit`) and `reason`. | Global Aggregate | `/metrics`        |
+| `realtime_presence_track_duration_bucket`                              | Histogram | Time for a client's presence `track`, `untrack`, or `update` call on the presence shard, tagged by `action`, `result` (`ok`/`error`/`exit`) and `reason`. | Global Aggregate | `/metrics`        |
 | `realtime_presence_notify_discarded`                                   | Counter   | Presence latency observations dropped as `negative` (clock skew) or `stale` (replayed join), tagged by `reason`.                  | Global Aggregate | `/metrics`        |
 | `realtime_presence_join_latency_bucket`                                | Histogram | Time from a client's channel join to its first `presence_state` push.                                            | Global Aggregate | `/metrics`        |
-| `realtime_presence_usage_scan_duration_milliseconds_bucket`            | Histogram | Time taken to scan Phoenix.Tracker's replicated state for the presence usage metrics.                            | Global Aggregate | `/metrics`        |
+| `realtime_presence_usage_scan_duration_milliseconds_bucket`            | Histogram | Time taken to read the presence usage metrics, tagged by `implementation`: a scan of Phoenix.Tracker's replicated state (`phoenix`), or a scan of the views of the Rollcall trackers (`rollcall`). | Global Aggregate | `/metrics`        |
 | `realtime_global_rpc_bucket`                                           | Histogram | Inter-node RPC call latency distribution, tagged by `success` and `mechanism`.                                   | Global Aggregate | `/metrics`        |
 | `realtime_global_rpc_count`                                            | Counter   | Total inter-node RPC calls. Divide failed by total to get error rate.                                            | Global Aggregate | `/metrics`        |
 | `realtime_tenants_read_authorization_check_bucket`                     | Histogram | RLS policy evaluation time for read operations per tenant.                                                       | **Per-Tenant**   | `/tenant-metrics` |
@@ -137,11 +141,12 @@ These metrics measure end-to-end latency and processing performance across diffe
 
 These metrics track security policy enforcement and error rates.
 
-| Metric                          | Type    | Description                                                                                                                                     | Scope            | Endpoint          |
-| ------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ----------------- |
-| `realtime_channel_error`        | Counter | Unhandled channel errors per tenant. Any non-zero value warrants investigation.                                                                 | **Per-Tenant**   | `/tenant-metrics` |
-| `realtime_channel_global_error` | Counter | Global unhandled channel error count across all tenants, tagged by error code.                                                                  | Global Aggregate | `/metrics`        |
-| `phoenix_channel_joined_total`  | Counter | WebSocket channel join attempts tagged by `result` (`ok`/`error`) and `transport`. Use `result="error"` rate to detect client or policy issues. | Per-Node         | `/metrics`        |
+| Metric                           | Type    | Description                                                                                                                                     | Scope            | Endpoint          |
+| -------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ----------------- |
+| `realtime_channel_error`         | Counter | Unhandled channel errors per tenant. Any non-zero value warrants investigation.                                                                 | **Per-Tenant**   | `/tenant-metrics` |
+| `realtime_channel_global_error`  | Counter | Global unhandled channel error count across all tenants, tagged by error code.                                                                  | Global Aggregate | `/metrics`        |
+| `phoenix_channel_joined_total`   | Counter | WebSocket channel join attempts tagged by `result` (`ok`/`error`) and `transport`. Use `result="error"` rate to detect client or policy issues. | Per-Node         | `/metrics`        |
+| `realtime_presence_shadow_error` | Counter | Rollcall calls that fail while Phoenix succeeds in shadow mode, by `operation` (`track`, `untrack`, `watch`) and `reason` (`timeout`, `error`). | Global Aggregate | `/metrics`        |
 
 ## Subscription Pooler Metrics
 
@@ -157,6 +162,48 @@ These metrics cover the Postgres Changes subscription pooler per tenant: the wor
 | `realtime_replication_poller_changes_dispatch`        | Counter | Number of Postgres Changes rows the poller broadcast to subscribers.                         | **Per-Tenant** | `/tenant-metrics` |
 | `realtime_replication_poller_changes_skip`            | Counter | Number of Postgres Changes rows skipped without broadcasting, tagged by `reason`.            | **Per-Tenant** | `/tenant-metrics` |
 | `realtime_subscriptions_manager_dead_pid`             | Counter | Not-alive subscriber pids the manager handled, tagged by `reason`: `phantom` or `not_found`. | **Per-Tenant** | `/tenant-metrics` |
+
+## Rollcall Metrics
+
+These metrics come from the telemetry events of Rollcall, the presence tracker. They have no tenant label.
+
+| Metric                                         | Type      | Description                                                                                                                                                                                                                          | Scope            | Endpoint   |
+| ---------------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------- | ---------- |
+| `realtime_rollcall_tracker_started`            | Counter   | Rollcall trackers that started on this node.                                                                                                                                                                                         | Global Aggregate | `/metrics` |
+| `realtime_rollcall_tracker_stopped`            | Counter   | Rollcall trackers that stopped on this node, tagged by `reason`: `normal` (the grace period ended), `shutdown` (a supervisor stopped the tracker) or `crash`.                                                                       | Global Aggregate | `/metrics` |
+| `realtime_rollcall_peer_purged`                | Counter   | Peer records that a tracker deleted after the silence threshold, tagged by `stale`. `stale=false` is normal: the peer said goodbye. `stale=true` means no goodbye arrived, and the entries of the peer left with the record.        | Global Aggregate | `/metrics` |
+| `realtime_rollcall_peer_silent_ticks_bucket`   | Histogram | The highest number of ticks without a message over the peers that hold entries, for each tracker at each tick. A healthy peer has 1. | Global Aggregate | `/metrics` |
+| `realtime_rollcall_peer_observations`          | Counter   | The peers that trackers held, counted for each tracker at each tick.                                                                                                                                                                 | Global Aggregate | `/metrics` |
+| `realtime_rollcall_peer_observations_overdue`  | Counter   | Peer observations where the peer holds entries and missed a heartbeat. | Global Aggregate | `/metrics` |
+| `realtime_rollcall_heartbeat_send_duration_bucket` | Histogram | Time that a Rollcall tracker spends to send a heartbeat, in microseconds, tagged by the `kind` of the message (`snapshot` or `diff`). It builds the message and calls the transport. It does not wait for an answer from a peer. | Global Aggregate | `/metrics` |
+| `realtime_rollcall_heartbeat_apply_duration_bucket` | Histogram | Time that a Rollcall tracker spends to apply a message from a peer, in microseconds, tagged by the `kind` of the message (`snapshot`, `diff` or `request`). It changes the peer record, the replica and the view, and does not include the publish. | Global Aggregate | `/metrics` |
+| `realtime_rollcall_heartbeat_send_entries_bucket` | Histogram | The entries in each heartbeat that a Rollcall tracker sends, tagged by the `kind` of the message (`snapshot` or `diff`). A snapshot holds all the local entries of the tracker. The bucket bounds are half an entry above a value, so an empty heartbeat is in the `le="0.5"` bucket. | Global Aggregate | `/metrics` |
+| `realtime_rollcall_publish_entries`            | Counter   | The joins and the leaves that Rollcall trackers publish, tagged by `source`: `local` (clients), `peer` (a message from a peer) or `purge` (a peer that was purged). | Global Aggregate | `/metrics` |
+| `realtime_rollcall_publish_duration_bucket`    | Histogram | Time of one call that publishes the changes of a Rollcall partition, in microseconds, tagged by `source` (`local`, `peer` or `purge`). It depends on the subscribers of the partition. | Global Aggregate | `/metrics` |
+| `realtime_rollcall_tracker_entries_bucket` | Histogram | The entries in the view of a Rollcall tracker, counted at each tick: the local entries plus the entries of the peers. The bucket bounds are half an entry above a value, so an empty view is in the `le="0.5"` bucket. | Global Aggregate | `/metrics` |
+| `realtime_rollcall_tracker_process_bytes_bucket` | Histogram | The memory of a Rollcall tracker process, in bytes, counted at each tick. It is the memory value of `Process.info/2`: the heap, the stack and the mailbox. The last bound is 100 MB. A larger value counts in the `+Inf` bucket only. | Global Aggregate | `/metrics` |
+| `realtime_rollcall_tracker_ets_bytes_bucket` | Histogram | The memory of the view table of a Rollcall tracker, in bytes, counted at each tick. The last bound is 100 MB. A larger value counts in the `+Inf` bucket only. | Global Aggregate | `/metrics` |
+| `realtime_rollcall_tracker_reductions_bucket` | Histogram | The reductions that a Rollcall tracker process used since its previous tick. It measures the CPU work of a tracker in each period. | Global Aggregate | `/metrics` |
+| `realtime_rollcall_trackers` | Gauge | The Rollcall trackers that run on this node. Each tenant with presence has one tracker. | Per-Node | `/metrics` |
+
+## Presence Comparison Metrics
+
+These metrics come from the comparison of the presence views of Phoenix and Rollcall in shadow mode. A sweep samples the shadow tenants of a node and compares the refs of each tenant. A ref that only one view holds is a candidate. A check at 1, 3, 5, 10 and 15 seconds after the first read marks each candidate as open, converged or gone. A candidate that is open at the 10 second rung is persistent. The comparison runs while the `presence_comparison` feature flag is on. It reports and does not alert. No metric has a tenant label.
+
+| Metric                                                     | Type      | Description                                                                                                                                                                                                     | Scope            | Endpoint   |
+| ---------------------------------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ---------- |
+| `realtime_presence_compare_comparisons`                    | Counter   | Comparisons, tagged by `outcome`: `clean`, `transient`, `persistent` or `discarded`. A comparison is discarded when the Rollcall tracker of the tenant does not run after a read.                              | Global Aggregate | `/metrics` |
+| `realtime_presence_compare_entries`                        | Counter   | The refs in the union of the two views at the first read. A discarded comparison adds nothing.                                                                                                                  | Global Aggregate | `/metrics` |
+| `realtime_presence_compare_candidates`                     | Counter   | The refs that one view holds and the other view does not, at the first read, tagged by `kind`: `missing` (Phoenix only) or `ghost` (Rollcall only). Divide by `realtime_presence_compare_entries` for the churn. | Global Aggregate | `/metrics` |
+| `realtime_presence_compare_persistent_candidates`          | Counter   | The candidates that were open at the persistent rung, tagged by `kind`.                                                                                                                                         | Global Aggregate | `/metrics` |
+| `realtime_presence_compare_candidate_rungs_open`           | Counter   | The candidates that were still open at a check, tagged by `rung` (milliseconds) and `kind`. The share of the open candidates at a rung is `open / (open + converged)`.                                          | Global Aggregate | `/metrics` |
+| `realtime_presence_compare_candidate_rungs_converged`      | Counter   | The candidates that converged at a check, tagged by `rung` and `kind`. The ref is in both views, or only in the other view.                                                                                     | Global Aggregate | `/metrics` |
+| `realtime_presence_compare_candidate_rungs_gone`           | Counter   | The candidates that were in neither view at a check, tagged by `rung` and `kind`.                                                                                                                               | Global Aggregate | `/metrics` |
+| `realtime_presence_compare_duration_bucket`                | Histogram | Time of one comparison, in milliseconds. A comparison with a candidate lasts until its last rung.                                                                                                               | Global Aggregate | `/metrics` |
+| `realtime_presence_compare_sweeps`                         | Counter   | Sweeps that ended on this node.                                                                                                                                                                                 | Global Aggregate | `/metrics` |
+| `realtime_presence_compare_sweep_tenants_listed`           | Counter   | The scopes that the sweeps listed, in all the presence modes.                                                                                                                                                   | Global Aggregate | `/metrics` |
+| `realtime_presence_compare_sweep_tenants_compared`         | Counter   | The tenants that the sweeps compared. A tenant task that crashed or ran past the timeout is not in this count.                                                                                                  | Global Aggregate | `/metrics` |
+| `realtime_presence_compare_sweep_duration_bucket`          | Histogram | Time of one sweep, in milliseconds. A long sweep means that the tenant tasks wait for a place: a task holds its place until its last rung.                                                                      | Global Aggregate | `/metrics` |
 
 ## Tenant Migration Metrics
 
@@ -239,5 +286,6 @@ These metrics expose system-level resource usage and inter-node cluster communic
 | `dist_send_pending_bytes`                      | Gauge   | Bytes pending in Erlang distribution queues. Works with queue size to diagnose cluster communication issues.                                                                                                                       |
 | `dist_send_bytes`                              | Counter | Total bytes sent via Erlang distribution protocol. Includes all cluster metadata and RPC traffic.                                                                                                                                  |
 | `dist_recv_bytes`                              | Counter | Total bytes received via Erlang distribution protocol. Compare with send to validate symmetric communication.                                                                                                                      |
-| `realtime_presence_replication_received_bytes` | Counter | Bytes (`:erlang.external_size/1`) of Presence state replication received from other nodes, tagged by `implementation` (`phoenix` = `Phoenix.Tracker` gossip). Not client presence events (see `realtime_channel_presence_events`). |
+| `realtime_presence_replication_received_bytes` | Counter | Bytes (`:erlang.external_size/1`) of Presence state replication received from other nodes, tagged by `implementation` (`phoenix` = `Phoenix.Tracker` gossip, `rollcall` = Rollcall heartbeats). Not client presence events (see `realtime_channel_presence_events`). |
+| `realtime_presence_replication_received_messages` | Counter | Count of Presence state replication messages received from other nodes, tagged by `implementation` (`phoenix` = `Phoenix.Tracker` gossip, `rollcall` = Rollcall heartbeats). |
 

@@ -38,14 +38,16 @@ Channel topics look like `realtime:<sub_topic>` and are all handled by `Realtime
 
 #### Join budget per node
 
-`Realtime.Tenants.NodeJoinBudget` measures how fast each tenant joins channels on each node. The budget is the larger of two values, in joins per second. The first is `NODE_JOIN_BUDGET_FLOOR` (default 10). The second is `CLIENT_JOINS_PER_SECOND` (default 1) times the tenant's clients on the node. The clients are the sockets that `Realtime.UsersCounter` counts.
+`Realtime.Tenants.NodeJoinBudget` limits how fast each tenant joins channels on each node. The budget is the larger of two values, in joins per second. The first is `NODE_JOIN_BUDGET_FLOOR` (default 10). The second is `CLIENT_JOINS_PER_SECOND` (default 1) times the tenant's clients on the node. The clients are the sockets that `Realtime.UsersCounter` counts.
 
-A token bucket (a store of joins that refills at the budget rate) holds `NODE_JOIN_BUDGET_BURST_SECONDS` (default 60) seconds of budget. A tenant with no clients on a node can make 600 joins at once (10 × 60), and then 10 joins per second. A tenant that keeps rejoining empties the bucket. After that, each join over the budget increments the metrics below. The moduledoc of `Realtime.Tenants.NodeJoinBudget` explains how the bucket works and why its size is in seconds.
+A token bucket (a store of joins that refills at the budget rate) holds `NODE_JOIN_BUDGET_BURST_SECONDS` (default 60) seconds of budget. A tenant with no clients on a node can make 600 joins at once (10 × 60), and then 10 joins per second. A tenant that keeps rejoining empties the bucket. The moduledoc of `Realtime.Tenants.NodeJoinBudget` explains how the bucket works and why its size is in seconds.
 
-| Metric | Endpoint | Label |
+The `node_join_budget` feature flag turns the budget on for a tenant. While the flag is on and the bucket is empty, Realtime refuses each channel join with `JoinsRateLimitReached`, and the socket stays connected. Realtime also refuses new WebSocket connections for the tenant with an HTTP 429. Each refused join increments the channel error metrics below with the code `JoinsRateLimitReached`. A refused connection does not.
+
+| Metric | Endpoint | Labels |
 | --- | --- | --- |
-| `realtime_channel_node_join_budget_exceeded` | `/tenant-metrics` | `tenant` |
-| `realtime_channel_global_node_join_budget_exceeded` | `/metrics` | none |
+| `realtime_channel_error` | `/tenant-metrics` | `code`, `tenant` |
+| `realtime_channel_global_error` | `/metrics` | `code` |
 
 ### 2. What a channel carries
 
@@ -57,12 +59,9 @@ A token bucket (a store of joins that refills at the budget rate) holds `NODE_JO
 
 #### Broadcasts per socket
 
-`RealtimeWeb.UserSocket.connect/3` gives each socket a `Realtime.TokenBucket` for the broadcasts its clients send. The bucket holds `CLIENT_BROADCASTS_BURST` (default 1,000) broadcasts and refills at `CLIENT_BROADCASTS_PER_SECOND` (default 100). All channels of the socket share it. While the `socket_broadcast_limit` feature flag is on, each broadcast takes a token. For now the limit never refuses a broadcast. A broadcast that finds the bucket empty is still sent, and it increments the metrics below.
+`RealtimeWeb.UserSocket.connect/3` gives each socket a `Realtime.TokenBucket` for the broadcasts its clients send. The bucket holds `CLIENT_BROADCASTS_BURST` (default 1,000) broadcasts and refills at `CLIENT_BROADCASTS_PER_SECOND` (default 100). All channels of the socket share it. While the `socket_broadcast_limit` feature flag is on, each broadcast takes a token.
 
-| Metric | Endpoint | Label |
-| --- | --- | --- |
-| `realtime_channel_socket_broadcast_limit_exceeded` | `/tenant-metrics` | `tenant` |
-| `realtime_channel_global_socket_broadcast_limit_exceeded` | `/metrics` | none |
+The limit delays a broadcast. It never refuses one. If the bucket is empty, the channel logs a `MessagePerSecondRateLimitReached` error, and the error increments `realtime_channel_error`. Then the channel sleeps until the bucket has a token, and it sends the broadcast. While the channel sleeps, it reads no more messages from the client. The client can therefore not send faster than the bucket refills.
 
 ### 3. Fan-out and receive
 
@@ -129,7 +128,9 @@ flowchart TD
     A["launch_node(region, default, tenant_id)"] --> B{"nodes in region"}
     B -->|none| C["fallback: current node"]
     B -->|one| D["that node"]
-    B -->|many| E["seed RNG with phash2({tenant_id, time_bucket})"]
+    B -->|many| J["leave out draining nodes<br/>(keep all if all are draining)"]
+    J -->|one left| D
+    J -->|many left| E["seed RNG with phash2({tenant_id, time_bucket})"]
     E --> F["pick 2 candidate nodes<br/>(same result on every node in the bucket)"]
     F --> G["node_load/1 on both<br/>:cpu_sup.avg5, cached per node"]
     G -->|both known| H["least loaded wins"]
@@ -137,6 +138,7 @@ flowchart TD
 ```
 
 - Region membership comes from `:syn.members(RegionNodes, region)`, sorted for stability. Tenant regions are mapped to the nearest Realtime region by `platform_region_translator/1` (overridable via `REGION_MAPPING`).
+- A node that shuts down marks itself as draining in the `DrainingNodes` scope (`Realtime.Application.prep_stop/1` calls `Realtime.Nodes.mark_draining/1`). The picker leaves draining nodes out, so a restarted `Connect` or Postgres Changes poller does not land on a node that is about to stop. The node stays in `RegionNodes`, because it still serves broadcasts to its websockets until the Endpoint closes them. Shutdown then waits `NODE_DRAIN_SETTLE_MS` so that the mark reaches the other nodes before any tenant process stops.
 - The time bucket (default 60s, `:node_selection_time_bucket_seconds`) is the trick: every node computing in the same window picks the same two candidates, so concurrent requests agree. The next window picks a different pair, so placement spreads out over time. Agreement is best-effort not a guarantee. Requests landing on either side of a bucket edge (or on nodes with clock skew) get different candidate pairs. Then two singletons start and `:syn` resolves the conflict via `SynHandler.resolve_registry_conflict/4` (oldest registration wins, node name as tiebreak), stopping the loser with `{:shutdown, :syn_conflict_resolution}`.
 - Load is `:cpu_sup.avg5/0`, fetched over `GenRpc` for remote nodes and cached in `Realtime.Nodes.Cache` for the bucket duration. A node that hasn't been up long enough (`:node_balance_uptime_threshold_in_ms`) reports `{:error, :not_enough_data}` and the picker falls back to consistent hashing — this keeps freshly booted nodes from looking artificially idle and absorbing every tenant.
 
@@ -144,11 +146,12 @@ The same picker is used for Postgres Changes (`PostgresCdcRls.start_distributed/
 
 ### Highlight: syn as the cluster-wide registry
 
-[`:syn`](https://github.com/ostinelli/syn) gives us a distributed process registry with metadata and conflict resolution. Realtime uses three kinds of scopes, set up in `Realtime.Application`:
+[`:syn`](https://github.com/ostinelli/syn) gives us a distributed process registry with metadata and conflict resolution. Realtime uses four kinds of scopes, set up in `Realtime.Application`:
 
 | Scope | What's registered | Used for |
 | --- | --- | --- |
 | `RegionNodes` | one process per node, joined to a group named after its region | region membership → node selection, region flood |
+| `DrainingNodes` | one process per node that is shutting down, joined to a group named after its region | `launch_node/3` leaves these nodes out |
 | `Realtime.Tenants.Connect` | the `Connect` GenServer, keyed by `tenant_id` | find the tenant's DB pool from any node |
 | `realtime_postgres_cdc_<shard>` | the CDC `WorkerSupervisor`, keyed by `tenant_id` | find the tenant's poller; sharded (`:postgres_cdc_scope_shards`) so one scope's table isn't a hot spot |
 

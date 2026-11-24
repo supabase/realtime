@@ -1,5 +1,5 @@
 defmodule Realtime.GenRpcPubSub.RegionRingsTest do
-  # async: false — Mimic global + distributed integration test
+  # async: false — distributed integration test
   use ExUnit.Case, async: false
   use TestHelpers
 
@@ -8,7 +8,10 @@ defmodule Realtime.GenRpcPubSub.RegionRingsTest do
   alias Forum.Muster
 
   use Mimic
-  setup :set_mimic_from_context
+  # Private mode, not global: app processes (Forum scopes flooding via GenRpcPubSub,
+  # the app's own RegionRings) call Nodes too and would consume global expectations.
+  # Each test's RegionRings instance is allowed explicitly in start_region_rings!/1.
+  setup :set_mimic_private
 
   @region "ap-southeast-1"
 
@@ -32,6 +35,7 @@ defmodule Realtime.GenRpcPubSub.RegionRingsTest do
     base = [name: name, table: table, reconcile_on_init: false, reconcile_interval_ms: 60_000]
 
     pid = start_supervised!({RegionRings, Keyword.merge(base, opts)}, id: name)
+    Mimic.allow(Nodes, self(), pid)
 
     %{pid: pid, table: table}
   end

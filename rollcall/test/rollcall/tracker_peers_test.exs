@@ -466,7 +466,7 @@ defmodule Rollcall.TrackerPeersTest do
         end,
         fn {ref, state}, _trace ->
           assert state.version == 1
-          assert [%{ref: ^ref}] = Local.entries(state.local, "partition")
+          assert Local.ids(state.local) == [{"partition", ref}]
           assert state.peers == %{}
         end
       )
@@ -474,7 +474,7 @@ defmodule Rollcall.TrackerPeersTest do
   end
 
   defp entries(refs) do
-    Enum.map(refs, &wire_entry("partition", "key", &1, %{}))
+    Enum.map(refs, &wire_entry("partition", &1, "key", %{}))
   end
 
   # Delivers `message` with the scope of the tracker, as a sender does.

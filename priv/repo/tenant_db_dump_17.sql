@@ -29,8 +29,8 @@ END $$;
 --
 
 
--- Dumped from database version 17.11
--- Dumped by pg_dump version 17.11
+-- Dumped from database version 17.12
+-- Dumped by pg_dump version 17.12
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -554,12 +554,15 @@ begin
             set_config('request.jwt.claim.role', role_name, true),
             set_config('request.headers', headers, true);
 
-    -- One lookup for every probe, by the full primary key.
-    visible_ids := array(
-      select m.id
-      from realtime.messages m
-      where m.inserted_at = probe_inserted_at
-        and m.id = any(probe_ids));
+    -- One lookup for every probe, by the full primary key. Skipped without probes, so the
+    -- SELECT policies are not planned for a write.
+    if cardinality(probe_ids) > 0 then
+      visible_ids := array(
+        select m.id
+        from realtime.messages m
+        where m.inserted_at = probe_inserted_at
+          and m.id = any(probe_ids));
+    end if;
 
     read_allowed := array(
       select p.id = any(visible_ids)
@@ -1016,8 +1019,8 @@ BEGIN
   BEGIN
     generated_id := gen_random_uuid();
 
-    -- Check if payload has an 'id' key, if not, add the generated UUID
-    IF payload ? 'id' THEN
+    -- Add the generated UUID as 'id' to object payloads that don't have one
+    IF jsonb_typeof(payload) <> 'object' OR payload ? 'id' THEN
       final_payload := payload;
     ELSE
       final_payload := jsonb_set(payload, '{id}', to_jsonb(generated_id));
@@ -1819,4 +1822,6 @@ INSERT INTO realtime."schema_migrations" (version) VALUES (20261022120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261027120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261029120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261103130000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20261107120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20261111120000);
 REVOKE ALL ON realtime.schema_migrations FROM postgres, dashboard_user, anon, authenticated, service_role, supabase_realtime_admin;

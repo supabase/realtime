@@ -17,13 +17,18 @@ defmodule Rollcall do
   view of a node is its own entries plus the replicas of the other nodes.
 
   The first `track/6` for a scope starts the tracker, so an unused scope costs
-  nothing. The tracker removes an entry when its process exits or untracks it,
-  so an entry never outlives its process. The tracker stops after it holds no
-  entry for the grace period. The grace period avoids a stop and a start when a
-  scope gets a new process soon after it lost its last process. See
-  `Rollcall.Tracker`.
+  nothing. `ensure_started/2` starts the tracker without an entry, for a node
+  that reads a scope and tracks nothing in it. The tracker removes an entry
+  when its process exits or untracks it, so an entry never outlives its
+  process. The tracker stops after it holds no entry for the grace period,
+  unless the transport is active. See `Rollcall.Transport.active?/1`.
+  The grace period avoids a stop and a start when a scope gets a new process
+  soon after it lost its last process. See `Rollcall.Tracker`.
 
   A client reads the entries of a partition with `state/3`. 
+
+  The tracker emits telemetry events for its start, its stop, the purge of a peer
+  and the state of its peers. See `Rollcall.Metrics`.
 
   Use the functions in this module. Do not call `Rollcall.Tracker` directly.
   """
@@ -51,8 +56,8 @@ defmodule Rollcall do
   @typedoc "An entry in one partition: its ref, its key and its meta."
   @type entry :: {ref(), key(), meta()}
 
-  @typedoc "An entry in a scope: its partition, its ref, its key and its meta."
-  @type scope_entry :: {partition(), ref(), key(), meta()}
+  @typedoc "An entry with its partition: its partition, its ref, its key and its meta."
+  @type partitioned_entry :: {partition(), ref(), key(), meta()}
 
   @typedoc """
   A set of changes to a partition.
@@ -63,6 +68,16 @@ defmodule Rollcall do
   2. a list of `entry()`s that have left the partition.
   """
   @type partition_diff :: {[entry()], [entry()]}
+
+  @typedoc "The usage of an instance. See `usage/2`."
+  @type usage :: %{
+          scope_count: non_neg_integer(),
+          partition_count: non_neg_integer(),
+          entry_count_buckets: %{(pos_integer() | :infinity) => non_neg_integer()}
+        }
+
+  @typedoc "The bounds of the buckets for the number of entries in a partition, in ascending order."
+  @type usage_buckets :: [pos_integer()]
 
   @doc """
   Defines an instance of Rollcall named after the module that calls `use`.
@@ -96,13 +111,17 @@ defmodule Rollcall do
         Rollcall.start_link([name: __MODULE__] ++ Keyword.merge(unquote(opts), opts))
       end
 
+      @spec ensure_started(Rollcall.scope()) :: :ok | {:error, term()}
+      def ensure_started(scope), do: Rollcall.ensure_started(__MODULE__, scope)
+
       @spec track(pid(), Rollcall.scope(), Rollcall.partition(), Rollcall.key(), Rollcall.meta(), Keyword.t()) ::
               {:ok, Rollcall.ref()} | {:error, term()}
       def track(pid, scope, partition, key, meta, opts \\ []),
         do: Rollcall.track(__MODULE__, pid, scope, partition, key, meta, opts)
 
-      @spec untrack(pid(), Rollcall.scope(), Rollcall.partition(), Rollcall.key()) :: :ok
-      def untrack(pid, scope, partition, key), do: Rollcall.untrack(__MODULE__, pid, scope, partition, key)
+      @spec untrack(pid(), Rollcall.scope(), Rollcall.partition(), Rollcall.key(), Keyword.t()) :: :ok
+      def untrack(pid, scope, partition, key, opts \\ []),
+        do: Rollcall.untrack(__MODULE__, pid, scope, partition, key, opts)
 
       @spec scopes() :: [Rollcall.scope()]
       def scopes, do: Rollcall.scopes(__MODULE__)
@@ -110,8 +129,17 @@ defmodule Rollcall do
       @spec state(Rollcall.scope(), Rollcall.partition()) :: [Rollcall.entry()]
       def state(scope, partition), do: Rollcall.state(__MODULE__, scope, partition)
 
-      @spec state(Rollcall.scope()) :: [Rollcall.scope_entry()]
+      @spec state(Rollcall.scope()) :: [Rollcall.partitioned_entry()]
       def state(scope), do: Rollcall.state(__MODULE__, scope)
+
+      @spec refs(Rollcall.scope()) :: %{Rollcall.partition() => [Rollcall.ref()]}
+      def refs(scope), do: Rollcall.refs(__MODULE__, scope)
+
+      @spec refs(Rollcall.scope(), Rollcall.partition()) :: [Rollcall.ref()]
+      def refs(scope, partition), do: Rollcall.refs(__MODULE__, scope, partition)
+
+      @spec usage(Rollcall.usage_buckets()) :: Rollcall.usage()
+      def usage(usage_buckets), do: Rollcall.usage(__MODULE__, usage_buckets)
     end
   end
 
@@ -171,6 +199,24 @@ defmodule Rollcall do
   end
 
   @doc """
+  Starts the tracker for `scope` when none runs.
+
+  Returns `:ok` when a tracker runs for `scope`, or when the call started one.
+  Returns `{:error, reason}` when the tracker does not start. 
+
+  Call this function on a node that reads the entries of `scope` and has no
+  entry of its own. A tracker with no entry stops after the grace period,
+  unless the transport is active. See `Rollcall.Transport.active?/1`.
+  """
+  @spec ensure_started(Rollcall.name(), Rollcall.scope()) :: :ok | {:error, term()}
+  def ensure_started(name, scope) do
+    case Tracker.whereis(name, scope) do
+      nil -> Tracker.start(name, scope)
+      _pid -> :ok
+    end
+  end
+
+  @doc """
   Returns the names of the scopes that have a running tracker on this node.
 
   A tracker in its grace period is running, so a scope with no entry can be in
@@ -196,7 +242,7 @@ defmodule Rollcall do
   you probably don't want this and should use `state/3` instead, which returns
   a single partition, but it's here for ergonomics when testing.
   """
-  @spec state(name(), scope()) :: [scope_entry()]
+  @spec state(name(), scope()) :: [partitioned_entry()]
   def state(name, scope) do
     Tracker.state(name, scope)
   end
@@ -222,6 +268,35 @@ defmodule Rollcall do
   end
 
   @doc """
+  Returns the refs of the entries in `scope`, grouped by partition. A partition
+  with no entry is not in the map. The order of the refs is not defined.
+
+  The refs are the local entries plus the replica of each peer. Use `refs/3` to
+  read one partition.
+
+  Returns `%{}` when no tracker runs for `scope`, or when the instance does not
+  run. The function reads a table of the tracker. It sends no message to the
+  tracker and it does not start a tracker.
+  """
+  @spec refs(name(), scope()) :: %{partition() => [ref()]}
+  def refs(name, scope) do
+    Tracker.refs(name, scope)
+  end
+
+  @doc """
+  Returns the refs of the entries in `partition` of `scope`. The order is not
+  defined. The result is the value of `partition` in the map of `refs/2`.
+
+  Returns `[]` when no tracker runs for `scope`, or when the instance does not
+  run. The function sends no message to the tracker and it does not start a
+  tracker.
+  """
+  @spec refs(name(), scope(), partition()) :: [ref()]
+  def refs(name, scope, partition) do
+    Tracker.refs(name, scope, partition)
+  end
+
+  @doc """
   Tracks an entry for `pid` in `partition` of `scope`.
 
   The `key` and the `meta` are the payload of the entry.
@@ -244,6 +319,10 @@ defmodule Rollcall do
   A `:ref` option can be passed in the opts argument. When it's provided the value
   will be used as the ref for the entry. Refs need to be unique per scope, when callers
   provide the ref they are responsible for its uniqueness.
+
+  A `:timeout` option sets the milliseconds to wait for the tracker. The default is 5000. The
+  function exits with `{:timeout, _}` when the tracker does not reply in time. The tracker still
+  handles the call later, so the entry exists after the exit.
   """
   @spec track(name(), pid(), scope(), partition(), key(), meta(), Keyword.t()) :: {:ok, ref()} | {:error, term()}
   def track(name, pid, scope, partition, key, meta, opts \\ []) when is_pid(pid) and is_map(meta) do
@@ -259,9 +338,35 @@ defmodule Rollcall do
 
   Does not start a tracker. A tracker that starts only to find nothing to
   remove would stop again after the grace period.
+
+  The `:timeout` option works as it does for `track/7`.
   """
-  @spec untrack(name(), pid(), scope(), partition(), key()) :: :ok
-  def untrack(name, pid, scope, partition, key) when is_pid(pid) do
-    Tracker.untrack(name, scope, pid, partition, key)
+  @spec untrack(name(), pid(), scope(), partition(), key(), Keyword.t()) :: :ok
+  def untrack(name, pid, scope, partition, key, opts \\ []) when is_pid(pid) do
+    Tracker.untrack(name, scope, pid, partition, key, opts)
+  end
+
+  @doc """
+  Returns the usage of the running trackers of the instance `name`.
+
+  The function reads the views of the trackers on this node. 
+
+  The argument `usage_buckets` is a list of bounds in ascending order. The
+  result has these keys:
+
+    * `scope_count` - the scopes that hold at least one entry. The entries of
+      the peers count.
+    * `partition_count` - the partitions that hold at least one entry, summed
+      over the scopes.
+    * `entry_count_buckets` - the number of partitions in each bucket. The map
+      has one key for each bound, and the key `:infinity`. A partition with `n`
+      entries counts in the first bound that is `n` or more. It counts in
+      `:infinity` when `n` is above the last bound.
+
+  The function skips a tracker that has exited.
+  """
+  @spec usage(name(), usage_buckets()) :: usage()
+  def usage(name, usage_buckets) when is_list(usage_buckets) do
+    Tracker.usage(name, usage_buckets)
   end
 end

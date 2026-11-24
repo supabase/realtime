@@ -6,7 +6,8 @@ defmodule Realtime.Presence.EncoderPhoenixTest do
   # A client decodes JSON, so the comparison decodes both sides from JSON. The refs differ between
   # the two sides, so the comparison replaces each ref by the number of the step that made it. The
   # order of the metas under one key is not defined, so the comparison sorts them.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
+  use Mimic
 
   alias Phoenix.Socket.Broadcast
   alias Realtime.Presence.Encoder
@@ -16,9 +17,17 @@ defmodule Realtime.Presence.EncoderPhoenixTest do
 
   @timeout 1_000
 
+  setup :set_mimic_from_context
+
   setup do
     id = System.unique_integer([:positive])
     name = :"encoder_phoenix_#{id}"
+    scope = "scope-#{id}"
+
+    # The transport publishes only in Rollcall mode, from the process of the tracker
+    Realtime.FeatureFlags
+    |> stub(:enabled?, fn flag, _scope -> flag == "presence_rollcall_primary" end)
+    |> allow(self(), fn -> Rollcall.Tracker.whereis(name, scope) end)
 
     start_supervised!({Rollcall, name: name, transport: {RollcallTransport, []}, heartbeat_period_in_ms: :manual})
 
@@ -29,7 +38,7 @@ defmodule Realtime.Presence.EncoderPhoenixTest do
 
     scenario = %{
       rollcall: name,
-      scope: "scope-#{id}",
+      scope: scope,
       phoenix_topic: phoenix_topic,
       rollcall_topic: rollcall_topic,
       clients: Map.new([:phone, :laptop], &{&1, start_client()}),

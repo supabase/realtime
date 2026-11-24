@@ -47,8 +47,23 @@ defmodule Realtime.PromEx.Plugins.TenantGlobal do
     [
       channel_global_events(),
       payload_global_size_metrics(),
-      broadcast_fanout_global_metrics()
+      broadcast_fanout_global_metrics(),
+      broadcast_replay_global_metrics()
     ]
+  end
+
+  defp broadcast_replay_global_metrics do
+    Event.build(
+      :realtime_global_broadcast_replay_metrics,
+      [
+        sum(
+          [:realtime, :broadcast, :global, :replay, :messages],
+          event_name: [:realtime, :broadcast, :replay],
+          measurement: :messages,
+          description: "Global sum of broadcast messages read from realtime.messages to replay on channel join."
+        )
+      ]
+    )
   end
 
   defp broadcast_fanout_global_metrics do
@@ -121,21 +136,9 @@ defmodule Realtime.PromEx.Plugins.TenantGlobal do
         ),
         sum(
           [:realtime, :channel, :global, :joins],
-          event_name: [:realtime, :rate_counter, :channel, :joins],
-          measurement: :sum,
+          event_name: [:realtime, :channel, :joins],
+          measurement: :count,
           description: "Global sum of Realtime Channel joins."
-        ),
-        counter(
-          [:realtime, :channel, :global, :node_join_budget_exceeded],
-          event_name: [:realtime, :channel, :node_join_budget_exceeded],
-          measurement: :count,
-          description: "Global count of Realtime Channel joins over their tenant's join budget on the node"
-        ),
-        counter(
-          [:realtime, :channel, :global, :socket_broadcast_limit_exceeded],
-          event_name: [:realtime, :channel, :socket_broadcast_limit_exceeded],
-          measurement: :count,
-          description: "Global count of Realtime Channel broadcasts over their socket's broadcast limit"
         ),
         sum(
           [:realtime, :channel, :global, :input_bytes],

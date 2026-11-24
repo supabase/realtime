@@ -19,7 +19,6 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Realtime.PostgresCdc
   alias Realtime.RateCounter
   alias Realtime.SignalHandler
-  alias Realtime.Telemetry
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
@@ -49,10 +48,8 @@ defmodule RealtimeWeb.RealtimeChannel do
   @postgres_cdc_down Realtime.Syn.PostgresCdc.down_event()
   @fullsweep_after Application.compile_env!(:realtime, :websocket_fullsweep_after)
   @node_join_budget_flag "node_join_budget"
-  @node_join_budget_exceeded_event [:realtime, :channel, :node_join_budget_exceeded]
   @socket_join_limit_flag "socket_join_limit"
   @socket_broadcast_limit_flag "socket_broadcast_limit"
-  @socket_broadcast_limit_exceeded_event [:realtime, :channel, :socket_broadcast_limit_exceeded]
 
   @impl true
   def join("realtime:", _params, socket) do
@@ -116,8 +113,8 @@ defmodule RealtimeWeb.RealtimeChannel do
          socket = assign(socket, PresenceHandler.join(join, tenant)),
          :ok <- only_private?(tenant, socket),
          :ok <- limit_max_users(tenant, transport_pid),
-         :ok <- measure_node_joins(tenant),
-         :ok <- limit_joins(tenant, socket),
+         :ok <- limit_node_joins(tenant),
+         :ok <- count_join(tenant),
          :ok <- limit_channels(tenant, socket),
          {:ok, claims, confirm_token_ref} <- confirm_token(socket),
          socket = assign_authorization_context(socket, sub_topic, claims),
@@ -205,6 +202,9 @@ defmodule RealtimeWeb.RealtimeChannel do
         msg = "Fields `role` and `exp` are required in JWT"
         maybe_log_warning(socket, "InvalidJWTToken", msg)
 
+      {:error, [message: _, claim: claim, claim_val: _]} ->
+        maybe_log_warning(socket, "InvalidJWTToken", "JWT claim `#{claim}` is invalid")
+
       {:error, :unauthorized, msg} ->
         log_error(socket, "Unauthorized", msg)
 
@@ -215,10 +215,9 @@ defmodule RealtimeWeb.RealtimeChannel do
         msg = "Too many connected users"
         log_error(socket, "ConnectionRateLimitReached", msg)
 
-      {:error, :too_many_joins} ->
-        msg = "ClientJoinRateLimitReached: Too many joins per second"
-        send(transport_pid, %Phoenix.Socket.Broadcast{event: "disconnect"})
-        {:error, %{reason: msg}}
+      # Only the join is refused, the socket stays connected
+      {:error, :too_many_node_joins} ->
+        maybe_log_error(socket, "JoinsRateLimitReached", "Too many joins per second", throttle: {1, 10_000})
 
       {:error, :increase_connection_pool} ->
         msg = "Please increase your connection pool size"
@@ -498,7 +497,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   @impl true
   def handle_in("broadcast", payload, %{assigns: %{private?: true}} = socket) do
     %{tenant: tenant_id} = socket.assigns
-    measure_socket_broadcasts(socket)
+    limit_socket_broadcasts(socket)
 
     RequestMetrics.track(:broadcast, :ws, tenant_id, fn ->
       with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id) do
@@ -532,7 +531,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_in("broadcast", payload, %{assigns: %{private?: false}} = socket) do
-    measure_socket_broadcasts(socket)
+    limit_socket_broadcasts(socket)
     RequestMetrics.track(:broadcast, :ws, socket.assigns.tenant, fn -> BroadcastHandler.handle(payload, socket) end)
   end
 
@@ -731,41 +730,37 @@ defmodule RealtimeWeb.RealtimeChannel do
     wait
   end
 
-  def limit_joins(tenant, socket) do
-    rate_args = Tenants.joins_per_second_rate(tenant)
-
-    RateCounter.new(rate_args)
-
-    case RateCounter.get(rate_args) do
-      {:ok, %{limit: %{triggered: false}}} ->
-        GenCounter.add(rate_args.id)
-        :ok
-
-      {:ok, %{limit: %{triggered: true}}} ->
-        {:error, :too_many_joins}
-
-      error ->
-        log_error(socket, "UnknownErrorOnCounter", error)
-        {:error, error}
-    end
-  end
-
-  # The node join budget is only measured for now: joins over it are counted, not refused. The flag is read on every
-  # join so switching it off takes effect without sockets reconnecting
-  defp measure_node_joins(tenant) do
+  # The flag is read on every join so switching it off takes effect without sockets reconnecting
+  defp limit_node_joins(tenant) do
     if FeatureFlags.enabled?(@node_join_budget_flag, tenant.external_id) and NodeJoinBudget.take(tenant) == :error do
-      Telemetry.execute(@node_join_budget_exceeded_event, %{count: 1}, %{tenant: tenant.external_id})
+      {:error, :too_many_node_joins}
+    else
+      :ok
+    end
+  end
+
+  defp count_join(tenant) do
+    :telemetry.execute([:realtime, :channel, :joins], %{count: 1}, %{tenant: tenant.external_id})
+  end
+
+  # A broadcast over the socket's limit is delayed, not refused: the channel sleeps until the bucket has a token for
+  # it. While it sleeps, the channel reads no more messages from the client, so the client cannot go faster than
+  # the bucket refills. The flag is read on every broadcast so switching it off takes effect without reconnects
+  defp limit_socket_broadcasts(%{assigns: %{tenant: tenant_id}, private: %{broadcast_bucket: bucket}} = socket) do
+    if FeatureFlags.enabled?(@socket_broadcast_limit_flag, tenant_id) and TokenBucket.take(bucket) == :error do
+      log_error(socket, "MessagePerSecondRateLimitReached", "Too many broadcasts on this socket")
+
+      wait_for_broadcast_token(bucket)
     end
 
     :ok
   end
 
-  defp measure_socket_broadcasts(%{assigns: %{tenant: tenant_id}, private: %{broadcast_bucket: bucket}}) do
-    if FeatureFlags.enabled?(@socket_broadcast_limit_flag, tenant_id) and TokenBucket.take(bucket) == :error do
-      Telemetry.execute(@socket_broadcast_limit_exceeded_event, %{count: 1}, %{tenant: tenant_id})
-    end
+  # Other channels of the socket share the bucket and can take the token first, so the take after the sleep can fail
+  defp wait_for_broadcast_token(bucket) do
+    bucket |> TokenBucket.wait_time() |> div(1_000) |> Kernel.+(1) |> Process.sleep()
 
-    :ok
+    if TokenBucket.take(bucket) == :error, do: wait_for_broadcast_token(bucket), else: :ok
   end
 
   # channels_count is the number of channels the transport already holds, set by UserSocket
@@ -868,13 +863,13 @@ defmodule RealtimeWeb.RealtimeChannel do
   # disconnected (JWT expiry). Keep client JWT expiry short: see
   # https://supabase.com/docs/guides/realtime/authorization#updating-rls-policies
   defp confirm_token(%{assigns: assigns}) do
-    %{jwt_secret: jwt_secret, access_token: access_token} = assigns
+    %{jwt_secret: jwt_secret, access_token: access_token, tenant: tenant_id} = assigns
 
     jwt_jwks = Map.get(assigns, :jwt_jwks)
 
     with jwt_secret_dec <- Tenant.decrypt_jwt_secret(jwt_secret),
          {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
-           ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec, jwt_jwks),
+           ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec, jwt_jwks, tenant_id),
          exp_diff when exp_diff > 0 <- exp - Joken.current_time() do
       if ref = assigns[:confirm_token_ref], do: Helpers.cancel_timer(ref)
 

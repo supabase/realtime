@@ -67,7 +67,9 @@ defmodule RealtimeWeb.Endpoint do
     param_key: "request_logger",
     cookie_key: "request_logger"
 
-  plug BaggageRequestId, baggage_key: BaggageRequestId.baggage_key()
+  # No baggage_key option, because plug options are evaluated when this module compiles, before
+  # config/runtime.exs reads REQUEST_ID_BAGGAGE_KEY. The plug reads the key on each request instead.
+  plug BaggageRequestId
 
   plug Plug.Telemetry,
     event_prefix: [:phoenix, :endpoint],

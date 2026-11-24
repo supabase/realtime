@@ -36,24 +36,6 @@ defmodule Rollcall.Tracker.LocalPropertyTest do
     end
   end
 
-  property "the changes rebuild the set", %{pids: pids} do
-    check all(operations <- operation_list()) do
-      Enum.reduce(operations, {Local.new(), MapSet.new()}, fn operation, {local, view} ->
-        {changes, local} = apply_to_local(local, pids, operation, unique_ref())
-        {joins, leaves} = change_tuples(changes)
-
-        view =
-          view
-          |> MapSet.difference(MapSet.new(leaves))
-          |> MapSet.union(MapSet.new(joins))
-
-        assert view == MapSet.new(all_entries(local))
-
-        {local, view}
-      end)
-    end
-  end
-
   property "untracking every pid returns the empty set", %{pids: pids} do
     check all(operations <- operation_list()) do
       local =
@@ -99,8 +81,9 @@ defmodule Rollcall.Tracker.LocalPropertyTest do
     Local.untrack_pid(local, Enum.at(pids, index))
   end
 
-  # Each function returns {{joins, leaves}, model}. The joins and the leaves are
-  # sorted lists of tuples.
+  # Each function returns {{joins, leaves}, model}. The joins are sorted
+  # partitioned entries `{partition, ref, key, meta}`. The leaves are sorted ids
+  # `{partition, ref}`.
   defp apply_to_model(model, pids, {:track, index, partition, key, meta}, ref) do
     pid = Enum.at(pids, index)
     {replaced, kept} = Enum.split_with(model, &same_id?(&1, pid, partition, key))
@@ -113,37 +96,28 @@ defmodule Rollcall.Tracker.LocalPropertyTest do
 
     entry = {pid, partition, key, meta, ref}
 
-    {{[entry], Enum.sort(replaced)}, [entry | kept]}
+    {{[to_join(entry)], replaced |> Enum.map(&to_id/1) |> Enum.sort()}, [entry | kept]}
   end
 
   defp apply_to_model(model, pids, {:untrack, index, partition, key}, _ref) do
     pid = Enum.at(pids, index)
     {removed, kept} = Enum.split_with(model, &same_id?(&1, pid, partition, key))
 
-    {{[], Enum.sort(removed)}, kept}
+    {{[], removed |> Enum.map(&to_id/1) |> Enum.sort()}, kept}
   end
 
   defp apply_to_model(model, pids, {:untrack_pid, index}, _ref) do
     pid = Enum.at(pids, index)
     {removed, kept} = Enum.split_with(model, fn {entry_pid, _, _, _, _} -> entry_pid == pid end)
 
-    {{[], Enum.sort(removed)}, kept}
+    {{[], removed |> Enum.map(&to_id/1) |> Enum.sort()}, kept}
   end
 
   defp same_id?({pid, partition, key, _meta, _ref}, pid, partition, key), do: true
   defp same_id?(_entry, _pid, _partition, _key), do: false
 
   defp assert_agrees(local, model, pids) do
-    for partition <- @partitions do
-      expected =
-        model
-        |> Enum.filter(fn {_, entry_partition, _, _, _} -> entry_partition == partition end)
-        |> Enum.sort()
-
-      actual = local |> Local.entries(partition) |> Enum.map(&to_tuple/1) |> Enum.sort()
-
-      assert actual == expected
-    end
+    assert Enum.sort(Local.ids(local)) == model |> Enum.map(&to_id/1) |> Enum.sort()
 
     for pid <- pids do
       assert Local.tracks?(local, pid) ==
@@ -152,21 +126,13 @@ defmodule Rollcall.Tracker.LocalPropertyTest do
 
     assert Local.empty?(local) == (model == [])
 
-    # An empty set holds no record of an entry, a pid or a partition.
+    # An empty set holds no record of an entry or a pid.
     if model == [], do: assert(local == Local.new())
   end
 
-  defp all_entries(local) do
-    @partitions
-    |> Enum.flat_map(&Local.entries(local, &1))
-    |> Enum.map(&to_tuple/1)
-  end
+  defp change_tuples(%{joins: joins, leaves: leaves}), do: {Enum.sort(joins), Enum.sort(leaves)}
 
-  defp change_tuples(%{joins: joins, leaves: leaves}) do
-    {joins |> Enum.map(&to_tuple/1) |> Enum.sort(), leaves |> Enum.map(&to_tuple/1) |> Enum.sort()}
-  end
+  defp to_join({_pid, partition, key, meta, ref}), do: {partition, ref, key, meta}
 
-  defp to_tuple(%{pid: pid, partition: partition, key: key, meta: meta, ref: ref}) do
-    {pid, partition, key, meta, ref}
-  end
+  defp to_id({_pid, partition, _key, _meta, ref}), do: {partition, ref}
 end

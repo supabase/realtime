@@ -29,7 +29,7 @@ defmodule Generators do
             "poll_max_changes" => 100,
             "poll_max_record_bytes" => 1_048_576,
             "region" => "us-east-1",
-            "publication" => "supabase_realtime_test",
+            "publication" => Integrations.publication(),
             "ssl_enforced" => false
           }
         }

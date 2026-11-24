@@ -1,8 +1,17 @@
 defmodule Realtime.Presence.RollcallTransportTest do
   use ExUnit.Case, async: true
+  use Mimic
+  use TestHelpers
 
   alias Realtime.Presence.RollcallTransport
+  alias Realtime.UsersCounter
+  alias RealtimeWeb.RealtimeChannel.MessageDispatcher
   alias Rollcall.Tracker.Messages
+
+  @latency_event [:realtime, :presence, :notify, :latency]
+  @discarded_event [:realtime, :presence, :notify, :discarded]
+
+  setup :set_mimic_from_context
 
   setup do
     scope = "rollcall-#{System.unique_integer([:positive])}"
@@ -25,6 +34,46 @@ defmodule Realtime.Presence.RollcallTransportTest do
 
       refute_receive :ping, 100
     end
+  end
+
+  # The tracker asks at the end of its grace period. A node that has users of the tenant connected
+  # keeps the tracker, so the users still get the state and the diffs of their peers.
+  describe "active?/1" do
+    setup %{scope: scope} do
+      {:ok, state} = RollcallTransport.init(scope, pubsub: Realtime.PubSub)
+      {:ok, state: state}
+    end
+
+    test "is false when no user of the scope is connected on the node", %{state: state} do
+      refute RollcallTransport.active?(state)
+    end
+
+    test "is true while a user of the scope is connected on the node", %{state: state, scope: scope} do
+      :ok = UsersCounter.add(connected_user(), scope)
+
+      assert RollcallTransport.active?(state)
+    end
+
+    test "is false after the process of the user exits", %{state: state, scope: scope} do
+      user = connected_user()
+      :ok = UsersCounter.add(user, scope)
+
+      Process.exit(user, :kill)
+
+      assert_eventually(not RollcallTransport.active?(state))
+    end
+
+    test "is false when only a user of another scope is connected on the node", %{state: state, scope: scope} do
+      :ok = UsersCounter.add(connected_user(), "other-#{scope}")
+
+      refute RollcallTransport.active?(state)
+    end
+  end
+
+  # The test supervisor stops the process when the test ends. The process is not linked to the test,
+  # so a test can kill it.
+  defp connected_user do
+    start_supervised!(Supervisor.child_spec({Task, fn -> Process.sleep(:infinity) end}, id: make_ref()))
   end
 
   describe "heartbeat/2" do
@@ -70,6 +119,7 @@ defmodule Realtime.Presence.RollcallTransportTest do
 
   describe "publish/3" do
     setup %{scope: scope} do
+      stub(Realtime.FeatureFlags, :enabled?, fn flag, ^scope -> flag == "presence_rollcall_primary" end)
       {:ok, state} = RollcallTransport.init(scope, pubsub: Realtime.PubSub)
       {:ok, state: state, partition: "realtime:partition-#{scope}"}
     end
@@ -107,6 +157,15 @@ defmodule Realtime.Presence.RollcallTransportTest do
       refute_receive %Phoenix.Socket.Broadcast{}, 100
     end
 
+    test "sends nothing unless the Rollcall mode is on", %{scope: scope, state: state, partition: partition} do
+      stub(Realtime.FeatureFlags, :enabled?, fn flag, ^scope -> flag == "presence_rollcall_shadow" end)
+      Phoenix.PubSub.subscribe(Realtime.PubSub, partition)
+
+      assert :ok = RollcallTransport.publish(state, partition, {[{"r1", "alice", %{}}], []})
+
+      refute_receive %Phoenix.Socket.Broadcast{}, 100
+    end
+
     test "sends the diff once to a subscriber", %{state: state, partition: partition} do
       Phoenix.PubSub.subscribe(Realtime.PubSub, partition)
 
@@ -114,6 +173,84 @@ defmodule Realtime.Presence.RollcallTransportTest do
 
       assert_receive %Phoenix.Socket.Broadcast{topic: ^partition}
       refute_receive %Phoenix.Socket.Broadcast{topic: ^partition}, 100
+    end
+  end
+
+  # A new tracker learns the entries of its peers from a snapshot. An entry tracked before the tracker
+  # started has a latency of its age, not of its delivery. The shadow mode does not record it.
+  describe "publish/3 in the shadow mode" do
+    setup %{scope: scope} do
+      stub(Realtime.FeatureFlags, :enabled?, fn flag, ^scope -> flag == "presence_rollcall_shadow" end)
+      attach_notify_telemetry(scope)
+      {:ok, state} = RollcallTransport.init(scope, pubsub: Realtime.PubSub)
+      {:ok, state: state, partition: "realtime:partition-#{scope}"}
+    end
+
+    test "records the latency of an entry tracked after the tracker started", %{
+      state: state,
+      partition: partition,
+      scope: scope
+    } do
+      now = System.system_time(:millisecond)
+
+      :ok = RollcallTransport.publish(state, partition, {[{"r1", "alice", stamped(now)}], []})
+
+      assert_receive {:telemetry, @latency_event, %{latency: _},
+                      %{tenant: ^scope, path: :transport, implementation: :rollcall}}
+    end
+
+    test "records neither a latency nor a discard for an entry tracked before the tracker started", %{
+      state: state,
+      partition: partition
+    } do
+      old = System.system_time(:millisecond) - 10_000
+
+      :ok = RollcallTransport.publish(state, partition, {[{"r1", "alice", stamped(old)}], []})
+
+      refute_receive {:telemetry, _event, _measurements, _metadata}, 100
+    end
+
+    test "drops only the old entries of a diff", %{state: state, partition: partition} do
+      now = System.system_time(:millisecond)
+      joins = [{"r1", "alice", stamped(now - 10_000)}, {"r2", "bob", stamped(now)}]
+
+      :ok = RollcallTransport.publish(state, partition, {joins, []})
+
+      assert_receive {:telemetry, @latency_event, %{latency: _}, _metadata}
+      refute_receive {:telemetry, _event, _measurements, _metadata}, 100
+    end
+  end
+
+  # The dispatcher records the latency of each entry that still has its stamp, once for each fastlane
+  # subscriber. It removes every stamp before it sends the diff to a subscriber, so the test reads
+  # the latency events, not the diff.
+  describe "publish/3 in the Rollcall mode" do
+    setup %{scope: scope} do
+      stub(Realtime.FeatureFlags, :enabled?, fn flag, ^scope -> flag == "presence_rollcall_primary" end)
+      attach_notify_telemetry(scope)
+      {:ok, state} = RollcallTransport.init(scope, pubsub: Realtime.PubSub)
+      partition = "realtime:partition-#{scope}"
+
+      fastlane = MessageDispatcher.fastlane_metadata(self(), Phoenix.Socket.V1.JSONSerializer, partition, :error, scope)
+      subscribe_from_other_process(partition, metadata: fastlane)
+
+      {:ok, state: state, partition: partition}
+    end
+
+    test "records the latency of an entry tracked after the tracker started", %{state: state, partition: partition} do
+      now = System.system_time(:millisecond)
+
+      :ok = RollcallTransport.publish(state, partition, {[{"r1", "alice", stamped(now)}], []})
+
+      assert_receive {:telemetry, @latency_event, %{latency: _}, %{path: :fastlane}}
+    end
+
+    test "records no latency for an entry tracked before the tracker started", %{state: state, partition: partition} do
+      old = System.system_time(:millisecond) - 10_000
+
+      :ok = RollcallTransport.publish(state, partition, {[{"r1", "alice", stamped(old)}], []})
+
+      refute_receive {:telemetry, _event, _measurements, _metadata}, 100
     end
   end
 
@@ -143,22 +280,43 @@ defmodule Realtime.Presence.RollcallTransportTest do
     end
   end
 
+  # The meta of an entry that the sampler stamped on a peer node.
+  defp stamped(ts), do: %{"n" => 1, _rt: %{ts: ts, node: "remote-node", impl: :rollcall}}
+
+  # The handler filters on the scope, so a test only sees the events of its own scope.
+  defp attach_notify_telemetry(scope) do
+    id = {__MODULE__, scope}
+
+    :telemetry.attach_many(
+      id,
+      [@latency_event, @discarded_event],
+      &__MODULE__.handle_telemetry/4,
+      %{pid: self(), tenant: scope}
+    )
+
+    on_exit(fn -> :telemetry.detach(id) end)
+  end
+
+  def handle_telemetry(event, measurements, metadata, %{pid: pid, tenant: tenant}) do
+    if metadata[:tenant] == tenant, do: send(pid, {:telemetry, event, measurements, metadata})
+  end
+
   defp message(:snapshot), do: snapshot()
   defp message(:diff), do: Messages.diff(self(), Messages.stamp(1, 2), 1, [], [])
   defp message(:request), do: Messages.request(self())
 
   defp snapshot do
-    Messages.snapshot(self(), Messages.stamp(1, 1), [Messages.wire_entry("partition", "key", make_ref(), %{})])
+    Messages.snapshot(self(), Messages.stamp(1, 1), [Messages.wire_entry("partition", make_ref(), "key", %{})])
   end
 
   # Subscribes a new process to `topic`, and returns when the subscription is
   # active. The process sends the first message it gets to the test process.
-  defp subscribe_from_other_process(topic) do
+  defp subscribe_from_other_process(topic, opts \\ []) do
     test = self()
 
     pid =
       spawn_link(fn ->
-        :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, topic)
+        :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, topic, opts)
         send(test, {:subscribed, self()})
 
         receive do

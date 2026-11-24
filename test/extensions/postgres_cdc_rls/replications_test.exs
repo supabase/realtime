@@ -96,17 +96,18 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
   end
 
   describe "list_changes/5" do
-    @publication "supabase_realtime_test"
+    @publication Integrations.publication()
 
     test "slot empty: returns only the sentinel row with slot_changes_count of 0", %{conn: conn} do
       slot_name = "test_slot_#{System.unique_integer([:positive])}"
+      publication = publish_only_test_table(conn)
 
       {:ok, _} = Replications.prepare_replication(conn, slot_name)
 
       assert {:ok, %Postgrex.Result{rows: rows}} =
                Replications.list_changes(conn,
                  slot_name: slot_name,
-                 publication: @publication,
+                 publication: publication,
                  max_changes: 100,
                  max_record_bytes: 1_048_576
                )
@@ -118,13 +119,14 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
 
     test "slot has changes visible to subscriber: returns real row and slot_changes_count of 1", %{conn: conn} do
       slot_name = "test_slot_#{System.unique_integer([:positive])}"
+      publication = publish_only_test_table(conn)
 
       {:ok, subscription_params} =
         Subscriptions.parse_subscription_params(%{"event" => "*", "schema" => "public", "table" => "test"})
 
       Subscriptions.create(
         conn,
-        @publication,
+        publication,
         [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}],
         self(),
         self()
@@ -137,7 +139,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
       assert {:ok, %Postgrex.Result{rows: rows}} =
                Replications.list_changes(conn,
                  slot_name: slot_name,
-                 publication: @publication,
+                 publication: publication,
                  max_changes: 100,
                  max_record_bytes: 1_048_576
                )
@@ -163,13 +165,14 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
     test "slot has changes but subscriber does not match the INSERT: returns only the sentinel row with slot_changes_count of 1",
          %{conn: conn} do
       slot_name = "test_slot_#{System.unique_integer([:positive])}"
+      publication = publish_only_test_table(conn)
 
       {:ok, subscription_params} =
         Subscriptions.parse_subscription_params(%{"event" => "UPDATE", "schema" => "public", "table" => "test"})
 
       Subscriptions.create(
         conn,
-        @publication,
+        publication,
         [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}],
         self(),
         self()
@@ -182,7 +185,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
       assert {:ok, %Postgrex.Result{rows: rows}} =
                Replications.list_changes(conn,
                  slot_name: slot_name,
-                 publication: @publication,
+                 publication: publication,
                  max_changes: 100,
                  max_record_bytes: 1_048_576
                )
@@ -258,6 +261,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
       conn: conn
     } do
       slot_name = "test_slot_#{System.unique_integer([:positive])}"
+      publication = publish_only_test_table(conn)
 
       {:ok, _} = Replications.prepare_replication(conn, slot_name)
 
@@ -266,7 +270,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
       assert {:ok, %Postgrex.Result{rows: rows}} =
                Replications.list_changes(conn,
                  slot_name: slot_name,
-                 publication: @publication,
+                 publication: publication,
                  max_changes: 100,
                  max_record_bytes: 1_048_576
                )
@@ -297,9 +301,19 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
     end
   end
 
+  # slot_changes_count counts every change in the slot that the publication covers, and the
+  # shared test publication is FOR ALL TABLES. Multigres writes its own heartbeat table every
+  # second, so with that publication a heartbeat landing between creating the slot and draining
+  # it shows up in the count. Publishing only public.test keeps the count to the test's writes.
+  defp publish_only_test_table(conn) do
+    publication = "list_changes_test"
+    Postgrex.query!(conn, "CREATE PUBLICATION #{publication} FOR TABLE public.test", [])
+    publication
+  end
+
   describe "list_changes for schemas and tables with special characters" do
     defp run_list_changes(conn, schema, table) do
-      pub = "supabase_realtime_test"
+      pub = @publication
       slot = "lc_#{:rand.uniform(9_999_999)}"
 
       # quote identifiers

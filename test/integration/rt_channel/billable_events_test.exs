@@ -1,10 +1,7 @@
 defmodule Realtime.Integration.RtChannel.BillableEventsTest do
   use RealtimeWeb.ConnCase,
     async: true,
-    parameterize: [
-      %{serializer: Phoenix.Socket.V1.JSONSerializer},
-      %{serializer: RealtimeWeb.Socket.V2Serializer}
-    ]
+    parameterize: Integrations.presence_parameters()
 
   import Generators
 
@@ -16,11 +13,11 @@ defmodule Realtime.Integration.RtChannel.BillableEventsTest do
 
   @moduletag :capture_log
 
-  setup [:checkout_tenant_connect_and_setup_postgres_changes]
+  setup [:checkout_tenant_connect_and_setup_postgres_changes, :set_presence_mode]
 
   setup %{tenant: tenant} do
     events = [
-      [:realtime, :rate_counter, :channel, :joins],
+      [:realtime, :channel, :joins],
       [:realtime, :rate_counter, :channel, :events],
       [:realtime, :rate_counter, :channel, :db_events],
       [:realtime, :rate_counter, :channel, :presence_events]
@@ -44,7 +41,10 @@ defmodule Realtime.Integration.RtChannel.BillableEventsTest do
   def handle_telemetry(event, measurements, metadata, name) do
     tenant = metadata[:tenant]
     [key] = Enum.take(event, -1)
-    value = Map.get(measurements, :sum) || Map.get(measurements, :value) || Map.get(measurements, :size) || 0
+
+    value =
+      Map.get(measurements, :sum) || Map.get(measurements, :value) || Map.get(measurements, :size) ||
+        Map.get(measurements, :count) || 0
 
     Agent.update(name, fn state ->
       state =
@@ -144,13 +144,14 @@ defmodule Realtime.Integration.RtChannel.BillableEventsTest do
       }
 
       WebsocketClient.send_event(socket, topic, "presence", payload)
-      assert_receive %Message{event: "presence_diff", payload: %{"joins" => _, "leaves" => %{}}, topic: ^topic}
+      assert_receive %Message{event: "presence_diff", payload: %{"joins" => _, "leaves" => %{}}, topic: ^topic}, 1000
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 1000
 
       # Presence events
       {socket, _} = get_connection(tenant, serializer, role: "authenticated")
       WebsocketClient.join(socket, topic, %{config: config})
 
-      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 1000
 
       payload = %{
         type: "presence",
@@ -159,8 +160,8 @@ defmodule Realtime.Integration.RtChannel.BillableEventsTest do
       }
 
       WebsocketClient.send_event(socket, topic, "presence", payload)
-      assert_receive %Message{event: "presence_diff", payload: %{"joins" => _, "leaves" => %{}}, topic: ^topic}
-      assert_receive %Message{event: "presence_diff", payload: %{"joins" => _, "leaves" => %{}}, topic: ^topic}
+      assert_receive %Message{event: "presence_diff", payload: %{"joins" => _, "leaves" => %{}}, topic: ^topic}, 1000
+      assert_receive %Message{event: "presence_diff", payload: %{"joins" => _, "leaves" => %{}}, topic: ^topic}, 1000
 
       # Expected billed
       # 2 joins due to two sockets

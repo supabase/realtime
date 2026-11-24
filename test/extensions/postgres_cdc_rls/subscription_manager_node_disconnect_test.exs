@@ -8,7 +8,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManagerNodeDisconnectTest do
   alias Extensions.PostgresCdcRls.SubscriptionManager
   alias Extensions.PostgresCdcRls.Subscriptions
 
-  @publication "supabase_realtime_test"
+  @publication Integrations.publication()
 
   # The SubscriptionManager runs on this node and the subscriber runs on a peer, so the manager
   # monitors a remote pid. Cutting the distribution link delivers a real

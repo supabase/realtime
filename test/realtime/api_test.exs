@@ -17,6 +17,7 @@ defmodule Realtime.ApiTest do
   alias Realtime.RateCounter
   alias Realtime.Tenants.Connect
   alias Extensions.PostgresCdcRls
+  alias RealtimeWeb.UserSocket
 
   @db_conf Application.compile_env(:realtime, Realtime.Repo)
 
@@ -230,7 +231,7 @@ defmodule Realtime.ApiTest do
       :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant.external_id)
       assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{jwt_jwks: %{keys: ["test"]}})
 
-      assert %Phoenix.Socket.Broadcast{
+      assert_receive %Phoenix.Socket.Broadcast{
         payload: %{message: "Server requested disconnect", status: "ok", extension: "system"},
         event: "system",
         topic: nil
@@ -241,7 +242,7 @@ defmodule Realtime.ApiTest do
       :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant.external_id)
       assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{jwt_secret: "potato"})
 
-      assert %Phoenix.Socket.Broadcast{
+      assert_receive %Phoenix.Socket.Broadcast{
         payload: %{message: "Server requested disconnect", status: "ok", extension: "system"},
         event: "system",
         topic: nil
@@ -252,11 +253,37 @@ defmodule Realtime.ApiTest do
       :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant.external_id)
       assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{suspend: true})
 
-      assert %Phoenix.Socket.Broadcast{
+      assert_receive %Phoenix.Socket.Broadcast{
         payload: %{message: "Server requested disconnect", status: "ok", extension: "system"},
         event: "system",
         topic: nil
       }
+    end
+
+    test "valid data and suspend change will disconnect and kill remaining sockets", %{tenants: [tenant | _]} do
+      reject(&UserSocket.disconnect/1)
+
+      expect(UserSocket, :disconnect_and_kill, fn external_id ->
+        assert external_id == tenant.external_id
+        :ok
+      end)
+
+      assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{suspend: true})
+    end
+
+    test "valid data and unsuspend change won't kill sockets", %{tenants: [tenant | _]} do
+      assert {:ok, %Tenant{suspend: true}} = Api.update_tenant_by_external_id(tenant.external_id, %{suspend: true})
+      reject(&UserSocket.disconnect_and_kill/1)
+      expect(UserSocket, :disconnect, fn _ -> :ok end)
+
+      assert {:ok, %Tenant{suspend: false}} = Api.update_tenant_by_external_id(tenant.external_id, %{suspend: false})
+    end
+
+    test "valid data and jwt_secret change won't kill sockets", %{tenants: [tenant | _]} do
+      reject(&UserSocket.disconnect_and_kill/1)
+      expect(UserSocket, :disconnect, fn _ -> :ok end)
+
+      assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{jwt_secret: "potato"})
     end
 
     test "valid data but not updating jwt_secret or jwt_jwks won't send event", %{tenants: [tenant | _]} do
@@ -320,7 +347,7 @@ defmodule Realtime.ApiTest do
             "poll_max_changes" => 100,
             "poll_max_record_bytes" => 1_048_576,
             "region" => "us-east-1",
-            "publication" => "supabase_realtime_test",
+            "publication" => Integrations.publication(),
             "ssl_enforced" => false
           }
         }
@@ -399,16 +426,6 @@ defmodule Realtime.ApiTest do
       assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{max_events_per_second: 123})
     end
 
-    test "change to max_joins_per_second publishes update to rate counters", %{tenants: [tenant | _]} do
-      expect(RateCounter, :publish_update, fn key ->
-        assert key == Realtime.Tenants.joins_per_second_key(tenant.external_id)
-      end)
-
-      reject(&RateCounter.publish_update/1)
-
-      assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{max_joins_per_second: 123})
-    end
-
     test "change to max_presence_events_per_second publishes update to rate counters", %{tenants: [tenant | _]} do
       expect(RateCounter, :publish_update, fn key ->
         assert key == Realtime.Tenants.presence_events_per_second_key(tenant.external_id)
@@ -434,7 +451,7 @@ defmodule Realtime.ApiTest do
             "poll_max_changes" => 100,
             "poll_max_record_bytes" => 1_048_576,
             "region" => "us-east-1",
-            "publication" => "supabase_realtime_test",
+            "publication" => Integrations.publication(),
             "ssl_enforced" => false
           }
         }

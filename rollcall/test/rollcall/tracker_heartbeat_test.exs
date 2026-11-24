@@ -29,7 +29,39 @@ defmodule Rollcall.TrackerHeartbeatTest do
       assert {:snapshot, origin, {:stamp, incarnation, 1}, entries} = receive_message(probe)
       assert node(origin) == @node_a
       assert incarnation == tracker_state(tracker).incarnation
-      assert entries == [wire_entry("partition", "key", ref, %{a: 1})]
+      assert entries == [wire_entry("partition", ref, "key", %{a: 1})]
+    end
+
+    test "sends only the local entries when the view holds the entries of a peer", %{
+      scope: scope,
+      network: network,
+      probe: probe
+    } do
+      tracker = start_node(scope, network, @node_a)
+      ref = track(tracker, start_client(), "partition", "key", %{a: 1})
+      send_from_probe(probe, snapshot(self(), stamp(1, 1), [wire_entry("partition", "peer-ref", "peer-key", %{b: 2})]))
+      sync(tracker)
+
+      tick(tracker)
+
+      assert {:snapshot, _, _, entries} = receive_message(probe)
+      assert entries == [wire_entry("partition", ref, "key", %{a: 1})]
+    end
+
+    test "sends only the new entry after a track replaces an entry", %{
+      scope: scope,
+      network: network,
+      probe: probe
+    } do
+      tracker = start_node(scope, network, @node_a)
+      client = start_client()
+      ref_1 = track(tracker, client, "partition", "key", %{a: 1})
+      ref_2 = track(tracker, client, "partition", "key", %{a: 2})
+
+      tick(tracker)
+
+      assert {:snapshot, _, {:stamp, _, 2}, entries} = receive_message(probe)
+      assert entries == [wire_entry("partition", ref_2, "key", %{a: 2, rc_prev_ref: ref_1})]
     end
 
     test "sends a snapshot with no entries when the tracker holds none", %{
@@ -110,7 +142,7 @@ defmodule Rollcall.TrackerHeartbeatTest do
       check_trace(
         fn ->
           tracker = start_node(scope, network, @node_a, silence_threshold: 2)
-          send_from_probe(probe, snapshot(self(), stamp(1, 1), [wire_entry("partition", "key", "ref", %{})]))
+          send_from_probe(probe, snapshot(self(), stamp(1, 1), [wire_entry("partition", "ref", "key", %{})]))
 
           tick(tracker)
           tick(tracker)

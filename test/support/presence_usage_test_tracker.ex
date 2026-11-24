@@ -1,6 +1,6 @@
 defmodule Realtime.Test.PresenceUsageTracker do
   @moduledoc """
-  A standalone `Phoenix.Presence` instance for `RealtimeWeb.Presence.Usage` tests.
+  A standalone `Phoenix.Presence` instance for `Realtime.Presence.PhoenixUsage` tests.
 
   `Phoenix.Presence.start_link/3` always registers under the using module's own name, so
   `RealtimeWeb.Presence` can't be started twice under different names. This is a separate

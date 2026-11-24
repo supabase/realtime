@@ -28,6 +28,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   alias Realtime.Tenants
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Authorization
+  alias Realtime.TokenBucket
   alias RealtimeWeb.Channels.Payloads
   alias Realtime.Presence
   alias RealtimeWeb.RealtimeChannel.Logging
@@ -55,33 +56,30 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   end
 
   @doc """
-  Computes presence rate-limiting assigns. 
+  Computes presence rate-limiting assigns.
 
   Only call this once a join has fully succeeded, otherwise we unnecessarily create a RateCounter.
+
+  `presence_client_bucket` limits the presence messages of this channel. It is a `Realtime.TokenBucket` that holds
+  `max_calls` messages and refills them over `window_ms`, one message every `window_ms / max_calls`. The tenant's
+  `max_client_presence_events_per_window` and `client_presence_window_ms` override the `:client_presence_rate_limit`
+  environment defaults. The values are read here, so a changed tenant applies to channels that join afterwards.
   """
   @spec join_rate_limits(Tenant.t()) :: %{
           presence_rate_counter: RateCounter.Args.t(),
-          presence_client_rate_limit: %{
-            :counter => 0,
-            :max_calls => pos_integer(),
-            :reset_at => nil,
-            :window_ms => pos_integer()
-          }
+          presence_client_bucket: TokenBucket.t()
         }
   def join_rate_limits(tenant) do
     config = Application.get_env(:realtime, :client_presence_rate_limit, max_calls: 5, window_ms: 30_000)
     rate_counter = Tenants.presence_events_per_second_rate(tenant)
+    max_calls = positive_integer_or(tenant.max_client_presence_events_per_window, config[:max_calls])
+    window_ms = positive_integer_or(tenant.client_presence_window_ms, config[:window_ms])
 
     RateCounter.new(rate_counter)
 
     %{
       presence_rate_counter: rate_counter,
-      presence_client_rate_limit: %{
-        max_calls: positive_integer_or(tenant.max_client_presence_events_per_window, config[:max_calls]),
-        window_ms: positive_integer_or(tenant.client_presence_window_ms, config[:window_ms]),
-        counter: 0,
-        reset_at: nil
-      }
+      presence_client_bucket: TokenBucket.per_window(max_calls, window_ms, :millisecond)
     }
   end
 
@@ -133,6 +131,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   end
 
   defp push_presence_state(socket, topic) do
+    Presence.watch(socket.assigns.tenant)
     state = Presence.list(socket.assigns.tenant, topic)
     push(socket, "presence_state", state)
     maybe_record_join_latency(socket, state)
@@ -187,10 +186,8 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   def handle(%{"event" => event} = payload, socket) do
     event = String.downcase(event, :ascii)
 
-    with {:ok, socket} <- limit_client_presence_event(socket) do
+    with :ok <- limit_client_presence_event(socket) do
       handle_presence_event(event, payload, socket)
-    else
-      {:error, :client_rate_limit_exceeded} = error -> error
     end
   end
 
@@ -348,27 +345,11 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     end
   end
 
-  defp limit_client_presence_event(socket) do
-    %{assigns: %{presence_client_rate_limit: limit_config}} = socket
-
-    current_time = System.monotonic_time(:millisecond)
-
-    # Check if we need to reset the window
-    cond do
-      is_nil(limit_config.reset_at) or current_time > limit_config.reset_at ->
-        # Start new window or reset expired window
-        updated_limit_config = %{limit_config | counter: 1, reset_at: current_time + limit_config.window_ms}
-        updated_socket = assign(socket, :presence_client_rate_limit, updated_limit_config)
-        {:ok, updated_socket}
-
-      limit_config.counter >= limit_config.max_calls ->
-        {:error, :client_rate_limit_exceeded}
-
-      true ->
-        # Increment counter
-        updated_limit_config = %{limit_config | counter: limit_config.counter + 1}
-        updated_socket = assign(socket, :presence_client_rate_limit, updated_limit_config)
-        {:ok, updated_socket}
+  # The bucket is an atomic, so taking a token needs no change to the socket
+  defp limit_client_presence_event(%{assigns: %{presence_client_bucket: bucket}}) do
+    case TokenBucket.take(bucket) do
+      :ok -> :ok
+      :error -> {:error, :client_rate_limit_exceeded}
     end
   end
 

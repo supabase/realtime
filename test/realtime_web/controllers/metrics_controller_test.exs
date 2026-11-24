@@ -68,6 +68,7 @@ defmodule RealtimeWeb.MetricsControllerTest do
     {"realtime_tenants_broadcast_from_database_latency_inserted_at",
      "realtime_tenants_broadcast_from_database_latency_inserted_at_count", [tenant: "test_tenant"]},
     {"realtime_tenants_replay", "realtime_tenants_replay_count", [tenant: "test_tenant"]},
+    {"realtime_broadcast_replay_messages", "realtime_broadcast_replay_messages", [tenant: "test_tenant"]},
     # Per-tenant errors
     {"realtime_channel_error", "realtime_channel_error", [code: "TestError", tenant: "test_tenant"]}
   ]
@@ -92,7 +93,7 @@ defmodule RealtimeWeb.MetricsControllerTest do
     :telemetry.execute([:realtime, :rate_counter, :channel, :events], %{sum: 5}, tenant_meta)
     :telemetry.execute([:realtime, :rate_counter, :channel, :presence_events], %{sum: 3}, tenant_meta)
     :telemetry.execute([:realtime, :rate_counter, :channel, :db_events], %{sum: 2}, tenant_meta)
-    :telemetry.execute([:realtime, :rate_counter, :channel, :joins], %{sum: 1}, tenant_meta)
+    :telemetry.execute([:realtime, :channel, :joins], %{count: 1}, tenant_meta)
     :telemetry.execute([:realtime, :channel, :input_bytes], %{size: 1024}, tenant_meta)
     :telemetry.execute([:realtime, :channel, :output_bytes], %{size: 2048}, tenant_meta)
 
@@ -112,7 +113,7 @@ defmodule RealtimeWeb.MetricsControllerTest do
       tenant_meta
     )
 
-    :telemetry.execute([:realtime, :tenants, :replay], %{latency: 20}, tenant_meta)
+    :telemetry.execute([:realtime, :broadcast, :replay], %{latency: 20, messages: 3}, tenant_meta)
     :telemetry.execute([:realtime, :rpc], %{latency: 5}, %{success: true, mechanism: :erpc})
 
     :telemetry.execute([:phoenix, :channel_joined], %{}, %{

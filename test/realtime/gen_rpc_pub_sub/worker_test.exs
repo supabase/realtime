@@ -13,6 +13,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
 
   @topic "test_topic"
   @fanout_event [:realtime, :broadcast, :fanout, :node_delivery]
+  @presence_replication_event [:realtime, :presence, :replication, :received]
   @view_hash "vh"
 
   setup do
@@ -104,10 +105,15 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       refute_receive {@fanout_event, ^ref, _, %{tenant: ^tenant_id}}
     end
 
-    test "does not emit for untagged messages", %{worker: worker, ref: ref, tenant_id: tenant_id} do
+    test "does not emit for untagged messages", %{worker: worker, ref: ref} do
+      broadcast = %Phoenix.Socket.Broadcast{topic: @topic, event: "e", payload: %{}}
+      send(worker, Worker.forward_to_local(@topic, broadcast, Phoenix.PubSub))
       send(worker, Worker.forward_to_local(@topic, "untagged message", Phoenix.PubSub))
 
-      refute_receive {@fanout_event, ^ref, _, %{tenant: ^tenant_id}}
+      # Wait until the worker handled both messages, so any emission is already in the mailbox.
+      # An untagged message carries no tenant to filter on, so match any fan-out event.
+      :sys.get_state(worker)
+      refute_received {@fanout_event, ^ref, _, _}
     end
 
     test "forward to region also measures fan-out on the receiving node",
@@ -324,6 +330,42 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       assert count >= 1
       refute_receive {@fanout_event, _, _, %{tenant: ^tenant_id}}
     end
+
+    test "measures a Rollcall heartbeat that the router delivers to its own subscribers", %{worker: worker} do
+      tenant_id = "routed-presence-#{System.unique_integer([:positive])}"
+      topic = "rollcall:#{tenant_id}"
+      message = {:tb, tenant_id, :heartbeat}
+      ref = :telemetry_test.attach_event_handlers(self(), [@presence_replication_event])
+
+      expect(Muster, :router, fn _scope, ^tenant_id -> {:ok, node()} end)
+      expect(Muster, :targets, fn _scope, ^tenant_id, @view_hash -> {:ok, [node()]} end)
+
+      send(worker, Worker.route(tenant_id, topic, message, Phoenix.PubSub, :node_origin, @view_hash))
+
+      size = :erlang.external_size(Worker.forward_to_local(topic, message, Phoenix.PubSub))
+
+      assert_receive {@presence_replication_event, ^ref, %{size: ^size}, %{implementation: "rollcall"}}
+      refute_receive {@presence_replication_event, ^ref, _, _}
+    end
+
+    # A remote target counts the message when its own worker receives the :ftl.
+    test "does not measure a Rollcall heartbeat when the router is not a target", %{worker: worker} do
+      tenant_id = "routed-presence-#{System.unique_integer([:positive])}"
+      topic = "rollcall:#{tenant_id}"
+      ref = :telemetry_test.attach_event_handlers(self(), [@presence_replication_event])
+
+      expect(Muster, :router, fn _scope, ^tenant_id -> {:ok, node()} end)
+      expect(Muster, :targets, fn _scope, ^tenant_id, @view_hash -> {:ok, [:node_us_2]} end)
+      expect(GenRpc, :abcast, fn [:node_us_2], _worker, {:ftl, ^topic, _message, _dispatcher}, [] -> :ok end)
+
+      send(
+        worker,
+        Worker.route(tenant_id, topic, {:tb, tenant_id, :heartbeat}, Phoenix.PubSub, :node_origin, @view_hash)
+      )
+
+      :sys.get_state(worker)
+      refute_received {@presence_replication_event, ^ref, _, _}
+    end
   end
 
   describe "cross-region routed broadcast" do
@@ -471,6 +513,39 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       assert_receive {@fanout_event, ^ref, %{local_tenant_users: count}, %{tenant: ^tenant_id, hit: true}}
       assert count >= 1
       refute_receive {@fanout_event, _, _, %{tenant: ^tenant_id}}
+    end
+
+    test "measures a Rollcall heartbeat that the router delivers to its own subscribers", %{worker: worker} do
+      tenant_id = "routed-region-presence-#{System.unique_integer([:positive])}"
+      topic = "rollcall:#{tenant_id}"
+      message = {:tb, tenant_id, :heartbeat}
+      ref = :telemetry_test.attach_event_handlers(self(), [@presence_replication_event])
+
+      expect(Muster, :router, fn _scope, ^tenant_id -> {:ok, node()} end)
+      expect(Muster, :targets, fn _scope, ^tenant_id, @view_hash -> {:ok, [node()]} end)
+
+      send(worker, Worker.route_region(topic, tenant_id, message, Phoenix.PubSub, @view_hash))
+
+      size = :erlang.external_size(Worker.forward_to_local(topic, message, Phoenix.PubSub))
+
+      assert_receive {@presence_replication_event, ^ref, %{size: ^size}, %{implementation: "rollcall"}}
+      refute_receive {@presence_replication_event, ^ref, _, _}
+    end
+
+    # A remote target counts the message when its own worker receives the :ftl.
+    test "does not measure a Rollcall heartbeat when the router is not a target", %{worker: worker} do
+      tenant_id = "routed-region-presence-#{System.unique_integer([:positive])}"
+      topic = "rollcall:#{tenant_id}"
+      ref = :telemetry_test.attach_event_handlers(self(), [@presence_replication_event])
+
+      expect(Muster, :router, fn _scope, ^tenant_id -> {:ok, node()} end)
+      expect(Muster, :targets, fn _scope, ^tenant_id, @view_hash -> {:ok, [:node_us_2]} end)
+      expect(GenRpc, :abcast, fn [:node_us_2], _worker, {:ftl, ^topic, _message, _dispatcher}, [] -> :ok end)
+
+      send(worker, Worker.route_region(topic, tenant_id, {:tb, tenant_id, :heartbeat}, Phoenix.PubSub, @view_hash))
+
+      :sys.get_state(worker)
+      refute_received {@presence_replication_event, ^ref, _, _}
     end
   end
 end

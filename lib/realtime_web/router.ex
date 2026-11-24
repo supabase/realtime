@@ -3,7 +3,7 @@ defmodule RealtimeWeb.Router do
 
   require Logger
 
-  import RealtimeWeb.ChannelsAuthorization, only: [authorize: 3]
+  alias RealtimeWeb.JwtVerification
 
   pipeline :browser do
     plug(:accepts, ["html"])
@@ -167,7 +167,7 @@ defmodule RealtimeWeb.Router do
 
   defp authorize_any(token, secrets) do
     Enum.find_value(secrets, {:error, :unauthorized}, fn secret ->
-      case authorize(token, secret, nil) do
+      case JwtVerification.verify(token, secret, nil) do
         {:ok, claims} -> {:ok, claims}
         _ -> nil
       end

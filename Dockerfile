@@ -3,8 +3,8 @@ ARG OTP_VERSION=28.5.0.4
 ARG DEBIAN_VERSION=trixie-20260713-slim
 ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
 ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
-# @supabase/pg-delta@1.0.0-alpha.60
-ARG PG_DELTA_COMMIT=265af521e462577886ea6fdbb5777e1a23811cce
+# @supabase/pg-delta@1.0.0-alpha.61
+ARG PG_DELTA_COMMIT=9c8fe1248bc29011d4c9038c5a900df992c67206
 
 FROM debian:${DEBIAN_VERSION} AS pgdelta-builder
 ARG PG_DELTA_COMMIT
@@ -71,7 +71,7 @@ RUN mix local.hex --force && \
 # install mix dependencies
 COPY mix.exs mix.lock ./
 COPY forum forum
-COPY sql_logex sql_logex
+COPY policy_eval policy_eval
 COPY rollcall rollcall
 RUN mix deps.get --only $MIX_ENV
 RUN mkdir config

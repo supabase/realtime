@@ -140,6 +140,41 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
 
       assert log =~ "RealtimeDisabledForTenant"
     end
+
+    test "connected socket is closed and cannot reconnect", %{tenant: tenant, topic: topic, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{config: %{broadcast: %{self: true}, private: false}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
+
+      {:ok, _} = Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{suspend: true})
+
+      assert_receive {:close_code, @service_restart_close_code}, 1000
+      assert_process_down(socket)
+
+      assert {:error, %Mint.WebSocket.UpgradeFailureError{status_code: 403}} =
+               get_connection(tenant, serializer, role: "authenticated")
+    end
+
+    test "socket that does not drain is killed", %{tenant: tenant, topic: topic, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{config: %{broadcast: %{self: true}, private: false}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
+
+      # A suspended transport never handles the drain, like one that is stuck or missed the broadcast
+      [{transport_pid, _}] = Registry.lookup(Realtime.PubSub, UserSocket.subscribers_id(tenant.external_id))
+      :ok = :sys.suspend(transport_pid)
+      ref = Process.monitor(transport_pid)
+
+      {:ok, _} = Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{suspend: true})
+
+      assert_receive {:DOWN, ^ref, :process, ^transport_pid, :killed}, 1000
+      assert_process_down(socket)
+      refute_received {:close_code, _}
+    end
   end
 
   describe "socket disconnect - configuration changes" do
@@ -510,55 +545,56 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
     end
   end
 
-  describe "rate limits - joins per second" do
-    setup [:rls_context]
-
-    test "max_joins_per_second limit respected", %{tenant: tenant, serializer: serializer} do
-      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
-      config = %{broadcast: %{self: true}, private: false}
-      realtime_topic = "realtime:#{random_string()}"
-
-      log =
-        capture_log(fn ->
-          for _ <- 1..1500 do
-            WebsocketClient.join(socket, realtime_topic, %{config: config})
-            assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^realtime_topic}, 500
-          end
-
-          RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
-
-          WebsocketClient.join(socket, realtime_topic, %{config: config})
-          assert_process_down(socket)
-        end)
-
-      assert log =~
-               "project=#{tenant.external_id} external_id=#{tenant.external_id} [critical] ClientJoinRateLimitReached: Too many joins per second"
-
-      assert length(String.split(log, "ClientJoinRateLimitReached")) <= 3
-    end
-  end
-
   describe "rate limits - node join budget" do
     setup [:rls_context]
 
-    test "joins over the tenant's budget on the node are counted, not refused", %{
+    test "refuses joins over the tenant's budget on the node and keeps the socket connected", %{
       tenant: tenant,
       serializer: serializer
     } do
       enable_tenant_flag!(tenant, "node_join_budget")
       {socket, _} = get_connection(tenant, serializer, role: "authenticated")
       config = %{broadcast: %{self: true}, private: false}
-      topics = for _ <- 1..50, do: "realtime:#{random_string()}"
+      [topic_1 | _] = topics = for _ <- 1..50, do: "realtime:#{random_string()}"
 
       for topic <- topics, do: WebsocketClient.join(socket, topic, %{config: config})
 
-      for topic <- topics do
-        assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 5_000
-      end
+      replies =
+        for topic <- topics do
+          assert_receive %Message{event: "phx_reply", payload: %{"status" => status} = reply, topic: ^topic}, 10_000
+          {status, reply["response"]}
+        end
 
       # config/test.exs makes the budget max(10, 2 * sockets) joins per second with a 2 second burst, so with one socket
       # the first 20 joins always fit and the rest outrun the refill of 10 per second
-      assert node_join_budget_exceeded(tenant) in 1..30
+      refused = {"error", %{"reason" => "JoinsRateLimitReached: Too many joins per second"}}
+      {first_20, rest} = Enum.split(replies, 20)
+      assert Enum.all?(first_20, &match?({"ok", _}, &1))
+      assert Enum.all?(rest, &(match?({"ok", _}, &1) or &1 == refused))
+      refused_count = Enum.count(rest, &(&1 == refused))
+      assert refused_count in 1..30
+      assert joins_rate_limit_reached(tenant) == refused_count
+
+      payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+      WebsocketClient.send_event(socket, topic_1, "broadcast", payload)
+      assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic_1}, 500
+    end
+
+    test "refuses new connections while the tenant's budget on the node is used up", %{
+      tenant: tenant,
+      serializer: serializer
+    } do
+      enable_tenant_flag!(tenant, "node_join_budget")
+      future = System.monotonic_time(:microsecond) + 60_000_000
+      Stream.repeatedly(fn -> Realtime.Tenants.NodeJoinBudget.take(tenant, future) end) |> Enum.find(&(&1 == :error))
+
+      log =
+        capture_log(fn ->
+          assert {:error, %Mint.WebSocket.UpgradeFailureError{status_code: 429}} =
+                   get_connection(tenant, serializer, role: "authenticated")
+        end)
+
+      assert log =~ "JoinsRateLimitReached"
     end
   end
 
@@ -707,9 +743,9 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
     on_exit(fn -> Realtime.FeatureFlags.Cache.invalidate_cache(name) end)
   end
 
-  defp node_join_budget_exceeded(tenant) do
+  defp joins_rate_limit_reached(tenant) do
     Realtime.TenantPromEx
     |> PromEx.get_metrics()
-    |> MetricsHelper.search("realtime_channel_node_join_budget_exceeded", tenant: tenant.external_id)
+    |> MetricsHelper.search("realtime_channel_error", code: "JoinsRateLimitReached", tenant: tenant.external_id)
   end
 end

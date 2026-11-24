@@ -1,10 +1,7 @@
 defmodule Realtime.Integration.RtChannel.PresenceTest do
   use RealtimeWeb.ConnCase,
     async: true,
-    parameterize: [
-      %{serializer: Phoenix.Socket.V1.JSONSerializer},
-      %{serializer: RealtimeWeb.Socket.V2Serializer}
-    ]
+    parameterize: Integrations.presence_parameters()
 
   import ExUnit.CaptureLog
   import Generators
@@ -15,7 +12,7 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
 
   @moduletag :capture_log
 
-  setup [:checkout_tenant]
+  setup [:checkout_tenant, :set_presence_mode]
 
   describe "public presence" do
     setup [:rls_context]
@@ -683,6 +680,121 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
       refute log =~ ~r/external_id=#{tenant.external_id}.*UnableToHandlePresence/
     end
   end
+
+  # The tests above run in each presence mode and show that a client sees the same events. These
+  # tests show where the entries live: the mode decides which backend holds them. A backend that the
+  # mode does not use must stay empty. In the shadow mode, Rollcall tracks and publishes nothing.
+  describe "the backends of the presence mode" do
+    test "hold the entry of a tracked client, and the client receives one presence_diff", ctx do
+      %{tenant: tenant, serializer: serializer, presence_mode: mode} = ctx
+      client = join_track_and_receive_diff(tenant, serializer)
+
+      await_entry(mode, tenant, client)
+
+      for backend <- [:phoenix, :rollcall], backend not in backends(mode) do
+        refute_eventually(entry?(backend, tenant, client))
+      end
+
+      # The backends of the mode hold the same entry. The shadow mode has two.
+      assert [_] = mode |> backends() |> Enum.map(&list(&1, tenant, client)) |> Enum.uniq()
+
+      # The helper received the presence_diff of the track. A second one is a duplicate, so only the
+      # backend of the mode publishes to the client.
+      refute_receive %Message{event: "presence_diff"}, 300
+    end
+
+    test "remove the entry of a client that untracks", ctx do
+      %{tenant: tenant, serializer: serializer, presence_mode: mode} = ctx
+      client = join_track_and_receive_diff(tenant, serializer)
+      await_entry(mode, tenant, client)
+
+      WebsocketClient.send_event(client.socket, client.topic, "presence", %{type: "presence", event: "UNTRACK"})
+
+      %{topic: topic, key: key} = client
+
+      assert_receive %Message{
+                       event: "presence_diff",
+                       payload: %{"joins" => joins, "leaves" => %{^key => _}},
+                       topic: ^topic
+                     },
+                     500
+
+      assert joins == %{}
+
+      for backend <- backends(mode), do: assert_eventually(not entry?(backend, tenant, client))
+    end
+
+    test "remove the entry of a client that closes the socket", ctx do
+      %{tenant: tenant, serializer: serializer, presence_mode: mode} = ctx
+      client = join_track_and_receive_diff(tenant, serializer)
+      await_entry(mode, tenant, client)
+      %{topic: topic, key: key} = client
+
+      # The client that closes cannot receive its own leave, so a second client on the topic does.
+      _observer = join_channel(tenant, serializer, topic, "observer-#{random_string()}")
+
+      WebsocketClient.close(client.socket)
+
+      assert_receive %Message{
+                       event: "presence_diff",
+                       payload: %{"joins" => joins, "leaves" => %{^key => _}},
+                       topic: ^topic
+                     },
+                     1_000
+
+      assert joins == %{}
+
+      for backend <- backends(mode), do: assert_eventually(not entry?(backend, tenant, client))
+    end
+  end
+
+  # Joins a public channel with a presence key and tracks. Returns after the client receives the
+  # presence_diff of the track, so that diff is out of the mailbox of the test.
+  defp join_track_and_receive_diff(tenant, serializer) do
+    sub_topic = random_string()
+    key = "key-#{random_string()}"
+    topic = "realtime:#{sub_topic}"
+    socket = join_channel(tenant, serializer, topic, key)
+
+    payload = %{type: "presence", event: "TRACK", payload: %{name: "alice"}}
+    WebsocketClient.send_event(socket, topic, "presence", payload)
+    assert_receive %Message{event: "presence_diff", payload: %{"joins" => %{^key => _}}, topic: ^topic}, 500
+
+    %{
+      socket: socket,
+      key: key,
+      topic: topic,
+      tenant_topic: Realtime.Tenants.tenant_topic(tenant.external_id, sub_topic)
+    }
+  end
+
+  # Connects a client and joins a public channel with presence enabled. Returns after the client
+  # receives the presence_state.
+  defp join_channel(tenant, serializer, topic, key) do
+    {socket, _} = get_connection(tenant, serializer)
+
+    WebsocketClient.join(socket, topic, %{config: %{presence: %{key: key, enabled: true}, private: false}})
+    assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+    assert_receive %Message{event: "presence_state", topic: ^topic}, 500
+
+    socket
+  end
+
+  defp backends(:phoenix), do: [:phoenix]
+  defp backends(:shadow), do: [:phoenix, :rollcall]
+  defp backends(:rollcall), do: [:rollcall]
+
+  defp await_entry(mode, tenant, client) do
+    for backend <- backends(mode), do: assert_eventually(entry?(backend, tenant, client))
+    :ok
+  end
+
+  defp entry?(backend, tenant, client), do: backend |> list(tenant, client) |> Map.has_key?(client.key)
+
+  defp list(:phoenix, _tenant, client), do: Realtime.Presence.PhoenixBackend.list(client.tenant_topic)
+
+  defp list(:rollcall, tenant, client),
+    do: Realtime.Presence.RollcallBackend.list(tenant.external_id, client.tenant_topic)
 
   # Forwards every frame received from a WebsocketClient to `parent`, wrapped in `{tag, frame}`,
   # so a second socket's frames can be asserted on independently of the test process mailbox.

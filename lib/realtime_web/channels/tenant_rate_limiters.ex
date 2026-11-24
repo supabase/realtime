@@ -2,16 +2,18 @@ defmodule RealtimeWeb.TenantRateLimiters do
   @moduledoc """
   Rate limiters for tenants.
   """
-  require Logger
+  alias Realtime.FeatureFlags
   alias Realtime.UsersCounter
-  alias Realtime.Tenants
-  alias Realtime.RateCounter
+  alias Realtime.Tenants.NodeJoinBudget
   alias Realtime.Api.Tenant
 
-  @spec check_tenant(Realtime.Api.Tenant.t()) :: :ok | {:error, :too_many_connections | :too_many_joins}
+  @node_join_budget_flag "node_join_budget"
+
+  @spec check_tenant(Realtime.Api.Tenant.t()) ::
+          :ok | {:error, :too_many_connections | :too_many_node_joins}
   def check_tenant(tenant) do
     with :ok <- max_concurrent_users_check(tenant) do
-      max_joins_per_second_check(tenant)
+      node_join_budget_check(tenant)
     end
   end
 
@@ -23,21 +25,9 @@ defmodule RealtimeWeb.TenantRateLimiters do
       else: {:error, :too_many_connections}
   end
 
-  defp max_joins_per_second_check(%Tenant{max_joins_per_second: max_joins_per_second} = tenant) do
-    rate_args = Tenants.joins_per_second_rate(tenant.external_id, max_joins_per_second)
-
-    RateCounter.new(rate_args)
-
-    case RateCounter.get(rate_args) do
-      {:ok, %{limit: %{triggered: false}}} ->
-        :ok
-
-      {:ok, %{limit: %{triggered: true}}} ->
-        {:error, :too_many_joins}
-
-      error ->
-        Logger.error("UnknownErrorOnCounter: #{inspect(error)}")
-        {:error, error}
-    end
+  defp node_join_budget_check(%Tenant{external_id: external_id} = tenant) do
+    if FeatureFlags.enabled?(@node_join_budget_flag, external_id) and NodeJoinBudget.exhausted?(tenant),
+      do: {:error, :too_many_node_joins},
+      else: :ok
   end
 end

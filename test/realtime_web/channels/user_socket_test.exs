@@ -50,6 +50,85 @@ defmodule RealtimeWeb.UserSocketTest do
     end
   end
 
+  describe "kill_local/1" do
+    test "kills the tenant's sockets and logs how many" do
+      tenant_id = "tenant-kill-local"
+      sockets = for _ <- 1..2, do: socket_subscriber(tenant_id)
+      other = socket_subscriber("tenant-kill-local-other")
+      refs = for pid <- sockets, do: {Process.monitor(pid), pid}
+
+      log = capture_log(fn -> assert :ok = UserSocket.kill_local(tenant_id) end)
+
+      for {ref, pid} <- refs, do: assert_receive({:DOWN, ^ref, :process, ^pid, :killed})
+      assert Process.alive?(other)
+      assert log =~ "Killing 2 sockets still connected for tenant #{tenant_id}"
+    end
+
+    test "does not log without sockets" do
+      log = capture_log(fn -> assert :ok = UserSocket.kill_local("tenant-kill-local-none") end)
+      refute log =~ "Killing"
+    end
+  end
+
+  describe "disconnect_and_kill/1" do
+    test "drains the tenant's sockets, then kills them once the configured delay is over" do
+      tenant_id = "tenant-disconnect-and-kill"
+      socket = socket_subscriber(tenant_id)
+      ref = Process.monitor(socket)
+      Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant_id)
+
+      log = capture_log(fn -> assert :ok = UserSocket.disconnect_and_kill(tenant_id) end)
+
+      assert log =~ "Disconnecting all sockets for tenant #{tenant_id}"
+      assert_receive %Phoenix.Socket.Broadcast{event: "system", payload: %{message: "Server requested disconnect"}}
+      assert_receive {:socket_received, ^socket, :socket_drain}
+      refute_receive {:DOWN, ^ref, :process, ^socket, _}, 100
+      assert_receive {:DOWN, ^ref, :process, ^socket, :killed}, 1000
+    end
+  end
+
+  describe "disconnect_and_kill_local/2" do
+    test "drains the tenant's sockets on this node, then kills them after the given delay" do
+      tenant_id = "tenant-disconnect-and-kill-local"
+      socket = socket_subscriber(tenant_id)
+      other = socket_subscriber("tenant-disconnect-and-kill-local-other")
+      ref = Process.monitor(socket)
+      Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant_id)
+
+      assert :ok = UserSocket.disconnect_and_kill_local(tenant_id, 50)
+
+      assert_receive %Phoenix.Socket.Broadcast{event: "system", payload: %{message: "Server requested disconnect"}}
+      assert_receive {:socket_received, ^socket, :socket_drain}
+      assert_receive {:DOWN, ^ref, :process, ^socket, :killed}, 1000
+      refute_received {:socket_received, ^other, _}
+      assert Process.alive?(other)
+    end
+  end
+
+  # Stands in for a socket transport, which subscribes to its socket id on init. Forwards what it receives, like a
+  # transport that never acts on the drain.
+  defp socket_subscriber(tenant_id) do
+    test_pid = self()
+
+    pid =
+      spawn(fn ->
+        Phoenix.PubSub.subscribe(Realtime.PubSub, UserSocket.subscribers_id(tenant_id))
+        send(test_pid, :subscribed)
+        forward_received(test_pid)
+      end)
+
+    assert_receive :subscribed
+    pid
+  end
+
+  defp forward_received(test_pid) do
+    receive do
+      msg -> send(test_pid, {:socket_received, self(), msg})
+    end
+
+    forward_received(test_pid)
+  end
+
   describe "handle_in/2 with invalid messages" do
     test "does not crash and logs when message is an array with not enough items" do
       raw = Jason.encode!(["join_ref", "ref", "topic"])
@@ -199,7 +278,7 @@ defmodule RealtimeWeb.UserSocketTest do
           {:tenant_suspended, 403, "Realtime was disabled for this tenant"},
           {:tenant_not_found, 404, "Tenant not found"},
           {:too_many_connections, 429, "Too many connected users"},
-          {:too_many_joins, 429, "Too many joins per second"}
+          {:too_many_node_joins, 429, "Too many joins per second"}
         ] do
       test "maps #{reason} to a #{status} JSON response" do
         conn = UserSocket.handle_error(conn(:get, "/socket/websocket"), unquote(reason))
@@ -239,7 +318,7 @@ defmodule RealtimeWeb.UserSocketTest do
       secret = "user-socket-test-secret-long-enough-for-hs256"
       exp = System.system_time(:second) + 1000
       jwt = Generators.generate_jwt_token(secret, %{role: "authenticated", exp: exp, iat: "yesterday"})
-      error = RealtimeWeb.ChannelsAuthorization.authorize_conn(jwt, secret, nil)
+      error = RealtimeWeb.ChannelsAuthorization.authorize_conn(jwt, secret, nil, "tenant")
 
       conn = UserSocket.handle_error(conn(:get, "/socket/websocket"), error)
 
@@ -252,7 +331,7 @@ defmodule RealtimeWeb.UserSocketTest do
       jwt = Generators.generate_jwt_token(secret, %{role: "authenticated", exp: System.system_time(:second) + 1000})
       [_header, claims, signature] = String.split(jwt, ".")
       jwt = Enum.join([Base.url_encode64("[]", padding: false), claims, signature], ".")
-      error = RealtimeWeb.ChannelsAuthorization.authorize_conn(jwt, secret, nil)
+      error = RealtimeWeb.ChannelsAuthorization.authorize_conn(jwt, secret, nil, "tenant")
 
       conn = UserSocket.handle_error(conn(:get, "/socket/websocket"), error)
 

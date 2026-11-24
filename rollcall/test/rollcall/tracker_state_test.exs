@@ -60,23 +60,23 @@ defmodule Rollcall.TrackerStateTest do
       pid = self()
       {:ok, ref} = Rollcall.track(rollcall, pid, scope, "partition", "key", %{a: 1})
 
-      assert [%{ref: ^ref, pid: ^pid, partition: "partition", key: "key", meta: %{a: 1}}] =
-               local_entries(rollcall, scope, "partition")
+      assert local_ids(rollcall, scope) == [{"partition", ref}]
+      assert Local.tracks?(Tracker.get_state(rollcall, scope).local, pid)
     end
 
     test "replaces the entry when the same key is tracked again", %{scope: scope, rollcall: rollcall} do
       {:ok, _ref} = Rollcall.track(rollcall, self(), scope, "partition", "key", %{a: 1})
       {:ok, ref} = Rollcall.track(rollcall, self(), scope, "partition", "key", %{a: 2})
 
-      assert [%{ref: ^ref, meta: %{a: 2}}] = local_entries(rollcall, scope, "partition")
+      assert local_ids(rollcall, scope) == [{"partition", ref}]
+      assert [{^ref, "key", %{a: 2}}] = Rollcall.state(rollcall, scope, "partition")
     end
 
     test "keeps the entries of different partitions apart", %{scope: scope, rollcall: rollcall} do
       {:ok, ref_1} = Rollcall.track(rollcall, self(), scope, "partition_1", "key", %{})
       {:ok, ref_2} = Rollcall.track(rollcall, self(), scope, "partition_2", "key", %{})
 
-      assert [%{ref: ^ref_1}] = local_entries(rollcall, scope, "partition_1")
-      assert [%{ref: ^ref_2}] = local_entries(rollcall, scope, "partition_2")
+      assert local_ids(rollcall, scope) == [{"partition_1", ref_1}, {"partition_2", ref_2}]
     end
   end
 
@@ -87,7 +87,7 @@ defmodule Rollcall.TrackerStateTest do
 
       :ok = Rollcall.untrack(rollcall, self(), scope, "partition", "key_1")
 
-      assert [%{ref: ^ref_2}] = local_entries(rollcall, scope, "partition")
+      assert local_ids(rollcall, scope) == [{"partition", ref_2}]
     end
   end
 
@@ -154,10 +154,11 @@ defmodule Rollcall.TrackerStateTest do
     end
   end
 
-  defp local_entries(rollcall, scope, partition) do
+  defp local_ids(rollcall, scope) do
     rollcall
     |> Tracker.get_state(scope)
     |> Map.fetch!(:local)
-    |> Local.entries(partition)
+    |> Local.ids()
+    |> Enum.sort()
   end
 end

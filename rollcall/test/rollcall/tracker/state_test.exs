@@ -4,7 +4,6 @@ defmodule Rollcall.Tracker.StateTest do
   import Rollcall.RefHelpers
 
   alias Rollcall.Tracker.Changes
-  alias Rollcall.Tracker.Entry
   alias Rollcall.Tracker.Local
   alias Rollcall.Tracker.Peer
   alias Rollcall.Tracker.State
@@ -20,7 +19,8 @@ defmodule Rollcall.Tracker.StateTest do
       silence_threshold: 10,
       heartbeat_period_in_ms: :manual,
       transport_module: Rollcall.Transport.Null,
-      transport_state: nil
+      transport_state: nil,
+      reductions: 0
     }
 
     %{state: state}
@@ -58,9 +58,7 @@ defmodule Rollcall.Tracker.StateTest do
     end
 
     test "counts a change that only has leaves", %{state: state} do
-      entry = Entry.new(self(), "partition", "key", %{}, unique_ref())
-
-      state = State.apply_changes(state, state.local, Changes.new([], [entry]))
+      state = State.apply_changes(state, state.local, Changes.new([], [{"partition", unique_ref()}]))
 
       assert state.version == 1
     end

@@ -5,8 +5,22 @@ defmodule RealtimeWeb.Plugs.BaggageRequestIdTest do
 
   alias RealtimeWeb.Plugs.BaggageRequestId
 
+  # Without the option the plug uses the key from config/test.exs, so the tests pass "request-id"
   defp call(conn, opts) do
+    opts = Keyword.put_new(opts, :baggage_key, "request-id")
     BaggageRequestId.call(conn, BaggageRequestId.init(opts))
+  end
+
+  test "uses the key from the application env when no baggage_key is given" do
+    key = BaggageRequestId.baggage_key()
+
+    conn =
+      conn(:get, "/")
+      |> put_req_header("baggage", "#{key}=1234567890")
+      |> BaggageRequestId.call(BaggageRequestId.init([]))
+
+    assert ["1234567890"] = get_resp_header(conn, "x-request-id")
+    assert Logger.metadata()[:request_id] == "1234567890"
   end
 
   test "uses request id from baggage if valid" do

@@ -22,7 +22,7 @@ defmodule Realtime.Tenants.Authorization do
   alias Realtime.GenRpc
   alias Realtime.Tenants.Repo
   alias Realtime.Tenants.Authorization.Policies
-  alias Realtime.Tenants.SqlLogexShadow
+  alias Realtime.Tenants.PolicyEvalShadow
 
   defstruct [:tenant_id, :topic, :headers, :jwt, :claims, :role, :sub]
 
@@ -86,7 +86,7 @@ defmodule Realtime.Tenants.Authorization do
         |> get_read_policies_for_connection(authorization_context, policies, opts)
         |> handle_policies_result(rate_counter)
 
-      SqlLogexShadow.read(db_conn, authorization_context, extensions_to_check(opts), result)
+      PolicyEvalShadow.read(db_conn, authorization_context, extensions_to_check(opts), result)
 
       result
     else
@@ -153,7 +153,7 @@ defmodule Realtime.Tenants.Authorization do
         |> get_write_policies_for_connection(authorization_context, policies, extensions)
         |> handle_policies_result(rate_counter)
 
-      SqlLogexShadow.write(db_conn, authorization_context, extensions, result)
+      PolicyEvalShadow.write(db_conn, authorization_context, extensions, result)
 
       result
     else

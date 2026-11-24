@@ -375,9 +375,6 @@ defmodule Realtime.Api do
       &Tenants.events_per_second_key/1,
       &Tenants.db_events_per_second_key/1
     ],
-    max_joins_per_second: [
-      &Tenants.joins_per_second_key/1
-    ],
     max_presence_events_per_second: [
       &Tenants.presence_events_per_second_key/1
     ],
@@ -410,7 +407,10 @@ defmodule Realtime.Api do
 
   defp maybe_trigger_disconnect(%Changeset{data: %{external_id: external_id}} = changeset)
        when requires_disconnect(changeset) do
-    UserSocket.disconnect(external_id)
+    # A plain disconnect is best-effort, so make sure no socket outlives a suspension
+    if Changeset.get_change(changeset, :suspend),
+      do: UserSocket.disconnect_and_kill(external_id),
+      else: UserSocket.disconnect(external_id)
   end
 
   defp maybe_trigger_disconnect(_changeset), do: nil

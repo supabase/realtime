@@ -27,12 +27,12 @@ defmodule Realtime.Presence.MetricsTest do
     "score" => 42
   }
 
-  describe "stamp/2" do
+  describe "stamp/3" do
     test "adds an envelope with the current time in ms and this node's short id when sampled" do
       stub(FeatureFlags, :enabled?, fn "presence_latency_metric", @tenant -> true end)
 
       before = System.system_time(:millisecond)
-      stamped = Metrics.stamp(%{"name" => "alice"}, @tenant)
+      stamped = Metrics.stamp(%{"name" => "alice"}, @tenant, :phoenix)
       after_ = System.system_time(:millisecond)
 
       assert %{_rt: %{ts: ts, node: node}} = stamped
@@ -40,18 +40,29 @@ defmodule Realtime.Presence.MetricsTest do
       assert node == Realtime.Nodes.short_node_id_from_name(node())
     end
 
+    test "records the implementation in the envelope, and strip_diff/1 returns it" do
+      stub(FeatureFlags, :enabled?, fn _, _ -> true end)
+
+      for implementation <- [:phoenix, :rollcall] do
+        stamped = Metrics.stamp(%{"name" => "alice"}, @tenant, implementation)
+        diff = %Broadcast{event: "presence_diff", payload: %{joins: %{"alice" => %{metas: [stamped]}}, leaves: %{}}}
+
+        assert {_stripped, [%Envelope{implementation: ^implementation}]} = Metrics.strip_diff(diff)
+      end
+    end
+
     test "leaves the user payload untouched" do
       stub(FeatureFlags, :enabled?, fn _, _ -> true end)
       payload = %{"name" => "alice", "nested" => %{"a" => 1}}
 
-      assert Map.delete(Metrics.stamp(payload, @tenant), :_rt) == payload
+      assert Map.delete(Metrics.stamp(payload, @tenant, :phoenix), :_rt) == payload
     end
 
     test "a user's own \"_rt\" field is neither overwritten by the stamp nor removed by the strip" do
       stub(FeatureFlags, :enabled?, fn _, _ -> true end)
 
       # User keys arrive as strings from JSON; the envelope key is an atom, so they never collide.
-      stamped = Metrics.stamp(%{"name" => "alice", "_rt" => "mine"}, @tenant)
+      stamped = Metrics.stamp(%{"name" => "alice", "_rt" => "mine"}, @tenant, :phoenix)
       assert %{"_rt" => "mine", :_rt => %{ts: _, node: _}} = stamped
 
       diff = %Broadcast{event: "presence_diff", payload: %{joins: %{"alice" => %{metas: [stamped]}}, leaves: %{}}}
@@ -62,7 +73,7 @@ defmodule Realtime.Presence.MetricsTest do
     test "adds only a top-level envelope to a nested payload, leaving every nested value untouched" do
       stub(FeatureFlags, :enabled?, fn _, _ -> true end)
 
-      stamped = Metrics.stamp(@nested_payload, @tenant)
+      stamped = Metrics.stamp(@nested_payload, @tenant, :phoenix)
 
       assert %{_rt: %{ts: _, node: _}} = stamped
       assert Map.delete(stamped, :_rt) == @nested_payload
@@ -72,14 +83,14 @@ defmodule Realtime.Presence.MetricsTest do
       stub(FeatureFlags, :enabled?, fn "presence_latency_metric", @tenant -> false end)
       payload = %{"name" => "alice"}
 
-      assert Metrics.stamp(payload, @tenant) == payload
+      assert Metrics.stamp(payload, @tenant, :phoenix) == payload
     end
 
     test "passes a non-map payload through for validation to reject" do
       reject(&FeatureFlags.enabled?/2)
 
-      assert Metrics.stamp("not a map", @tenant) == "not a map"
-      assert Metrics.stamp(nil, @tenant) == nil
+      assert Metrics.stamp("not a map", @tenant, :phoenix) == "not a map"
+      assert Metrics.stamp(nil, @tenant, :phoenix) == nil
     end
   end
 
@@ -268,23 +279,53 @@ defmodule Realtime.Presence.MetricsTest do
     end
   end
 
+  describe "measure_untrack_call/2" do
+    setup do
+      id = {__MODULE__, make_ref()}
+      :telemetry.attach(id, [:realtime, :presence, :track, :duration], &__MODULE__.handle_duration/4, self())
+      on_exit(fn -> :telemetry.detach(id) end)
+    end
+
+    test "records the duration as an untrack, tagged with the implementation, and returns :ok" do
+      assert :ok = Metrics.measure_untrack_call(fn -> :ok end, :phoenix)
+
+      assert_receive {:duration, %{duration: duration},
+                      %{action: :untrack, result: :ok, reason: :none, implementation: :phoenix}}
+
+      assert is_integer(duration) and duration >= 0
+    end
+
+    test "records an exit by reason as an untrack, then exits with the original reason" do
+      timeout = {:timeout, {GenServer, :call, [:shard, :msg, 100]}}
+
+      assert catch_exit(Metrics.measure_untrack_call(fn -> exit(timeout) end, :rollcall)) == timeout
+      assert_receive {:duration, _, %{action: :untrack, result: :exit, reason: :timeout, implementation: :rollcall}}
+
+      catch_exit(Metrics.measure_untrack_call(fn -> exit({:noproc, {}}) end, :rollcall))
+      assert_receive {:duration, _, %{action: :untrack, result: :exit, reason: :noproc}}
+
+      catch_exit(Metrics.measure_untrack_call(fn -> exit(:killed) end, :rollcall))
+      assert_receive {:duration, _, %{action: :untrack, result: :exit, reason: :other}}
+    end
+  end
+
   describe "record/2" do
     setup do
       tenant = "tenant-#{System.unique_integer([:positive])}"
       attach_telemetry(tenant)
 
-      context = %{tenant: tenant, path: :fastlane, implementation: :phoenix, now: 10_000, node: "n1"}
+      context = %{tenant: tenant, path: :fastlane, now: 10_000, node: "n1"}
 
       %{tenant: tenant, context: context}
     end
 
-    test "emits one latency observation per envelope, tagged with the context", %{
+    test "emits one latency observation per envelope, tagged with the context and the envelope", %{
       tenant: tenant,
       context: context
     } do
       envelopes = [
-        %Envelope{ts: 9_990, node: "n1", action: :track},
-        %Envelope{ts: 8_500, node: "n2", action: :update}
+        %Envelope{ts: 9_990, node: "n1", action: :track, implementation: :phoenix},
+        %Envelope{ts: 8_500, node: "n2", action: :update, implementation: :rollcall}
       ]
 
       assert :ok = Metrics.record(envelopes, context)
@@ -293,9 +334,16 @@ defmodule Realtime.Presence.MetricsTest do
                       %{tenant: ^tenant, action: :track, origin: :local, path: :fastlane, implementation: :phoenix}}
 
       assert_receive {:telemetry, [:realtime, :presence, :notify, :latency], %{latency: 1_500},
-                      %{tenant: ^tenant, action: :update, origin: :remote, path: :fastlane, implementation: :phoenix}}
+                      %{tenant: ^tenant, action: :update, origin: :remote, path: :fastlane, implementation: :rollcall}}
 
       refute_receive {:telemetry, _, _, _}
+    end
+
+    test "an envelope without an implementation is tagged :phoenix", %{tenant: tenant, context: context} do
+      assert :ok = Metrics.record([%Envelope{ts: 9_990, node: "n1", action: :track}], context)
+
+      assert_receive {:telemetry, [:realtime, :presence, :notify, :latency], _,
+                      %{tenant: ^tenant, implementation: :phoenix}}
     end
 
     test "a negative latency is discarded as clock skew rather than recorded", %{tenant: tenant, context: context} do
@@ -330,6 +378,9 @@ defmodule Realtime.Presence.MetricsTest do
     setup do
       tenant = "tenant-#{System.unique_integer([:positive])}"
       attach_join_telemetry(tenant)
+      # No presence flag is set for the tenant, so the mode is Phoenix. The tenant is not in the
+      # database, and a flag lookup that reaches the tenant cache would query for it.
+      stub(FeatureFlags, :enabled?, fn _flag, _tenant -> false end)
       %{tenant: tenant}
     end
 
@@ -343,6 +394,24 @@ defmodule Realtime.Presence.MetricsTest do
                       %{tenant: ^tenant, state: :warm, implementation: :phoenix}}
 
       assert latency >= 10
+    end
+
+    test "tags the implementation :rollcall in Rollcall mode", %{tenant: tenant} do
+      stub(FeatureFlags, :enabled?, fn flag, ^tenant -> flag == "presence_rollcall_primary" end)
+
+      assert :ok = Metrics.record_join(System.monotonic_time(), tenant, :warm)
+
+      assert_receive {:telemetry, [:realtime, :presence, :join, :latency], _,
+                      %{tenant: ^tenant, implementation: :rollcall}}
+    end
+
+    test "tags the implementation :phoenix in shadow mode", %{tenant: tenant} do
+      stub(FeatureFlags, :enabled?, fn flag, ^tenant -> flag == "presence_rollcall_shadow" end)
+
+      assert :ok = Metrics.record_join(System.monotonic_time(), tenant, :warm)
+
+      assert_receive {:telemetry, [:realtime, :presence, :join, :latency], _,
+                      %{tenant: ^tenant, implementation: :phoenix}}
     end
 
     test "tags :cold the same way", %{tenant: tenant} do

@@ -23,9 +23,6 @@ defmodule Realtime.TenantsTest do
       [all] = Enum.filter(limits, fn e -> e.limiter == Tenants.requests_per_second_key(tenant) end)
       assert all.counter == 9
 
-      [channel_joins] = Enum.filter(limits, fn e -> e.limiter == Tenants.joins_per_second_key(tenant) end)
-      assert channel_joins.counter == 9
-
       [tenant_events] = Enum.filter(limits, fn e -> e.limiter == Tenants.events_per_second_key(tenant) end)
       assert tenant_events.counter == 9
     end
@@ -49,7 +46,7 @@ defmodule Realtime.TenantsTest do
               "poll_max_changes" => 100,
               "poll_max_record_bytes" => 1_048_576,
               "region" => "us-east-1",
-              "publication" => "supabase_realtime_test",
+              "publication" => Integrations.publication(),
               "ssl_enforced" => false
             }
           }

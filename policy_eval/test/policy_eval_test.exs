@@ -1,0 +1,365 @@
+defmodule PolicyEvalTest do
+  # SQL in, value out: what a policy expression evaluates to, through parser, resolver and evaluator.
+  #
+  # The expressions are written the way Postgres prints them (pg_get_expr), the only form the parser
+  # reads. Every expected value here was checked against Postgres 17. A fallback, `{:unsupported, _}`,
+  # is where the database is asked instead; the comment says what Postgres answers there.
+  # test/postgres/expressions_test.exs does the same against Postgres for thousands of expressions,
+  # written as policy authors write them.
+  use ExUnit.Case, async: true
+
+  alias PolicyEval.Env
+  alias PolicyEval.Eval
+  alias PolicyEval.Parser
+  alias PolicyEval.Resolver
+  alias PolicyEval.Test.ExampleProfile
+
+  @profile ExampleProfile.profile()
+
+  @uid "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
+  @other_uid "b1ffcd00-8d1c-4ff9-cc7e-7cc0ce491b22"
+
+  # app.team(), app.user_id(), app.user_role() and app.claims() as Postgres 17 reports them, with the
+  # simple bodies of app.user_id() and app.user_role()
+  {catalog, _binding} = Code.eval_file(Path.expand("fixtures/pg17/catalog.exs", __DIR__))
+  @functions catalog.functions
+
+  # The fallback body of app.user_id(), which also reads the sub from the claims
+  @user_id_fallback """
+  select
+    coalesce(
+      nullif(current_setting('app.user_id', true), ''),
+      (nullif(current_setting('app.claims', true), '')::jsonb ->> 'sub')
+    )::uuid
+  """
+
+  @own_team_rls "(app.team() = ('user:'::text || app.user_id()))"
+
+  # Evaluates `sql` in the session that the application of the example sets up: the settings for a
+  # user with this role, user id and claims, and the row with this team and kind. A nil user id is
+  # a user without one.
+  defp evaluate(sql, opts) do
+    {ir, _type} = sql |> Parser.parse() |> Resolver.resolve(Keyword.get(opts, :functions, @functions), @profile)
+    Eval.eval(ir, env(opts))
+  end
+
+  # The functions above, with these changes to the definition of app.user_id()
+  defp with_user_id(changes) do
+    Enum.map(@functions, fn
+      %{schema: "app", name: "user_id"} = function -> Map.merge(function, changes)
+      function -> function
+    end)
+  end
+
+  defp env(opts) do
+    role = Keyword.get(opts, :role, "member")
+    user_id = Keyword.get(opts, :user_id)
+    team = Keyword.get(opts, :team, "room:1")
+    claims = Keyword.get_lazy(opts, :claims, fn -> JSON.encode!(%{"role" => role, "sub" => user_id}) end)
+
+    Env.new(
+      %{
+        "role" => role,
+        "app.team" => team,
+        "app.claims" => claims,
+        "app.user_id" => user_id,
+        "app.user_role" => role
+      },
+      %{"team" => {:text, team}, "kind" => {:text, Keyword.get(opts, :kind, "note")}}
+    )
+  end
+
+  describe "a user's own team" do
+    test "is the team user:<their user id>" do
+      assert evaluate(@own_team_rls, team: "user:#{@uid}", user_id: @uid) == true
+      assert evaluate(@own_team_rls, team: "user:#{@other_uid}", user_id: @uid) == false
+    end
+
+    test "is the same in the (select app.user_id()) form" do
+      initplan = "(app.team() = ('user:'::text || ( SELECT app.user_id() AS user_id)))"
+
+      assert evaluate(initplan, team: "user:#{@uid}", user_id: @uid) == true
+      assert evaluate(initplan, team: "user:#{@other_uid}", user_id: @uid) == false
+    end
+
+    test "compares the user id as Postgres prints it, in lower case" do
+      assert evaluate(@own_team_rls, team: "user:#{@uid}", user_id: String.upcase(@uid)) == true
+      assert evaluate(@own_team_rls, team: "user:#{String.upcase(@uid)}", user_id: @uid) == false
+    end
+
+    test "is NULL without a user id, which denies" do
+      assert evaluate(@own_team_rls, team: "user:", user_id: nil) == nil
+    end
+
+    test "falls back for a user id that isn't a uuid, where Postgres raises" do
+      assert evaluate(@own_team_rls, team: "user:user_2abc", user_id: "user_2abc") ==
+               {:unsupported, {:raises, :invalid_text_representation, "invalid input syntax for type uuid"}}
+    end
+
+    test "depends on the body of app.user_id(): the fallback body also reads the sub from the claims" do
+      opts = [team: "user:#{@uid}", user_id: "", claims: ~s({"sub":"#{@uid}"})]
+
+      assert evaluate(@own_team_rls, [functions: with_user_id(%{source: @user_id_fallback})] ++ opts) == true
+      assert evaluate(@own_team_rls, opts) == nil
+    end
+  end
+
+  describe "lists" do
+    test "IN is = ANY over an array" do
+      sql = "(kind = ANY (ARRAY['note'::text, 'task'::text]))"
+
+      assert evaluate(sql, kind: "task") == true
+      assert evaluate(sql, kind: "comment") == false
+    end
+  end
+
+  describe "regular expressions" do
+    test "a literal pattern is an unanchored match, ~* ignores ASCII case" do
+      sql = "(app.team() ~* 'public:lobby'::text)"
+
+      assert evaluate(sql, team: "PUBLIC:LOBBY") == true
+      assert evaluate(sql, team: "xpublic:lobbyy") == true
+      assert evaluate(sql, team: "room:1") == false
+    end
+
+    test "fall back for a pattern with metacharacters, or ~* on a team that isn't ASCII" do
+      # Postgres: true, then false
+      assert evaluate("(app.team() ~ '^public'::text)", team: "public:lobby") ==
+               {:unsupported, :regex_not_literal}
+
+      assert evaluate("(app.team() ~* 'public:lobby'::text)", team: "café") ==
+               {:unsupported, :regex_non_ascii}
+    end
+  end
+
+  describe "starts_with" do
+    # The shape of a policy that lets a user read the topics under their own prefix
+    @own_prefix "starts_with(( SELECT app.team() AS team), (('notify:'::text || (( SELECT app.user_id() AS user_id))::text) || ':'::text))"
+
+    test "true when the text starts with the prefix, byte by byte" do
+      assert evaluate(@own_prefix, user_id: @uid, team: "notify:#{@uid}:inbox") == true
+      assert evaluate(@own_prefix, user_id: @uid, team: "notify:#{@uid}:") == true
+      assert evaluate(@own_prefix, user_id: @uid, team: "notify:#{@uid}") == false
+      assert evaluate(@own_prefix, user_id: @uid, team: "notify:#{@other_uid}:inbox") == false
+      assert evaluate(@own_prefix, user_id: @uid, team: "NOTIFY:#{@uid}:inbox") == false
+    end
+
+    test "NULL when the user id or the text is NULL" do
+      assert evaluate(@own_prefix, user_id: nil, team: "notify::inbox") == nil
+      assert evaluate(@own_prefix, user_id: @uid, team: nil) == nil
+    end
+  end
+
+  describe "split_part" do
+    # The shape of a policy that lets a client use the topics `cursors:<its claim>:<room>`
+    @cursors """
+    ((COALESCE(((current_setting('app.claims'::text, true))::jsonb ->> 'cursor_client'::text), ''::text) <> ''::text) \
+    AND (split_part(( SELECT app.team() AS team), ':'::text, 1) = 'cursors'::text) \
+    AND (split_part(( SELECT app.team() AS team), ':'::text, 2) = ((current_setting('app.claims'::text, true))::jsonb ->> 'cursor_client'::text)) \
+    AND (split_part(( SELECT app.team() AS team), ':'::text, 3) <> ''::text) \
+    AND (split_part(( SELECT app.team() AS team), ':'::text, 4) = ''::text))\
+    """
+
+    test "decides each field of the topic" do
+      claims = ~s({"cursor_client":"c1"})
+
+      assert evaluate(@cursors, claims: claims, team: "cursors:c1:room") == true
+      assert evaluate(@cursors, claims: claims, team: "cursors:c2:room") == false
+      assert evaluate(@cursors, claims: claims, team: "cursors:c1:") == false
+      assert evaluate(@cursors, claims: claims, team: "cursors:c1:room:x") == false
+      assert evaluate(@cursors, claims: claims, team: "presence:c1:room") == false
+      assert evaluate(@cursors, claims: ~s({"cursor_client":"é🎉"}), team: "cursors:é🎉:sala") == true
+      assert evaluate(@cursors, claims: ~s({}), team: "cursors::room") == false
+    end
+
+    test "field 0 falls back, because Postgres raises" do
+      assert evaluate("(split_part(app.team(), ':'::text, 0) = 'a'::text)", team: "a:b") ==
+               {:unsupported, {:raises, :invalid_parameter_value, "field position must not be zero"}}
+    end
+  end
+
+  describe "LIKE" do
+    test "% matches any run and _ one character, on the whole text" do
+      sql = "(app.team() ~~ 'public:%'::text)"
+
+      assert evaluate(sql, team: "public:lobby") == true
+      assert evaluate(sql, team: "xpublic:lobby") == false
+      assert evaluate(sql, team: "publicx:lobby") == false
+      assert evaluate(sql, team: "public::lobby") == true
+      assert evaluate(sql, team: "room:1") == false
+      assert evaluate("(app.team() ~~ 'room:_'::text)", team: "room:1") == true
+    end
+
+    test "NOT LIKE is the negation, and NULL stays NULL" do
+      sql = "(app.team() !~~ 'public:%'::text)"
+
+      assert evaluate(sql, team: "public:lobby") == false
+      assert evaluate(sql, team: "room:1") == true
+      assert evaluate(sql, team: nil) == nil
+    end
+
+    test "fall back for a pattern with a backslash, or ILIKE" do
+      # Postgres: true, then true
+      assert evaluate("(app.team() ~~ 'public\\:%'::text)", team: "public:lobby") ==
+               {:unsupported, :like_escape}
+
+      assert evaluate("(app.team() ~~* 'PUBLIC:%'::text)", team: "public:lobby") ==
+               {:unsupported, {:operator, "~~*", :text, :text}}
+    end
+  end
+
+  describe "claims" do
+    test "are read with app.claims() ->>" do
+      sql = "((app.claims() ->> 'role'::text) = 'member'::text)"
+
+      assert evaluate(sql, claims: ~s({"role":"member"})) == true
+      assert evaluate(sql, claims: ~s({"role":"guest"})) == false
+      assert evaluate(sql, claims: ~s({})) == nil
+    end
+
+    test "cast to boolean as Postgres reads booleans" do
+      sql = "((app.claims() ->> 'is_admin'::text))::boolean"
+
+      assert evaluate(sql, claims: ~s({"is_admin":true})) == true
+      assert evaluate(sql, claims: ~s({"is_admin":"yes"})) == true
+
+      assert evaluate(sql, claims: ~s({"is_admin":"maybe"})) ==
+               {:unsupported, {:raises, :invalid_text_representation, "invalid input syntax for type boolean"}}
+    end
+
+    test "fall back for a number, whose text Postgres normalises" do
+      # Postgres: true
+      assert evaluate("((app.claims() ->> 'level'::text) = '1'::text)", claims: ~s({"level":1})) ==
+               {:unsupported, :jsonb_number_text}
+    end
+
+    test "are read nested with ->, which gives jsonb" do
+      sql = "(((app.claims() -> 'app_metadata'::text) ->> 'team'::text) = 'red'::text)"
+
+      assert evaluate(sql, claims: ~s({"app_metadata":{"team":"red"}})) == true
+      assert evaluate(sql, claims: ~s({"app_metadata":{"team":"blue"}})) == false
+      assert evaluate(sql, claims: ~s({"app_metadata":{}})) == nil
+      assert evaluate(sql, claims: ~s({"app_metadata":"red"})) == nil
+      assert evaluate(sql, claims: ~s({})) == nil
+    end
+
+    test "-> keeps a JSON null, which is not SQL NULL" do
+      sql = "((app.claims() -> 'app_metadata'::text) IS NULL)"
+
+      assert evaluate(sql, claims: ~s({"app_metadata":null})) == false
+      assert evaluate(sql, claims: ~s({})) == true
+    end
+
+    test "-> with an integer reads an array element, a negative one from the end" do
+      first = "((((app.claims() -> 'teams'::text) -> 0) ->> 'id'::text) = 'red'::text)"
+      last = "((((app.claims() -> 'teams'::text) -> '-1'::integer) ->> 'id'::text) = 'red'::text)"
+      claims = ~s({"teams":[{"id":"red"},{"id":"blue"}]})
+
+      assert evaluate(first, claims: claims) == true
+      assert evaluate(last, claims: claims) == false
+      assert evaluate(first, claims: ~s({"teams":[]})) == nil
+    end
+
+    test "->> with an integer reads an array element as text" do
+      first = "(((app.claims() -> 'roles'::text) ->> 0) = 'admin'::text)"
+      last = "(((app.claims() -> 'roles'::text) ->> '-1'::integer) = 'admin'::text)"
+
+      assert evaluate(first, claims: ~s({"roles":["admin","viewer"]})) == true
+      assert evaluate(last, claims: ~s({"roles":["admin","viewer"]})) == false
+      assert evaluate(first, claims: ~s({"roles":[null]})) == nil
+      assert evaluate(first, claims: ~s({"roles":[]})) == nil
+      # A scalar is an array of one element, as in Postgres
+      assert evaluate(first, claims: ~s({"roles":"admin"})) == true
+      assert evaluate(last, claims: ~s({"roles":[1,"admin"]})) == true
+      # Postgres: false
+      assert evaluate(first, claims: ~s({"roles":[1,"admin"]})) == {:unsupported, :jsonb_number_text}
+    end
+
+    test "fall back for a number that -> found, once ->> needs its text" do
+      # Postgres: true
+      assert evaluate("(((app.claims() -> 'meta'::text) ->> 'level'::text) = '1'::text)",
+               claims: ~s({"meta":{"level":1}})
+             ) == {:unsupported, :jsonb_number_text}
+    end
+  end
+
+  describe "claims as json" do
+    @email_rls "(((current_setting('app.claims'::text, true))::json ->> 'email'::text) ~~ '%@example.com'::text)"
+
+    test "are read with current_setting(name, true)::json ->>, as with jsonb" do
+      assert evaluate(@email_rls, claims: ~s({"email":"ada@example.com"})) == true
+      assert evaluate(@email_rls, claims: ~s({"email":"ada@example.org"})) == false
+      assert evaluate(@email_rls, claims: ~s({"email":"ada@x.example.com"})) == false
+      assert evaluate(@email_rls, claims: ~s({"email":null})) == nil
+      assert evaluate(@email_rls, claims: ~s({})) == nil
+    end
+
+    test "the last of duplicate keys wins, as with jsonb" do
+      assert evaluate(@email_rls, claims: ~s({"email":"ada@example.org","email":"ada@example.com"})) == true
+    end
+
+    test "fall back where Postgres raises, which for json is at ->> and not at the cast" do
+      # Postgres: json_in accepts the text, then ->> raises untranslatable_character
+      assert evaluate(@email_rls, claims: ~s({"email":"ada@example.com","x":"\\u0000"})) ==
+               {:unsupported, {:raises, :untranslatable_character, "unsupported Unicode escape sequence"}}
+
+      assert evaluate(@email_rls, claims: "") ==
+               {:unsupported, {:raises, :invalid_text_representation, "invalid input syntax for type json"}}
+    end
+
+    test "fall back for a number" do
+      # Postgres: true. json ->> gives a number as written, jsonb ->> normalised
+      assert evaluate("(((current_setting('app.claims'::text, true))::json ->> 'level'::text) = '1'::text)",
+               claims: ~s({"level":1})
+             ) == {:unsupported, :jsonb_number_text}
+    end
+  end
+
+  describe "NULL" do
+    test "follows SQL's three-valued logic" do
+      null = "(app.team() = NULL::text)"
+
+      assert evaluate(null, []) == nil
+      assert evaluate("(NOT #{null})", []) == nil
+      assert evaluate("(#{null} OR (kind = 'note'::text))", []) == true
+      assert evaluate("(#{null} AND (kind = 'note'::text))", []) == nil
+      assert evaluate("(#{null} AND (kind = 'task'::text))", []) == false
+    end
+  end
+
+  describe "falling back rather than guessing" do
+    test "an unsupported part decides an OR even next to a true one" do
+      # Postgres: true. It may evaluate the unsupported part first or while planning, and raise
+      sql = "((kind = 'note'::text) OR (app.team() ~ 'a.b'::text))"
+
+      assert evaluate(sql, kind: "note") == {:unsupported, :regex_not_literal}
+    end
+
+    test "a COALESCE with an unsupported argument, even after a non-NULL one" do
+      # Postgres raises division_by_zero: the planner folds the constant 1 / 0 before COALESCE
+      # would stop at app.team(). Here 1 / 0 is unsupported because no operator on integers is
+      # modelled (hence the reason); what the test shows is that COALESCE doesn't skip it.
+      assert {:unsupported, {:operator, "/", :int4, :int4}} =
+               evaluate("(COALESCE(app.team(), ((1 / 0))::text) = 'x'::text)", team: "x")
+    end
+
+    test "a column other than team and kind" do
+      assert evaluate("(title = 'x'::text)", []) == {:unsupported, {:column, "title"}}
+    end
+
+    test "a function whose definition isn't one of the known ones" do
+      for changes <- [%{source: "select '#{@uid}'::uuid;"}, %{security_definer: true}] do
+        assert evaluate(@own_team_rls, team: "user:#{@uid}", user_id: @uid, functions: with_user_id(changes)) ==
+                 {:unsupported, {:function, "app.user_id", :unknown_definition}}
+      end
+    end
+
+    test "an expression over 4 KB" do
+      # Postgres: true
+      sql = "(" <> Enum.map_join(1..200, " OR ", &"(app.team() = 'room:#{&1}'::text)") <> ")"
+
+      assert byte_size(sql) > 4096
+      assert evaluate(sql, team: "room:1") == {:unsupported, {:unparsed, :other}}
+    end
+  end
+end
