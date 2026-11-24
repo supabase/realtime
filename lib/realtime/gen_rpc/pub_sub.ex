@@ -66,7 +66,8 @@ defmodule Realtime.GenRpcPubSub do
 
     # send a message to a node in each region to forward to the rest of the region
     other_region_nodes = nodes_from_other_regions(my_region, self())
-    GenRpc.abcast(other_region_nodes, worker, Worker.forward_to_region(topic, message, dispatcher), key: self())
+    ftr = Worker.forward_to_region(topic, message, dispatcher, relay_key())
+    GenRpc.abcast(other_region_nodes, worker, ftr, key: self())
 
     :ok
   end
@@ -82,10 +83,11 @@ defmodule Realtime.GenRpcPubSub do
     worker = worker_name(adapter_name, self())
     my_region = Nodes.region()
     scope = Application.get_env(:realtime, :muster_scope)
+    relay_key = relay_key()
 
     # Cross-region: route to each remote region's expected router, or flood that
     # region when we have no ring for it yet.
-    cross_region_route(worker, my_region, tenant_id, topic, message, dispatcher)
+    cross_region_route(worker, my_region, tenant_id, topic, message, dispatcher, relay_key)
 
     # Intra-region: route to the node Muster says owns this tenant's occupancy.
     case Muster.router(scope, tenant_id) do
@@ -98,7 +100,7 @@ defmodule Realtime.GenRpcPubSub do
 
       {:ok, router_node} ->
         # Remote router: hand it the routing decision over the network. Fire-and-forget,
-        route = Worker.route(tenant_id, topic, message, dispatcher, node(), Muster.view_hash(scope))
+        route = Worker.route(tenant_id, topic, message, dispatcher, node(), Muster.view_hash(scope), relay_key)
         GenRpc.abcast([router_node], worker, route, key: self())
 
       _ ->
@@ -122,6 +124,13 @@ defmodule Realtime.GenRpcPubSub do
     abcast_local(worker, Nodes.region_nodes(my_region), topic, message, dispatcher)
   end
 
+  # Key for the relay hops (router, region representative) to pick their gen_rpc
+  # client. The origin hop keys by `self()`, so one sender's messages reach the same
+  # worker on the relay node in order. The relay must also send them on over one
+  # client, or they can take different TCP connections and arrive out of order. The
+  # relay does not know the sender, so the origin puts this key in the message.
+  defp relay_key, do: :erlang.phash2(self())
+
   defp nodes_from_other_regions(my_region, key) do
     Enum.flat_map(RegionRings.all_node_regions(), fn
       ^my_region ->
@@ -141,7 +150,7 @@ defmodule Realtime.GenRpcPubSub do
   # was wrong. When we have no ring for a region yet, fall back to the original
   # representative-per-region flood (`:ftr`), so cross-region delivery is never worse
   # than before Muster routing.
-  defp cross_region_route(worker, my_region, tenant_id, topic, message, dispatcher) do
+  defp cross_region_route(worker, my_region, tenant_id, topic, message, dispatcher, relay_key) do
     Enum.each(RegionRings.all_node_regions(), fn
       ^my_region ->
         :ok
@@ -149,12 +158,13 @@ defmodule Realtime.GenRpcPubSub do
       region ->
         case RegionRings.expected_router(region, tenant_id) do
           {:ok, router_node, view_hash} ->
-            route = Worker.route_region(topic, tenant_id, message, dispatcher, view_hash)
+            route = Worker.route_region(topic, tenant_id, message, dispatcher, view_hash, relay_key)
             GenRpc.abcast([router_node], worker, route, key: self())
 
           :error ->
             with {:ok, node} <- Nodes.node_from_region(region, self()) do
-              GenRpc.abcast([node], worker, Worker.forward_to_region(topic, message, dispatcher), key: self())
+              ftr = Worker.forward_to_region(topic, message, dispatcher, relay_key)
+              GenRpc.abcast([node], worker, ftr, key: self())
             end
         end
     end)
@@ -177,15 +187,16 @@ defmodule Realtime.GenRpcPubSub.Worker do
   defstruct [:pubsub, :worker, :scope, :my_region]
 
   def forward_to_local(topic, message, dispatcher), do: {:ftl, topic, message, dispatcher}
-  def forward_to_region(topic, message, dispatcher), do: {:ftr, topic, message, dispatcher}
 
-  def route(tenant_id, topic, message, dispatcher, origin, view_hash),
-    do: {:route, tenant_id, topic, message, dispatcher, origin, view_hash}
+  def forward_to_region(topic, message, dispatcher, relay_key), do: {:ftr, topic, message, dispatcher, relay_key}
+
+  def route(tenant_id, topic, message, dispatcher, origin, view_hash, relay_key),
+    do: {:route, tenant_id, topic, message, dispatcher, origin, view_hash, relay_key}
 
   # Cross-region routed broadcast. Carries the origin-computed `view_hash` for the
   # *target* region's membership
-  def route_region(topic, tenant_id, message, dispatcher, view_hash),
-    do: {:route_region, topic, tenant_id, message, dispatcher, view_hash}
+  def route_region(topic, tenant_id, message, dispatcher, view_hash, relay_key),
+    do: {:route_region, topic, tenant_id, message, dispatcher, view_hash, relay_key}
 
   # Resolve the delivery set for a tenant broadcast when this node is the router
   def targets_or_flood(scope, tenant_id, my_region, view_hash) do
@@ -223,7 +234,7 @@ defmodule Realtime.GenRpcPubSub.Worker do
   end
 
   # Forward to the rest of the region
-  def handle_info({:ftr, topic, message, dispatcher} = msg, %__MODULE__{} = state) do
+  def handle_info({:ftr, topic, message, dispatcher, relay_key} = msg, %__MODULE__{} = state) do
     %__MODULE__{pubsub: pubsub, worker: worker, my_region: my_region} = state
     measure_presence_replication_received(topic, msg)
     measure_broadcast_fanout(message)
@@ -236,7 +247,7 @@ defmodule Realtime.GenRpcPubSub.Worker do
     other_nodes = for node <- Nodes.region_nodes(my_region), node != node(), do: node
 
     if other_nodes != [] do
-      Realtime.GenRpc.abcast(other_nodes, worker, forward_to_local(topic, message, dispatcher), [])
+      Realtime.GenRpc.abcast(other_nodes, worker, forward_to_local(topic, message, dispatcher), key: relay_key)
     end
 
     {:noreply, state}
@@ -245,7 +256,7 @@ defmodule Realtime.GenRpcPubSub.Worker do
   # Routed broadcast: the origin named us as the
   # router for `tenant_id`. Deliver only to the nodes Muster says hold the tenant.
   def handle_info(
-        {:route, tenant_id, topic, message, dispatcher, origin, view_hash},
+        {:route, tenant_id, topic, message, dispatcher, origin, view_hash, relay_key},
         %__MODULE__{pubsub: pubsub, worker: worker, scope: scope, my_region: my_region} = state
       ) do
     # We are being extra catious here because Muster.targets/3 would already detect the different sender view hash
@@ -266,7 +277,7 @@ defmodule Realtime.GenRpcPubSub.Worker do
           Nodes.region_nodes(my_region)
       end
 
-    dispatch_to_nodes(nodes, origin, pubsub, worker, topic, message, dispatcher)
+    dispatch_to_nodes(nodes, origin, pubsub, worker, topic, message, dispatcher, relay_key)
 
     {:noreply, state}
   end
@@ -276,7 +287,7 @@ defmodule Realtime.GenRpcPubSub.Worker do
   # region and tagged the message with the view_hash it derived from the expected
   # region's membership.
   def handle_info(
-        {:route_region, topic, tenant_id, message, dispatcher, view_hash},
+        {:route_region, topic, tenant_id, message, dispatcher, view_hash, relay_key},
         %__MODULE__{pubsub: pubsub, worker: worker, scope: scope, my_region: my_region} = state
       ) do
     nodes =
@@ -298,7 +309,7 @@ defmodule Realtime.GenRpcPubSub.Worker do
 
     # No origin to exclude: the sender is in another region and never holds local
     # members here, so `nil` matches no node and we deliver to the full target set.
-    dispatch_to_nodes(nodes, nil, pubsub, worker, topic, message, dispatcher)
+    dispatch_to_nodes(nodes, nil, pubsub, worker, topic, message, dispatcher, relay_key)
 
     {:noreply, state}
   end
@@ -336,7 +347,7 @@ defmodule Realtime.GenRpcPubSub.Worker do
   # Deliver `message` to `nodes`, excluding `origin` (which already delivered to its
   # own subscribers via Phoenix.PubSub's local dispatch). Delivers locally if this
   # node is among the targets, and :ftl to the rest.
-  defp dispatch_to_nodes(nodes, origin, pubsub, worker, topic, message, dispatcher) do
+  defp dispatch_to_nodes(nodes, origin, pubsub, worker, topic, message, dispatcher, relay_key) do
     self_node = node()
 
     # Single pass: drop the origin (it already delivered locally), flag whether this
@@ -357,7 +368,7 @@ defmodule Realtime.GenRpcPubSub.Worker do
     end
 
     if remote != [] do
-      Realtime.GenRpc.abcast(remote, worker, forward_to_local(topic, message, dispatcher), [])
+      Realtime.GenRpc.abcast(remote, worker, forward_to_local(topic, message, dispatcher), key: relay_key)
     end
 
     :ok

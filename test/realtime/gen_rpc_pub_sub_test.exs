@@ -211,19 +211,30 @@ defmodule Realtime.GenRpcPubSubTest do
 
       presence_topic = "phx_presence:gen_rpc_pub_sub_test"
       presence_message = {:pub, :heartbeat, {:gen_rpc_pub_sub_test, 1}, :empty, %{}}
-      size = :erlang.external_size(Worker.forward_to_local(presence_topic, presence_message, Phoenix.PubSub))
+      ftl_size = :erlang.external_size(Worker.forward_to_local(presence_topic, presence_message, Phoenix.PubSub))
 
-      refs =
+      # The ap-southeast-2 representative receives an :ftr, which also carries the relay
+      # key (derived from this process, the sender), and re-floods an :ftl to the other ap node.
+      ftr = Worker.forward_to_region(presence_topic, presence_message, Phoenix.PubSub, :erlang.phash2(self()))
+      ftr_size = :erlang.external_size(ftr)
+
+      [us_ref | ap_refs] =
         for node <- [us, ap_x, ap_y],
             do: :erpc.call(node, :telemetry_test, :attach_event_handlers, [self(), [@presence_event]])
 
       Phoenix.PubSub.broadcast(Realtime.PubSub, presence_topic, presence_message)
 
-      for ref <- refs do
-        assert_receive {@presence_event, ^ref, %{size: ^size}, %{implementation: "phoenix"}}, 5000
-      end
+      assert_receive {@presence_event, ^us_ref, %{size: ^ftl_size}, %{implementation: "phoenix"}}, 5000
 
-      refute_receive {@presence_event, _, %{size: ^size}, _}
+      ap_sizes =
+        for ref <- ap_refs do
+          assert_receive {@presence_event, ^ref, %{size: size}, %{implementation: "phoenix"}}, 5000
+          size
+        end
+
+      assert Enum.sort(ap_sizes) == Enum.sort([ftl_size, ftr_size])
+
+      refute_receive {@presence_event, _, _, _}
     end
   end
 
@@ -241,20 +252,20 @@ defmodule Realtime.GenRpcPubSubTest do
       ref: ref
     } do
       ftl = Worker.forward_to_local(topic, message, Phoenix.PubSub)
-      ftr = Worker.forward_to_region(topic, message, Phoenix.PubSub)
-      size = :erlang.external_size(ftl)
-      assert :erlang.external_size(ftr) == size
+      ftr = Worker.forward_to_region(topic, message, Phoenix.PubSub, 0)
+      ftl_size = :erlang.external_size(ftl)
+      ftr_size = :erlang.external_size(ftr)
 
       route_to_worker(node(), ftl)
-      assert_receive {@presence_event, ^ref, %{size: ^size}, %{implementation: "phoenix"}}, 1000
+      assert_receive {@presence_event, ^ref, %{size: ^ftl_size}, %{implementation: "phoenix"}}, 1000
 
       route_to_worker(node(), ftr)
-      assert_receive {@presence_event, ^ref, %{size: ^size}, %{implementation: "phoenix"}}, 1000
+      assert_receive {@presence_event, ^ref, %{size: ^ftr_size}, %{implementation: "phoenix"}}, 1000
     end
 
     test "the receiving worker emits nothing for non-presence topics", %{message: message, ref: ref} do
       ftl = Worker.forward_to_local(@topic, message, Phoenix.PubSub)
-      ftr = Worker.forward_to_region(@topic, message, Phoenix.PubSub)
+      ftr = Worker.forward_to_region(@topic, message, Phoenix.PubSub, 0)
 
       size = :erlang.external_size(ftl)
 
@@ -348,7 +359,7 @@ defmodule Realtime.GenRpcPubSubTest do
       # The routed message carries the tenant tag, exactly as the adapter forwards it.
       route_to_worker(
         holder_node,
-        Worker.route(tenant_id, topic1, {:tb, tenant_id, message1}, MessageDispatcher, node(), stale_view_hash)
+        Worker.route(tenant_id, topic1, {:tb, tenant_id, message1}, MessageDispatcher, node(), stale_view_hash, 0)
       )
 
       assert_receive {:relay, ^holder_node, ^message1}, 5000
@@ -365,7 +376,7 @@ defmodule Realtime.GenRpcPubSubTest do
 
       route_to_worker(
         bystander_node,
-        Worker.route(tenant_id, topic2, {:tb, tenant_id, message2}, MessageDispatcher, node(), view_hash)
+        Worker.route(tenant_id, topic2, {:tb, tenant_id, message2}, MessageDispatcher, node(), view_hash, 0)
       )
 
       assert_receive {:relay, ^holder_node, ^message2}, 5000
