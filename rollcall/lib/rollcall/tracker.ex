@@ -632,7 +632,7 @@ defmodule Rollcall.Tracker do
           Messages.origin_node(msg) == node() ->
             {:noreply, drop_message(state, :local_origin, state.scope, node())}
 
-          # When we get a request we immediately reply with a snapshot. 
+          # When we get a request we immediately reply with a snapshot.
           # We then apply it to a peer if it exists, to treat a request
           # as "Proof of Life"
           Messages.kind(msg) == :request ->
