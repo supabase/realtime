@@ -17,7 +17,7 @@ defmodule Realtime.Integration.RtChannel.BillableEventsTest do
 
   setup %{tenant: tenant} do
     events = [
-      [:realtime, :rate_counter, :channel, :joins],
+      [:realtime, :channel, :joins],
       [:realtime, :rate_counter, :channel, :events],
       [:realtime, :rate_counter, :channel, :db_events],
       [:realtime, :rate_counter, :channel, :presence_events]
@@ -41,7 +41,10 @@ defmodule Realtime.Integration.RtChannel.BillableEventsTest do
   def handle_telemetry(event, measurements, metadata, name) do
     tenant = metadata[:tenant]
     [key] = Enum.take(event, -1)
-    value = Map.get(measurements, :sum) || Map.get(measurements, :value) || Map.get(measurements, :size) || 0
+
+    value =
+      Map.get(measurements, :sum) || Map.get(measurements, :value) || Map.get(measurements, :size) ||
+        Map.get(measurements, :count) || 0
 
     Agent.update(name, fn state ->
       state =

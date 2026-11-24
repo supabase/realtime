@@ -114,7 +114,7 @@ defmodule RealtimeWeb.RealtimeChannel do
          :ok <- only_private?(tenant, socket),
          :ok <- limit_max_users(tenant, transport_pid),
          :ok <- limit_node_joins(tenant),
-         :ok <- limit_joins(tenant, socket),
+         :ok <- count_join(tenant),
          :ok <- limit_channels(tenant, socket),
          {:ok, claims, confirm_token_ref} <- confirm_token(socket),
          socket = assign_authorization_context(socket, sub_topic, claims),
@@ -214,11 +214,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, :too_many_connections} ->
         msg = "Too many connected users"
         log_error(socket, "ConnectionRateLimitReached", msg)
-
-      {:error, :too_many_joins} ->
-        msg = "ClientJoinRateLimitReached: Too many joins per second"
-        send(transport_pid, %Phoenix.Socket.Broadcast{event: "disconnect"})
-        {:error, %{reason: msg}}
 
       # Only the join is refused, the socket stays connected
       {:error, :too_many_node_joins} ->
@@ -735,33 +730,17 @@ defmodule RealtimeWeb.RealtimeChannel do
     wait
   end
 
-  def limit_joins(tenant, socket) do
-    rate_args = Tenants.joins_per_second_rate(tenant)
-
-    RateCounter.new(rate_args)
-
-    case RateCounter.get(rate_args) do
-      {:ok, %{limit: %{triggered: false}}} ->
-        GenCounter.add(rate_args.id)
-        :ok
-
-      {:ok, %{limit: %{triggered: true}}} ->
-        {:error, :too_many_joins}
-
-      error ->
-        log_error(socket, "UnknownErrorOnCounter", error)
-        {:error, error}
-    end
-  end
-
-  # Checked before limit_joins so refused joins are not counted as joins. The flag is read on every join so switching it
-  # off takes effect without sockets reconnecting
+  # The flag is read on every join so switching it off takes effect without sockets reconnecting
   defp limit_node_joins(tenant) do
     if FeatureFlags.enabled?(@node_join_budget_flag, tenant.external_id) and NodeJoinBudget.take(tenant) == :error do
       {:error, :too_many_node_joins}
     else
       :ok
     end
+  end
+
+  defp count_join(tenant) do
+    :telemetry.execute([:realtime, :channel, :joins], %{count: 1}, %{tenant: tenant.external_id})
   end
 
   # A broadcast over the socket's limit is delayed, not refused: the channel sleeps until the bucket has a token for

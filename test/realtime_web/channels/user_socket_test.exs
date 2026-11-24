@@ -278,7 +278,6 @@ defmodule RealtimeWeb.UserSocketTest do
           {:tenant_suspended, 403, "Realtime was disabled for this tenant"},
           {:tenant_not_found, 404, "Tenant not found"},
           {:too_many_connections, 429, "Too many connected users"},
-          {:too_many_joins, 429, "Too many joins per second"},
           {:too_many_node_joins, 429, "Too many joins per second"}
         ] do
       test "maps #{reason} to a #{status} JSON response" do

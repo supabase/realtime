@@ -210,8 +210,8 @@ defmodule Realtime.PromEx.Plugins.Tenant do
         ),
         sum(
           [:realtime, :channel, :joins],
-          event_name: [:realtime, :rate_counter, :channel, :joins],
-          measurement: :sum,
+          event_name: [:realtime, :channel, :joins],
+          measurement: :count,
           description: "Sum of Realtime Channel joins.",
           tags: [:tenant]
         ),

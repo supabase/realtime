@@ -93,7 +93,7 @@ defmodule RealtimeWeb.MetricsControllerTest do
     :telemetry.execute([:realtime, :rate_counter, :channel, :events], %{sum: 5}, tenant_meta)
     :telemetry.execute([:realtime, :rate_counter, :channel, :presence_events], %{sum: 3}, tenant_meta)
     :telemetry.execute([:realtime, :rate_counter, :channel, :db_events], %{sum: 2}, tenant_meta)
-    :telemetry.execute([:realtime, :rate_counter, :channel, :joins], %{sum: 1}, tenant_meta)
+    :telemetry.execute([:realtime, :channel, :joins], %{count: 1}, tenant_meta)
     :telemetry.execute([:realtime, :channel, :input_bytes], %{size: 1024}, tenant_meta)
     :telemetry.execute([:realtime, :channel, :output_bytes], %{size: 2048}, tenant_meta)
 

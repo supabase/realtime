@@ -426,16 +426,6 @@ defmodule Realtime.ApiTest do
       assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{max_events_per_second: 123})
     end
 
-    test "change to max_joins_per_second publishes update to rate counters", %{tenants: [tenant | _]} do
-      expect(RateCounter, :publish_update, fn key ->
-        assert key == Realtime.Tenants.joins_per_second_key(tenant.external_id)
-      end)
-
-      reject(&RateCounter.publish_update/1)
-
-      assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{max_joins_per_second: 123})
-    end
-
     test "change to max_presence_events_per_second publishes update to rate counters", %{tenants: [tenant | _]} do
       expect(RateCounter, :publish_update, fn key ->
         assert key == Realtime.Tenants.presence_events_per_second_key(tenant.external_id)
