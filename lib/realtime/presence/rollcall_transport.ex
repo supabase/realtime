@@ -58,6 +58,12 @@ defmodule Realtime.Presence.RollcallTransport do
   end
 
   @impl true
+  def send_to(%{scope: scope, pubsub: pubsub}, node, message) do
+    Phoenix.PubSub.direct_broadcast(node, pubsub, topic_for(scope), wrap(scope, message))
+    :ok
+  end
+
+  @impl true
   def unwrap(_transport, {:tb, scope, message}) do
     {:ok, scope, message}
   end

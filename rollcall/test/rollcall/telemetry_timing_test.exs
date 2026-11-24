@@ -37,6 +37,9 @@ defmodule Rollcall.TelemetryTimingTest do
     end
 
     @impl true
+    def send_to(_state, _node, _message), do: :ok
+
+    @impl true
     def publish(%{publish_ms: ms}, _partition, _diff) do
       Process.sleep(ms)
       :ok

@@ -25,6 +25,11 @@ defmodule Rollcall.Transport.Null do
   end
 
   @impl true
+  def send_to(_t, _node, _message) do
+    :ok
+  end
+
+  @impl true
   def unwrap(_scope, _raw) do
     :ignore
   end
