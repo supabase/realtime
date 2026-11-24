@@ -19,6 +19,7 @@ defmodule Extensions.PostgresCdcRlsTest do
   alias Realtime.Tenants.Rebalancer
 
   @cdc_module Extensions.PostgresCdcRls
+  @publication Integrations.publication()
 
   describe "Postgres extensions" do
     setup do
@@ -85,12 +86,12 @@ defmodule Extensions.PostgresCdcRlsTest do
 
       %SubscriptionManager.State{oids: oids} = :sys.get_state(subscriber_manager_pid)
 
-      Postgrex.query!(conn, "drop publication if exists supabase_realtime_test", [])
+      Postgrex.query!(conn, "drop publication if exists #{@publication}", [])
       send(subscriber_manager_pid, :check_oids)
       %{oids: oids2} = :sys.get_state(subscriber_manager_pid)
       assert !Map.equal?(oids, oids2)
 
-      Postgrex.query!(conn, "create publication supabase_realtime_test for all tables", [])
+      Postgrex.query!(conn, "create publication #{@publication} for all tables", [])
       send(subscriber_manager_pid, :check_oids)
       %{oids: oids3} = :sys.get_state(subscriber_manager_pid)
       assert !Map.equal?(oids2, oids3)
@@ -109,7 +110,7 @@ defmodule Extensions.PostgresCdcRlsTest do
                Postgrex.query!(conn, "SELECT count(*)::int FROM pg_replication_slots WHERE slot_name = $1", [slot_name])
 
       # Drop the publication: poller should drop its slot and clear oids.
-      Postgrex.query!(conn, "drop publication if exists supabase_realtime_test", [])
+      Postgrex.query!(conn, "drop publication if exists #{@publication}", [])
       send(poller_pid, :check_oids)
 
       %{oids: oids_after_drop, poll_ref: poll_ref_after_drop} =
@@ -124,7 +125,7 @@ defmodule Extensions.PostgresCdcRlsTest do
                Postgrex.query!(conn, "SELECT count(*)::int FROM pg_replication_slots WHERE slot_name = $1", [slot_name])
 
       # Re-create the publication: poller should recreate the slot and repopulate oids.
-      Postgrex.query!(conn, "create publication supabase_realtime_test for all tables", [])
+      Postgrex.query!(conn, "create publication #{@publication} for all tables", [])
       send(poller_pid, :check_oids)
       %{oids: oids_after_create} = wait_for_poller_oids(poller_pid)
       refute oids_after_create == %{}
@@ -144,8 +145,8 @@ defmodule Extensions.PostgresCdcRlsTest do
 
       # Publication still exists but has no tables (recreated without FOR ALL TABLES
       # since you can't ALTER ... DROP TABLE on a FOR ALL TABLES publication).
-      Postgrex.query!(conn, "drop publication if exists supabase_realtime_test", [])
-      Postgrex.query!(conn, "create publication supabase_realtime_test", [])
+      Postgrex.query!(conn, "drop publication if exists #{@publication}", [])
+      Postgrex.query!(conn, "create publication #{@publication}", [])
 
       send(poller_pid, :check_oids)
 
@@ -161,7 +162,7 @@ defmodule Extensions.PostgresCdcRlsTest do
                Postgrex.query!(conn, "SELECT count(*)::int FROM pg_replication_slots WHERE slot_name = $1", [slot_name])
 
       # Add a table back to the publication: poller should recreate the slot and repopulate oids.
-      Postgrex.query!(conn, "alter publication supabase_realtime_test add table public.test", [])
+      Postgrex.query!(conn, "alter publication #{@publication} add table public.test", [])
 
       send(poller_pid, :check_oids)
       %{oids: oids_after_add} = wait_for_poller_oids(poller_pid)

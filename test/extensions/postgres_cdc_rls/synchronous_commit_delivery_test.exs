@@ -18,7 +18,7 @@ defmodule Extensions.PostgresCdcRls.SynchronousCommitDeliveryTest do
   alias Extensions.PostgresCdcRls.Subscriptions
   alias Realtime.Database
 
-  @publication "supabase_realtime_test"
+  @publication Integrations.publication()
   @claims %{"role" => "anon", "audience" => "allowed"}
 
   setup do
