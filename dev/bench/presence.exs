@@ -57,6 +57,9 @@
 # in the join window. The results file keeps the lowest and the highest result of each figure.
 # Compare a change with that spread.
 #
+# Compare runs that have the same settings. When a setting differs, the run prints a warning and
+# the report shows a note above the changes.
+#
 # Settings
 #
 #   --tenants         default 20
@@ -83,6 +86,16 @@ defmodule PresenceBench do
   @gen_rpc_base 5470
   @window_s 30
   @settle_s 2
+  # The settings that change what a figure means, as `{section of the results file, key}`. A
+  # comparison between runs that differ in one of them mixes two effects.
+  @compared [
+    {"settings", "tenants"},
+    {"settings", "entries"},
+    {"settings", "nodes"},
+    {"settings", "changes_per_s"},
+    {"workload", "shards"},
+    {"workload", "schedulers_per_node"}
+  ]
   @per_partition 100
   @meta_bytes 32
   @backends [:phoenix, :rollcall]
@@ -149,6 +162,12 @@ defmodule PresenceBench do
       |> normalize()
 
     result = if settings.compare, do: Map.merge(result, compare(result, settings.compare)), else: result
+
+    for difference <- result["different_settings"] || [] do
+      step(
+        "Warning: #{difference["setting"]} was #{difference["before"]} in the earlier run and is #{difference["now"]} now"
+      )
+    end
 
     path = write_results(result, settings)
     step("Results written to #{path}")
@@ -693,7 +712,22 @@ defmodule PresenceBench do
         }
       end
 
-    %{"baseline" => Map.take(old, ["settings", "summary"]) |> Map.put("file", path), "comparison" => rows}
+    %{
+      "baseline" => Map.take(old, ["settings", "summary"]) |> Map.put("file", path),
+      "comparison" => rows,
+      "different_settings" => different_settings(result, old)
+    }
+  end
+
+  # The settings in `@compared` that differ between the runs. An earlier file that lacks a setting
+  # differs, because the setting did not exist then.
+  defp different_settings(result, old) do
+    for {section, key} <- @compared,
+        before = get_in(old, [section, key]) || "missing",
+        now = get_in(result, [section, key]),
+        before != now do
+      %{"setting" => key, "before" => before, "now" => now}
+    end
   end
 
   ## Machine and arguments
