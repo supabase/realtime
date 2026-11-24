@@ -100,6 +100,10 @@ defmodule Rollcall.Transport.InMemory.Network do
   @spec drop_next(GenServer.server(), pos_integer()) :: :ok
   def drop_next(network, count \\ 1), do: GenServer.call(network, {:drop_next, count})
 
+  @doc "Cancels the deliveries that `drop_next/2` has not used yet."
+  @spec clear_drops(GenServer.server()) :: :ok
+  def clear_drops(network), do: GenServer.call(network, :clear_drops)
+
   @impl true
   def init(:ok), do: {:ok, %{members: %{}, subscribers: %{}, monitors: %{}, drops: 0}}
 
@@ -137,6 +141,10 @@ defmodule Rollcall.Transport.InMemory.Network do
 
   def handle_call({:drop_next, count}, _from, state) do
     {:reply, :ok, %{state | drops: state.drops + count}}
+  end
+
+  def handle_call(:clear_drops, _from, state) do
+    {:reply, :ok, %{state | drops: 0}}
   end
 
   @impl true
