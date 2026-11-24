@@ -8,6 +8,7 @@ defmodule PresenceBench.Node do
 
   @rollcall Realtime.Presence.Rollcall
   @clients PresenceBench.Node.Clients
+  @cpu_meter PresenceBench.Node.CpuMeter
 
   # Registers a listener for each tenant, as a connected client does, then makes sure the Rollcall
   # tracker runs. Rollcall sends its heartbeats only to the nodes that joined the Muster group of
@@ -81,24 +82,47 @@ defmodule PresenceBench.Node do
 
   def entries(:rollcall), do: Enum.sum(for p <- rollcall_procs(), do: :ets.info(hd(p.tables), :size))
 
-  # One reading of the reductions and the memory of every process of both backends. The memory is
-  # the process memory plus the ETS tables of the process, read after a GC so the heap is not at a
-  # growth step. A GC costs reductions, so it must fall outside the window. At the start of a
-  # window, the GC runs before the reductions are read. At the end, the reductions are read before
-  # the GC.
+  # One reading of the reductions and the memory of every process of both backends, and of the
+  # scheduler wall time of the node. The memory is the process memory plus the ETS tables of the
+  # process, read after a GC so the heap is not at a growth step. A GC costs reductions and CPU
+  # time, so it must fall outside the window. At the start of a window, the GC runs before the
+  # reductions and the scheduler time are read. At the end, they are read before the GC.
+  #
+  # The scheduler wall time covers the whole node, not only the measured processes. It includes the
+  # clients of the benchmark.
   def snapshot(:start) do
+    hold_scheduler_wall_time()
     procs = phoenix_procs() ++ rollcall_procs()
     gc(procs)
-    read(procs)
+
+    %{processes: read(procs), schedulers: schedulers()}
   end
 
   def snapshot(:end) do
     procs = phoenix_procs() ++ rollcall_procs()
     reductions = Map.new(procs, &{&1.pid, reductions(&1.pid)})
+    schedulers = schedulers()
     gc(procs)
 
-    for reading <- read(procs), do: %{reading | reductions: Map.fetch!(reductions, reading.pid)}
+    %{
+      processes: for(reading <- read(procs), do: %{reading | reductions: Map.fetch!(reductions, reading.pid)}),
+      schedulers: schedulers
+    }
   end
+
+  # The scheduler wall time flag belongs to the process that sets it. The flag clears when that
+  # process exits. An RPC call runs in a process that exits at the end of the call, so a process
+  # that lives on holds the flag. The agent starts once on each node and sets the flag in its init.
+  defp hold_scheduler_wall_time do
+    case Agent.start(fn -> :erlang.system_flag(:scheduler_wall_time, true) end, name: @cpu_meter) do
+      {:ok, _pid} -> :ok
+      {:error, {:already_started, _pid}} -> :ok
+    end
+  end
+
+  # The `{id, active_time, total_time}` of each scheduler. The times grow from the moment that the
+  # flag is set.
+  defp schedulers, do: :scheduler_wall_time |> :erlang.statistics() |> Enum.sort()
 
   defp gc(procs), do: Enum.each(procs, &:erlang.garbage_collect(&1.pid))
 
