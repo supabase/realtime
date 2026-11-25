@@ -496,43 +496,20 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @impl true
   def handle_in("broadcast", payload, %{assigns: %{private?: true}} = socket) do
-    %{tenant: tenant_id} = socket.assigns
-    limit_socket_broadcasts(socket)
-
-    RequestMetrics.track(:broadcast, :ws, tenant_id, fn ->
-      with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id) do
-        BroadcastHandler.handle(payload, db_conn, socket)
-      else
-        {:error, :rpc_error, error} ->
-          log_error(socket, "UnableToHandleBroadcast", error)
-          BroadcastHandler.maybe_reply_error(socket, :unable_to_handle_broadcast)
-
-        {:error, :tenant_database_unavailable} ->
-          log_error(socket, "UnableToConnectToProject", :tenant_database_unavailable)
-          BroadcastHandler.maybe_reply_error(socket, :unable_to_connect_to_project)
-
-        {:error, :tenant_db_too_many_connections} ->
-          log_error(socket, "DatabaseLackOfConnections", :tenant_db_too_many_connections)
-          BroadcastHandler.maybe_reply_error(socket, :database_lack_of_connections)
-
-        {:error, :connect_rate_limit_reached} ->
-          log_error(socket, "DatabaseConnectionRateLimitReached", :connect_rate_limit_reached)
-          BroadcastHandler.maybe_reply_error(socket, :database_connection_rate_limit_reached)
-
-        {:error, reason} when reason in [:initializing, :tenant_database_connection_initializing] ->
-          log_error(socket, "InitializingProjectConnection", reason)
-          BroadcastHandler.maybe_reply_error(socket, :initializing_project_connection)
-
-        {:error, error} ->
-          log_error(socket, "UnableToHandleBroadcast", error)
-          BroadcastHandler.maybe_reply_error(socket, :unable_to_handle_broadcast)
-      end
-    end)
+    case limit_socket_broadcasts(socket) do
+      :ok -> handle_private_broadcast(payload, socket)
+      {:error, :broadcast_backlog} -> broadcast_backlog_response(socket)
+    end
   end
 
   def handle_in("broadcast", payload, %{assigns: %{private?: false}} = socket) do
-    limit_socket_broadcasts(socket)
-    RequestMetrics.track(:broadcast, :ws, socket.assigns.tenant, fn -> BroadcastHandler.handle(payload, socket) end)
+    case limit_socket_broadcasts(socket) do
+      :ok ->
+        RequestMetrics.track(:broadcast, :ws, socket.assigns.tenant, fn -> BroadcastHandler.handle(payload, socket) end)
+
+      {:error, :broadcast_backlog} ->
+        broadcast_backlog_response(socket)
+    end
   end
 
   def handle_in("presence", payload, socket) do
@@ -743,17 +720,60 @@ defmodule RealtimeWeb.RealtimeChannel do
     :telemetry.execute([:realtime, :channel, :joins], %{count: 1}, %{tenant: tenant.external_id})
   end
 
-  # A broadcast over the socket's limit is delayed, not refused: the channel sleeps until the bucket has a token for
-  # it. While it sleeps, the channel reads no more messages from the client, so the client cannot go faster than
-  # the bucket refills. The flag is read on every broadcast so switching it off takes effect without reconnects
+  defp handle_private_broadcast(payload, %{assigns: %{tenant: tenant_id}} = socket) do
+    RequestMetrics.track(:broadcast, :ws, tenant_id, fn ->
+      with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id) do
+        BroadcastHandler.handle(payload, db_conn, socket)
+      else
+        {:error, :rpc_error, error} ->
+          log_error(socket, "UnableToHandleBroadcast", error)
+          BroadcastHandler.maybe_reply_error(socket, :unable_to_handle_broadcast)
+
+        {:error, :tenant_database_unavailable} ->
+          log_error(socket, "UnableToConnectToProject", :tenant_database_unavailable)
+          BroadcastHandler.maybe_reply_error(socket, :unable_to_connect_to_project)
+
+        {:error, :tenant_db_too_many_connections} ->
+          log_error(socket, "DatabaseLackOfConnections", :tenant_db_too_many_connections)
+          BroadcastHandler.maybe_reply_error(socket, :database_lack_of_connections)
+
+        {:error, :connect_rate_limit_reached} ->
+          log_error(socket, "DatabaseConnectionRateLimitReached", :connect_rate_limit_reached)
+          BroadcastHandler.maybe_reply_error(socket, :database_connection_rate_limit_reached)
+
+        {:error, reason} when reason in [:initializing, :tenant_database_connection_initializing] ->
+          log_error(socket, "InitializingProjectConnection", reason)
+          BroadcastHandler.maybe_reply_error(socket, :initializing_project_connection)
+
+        {:error, error} ->
+          log_error(socket, "UnableToHandleBroadcast", error)
+          BroadcastHandler.maybe_reply_error(socket, :unable_to_handle_broadcast)
+      end
+    end)
+  end
+
+  # A broadcast over the socket's limit is delayed: the channel sleeps until the bucket has a token for it. The
+  # transport keeps reading the client while the channel sleeps, so the client's messages queue up in the channel's
+  # mailbox. Past twice the burst, the channel stops instead of sleeping, so the backlog stays bounded. The flag is
+  # read on every broadcast so switching it off takes effect without reconnects
   defp limit_socket_broadcasts(%{assigns: %{tenant: tenant_id}, private: %{broadcast_bucket: bucket}} = socket) do
     if FeatureFlags.enabled?(@socket_broadcast_limit_flag, tenant_id) and TokenBucket.take(bucket) == :error do
-      log_error(socket, "MessagePerSecondRateLimitReached", "Too many broadcasts on this socket")
+      {:message_queue_len, queued} = Process.info(self(), :message_queue_len)
 
-      wait_for_broadcast_token(bucket)
+      if queued > 2 * TokenBucket.burst(bucket) do
+        {:error, :broadcast_backlog}
+      else
+        log_error(socket, "MessagePerSecondRateLimitReached", "Too many broadcasts on this socket")
+        wait_for_broadcast_token(bucket)
+      end
+    else
+      :ok
     end
+  end
 
-    :ok
+  defp broadcast_backlog_response(socket) do
+    log_error(socket, "MessagePerSecondRateLimitReached", "Too many broadcasts queued on this socket")
+    shutdown_response(socket, "Too many broadcasts queued on this socket")
   end
 
   # Other channels of the socket share the bucket and can take the token first, so the take after the sleep can fail
