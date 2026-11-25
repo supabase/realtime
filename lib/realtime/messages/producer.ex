@@ -9,14 +9,15 @@ defmodule Realtime.Messages.Producer do
   soon as it is full, and otherwise once `:flush_interval_ms` passed since the previous one.
 
   A message is rejected when `:max_pending` messages or `:max_pending_bytes` are queued or being written.
-  A `:reply_to` gets the result once the message is written. Senders on other nodes cast to it, and get
-  their errors at their `:reply_to`.
+  A `:reply_to` gets the result once the message is written. Senders on other nodes send to it without
+  waiting, and get their errors at their `:reply_to`.
 
   The producer logs the messages that were not persisted, its own and the ones the consumer reports, once
   per reason every `:drops_report_interval_ms`.
 
   The producer starts `Realtime.Messages.Consumer`, linked, which subscribes to it, and stops
   when it stops. On shutdown, the consumer writes the messages still queued after the events it was sent.
+  Messages sent to the producer while it stops fail with `persistence_unavailable`.
 
   Both stages use `Realtime.Messages.config/0`, with the `:config` option merged over it.
   """
@@ -89,13 +90,19 @@ defmodule Realtime.Messages.Producer do
     end
   end
 
+  @impl true
+  def handle_demand(incoming_demand, state) do
+    dispatch_events(%{state | pending_demand: state.pending_demand + incoming_demand, writing: {0, 0}})
+  end
+
   @doc """
-  Queues a message cast by `Realtime.Messages.enqueue/6`, which persists for senders on other nodes without
-  waiting on the producer. It admits the message like `handle_call/3`, but sends a rejection to the
-  message's `:reply_to`, since nobody waits for a reply.
+  Queues a `{:persist, entry, caller}` message sent by `Realtime.Messages.enqueue/6`, which persists for
+  senders on other nodes without waiting on the producer. It admits the message like `handle_call/3`, but
+  sends a rejection to the message's `:reply_to`, since nobody waits for a reply. The other clauses handle
+  the producer's timers and the exits of the connection and the consumer.
   """
   @impl true
-  def handle_cast({:persist, entry, caller}, state) do
+  def handle_info({:persist, entry, caller}, state) do
     case admit(state, entry) do
       :ok ->
         state |> enqueue(entry, caller) |> dispatch_events()
@@ -106,12 +113,6 @@ defmodule Realtime.Messages.Producer do
     end
   end
 
-  @impl true
-  def handle_demand(incoming_demand, state) do
-    dispatch_events(%{state | pending_demand: state.pending_demand + incoming_demand, writing: {0, 0}})
-  end
-
-  @impl true
   def handle_info(:flush, state), do: dispatch_events(%{state | timer: nil})
   def handle_info({:dropped, reason, count}, state), do: {:noreply, [], drop(state, reason, count)}
   def handle_info(:report_drops, state), do: {:noreply, [], report_drops(state)}
@@ -128,12 +129,12 @@ defmodule Realtime.Messages.Producer do
 
   @impl true
   def terminate(_reason, %{consumer: nil} = state) do
-    state |> fail_queued(:persistence_unavailable) |> receive_drops() |> report_drops()
+    state |> fail_queued(:persistence_unavailable) |> fail_unread() |> receive_drops() |> report_drops()
   end
 
   def terminate(_reason, state) do
     stop_consumer(state)
-    state |> receive_drops() |> report_drops()
+    state |> fail_unread() |> receive_drops() |> report_drops()
   end
 
   defp admit(state, entry) do
@@ -212,6 +213,18 @@ defmodule Realtime.Messages.Producer do
     queued = :queue.to_list(state.queue)
     Messages.reply(for {_entry, caller} <- queued, do: {caller, {:error, reason}})
     drop(%{state | queue: :queue.new(), count: 0, bytes: 0}, reason, length(queued))
+  end
+
+  # It stays registered until it exits, so senders on other nodes keep sending to it while it stops. Senders
+  # on this node call it, and get `persistence_unavailable` when it exits
+  defp fail_unread(state) do
+    receive do
+      {:persist, _entry, caller} ->
+        Messages.reply([{caller, {:error, :persistence_unavailable}}])
+        state |> drop(:persistence_unavailable, 1) |> fail_unread()
+    after
+      0 -> state
+    end
   end
 
   defp drop(state, _reason, 0), do: state

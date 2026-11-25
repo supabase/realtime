@@ -390,9 +390,33 @@ defmodule Realtime.Messages.PersistTest do
 
       assert {:ok, _} = persist_and_wait(conn, tenant_id, "t", "e", {:json, %{}})
     end
+
+    test "fails a message for a database connection that stopped", %{conn: conn, tenant_id: tenant_id} do
+      stop_conn_and_producer(conn)
+
+      assert Messages.persist(conn, tenant_id, "t", "e", {:json, %{}}) == {:error, :persistence_unavailable}
+
+      assert_receive {:telemetry, [:realtime, :tenants, :persist, :dropped], %{count: 1},
+                      %{reason: :persistence_unavailable}}
+    end
   end
 
   describe "enqueue/6" do
+    test "sends persistence_unavailable to reply_to when the database connection stopped", %{
+      conn: conn,
+      tenant_id: tenant_id
+    } do
+      stop_conn_and_producer(conn)
+      ref = make_ref()
+
+      :ok = Messages.enqueue(conn, tenant_id, "t", "e", {:json, %{}}, reply_to: {self(), ref})
+
+      assert_receive {^ref, {:error, :persistence_unavailable}}
+
+      assert_receive {:telemetry, [:realtime, :tenants, :persist, :dropped], %{count: 1},
+                      %{reason: :persistence_unavailable}}
+    end
+
     @tag config: [max_pending: 1, flush_interval_ms: 60_000]
     test "sends a rejected message's error to reply_to", %{conn: conn, tenant_id: tenant_id} do
       start_flush_interval(conn, tenant_id)
@@ -439,6 +463,13 @@ defmodule Realtime.Messages.PersistTest do
   end
 
   defp consumer(conn), do: :sys.get_state(producer(conn)).state.consumer
+
+  defp stop_conn_and_producer(conn) do
+    pid = producer(conn)
+    ref = Process.monitor(pid)
+    GenServer.stop(conn)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+  end
 
   defp hibernating?(pid) do
     Process.info(pid, :current_function) in [

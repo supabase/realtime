@@ -79,6 +79,16 @@ defmodule Realtime.MessagesTest do
       assert_eventually {:ok, [%Message{topic: ^topic}]} = Repo.all(conn, Message, Message)
     end
 
+    test "distributed store fails when the node of the database connection is not connected", %{tenant: tenant} do
+      {:ok, peer, _node} = Clustered.start_disconnected()
+      conn = :peer.call(peer, :erlang, :self, [])
+      ref = make_ref()
+
+      assert :ok = Messages.persist(conn, tenant.id, "t", "test", {:json, %{}}, reply_to: {self(), ref})
+      assert_receive {^ref, {:error, :persistence_unavailable}}
+      assert Messages.persist(conn, tenant.id, "t", "test", {:json, %{}}) == {:error, :persistence_unavailable}
+    end
+
     test "distributed store does not hold the gen_rpc client while the producer is busy", %{
       conn: conn,
       tenant: tenant

@@ -167,7 +167,8 @@ defmodule Realtime.Messages do
   broadcast again when it appears on the replication stream.
 
   Writes are batched, see "Persistence" in the moduledoc. Returns `:ok` once the message is queued, or its
-  error when it is over a limit. Over RPC it returns `:ok` without waiting. It accepts the options below.
+  error when it is over a limit or the connection stopped. Over RPC it returns `:ok` without waiting, or
+  `persistence_unavailable` when the node of the connection is not connected. It accepts the options below.
 
     * `:reply_to` - `{pid, tag}` that gets `{tag, {:ok, id}}` or `{tag, {:error, reason}}` once the message
       is written or dropped. Its errors are sent there too, and `persist/6` returns `:ok`. `pid` can be on
@@ -191,7 +192,7 @@ defmodule Realtime.Messages do
     entry = %{entry(topic, event, payload) | expires_at: Keyword.get(opts, :expires_at)}
 
     with {:ok, pid} <- lookup_or_start_producer(conn, tenant_id),
-         :ok <- call(pid, entry, caller) do
+         :ok <- call(pid, tenant_id, entry, caller) do
       :ok
     else
       error when caller != nil -> reply([{caller, error}])
@@ -200,18 +201,29 @@ defmodule Realtime.Messages do
   end
 
   def persist(conn, tenant_id, topic, event, payload, opts) do
-    args = [conn, tenant_id, topic, event, payload, opts]
-    Realtime.GenRpc.ordered_cast(node(conn), __MODULE__, :enqueue, args, key: topic)
+    caller = Keyword.get(opts, :reply_to)
+    conn_node = node(conn)
+
+    if conn_node in Node.list() do
+      args = [conn, tenant_id, topic, event, payload, opts]
+      Realtime.GenRpc.ordered_cast(conn_node, __MODULE__, :enqueue, args, key: topic)
+    else
+      # The connection's node left the cluster, but syn on this node still returns that connection
+      emit_dropped(tenant_id, :persistence_unavailable, 1)
+      error = {:error, :persistence_unavailable}
+      if caller, do: reply([{caller, error}]), else: error
+    end
   end
 
-  # Applied by `ordered_cast/5` on the node of `conn`. It casts to the producer, so it never holds the gen_rpc client
+  # Applied by `ordered_cast/5` on the node of `conn`. It sends to the producer without waiting, so it never
+  # holds the gen_rpc client
   @doc false
   def enqueue(conn, tenant_id, topic, event, payload, opts) do
     caller = Keyword.get(opts, :reply_to)
     entry = %{entry(topic, event, payload) | expires_at: Keyword.get(opts, :expires_at)}
 
     case lookup_or_start_producer(conn, tenant_id) do
-      {:ok, pid} -> GenStage.cast(pid, {:persist, entry, caller})
+      {:ok, pid} -> send(pid, {:persist, entry, caller})
       error -> reply([{caller, error}])
     end
 
@@ -266,8 +278,17 @@ defmodule Realtime.Messages do
 
   defp lookup_or_start_producer(conn, tenant_id) do
     case Registry.lookup(@registry, {Producer, conn}) do
-      [{pid, _}] -> {:ok, pid}
-      [] -> start_producer(conn, tenant_id)
+      [{pid, _}] ->
+        {:ok, pid}
+
+      [] ->
+        # Guard against a race condition: syn can still return the connection of a Connect that stopped
+        if Process.alive?(conn) do
+          start_producer(conn, tenant_id)
+        else
+          emit_dropped(tenant_id, :persistence_unavailable, 1)
+          {:error, :persistence_unavailable}
+        end
     end
   end
 
@@ -288,11 +309,16 @@ defmodule Realtime.Messages do
     end
   end
 
-  defp call(pid, entry, caller) do
+  defp call(pid, tenant_id, entry, caller) do
     GenServer.call(pid, {:persist, entry, caller})
   catch
-    :exit, {:timeout, _} -> {:error, :persistence_timeout}
-    :exit, _ -> {:error, :persistence_unavailable}
+    :exit, {:timeout, _} ->
+      {:error, :persistence_timeout}
+
+    # The producer stopped before it read the message
+    :exit, _ ->
+      emit_dropped(tenant_id, :persistence_unavailable, 1)
+      {:error, :persistence_unavailable}
   end
 
   @doc """
