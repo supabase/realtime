@@ -410,7 +410,7 @@ defmodule Realtime.Messages.PersistTest do
     end
   end
 
-  describe "enqueue/6" do
+  describe "enqueue/4" do
     test "sends persistence_unavailable to reply_to when the database connection stopped", %{
       conn: conn,
       tenant_id: tenant_id
@@ -418,7 +418,7 @@ defmodule Realtime.Messages.PersistTest do
       stop_conn_and_producer(conn)
       ref = make_ref()
 
-      :ok = Messages.enqueue(conn, tenant_id, "t", "e", {:json, %{}}, reply_to: {self(), ref})
+      :ok = Messages.enqueue(conn, tenant_id, entry(), {self(), ref})
 
       assert_receive {^ref, {:error, :persistence_unavailable}}
 
@@ -432,8 +432,8 @@ defmodule Realtime.Messages.PersistTest do
       first = make_ref()
       second = make_ref()
 
-      :ok = Messages.enqueue(conn, tenant_id, "t", "e", {:json, %{}}, reply_to: {self(), first})
-      :ok = Messages.enqueue(conn, tenant_id, "t", "e", {:json, %{}}, reply_to: {self(), second})
+      :ok = Messages.enqueue(conn, tenant_id, entry(), {self(), first})
+      :ok = Messages.enqueue(conn, tenant_id, entry(), {self(), second})
 
       assert_receive {^second, {:error, :persistence_buffer_full}}
 
@@ -465,6 +465,9 @@ defmodule Realtime.Messages.PersistTest do
     assert_receive {^ref, result}, 5_000
     result
   end
+
+  defp entry,
+    do: %{id: Ecto.UUID.generate(), topic: "t", event: "e", json: "{}", binary: nil, bytes: 2, expires_at: nil}
 
   defp producer(conn) do
     [{pid, _}] = Registry.lookup(Realtime.Registry.Unique, {Producer, conn})

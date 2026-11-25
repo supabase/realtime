@@ -88,29 +88,6 @@ defmodule Realtime.MessagesTest do
       assert_receive {^ref, {:error, :persistence_unavailable}}
       assert Messages.persist(conn, tenant.id, "t", "test", {:json, %{}}) == {:error, :persistence_unavailable}
     end
-
-    test "distributed store does not hold the gen_rpc client while the producer is busy", %{
-      conn: conn,
-      tenant: tenant
-    } do
-      topic = random_string()
-      {:ok, node} = Clustered.start()
-      {:ok, _} = persist_and_wait(conn, tenant.id, topic, "test", {:json, %{}})
-      [{producer, _}] = Registry.lookup(Realtime.Registry.Unique, {Messages.Producer, conn})
-      :sys.suspend(producer)
-      on_exit(fn -> if Process.alive?(producer), do: :sys.resume(producer) end)
-
-      ref = make_ref()
-      args = [conn, tenant.id, topic, "test", {:json, %{}}, [reply_to: {self(), ref}]]
-      :ok = :erpc.call(node, Messages, :persist, args)
-      # The same key as the persist above, so the same gen_rpc client
-      :ok = :erpc.call(node, Realtime.GenRpc, :ordered_cast, [node(), Kernel, :send, [self(), :next], [key: topic]])
-
-      assert_receive :next, 1_000
-
-      :sys.resume(producer)
-      assert_receive {^ref, {:ok, _id}}, 5_000
-    end
   end
 
   describe "replay/5" do

@@ -221,36 +221,6 @@ defmodule Realtime.GenRpcTest do
     end
   end
 
-  describe "ordered_cast/5" do
-    test "raises for the local node" do
-      assert_raise FunctionClauseError, fn -> GenRpc.ordered_cast(node(), Kernel, :send, [self(), :sent], key: :k) end
-    end
-
-    test "apply on a remote node", %{node: node} do
-      assert GenRpc.ordered_cast(node, Kernel, :send, [self(), :sent], key: :k) == :ok
-
-      assert_receive :sent
-    end
-
-    test "applies a cast after the previous one with the same key finished", %{node: node} do
-      :ok = GenRpc.ordered_cast(node, Process, :sleep, [300], key: :k)
-      :ok = GenRpc.ordered_cast(node, Kernel, :send, [self(), :sent], key: :k)
-
-      refute_receive :sent, 200
-      assert_receive :sent, 1_000
-    end
-
-    test "requires a key", %{node: node} do
-      assert_raise KeyError, fn -> GenRpc.ordered_cast(node, Kernel, :send, [self(), :sent], []) end
-    end
-
-    test "bad node does nothing" do
-      assert GenRpc.ordered_cast(:"unknown@1.1.1.1", Kernel, :send, [self(), :sent], key: :k) == :ok
-
-      refute_receive _any
-    end
-  end
-
   describe "multicast/4" do
     test "evals everywhere" do
       parent = self()

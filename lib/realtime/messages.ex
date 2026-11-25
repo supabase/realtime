@@ -5,7 +5,7 @@ defmodule Realtime.Messages do
   ## Persistence
 
   `persist/6` writes messages in batches, with one `GenStage` pipeline per tenant database connection, on
-  the node that owns it.
+  the node that owns it. Senders on other nodes reach it through `Realtime.Messages.Router`.
 
       [Producer] -> [Consumer]
 
@@ -34,6 +34,7 @@ defmodule Realtime.Messages do
 
   alias Realtime.Api.Message
   alias Realtime.Messages.Producer
+  alias Realtime.Messages.Router
   alias Realtime.Telemetry
 
   import Ecto.Query, only: [from: 2]
@@ -123,13 +124,14 @@ defmodule Realtime.Messages do
   @type reply :: {caller, {:ok, String.t()} | {:error, persist_error}}
 
   @typedoc """
-  A message waiting to be written. `bytes` is the size of its payload.
+  A message waiting to be written. `json` is the encoded payload, kept as iodata so it can be sent to
+  another node, and `bytes` is the size of the payload.
   """
   @type entry :: %{
           id: String.t(),
           topic: String.t(),
           event: String.t(),
-          json: %Jason.Fragment{} | nil,
+          json: iodata() | nil,
           binary: binary() | nil,
           bytes: non_neg_integer(),
           expires_at: NaiveDateTime.t() | nil
@@ -207,8 +209,8 @@ defmodule Realtime.Messages do
     conn_node = node(conn)
 
     if conn_node in Node.list() do
-      args = [conn, tenant_id, topic, event, payload, opts]
-      Realtime.GenRpc.ordered_cast(conn_node, __MODULE__, :enqueue, args, key: topic)
+      entry = %{entry(topic, event, payload) | expires_at: Keyword.get(opts, :expires_at)}
+      Realtime.GenRpc.abcast([conn_node], Router, {:persist, conn, tenant_id, entry, caller}, key: topic)
     else
       # The connection's node left the cluster, but syn on this node still returns that connection
       emit_dropped(tenant_id, :persistence_unavailable, 1)
@@ -217,13 +219,10 @@ defmodule Realtime.Messages do
     end
   end
 
-  # Applied by `ordered_cast/5` on the node of `conn`. It sends to the producer without waiting, so it never
-  # holds the gen_rpc client
+  # Runs in `Realtime.Messages.Router`, so it sends to the producer instead of waiting on it
   @doc false
-  def enqueue(conn, tenant_id, topic, event, payload, opts) do
-    caller = Keyword.get(opts, :reply_to)
-    entry = %{entry(topic, event, payload) | expires_at: Keyword.get(opts, :expires_at)}
-
+  @spec enqueue(pid(), String.t(), entry, caller) :: :ok
+  def enqueue(conn, tenant_id, entry, caller) do
     case lookup_or_start_producer(conn, tenant_id) do
       {:ok, pid} -> send(pid, {:persist, entry, caller})
       error -> reply([{caller, error}])
@@ -259,7 +258,7 @@ defmodule Realtime.Messages do
 
   defp entry(topic, event, {:json, payload}) do
     iodata = Jason.encode_to_iodata!(payload)
-    %{new_entry(topic, event) | json: Jason.Fragment.new(iodata), bytes: IO.iodata_length(iodata)}
+    %{new_entry(topic, event) | json: iodata, bytes: IO.iodata_length(iodata)}
   end
 
   defp entry(topic, event, {:binary, payload}) do
@@ -402,7 +401,7 @@ defmodule Realtime.Messages do
       Enum.map(entries, &Ecto.UUID.dump!(&1.id)),
       Enum.map(entries, & &1.topic),
       Enum.map(entries, & &1.event),
-      Enum.map(entries, & &1.json),
+      Enum.map(entries, &(&1.json && Jason.Fragment.new(&1.json))),
       Enum.map(entries, & &1.binary),
       Enum.map(entries, & &1.expires_at),
       inserted_ats

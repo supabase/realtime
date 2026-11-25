@@ -9,8 +9,8 @@ defmodule Realtime.Messages.Producer do
   soon as it is full, and otherwise once `:flush_interval_ms` passed since the previous one.
 
   A message is rejected when `:max_pending` messages or `:max_pending_bytes` are queued or being written.
-  A `:reply_to` gets the result once the message is written. Senders on other nodes send to it without
-  waiting, and get their errors at their `:reply_to`.
+  A `:reply_to` gets the result once the message is written. Senders on other nodes reach it through
+  `Realtime.Messages.Router`, which sends to it without waiting, and get their errors at their `:reply_to`.
 
   The producer logs the messages that were not persisted, its own and the ones the consumer reports, once
   per reason every `:drops_report_interval_ms`.
@@ -96,7 +96,7 @@ defmodule Realtime.Messages.Producer do
   end
 
   @doc """
-  Queues a `{:persist, entry, caller}` message sent by `Realtime.Messages.enqueue/6`, which persists for
+  Queues a `{:persist, entry, caller}` message sent by `Realtime.Messages.enqueue/4`, which persists for
   senders on other nodes without waiting on the producer. It admits the message like `handle_call/3`, but
   sends a rejection to the message's `:reply_to`, since nobody waits for a reply. The other clauses handle
   the producer's timers and the exits of the connection and the consumer.

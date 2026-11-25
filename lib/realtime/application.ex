@@ -200,6 +200,7 @@ defmodule Realtime.Application do
          strategy: :one_for_one,
          name: Realtime.Messages.Producer.DynamicSupervisor,
          partitions: connect_partition_slots},
+        Realtime.Messages.Router,
         Realtime.Tenants.Reconnector,
         RealtimeWeb.Endpoint,
         {RealtimeWeb.Presence,
