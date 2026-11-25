@@ -2,7 +2,7 @@
 #
 # Plain Debian rather than an elixir/OTP image, so mise.toml and mise.lock stay the single
 # source of tool versions and the workflow is identical inside and outside the container.
-FROM debian:trixie-20260713-slim
+FROM debian:trixie-20261123-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
