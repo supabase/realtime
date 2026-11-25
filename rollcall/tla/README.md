@@ -3,7 +3,7 @@
 This directory holds the TLA+ model of the replication protocol. The model
 was built in steps. Each step adds one mechanism and the property that the
 mechanism is responsible for. Each step is one module. The last module,
-`Presence8.tla`, is the full protocol. `../DESIGN.md` gives the result.
+`Presence9.tla`, is the full protocol. `../DESIGN.md` gives the result.
 `NOTES.md` gives the reasons, the findings and the run results for each
 step.
 
@@ -15,7 +15,7 @@ name. A TLA+ module name must match its file name, so the names stay.
 Run TLC through the `tlc` task from any directory under `rollcall`:
 
 ```
-mise run tlc -- -config Presence8_live.cfg Presence8.tla
+mise run tlc -- -config Presence9_live.cfg Presence9.tla
 ```
 
 The task runs in this directory and uses all cores. For a run with liveness
@@ -23,7 +23,7 @@ properties and more than about 100K states, add `-lncheck final`. TLC then
 checks liveness once at the end instead of every few seconds:
 
 ```
-mise run tlc -- -lncheck final -config Presence8_live.cfg Presence8.tla
+mise run tlc -- -lncheck final -config Presence9_live.cfg Presence9.tla
 ```
 
 TLC writes its working files to `states/`. Git ignores that directory.
@@ -61,9 +61,10 @@ Every config header gives the expected result.
 | 6 | none | Tracker restart. A restart is a crash and a start. No new mechanism. See `NOTES.md`. | |
 | 7 | `Presence7.tla` | The client contract. State message, then diffs. | A synced client with an empty inbox holds the view of its node. |
 | 8 | `Presence8.tla` | Diff heartbeats, stamps, marks, the behind flag, request and reply. | A receiver with a current mark holds the entries of the sender. All step 5 properties hold. |
+| 9 | `Presence9.tla` | A targeted snapshot to a peer that a diff cannot reach after a reply. | Without loss, a synced receiver stays current on diffs. All step 8 properties hold. |
 
-Steps 1 to 5 are the snapshot protocol. Step 7 adds the client. Step 8 is
-the full protocol. Earlier modules use the names Join and Leave for the
+Steps 1 to 5 are the snapshot protocol. Step 7 adds the client. Step 8
+adds diffs. Step 9 is the full protocol. Earlier modules use the names Join and Leave for the
 tracker lifecycle. From step 7 the names are Start and Stop.
 
 ## Run times
@@ -84,6 +85,9 @@ seconds and are not listed.
 | `Presence8.cfg` | 288,928,270 | 53 min | Invariants only, with symmetry. Run it at the end of a change, not after each edit. |
 | `Presence8_live.cfg` | 572,160 | 15 min | Use `-lncheck final`. |
 | `Presence8_stable.cfg` | 490,576 | 10 min | Use `-lncheck final`. |
+| `Presence9.cfg` | 393,858,383 | 72 min | Invariants only, with symmetry. Run it at the end of a change. |
+| `Presence9_live.cfg` | 819,225 | 14 min | Use `-lncheck final`. |
+| `Presence9_stable.cfg` | 585,445 | 7 min | Use `-lncheck final`. |
 
 `Presence8_live.cfg` runs at `MaxStarts = 1`. At `MaxStarts = 2` the two
 properties take 34 and 65 minutes when checked one at a time. Both hold.
@@ -121,7 +125,8 @@ be false. It documents a limit of the protocol. `FalsePositivesUnreachable`
 in step 5 is an example: a live peer can be purged at any finite threshold.
 
 The witness switches are constants in the modules, such as `UniqueRefs`,
-`PeriodicHeartbeat`, `PurgeEnabled`, `SubscribeFirst` and `RequestsEnabled`.
+`PeriodicHeartbeat`, `PurgeEnabled`, `SubscribeFirst`, `RequestsEnabled` and
+`TargetedSnapshots`.
 Every config other than the witness sets them to the value the protocol
 uses. The switches are not carried forward to later modules unless a later
 witness needs them.
@@ -141,6 +146,7 @@ witness needs them.
 | `Presence8_w2.cfg` | Asserts no in-flight message is stale | `NoStaleInFlight` | Messages overtake each other. The stamp check is mandatory. |
 | `Presence8_w3.cfg` | Requests | `PairRepair` | Diffs alone cannot repair a link. |
 | `Presence8_w4.cfg` | Requests, under bounded loss | `Stabilisation` | The request path is necessary even when the network stops losing. |
+| `Presence9_w1.cfg` | Targeted snapshots, without loss | `StaysInStep` | A requester goes behind again after a reply. The targeted snapshot is necessary. |
 
 `Presence8_w2.cfg` fails by two routes. At `MaxDelay = 1` two snapshots
 from one incarnation overtake each other. At `MaxDelay = 0` with threshold 2

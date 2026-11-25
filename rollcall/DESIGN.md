@@ -64,6 +64,10 @@ Each tracker holds these values:
   persist the incarnation across restarts.
 - `sent`: the `local` set and the `version` at the time of the last
   heartbeat. The next diff starts from this state.
+- `replied`: a map from a peer node to the version of the last reply that
+  this tracker sent to that peer since the last heartbeat. The tracker clears
+  the map when it sends a heartbeat, when it starts and when it stops. A
+  purge of a peer does not clear it.
 
 Each tracker holds these values for each peer node:
 
@@ -103,20 +107,26 @@ the scope. The message is a snapshot or a diff. The tracker chooses the
 kind. The model shows that each choice is correct. After the tracker sends
 the message, it sets `sent` to the current `local` set and `version`.
 
+After a tracker sends a diff, it sends a snapshot at the current stamp to
+each peer whose `replied` version is greater than the `from` version of the
+diff and less than the current `version`. Send this snapshot to that peer
+only. A tracker that sends a snapshot sends no extra message. See caution 6.
+
 A tracker does not hold a list of peers. It creates a peer record when the
 first message from a node arrives.
 
 In the same period, the tracker sends a request to each peer that has the
-`behind` flag set. The request is a call to the tracker for the scope on
-the peer node. The tracker does not block on the call. The reply is the
-result of the call. The tracker sends the request again in each period
-until the flag is clear. A lost request needs no extra state. The next
-period sends it again.
+`behind` flag set. The tracker sends the request with `send_to` to the
+tracker for the scope on the peer node. The tracker does not wait for a
+reply. The reply arrives as a snapshot message. The tracker sends the
+request again in each period until the flag is clear. A lost request needs
+no extra state. The next period sends it again.
 
-When a tracker receives a request, it replies with a snapshot immediately.
-It does not change `sent`, because a reply is not a heartbeat. If the
-requester is not running, the reply goes to a process that does not exist,
-and the VM discards it.
+When a tracker receives a request, it replies immediately. The reply is a
+snapshot that the tracker sends with `send_to` to the node of the requester.
+It sets `replied` for the requester to the current `version`. It does not
+change `sent`, because a reply is not a heartbeat. If the requester is not
+running, the reply has no receiver, and the transport discards it.
 
 When a tracker stops, it broadcasts a snapshot with an empty set. This
 snapshot is the goodbye. When a tracker crashes, it sends nothing.
@@ -237,8 +247,9 @@ The design depends on these conditions:
 1. Make the request and the reply reliable. The snapshot reply is the
    largest message in the protocol. Recovery is not possible without it.
    Under load, a large message can be lost more often than a small message.
-   This breaks the assumption on message loss. Use a call with an
-   acknowledgement for the request and the reply. Do not use a cast.
+   This breaks the assumption on message loss. `send_to` has no
+   acknowledgement. The requester sends the request again in each period, so
+   a lost request or a lost reply costs one period.
 2. Incarnations must have an order. A different value is not sufficient.
    A stop, a start and a stop in one period put two goodbyes from two
    incarnations in flight at the same time. Without an order, the receiver
@@ -250,16 +261,19 @@ The design depends on these conditions:
    This is true also on a network that loses messages rarely.
 4. The purge must reset `mark`. See the section on dead peers.
 5. A request can be in flight when its sender crashes. The request still
-   arrives. Because the request is a call, the reply goes to the dead
-   caller process, and the VM discards it. No rule is necessary. If the
-   implementation changes the request to a message, add a rule: do not
-   reply to a requester that is down.
-6. A requester can become behind two times. The reply carries the state at
-   the time of the reply. The next diff starts from `sent`. If a change
-   occurred between the two, the requester sees one more gap and sends one
-   more request. The number of requests has a limit, and the result is
-   correct. If the extra round is a problem, keep a base version for each
-   peer and advance it on each reply.
+   arrives. The tracker sends the reply with `send_to` to the node of the
+   requester. The transport does not deliver a message to a node that is
+   down, so the reply is discarded. No rule is necessary. The model replies
+   only to a requester that is running. The result is the same.
+6. A reply can leave the requester behind. The reply carries the state at
+   the time of the reply. The next diff starts from `sent`. A change can
+   occur between the last heartbeat and the reply, and another change can
+   occur between the reply and the next heartbeat. The diff then does not
+   apply to the requester, and the requester sends another request. Under
+   steady change this loop does not end, and the pair never returns to
+   diffs. Use `replied`: send the requester a snapshot at the current stamp
+   when the diff does not apply to it. Do not send this snapshot to peers
+   that are not in `replied`.
 7. A stale snapshot that arrives after a goodbye has no effect. Its version
    is older, and the receiver ignores it. No special rule is necessary.
 8. After a crash and a restart, the peers remove the old entries when they
@@ -306,6 +320,11 @@ tracker starts, with the client on and with the client off:
   correct again an unlimited number of times. The entries of a dead tracker
   are removed from each live tracker, and they stay removed.
 - With limited message loss, all replicas become correct and stay correct.
+- With no message loss, a receiver that holds a mark from the current
+  incarnation of a peer is never behind that peer at the start of a heartbeat
+  period. A reply does not cause a second request. This property needs the
+  targeted snapshot. Without it, the model finds a run that breaks the
+  property in 16 states.
 
 The model proved the liveness properties with two nodes only. Two nodes are
 sufficient because a node does not forward the entries of another node.
