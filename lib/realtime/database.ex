@@ -271,7 +271,7 @@ defmodule Realtime.Database do
   def default_ssl_param(_), do: true
 
   @doc """
-  Runs database transaction in local node or against a target node withing a Postgrex transaction
+  Runs database transaction in local node or against a target node within a Postgrex transaction
   """
   @spec transaction(pid | DBConnection.t(), fun(), keyword(), keyword()) :: {:ok, any()} | {:error, any()}
   def transaction(db_conn, func, opts \\ [], metadata \\ [])

@@ -29,7 +29,7 @@ defmodule Realtime.Presence.Comparison do
      If the list is empty, we're done, the tenant is converged and there's nothing to check. 
      Low churn tenants will hit this fairly often.
   3. If we do have candidates, we wait for the next rung and do another check, using `step/3`.
-  4. When doing a step, we get the updated state in Phoenix and Rollcall for all the open candiates. Any candidates 
+  4. When doing a step, we get the updated state in Phoenix and Rollcall for all the open candidates. Any candidates 
      that have converged, get removed from the list.
   5. If our list of open candidates is empty, we're done and end with a `:converged` outcome. If not, we go back to 
      (3) and wait for the next rung. If we were on the persistent_rung we record how many candidates were still diverged.
