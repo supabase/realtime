@@ -167,8 +167,10 @@ defmodule Realtime.Messages do
   broadcast again when it appears on the replication stream.
 
   Writes are batched, see "Persistence" in the moduledoc. Returns `:ok` once the message is queued, or its
-  error when it is over a limit or the connection stopped. Over RPC it returns `:ok` without waiting, or
-  `persistence_unavailable` when the node of the connection is not connected. It accepts the options below.
+  error when it is over a limit or the connection stopped. It returns `persistence_timeout` when the
+  producer does not reply within a second, and the message may still be written. Over RPC it returns `:ok`
+  without waiting, or `persistence_unavailable` when the node of the connection is not connected. It
+  accepts the options below.
 
     * `:reply_to` - `{pid, tag}` that gets `{tag, {:ok, id}}` or `{tag, {:error, reason}}` once the message
       is written or dropped. Its errors are sent there too, and `persist/6` returns `:ok`. `pid` can be on
@@ -310,7 +312,7 @@ defmodule Realtime.Messages do
   end
 
   defp call(pid, tenant_id, entry, caller) do
-    GenServer.call(pid, {:persist, entry, caller})
+    GenStage.call(pid, {:persist, entry, caller}, 1_000)
   catch
     :exit, {:timeout, _} ->
       {:error, :persistence_timeout}
@@ -390,9 +392,10 @@ defmodule Realtime.Messages do
 
     query = """
     INSERT INTO realtime.messages
-      (id, topic, event, payload, binary_payload, expires_at, inserted_at, extension, private, skip_broadcast)
-    SELECT *, 'broadcast', true, true
+      (id, topic, event, payload, binary_payload, expires_at, inserted_at, updated_at, extension, private, skip_broadcast)
+    SELECT *, inserted_at, 'broadcast', true, true
     FROM unnest($1::uuid[], $2::text[], $3::text[], $4::jsonb[], $5::bytea[], $6::timestamp[], $7::timestamp[])
+      AS m(id, topic, event, payload, binary_payload, expires_at, inserted_at)
     """
 
     params = [

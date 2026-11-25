@@ -399,6 +399,15 @@ defmodule Realtime.Messages.PersistTest do
       assert_receive {:telemetry, [:realtime, :tenants, :persist, :dropped], %{count: 1},
                       %{reason: :persistence_unavailable}}
     end
+
+    test "times out when the producer does not reply within a second", %{conn: conn, tenant_id: tenant_id} do
+      pid = producer(conn)
+      :sys.suspend(pid)
+
+      assert Messages.persist(conn, tenant_id, "t", "e", {:json, %{}}) == {:error, :persistence_timeout}
+
+      :sys.resume(pid)
+    end
   end
 
   describe "enqueue/6" do
