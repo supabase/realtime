@@ -22,7 +22,7 @@ defmodule Realtime.PromEx.Plugins.PresenceTest do
   test "sizes Phoenix.Tracker messages received via :ftl and :ftr" do
     tracker_msg = {:pub, :heartbeat, {:shard, 1}, :empty, %{}}
     ftl = Worker.forward_to_local("phx_presence:shard_1", tracker_msg, Phoenix.PubSub)
-    ftr = Worker.forward_to_region("phx_presence:shard_1", tracker_msg, Phoenix.PubSub)
+    ftr = Worker.forward_to_region("phx_presence:shard_1", tracker_msg, Phoenix.PubSub, 0)
 
     bytes_before = metric_value("realtime_presence_replication_received_bytes") || 0
     messages_before = metric_value("realtime_presence_replication_received_messages") || 0
