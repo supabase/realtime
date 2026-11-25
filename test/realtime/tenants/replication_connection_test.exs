@@ -749,6 +749,37 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       end
     end
 
+    test "starts and broadcasts when the database sends notices to the client", %{tenant: tenant, db_conn: db_conn} do
+      # With client_min_messages at debug1 the walsender sends a DEBUG NoticeResponse for
+      # START_REPLICATION. ReplicationConnection overides client_min_messages to avoid this
+      %{rows: [[database]]} = Postgrex.query!(db_conn, "SELECT current_database()", [])
+      Postgrex.query!(db_conn, ~s(ALTER DATABASE "#{database}" SET client_min_messages = debug1), [])
+      on_exit(fn -> reset_client_min_messages(tenant, database) end)
+
+      start_link_supervised!(
+        {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
+        restart: :transient
+      )
+
+      topic = random_string()
+      tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
+      subscribe(tenant_topic, topic)
+
+      value = random_string()
+
+      message_fixture(tenant, %{
+        "topic" => topic,
+        "private" => true,
+        "event" => "INSERT",
+        "payload" => %{"value" => value}
+      })
+
+      assert_receive {:socket_push, :text, data}
+
+      assert %{"event" => "broadcast", "payload" => %{"payload" => %{"value" => ^value}}} =
+               data |> IO.iodata_to_binary() |> Jason.decode!()
+    end
+
     test "fails on existing replication slot", %{tenant: tenant} do
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
       name = @replication_slot_name
@@ -1215,6 +1246,12 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     {:ok, tenant} = FeatureFlags.set_tenant_flag("broadcast_persistence", tenant.external_id, true)
     Realtime.Tenants.Cache.update_cache(tenant)
     on_exit(fn -> FeatureFlags.Cache.invalidate_cache("broadcast_persistence") end)
+  end
+
+  defp reset_client_min_messages(tenant, database) do
+    {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+    Postgrex.query!(conn, ~s(ALTER DATABASE "#{database}" RESET client_min_messages), [])
+    GenServer.stop(conn)
   end
 
   defp create_messages_publication(db_conn, publication_name) do

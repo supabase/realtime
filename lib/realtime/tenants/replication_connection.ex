@@ -173,7 +173,8 @@ defmodule Realtime.Tenants.ReplicationConnection do
           ssl: db_settings.ssl,
           sync_connect: true,
           auto_reconnect: false,
-          parameters: [application_name: "realtime_replication_connection"]
+          # client_min_messages=error is used to avoid receiving debug/notice messages
+          parameters: [application_name: "realtime_replication_connection", client_min_messages: "error"]
         ]
 
       case Postgrex.ReplicationConnection.start_link(__MODULE__, attrs, connection_opts) do
