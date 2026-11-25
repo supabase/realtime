@@ -35,7 +35,7 @@ defmodule Realtime.Presence.Metrics do
 
   defmodule Envelope do
     @moduledoc """
-    Provides a struct for repesenting a resolved metrics envelope.
+    Provides a struct for representing a resolved metrics envelope.
 
     This includes an :action value that identifies whether the action was a track or an update.
     It also includes the :implementation that tracked the entry.
