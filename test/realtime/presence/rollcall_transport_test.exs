@@ -117,6 +117,28 @@ defmodule Realtime.Presence.RollcallTransportTest do
     end
   end
 
+  # `send_to/3` addresses one node. The test sends to its own node, so a subscriber of the topic gets
+  # the message the way a tracker on another node would.
+  describe "send_to/3" do
+    setup %{scope: scope} do
+      {:ok, state} = RollcallTransport.init(scope, pubsub: Realtime.PubSub)
+      {:ok, state: state}
+    end
+
+    test "delivers the tagged message to the subscribers of the topic on the node", %{
+      state: state,
+      scope: scope,
+      topic: topic
+    } do
+      subscribe_from_other_process(topic)
+      message = message(:request)
+
+      assert :ok = RollcallTransport.send_to(state, node(), message)
+
+      assert_receive {:relayed, {:tb, ^scope, ^message}}
+    end
+  end
+
   describe "publish/3" do
     setup %{scope: scope} do
       stub(Realtime.FeatureFlags, :enabled?, fn flag, ^scope -> flag == "presence_rollcall_primary" end)

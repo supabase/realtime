@@ -21,6 +21,9 @@ defmodule Rollcall.Transport.Active do
   def heartbeat(_state, _message), do: :ok
 
   @impl true
+  def send_to(_state, _node, _message), do: :ok
+
+  @impl true
   def publish(_state, _partition, _diff), do: :ok
 
   @impl true

@@ -26,6 +26,9 @@ defmodule Rollcall.Transport.PublishProbe do
   def heartbeat(_state, _message), do: :ok
 
   @impl true
+  def send_to(_state, _node, _message), do: :ok
+
+  @impl true
   def publish(%{scope: scope, to: to, rollcall: rollcall}, partition, diff) do
     send(to, {:published, partition, diff, Rollcall.state(rollcall, scope, partition)})
     :ok

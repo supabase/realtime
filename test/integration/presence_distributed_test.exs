@@ -8,6 +8,8 @@ defmodule Realtime.Integration.PresenceDistributedTest do
 
   alias Phoenix.Socket.Message
   alias Realtime.Integration.WebsocketClient
+  alias Realtime.Presence.RollcallTransport
+  alias Rollcall.Tracker.Messages
 
   @moduletag :capture_log
   # A remote change arrives with the next heartbeat.
@@ -109,6 +111,33 @@ defmodule Realtime.Integration.PresenceDistributedTest do
     end
   end
 
+  describe "a request sent to another node" do
+    # The test process stands in for a tracker on the test node. It subscribes to the topic of the
+    # scope and sends the request. The tracker on node A answers with a snapshot to the test node.
+    test "gets a snapshot of the entries of that node", ctx do
+      %{tenant: tenant, topic: topic, nodes: [node_a, _node_b]} = ctx
+      scope = tenant.external_id
+      tracker = connect(tenant, node_a, :tracker, topic, "tracker")
+      ClusterPresence.track(tracker, topic, %{name: "alice"})
+
+      assert_receive {:tracker, %Message{event: "presence_diff", payload: %{"joins" => %{"tracker" => _}}}},
+                     @remote_timeout
+
+      {:ok, transport} = RollcallTransport.init(scope, pubsub: Realtime.PubSub)
+
+      # The heartbeats of node A do not reach this node, because no client of the tenant is connected
+      # here. A snapshot that arrives after the request is then the reply. The wait is longer than the
+      # heartbeat period, so the test shows that no heartbeat arrives.
+      refute_receive {:tb, ^scope, _message}, 2 * heartbeat_period_in_ms()
+
+      :ok = RollcallTransport.send_to(transport, node_a, Messages.request(self()))
+
+      assert_receive {:tb, ^scope, {:snapshot, origin, _stamp, entries}}, @remote_timeout
+      assert node(origin) == node_a
+      assert [{_partition, _ref, "tracker", %{"name" => "alice"}}] = entries
+    end
+  end
+
   describe "clients on three nodes" do
     test "see each other", ctx do
       %{tenant: tenant, topic: topic, nodes: [node_a, node_b]} = ctx
@@ -152,5 +181,10 @@ defmodule Realtime.Integration.PresenceDistributedTest do
 
   defp grace_period_in_ms do
     :realtime |> Application.fetch_env!(:rollcall) |> Keyword.fetch!(:empty_grace_in_ms)
+  end
+
+  # The tracker default when the application does not set the option. See `Rollcall.Tracker`.
+  defp heartbeat_period_in_ms do
+    :realtime |> Application.fetch_env!(:rollcall) |> Keyword.get(:heartbeat_period_in_ms, 1_500)
   end
 end

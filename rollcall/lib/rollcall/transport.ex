@@ -41,6 +41,13 @@ defmodule Rollcall.Transport do
   diff to another process.
   """
   @callback publish(t :: any, partition :: Rollcall.partition(), diff :: Rollcall.partition_diff()) :: :ok
+
+  @doc """
+  Called to send one message to the tracker of the same scope on `node`. Use
+  `heartbeat/2` to send to all peers.
+  """
+  @callback send_to(t :: any(), node :: node(), message :: Messages.t()) :: :ok
+
   @doc """
   Called when a message is received by the tracker.
 
