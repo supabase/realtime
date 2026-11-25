@@ -62,6 +62,43 @@ defmodule Rollcall.Tracker.StateTest do
 
       assert state.version == 1
     end
+
+    test "starts the pending changes from the first change", %{state: state} do
+      {changes, local} = Local.track(state.local, self(), "partition", "key", %{a: 1}, unique_ref())
+
+      state = State.apply_changes(state, local, changes)
+
+      assert Changes.joins(state.changes_since_last_tick) == Changes.joins(changes)
+    end
+
+    test "adds each change to the pending changes", %{state: state} do
+      {changes_1, local_1} = Local.track(state.local, self(), "partition", "key_1", %{}, unique_ref())
+      {changes_2, local_2} = Local.track(local_1, self(), "partition", "key_2", %{}, unique_ref())
+
+      state =
+        state
+        |> State.apply_changes(local_1, changes_1)
+        |> State.apply_changes(local_2, changes_2)
+
+      assert state.changes_since_last_tick |> Changes.joins() |> Enum.sort() ==
+               Enum.sort(Changes.joins(changes_1) ++ Changes.joins(changes_2))
+    end
+  end
+
+  describe "heartbeat_sent/1" do
+    test "sets the last tick version to the version and clears the pending changes", %{state: state} do
+      {changes, local} = Local.track(state.local, self(), "partition", "key", %{}, unique_ref())
+      state = State.apply_changes(state, local, changes)
+
+      state = State.heartbeat_sent(state)
+
+      assert state.last_tick_version == 1
+      assert Changes.empty?(state.changes_since_last_tick)
+    end
+
+    test "does not change the other fields", %{state: state} do
+      assert %{State.heartbeat_sent(state) | last_tick_version: nil, changes_since_last_tick: nil} == state
+    end
   end
 
   describe "peer/2 and put_peer/3" do

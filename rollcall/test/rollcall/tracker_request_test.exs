@@ -81,7 +81,7 @@ defmodule Rollcall.TrackerRequestTest do
           receive_message(probe)
         end,
         fn heartbeat, trace ->
-          assert kind(heartbeat) == :snapshot
+          assert kind(heartbeat) in [:snapshot, :diff]
           refute_receive {:in_memory, _scope, _node, _message}, 50
 
           assert [%{behind: true}, %{behind: false}] = expect_events(trace, @peer_message, scope, 2)

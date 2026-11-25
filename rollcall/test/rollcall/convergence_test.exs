@@ -25,11 +25,12 @@ defmodule Rollcall.ConvergenceTest do
   @threshold 3
 
   # The number of rounds that a live replica needs to become correct, after the
-  # last drop and the last change. A snapshot heartbeat repairs a replica in one
-  # round, in any order of the ticks.
-  @rounds 1
+  # last drop and the last change. A diff repairs a replica that is in step. A
+  # replica that is behind needs a second round: the first round sends the
+  # request, and the reply comes in the same round, so the next diff applies.
+  @rounds 2
 
-  property "live trackers hold the entries of live peers after #{@rounds} round, and no entry of a dead peer after the threshold" do
+  property "live trackers hold the entries of live peers after #{@rounds} rounds, and no entry of a dead peer after the threshold" do
     check all(
             node_count <- integer(2..3),
             ops <- list_of(operation(node_count), max_length: 40),
