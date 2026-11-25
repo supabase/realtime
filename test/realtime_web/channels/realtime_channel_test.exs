@@ -1504,6 +1504,67 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       refute_received {@channel_error_event, ^telemetry_ref, _, %{code: @broadcast_limit_code, tenant: ^tenant_id}}
     end
 
+    test "stops the channel when more than twice the burst is queued behind an empty bucket", context do
+      %{socket: socket, telemetry_ref: telemetry_ref, tenant_id: tenant_id} = context
+      # A burst of 1 allows 2 queued messages
+      socket = put_broadcast_bucket(socket, 10, 1)
+
+      assert %Socket{channel_pid: channel_pid} =
+               socket = subscribe_and_join!(socket, "realtime:test", %{"config" => @broadcast_ack_config})
+
+      # The first broadcast takes the only token, and the second finds 3 messages queued behind it
+      :ok = :sys.suspend(channel_pid)
+      [first_ref | _] = for _ <- 1..5, do: push(socket, "broadcast", %{"event" => "my_event", "payload" => %{}})
+
+      log =
+        capture_log(fn ->
+          :ok = :sys.resume(channel_pid)
+
+          assert_reply first_ref, :ok, %{}
+
+          assert_receive %Socket.Message{
+                           topic: "realtime:test",
+                           event: "system",
+                           payload: %{
+                             message: "Too many broadcasts queued on this socket",
+                             status: "error",
+                             extension: "system",
+                             channel: "test"
+                           }
+                         },
+                         500
+
+          assert_process_down(channel_pid)
+        end)
+
+      assert log =~ "MessagePerSecondRateLimitReached: Too many broadcasts queued on this socket"
+      refute log =~ "Too many broadcasts on this socket"
+
+      assert_received {@channel_error_event, ^telemetry_ref, %{count: 1},
+                       %{code: @broadcast_limit_code, tenant: ^tenant_id}}
+    end
+
+    test "waits for the bucket while at most twice the burst is queued", context do
+      %{socket: socket} = context
+      # A burst of 1 allows 2 queued messages
+      socket = put_broadcast_bucket(socket, 10, 1)
+
+      assert %Socket{channel_pid: channel_pid} =
+               socket = subscribe_and_join!(socket, "realtime:test", %{"config" => @broadcast_ack_config})
+
+      # The first broadcast takes the only token, and the second finds 2 messages queued behind it
+      :ok = :sys.suspend(channel_pid)
+      refs = for _ <- 1..4, do: push(socket, "broadcast", %{"event" => "my_event", "payload" => %{}})
+
+      capture_log(fn ->
+        :ok = :sys.resume(channel_pid)
+        for ref <- refs, do: assert_reply(ref, :ok, %{}, 1_000)
+      end)
+
+      refute_push "system", %{message: "Too many broadcasts queued on this socket"}
+      assert Process.alive?(channel_pid)
+    end
+
     test "logs nothing and takes no token while the flag is off", context do
       %{socket: socket, telemetry_ref: telemetry_ref, tenant_id: tenant_id} = context
       stub_socket_broadcast_limit_flag(false)
