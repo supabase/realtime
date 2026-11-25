@@ -30,7 +30,7 @@ defmodule Rollcall.PeerHelpers do
 
   @doc "Returns the sorted ids of the entries that `changes` removed."
   @spec leave_ids(Changes.t()) :: [Rollcall.Tracker.View.id()]
-  def leave_ids(%Changes{leaves: leaves}), do: Enum.sort(leaves)
+  def leave_ids(changes), do: changes |> Changes.leaves() |> Enum.sort()
 
   @doc "Returns the sorted refs of the entries that `peer` holds."
   @spec refs(Peer.t()) :: [Rollcall.ref()]

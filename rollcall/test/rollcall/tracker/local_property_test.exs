@@ -4,6 +4,7 @@ defmodule Rollcall.Tracker.LocalPropertyTest do
 
   import Rollcall.RefHelpers
 
+  alias Rollcall.Tracker.Changes
   alias Rollcall.Tracker.Local
 
   # The generators draw from small pools. Operations then hit the same pid,
@@ -130,7 +131,9 @@ defmodule Rollcall.Tracker.LocalPropertyTest do
     if model == [], do: assert(local == Local.new())
   end
 
-  defp change_tuples(%{joins: joins, leaves: leaves}), do: {Enum.sort(joins), Enum.sort(leaves)}
+  defp change_tuples(changes) do
+    {changes |> Changes.joins() |> Enum.sort(), changes |> Changes.leaves() |> Enum.sort()}
+  end
 
   defp to_join({_pid, partition, key, meta, ref}), do: {partition, ref, key, meta}
 

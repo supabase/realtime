@@ -768,7 +768,7 @@ defmodule Rollcall.Tracker do
                 ignore_side_effects: true
               )
 
-              purge_count = length(changes.leaves)
+              purge_count = length(Changes.leaves(changes))
 
               :telemetry.execute(
                 Metrics.tracker_peer_purge(),

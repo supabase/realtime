@@ -152,7 +152,10 @@ defmodule Rollcall.Tracker.View do
   Raises when a leave has no entry.
   """
   @spec write(t(), Changes.t()) :: CommittedChanges.t()
-  def write(table, %Changes{joins: joins, leaves: leaves}) do
+  def write(table, changes) do
+    leaves = Changes.leaves(changes)
+    joins = Changes.joins(changes)
+
     left =
       for id <- leaves do
         {partition, ref} = id
