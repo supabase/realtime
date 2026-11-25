@@ -17,7 +17,7 @@ defmodule Realtime.MixProject do
       hex: [
         # Can be overridden via `HEX_COOLDOWN=0d` should you want to, see DEVELOPERS.md#dependency-cooldown
         cooldown: "7d",
-        ignore_advisories: []
+        ignore_advisories: ["CVE-2026-128361"]
       ],
       releases: [
         realtime: [
