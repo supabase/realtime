@@ -39,6 +39,12 @@ defmodule Realtime.PromEx.Plugins.Rollcall do
       tracker, in bytes. A value above 100 MB counts in the `+Inf` bucket only.
     * `realtime_rollcall_tracker_reductions` - a distribution of the reductions that a tracker process
       used since its previous tick.
+    * `realtime_rollcall_request_sent` - requests for a snapshot that trackers sent to a peer that was
+      behind. A tracker sends one request in each tick while the peer is behind.
+    * `realtime_rollcall_reply_send_duration` - a distribution, in microseconds, of the time that a
+      tracker spends to build the snapshot for a reply and to call the transport.
+    * `realtime_rollcall_reply_send_entries` - a distribution of the entries in each snapshot that a
+      tracker sends as the reply to a request.
     * `realtime_rollcall_trackers` - a gauge of the trackers that run on this node. The plugin polls
       the Registry of the Rollcall instance. The option `:rollcall` sets the instance. The default
       is `Realtime.Presence.Rollcall`.
@@ -226,6 +232,28 @@ defmodule Realtime.PromEx.Plugins.Rollcall do
         description:
           "The reductions that a Rollcall tracker process used since its previous tick. It measures the CPU work of a tracker in each period.",
         reporter_options: [peep_bucket_calculator: Reductions.Buckets]
+      ),
+      counter(
+        [:realtime, :rollcall, :request, :sent],
+        event_name: Rollcall.Metrics.tracker_request_send(),
+        description:
+          "Requests for a snapshot that Rollcall trackers sent to a peer that was behind. A tracker sends one request in each tick while the peer is behind, so the count shows how long peers stay behind."
+      ),
+      distribution(
+        [:realtime, :rollcall, :reply, :send, :duration],
+        event_name: Rollcall.Metrics.tracker_reply_send(),
+        measurement: :duration,
+        unit: {:native, :microsecond},
+        description:
+          "Time that a Rollcall tracker spends to reply to a request, in microseconds. It builds the snapshot of the local entries and calls the transport. It does not wait for an answer from the peer. The event also carries the node of the requester, which is not a tag.",
+        reporter_options: [peep_bucket_calculator: Duration.Buckets]
+      ),
+      distribution(
+        [:realtime, :rollcall, :reply, :send, :entries],
+        event_name: Rollcall.Metrics.tracker_reply_send(),
+        measurement: :entries,
+        description: "The entries in each snapshot that a Rollcall tracker sends as the reply to a request.",
+        reporter_options: [peep_bucket_calculator: Entries.Buckets]
       )
     ])
   end

@@ -17,7 +17,6 @@ defmodule Realtime.Tenants.Authorization do
   alias Realtime.Api.Message
   alias Realtime.Api.Tenant
   alias Realtime.Database
-  alias Realtime.FeatureFlags
   alias Realtime.GenCounter
   alias Realtime.GenRpc
   alias Realtime.Tenants.Repo
@@ -256,27 +255,23 @@ defmodule Realtime.Tenants.Authorization do
       else: [:broadcast]
   end
 
-  # With the flag on, policies are checked by realtime.authorize in a single round trip. If calling
-  # the function itself fails, such as it not existing yet on a database still being migrated, the
-  # check is redone in a transaction. Any other error is returned as is.
+  # Policies are checked by realtime.authorize in a single round trip. If calling the function
+  # itself fails, such as it not existing yet on a database still being migrated, the check is
+  # redone in a transaction. Any other error is returned as is.
   defp check_with_fallback(authorization_context, function_check, transaction_check) do
     %__MODULE__{tenant_id: tenant_id} = authorization_context
 
-    if FeatureFlags.enabled?("use_authorize_function", tenant_id) do
-      case function_check.() do
-        {:error, reason} = error ->
-          if fallback?(reason) do
-            log_warning("AuthorizeFunctionFallback", reason, project: tenant_id, external_id: tenant_id)
-            transaction_check.()
-          else
-            error
-          end
+    case function_check.() do
+      {:error, reason} = error ->
+        if fallback?(reason) do
+          log_warning("AuthorizeFunctionFallback", reason, project: tenant_id, external_id: tenant_id)
+          transaction_check.()
+        else
+          error
+        end
 
-        result ->
-          result
-      end
-    else
-      transaction_check.()
+      result ->
+        result
     end
   end
 

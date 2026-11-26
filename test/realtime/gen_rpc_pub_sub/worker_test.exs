@@ -15,6 +15,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
   @fanout_event [:realtime, :broadcast, :fanout, :node_delivery]
   @presence_replication_event [:realtime, :presence, :replication, :received]
   @view_hash "vh"
+  @relay_key 4242
 
   setup do
     worker = start_link_supervised!({Worker, {Realtime.PubSub, __MODULE__}})
@@ -51,13 +52,13 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       expect(GenRpc, :abcast, fn [:node_us_2, :node_us_3],
                                  Realtime.GenRpcPubSub.WorkerTest,
                                  {:ftl, "test_topic", "le message", Phoenix.PubSub},
-                                 [] ->
+                                 [key: @relay_key] ->
         send(parent, :abcast_called)
         :ok
       end)
 
       :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, @topic)
-      send(worker, Worker.forward_to_region(@topic, "le message", Phoenix.PubSub))
+      send(worker, Worker.forward_to_region(@topic, "le message", Phoenix.PubSub, @relay_key))
 
       assert_receive "le message"
       assert_receive :abcast_called
@@ -70,7 +71,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       reject(GenRpc, :abcast, 4)
 
       :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, @topic)
-      send(worker, Worker.forward_to_region(@topic, "le message", Phoenix.PubSub))
+      send(worker, Worker.forward_to_region(@topic, "le message", Phoenix.PubSub, @relay_key))
 
       assert_receive "le message"
       refute_receive _any
@@ -129,24 +130,24 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       expect(Nodes, :region_nodes, fn "us-east-1" -> [node()] end)
 
       message = {:tb, tenant_id, %Phoenix.Socket.Broadcast{topic: @topic, event: "e", payload: %{}}}
-      send(worker, Worker.forward_to_region(@topic, message, Phoenix.PubSub))
+      send(worker, Worker.forward_to_region(@topic, message, Phoenix.PubSub, @relay_key))
 
       assert_receive {@fanout_event, ^ref, %{local_tenant_users: 0}, %{tenant: ^tenant_id, hit: false}}, 500
       refute_receive {@fanout_event, ^ref, _, %{tenant: ^tenant_id}}
     end
   end
 
-  describe "route/6" do
+  describe "route/7" do
     test "builds the routed-broadcast message" do
-      assert Worker.route("tenant", "topic", "msg", Phoenix.PubSub, :origin, "vh") ==
-               {:route, "tenant", "topic", "msg", Phoenix.PubSub, :origin, "vh"}
+      assert Worker.route("tenant", "topic", "msg", Phoenix.PubSub, :origin, "vh", @relay_key) ==
+               {:route, "tenant", "topic", "msg", Phoenix.PubSub, :origin, "vh", @relay_key}
     end
   end
 
-  describe "route_region/5" do
+  describe "route_region/6" do
     test "builds the cross-region routed-broadcast message" do
-      assert Worker.route_region("topic", "tenant", "msg", Phoenix.PubSub, "vh") ==
-               {:route_region, "topic", "tenant", "msg", Phoenix.PubSub, "vh"}
+      assert Worker.route_region("topic", "tenant", "msg", Phoenix.PubSub, "vh", @relay_key) ==
+               {:route_region, "topic", "tenant", "msg", Phoenix.PubSub, "vh", @relay_key}
     end
   end
 
@@ -196,7 +197,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       expect(GenRpc, :abcast, fn [:node_us_2],
                                  Realtime.GenRpcPubSub.WorkerTest,
                                  {:ftl, "test_topic", "le message", Phoenix.PubSub},
-                                 [] ->
+                                 [key: @relay_key] ->
         send(parent, :abcast_called)
         :ok
       end)
@@ -205,7 +206,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
 
       send(
         worker,
-        Worker.route(tenant_id, @topic, "le message", Phoenix.PubSub, :node_origin, @view_hash)
+        Worker.route(tenant_id, @topic, "le message", Phoenix.PubSub, :node_origin, @view_hash, @relay_key)
       )
 
       assert_receive "le message"
@@ -225,7 +226,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       expect(GenRpc, :abcast, fn nodes,
                                  Realtime.GenRpcPubSub.WorkerTest,
                                  {:ftl, "test_topic", "le message", Phoenix.PubSub},
-                                 [] ->
+                                 [key: @relay_key] ->
         send(parent, {:abcast_called, nodes})
         :ok
       end)
@@ -234,7 +235,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
 
       send(
         worker,
-        Worker.route(tenant_id, @topic, "le message", Phoenix.PubSub, :node_origin, @view_hash)
+        Worker.route(tenant_id, @topic, "le message", Phoenix.PubSub, :node_origin, @view_hash, @relay_key)
       )
 
       assert_receive "le message"
@@ -256,7 +257,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       expect(GenRpc, :abcast, fn [:node_us_2],
                                  Realtime.GenRpcPubSub.WorkerTest,
                                  {:ftl, "test_topic", "le message", Phoenix.PubSub},
-                                 [] ->
+                                 [key: @relay_key] ->
         send(parent, :abcast_called)
         :ok
       end)
@@ -267,7 +268,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
 
           send(
             worker,
-            Worker.route(tenant_id, @topic, "le message", Phoenix.PubSub, :node_origin, @view_hash)
+            Worker.route(tenant_id, @topic, "le message", Phoenix.PubSub, :node_origin, @view_hash, @relay_key)
           )
 
           assert_receive "le message"
@@ -290,7 +291,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
 
       send(
         worker,
-        Worker.route(tenant_id, @topic, "le message", Phoenix.PubSub, :node_origin, @view_hash)
+        Worker.route(tenant_id, @topic, "le message", Phoenix.PubSub, :node_origin, @view_hash, @relay_key)
       )
 
       assert_receive "le message"
@@ -309,7 +310,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
 
       send(
         worker,
-        Worker.route(tenant_id, @topic, "le message", Phoenix.PubSub, :node_origin, @view_hash)
+        Worker.route(tenant_id, @topic, "le message", Phoenix.PubSub, :node_origin, @view_hash, @relay_key)
       )
 
       refute_receive "le message"
@@ -324,7 +325,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       expect(Muster, :targets, fn _scope, ^tenant_id, @view_hash -> {:ok, [node()]} end)
 
       message = {:tb, tenant_id, %Phoenix.Socket.Broadcast{topic: @topic, event: "e", payload: %{}}}
-      send(worker, Worker.route(tenant_id, @topic, message, Phoenix.PubSub, :node_origin, @view_hash))
+      send(worker, Worker.route(tenant_id, @topic, message, Phoenix.PubSub, :node_origin, @view_hash, @relay_key))
 
       assert_receive {@fanout_event, ^ref, %{local_tenant_users: count}, %{tenant: ^tenant_id, hit: true}}
       assert count >= 1
@@ -340,7 +341,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       expect(Muster, :router, fn _scope, ^tenant_id -> {:ok, node()} end)
       expect(Muster, :targets, fn _scope, ^tenant_id, @view_hash -> {:ok, [node()]} end)
 
-      send(worker, Worker.route(tenant_id, topic, message, Phoenix.PubSub, :node_origin, @view_hash))
+      send(worker, Worker.route(tenant_id, topic, message, Phoenix.PubSub, :node_origin, @view_hash, @relay_key))
 
       size = :erlang.external_size(Worker.forward_to_local(topic, message, Phoenix.PubSub))
 
@@ -356,11 +357,22 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
 
       expect(Muster, :router, fn _scope, ^tenant_id -> {:ok, node()} end)
       expect(Muster, :targets, fn _scope, ^tenant_id, @view_hash -> {:ok, [:node_us_2]} end)
-      expect(GenRpc, :abcast, fn [:node_us_2], _worker, {:ftl, ^topic, _message, _dispatcher}, [] -> :ok end)
+
+      expect(GenRpc, :abcast, fn [:node_us_2], _worker, {:ftl, ^topic, _message, _dispatcher}, [key: @relay_key] ->
+        :ok
+      end)
 
       send(
         worker,
-        Worker.route(tenant_id, topic, {:tb, tenant_id, :heartbeat}, Phoenix.PubSub, :node_origin, @view_hash)
+        Worker.route(
+          tenant_id,
+          topic,
+          {:tb, tenant_id, :heartbeat},
+          Phoenix.PubSub,
+          :node_origin,
+          @view_hash,
+          @relay_key
+        )
       )
 
       :sys.get_state(worker)
@@ -395,14 +407,14 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       expect(GenRpc, :abcast, fn [:node_us_2],
                                  Realtime.GenRpcPubSub.WorkerTest,
                                  {:ftl, "test_topic", "le message", Phoenix.PubSub},
-                                 [] ->
+                                 [key: @relay_key] ->
         send(parent, :abcast_called)
         :ok
       end)
 
       :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, @topic)
 
-      send(worker, Worker.route_region(@topic, tenant_id, "le message", Phoenix.PubSub, @view_hash))
+      send(worker, Worker.route_region(@topic, tenant_id, "le message", Phoenix.PubSub, @view_hash, @relay_key))
 
       assert_receive "le message"
       assert_receive :abcast_called
@@ -421,14 +433,14 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       expect(GenRpc, :abcast, fn nodes,
                                  Realtime.GenRpcPubSub.WorkerTest,
                                  {:ftl, "test_topic", "le message", Phoenix.PubSub},
-                                 [] ->
+                                 [key: @relay_key] ->
         send(parent, {:abcast_called, nodes})
         :ok
       end)
 
       :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, @topic)
 
-      send(worker, Worker.route_region(@topic, tenant_id, "le message", Phoenix.PubSub, @view_hash))
+      send(worker, Worker.route_region(@topic, tenant_id, "le message", Phoenix.PubSub, @view_hash, @relay_key))
 
       assert_receive "le message"
       assert_receive {:abcast_called, nodes}
@@ -449,7 +461,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       expect(GenRpc, :abcast, fn [:node_us_2],
                                  Realtime.GenRpcPubSub.WorkerTest,
                                  {:ftl, "test_topic", "le message", Phoenix.PubSub},
-                                 [] ->
+                                 [key: @relay_key] ->
         send(parent, :abcast_called)
         :ok
       end)
@@ -458,7 +470,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
         capture_log(fn ->
           :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, @topic)
 
-          send(worker, Worker.route_region(@topic, tenant_id, "le message", Phoenix.PubSub, @view_hash))
+          send(worker, Worker.route_region(@topic, tenant_id, "le message", Phoenix.PubSub, @view_hash, @relay_key))
 
           assert_receive "le message"
           assert_receive :abcast_called
@@ -478,7 +490,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
 
       :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, @topic)
 
-      send(worker, Worker.route_region(@topic, tenant_id, "le message", Phoenix.PubSub, @view_hash))
+      send(worker, Worker.route_region(@topic, tenant_id, "le message", Phoenix.PubSub, @view_hash, @relay_key))
 
       assert_receive "le message"
       refute_receive "le message"
@@ -494,7 +506,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
 
       :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, @topic)
 
-      send(worker, Worker.route_region(@topic, tenant_id, "le message", Phoenix.PubSub, @view_hash))
+      send(worker, Worker.route_region(@topic, tenant_id, "le message", Phoenix.PubSub, @view_hash, @relay_key))
 
       refute_receive "le message"
       refute_receive {@fanout_event, _, _, %{tenant: ^tenant_id}}
@@ -508,7 +520,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       expect(Muster, :targets, fn _scope, ^tenant_id, @view_hash -> {:ok, [node()]} end)
 
       message = {:tb, tenant_id, %Phoenix.Socket.Broadcast{topic: @topic, event: "e", payload: %{}}}
-      send(worker, Worker.route_region(@topic, tenant_id, message, Phoenix.PubSub, @view_hash))
+      send(worker, Worker.route_region(@topic, tenant_id, message, Phoenix.PubSub, @view_hash, @relay_key))
 
       assert_receive {@fanout_event, ^ref, %{local_tenant_users: count}, %{tenant: ^tenant_id, hit: true}}
       assert count >= 1
@@ -524,7 +536,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       expect(Muster, :router, fn _scope, ^tenant_id -> {:ok, node()} end)
       expect(Muster, :targets, fn _scope, ^tenant_id, @view_hash -> {:ok, [node()]} end)
 
-      send(worker, Worker.route_region(topic, tenant_id, message, Phoenix.PubSub, @view_hash))
+      send(worker, Worker.route_region(topic, tenant_id, message, Phoenix.PubSub, @view_hash, @relay_key))
 
       size = :erlang.external_size(Worker.forward_to_local(topic, message, Phoenix.PubSub))
 
@@ -540,9 +552,15 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
 
       expect(Muster, :router, fn _scope, ^tenant_id -> {:ok, node()} end)
       expect(Muster, :targets, fn _scope, ^tenant_id, @view_hash -> {:ok, [:node_us_2]} end)
-      expect(GenRpc, :abcast, fn [:node_us_2], _worker, {:ftl, ^topic, _message, _dispatcher}, [] -> :ok end)
 
-      send(worker, Worker.route_region(topic, tenant_id, {:tb, tenant_id, :heartbeat}, Phoenix.PubSub, @view_hash))
+      expect(GenRpc, :abcast, fn [:node_us_2], _worker, {:ftl, ^topic, _message, _dispatcher}, [key: @relay_key] ->
+        :ok
+      end)
+
+      send(
+        worker,
+        Worker.route_region(topic, tenant_id, {:tb, tenant_id, :heartbeat}, Phoenix.PubSub, @view_hash, @relay_key)
+      )
 
       :sys.get_state(worker)
       refute_received {@presence_replication_event, ^ref, _, _}

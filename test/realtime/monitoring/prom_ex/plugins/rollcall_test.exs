@@ -33,6 +33,9 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
   @tracker_process_bytes "realtime_rollcall_tracker_process_bytes"
   @tracker_ets_bytes "realtime_rollcall_tracker_ets_bytes"
   @tracker_reductions "realtime_rollcall_tracker_reductions"
+  @request_sent "realtime_rollcall_request_sent"
+  @reply_duration "realtime_rollcall_reply_send_duration"
+  @reply_entries "realtime_rollcall_reply_send_entries"
 
   @trackers "realtime_rollcall_trackers"
 
@@ -264,6 +267,46 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
     end
   end
 
+  describe "the requests and the replies" do
+    test "counts each request" do
+      before = metric_value(@request_sent) || 0
+
+      :telemetry.execute(Metrics.tracker_request_send(), %{}, %{scope: "tenant-a", node: :a@host})
+
+      assert metric_value(@request_sent) == before + 1
+    end
+
+    # The event carries `duration` in native time units. The metric is in microseconds.
+    test "records the reply duration in microseconds" do
+      le_250_before = metric_value(@reply_duration <> "_bucket", le: "250.0") || 0
+      le_500_before = metric_value(@reply_duration <> "_bucket", le: "500.0") || 0
+
+      :telemetry.execute(Metrics.tracker_reply_send(), %{duration: native(300), entries: 2}, %{
+        scope: "tenant-a",
+        node: :a@host
+      })
+
+      assert metric_value(@reply_duration <> "_bucket", le: "500.0") == le_500_before + 1
+      assert (metric_value(@reply_duration <> "_bucket", le: "250.0") || 0) == le_250_before
+    end
+
+    # The values are whole entries, so each bound is half an entry above the value it stands for.
+    test "records the entries of each reply in a distribution" do
+      count_before = metric_value(@reply_entries <> "_count") || 0
+      le_100_before = metric_value(@reply_entries <> "_bucket", le: "100.5") || 0
+      le_500_before = metric_value(@reply_entries <> "_bucket", le: "500.5") || 0
+
+      :telemetry.execute(Metrics.tracker_reply_send(), %{duration: native(50), entries: 150}, %{
+        scope: "tenant-a",
+        node: :a@host
+      })
+
+      assert metric_value(@reply_entries <> "_count") == count_before + 1
+      assert metric_value(@reply_entries <> "_bucket", le: "500.5") == le_500_before + 1
+      assert (metric_value(@reply_entries <> "_bucket", le: "100.5") || 0) == le_100_before
+    end
+  end
+
   describe "the tracker gauge" do
     test "is the number of running trackers of the Rollcall instance" do
       id = System.unique_integer([:positive])
@@ -306,6 +349,12 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
     })
 
     :telemetry.execute(Metrics.tracker_publish(), %{duration: native(50), entries: 1}, %{scope: scope, source: :local})
+    :telemetry.execute(Metrics.tracker_request_send(), %{}, %{scope: scope, node: :a@host})
+
+    :telemetry.execute(Metrics.tracker_reply_send(), %{duration: native(50), entries: 1}, %{
+      scope: scope,
+      node: :a@host
+    })
 
     usage([], scope)
 
@@ -325,15 +374,20 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
       @apply_duration <> "_count",
       @send_entries <> "_count",
       @publish_entries,
-      @publish_duration <> "_count"
+      @publish_duration <> "_count",
+      @request_sent,
+      @reply_duration <> "_count",
+      @reply_entries <> "_count"
     ]
 
     for metric <- metrics do
       assert metric_value(metric, scope: scope) == nil
     end
 
-    # The apply event also carries the node of the peer, which is not a label either.
+    # The apply, request and reply events also carry the node of the peer, which is not a label either.
     assert metric_value(@apply_duration <> "_count", node: "a@host") == nil
+    assert metric_value(@request_sent, node: "a@host") == nil
+    assert metric_value(@reply_duration <> "_count", node: "a@host") == nil
   end
 
   defp usage(measurements, scope \\ "tenant-a") do

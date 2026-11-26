@@ -29,6 +29,9 @@ defmodule Rollcall.TelemetryTest do
     def heartbeat(_scope, _message), do: raise("the transport cannot send")
 
     @impl true
+    def send_to(_scope, _node, _message), do: :ok
+
+    @impl true
     def publish(_scope, _partition, _diff), do: :ok
 
     @impl true

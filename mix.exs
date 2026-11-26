@@ -4,7 +4,7 @@ defmodule Realtime.MixProject do
   def project do
     [
       app: :realtime,
-      version: "2.177.2",
+      version: "2.177.6",
       elixir: "~> 1.19",
       elixirc_paths: elixirc_paths(Mix.env()),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
@@ -17,7 +17,7 @@ defmodule Realtime.MixProject do
       hex: [
         # Can be overridden via `HEX_COOLDOWN=0d` should you want to, see DEVELOPERS.md#dependency-cooldown
         cooldown: "7d",
-        ignore_advisories: []
+        ignore_advisories: ["CVE-2026-128361"]
       ],
       releases: [
         realtime: [

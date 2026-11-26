@@ -1,14 +1,14 @@
-# Benchmark for the Phoenix and Rollcall presence backends. It measures the reductions and the
-# memory of each backend on a local cluster of 3 nodes, so you can see what a change to Rollcall
-# does to its cost.
+# Benchmark for the Phoenix and Rollcall presence backends. It measures the reductions, the CPU
+# time and the memory of each backend on a local cluster of nodes, so you can see what a change
+# to Rollcall does to its cost.
 #
 # Start the database, then run the script. It runs this file and renders the report:
 #
 #     mise run db-start
 #     dev/scripts/presence-bench.sh --tenants 20 --entries 100 --changes-per-s 60
 #
-# A default run takes about 6 minutes. The results go to _build/presence_bench/latest.json, or to
-# the file of `--out`. The report goes next to the results, with the extension .html.
+# The results go to _build/presence_bench/latest.json, or to the file of `--out`. The report goes
+# next to the results, with the extension .html.
 #
 # What a run does
 #
@@ -20,18 +20,31 @@
 #           an entry at random and either updates it, or removes it and adds it back. The number
 #           of entries does not change.
 #
-# For each window it reports two numbers, added up over the 3 nodes:
+# For each window it reports three numbers, added up over the nodes:
 #
 #   reductions per second   the work done. A reduction is the BEAM's count of work, about one
-#                           function call.
+#                           function call. It does not count the time in a BIF, such as an ETS read,
+#                           or the time in a garbage collection.
+#   CPU seconds per second  the CPU time that the schedulers of the node used for each second of the
+#                           window. It is the sum, over the schedulers, of the share of the window
+#                           that the scheduler was busy. A node that uses 2 of its schedulers fully
+#                           reports 2. The results file keeps the figure of each node.
 #   memory                  the memory held, read after a garbage collection.
 #
-# Only the Phoenix shards and the Rollcall trackers are measured, not the clients or the rest of
-# the app. The clients call the presence functions directly, with no WebSocket.
+# Each node runs with its share of the cores of the machine and with scheduler spinning off, so the
+# CPU seconds do not include time that the OS gave to another node or time that a scheduler spent
+# waiting for work. A node gets the number of cores divided by `--nodes`, and at least 1. A run with
+# another number of nodes, or on another machine, has another number of schedulers on each node.
+# Compare only runs with the same number.
 #
-# The tenants have skewed sizes: a tenth of them hold 80% of the entries. Every tenant is on all 3
-# nodes. That is the worst case for Rollcall, which otherwise replicates a tenant only to the
-# nodes that hold it, so the benchmark has no setting to change it.
+# The reductions and the memory cover only the Phoenix shards and the Rollcall trackers. The
+# clients call the presence functions directly, with no WebSocket. The CPU seconds cover the whole
+# node, so they include the clients and the rest of the app. That share is about the same for both
+# backends.
+#
+# The tenants have skewed sizes: a tenth of them hold 80% of the entries. Every tenant is on all
+# nodes, so a tenant has `--nodes` minus 1 peers. Rollcall otherwise replicates a tenant only to the
+# nodes that hold it, so the benchmark has no setting to change that.
 #
 # Comparing with an earlier run
 #
@@ -44,20 +57,25 @@
 # in the join window. The results file keeps the lowest and the highest result of each figure.
 # Compare a change with that spread.
 #
+# Compare runs that have the same settings. When a setting differs, the run prints a warning and
+# the report shows a note above the changes.
+#
 # Settings
 #
 #   --tenants         default 20
 #   --entries         average entries for each tenant, default 100
+#   --nodes           nodes in the cluster, default 3. Each node holds every tenant.
 #   --changes-per-s   changes each second across the whole cluster in the steady window, default 60
 #   --repeats         default 5
 #   --backends        phoenix, rollcall, or both separated by a comma. Default: both.
 #   --compare         path of an earlier results file
 #   --out             path of the results file. The script sets it.
 #
-# Set PRESENCE_POOL_SIZE for the number of Phoenix shards on each node, as in production. The
-# default is 10. The script creates tenants named presencebench-N in the dev database and deletes
-# them afterwards. It also adds the two presence feature flags, switched off, if the database lacks
-# them. It leaves them there.
+# Set PRESENCE_POOL_SIZE for the number of Phoenix shards on each node. 
+#
+# The script creates tenants named presencebench-N in the dev database and deletes them afterwards.
+# It also adds the two presence feature flags, switched off, if the database lacks them. It leaves
+# them there.
 
 defmodule PresenceBench do
   @moduledoc false
@@ -66,20 +84,31 @@ defmodule PresenceBench do
   @flags ["presence_rollcall_primary", "presence_rollcall_shadow"]
   @tenant_prefix "presencebench"
   @gen_rpc_base 5470
-  @nodes 3
   @window_s 30
   @settle_s 2
+  # The settings that change what a figure means, as `{section of the results file, key}`. A
+  # comparison between runs that differ in one of them mixes two effects.
+  @compared [
+    {"settings", "tenants"},
+    {"settings", "entries"},
+    {"settings", "nodes"},
+    {"settings", "changes_per_s"},
+    {"workload", "shards"},
+    {"workload", "schedulers_per_node"}
+  ]
   @per_partition 100
   @meta_bytes 32
   @backends [:phoenix, :rollcall]
+  @phoenix_shards 150
   @windows ["join", "steady"]
-  @metrics ["reductions_per_s", "memory_bytes"]
+  @metrics ["reductions_per_s", "cpu_s_per_s", "memory_bytes"]
   # What a window did. They show what the reductions per second are made of. An operation is an
   # entry that joins, in the join window, or a change, in the steady window.
   @activity ["seconds", "operations", "operations_per_s", "reductions_per_operation"]
   @switches [
     tenants: :integer,
     entries: :integer,
+    nodes: :integer,
     changes_per_s: :integer,
     repeats: :integer,
     backends: :string,
@@ -89,6 +118,7 @@ defmodule PresenceBench do
   @base_settings %{
     tenants: 20,
     entries: 100,
+    nodes: 3,
     changes_per_s: 60,
     repeats: 5,
     backends: @backends,
@@ -100,11 +130,15 @@ defmodule PresenceBench do
 
   def main(argv) do
     settings = parse_settings(argv)
+    # The app config reads PRESENCE_POOL_SIZE, and its default is 10. The peers copy this config.
+    unless System.get_env("PRESENCE_POOL_SIZE"),
+      do: Application.put_env(:realtime, :presence_pool_size, @phoenix_shards)
+
     backends = settings.backends
     total_phases = settings.repeats * length(backends)
     workload = workload(settings)
 
-    step("#{@nodes} nodes, #{settings.repeats} repeats of #{Enum.join(backends, " then ")}")
+    step("#{settings.nodes} nodes, #{settings.repeats} repeats of #{Enum.join(backends, " then ")}")
     step("Workload: #{describe(workload)}")
     step("Each backend runs on its own cluster. Do not run other heavy work on this machine.")
     step("Load average at the start: #{load_average()}")
@@ -120,7 +154,7 @@ defmodule PresenceBench do
       %{
         started_at: DateTime.utc_now() |> DateTime.to_iso8601(),
         workload: workload,
-        settings: settings |> Map.drop([:out, :compare]) |> Map.merge(%{nodes: @nodes, window_s: @window_s}),
+        settings: settings |> Map.drop([:out, :compare]) |> Map.merge(%{window_s: @window_s}),
         machine: machine(),
         runs: runs,
         summary: summarize(runs)
@@ -128,6 +162,12 @@ defmodule PresenceBench do
       |> normalize()
 
     result = if settings.compare, do: Map.merge(result, compare(result, settings.compare)), else: result
+
+    for difference <- result["different_settings"] || [] do
+      step(
+        "Warning: #{difference["setting"]} was #{difference["before"]} in the earlier run and is #{difference["now"]} now"
+      )
+    end
 
     path = write_results(result, settings)
     step("Results written to #{path}")
@@ -144,7 +184,7 @@ defmodule PresenceBench do
 
     settings = @base_settings |> Map.merge(Map.new(given)) |> Map.update!(:backends, &backends/1)
 
-    for key <- [:tenants, :entries, :changes_per_s, :repeats], settings[key] < 1 do
+    for key <- [:tenants, :entries, :nodes, :changes_per_s, :repeats], settings[key] < 1 do
       raise "--#{String.replace(Atom.to_string(key), "_", "-")} is #{settings[key]}, it must be at least 1"
     end
 
@@ -165,7 +205,7 @@ defmodule PresenceBench do
 
   defp run_phase(settings, backend, repeat, phase, total_phases) do
     step("Phase #{phase} of #{total_phases}: #{backend}, repeat #{repeat} of #{settings.repeats}")
-    cluster = start_cluster()
+    cluster = start_cluster(settings.nodes)
     nodes = cluster.nodes
 
     try do
@@ -227,8 +267,9 @@ defmodule PresenceBench do
       |> Enum.map(fn {each, tenants} -> %{tenants: length(tenants), entries: each, topics: length(topics(each))} end)
 
     %{
-      nodes: @nodes,
-      shards: Application.get_env(:realtime, :presence_pool_size, 10),
+      nodes: settings.nodes,
+      schedulers_per_node: schedulers_per_node(settings.nodes),
+      shards: Application.fetch_env!(:realtime, :presence_pool_size),
       entries: entries,
       groups: groups,
       entries_per_topic: @per_partition,
@@ -307,12 +348,14 @@ defmodule PresenceBench do
     end
 
     ended = System.monotonic_time(:millisecond)
+    finish = snapshots(ctx, :end)
 
     %{
       label: label,
       duration_ms: ended - started,
       output: output,
-      nodes: summarize_window(start, snapshots(ctx, :end))
+      nodes: summarize_window(start, finish),
+      cpu: cpu_busy(start, finish)
     }
   end
 
@@ -358,9 +401,25 @@ defmodule PresenceBench do
     parallel(ctx.nodes, fn node -> {node, rpc(node, module, function, args)} end)
   end
 
+  # The CPU seconds that each node used for each second of the window. Each scheduler is busy for
+  # a share of the window. The sum of the shares over the schedulers is the CPU seconds per second.
+  defp cpu_busy(start, finish) do
+    for {node, %{schedulers: now}} <- finish, into: %{} do
+      before = Map.new(Map.fetch!(start, node).schedulers, fn {id, active, total} -> {id, {active, total}} end)
+
+      busy =
+        Enum.reduce(now, 0.0, fn {id, active, total}, sum ->
+          {active_before, total_before} = Map.fetch!(before, id)
+          sum + (active - active_before) / (total - total_before)
+        end)
+
+      {node, busy}
+    end
+  end
+
   defp summarize_window(start, finish) do
-    for {node, procs} <- finish, into: %{} do
-      before = Map.new(Map.fetch!(start, node), &{&1.pid, &1.reductions})
+    for {node, %{processes: procs}} <- finish, into: %{} do
+      before = Map.new(Map.fetch!(start, node).processes, &{&1.pid, &1.reductions})
 
       by_backend =
         procs
@@ -382,16 +441,17 @@ defmodule PresenceBench do
 
   ## Cluster
 
-  defp start_cluster do
-    indexes = Enum.to_list(1..@nodes)
+  defp start_cluster(node_count) do
+    indexes = Enum.to_list(1..node_count)
     nodes = for i <- indexes, do: :"pbench#{i}@127.0.0.1"
     gen_rpc_ports = Map.new(Enum.zip(nodes, Enum.map(indexes, &(@gen_rpc_base + &1 - 1))))
 
     for port <- Map.values(gen_rpc_ports), do: await_port(port)
 
-    step("Starting #{@nodes} nodes")
+    step("Starting #{node_count} nodes")
 
-    peers = for node <- nodes, do: start_peer(node, gen_rpc_ports)
+    vm_args = vm_args(schedulers_per_node(node_count))
+    peers = for node <- nodes, do: start_peer(node, gen_rpc_ports, vm_args)
 
     for a <- nodes, b <- nodes, a != b, do: true = :erpc.call(a, Node, :connect, [b])
     for node <- nodes, do: true = Node.connect(node)
@@ -404,7 +464,26 @@ defmodule PresenceBench do
     %{nodes: nodes, peers: peers}
   end
 
-  defp start_peer(node, gen_rpc_ports) do
+  # The nodes share one machine. Each node gets its share of the cores, so the schedulers of the
+  # nodes do not compete for a core and the CPU time is not the time of a thread that the OS paused.
+  # A scheduler that has no work sleeps at once and does not spin, because the spin counts as busy
+  # time in the scheduler wall time.
+  defp schedulers_per_node(node_count), do: max(div(System.schedulers_online(), node_count), 1)
+
+  defp vm_args(schedulers) do
+    [
+      ~c"+S",
+      Integer.to_charlist(schedulers),
+      ~c"+sbwt",
+      ~c"none",
+      ~c"+sbwtdcpu",
+      ~c"none",
+      ~c"+sbwtdio",
+      ~c"none"
+    ]
+  end
+
+  defp start_peer(node, gen_rpc_ports, vm_args) do
     [name, _host] = node |> Atom.to_string() |> String.split("@")
 
     {:ok, pid, ^node} =
@@ -412,7 +491,8 @@ defmodule PresenceBench do
         name: String.to_charlist(name),
         host: ~c"127.0.0.1",
         longnames: true,
-        connection: :standard_io
+        connection: :standard_io,
+        args: vm_args
       })
 
     call = fn m, f, a -> :peer.call(pid, m, f, a, 120_000) end
@@ -422,7 +502,8 @@ defmodule PresenceBench do
     # The app env has defaults that a put_env before the load would lose, so load first.
     call.(Application, :ensure_loaded, [:gen_rpc])
 
-    # The peers copy the app config of the coordinator. That is how PRESENCE_POOL_SIZE reaches them.
+    # The peers copy the app config of the coordinator. That is how the number of Phoenix shards
+    # reaches them.
     for {app, _, _} <- Application.loaded_applications(), {key, value} <- Application.get_all_env(app) do
       call.(Application, :put_env, [app, key, value])
     end
@@ -572,6 +653,7 @@ defmodule PresenceBench do
 
     %{
       "reductions_per_s" => sum.(:reductions) / seconds,
+      "cpu_s_per_s" => window.cpu |> Map.values() |> Enum.sum(),
       "memory_bytes" => sum.(:memory_bytes),
       "seconds" => seconds,
       "operations" => operations,
@@ -630,7 +712,22 @@ defmodule PresenceBench do
         }
       end
 
-    %{"baseline" => Map.take(old, ["settings", "summary"]) |> Map.put("file", path), "comparison" => rows}
+    %{
+      "baseline" => Map.take(old, ["settings", "summary"]) |> Map.put("file", path),
+      "comparison" => rows,
+      "different_settings" => different_settings(result, old)
+    }
+  end
+
+  # The settings in `@compared` that differ between the runs. An earlier file that lacks a setting
+  # differs, because the setting did not exist then.
+  defp different_settings(result, old) do
+    for {section, key} <- @compared,
+        before = get_in(old, [section, key]) || "missing",
+        now = get_in(result, [section, key]),
+        before != now do
+      %{"setting" => key, "before" => before, "now" => now}
+    end
   end
 
   ## Machine and arguments

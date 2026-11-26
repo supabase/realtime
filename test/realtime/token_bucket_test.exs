@@ -91,6 +91,14 @@ defmodule Realtime.TokenBucketTest do
     end
   end
 
+  describe "burst/1" do
+    test "returns the tokens a full bucket holds" do
+      assert TokenBucket.burst(TokenBucket.per_second(1_000, 100)) == 1_000
+      assert TokenBucket.burst(TokenBucket.per_second(1, 3)) == 1
+      assert TokenBucket.burst(TokenBucket.per_window(5, 30_000, :millisecond)) == 5
+    end
+  end
+
   describe "per_second/3" do
     test "refills one token every 1 / rate seconds" do
       assert %TokenBucket{interval: 10_000, tolerance: 9_990_000} = TokenBucket.per_second(1_000, 100)

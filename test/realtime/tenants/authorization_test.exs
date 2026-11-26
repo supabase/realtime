@@ -1,6 +1,6 @@
 defmodule Realtime.Tenants.AuthorizationTest do
   # Every check runs against both implementations: the realtime.authorize function and the
-  # transaction it replaces.
+  # transaction fallback, forced by dropping realtime.authorize.
   use RealtimeWeb.ConnCase,
     async: true,
     parameterize: [%{authorize_function: false}, %{authorize_function: true}]
@@ -13,7 +13,6 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
   alias Realtime.Api.Message
   alias Realtime.Database
-  alias Realtime.FeatureFlags
   alias Realtime.Tenants.Repo
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
@@ -452,10 +451,8 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
       external_id = context.tenant.external_id
 
-      # A transaction logs the checkout failure; a single query returns it as an error.
-      unless context.authorize_function do
-        assert log =~ "project=#{external_id} external_id=#{external_id} [error] ErrorExecutingTransaction"
-      end
+      # The pool times out on the realtime.authorize query, so no check reaches the transaction fallback.
+      refute log =~ "ErrorExecutingTransaction"
 
       assert log =~
                "project=#{external_id} external_id=#{external_id} [critical] IncreaseConnectionPool: Too many database timeouts"
@@ -679,12 +676,10 @@ defmodule Realtime.Tenants.AuthorizationTest do
     )
   end
 
-  defp use_authorize_function(%{authorize_function: enabled?}) do
-    stub(FeatureFlags, :enabled?, fn
-      "use_authorize_function", _tenant_id -> enabled?
-      name, tenant_id -> call_original(FeatureFlags, :enabled?, [name, tenant_id])
-    end)
+  defp use_authorize_function(%{authorize_function: true}), do: :ok
 
+  defp use_authorize_function(%{authorize_function: false, db_conn: db_conn}) do
+    Postgrex.query!(db_conn, "DROP FUNCTION realtime.authorize", [])
     :ok
   end
 

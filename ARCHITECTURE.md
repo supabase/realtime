@@ -61,7 +61,9 @@ The `node_join_budget` feature flag turns the budget on for a tenant. While the 
 
 `RealtimeWeb.UserSocket.connect/3` gives each socket a `Realtime.TokenBucket` for the broadcasts its clients send. The bucket holds `CLIENT_BROADCASTS_BURST` (default 1,000) broadcasts and refills at `CLIENT_BROADCASTS_PER_SECOND` (default 100). All channels of the socket share it. While the `socket_broadcast_limit` feature flag is on, each broadcast takes a token.
 
-The limit delays a broadcast. It never refuses one. If the bucket is empty, the channel logs a `MessagePerSecondRateLimitReached` error, and the error increments `realtime_channel_error`. Then the channel sleeps until the bucket has a token, and it sends the broadcast. While the channel sleeps, it reads no more messages from the client. The client can therefore not send faster than the bucket refills.
+The limit delays a broadcast. If the bucket is empty, the channel logs a `MessagePerSecondRateLimitReached` error, and the error increments `realtime_channel_error`. Then the channel sleeps until the bucket has a token, and it sends the broadcast.
+
+A sleeping channel still receives the client's messages, and they queue until the channel wakes. If the bucket is empty and more than twice the burst is queued, the channel stops instead of sleeping. It logs a `MessagePerSecondRateLimitReached` error and pushes a `system` error message to the client. The cap counts messages, not bytes.
 
 #### Broadcast persistence
 
