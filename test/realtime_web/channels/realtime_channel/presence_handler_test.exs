@@ -190,6 +190,19 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
   end
 
   describe "handle/2" do
+    test "track restarts a stopped presence rate counter and counts the event", %{tenant: tenant, topic: topic} do
+      socket = socket_fixture(tenant, topic, random_string(), private?: false)
+      rate = socket.assigns.presence_rate_counter
+      RateCounterHelper.stop(tenant.external_id)
+      assert {:error, :not_found} = RateCounter.find(rate.id)
+
+      assert {:ok, _socket, _} = PresenceHandler.handle(%{"event" => "track", "payload" => %{"a" => 1}}, socket)
+
+      assert {:ok, %RateCounter{}} = RateCounter.find(rate.id)
+      assert {:ok, %RateCounter{bucket: bucket}} = RateCounterHelper.tick!(rate)
+      assert Enum.sum(bucket) == 1
+    end
+
     setup %{tenant: tenant} do
       on_exit(fn -> :telemetry.detach(__MODULE__) end)
 
@@ -684,41 +697,35 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     end
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
-    test "rate limit is checked on private channel", %{tenant: tenant, topic: topic} do
+    test "tenant presence rate is counted but not enforced on private channel", %{tenant: tenant, topic: topic} do
       key = random_string()
       policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
       # Use high client rate limit to test tenant-level rate limiting
       client_bucket = TokenBucket.per_window(10_000, 60_000, :millisecond)
       socket = socket_fixture(tenant, topic, key, policies: policies, private?: true, client_bucket: client_bucket)
 
-      log =
-        capture_log(fn ->
-          for _ <- 1..1500, do: PresenceHandler.handle(%{"event" => "track"}, socket)
+      for i <- 1..1500, do: PresenceHandler.handle(%{"event" => "track", "payload" => %{"i" => i}}, socket)
 
-          {:ok, _} = RateCounterHelper.tick!(Tenants.presence_events_per_second_rate(tenant))
+      {:ok, %{avg: avg}} = RateCounterHelper.tick!(Tenants.presence_events_per_second_rate(tenant))
+      assert avg > tenant.max_presence_events_per_second
 
-          assert {:error, :rate_limit_exceeded} = PresenceHandler.handle(%{"event" => "track"}, socket)
-        end)
-
-      assert log =~ "PresenceRateLimitReached"
+      assert {:ok, _socket, _} =
+               PresenceHandler.handle(%{"event" => "track", "payload" => %{"i" => "last"}}, socket)
     end
 
-    test "rate limit is checked on public channel", %{tenant: tenant, topic: topic} do
+    test "tenant presence rate is counted but not enforced on public channel", %{tenant: tenant, topic: topic} do
       key = random_string()
       # Use high client rate limit to test tenant-level rate limiting
       client_bucket = TokenBucket.per_window(10_000, 60_000, :millisecond)
       socket = socket_fixture(tenant, topic, key, private?: false, client_bucket: client_bucket)
 
-      log =
-        capture_log(fn ->
-          for _ <- 1..1500, do: PresenceHandler.handle(%{"event" => "track"}, socket)
+      for i <- 1..1500, do: PresenceHandler.handle(%{"event" => "track", "payload" => %{"i" => i}}, socket)
 
-          {:ok, _} = RateCounterHelper.tick!(Tenants.presence_events_per_second_rate(tenant))
+      {:ok, %{avg: avg}} = RateCounterHelper.tick!(Tenants.presence_events_per_second_rate(tenant))
+      assert avg > tenant.max_presence_events_per_second
 
-          assert {:error, :rate_limit_exceeded} = PresenceHandler.handle(%{"event" => "track"}, socket)
-        end)
-
-      assert log =~ "PresenceRateLimitReached"
+      assert {:ok, _socket, _} =
+               PresenceHandler.handle(%{"event" => "track", "payload" => %{"i" => "last"}}, socket)
     end
 
     test "returns error when track payload is not a map", %{tenant: tenant, topic: topic} do
@@ -776,6 +783,19 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
   end
 
   describe "sync/1" do
+    test "restarts a stopped presence rate counter and counts the event", %{tenant: tenant, topic: topic} do
+      socket = socket_fixture(tenant, topic, random_string(), private?: false)
+      rate = socket.assigns.presence_rate_counter
+      RateCounterHelper.stop(tenant.external_id)
+      assert {:error, :not_found} = RateCounter.find(rate.id)
+
+      assert {:ok, _socket} = PresenceHandler.sync(socket)
+
+      assert {:ok, %RateCounter{}} = RateCounter.find(rate.id)
+      assert {:ok, %RateCounter{bucket: bucket}} = RateCounterHelper.tick!(rate)
+      assert Enum.sum(bucket) == 1
+    end
+
     test "syncs presence state for public channels", %{tenant: tenant, topic: topic} do
       key = random_string()
       policies = %Policies{presence: %PresencePolicies{read: false, write: false}}
@@ -899,25 +919,21 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       refute_receive {_, :text, _}
     end
 
-    test "respects rate limits on public channels", %{tenant: tenant, topic: topic} do
+    test "does not enforce the tenant presence rate on public channels", %{tenant: tenant, topic: topic} do
       key = random_string()
       # Use high client rate limit to test tenant-level rate limiting
       client_bucket = TokenBucket.per_window(10_000, 60_000, :millisecond)
       socket = socket_fixture(tenant, topic, key, private?: false, client_bucket: client_bucket)
 
-      log =
-        capture_log(fn ->
-          for _ <- 1..1500, do: PresenceHandler.handle(%{"event" => "track"}, socket)
+      for i <- 1..1500, do: PresenceHandler.handle(%{"event" => "track", "payload" => %{"i" => i}}, socket)
 
-          {:ok, _} = RateCounterHelper.tick!(Tenants.presence_events_per_second_rate(tenant))
+      {:ok, %{avg: avg}} = RateCounterHelper.tick!(Tenants.presence_events_per_second_rate(tenant))
+      assert avg > tenant.max_presence_events_per_second
 
-          assert {:error, :rate_limit_exceeded} = PresenceHandler.sync(socket)
-        end)
-
-      assert log =~ "PresenceRateLimitReached"
+      assert {:ok, _socket} = PresenceHandler.sync(socket)
     end
 
-    test "respects rate limits on private channels", %{tenant: tenant, topic: topic} do
+    test "does not enforce the tenant presence rate on private channels", %{tenant: tenant, topic: topic} do
       key = random_string()
       # write: true keeps the fill loop fast. With write: nil every call authorizes against the tenant DB,
       # slow enough for the RateCounter's own 5s tick to land mid-loop and split the counts across buckets
@@ -928,16 +944,12 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       socket =
         socket_fixture(tenant, topic, key, policies: policies, private?: true, client_bucket: client_bucket)
 
-      log =
-        capture_log(fn ->
-          for _ <- 1..1500, do: PresenceHandler.handle(%{"event" => "track"}, socket)
+      for i <- 1..1500, do: PresenceHandler.handle(%{"event" => "track", "payload" => %{"i" => i}}, socket)
 
-          {:ok, _} = RateCounterHelper.tick!(Tenants.presence_events_per_second_rate(tenant))
+      {:ok, %{avg: avg}} = RateCounterHelper.tick!(Tenants.presence_events_per_second_rate(tenant))
+      assert avg > tenant.max_presence_events_per_second
 
-          assert {:error, :rate_limit_exceeded} = PresenceHandler.sync(socket)
-        end)
-
-      assert log =~ "PresenceRateLimitReached"
+      assert {:ok, _socket} = PresenceHandler.sync(socket)
     end
   end
 

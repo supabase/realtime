@@ -319,17 +319,7 @@ defmodule Realtime.Tenants do
         event_name: [:channel, :presence_events],
         measurements: %{limit: max_presence_events_per_second},
         metadata: %{tenant: tenant_id}
-      },
-      limit: [
-        value: max_presence_events_per_second,
-        measurement: :avg,
-        log_fn: fn ->
-          Logger.error("PresenceRateLimitReached: Too many presence events per second",
-            external_id: tenant_id,
-            project: tenant_id
-          )
-        end
-      ]
+      }
     ]
 
     %RateCounter.Args{id: presence_events_per_second_key(tenant_id), opts: opts}

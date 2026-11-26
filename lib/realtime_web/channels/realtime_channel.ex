@@ -457,13 +457,8 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_info(:sync_presence, %{assigns: %{presence_enabled?: true}} = socket) do
-    case PresenceHandler.sync(socket) do
-      {:ok, socket} ->
-        {:noreply, socket}
-
-      {:error, :rate_limit_exceeded} ->
-        shutdown_response(socket, "Too many presence messages per second")
-    end
+    {:ok, socket} = PresenceHandler.sync(socket)
+    {:noreply, socket}
   end
 
   def handle_info(:sync_presence, socket), do: {:noreply, socket}
@@ -521,9 +516,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, :client_rate_limit_exceeded} ->
         log_error(socket, "ClientPresenceRateLimitReached", :client_rate_limit_exceeded)
         shutdown_response(socket, "Client presence rate limit exceeded")
-
-      {:error, :rate_limit_exceeded} ->
-        shutdown_response(socket, "Too many presence messages per second")
 
       {:error, :payload_size_exceeded} ->
         shutdown_response(socket, "Track message size exceeded")
