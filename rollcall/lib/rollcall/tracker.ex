@@ -125,10 +125,12 @@ defmodule Rollcall.Tracker do
     * `:rollcall_tracker_request_sent` - a tick sent a request to a peer that is
       behind. The event has the keys `scope` and `node`. The tracker emits one
       event for each request.
-    * `:rollcall_tracker_reply_sent` - the tracker replied to a request with a
-      snapshot. The event has the keys `scope`, `node`, `version` and `refs`.
-      `node` is the node of the requester. `version` is the version of the
-      snapshot. `refs` lists the refs of the entries in the snapshot.
+    * `:rollcall_tracker_reply_sent` - the tracker sent a snapshot to one peer,
+      as the reply to a request or as a targeted snapshot in a tick. The event
+      has the keys `scope`, `node`, `version`, `refs` and `tick`. `node` is the
+      node of the peer. `version` is the version of the snapshot. `refs` lists
+      the refs of the entries in the snapshot. `tick` is `false` for a reply to
+      a request and `true` for a targeted snapshot.
     * `:rollcall_tracker_track` - a `track` call changed `local`. The event has
       the keys `pid`, `partition`, `key`, `version`, `joins` and `leaves`. The
       `version` is the version after the call. `joins` and `leaves` are lists of
@@ -614,6 +616,7 @@ defmodule Rollcall.Tracker do
     {
       :noreply,
       state
+      |> send_targeted_snapshots()
       |> send_heartbeat()
       |> tick_purge_and_request_snapshots_for_peers()
       |> schedule_heartbeat()
@@ -644,7 +647,7 @@ defmodule Rollcall.Tracker do
           Messages.kind(msg) == :request ->
             origin = Messages.origin_node(msg)
 
-            send_snapshot(state, origin)
+            state = send_snapshot(state, origin)
 
             case apply_to_peer(state, origin, State.peer(state, origin), msg) do
               {state, _} -> {:noreply, state}
@@ -875,6 +878,16 @@ defmodule Rollcall.Tracker do
     state
   end
 
+  defp send_targeted_snapshots(%State{replied: replied} = state) when map_size(replied) == 0, do: state
+
+  defp send_targeted_snapshots(%State{replied: replied, last_tick_version: last_tick_version, version: now} = state) do
+    for {node, replied_version} <- replied, replied_version > last_tick_version and replied_version < now do
+      send_snapshot(state, node, tick: true)
+    end
+
+    state
+  end
+
   defp send_heartbeat(%State{} = state) do
     kind = choose_heartbeat_kind(state)
 
@@ -944,7 +957,7 @@ defmodule Rollcall.Tracker do
     length(joins) + length(leaves)
   end
 
-  defp send_snapshot(%State{local: local} = state, destination) do
+  defp send_snapshot(%State{local: local} = state, destination, opts \\ []) do
     {duration, entry_count} =
       :timer.tc(
         fn ->
@@ -962,7 +975,8 @@ defmodule Rollcall.Tracker do
 
     :telemetry.execute(Metrics.tracker_reply_send(), %{duration: duration, entries: entry_count}, %{
       scope: state.scope,
-      node: destination
+      node: destination,
+      tick: Keyword.get(opts, :tick, false)
     })
 
     tp(
@@ -971,12 +985,13 @@ defmodule Rollcall.Tracker do
         scope: state.scope,
         node: destination,
         version: state.version,
-        refs: Enum.map(Local.ids(state.local), &elem(&1, 1))
+        refs: Enum.map(Local.ids(state.local), &elem(&1, 1)),
+        tick: Keyword.get(opts, :tick, false)
       },
       ignore_side_effects: true
     )
 
-    state
+    %{state | replied: Map.put(state.replied, destination, state.version)}
   end
 
   defp send_requests_for_behind_nodes(%State{scope: scope} = state, behind_nodes) do

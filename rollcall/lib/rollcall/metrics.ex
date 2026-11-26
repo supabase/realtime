@@ -107,14 +107,17 @@ defmodule Rollcall.Metrics do
       the `behind` flag. The number of events for one peer shows how long the
       peer stays behind.
 
-    * `tracker_reply_send/0` - the tracker replied to a request with a snapshot.
-      The event measures the time that the tracker spends to build the snapshot
-      and to call `Rollcall.Transport.send_to/3`.
+    * `tracker_reply_send/0` - the tracker sent a snapshot to one peer. The
+      snapshot is the reply to a request, or a targeted snapshot that a tick
+      sends. The event measures the time that the tracker spends to build the
+      snapshot and to call `Rollcall.Transport.send_to/3`.
 
       Measurements: `duration` and `entries`. The `duration` is in native time
       units. `entries` is the number of entries in the snapshot.
 
-      Metadata: `scope` and `node`. `node` is the node of the requester.
+      Metadata: `scope`, `node` and `tick`. `node` is the node of the peer.
+      `tick` is `false` for the reply to a request and `true` for a targeted
+      snapshot that a tick sends.
 
       The tracker replies to a request from a node that has no peer record. The
       event does not tell the two cases apart.

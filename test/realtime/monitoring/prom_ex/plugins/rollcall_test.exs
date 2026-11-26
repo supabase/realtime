@@ -305,6 +305,25 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
       assert metric_value(@reply_entries <> "_bucket", le: "500.5") == le_500_before + 1
       assert (metric_value(@reply_entries <> "_bucket", le: "100.5") || 0) == le_100_before
     end
+
+    # `tick` is true for a targeted snapshot that a tick sent, and false for the reply to a request.
+    test "tags the reply duration and the reply entries with tick" do
+      for metric <- [@reply_duration <> "_count", @reply_entries <> "_count"] do
+        true_before = metric_value(metric, tick: "true") || 0
+        false_before = metric_value(metric, tick: "false") || 0
+
+        for tick <- [true, true, false] do
+          :telemetry.execute(Metrics.tracker_reply_send(), %{duration: native(50), entries: 1}, %{
+            scope: "tenant-a",
+            node: :a@host,
+            tick: tick
+          })
+        end
+
+        assert metric_value(metric, tick: "true") == true_before + 2
+        assert metric_value(metric, tick: "false") == false_before + 1
+      end
+    end
   end
 
   describe "the tracker gauge" do
@@ -353,7 +372,8 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
 
     :telemetry.execute(Metrics.tracker_reply_send(), %{duration: native(50), entries: 1}, %{
       scope: scope,
-      node: :a@host
+      node: :a@host,
+      tick: false
     })
 
     usage([], scope)

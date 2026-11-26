@@ -159,4 +159,14 @@ defmodule Rollcall.NetworkHelpers do
       timeout -> flunk("No message from a tracker within #{timeout} ms")
     end
   end
+
+  @doc """
+  Returns the next `count` messages that a tracker sent to the probe, sorted by
+  the kind of the message. Use it when the order of the messages is not defined.
+  """
+  @spec receive_messages_by_kind(term(), pos_integer()) :: [term()]
+  def receive_messages_by_kind(probe, count) do
+    for(_ <- 1..count, do: receive_message(probe))
+    |> Enum.sort_by(&elem(&1, 0))
+  end
 end
