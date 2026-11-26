@@ -71,6 +71,23 @@ defmodule Rollcall.Tracker.View do
   end
 
   @doc """
+  Returns the entry of each id in `ids`, with its partition.
+
+  The tracker uses this to read the entries that `Rollcall.Tracker.Local`
+  holds by id. `Local` does not keep the meta of an entry. The view does.
+
+  The result has the order of `ids`. Each id must name an entry in the view.
+  """
+  @spec fetch(t(), [id()]) :: [Rollcall.partitioned_entry()]
+  def fetch(table, ids) do
+    Enum.map(ids, fn id ->
+      [{{partition, ref} = ^id, key, meta}] = :ets.lookup(table, id)
+
+      {partition, ref, key, meta}
+    end)
+  end
+
+  @doc """
   Returns the number of entries in each partition that has an entry.
 
   Returns `%{}` when the table does not exist.

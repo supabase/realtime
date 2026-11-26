@@ -25,12 +25,6 @@ defmodule RealtimeWeb.TenantRateLimitersTest do
       assert TenantRateLimiters.check_tenant(tenant) == {:error, :too_many_connections}
     end
 
-    test "max joins is exceeded", %{tenant: tenant} do
-      expect(Realtime.RateCounter, :get, fn _ -> {:ok, %{limit: %{triggered: true}}} end)
-
-      assert TenantRateLimiters.check_tenant(tenant) == {:error, :too_many_joins}
-    end
-
     test "node join budget is used up while the node_join_budget flag is on", %{tenant: tenant} do
       stub(Realtime.FeatureFlags, :enabled?, fn name, _tenant_id -> name == "node_join_budget" end)
       use_up_node_join_budget(tenant)

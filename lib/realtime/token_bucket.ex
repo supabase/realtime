@@ -88,6 +88,10 @@ defmodule Realtime.TokenBucket do
     end
   end
 
+  @doc "Returns the number of tokens the bucket holds when it is full."
+  @spec burst(t()) :: pos_integer()
+  def burst(%__MODULE__{interval: interval, tolerance: tolerance}), do: div(tolerance, interval) + 1
+
   @doc """
   Returns the microseconds until the bucket has a token again, or 0 when it has one now.
 

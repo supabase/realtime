@@ -2,17 +2,17 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   @moduledoc """
   Handles the Presence feature for Realtime.
 
-  This module provides functions for all client facing entry points into 
+  This module provides functions for all client facing entry points into
   Realtime's Presence feature. These entry points include:
 
   * Joining - When a channel joins, at this point it may or may not be part of
               a presence topic depending on its join config.
-  * Syncing - using the `sync/1` function. This will send the full state of the 
+  * Syncing - using the `sync/1` function. This will send the full state of the
               presence topic back to the client socket, assuming they have access to it.
-  * Tracking and Untracking - via `handle/2`, this will add, update, or remove the client's 
+  * Tracking and Untracking - via `handle/2`, this will add, update, or remove the client's
               presence state from the topic.
 
-  All presence tracking uses `RealtimeWeb.Presence`, which is Realtime's instantiation of 
+  All presence tracking uses `RealtimeWeb.Presence`, which is Realtime's instantiation of
   `Phoenix.Presence`.
   """
   use Realtime.Logs
@@ -103,18 +103,17 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   join-latency metric and clears the timer. A later resync - triggered by a track flipping
   presence on - finds no timer and records nothing, so it's never misattributed as join latency.
   """
-  @spec sync(Socket.t()) :: {:ok, Socket.t()} | {:error, :rate_limit_exceeded}
+  @spec sync(Socket.t()) :: {:ok, Socket.t()}
   def sync(%{assigns: %{presence_enabled?: false}} = socket), do: {:ok, socket}
 
   def sync(socket) when not is_private?(socket) do
     %{assigns: %{tenant_topic: topic}} = socket
 
-    with :ok <- limit_presence_event(socket) do
-      socket = push_presence_state(socket, topic)
-      Logging.maybe_log_info(socket, :sync_presence)
+    count_presence_event(socket)
+    socket = push_presence_state(socket, topic)
+    Logging.maybe_log_info(socket, :sync_presence)
 
-      {:ok, socket}
-    end
+    {:ok, socket}
   end
 
   def sync(socket) when not can_read_presence?(socket), do: {:ok, socket}
@@ -122,12 +121,11 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   def sync(socket) when can_read_presence?(socket) do
     %{tenant_topic: topic} = socket.assigns
 
-    with :ok <- limit_presence_event(socket) do
-      socket = push_presence_state(socket, topic)
-      Logging.maybe_log_info(socket, :sync_presence)
+    count_presence_event(socket)
+    socket = push_presence_state(socket, topic)
+    Logging.maybe_log_info(socket, :sync_presence)
 
-      {:ok, socket}
-    end
+    {:ok, socket}
   end
 
   defp push_presence_state(socket, topic) do
@@ -154,15 +152,15 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   * track - used to store or update a client's state in the presence topic.
   * untrack - used to leave, and remove state from the presence topic.
 
-  This function will apply rate limits and authorization to ensure that 
-  the client has access to the topic, and if so the event will be passed on 
+  This function will apply rate limits and authorization to ensure that
+  the client has access to the topic, and if so the event will be passed on
   to the presence system.
 
   When successful, returns `{:ok, socket, :resync | :no_resync}`.
 
   The third element of the tuple can be used to determine whether the client
-  should get a full update of the current presence sync. At this point that is 
-  only set if a track call caused presence to flip from disabled to enabled for 
+  should get a full update of the current presence sync. At this point that is
+  only set if a track call caused presence to flip from disabled to enabled for
   the channel.
 
   """
@@ -176,7 +174,6 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
              | :tenant_database_unavailable
              | :unable_to_set_policies
              | :increase_connection_pool
-             | :rate_limit_exceeded
              | :client_rate_limit_exceeded
              | :unable_to_track_presence
              | :payload_size_exceeded
@@ -281,7 +278,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
          tenant <- Tenants.Cache.get_tenant_by_external_id(socket.assigns.tenant),
          :ok <- validate_payload_size(tenant, payload),
          _ <- RealtimeWeb.TenantBroadcaster.collect_payload_size(socket.assigns.tenant, payload, :presence),
-         :ok <- limit_presence_event(socket),
+         _ <- count_presence_event(socket),
          {:ok, action, _} <- Presence.track(self(), socket.assigns.tenant, tenant_topic, presence_key, payload) do
       case action do
         :track ->
@@ -311,7 +308,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
         log_error("UnableToTrackPresence", error)
         {:error, :unable_to_track_presence}
 
-      {:error, reason} when reason in [:invalid_payload, :rate_limit_exceeded, :payload_size_exceeded] ->
+      {:error, reason} when reason in [:invalid_payload, :payload_size_exceeded] ->
         {:error, reason}
 
       {:error, error} ->
@@ -332,17 +329,9 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   defp check_track_payload(%{presence_track_payload: payload}, payload), do: {:error, :no_payload_change}
   defp check_track_payload(_assigns, _payload), do: :ok
 
-  defp limit_presence_event(socket) do
-    %{assigns: %{presence_rate_counter: presence_counter, tenant: _tenant_id}} = socket
-    {:ok, rate_counter} = RateCounter.get(presence_counter)
-    tenant = Tenants.Cache.get_tenant_by_external_id(socket.assigns.tenant)
-
-    if rate_counter.avg > tenant.max_presence_events_per_second do
-      {:error, :rate_limit_exceeded}
-    else
-      GenCounter.add(presence_counter.id)
-      :ok
-    end
+  defp count_presence_event(%{assigns: %{presence_rate_counter: presence_counter}}) do
+    {:ok, _} = RateCounter.get(presence_counter)
+    GenCounter.add(presence_counter.id)
   end
 
   # The bucket is an atomic, so taking a token needs no change to the socket

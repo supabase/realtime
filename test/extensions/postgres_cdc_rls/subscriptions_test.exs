@@ -8,6 +8,8 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
   alias Extensions.PostgresCdcRls.Subscriptions
   alias Realtime.Database
 
+  @publication Integrations.publication()
+
   setup :maybe_checkout_tenant
 
   # Pure-parse and dead-connection tests build their own pid (or none) and never touch the
@@ -397,7 +399,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       params_list = [%{claims: %{"role" => "anon"}, id: id, subscription_params: subscription_params}]
 
       assert {:ok, [%Postgrex.Result{}]} =
-               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+               Subscriptions.create(conn, @publication, params_list, self(), self())
 
       assert_received {:subscribed, {_, ^id}}
 
@@ -416,7 +418,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
 
       assert {:ok, [%Postgrex.Result{}]} =
-               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+               Subscriptions.create(conn, @publication, params_list, self(), self())
 
       assert %Postgrex.Result{
                rows: [
@@ -449,7 +451,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       ]
 
       assert {:ok, [%Postgrex.Result{}]} =
-               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+               Subscriptions.create(conn, @publication, params_list, self(), self())
 
       assert %Postgrex.Result{rows: [[filters]]} =
                Postgrex.query!(conn, "select filters from realtime.subscription", [])
@@ -472,7 +474,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       assert {:error,
               {:subscription_insert_failed,
                "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [event: *, schema: public, table: test, filters: [{\"subject\", \"eq\", \"hey\", false}], select: nil]. Exception: ERROR P0001 (raise_exception) invalid column for filter subject"}} =
-               Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+               Subscriptions.create(conn, @publication, subscription_list, self(), self())
 
       %Postgrex.Result{rows: [[0]]} =
         Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
@@ -501,7 +503,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       ]
 
       assert {:error, {:subscription_insert_failed, _}} =
-               Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+               Subscriptions.create(conn, @publication, subscription_list, self(), self())
 
       # The insert of the first subscription is rolled back with the transaction, so the
       # manager must not be told it is subscribed.
@@ -526,7 +528,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       assert {:error,
               {:subscription_insert_failed,
                "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [event: *, schema: public, table: test, filters: [{\"id\", \"eq\", \"hey\", false}], select: nil]. Exception: ERROR 22P02 (invalid_text_representation) invalid input syntax for type integer: \"hey\""}} =
-               Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+               Subscriptions.create(conn, @publication, subscription_list, self(), self())
 
       %Postgrex.Result{rows: [[0]]} =
         Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
@@ -543,7 +545,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
 
       assert {:ok, [%Postgrex.Result{}]} =
-               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+               Subscriptions.create(conn, @publication, params_list, self(), self())
 
       assert %Postgrex.Result{rows: [[1]]} =
                Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
@@ -563,7 +565,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
         params_list = [%{claims: %{"role" => role}, id: id, subscription_params: subscription_params}]
 
         assert {:ok, [%Postgrex.Result{}]} =
-                 Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+                 Subscriptions.create(conn, @publication, params_list, self(), self())
       end
 
       assert %Postgrex.Result{rows: [[1, "authenticated"]]} =
@@ -588,7 +590,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
         params_list = [%{claims: %{"role" => "anon"}, id: id, subscription_params: subscription_params}]
 
         assert {:ok, [%Postgrex.Result{}]} =
-                 Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+                 Subscriptions.create(conn, @publication, params_list, self(), self())
       end
 
       create_replication_slot(conn, slot_name, plugin: "wal2json")
@@ -600,7 +602,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
           Postgrex.query!(
             conn,
             "select wal, subscription_ids from realtime.list_changes($1, $2, 100, 1048576)",
-            ["supabase_realtime_test", slot_name]
+            [@publication, slot_name]
           )
 
         all_sub_ids = rows |> Enum.flat_map(fn [_wal, sub_ids] -> sub_ids || [] end)
@@ -637,7 +639,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
         params_list = [%{claims: %{"role" => "anon"}, id: id, subscription_params: subscription_params}]
 
         assert {:ok, [%Postgrex.Result{}]} =
-                 Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+                 Subscriptions.create(conn, @publication, params_list, self(), self())
       end
 
       create_replication_slot(conn, slot_name, plugin: "wal2json")
@@ -649,7 +651,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
           Postgrex.query!(
             conn,
             "select wal, subscription_ids from realtime.list_changes($1, $2, 100, 1048576)",
-            ["supabase_realtime_test", slot_name]
+            [@publication, slot_name]
           )
 
         all_sub_ids = rows |> Enum.flat_map(fn [_wal, sub_ids] -> sub_ids || [] end)
@@ -687,7 +689,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
         params_list = [%{claims: %{"role" => "anon"}, id: id, subscription_params: subscription_params}]
 
         assert {:ok, [%Postgrex.Result{}]} =
-                 Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+                 Subscriptions.create(conn, @publication, params_list, self(), self())
       end
 
       create_replication_slot(conn, slot_name, plugin: "wal2json")
@@ -700,7 +702,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
           Postgrex.query!(
             conn,
             "select wal, subscription_ids from realtime.list_changes($1, $2, 100, 1048576)",
-            ["supabase_realtime_test", slot_name]
+            [@publication, slot_name]
           )
 
         all_sub_ids = rows |> Enum.flat_map(fn [_wal, sub_ids] -> sub_ids || [] end)
@@ -725,7 +727,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       ]
 
       assert {:ok, [%Postgrex.Result{}]} =
-               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+               Subscriptions.create(conn, @publication, params_list, self(), self())
 
       assert %Postgrex.Result{rows: rows} =
                Postgrex.query!(conn, "select filters, action_filter from realtime.subscription", [])
@@ -759,7 +761,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
 
       assert {:ok, [%Postgrex.Result{}]} =
-               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+               Subscriptions.create(conn, @publication, params_list, self(), self())
     end
 
     test "create succeeds when the connection cached a stale user_defined_filter arity", %{conn: conn, tenant: tenant} do
@@ -842,7 +844,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
 
       assert {:ok, [%Postgrex.Result{}]} =
-               Subscriptions.create(stale_conn, "supabase_realtime_test", params_list, self(), self())
+               Subscriptions.create(stale_conn, @publication, params_list, self(), self())
 
       # Read filters back as text: the shared Postgrex type cache still holds the stale 3-field
       # composite decoder, so casting to text avoids decoding through it while still proving the
@@ -864,7 +866,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
         params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
 
         assert {:ok, [%Postgrex.Result{}]} =
-                 Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+                 Subscriptions.create(conn, @publication, params_list, self(), self())
       end
 
       # pg_prepared_statements is session-scoped and this pool has a single connection, so this
@@ -889,7 +891,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       ]
 
       assert {:ok, [%Postgrex.Result{}]} =
-               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+               Subscriptions.create(conn, @publication, params_list, self(), self())
 
       assert %Postgrex.Result{rows: rows} =
                Postgrex.query!(conn, "select filters, action_filter from realtime.subscription", [])
@@ -907,7 +909,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       ]
 
       assert {:ok, [%Postgrex.Result{}]} =
-               Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+               Subscriptions.create(conn, @publication, subscription_list, self(), self())
 
       %Postgrex.Result{rows: [[1]]} =
         Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
@@ -934,7 +936,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       ]
 
       assert {:ok, [%Postgrex.Result{num_rows: 1}]} =
-               Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+               Subscriptions.create(conn, @publication, subscription_list, self(), self())
     end
 
     test "create subscribes only to the named table, not to tables that match it as a LIKE pattern", %{
@@ -965,7 +967,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
         ]
 
         assert {:ok, [%Postgrex.Result{num_rows: 1}]} =
-                 Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+                 Subscriptions.create(conn, @publication, subscription_list, self(), self())
       end
 
       assert %Postgrex.Result{rows: rows} =
@@ -1013,7 +1015,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       ]
 
       assert {:ok, [%Postgrex.Result{num_rows: 1}]} =
-               Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+               Subscriptions.create(conn, @publication, subscription_list, self(), self())
     end
 
     test "create matches a schema exactly when a published schema has that name, and as a pattern otherwise", %{
@@ -1049,12 +1051,12 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
         %{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}
       ]
 
-      Postgrex.query!(conn, "drop publication if exists supabase_realtime_test", [])
+      Postgrex.query!(conn, "drop publication if exists #{@publication}", [])
 
       assert {:error,
               {:subscription_insert_failed,
                "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [event: *, schema: public, table: test, filters: [], select: nil]"}} =
-               Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+               Subscriptions.create(conn, @publication, subscription_list, self(), self())
 
       %Postgrex.Result{rows: [[0]]} =
         Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
@@ -1074,7 +1076,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       assert {:error,
               {:subscription_insert_failed,
                "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [event: *, schema: public, table: doesnotexist, filters: [], select: nil]"}} =
-               Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+               Subscriptions.create(conn, @publication, subscription_list, self(), self())
 
       %Postgrex.Result{rows: [[0]]} =
         Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
@@ -1092,7 +1094,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       conn = spawn(fn -> :ok end)
 
       assert {:error, {:exit, _}} =
-               Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+               Subscriptions.create(conn, @publication, subscription_list, self(), self())
     end
 
     @tag pool_queue: [queue_target: 50, queue_interval: 100]
@@ -1110,7 +1112,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       ]
 
       assert {:error, %DBConnection.ConnectionError{reason: :queue_timeout}} =
-               Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+               Subscriptions.create(conn, @publication, subscription_list, self(), self())
     end
 
     @tag without_db: true
@@ -1147,7 +1149,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
 
       assert {:error, {:database_timeout, %Postgrex.Error{postgres: %{code: :query_canceled}}}} =
-               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+               Subscriptions.create(conn, @publication, params_list, self(), self())
     end
 
     defp install_slow_insert_trigger(conn) do
@@ -1257,7 +1259,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
         })
 
       subscription_list = [%{claims: %{"role" => "anon"}, id: id, subscription_params: subscription_params}]
-      Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+      Subscriptions.create(conn, @publication, subscription_list, self(), self())
 
       assert {:ok, %Postgrex.Result{}} = Subscriptions.delete(conn, bin_id)
       assert %Postgrex.Result{rows: [[0]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
@@ -1293,7 +1295,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
         %{claims: %{"role" => "anon"}, id: id2, subscription_params: subscription_params}
       ]
 
-      assert {:ok, _} = Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+      assert {:ok, _} = Subscriptions.create(conn, @publication, subscription_list, self(), self())
 
       assert %Postgrex.Result{rows: [[2]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
       assert {:ok, %Postgrex.Result{}} = Subscriptions.delete_multi(conn, [bin_id1, bin_id2])
@@ -1362,7 +1364,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
 
   describe "fetch_publication_tables/2" do
     test "returns {:ok, tables} for an existing publication", %{conn: conn} do
-      assert {:ok, tables} = Subscriptions.fetch_publication_tables(conn, "supabase_realtime_test")
+      assert {:ok, tables} = Subscriptions.fetch_publication_tables(conn, @publication)
       assert tables[{"*"}] != nil
     end
 
@@ -1372,7 +1374,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
 
     test "returns {:error, _} when the query fails", %{conn: conn} do
       GenServer.stop(conn)
-      assert {:error, _reason} = Subscriptions.fetch_publication_tables(conn, "supabase_realtime_test")
+      assert {:error, _reason} = Subscriptions.fetch_publication_tables(conn, @publication)
     end
   end
 
@@ -1407,7 +1409,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       ]
 
       assert {:ok, [%Postgrex.Result{}]} =
-               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+               Subscriptions.create(conn, @publication, params_list, self(), self())
 
       assert %Postgrex.Result{rows: [[nil]]} =
                Postgrex.query!(conn, "select selected_columns from realtime.subscription", [])
@@ -1434,7 +1436,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
           Postgrex.query!(
             conn,
             "select wal, subscription_ids from realtime.list_changes($1, $2, 100, 1048576)",
-            ["supabase_realtime_test", slot_name]
+            [@publication, slot_name]
           )
 
         # apply_rls stores subscription_ids as binary UUIDs
@@ -1458,7 +1460,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       ]
 
       assert {:ok, [%Postgrex.Result{}]} =
-               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+               Subscriptions.create(conn, @publication, params_list, self(), self())
 
       # '{}' is preserved rather than collapsed to NULL, so it stays distinct from
       # "no select" (all columns)
@@ -1485,7 +1487,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       ]
 
       assert {:ok, [%Postgrex.Result{}, %Postgrex.Result{}]} =
-               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+               Subscriptions.create(conn, @publication, params_list, self(), self())
 
       # Two distinct rows survive: NULL (all columns) and '{}' (primary keys only).
       assert %Postgrex.Result{rows: [[nil], [[]]]} =
@@ -1515,7 +1517,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
           Postgrex.query!(
             conn,
             "select wal, subscription_ids from realtime.list_changes($1, $2, 100, 1048576)",
-            ["supabase_realtime_test", slot_name]
+            [@publication, slot_name]
           )
 
         bin_sub_id = UUID.string_to_binary!(sub_id)
@@ -1622,7 +1624,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       ]
 
       assert {:ok, [%Postgrex.Result{}]} =
-               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+               Subscriptions.create(conn, @publication, params_list, self(), self())
 
       assert %Postgrex.Result{rows: [[selected_columns]]} =
                Postgrex.query!(conn, "select selected_columns from realtime.subscription", [])
@@ -1654,7 +1656,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       ]
 
       assert {:ok, [%Postgrex.Result{}, %Postgrex.Result{}]} =
-               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+               Subscriptions.create(conn, @publication, params_list, self(), self())
 
       assert %Postgrex.Result{rows: [[2]]} =
                Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
@@ -1673,7 +1675,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       ]
 
       assert {:error, {:subscription_insert_failed, msg}} =
-               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+               Subscriptions.create(conn, @publication, params_list, self(), self())
 
       assert msg =~ "invalid column for select nonexistent_column"
     end
@@ -1694,7 +1696,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
       ]
 
       assert {:error, {:subscription_insert_failed, msg}} =
-               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+               Subscriptions.create(conn, @publication, params_list, self(), self())
 
       assert msg =~ "invalid column for select details"
 
@@ -1756,7 +1758,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
                Postgrex.query(
                  conn,
                  "select wal, subscription_ids from realtime.list_changes($1, $2, 100, 1048576)",
-                 ["supabase_realtime_test", slot_name]
+                 [@publication, slot_name]
                )
 
       sub_ids = rows |> Enum.flat_map(fn [_wal, sub_ids] -> sub_ids end)
@@ -1792,7 +1794,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
         ]
       end)
 
-    Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+    Subscriptions.create(conn, @publication, params_list, self(), self())
   end
 
   defp create_published_tables!(conn, tenant, tables) do
@@ -1818,7 +1820,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsTest do
     subscription_list = [%{claims: %{"role" => "anon"}, id: id, subscription_params: subscription_params}]
 
     assert {:ok, [%Postgrex.Result{}]} =
-             Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+             Subscriptions.create(conn, @publication, subscription_list, self(), self())
 
     %Postgrex.Result{rows: rows} =
       Postgrex.query!(

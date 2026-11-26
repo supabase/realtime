@@ -470,12 +470,7 @@ defmodule Realtime.Tenants.PolicyEvalShadowTest do
 
       flag_off = Authorization.get_read_authorizations(%Policies{}, db_conn, ctx)
 
-      # Both get_read_authorizations/4 (via check_with_fallback) and the shadow hook check a flag —
-      # only the shadow one is under test here, so the other keeps its natural (unset -> false) answer.
-      expect(FeatureFlags, :enabled?, 2, fn
-        "use_authorize_function", _tenant_id -> false
-        @flag, _tenant_id -> true
-      end)
+      expect(FeatureFlags, :enabled?, fn @flag, _tenant_id -> true end)
 
       flag_on = Authorization.get_read_authorizations(%Policies{}, db_conn, ctx)
 

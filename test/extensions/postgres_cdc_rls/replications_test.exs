@@ -96,7 +96,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
   end
 
   describe "list_changes/5" do
-    @publication "supabase_realtime_test"
+    @publication Integrations.publication()
 
     test "slot empty: returns only the sentinel row with slot_changes_count of 0", %{conn: conn} do
       slot_name = "test_slot_#{System.unique_integer([:positive])}"
@@ -355,7 +355,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
 
   describe "list_changes for schemas and tables with special characters" do
     defp run_list_changes(conn, schema, table) do
-      pub = "supabase_realtime_test"
+      pub = @publication
       slot = "lc_#{:rand.uniform(9_999_999)}"
 
       # quote identifiers

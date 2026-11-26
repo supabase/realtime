@@ -9,11 +9,8 @@ defmodule Rollcall.Tracker do
 
   ## Not built yet
 
-  This module describes the finished design. The tracker does not yet do these
-  things:
+  This module describes the finished design. The tracker does not yet do this:
 
-    * send a request
-    * reply to a request with a snapshot
     * hold `sent`, the state at the last heartbeat
 
   ## Process monitoring
@@ -58,7 +55,23 @@ defmodule Rollcall.Tracker do
 
   A tracker that stops sends a goodbye from `terminate/2`. The tracker traps
   exits, so a supervisor shutdown also reaches `terminate/2`. The goodbye is a
-  snapshot with no entries, and a peer clears its replica when it arrives. 
+  snapshot with no entries, and a peer clears its replica when it arrives.
+
+  ## Requests
+
+  A peer is behind when a diff arrives that the tracker cannot apply. A tick
+  sends a request to the node of each peer that is behind. The tracker sends the
+  request again in each tick until a snapshot of the peer clears the flag. A lost
+  request needs no extra state.
+
+  The request goes through `c:Rollcall.Transport.send_to/3`. The tracker does not
+  wait for a reply. The reply arrives as a snapshot message, and the snapshot
+  rule of the peer applies it in the same way as a heartbeat snapshot.
+
+  A tracker that receives a request replies at once with a snapshot of `local` at
+  the current stamp. It sends the reply to the node of the requester. It replies
+  also when it holds no record for that node, and it creates no record. A reply
+  does not count as a heartbeat.
 
   ## Grace period
 
@@ -103,6 +116,13 @@ defmodule Rollcall.Tracker do
     * `:rollcall_tracker_goodbye_sent` - the tracker sent the goodbye. The event
       has the keys `scope`, `origin` and `version`. The `version` is the version
       of the goodbye message.
+    * `:rollcall_tracker_request_sent` - a tick sent a request to a peer that is
+      behind. The event has the keys `scope` and `node`. The tracker emits one
+      event for each request.
+    * `:rollcall_tracker_reply_sent` - the tracker replied to a request with a
+      snapshot. The event has the keys `scope`, `node`, `version` and `refs`.
+      `node` is the node of the requester. `version` is the version of the
+      snapshot. `refs` lists the refs of the entries in the snapshot.
     * `:rollcall_tracker_track` - a `track` call changed `local`. The event has
       the keys `pid`, `partition`, `key`, `version`, `joins` and `leaves`. The
       `version` is the version after the call. `joins` and `leaves` are lists of
@@ -132,7 +152,6 @@ defmodule Rollcall.Tracker do
   alias Rollcall.Metrics
   alias Rollcall.Tracker.Changes
   alias Rollcall.Tracker.CommittedChanges
-  alias Rollcall.Tracker.Entry
   alias Rollcall.Tracker.Local
   alias Rollcall.Tracker.Messages
   alias Rollcall.Tracker.Peer
@@ -590,6 +609,7 @@ defmodule Rollcall.Tracker do
       state
       |> send_heartbeat()
       |> tick_and_purge_peers()
+      |> send_requests_for_behind_peers()
       |> schedule_heartbeat()
       |> emit_usage_metrics()
     }
@@ -609,9 +629,24 @@ defmodule Rollcall.Tracker do
           scope != state.scope ->
             {:noreply, drop_message(state, :wrong_scope, scope, Messages.origin_node(msg))}
 
-          # Valid message from the same scope
+          Messages.origin_node(msg) == node() ->
+            {:noreply, drop_message(state, :local_origin, state.scope, node())}
+
+          # When we get a request we immediately reply with a snapshot.
+          # We then apply it to a peer if it exists, to treat a request
+          # as "Proof of Life"
+          Messages.kind(msg) == :request ->
+            origin = Messages.origin_node(msg)
+
+            send_snapshot(state, origin)
+
+            case apply_to_peer(state, origin, State.peer(state, origin), msg) do
+              {state, _} -> {:noreply, state}
+            end
+
+          # Valid, non-request message from the same scope
           true ->
-            origin = node(Messages.origin(msg))
+            origin = Messages.origin_node(msg)
 
             case apply_to_peer(state, origin, State.peer(state, origin), msg) do
               {state, nil} -> {:noreply, state}
@@ -641,14 +676,7 @@ defmodule Rollcall.Tracker do
     tp(:rollcall_tracker_goodbye_sent, %{scope: state.scope, origin: self(), version: goodbye_version})
   end
 
-  # The transport does not send a message to its own node. The clause makes a
-  # tracker safe when it does.
-  defp apply_to_peer(state, node, _peer, _msg) when node == node() do
-    {drop_message(state, :local_origin, state.scope, node), nil}
-  end
-
-  # A request carries no state, so a request from an unknown node creates no
-  # record.
+  # A request carries no state, so a request from an unknown node doesn't create a peer
   defp apply_to_peer(state, _node, nil, {:request, _origin}), do: {state, nil}
 
   defp apply_to_peer(state, node, nil, msg) do
@@ -843,9 +871,8 @@ defmodule Rollcall.Tracker do
     {duration, entry_count} =
       :timer.tc(
         fn ->
-          local_entries = Local.entries(state.local)
+          snapshot_entries = View.fetch(state.view, Local.ids(state.local))
 
-          snapshot_entries = Enum.map(local_entries, &Entry.to_wire_entry/1)
           snapshot = Messages.snapshot(self(), State.current_stamp(state), snapshot_entries)
 
           :ok = state.transport_module.heartbeat(state.transport_state, snapshot)
@@ -867,10 +894,57 @@ defmodule Rollcall.Tracker do
         origin: self(),
         kind: :snapshot,
         version: state.version,
-        refs: Enum.map(Local.entries(state.local), & &1.ref)
+        refs: Enum.map(Local.ids(state.local), &elem(&1, 1))
       },
       ignore_side_effects: true
     )
+
+    state
+  end
+
+  defp send_snapshot(%State{local: local} = state, destination) do
+    {duration, entry_count} =
+      :timer.tc(
+        fn ->
+          snapshot_entries = View.fetch(state.view, Local.ids(local))
+          snapshot = Messages.snapshot(self(), State.current_stamp(state), snapshot_entries)
+
+          # This is fire and forget, we ignore the result of sending the snapshot,
+          # if the peer didn't get it they'll ask again.
+          state.transport_module.send_to(state.transport_state, destination, snapshot)
+
+          length(snapshot_entries)
+        end,
+        :native
+      )
+
+    :telemetry.execute(Metrics.tracker_reply_send(), %{duration: duration, entries: entry_count}, %{
+      scope: state.scope,
+      node: destination
+    })
+
+    tp(
+      :rollcall_tracker_reply_sent,
+      %{
+        scope: state.scope,
+        node: destination,
+        version: state.version,
+        refs: Enum.map(Local.ids(state.local), &elem(&1, 1))
+      },
+      ignore_side_effects: true
+    )
+
+    state
+  end
+
+  defp send_requests_for_behind_peers(%State{peers: peers, scope: scope} = state) do
+    for {node, peer} <- peers, Peer.behind?(peer) do
+      state.transport_module.send_to(state.transport_state, node, Messages.request(self()))
+
+      :telemetry.execute(Metrics.tracker_request_send(), %{}, %{scope: scope, node: node})
+
+      tp(:rollcall_tracker_request_sent, %{scope: scope, node: node})
+    end
 
     state
   end

@@ -375,9 +375,6 @@ defmodule Realtime.Api do
       &Tenants.events_per_second_key/1,
       &Tenants.db_events_per_second_key/1
     ],
-    max_joins_per_second: [
-      &Tenants.joins_per_second_key/1
-    ],
     max_presence_events_per_second: [
       &Tenants.presence_events_per_second_key/1
     ],

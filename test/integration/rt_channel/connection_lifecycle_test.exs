@@ -545,39 +545,6 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
     end
   end
 
-  describe "rate limits - joins per second" do
-    setup [:rls_context]
-
-    test "max_joins_per_second limit respected", %{tenant: tenant, serializer: serializer} do
-      # The joins counter starts on connect and ticks on its own every 5s, averaging over the buckets so far.
-      # A low limit keeps the join loop far shorter than that tick so only the manual tick below evaluates it:
-      # buckets [20, 0] average to 20 / 2 / 5s = 2 joins per second.
-      # CI used to struggle trying to go over the higher limit within the 5 seconds.
-      change_tenant_configuration(tenant, :max_joins_per_second, 1)
-      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
-      config = %{broadcast: %{self: true}, private: false}
-      realtime_topic = "realtime:#{random_string()}"
-
-      log =
-        capture_log(fn ->
-          for _ <- 1..20 do
-            WebsocketClient.join(socket, realtime_topic, %{config: config})
-            assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^realtime_topic}, 500
-          end
-
-          RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
-
-          WebsocketClient.join(socket, realtime_topic, %{config: config})
-          assert_process_down(socket)
-        end)
-
-      assert log =~
-               "project=#{tenant.external_id} external_id=#{tenant.external_id} [critical] ClientJoinRateLimitReached: Too many joins per second"
-
-      assert length(String.split(log, "ClientJoinRateLimitReached")) <= 3
-    end
-  end
-
   describe "rate limits - node join budget" do
     setup [:rls_context]
 

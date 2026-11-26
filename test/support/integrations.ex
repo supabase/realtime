@@ -90,8 +90,10 @@ defmodule Integrations do
     result
   end
 
+  def publication, do: "supabase_realtime_test"
+
   def setup_postgres_changes(conn) do
-    publication = "supabase_realtime_test"
+    publication = publication()
 
     Postgrex.transaction(conn, fn db_conn ->
       queries = [

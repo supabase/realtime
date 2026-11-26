@@ -780,6 +780,121 @@ Observations:
 - A liveness property about the client, a subscribed client eventually
   catches up, remains unchecked, as at step 7.
 
+## Step 9: `Presence9.tla`, targeted snapshots after a reply
+
+What: each tracker keeps `replied`, the version of the last reply to each
+peer since the last heartbeat. In each tick, a tracker that sends a diff
+also sends a targeted snapshot to some peers. A peer gets one when it is
+running and its `replied` version is above `sent.version` and below the
+current version. The reply stays immediate. A tracker that sends a
+broadcast snapshot sends no targeted snapshot. Each tick clears `replied`.
+
+Why this step: it removes the second gap from the step 8 observation "A
+requester can go behind twice". The facts:
+
+- The reply carries the version at reply time.
+- The next diff starts from `sent.version`, the version at the last
+  heartbeat.
+- A change between the heartbeat and the reply puts the mark of the
+  requester above `sent.version`.
+- One more change before the next heartbeat makes the diff a second gap.
+  The requester is behind again and sends a second request.
+- Step 8 limits the requests only because the model has a finite number
+  of changes.
+
+Result: a sender that changes in each period keeps the pair in the request
+loop for ever. The pair loses the benefit of diffs.
+
+A broadcast snapshot to every peer also removes the second gap. It sends
+every entry to every peer to repair one peer. The design rejects it.
+
+At the next tick, a requester that applied the reply is in one of three
+cases:
+
+- The reply version is equal to `sent.version`. The diff applies. Send
+  nothing more.
+- The reply version is equal to the current version. The requester is
+  current. The diff is stale at the requester. Send nothing more.
+- The reply version is between the two. The diff is a second gap. Send a
+  targeted snapshot.
+
+Properties: every step 8 property, plus one:
+
+- `StaysInStep`: in a lossless run, at a tick boundary, a receiver is
+  behind a running peer only when its mark is from a different incarnation
+  of that peer. A receiver with a mark from the current incarnation stays
+  current on diffs. It sends no second request.
+
+Decisions recorded in the module:
+
+- `replied` is a tracker field, a map from peer to version. It is not in
+  the peer record. The peer record holds what the tracker received.
+  `replied` holds what the tracker sent. Purge resets the peer record and
+  must not clear `replied`.
+- Start, Stop and Crash clear `replied`. A later reply to the same peer
+  replaces the entry.
+- The targeted snapshot is the same message as a broadcast snapshot to
+  that peer. It carries the current stamp. The receive rules do not
+  change.
+- `TargetedSnapshots` is the witness switch. When it is FALSE, no action
+  writes `replied`, and the module is step 8.
+- `StaysInStep` needs no history of where a mark came from. Within one
+  incarnation and without loss, only a reply puts a mark above
+  `sent.version`. So a second gap is the only cause of a behind state with
+  a mark from the current incarnation. Every other behind state has a mark
+  from a different incarnation: a cold start, a restart of either end, the
+  first message of a new incarnation, and a purge.
+- The history variable `lossless` is TRUE until the first drop. It lets
+  the default config check `StaysInStep` on the lossless runs in a space
+  with unbounded loss. `drops` counts only when `BoundedLoss` is TRUE, so
+  it cannot do this.
+- `StaysInStep` applies only when `msgs = {}`. At `MaxDelay = 0`, these
+  are the states where Tick is enabled. Between two ticks, the diff can
+  arrive before the targeted snapshot. The diff then sets `behind`, and
+  the targeted snapshot clears it.
+
+Finding: the targeted snapshot condition is sufficient at `MaxDelay = 0`.
+With targeted snapshots, no lossless run gets to a behind state with a
+mark from the current incarnation at a tick boundary. Without them, TLC
+finds the second gap in 16 states.
+
+Runs (2026-11-25), all at two nodes, two refs, `SilenceThreshold = 2`,
+`MaxDelay = 0`:
+
+| Config | Starts | Client | Loss | Targeted snapshots | Distinct states | Depth | Time | Result |
+|---|---|---|---|---|---|---|---|---|
+| ad hoc | 1 | off | none | on | 93,719 | 20 | 1 s | holds |
+| ad hoc | 2 | on | none | on | 32,298,323 | 34 | 4 min 35 s | holds |
+| ad hoc, no `StaysInStep` | 1 | off | none | off | 81,621 | 24 | 1 s | holds |
+| `Presence9.cfg` | 2 | on | unbounded | on | 393,858,383 | 48 | 1 h 12 min | holds |
+| `Presence9_live.cfg` | 1 | off | unbounded | on | 819,225 | 29 | 13 min 34 s | holds |
+| `Presence9_stable.cfg` | 1 | off | 2 drops | on | 585,445 | 26 | 7 min 11 s | holds |
+
+The run with targeted snapshots off has the same counts as step 8 at the
+same constants: 483,986 states generated and 81,621 distinct. This shows
+that the switch gives step 8.
+
+`Presence9.cfg` has 36% more states than `Presence8.cfg`, which has
+288,928,270. The new states come from `lossless`, `replied` and the
+targeted snapshots in flight. For this run, TLC gives a fingerprint
+collision probability of 0.083 (optimistic) and 0.043 (actual).
+
+Witnesses:
+
+- `Presence9_w1.cfg`: `TargetedSnapshots = FALSE`, no loss.
+  `StaysInStep` is violated in 16 states. Both trackers start. n2 is
+  behind on its first diff from n1 and sends a request. n1 tracks, replies
+  at version 1 and untracks. The next diff from n1 has `from` 0 and stamp
+  version 2. n2 is behind again. 76,455 states.
+
+Observations:
+
+- `MaxDelay = 1` is not run at this step. At that delay, `msgs = {}` is
+  not the tick boundary. `StaysInStep` needs a different boundary.
+- A targeted snapshot goes to one peer. A tracker sends one only in a tick
+  after a reply and a later change. In a period with no change, a reply
+  needs nothing more.
+
 ## Further work
 
 The planned steps are done. Candidates, none of which change a decision

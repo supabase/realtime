@@ -133,6 +133,40 @@ defmodule Realtime.Integration.RtChannel.PresenceTest do
       assert_receive {:late, %Message{event: "presence_state", payload: state, topic: ^topic}}, 500
       assert Map.has_key?(state, "early")
     end
+
+    # CVE-2026-128361: Phoenix.Presence raises in group/1 on a key that is not a string. On Phoenix
+    # 1.7.0 and later the failure terminates the tracker shard and erases the presence state.
+    test "a client that joins with a map presence key does not disturb the other clients", ctx do
+      %{tenant: tenant, topic: topic, serializer: serializer, presence_mode: mode} = ctx
+      topic = "realtime:#{topic}"
+      observer_key = "observer-#{random_string()}"
+
+      observer = join_channel(tenant, serializer, topic, observer_key)
+
+      WebsocketClient.send_event(observer, topic, "presence", %{type: "presence", event: "TRACK", payload: %{name: "o"}})
+
+      assert_receive %Message{event: "presence_diff", payload: %{"joins" => %{^observer_key => _}}, topic: ^topic}, 500
+
+      client = %{
+        key: observer_key,
+        tenant_topic: Realtime.Tenants.tenant_topic(tenant.external_id, String.replace_prefix(topic, "realtime:", ""))
+      }
+
+      attacker = join_channel(tenant, serializer, topic, %{"x" => 1})
+
+      WebsocketClient.send_event(attacker, topic, "presence", %{type: "presence", event: "TRACK", payload: %{name: "a"}})
+
+      # The server replaces the map with a generated key, so the join is tracked under a string.
+      assert_receive %Message{event: "presence_diff", payload: %{"joins" => joins}, topic: ^topic}, 500
+      assert [attacker_key] = Map.keys(joins)
+      assert is_binary(attacker_key)
+      refute attacker_key == observer_key
+
+      # The observer keeps its channel and its entry in each backend of the mode.
+      refute_receive %Message{event: "phx_error", topic: ^topic}, 300
+      refute_receive %Message{event: "phx_close", topic: ^topic}, 100
+      for backend <- backends(mode), do: assert_eventually(entry?(backend, tenant, client))
+    end
   end
 
   describe "private presence" do

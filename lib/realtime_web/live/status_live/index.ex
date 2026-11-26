@@ -1,6 +1,6 @@
 defmodule RealtimeWeb.StatusLive.Index do
   @moduledoc """
-  Publically available status page for our clusters, showing nodes and cross region latency.
+  Publicly available status page for our clusters, showing nodes and cross region latency.
   """
   use RealtimeWeb, :live_view
 

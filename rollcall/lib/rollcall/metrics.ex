@@ -96,6 +96,28 @@ defmodule Rollcall.Metrics do
 
       The tracker emits no event when there are no changes to publish.
 
+    * `tracker_request_send/0` - a tick sent a request for a snapshot to a peer
+      that is behind. The tracker emits one event for each request.
+
+      Measurements: none. Metadata: `scope` and `node`. `node` is the node of the
+      peer.
+
+      A tracker sends a request in each tick until a snapshot of the peer clears
+      the `behind` flag. The number of events for one peer shows how long the
+      peer stays behind.
+
+    * `tracker_reply_send/0` - the tracker replied to a request with a snapshot.
+      The event measures the time that the tracker spends to build the snapshot
+      and to call `Rollcall.Transport.send_to/3`.
+
+      Measurements: `duration` and `entries`. The `duration` is in native time
+      units. `entries` is the number of entries in the snapshot.
+
+      Metadata: `scope` and `node`. `node` is the node of the requester.
+
+      The tracker replies to a request from a node that has no peer record. The
+      event does not tell the two cases apart.
+
     * `tracker_usage/0` - the resources that a tracker uses. The tracker emits
       the event at the end of each tick, after it purged the silent peers.
 
@@ -130,6 +152,10 @@ defmodule Rollcall.Metrics do
 
   @tracker_publish [:rollcall, :tracker, :publish]
 
+  @tracker_request_send [:rollcall, :tracker, :request, :send]
+
+  @tracker_reply_send [:rollcall, :tracker, :reply, :send]
+
   @tracker_usage [:rollcall, :tracker, :usage]
 
   @doc "Returns the name of the event for a purge of a peer record. See the module doc."
@@ -159,6 +185,14 @@ defmodule Rollcall.Metrics do
   @doc "Returns the name of the event for the time to publish changes. See the module doc."
   @spec tracker_publish() :: event_name()
   def tracker_publish, do: @tracker_publish
+
+  @doc "Returns the name of the event for a request for a snapshot. See the module doc."
+  @spec tracker_request_send() :: event_name()
+  def tracker_request_send, do: @tracker_request_send
+
+  @doc "Returns the name of the event for a reply to a request. See the module doc."
+  @spec tracker_reply_send() :: event_name()
+  def tracker_reply_send, do: @tracker_reply_send
 
   @doc "Returns the name of the event for the resources that a tracker uses. See the module doc."
   @spec tracker_usage() :: event_name()
