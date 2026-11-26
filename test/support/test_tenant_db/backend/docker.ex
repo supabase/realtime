@@ -115,6 +115,8 @@ defmodule TestTenantDb.Backend.Docker do
   @inspect_format "status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} " <>
                     "error={{.State.Error}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}"
 
+  @image_format "{{.Config.Image}} id={{.Image}}"
+
   @stats_format "mem={{.MemUsage}} mem%={{.MemPerc}} cpu={{.CPUPerc}} pids={{.PIDs}}"
 
   @all_stats_format "{{.Name}} mem={{.MemUsage}} cpu={{.CPUPerc}} pids={{.PIDs}}"
@@ -139,6 +141,7 @@ defmodule TestTenantDb.Backend.Docker do
     [
       "verdict: " <> verdict(name),
       "container: " <> docker(["inspect", "--format", @inspect_format, name]),
+      "image: " <> docker(["inspect", "--format", @image_format, name]),
       "resources: " <> docker(["stats", "--no-stream", "--format", @stats_format, name])
     ]
   end
@@ -186,12 +189,25 @@ defmodule TestTenantDb.Backend.Docker do
   defp inside(name) do
     if running?(name) do
       [
+        "versions: " <> versions(name),
         "backends:\n" <> docker(["exec", name, "ps", "-eo", "pid,stat,time,etime,rss,args"]),
         "pg_stat_activity:\n" <> psql(name, @activity_query),
         "pg_replication_slots:\n" <> psql(name, @slots_query)
       ]
     else
       ["(container is not running, so no in-container state to collect)"]
+    end
+  end
+
+  # Ask the server, the image tag alone needs a lookup in supabase/postgres to tell the OrioleDB build.
+  # orioledb_version() over pg_extension.extversion: the latter only says "1.10", not the patch level.
+  defp versions(name) do
+    postgres = psql(name, "SELECT version()")
+
+    if psql(name, "SELECT count(*) FROM pg_extension WHERE extname = 'orioledb'") == "1" do
+      postgres <> ", " <> psql(name, "SELECT orioledb_version()")
+    else
+      postgres
     end
   end
 
