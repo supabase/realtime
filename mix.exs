@@ -17,7 +17,10 @@ defmodule Realtime.MixProject do
       hex: [
         # Can be overridden via `HEX_COOLDOWN=0d` should you want to, see DEVELOPERS.md#dependency-cooldown
         cooldown: "7d",
-        ignore_advisories: ["CVE-2026-128361"]
+        # CVE-2026-129344: Realtime dispatches broadcasts with its own MessageDispatcher, not Phoenix's.
+        # It does not send binary UserBroadcasts to V1 clients and contains encode errors per subscriber.
+        # See "dispatches binary UserBroadcast to V1 & V2 Serializers" in message_dispatcher_test.exs.
+        ignore_advisories: ["CVE-2026-128361", "CVE-2026-129344"]
       ],
       releases: [
         realtime: [
