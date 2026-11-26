@@ -31,6 +31,14 @@
 #                           reports 2. The results file keeps the figure of each node.
 #   memory                  the memory held, read after a garbage collection.
 #
+# The CPU seconds cover the whole node, so they include the clients and the rest of the app. A run
+# with `--scoped-cpu` also reports the CPU seconds of the measured processes alone: the Phoenix
+# shards or the Rollcall trackers. The VM traces when each of these processes starts and stops to
+# run, and the run adds up the time that they ran. It includes their BIFs and their garbage
+# collections, which reductions do not count. The tracing adds work to the node, so the CPU seconds
+# of a run with the option are not comparable with the CPU seconds of a run without it. Compare
+# the scoped figure only with the scoped figure of another run.
+#
 # Each node runs with its share of the cores of the machine and with scheduler spinning off, so the
 # CPU seconds do not include time that the OS gave to another node or time that a scheduler spent
 # waiting for work. A node gets the number of cores divided by `--nodes`, and at least 1. A run with
@@ -68,6 +76,7 @@
 #   --changes-per-s   changes each second across the whole cluster in the steady window, default 60
 #   --repeats         default 5
 #   --backends        phoenix, rollcall, or both separated by a comma. Default: both.
+#   --scoped-cpu      also measure the CPU seconds of the measured processes alone. See above.
 #   --compare         path of an earlier results file
 #   --out             path of the results file. The script sets it.
 #
@@ -102,6 +111,8 @@ defmodule PresenceBench do
   @phoenix_shards 150
   @windows ["join", "steady"]
   @metrics ["reductions_per_s", "cpu_s_per_s", "memory_bytes"]
+  # Only a run with `--scoped-cpu` has this figure.
+  @scoped_metrics ["cpu_scoped_s_per_s"]
   # What a window did. They show what the reductions per second are made of. An operation is an
   # entry that joins, in the join window, or a change, in the steady window.
   @activity ["seconds", "operations", "operations_per_s", "reductions_per_operation"]
@@ -113,7 +124,8 @@ defmodule PresenceBench do
     repeats: :integer,
     backends: :string,
     out: :string,
-    compare: :string
+    compare: :string,
+    scoped_cpu: :boolean
   ]
   @base_settings %{
     tenants: 20,
@@ -123,7 +135,8 @@ defmodule PresenceBench do
     repeats: 5,
     backends: @backends,
     out: nil,
-    compare: nil
+    compare: nil,
+    scoped_cpu: false
   }
 
   ## Entry point
@@ -355,8 +368,15 @@ defmodule PresenceBench do
       duration_ms: ended - started,
       output: output,
       nodes: summarize_window(start, finish),
-      cpu: cpu_busy(start, finish)
+      cpu: cpu_busy(start, finish),
+      scoped_cpu: scoped_cpu_busy(finish)
     }
+  end
+
+  # The CPU seconds that the measured processes of each node used for each second of the window.
+  # The map is empty when the run does not have `--scoped-cpu`.
+  defp scoped_cpu_busy(finish) do
+    for {node, %{scoped_cpu: %{busy_ns: busy, wall_ns: wall}}} <- finish, into: %{}, do: {node, busy / wall}
   end
 
   defp topics(entries) do
@@ -395,7 +415,8 @@ defmodule PresenceBench do
 
   defp total_entries(counts), do: counts |> Enum.map(&elem(&1, 1)) |> Enum.sum()
 
-  defp snapshots(ctx, mode), do: Map.new(on_nodes_with_node(ctx, PresenceBench.Node, :snapshot, [mode]))
+  defp snapshots(ctx, mode),
+    do: Map.new(on_nodes_with_node(ctx, PresenceBench.Node, :snapshot, [mode, ctx.settings.scoped_cpu]))
 
   defp on_nodes_with_node(ctx, module, function, args) do
     parallel(ctx.nodes, fn node -> {node, rpc(node, module, function, args)} end)
@@ -636,10 +657,11 @@ defmodule PresenceBench do
              figures(Enum.find(run.windows, &(&1.label == label)), backend)
            end
 
-         {label,
-          Map.new(@metrics ++ @activity, fn name ->
-            {name, stats(Enum.map(figures, &Map.fetch!(&1, name)))}
-          end)}
+         # A figure that a run did not measure is nil, and the summary leaves it out.
+         names =
+           Enum.filter(@metrics ++ @scoped_metrics ++ @activity, fn name -> Enum.all?(figures, &(&1[name] != nil)) end)
+
+         {label, Map.new(names, fn name -> {name, stats(Enum.map(figures, &Map.fetch!(&1, name)))} end)}
        end}
     end
   end
@@ -654,6 +676,7 @@ defmodule PresenceBench do
     %{
       "reductions_per_s" => sum.(:reductions) / seconds,
       "cpu_s_per_s" => window.cpu |> Map.values() |> Enum.sum(),
+      "cpu_scoped_s_per_s" => if(map_size(window.scoped_cpu) > 0, do: window.scoped_cpu |> Map.values() |> Enum.sum()),
       "memory_bytes" => sum.(:memory_bytes),
       "seconds" => seconds,
       "operations" => operations,
@@ -694,10 +717,9 @@ defmodule PresenceBench do
     rows =
       for {backend, windows} <- Enum.sort(result["summary"]),
           label <- @windows,
-          metric <- @metrics,
-          before = get_in(old, ["summary", backend, label, metric]) do
-        now = windows[label][metric]
-
+          metric <- @metrics ++ @scoped_metrics,
+          before = get_in(old, ["summary", backend, label, metric]),
+          now = windows[label][metric] do
         %{
           "backend" => backend,
           "window" => label,

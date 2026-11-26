@@ -16,6 +16,7 @@ defmodule Report do
   @metrics [
     {"reductions_per_s", "Reductions per second", :count},
     {"cpu_s_per_s", "CPU seconds per second", :cpu},
+    {"cpu_scoped_s_per_s", "CPU seconds per second of the measured processes", :cpu_fine},
     {"memory_bytes", "Memory", :bytes}
   ]
   @windows [{"join", "Join"}, {"steady", "Steady"}]
@@ -91,6 +92,10 @@ defmodule Report do
 
   defp caption("cpu_s_per_s", now) do
     "CPU time of the schedulers for each second of the window, all #{now["workload"]["nodes"]} nodes added together. It covers the whole node, including the clients."
+  end
+
+  defp caption("cpu_scoped_s_per_s", now) do
+    "Time that the Phoenix shards or the Rollcall trackers held a scheduler for each second of the window, all #{now["workload"]["nodes"]} nodes added together. It covers these processes only, with their BIFs and garbage collections. The tracing that measures it adds work to the node, so compare it only with the scoped figure of another run."
   end
 
   defp caption("memory_bytes", now) do
@@ -186,12 +191,16 @@ defmodule Report do
   # Round ticks in the unit of the labels: MiB or KiB for bytes, so the ticks read 2, 4, 6 MiB.
   defp ticks(hi, unit) do
     scale = tick_scale(hi, unit)
-    top = max(hi, 1) / scale
+    top = max(hi, tick_floor(unit)) / scale
     raw = top / 4
     mag = :math.pow(10, Float.floor(:math.log10(raw)))
     step = Enum.find([1, 2, 5, 10], &(&1 * mag >= raw)) * mag
     for i <- 0..ceil(top / step), do: i * step * scale
   end
+
+  # The smallest top of an axis. The scoped CPU is small, so its axis starts lower.
+  defp tick_floor(:cpu_fine), do: 0.01
+  defp tick_floor(_unit), do: 1
 
   defp tick_scale(hi, :bytes) when hi >= 1_048_576, do: 1_048_576
   defp tick_scale(hi, :bytes) when hi >= 1024, do: 1024
@@ -261,6 +270,7 @@ defmodule Report do
   defp fmt(v, :bytes) when v >= 1024, do: "#{trim(v / 1024)} KiB"
   defp fmt(v, :bytes), do: "#{trim(v)} B"
   defp fmt(v, :cpu), do: :erlang.float_to_binary(v / 1, decimals: 2)
+  defp fmt(v, :cpu_fine), do: :erlang.float_to_binary(v / 1, decimals: 3)
   defp fmt(v, :count) when v >= 1_000_000, do: "#{trim(v / 1_000_000)}M"
   defp fmt(v, :count) when v >= 1000, do: "#{trim(v / 1000)}k"
   defp fmt(v, :count), do: trim(v)

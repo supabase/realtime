@@ -90,24 +90,127 @@ defmodule PresenceBench.Node do
   #
   # The scheduler wall time covers the whole node, not only the measured processes. It includes the
   # clients of the benchmark.
-  def snapshot(:start) do
+  #
+  # With `scoped_cpu?`, the window also measures the CPU time of the measured processes alone. See
+  # `start_cpu_trace/1`.
+  def snapshot(mode, scoped_cpu? \\ false)
+
+  def snapshot(:start, scoped_cpu?) do
     hold_scheduler_wall_time()
     procs = phoenix_procs() ++ rollcall_procs()
     gc(procs)
+    if scoped_cpu?, do: start_cpu_trace(procs)
 
     %{processes: read(procs), schedulers: schedulers()}
   end
 
-  def snapshot(:end) do
+  def snapshot(:end, scoped_cpu?) do
     procs = phoenix_procs() ++ rollcall_procs()
+    scoped_cpu = if scoped_cpu?, do: stop_cpu_trace(procs)
     reductions = Map.new(procs, &{&1.pid, reductions(&1.pid)})
     schedulers = schedulers()
     gc(procs)
 
     %{
       processes: for(reading <- read(procs), do: %{reading | reductions: Map.fetch!(reductions, reading.pid)}),
-      schedulers: schedulers
+      schedulers: schedulers,
+      scoped_cpu: scoped_cpu
     }
+  end
+
+  # The CPU time of the measured processes alone, without the clients and the rest of the node.
+  #
+  # The VM traces when each process starts and stops to run. A tracer process adds up the time from
+  # each "in" to the next "out". That time is the time that the process held a scheduler: its own
+  # code, the BIFs that it called and its garbage collections. Each node runs one scheduler per
+  # share of the cores, so the process does not wait for another process that runs on the scheduler
+  # in that span.
+  #
+  # The tracing adds work to the node: one message for each time that a process starts or stops.
+  # The tracer runs on the node, so the CPU seconds of the node include it. They are not comparable
+  # with the CPU seconds of a run without the option.
+  @cpu_tracer PresenceBench.Node.CpuTracer
+
+  defp start_cpu_trace(procs) do
+    if old = Process.whereis(@cpu_tracer), do: Process.exit(old, :kill)
+
+    tracer = spawn(fn -> cpu_tracer(%{}, 0, nil) end)
+    Process.register(tracer, @cpu_tracer)
+    pids = Enum.map(procs, & &1.pid)
+    started = System.monotonic_time()
+
+    traced =
+      for pid <- pids, traced?(pid, tracer) do
+        pid
+      end
+
+    :persistent_term.put({__MODULE__, :cpu_trace}, {traced, started})
+  end
+
+  # A process can exit between the listing and the trace call.
+  defp traced?(pid, tracer) do
+    :erlang.trace(pid, true, [:running_procs, :monotonic_timestamp, {:tracer, tracer}])
+    true
+  rescue
+    ArgumentError -> false
+  end
+
+  # The result is nil when a measured process started after the start of the window, because the
+  # trace never saw it. This is the case for the Rollcall trackers in the join window, which starts
+  # them.
+  defp stop_cpu_trace(procs_at_end) do
+    {pids, started} = :persistent_term.get({__MODULE__, :cpu_trace})
+    ended = System.monotonic_time()
+    complete? = MapSet.subset?(MapSet.new(procs_at_end, & &1.pid), MapSet.new(pids))
+
+    for pid <- pids do
+      try do
+        :erlang.trace(pid, false, [:all])
+      rescue
+        ArgumentError -> :ok
+      end
+    end
+
+    ref = make_ref()
+    send(@cpu_tracer, {:stop, self(), ref})
+
+    receive do
+      {^ref, _busy} when not complete? ->
+        nil
+
+      {^ref, busy} ->
+        %{
+          busy_ns: System.convert_time_unit(busy, :native, :nanosecond),
+          wall_ns: System.convert_time_unit(ended - started, :native, :nanosecond)
+        }
+    after
+      30_000 -> raise "the CPU tracer did not answer"
+    end
+  end
+
+  # `running` holds when each traced process started to run. `busy` is the total time that the
+  # processes ran. After the stop, the tracer waits until the VM delivered every trace message.
+  defp cpu_tracer(running, busy, waiting) do
+    receive do
+      {:trace_ts, pid, :in, _mfa, ts} ->
+        cpu_tracer(Map.put(running, pid, ts), busy, waiting)
+
+      {:trace_ts, pid, :out, _mfa, ts} ->
+        case Map.pop(running, pid) do
+          {nil, running} -> cpu_tracer(running, busy, waiting)
+          {since, running} -> cpu_tracer(running, busy + ts - since, waiting)
+        end
+
+      {:stop, from, ref} ->
+        cpu_tracer(running, busy, {from, ref, :erlang.trace_delivered(:all)})
+
+      {:trace_delivered, _tracee, delivered} ->
+        {from, ref, ^delivered} = waiting
+        send(from, {ref, busy})
+
+      _other ->
+        cpu_tracer(running, busy, waiting)
+    end
   end
 
   # The scheduler wall time flag belongs to the process that sets it. The flag clears when that
