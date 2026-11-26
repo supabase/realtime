@@ -62,6 +62,21 @@ defmodule Rollcall.TrackerRequestTest do
       assert :request in kinds(receive_messages(probe, 2))
     end
 
+    test "sends no request to a peer that the tick purges", %{scope: scope, network: network, probe: probe} do
+      tracker = start_node(scope, network, @node_a, silence_threshold: 2)
+      make_behind(tracker, probe)
+
+      # The first tick keeps the peer, so it sends the heartbeat and the request.
+      tick(tracker)
+      assert :request in kinds(receive_messages(probe, 2))
+
+      # The second tick purges the peer, so it sends the heartbeat only.
+      tick(tracker)
+
+      assert kind(receive_message(probe)) in [:snapshot, :diff]
+      refute_receive {:in_memory, _scope, _node, _message}, 50
+    end
+
     test "sends no request after a snapshot of the peer cleared behind", %{
       scope: scope,
       network: network,

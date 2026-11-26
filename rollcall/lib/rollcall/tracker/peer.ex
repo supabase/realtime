@@ -152,7 +152,7 @@ defmodule Rollcall.Tracker.Peer do
 
   @doc "Returns true when the peer is holds no entries"
   @spec empty?(t()) :: boolean()
-  def empty?(%__MODULE__{replica: replica}), do: Enum.empty?(replica)
+  def empty?(%__MODULE__{replica: replica}), do: map_size(replica) == 0
 
   @doc "Returns true when the peer knows it missed a message that is newer than its mark."
   @spec behind?(t()) :: boolean()
@@ -212,6 +212,8 @@ defmodule Rollcall.Tracker.Peer do
   end
 
   @spec apply_diff(t(), [Messages.wire_entry()], [Rollcall.ref()]) :: {t(), Changes.t()}
+  defp apply_diff(peer, [], []), do: {peer, Changes.new()}
+
   defp apply_diff(%__MODULE__{replica: old} = peer, joins, leaves) do
     joined_refs_to_partition = wire_to_ref_map(joins)
     joined_entries = wire_to_new_entries(joins, old)

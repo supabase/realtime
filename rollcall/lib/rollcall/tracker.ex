@@ -615,8 +615,7 @@ defmodule Rollcall.Tracker do
       :noreply,
       state
       |> send_heartbeat()
-      |> tick_and_purge_peers()
-      |> send_requests_for_behind_peers()
+      |> tick_purge_and_request_snapshots_for_peers()
       |> schedule_heartbeat()
       |> emit_usage_metrics()
     }
@@ -749,16 +748,26 @@ defmodule Rollcall.Tracker do
 
     state = State.put_peer(state, node, peer)
 
-    {state, View.write(state.view, changes)}
+    {state,
+     if Changes.empty?(changes) do
+       nil
+     else
+       View.write(state.view, changes)
+     end}
   end
 
-  defp tick_and_purge_peers(%State{} = state) do
-    peers =
-      Enum.reduce(state.peers, %{}, fn
-        {node, peer}, kept ->
+  defp tick_purge_and_request_snapshots_for_peers(%State{} = state) do
+    {peers, overdue_count, max_silent_ticks, behind_nodes} =
+      Enum.reduce(state.peers, {%{}, 0, 0, []}, fn
+        {node, peer}, {kept, overdue_count, max_silent_ticks, behind_nodes} = acc ->
           case Peer.tick(peer, state.silence_threshold) do
             {:keep, peer} ->
-              Map.put(kept, node, peer)
+              {
+                Map.put(kept, node, peer),
+                if(Peer.overdue?(peer), do: overdue_count + 1, else: overdue_count),
+                if(Peer.empty?(peer), do: max_silent_ticks, else: max(max_silent_ticks, peer.silent_ticks)),
+                if(Peer.behind?(peer), do: [node | behind_nodes], else: behind_nodes)
+              }
 
             {:purge, changes} ->
               committed = View.write(state.view, changes)
@@ -783,29 +792,21 @@ defmodule Rollcall.Tracker do
                 %{node: node, scope: state.scope, stale: purge_count > 0}
               )
 
-              kept
+              acc
           end
       end)
 
-    emit_peer_metric(state, peers)
+    emit_peer_metric(state, peers, overdue_count, max_silent_ticks)
 
-    %{state | peers: peers}
+    send_requests_for_behind_nodes(%{state | peers: peers}, behind_nodes)
   end
 
-  defp emit_peer_metric(state, peers) do
-    peer_list = Map.values(peers)
-
-    max_silent_ticks =
-      peer_list
-      |> Stream.reject(&Peer.empty?/1)
-      |> Stream.map(& &1.silent_ticks)
-      |> Enum.max(fn -> 0 end)
-
+  defp emit_peer_metric(state, peers, overdue_count, max_silent_ticks) do
     :telemetry.execute(
       Metrics.tracker_peers(),
       %{
         count: map_size(peers),
-        overdue_count: Enum.count(peer_list, &Peer.overdue?/1),
+        overdue_count: overdue_count,
         max_silent_ticks: max_silent_ticks
       },
       %{
@@ -978,8 +979,8 @@ defmodule Rollcall.Tracker do
     state
   end
 
-  defp send_requests_for_behind_peers(%State{peers: peers, scope: scope} = state) do
-    for {node, peer} <- peers, Peer.behind?(peer) do
+  defp send_requests_for_behind_nodes(%State{scope: scope} = state, behind_nodes) do
+    for node <- behind_nodes do
       state.transport_module.send_to(state.transport_state, node, Messages.request(self()))
 
       :telemetry.execute(Metrics.tracker_request_send(), %{}, %{scope: scope, node: node})

@@ -21,25 +21,25 @@ defmodule Rollcall.Tracker.Changes do
 
   @opaque t :: %__MODULE__{
             joins: %{View.id() => {Rollcall.key(), Rollcall.meta()}},
-            leaves: MapSet.t(View.id())
+            leaves: %{View.id() => true}
           }
 
   @doc "Returns changes with no join and no leave."
   @spec new() :: t()
-  def new, do: new([], [])
+  def new, do: %__MODULE__{joins: %{}, leaves: %{}}
 
   @doc "Returns changes with the given `joins` and `leaves`."
   @spec new([Rollcall.partitioned_entry()], [View.id()]) :: t()
   def new(joins, leaves) do
     %__MODULE__{
       joins: Map.new(joins, fn {partition, ref, key, meta} -> {{partition, ref}, {key, meta}} end),
-      leaves: MapSet.new(leaves)
+      leaves: Map.new(leaves, fn {partition, ref} -> {{partition, ref}, true} end)
     }
   end
 
   @doc "Returns true when `changes` have no join and no leave."
   @spec empty?(t()) :: boolean()
-  def empty?(%__MODULE__{joins: joins, leaves: leaves}), do: map_size(joins) == 0 and MapSet.size(leaves) == 0
+  def empty?(%__MODULE__{joins: joins, leaves: leaves}), do: joins == %{} and leaves == %{}
 
   @doc "Adds `entry` to the joins."
   @spec join(t(), Rollcall.partitioned_entry()) :: t()
@@ -49,12 +49,16 @@ defmodule Rollcall.Tracker.Changes do
 
   @doc "Returns the joins as partitioned entries. The order is not defined."
   @spec joins(t()) :: [Rollcall.partitioned_entry()]
+  def joins(%__MODULE__{joins: joins}) when joins == %{}, do: []
+
   def joins(%__MODULE__{joins: joins}) do
     Enum.map(joins, fn {{partition, ref}, {key, meta}} -> {partition, ref, key, meta} end)
   end
 
   @doc "Returns the refs of the joins."
   @spec join_refs(t()) :: [Rollcall.ref()]
+  def join_refs(%__MODULE__{joins: joins}) when joins == %{}, do: []
+
   def join_refs(%__MODULE__{joins: joins}) do
     joins
     |> Map.keys()
@@ -63,18 +67,20 @@ defmodule Rollcall.Tracker.Changes do
 
   @doc "Returns the refs of the leaves."
   @spec leave_refs(t()) :: [Rollcall.ref()]
+  def leave_refs(%__MODULE__{leaves: leaves}) when leaves == %{}, do: []
+
   def leave_refs(%__MODULE__{leaves: leaves}) do
-    Enum.map(leaves, fn {_partition, ref} -> ref end)
+    Enum.map(leaves, fn {{_partition, ref}, _} -> ref end)
   end
 
   @doc "Returns the ids of the leaves. The order is not defined."
   @spec leaves(t()) :: [View.id()]
-  def leaves(%__MODULE__{leaves: leaves}), do: MapSet.to_list(leaves)
+  def leaves(%__MODULE__{leaves: leaves}), do: Map.keys(leaves)
 
   @doc "Adds `entry` to the leaves."
   @spec leave(t(), View.id()) :: t()
   def leave(%__MODULE__{leaves: leaves} = changes, {_partition, _ref} = leave) do
-    %{changes | leaves: MapSet.put(leaves, leave)}
+    %{changes | leaves: Map.put(leaves, leave, true)}
   end
 
   @doc """
@@ -85,12 +91,14 @@ defmodule Rollcall.Tracker.Changes do
   """
   @spec merge(t(), t()) :: t()
   def merge(%__MODULE__{} = c1, %__MODULE__{} = c2) do
-    join_union = Map.merge(c1.joins, c2.joins)
-    leave_union = MapSet.union(c1.leaves, c2.leaves)
+    joined = %{c1 | joins: Map.merge(c1.joins, c2.joins)}
 
-    %__MODULE__{
-      joins: Map.drop(join_union, MapSet.to_list(leave_union)),
-      leaves: MapSet.difference(leave_union, MapSet.new(Map.keys(join_union)))
-    }
+    Enum.reduce(c2.leaves, joined, fn {id, true}, acc ->
+      if Map.has_key?(acc.joins, id) do
+        %{acc | joins: Map.delete(acc.joins, id)}
+      else
+        %{acc | leaves: Map.put(acc.leaves, id, true)}
+      end
+    end)
   end
 end
