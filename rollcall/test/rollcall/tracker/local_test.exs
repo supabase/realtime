@@ -3,6 +3,7 @@ defmodule Rollcall.Tracker.LocalTest do
 
   import Rollcall.RefHelpers
 
+  alias Rollcall.Tracker.Changes
   alias Rollcall.Tracker.Local
 
   describe "new/0" do
@@ -15,9 +16,10 @@ defmodule Rollcall.Tracker.LocalTest do
     test "returns the new entry as a join and holds its id" do
       ref = unique_ref()
 
-      assert {%{joins: [{"partition", ^ref, "key", %{a: 1}}], leaves: []}, local} =
-               Local.track(Local.new(), new_pid(), "partition", "key", %{a: 1}, ref)
+      {changes, local} = Local.track(Local.new(), new_pid(), "partition", "key", %{a: 1}, ref)
 
+      assert Changes.joins(changes) == [{"partition", ref, "key", %{a: 1}}]
+      assert Changes.leaves(changes) == []
       assert ids(local) == [{"partition", ref}]
     end
 
@@ -64,9 +66,10 @@ defmodule Rollcall.Tracker.LocalTest do
         expected_meta = Map.put(meta, :rc_prev_ref, old_ref)
         old_id = {"partition", old_ref}
 
-        assert {%{joins: [{"partition", ^ref, "key", ^expected_meta}], leaves: [^old_id]}, local} =
-                 Local.track(local, pid, "partition", "key", meta, ref)
+        {changes, local} = Local.track(local, pid, "partition", "key", meta, ref)
 
+        assert Changes.joins(changes) == [{"partition", ref, "key", expected_meta}]
+        assert Changes.leaves(changes) == [old_id]
         assert ids(local) == [{"partition", ref}]
       end
     end
@@ -74,9 +77,9 @@ defmodule Rollcall.Tracker.LocalTest do
     test "overwrites :rc_prev_ref in the meta of the caller", %{pid: pid, old_ref: old_ref, local: local} do
       meta = %{a: 2, rc_prev_ref: "from-the-caller"}
 
-      {%{joins: [{_partition, _ref, _key, new_meta}]}, _local} =
-        Local.track(local, pid, "partition", "key", meta, unique_ref())
+      {changes, _local} = Local.track(local, pid, "partition", "key", meta, unique_ref())
 
+      assert [{_partition, _ref, _key, new_meta}] = Changes.joins(changes)
       assert new_meta.rc_prev_ref == old_ref
     end
 
@@ -95,15 +98,17 @@ defmodule Rollcall.Tracker.LocalTest do
       pid = new_pid()
       {id, local} = track!(Local.new(), pid, "partition", "key")
 
-      assert {%{joins: [], leaves: [^id]}, _local} =
-               Local.untrack(local, pid, "partition", "key")
+      {changes, _local} = Local.untrack(local, pid, "partition", "key")
+
+      assert Changes.joins(changes) == []
+      assert Changes.leaves(changes) == [id]
     end
 
     test "returns no change and the same set when nothing matches" do
       {_id, local} = track!(Local.new(), new_pid(), "partition", "key")
 
-      assert {%{joins: [], leaves: []}, ^local} =
-               Local.untrack(local, new_pid(), "partition", "key")
+      assert {changes, ^local} = Local.untrack(local, new_pid(), "partition", "key")
+      assert Changes.empty?(changes)
     end
 
     test "keeps the entry of another pid for the same key" do
@@ -131,8 +136,10 @@ defmodule Rollcall.Tracker.LocalTest do
       {_id, local} = track!(Local.new(), pid, "partition", "key")
       {_changes, local} = Local.untrack(local, pid, "partition", "key")
 
-      assert {%{joins: [_join], leaves: []}, _local} =
-               Local.track(local, pid, "partition", "key", %{}, unique_ref())
+      {changes, _local} = Local.track(local, pid, "partition", "key", %{}, unique_ref())
+
+      assert [_join] = Changes.joins(changes)
+      assert Changes.leaves(changes) == []
     end
   end
 
@@ -142,9 +149,10 @@ defmodule Rollcall.Tracker.LocalTest do
       {id_1, local} = track!(Local.new(), pid, "partition_1", "key_1")
       {id_2, local} = track!(local, pid, "partition_2", "key_2")
 
-      {%{joins: [], leaves: leaves}, _local} = Local.untrack_pid(local, pid)
+      {changes, _local} = Local.untrack_pid(local, pid)
 
-      assert Enum.sort(leaves) == Enum.sort([id_1, id_2])
+      assert Changes.joins(changes) == []
+      assert Enum.sort(Changes.leaves(changes)) == Enum.sort([id_1, id_2])
     end
 
     test "keeps the entries of other pids" do
@@ -160,7 +168,8 @@ defmodule Rollcall.Tracker.LocalTest do
     test "returns no change and the same set for a pid with no entry" do
       {_id, local} = track!(Local.new(), new_pid(), "partition", "key")
 
-      assert {%{joins: [], leaves: []}, ^local} = Local.untrack_pid(local, new_pid())
+      assert {changes, ^local} = Local.untrack_pid(local, new_pid())
+      assert Changes.empty?(changes)
     end
   end
 
@@ -301,8 +310,8 @@ defmodule Rollcall.Tracker.LocalTest do
 
     {changes, local} = Local.track(local, pid, partition, key, meta, ref)
 
-    assert changes.joins == [{partition, ref, key, meta}]
-    assert changes.leaves == []
+    assert Changes.joins(changes) == [{partition, ref, key, meta}]
+    assert Changes.leaves(changes) == []
 
     {{partition, ref}, local}
   end

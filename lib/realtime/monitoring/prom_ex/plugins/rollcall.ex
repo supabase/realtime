@@ -28,7 +28,8 @@ defmodule Realtime.PromEx.Plugins.Rollcall do
       the changes of a partition, by `source`: `local`, `peer` or `purge`. It depends on the
       subscribers of the partition, so it is apart from the apply duration.
     * `realtime_rollcall_heartbeat_send_entries` - a distribution of the entries in each heartbeat
-      that a tracker sends, by `kind`. A snapshot holds all the local entries of the tracker.
+      that a tracker sends, by `kind`. A snapshot holds all the local entries of the tracker. A diff
+      holds its joins and its leaves.
     * `realtime_rollcall_publish_entries` - the joins and the leaves that trackers publish, by
       `source`. It is the churn of the entries.
     * `realtime_rollcall_tracker_entries` - a distribution of the entries in the view of a tracker:

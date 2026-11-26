@@ -75,7 +75,7 @@ defmodule Rollcall.ReplicationTest do
   end
 
   describe "a lost heartbeat" do
-    test "is repaired by the next heartbeat", %{network: network, a: a, b: b} do
+    test "is repaired by a request after the next heartbeat", %{network: network, a: a, b: b} do
       client = start_client()
       ref_1 = track(a, client, "partition", "key_1")
       tick(a)
@@ -86,7 +86,14 @@ defmodule Rollcall.ReplicationTest do
       sync(b)
       assert refs(peer(b, @node_a)) == [ref_1]
 
+      # The next diff starts after the lost diff, so B cannot apply it.
       tick(a)
+      sync(b)
+      assert refs(peer(b, @node_a)) == [ref_1]
+
+      # B asks for a snapshot in its next tick.
+      tick(b)
+      sync(a)
       sync(b)
       assert refs(peer(b, @node_a)) == Enum.sort([ref_1, ref_2])
     end

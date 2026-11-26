@@ -64,6 +64,8 @@ defmodule Rollcall.Tracker.State do
     :transport_state,
     :heartbeat_period_in_ms,
     :reductions,
+    :last_tick_version,
+    :changes_since_last_tick,
     empty_timer: nil,
     version: 0,
     monitors: %{},
@@ -79,6 +81,8 @@ defmodule Rollcall.Tracker.State do
           local: Local.t(),
           view: View.t(),
           version: non_neg_integer(),
+          last_tick_version: non_neg_integer() | nil,
+          changes_since_last_tick: Changes.t() | nil,
           monitors: %{pid() => reference()},
           peers: %{node() => Peer.t()},
           silence_threshold: pos_integer(),
@@ -92,7 +96,11 @@ defmodule Rollcall.Tracker.State do
   """
   @spec apply_changes(t(), Local.t(), Changes.t()) :: t()
   def apply_changes(%__MODULE__{} = state, local, changes) do
-    state = %{state | local: local}
+    state = %{
+      state
+      | local: local,
+        changes_since_last_tick: Changes.merge(state.changes_since_last_tick || Changes.new(), changes)
+    }
 
     if Changes.empty?(changes) do
       state
@@ -109,6 +117,15 @@ defmodule Rollcall.Tracker.State do
   @spec current_stamp(t()) :: Messages.stamp()
   def current_stamp(%__MODULE__{incarnation: incarnation, version: version}) do
     Messages.stamp(incarnation, version)
+  end
+
+  @spec heartbeat_sent(t()) :: t()
+  def heartbeat_sent(%__MODULE__{} = state) do
+    %{
+      state
+      | last_tick_version: state.version,
+        changes_since_last_tick: Changes.new()
+    }
   end
 
   @inspectable_keys [:incarnation, :scope, :version, :local, :peers]

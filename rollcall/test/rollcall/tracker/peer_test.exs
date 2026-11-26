@@ -4,6 +4,7 @@ defmodule Rollcall.Tracker.PeerTest do
   import Rollcall.PeerHelpers
   import Rollcall.Tracker.Messages, only: [diff: 5, request: 1, snapshot: 3, stamp: 2, wire_entry: 4]
 
+  alias Rollcall.Tracker.Changes
   alias Rollcall.Tracker.Peer
 
   setup do
@@ -46,7 +47,7 @@ defmodule Rollcall.Tracker.PeerTest do
 
       assert Enum.sort(Peer.entries(peer)) == [{"partition_1", "a"}, {"partition_1", "c"}, {"partition_2", "b"}]
 
-      assert Enum.sort(changes.joins) == [
+      assert Enum.sort(Changes.joins(changes)) == [
                {"partition_1", "a", "key_1", %{a: 1}},
                {"partition_1", "c", "key_2", %{}},
                {"partition_2", "b", "key_1", %{b: 2}}
@@ -59,7 +60,7 @@ defmodule Rollcall.Tracker.PeerTest do
 
       {_peer, changes} = Peer.apply(peer, diff(origin, stamp(1, 4), 3, [joined], []))
 
-      assert changes.joins == [{"partition_2", "b", "key_1", %{b: 2}}]
+      assert Changes.joins(changes) == [{"partition_2", "b", "key_1", %{b: 2}}]
     end
 
     test "a leave removes the entry with its ref and keeps the entry with the same key",
@@ -71,7 +72,7 @@ defmodule Rollcall.Tracker.PeerTest do
       {peer, changes} = Peer.apply(peer, diff(origin, stamp(1, 4), 3, [], ["a"]))
 
       assert Peer.entries(peer) == [{"partition", "b"}]
-      assert changes.leaves == [{"partition", "a"}]
+      assert Changes.leaves(changes) == [{"partition", "a"}]
     end
 
     test "a wire entry of the wrong shape is rejected", %{origin: origin} do

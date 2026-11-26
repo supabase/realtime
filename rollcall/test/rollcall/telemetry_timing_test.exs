@@ -77,6 +77,21 @@ defmodule Rollcall.TelemetryTimingTest do
       assert is_integer(duration) and duration >= 0
     end
 
+    test "counts the joins and the leaves of a diff as its entries", %{scope: scope, rollcall: rollcall} do
+      tracker = start_tracker(rollcall, scope, @threshold)
+      client = start_client()
+      track(tracker, client, "partition", "key_1")
+      tick(tracker)
+      track(tracker, client, "partition", "key_2")
+      track(tracker, client, "partition", "key_3")
+      untrack(tracker, client, "partition", "key_1")
+
+      tick(tracker)
+
+      assert_receive {:telemetry, @send, %{duration: duration, entries: 3}, %{scope: ^scope, kind: :diff}}
+      assert is_integer(duration) and duration >= 0
+    end
+
     test "measures the call to the transport", %{scope: scope, rollcall: rollcall} do
       tracker = start_tracker_with(rollcall, scope, {SlowTransport, heartbeat_ms: 30})
 

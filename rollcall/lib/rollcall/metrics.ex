@@ -62,10 +62,11 @@ defmodule Rollcall.Metrics do
       `Rollcall.Transport.heartbeat/2`.
 
       Measurements: `duration` and `entries`. The `duration` is in native time
-      units. `entries` is the number of entries in the message.
+      units. `entries` is the number of entries in the message. For a diff, it
+      is the number of joins plus the number of leaves.
 
       Metadata: `scope` and `kind`. The `kind` is the kind of the message:
-      `:snapshot` or `:diff`. The tracker sends only snapshots today.
+      `:snapshot` or `:diff`.
 
     * `tracker_heartbeat_apply/0` - the tracker applied a message from a peer.
       The event measures the time that the tracker spends to change the peer

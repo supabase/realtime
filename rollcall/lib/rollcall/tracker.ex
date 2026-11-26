@@ -11,7 +11,8 @@ defmodule Rollcall.Tracker do
 
   This module describes the finished design. The tracker does not yet do this:
 
-    * hold `sent`, the state at the last heartbeat
+    * send a snapshot with `c:Rollcall.Transport.send_to/3` to a peer that got a
+      reply, when the next diff does not apply to that peer. See "Requests".
 
   ## Process monitoring
 
@@ -49,9 +50,12 @@ defmodule Rollcall.Tracker do
 
   ## Heartbeat
 
-  A tick sends one snapshot of `local` to the peers and counts one quiet period
-  for each peer record. The `:heartbeat_period_in_ms` option of `start_link/1` sets the
-  time between ticks, in milliseconds. The default is 1500. 
+  A tick sends one heartbeat to the peers and counts one quiet period for each
+  peer record. The first heartbeat after the tracker starts is a snapshot of
+  `local`. Each later heartbeat is a diff: the net change since the previous
+  heartbeat. An entry that joined and left in that time is not in the diff. A
+  diff with no entry is the keepalive. The `:heartbeat_period_in_ms` option of
+  `start_link/1` sets the time between ticks, in milliseconds. The default is 1500. 
 
   A tracker that stops sends a goodbye from `terminate/2`. The tracker traps
   exits, so a supervisor shutdown also reaches `terminate/2`. The goodbye is a
@@ -110,9 +114,11 @@ defmodule Rollcall.Tracker do
       the grace period started.
     * `:rollcall_tracker_stopped` - the timer expired. The tracker stops after
       the event.
-    * `:rollcall_tracker_heartbeat_sent` - a tick sent a snapshot. The event has
-      the keys `scope`, `origin`, `kind`, `version` and `refs`. `kind` is
-      `:snapshot`. `refs` lists the refs of the entries in the message.
+    * `:rollcall_tracker_heartbeat_sent` - a tick sent a heartbeat. The event has
+      the keys `scope`, `origin`, `kind` and `version`. `kind` is `:snapshot` or
+      `:diff`. A snapshot has the key `refs`: the refs of the entries in the
+      message. A diff has the keys `from`, `joins` and `leaves`. `from` is the
+      version of the previous heartbeat. `joins` and `leaves` list the refs.
     * `:rollcall_tracker_goodbye_sent` - the tracker sent the goodbye. The event
       has the keys `scope`, `origin` and `version`. The `version` is the version
       of the goodbye message.
@@ -480,7 +486,8 @@ defmodule Rollcall.Tracker do
       heartbeat_period_in_ms: Keyword.get(opts, :heartbeat_period_in_ms, @default_heartbeat_period_in_ms),
       transport_module: transport_module,
       transport_state: transport_state,
-      reductions: reductions
+      reductions: reductions,
+      changes_since_last_tick: Changes.new()
     }
 
     # Trap exists in this process so we get terminate/2 callbacks and can send goodbye messages
@@ -608,8 +615,7 @@ defmodule Rollcall.Tracker do
       :noreply,
       state
       |> send_heartbeat()
-      |> tick_and_purge_peers()
-      |> send_requests_for_behind_peers()
+      |> tick_purge_and_request_snapshots_for_peers()
       |> schedule_heartbeat()
       |> emit_usage_metrics()
     }
@@ -742,16 +748,26 @@ defmodule Rollcall.Tracker do
 
     state = State.put_peer(state, node, peer)
 
-    {state, View.write(state.view, changes)}
+    {state,
+     if Changes.empty?(changes) do
+       nil
+     else
+       View.write(state.view, changes)
+     end}
   end
 
-  defp tick_and_purge_peers(%State{} = state) do
-    peers =
-      Enum.reduce(state.peers, %{}, fn
-        {node, peer}, kept ->
+  defp tick_purge_and_request_snapshots_for_peers(%State{} = state) do
+    {peers, overdue_count, max_silent_ticks, behind_nodes} =
+      Enum.reduce(state.peers, {%{}, 0, 0, []}, fn
+        {node, peer}, {kept, overdue_count, max_silent_ticks, behind_nodes} = acc ->
           case Peer.tick(peer, state.silence_threshold) do
             {:keep, peer} ->
-              Map.put(kept, node, peer)
+              {
+                Map.put(kept, node, peer),
+                if(Peer.overdue?(peer), do: overdue_count + 1, else: overdue_count),
+                if(Peer.empty?(peer), do: max_silent_ticks, else: max(max_silent_ticks, peer.silent_ticks)),
+                if(Peer.behind?(peer), do: [node | behind_nodes], else: behind_nodes)
+              }
 
             {:purge, changes} ->
               committed = View.write(state.view, changes)
@@ -768,7 +784,7 @@ defmodule Rollcall.Tracker do
                 ignore_side_effects: true
               )
 
-              purge_count = length(changes.leaves)
+              purge_count = length(Changes.leaves(changes))
 
               :telemetry.execute(
                 Metrics.tracker_peer_purge(),
@@ -776,29 +792,21 @@ defmodule Rollcall.Tracker do
                 %{node: node, scope: state.scope, stale: purge_count > 0}
               )
 
-              kept
+              acc
           end
       end)
 
-    emit_peer_metric(state, peers)
+    emit_peer_metric(state, peers, overdue_count, max_silent_ticks)
 
-    %{state | peers: peers}
+    send_requests_for_behind_nodes(%{state | peers: peers}, behind_nodes)
   end
 
-  defp emit_peer_metric(state, peers) do
-    peer_list = Map.values(peers)
-
-    max_silent_ticks =
-      peer_list
-      |> Stream.reject(&Peer.empty?/1)
-      |> Stream.map(& &1.silent_ticks)
-      |> Enum.max(fn -> 0 end)
-
+  defp emit_peer_metric(state, peers, overdue_count, max_silent_ticks) do
     :telemetry.execute(
       Metrics.tracker_peers(),
       %{
         count: map_size(peers),
-        overdue_count: Enum.count(peer_list, &Peer.overdue?/1),
+        overdue_count: overdue_count,
         max_silent_ticks: max_silent_ticks
       },
       %{
@@ -868,24 +876,33 @@ defmodule Rollcall.Tracker do
   end
 
   defp send_heartbeat(%State{} = state) do
-    {duration, entry_count} =
-      :timer.tc(
-        fn ->
-          snapshot_entries = View.fetch(state.view, Local.ids(state.local))
+    kind = choose_heartbeat_kind(state)
 
-          snapshot = Messages.snapshot(self(), State.current_stamp(state), snapshot_entries)
-
-          :ok = state.transport_module.heartbeat(state.transport_state, snapshot)
-
-          length(snapshot_entries)
-        end,
-        :native
-      )
+    {duration, entry_count} = :timer.tc(fn -> do_send_heartbeat(state, kind) end, :native)
 
     :telemetry.execute(Metrics.tracker_heartbeat_send(), %{duration: duration, entries: entry_count}, %{
       scope: state.scope,
-      kind: :snapshot
+      kind: kind
     })
+
+    State.heartbeat_sent(state)
+  end
+
+  defp choose_heartbeat_kind(%State{} = state) do
+    if is_nil(state.last_tick_version) do
+      :snapshot
+    else
+      :diff
+    end
+  end
+
+  defp do_send_heartbeat(%State{} = state, :snapshot) do
+    local_ids = Local.ids(state.local)
+    snapshot_entries = View.fetch(state.view, local_ids)
+
+    snapshot = Messages.snapshot(self(), State.current_stamp(state), snapshot_entries)
+
+    :ok = state.transport_module.heartbeat(state.transport_state, snapshot)
 
     tp(
       :rollcall_tracker_heartbeat_sent,
@@ -899,7 +916,32 @@ defmodule Rollcall.Tracker do
       ignore_side_effects: true
     )
 
-    state
+    length(snapshot_entries)
+  end
+
+  defp do_send_heartbeat(%State{changes_since_last_tick: changes} = state, :diff) do
+    joins = Changes.joins(changes)
+    leaves = Changes.leave_refs(changes)
+
+    diff = Messages.diff(self(), State.current_stamp(state), state.last_tick_version, joins, leaves)
+
+    :ok = state.transport_module.heartbeat(state.transport_state, diff)
+
+    tp(
+      :rollcall_tracker_heartbeat_sent,
+      %{
+        scope: state.scope,
+        origin: self(),
+        kind: :diff,
+        from: state.last_tick_version,
+        version: state.version,
+        joins: Changes.join_refs(changes),
+        leaves: Changes.leave_refs(changes)
+      },
+      ignore_side_effects: true
+    )
+
+    length(joins) + length(leaves)
   end
 
   defp send_snapshot(%State{local: local} = state, destination) do
@@ -937,8 +979,8 @@ defmodule Rollcall.Tracker do
     state
   end
 
-  defp send_requests_for_behind_peers(%State{peers: peers, scope: scope} = state) do
-    for {node, peer} <- peers, Peer.behind?(peer) do
+  defp send_requests_for_behind_nodes(%State{scope: scope} = state, behind_nodes) do
+    for node <- behind_nodes do
       state.transport_module.send_to(state.transport_state, node, Messages.request(self()))
 
       :telemetry.execute(Metrics.tracker_request_send(), %{}, %{scope: scope, node: node})
