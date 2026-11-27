@@ -70,7 +70,7 @@ defmodule Rollcall.TrackerTargetedSnapshotTest do
         end,
         fn _, trace ->
           # The tracker sent one targeted snapshot, and it went to the probe.
-          assert [%{node: @probe, tick: true}] = tick_replies(trace, scope)
+          assert [%{node: @probe, trigger: :tick}] = tick_replies(trace, scope)
         end
       )
     end
@@ -169,6 +169,6 @@ defmodule Rollcall.TrackerTargetedSnapshotTest do
   end
 
   defp tick_replies(trace, scope) do
-    trace |> events(@reply_sent, scope) |> Enum.filter(& &1.tick)
+    trace |> events(@reply_sent, scope) |> Enum.filter(&(&1.trigger == :tick))
   end
 end

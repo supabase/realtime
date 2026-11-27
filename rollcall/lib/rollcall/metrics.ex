@@ -115,9 +115,9 @@ defmodule Rollcall.Metrics do
       Measurements: `duration` and `entries`. The `duration` is in native time
       units. `entries` is the number of entries in the snapshot.
 
-      Metadata: `scope`, `node` and `tick`. `node` is the node of the peer.
-      `tick` is `false` for the reply to a request and `true` for a targeted
-      snapshot that a tick sends.
+      Metadata: `scope`, `node` and `trigger`. `node` is the node of the peer.
+      `trigger` is `:request` for the reply to a request and `:tick` for a
+      targeted snapshot that a tick sends.
 
       The tracker replies to a request from a node that has no peer record. The
       event does not tell the two cases apart.

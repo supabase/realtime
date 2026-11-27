@@ -134,7 +134,8 @@ defmodule Rollcall.TrackerRequestTest do
           assert stamp == {:stamp, tracker_state(tracker).incarnation, 1}
           assert entries == [wire_entry("partition", ref, "key", %{a: 1})]
 
-          assert [%{node: @probe, version: 1, refs: [^ref], tick: false}] = expect_events(trace, @reply_sent, scope, 1)
+          assert [%{node: @probe, version: 1, refs: [^ref], trigger: :request}] =
+                   expect_events(trace, @reply_sent, scope, 1)
         end
       )
     end
@@ -213,12 +214,16 @@ defmodule Rollcall.TrackerRequestTest do
       sync(tracker)
 
       assert_receive {:telemetry, ^reply_send, %{entries: 2, duration: duration},
-                      %{scope: ^scope, node: @probe, tick: false}}
+                      %{scope: ^scope, node: @probe, trigger: :request}}
 
       assert is_integer(duration) and duration >= 0
     end
 
-    test "a targeted snapshot emits a reply event with tick true", %{scope: scope, network: network, probe: probe} do
+    test "a targeted snapshot emits a reply event with the trigger tick", %{
+      scope: scope,
+      network: network,
+      probe: probe
+    } do
       reply_send = Rollcall.Metrics.tracker_reply_send()
       tracker = start_node(scope, network, @node_a)
       client = start_client()
@@ -229,12 +234,12 @@ defmodule Rollcall.TrackerRequestTest do
       track(tracker, client, "partition", "key_2")
       send_from_probe(probe, request(self()))
       sync(tracker)
-      assert_receive {:telemetry, ^reply_send, _measurements, %{tick: false}}
+      assert_receive {:telemetry, ^reply_send, _measurements, %{trigger: :request}}
 
       track(tracker, client, "partition", "key_3")
       tick(tracker)
 
-      assert_receive {:telemetry, ^reply_send, %{entries: 3}, %{scope: ^scope, node: @probe, tick: true}}
+      assert_receive {:telemetry, ^reply_send, %{entries: 3}, %{scope: ^scope, node: @probe, trigger: :tick}}
     end
   end
 

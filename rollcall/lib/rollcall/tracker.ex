@@ -127,10 +127,10 @@ defmodule Rollcall.Tracker do
       event for each request.
     * `:rollcall_tracker_reply_sent` - the tracker sent a snapshot to one peer,
       as the reply to a request or as a targeted snapshot in a tick. The event
-      has the keys `scope`, `node`, `version`, `refs` and `tick`. `node` is the
-      node of the peer. `version` is the version of the snapshot. `refs` lists
-      the refs of the entries in the snapshot. `tick` is `false` for a reply to
-      a request and `true` for a targeted snapshot.
+      has the keys `scope`, `node`, `version`, `refs` and `trigger`. `node` is
+      the node of the peer. `version` is the version of the snapshot. `refs`
+      lists the refs of the entries in the snapshot. `trigger` is `:request`
+      for a reply to a request and `:tick` for a targeted snapshot.
     * `:rollcall_tracker_track` - a `track` call changed `local`. The event has
       the keys `pid`, `partition`, `key`, `version`, `joins` and `leaves`. The
       `version` is the version after the call. `joins` and `leaves` are lists of
@@ -882,7 +882,7 @@ defmodule Rollcall.Tracker do
 
   defp send_targeted_snapshots(%State{replied: replied, last_tick_version: last_tick_version, version: now} = state) do
     for {node, replied_version} <- replied, replied_version > last_tick_version and replied_version < now do
-      send_snapshot(state, node, tick: true)
+      send_snapshot(state, node, trigger: :tick)
     end
 
     state
@@ -976,7 +976,7 @@ defmodule Rollcall.Tracker do
     :telemetry.execute(Metrics.tracker_reply_send(), %{duration: duration, entries: entry_count}, %{
       scope: state.scope,
       node: destination,
-      tick: Keyword.get(opts, :tick, false)
+      trigger: Keyword.get(opts, :trigger, :request)
     })
 
     tp(
@@ -986,7 +986,7 @@ defmodule Rollcall.Tracker do
         node: destination,
         version: state.version,
         refs: Enum.map(Local.ids(state.local), &elem(&1, 1)),
-        tick: Keyword.get(opts, :tick, false)
+        trigger: Keyword.get(opts, :trigger, :request)
       },
       ignore_side_effects: true
     )
