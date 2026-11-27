@@ -19,7 +19,8 @@ defmodule Realtime.Messages.Router do
 
   @spec child_spec(keyword()) :: Supervisor.child_spec()
   def child_spec(opts) do
-    %{id: __MODULE__, type: :supervisor, start: {__MODULE__, :start_pool, [Keyword.fetch!(opts, :pool_size)]}}
+    pool_size = Keyword.fetch!(opts, :pool_size)
+    %{id: __MODULE__, type: :supervisor, start: {__MODULE__, :start_pool, [pool_size]}}
   end
 
   @spec start_pool(pos_integer()) :: Supervisor.on_start()

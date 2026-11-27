@@ -27,20 +27,24 @@ defmodule Realtime.Messages.Producer do
   alias Realtime.Messages.Consumer
 
   def child_spec(opts) do
-    opts = Keyword.update(opts, :config, Messages.config(), &Keyword.merge(Messages.config(), &1))
+    config = Keyword.merge(Messages.config(), Keyword.get(opts, :config, []))
+    query_timeout = Keyword.fetch!(config, :query_timeout)
 
     %{
       id: __MODULE__,
-      start: {__MODULE__, :start_link, [opts]},
+      start: {__MODULE__, :start_link, [Keyword.put(opts, :config, config)]},
       restart: :temporary,
-      shutdown: opts[:config][:query_timeout] + 1_000
+      shutdown: query_timeout + 1_000
     }
   end
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
-    name = {:via, Registry, {Realtime.Registry.Unique, {__MODULE__, Keyword.fetch!(opts, :db_conn)}}}
-    GenStage.start_link(__MODULE__, opts, name: name, hibernate_after: Keyword.fetch!(opts, :config)[:hibernate_after])
+    db_conn = Keyword.fetch!(opts, :db_conn)
+    config = Keyword.fetch!(opts, :config)
+    hibernate_after = Keyword.fetch!(config, :hibernate_after)
+    name = {:via, Registry, {Realtime.Registry.Unique, {__MODULE__, db_conn}}}
+    GenStage.start_link(__MODULE__, opts, name: name, hibernate_after: hibernate_after)
   end
 
   @impl true
@@ -68,7 +72,7 @@ defmodule Realtime.Messages.Producer do
        writing: {0, 0},
        pending_demand: 0,
        timer: nil,
-       emitted_at: System.monotonic_time(:millisecond) - config[:flush_interval_ms],
+       next_flush_at: System.monotonic_time(:millisecond),
        drops: %{}
      }}
   end
@@ -139,10 +143,12 @@ defmodule Realtime.Messages.Producer do
 
   defp admit(state, entry) do
     {writing_count, writing_bytes} = state.writing
+    max_pending = Keyword.fetch!(state.config, :max_pending)
+    max_pending_bytes = Keyword.fetch!(state.config, :max_pending_bytes)
 
     cond do
-      state.count + writing_count >= state.config[:max_pending] -> {:error, :persistence_buffer_full}
-      state.bytes + writing_bytes + entry.bytes > state.config[:max_pending_bytes] -> {:error, :persistence_buffer_full}
+      state.count + writing_count >= max_pending -> {:error, :persistence_buffer_full}
+      state.bytes + writing_bytes + entry.bytes > max_pending_bytes -> {:error, :persistence_buffer_full}
       true -> :ok
     end
   end
@@ -155,7 +161,7 @@ defmodule Realtime.Messages.Producer do
   defp dispatch_events(%{count: 0} = state), do: {:noreply, [], state}
 
   defp dispatch_events(state) do
-    wait = state.emitted_at + state.config[:flush_interval_ms] - System.monotonic_time(:millisecond)
+    wait = state.next_flush_at - System.monotonic_time(:millisecond)
 
     cond do
       full?(state) or wait <= 0 -> emit(state)
@@ -165,24 +171,27 @@ defmodule Realtime.Messages.Producer do
   end
 
   defp full?(state) do
-    state.count >= state.config[:max_batch_size] or state.bytes >= state.config[:max_batch_bytes]
+    max_count = Keyword.fetch!(state.config, :max_batch_size)
+    max_bytes = Keyword.fetch!(state.config, :max_batch_bytes)
+    state.count >= max_count or state.bytes >= max_bytes
   end
 
   defp emit(state) do
     if state.timer, do: Process.cancel_timer(state.timer)
     {batch, rest} = take(state)
     writing = {state.count - rest.count, state.bytes - rest.bytes}
-    now = System.monotonic_time(:millisecond)
+    flush_interval_ms = Keyword.fetch!(state.config, :flush_interval_ms)
+    next_flush_at = System.monotonic_time(:millisecond) + flush_interval_ms
 
     {:noreply, [batch],
-     %{rest | pending_demand: rest.pending_demand - 1, timer: nil, emitted_at: now, writing: writing}}
+     %{rest | pending_demand: rest.pending_demand - 1, timer: nil, next_flush_at: next_flush_at, writing: writing}}
   end
 
   # Takes the oldest messages, at least one, up to `:max_batch_size` messages and `:max_batch_bytes`
   defp take(state) do
-    {batch, queue, count, bytes} =
-      take(state.queue, state.config[:max_batch_size], state.config[:max_batch_bytes], [], 0, 0)
-
+    max_count = Keyword.fetch!(state.config, :max_batch_size)
+    max_bytes = Keyword.fetch!(state.config, :max_batch_bytes)
+    {batch, queue, count, bytes} = take(state.queue, max_count, max_bytes, [], 0, 0)
     {batch, %{state | queue: queue, count: state.count - count, bytes: state.bytes - bytes}}
   end
 
@@ -231,7 +240,12 @@ defmodule Realtime.Messages.Producer do
 
   defp drop(state, reason, count) do
     Messages.emit_dropped(state.tenant_id, reason, count)
-    if state.drops == %{}, do: Process.send_after(self(), :report_drops, state.config[:drops_report_interval_ms])
+
+    if state.drops == %{} do
+      interval = Keyword.fetch!(state.config, :drops_report_interval_ms)
+      Process.send_after(self(), :report_drops, interval)
+    end
+
     %{state | drops: Map.update(state.drops, reason, count, &(&1 + count))}
   end
 

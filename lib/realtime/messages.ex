@@ -153,7 +153,10 @@ defmodule Realtime.Messages do
   @spec ack_timeout() :: pos_integer()
   def ack_timeout do
     config = config()
-    config[:flush_interval_ms] + config[:max_queue_ms] + config[:query_timeout]
+    flush_interval_ms = Keyword.fetch!(config, :flush_interval_ms)
+    max_queue_ms = Keyword.fetch!(config, :max_queue_ms)
+    query_timeout = Keyword.fetch!(config, :query_timeout)
+    flush_interval_ms + max_queue_ms + query_timeout
   end
 
   @doc """
@@ -337,9 +340,8 @@ defmodule Realtime.Messages do
           {:ok, [{:ok, String.t()} | {:error, :persistence_failed}], NaiveDateTime.t() | nil}
           | {:error, :persistence_failed}
   def insert_batch(conn, tenant_id, entries, last_inserted_at, timeout) do
-    start = System.monotonic_time()
-
     count = length(entries)
+    start = System.monotonic_time()
 
     {inserted, result} =
       case insert(conn, entries, last_inserted_at, timeout) do
@@ -355,14 +357,11 @@ defmodule Realtime.Messages do
           {0, {:error, :persistence_failed}}
       end
 
+    duration = System.monotonic_time() - start
+
     Telemetry.execute(
       [:realtime, :tenants, :persist, :flush],
-      %{
-        count: count,
-        inserted: inserted,
-        bytes: Enum.sum_by(entries, & &1.bytes),
-        duration: System.monotonic_time() - start
-      },
+      %{count: count, inserted: inserted, bytes: Enum.sum_by(entries, & &1.bytes), duration: duration},
       %{tenant: tenant_id}
     )
 

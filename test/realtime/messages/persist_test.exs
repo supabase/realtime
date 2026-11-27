@@ -216,7 +216,7 @@ defmodule Realtime.Messages.PersistTest do
       Postgrex.query!(conn, "DROP TABLE realtime.messages_#{partition_suffix()}", [])
 
       log =
-        capture_log([format: "$metadata$message\n", metadata: [:project]], fn ->
+        capture_log([format: "$metadata$message\n", colors: [enabled: false], metadata: [:project]], fn ->
           for _ <- 1..5, do: :ok = Messages.persist(conn, tenant_id, "t", "e", {:json, %{}})
           assert_eventually :sys.get_state(pid).state.drops == %{persistence_failed: 5}, interval: 10
           send(pid, :report_drops)

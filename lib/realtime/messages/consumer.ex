@@ -16,20 +16,24 @@ defmodule Realtime.Messages.Consumer do
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
-    GenStage.start_link(__MODULE__, opts, hibernate_after: Keyword.fetch!(opts, :config)[:hibernate_after])
+    config = Keyword.fetch!(opts, :config)
+    hibernate_after = Keyword.fetch!(config, :hibernate_after)
+    GenStage.start_link(__MODULE__, opts, hibernate_after: hibernate_after)
   end
 
   @impl true
   def init(opts) do
+    db_conn = Keyword.fetch!(opts, :db_conn)
     tenant_id = Keyword.fetch!(opts, :tenant_id)
     producer = Keyword.fetch!(opts, :producer)
+    config = Keyword.fetch!(opts, :config)
     Logger.metadata(external_id: tenant_id, project: tenant_id)
 
     state = %{
-      db_conn: Keyword.fetch!(opts, :db_conn),
+      db_conn: db_conn,
       tenant_id: tenant_id,
       producer: producer,
-      config: Keyword.fetch!(opts, :config),
+      config: config,
       failures: 0,
       last_inserted_at: nil
     }
@@ -73,10 +77,13 @@ defmodule Realtime.Messages.Consumer do
   defp count_failures(failures, :error), do: failures + 1
 
   defp ask(from, %{failures: failures, config: config}) do
-    if failures >= config[:breaker_threshold] do
+    breaker_threshold = Keyword.fetch!(config, :breaker_threshold)
+    breaker_cooldown_ms = Keyword.fetch!(config, :breaker_cooldown_ms)
+
+    if failures >= breaker_threshold do
       writes = if failures == 1, do: "1 failed write", else: "#{failures} failed writes"
       log_error("PersistenceUnavailable", "Persistence paused after #{writes}")
-      Process.send_after(self(), {:ask, from}, config[:breaker_cooldown_ms])
+      Process.send_after(self(), {:ask, from}, breaker_cooldown_ms)
     else
       GenStage.ask(from, 1)
     end
@@ -84,7 +91,7 @@ defmodule Realtime.Messages.Consumer do
 
   defp insert(batch, state) do
     {entries, callers} = Enum.unzip(batch)
-    timeout = state.config[:query_timeout]
+    timeout = Keyword.fetch!(state.config, :query_timeout)
 
     case Messages.insert_batch(state.db_conn, state.tenant_id, entries, state.last_inserted_at, timeout) do
       {:ok, results, last_inserted_at} -> {:ok, Enum.zip(callers, results), last_inserted_at}

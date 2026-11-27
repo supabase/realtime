@@ -173,7 +173,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   end
 
   defp count_rate_limited(socket) do
-    Process.send_after(self(), :report_persist_rate_limited, Messages.config()[:drops_report_interval_ms])
+    interval = Keyword.fetch!(Messages.config(), :drops_report_interval_ms)
+    Process.send_after(self(), :report_persist_rate_limited, interval)
     assign(socket, :persistence_rate_limited, 1)
   end
 
