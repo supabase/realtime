@@ -10,7 +10,7 @@ defmodule Realtime.Messages.Producer do
 
   A message is rejected when `:max_pending` messages or `:max_pending_bytes` are queued or being written.
   A `:reply_to` gets the result once the message is written. Senders on other nodes reach it through
-  `Realtime.Messages.Router`, which sends to it without waiting, and get their errors at their `:reply_to`.
+  a `Realtime.Messages.Router`, which sends to it without waiting, and get their errors at their `:reply_to`.
 
   The producer logs the messages that were not persisted, its own and the ones the consumer reports, once
   per reason every `:drops_report_interval_ms`.

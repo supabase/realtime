@@ -210,7 +210,7 @@ defmodule Realtime.Messages do
 
     if conn_node in Node.list() do
       entry = %{entry(topic, event, payload) | expires_at: Keyword.get(opts, :expires_at)}
-      Realtime.GenRpc.abcast([conn_node], Router, {:persist, conn, tenant_id, entry, caller}, key: topic)
+      Realtime.GenRpc.abcast([conn_node], Router.name(topic), {:persist, conn, tenant_id, entry, caller}, key: topic)
     else
       # The connection's node left the cluster, but syn on this node still returns that connection
       emit_dropped(tenant_id, :persistence_unavailable, 1)
@@ -219,7 +219,7 @@ defmodule Realtime.Messages do
     end
   end
 
-  # Runs in `Realtime.Messages.Router`, so it sends to the producer instead of waiting on it
+  # Runs in a `Realtime.Messages.Router`, so it sends to the producer instead of waiting on it
   @doc false
   @spec enqueue(pid(), String.t(), entry, caller) :: :ok
   def enqueue(conn, tenant_id, entry, caller) do
