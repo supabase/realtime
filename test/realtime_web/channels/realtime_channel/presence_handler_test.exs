@@ -313,7 +313,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     end
 
     test "a sampled track stores the latency envelope in the tracker meta only", %{tenant: tenant, topic: topic} do
-      stub(Realtime.FeatureFlags, :enabled?, fn flag, _tenant -> flag == "presence_latency_metric" end)
+      set_presence_sample_rate(1.0)
       key = random_string()
       policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
       socket = socket_fixture(tenant, topic, key, policies: policies)
@@ -332,7 +332,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     end
 
     test "re-tracking the same payload is still a no-op when sampled", %{tenant: tenant, topic: topic} do
-      stub(Realtime.FeatureFlags, :enabled?, fn flag, _tenant -> flag == "presence_latency_metric" end)
+      set_presence_sample_rate(1.0)
       key = random_string()
       policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
       socket = socket_fixture(tenant, topic, key, policies: policies)
@@ -346,7 +346,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     end
 
     test "a sampled update stamps the new meta", %{tenant: tenant, topic: topic} do
-      stub(Realtime.FeatureFlags, :enabled?, fn flag, _tenant -> flag == "presence_latency_metric" end)
+      set_presence_sample_rate(1.0)
       key = random_string()
       policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
       socket = socket_fixture(tenant, topic, key, policies: policies)
@@ -819,7 +819,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     end
 
     test "strips the latency envelope from the presence state it pushes", %{tenant: tenant, topic: topic} do
-      stub(Realtime.FeatureFlags, :enabled?, fn flag, _tenant -> flag == "presence_latency_metric" end)
+      set_presence_sample_rate(1.0)
       key = random_string()
       policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
       socket = socket_fixture(tenant, topic, key, policies: policies, private?: true)

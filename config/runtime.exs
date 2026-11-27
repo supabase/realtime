@@ -147,8 +147,7 @@ presence_permdown_period_in_ms = Env.get_integer("PRESENCE_PERMDOWN_PERIOD_IN_MS
 presence_pool_size = Env.get_integer("PRESENCE_POOL_SIZE", 10)
 presence_usage_poll_rate = Env.get_integer("PRESENCE_USAGE_POLL_RATE_MS", 60_000)
 
-presence_latency_sample_rate =
-  Env.get_float("PRESENCE_LATENCY_SAMPLE_RATE", if(config_env() == :test, do: 1.0, else: 0.0))
+presence_latency_sample_rate = Env.get_float("PRESENCE_LATENCY_SAMPLE_RATE", 0.0)
 
 prom_poll_rate = Env.get_integer("PROM_POLL_RATE", 5000)
 realtime_ip_version = System.get_env("REALTIME_IP_VERSION")

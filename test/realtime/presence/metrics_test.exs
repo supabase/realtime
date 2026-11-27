@@ -1,15 +1,16 @@
 defmodule Realtime.Presence.MetricsTest do
-  use ExUnit.Case, async: true
+  # The stamp tests set the global sample rate, so this module cannot run at the same time as others.
+  use ExUnit.Case, async: false
   use Mimic
 
   setup :set_mimic_from_context
+
+  import TestHelpers, only: [set_presence_sample_rate: 1]
 
   alias Phoenix.Socket.Broadcast
   alias Realtime.FeatureFlags
   alias Realtime.Presence.Metrics
   alias Realtime.Presence.Metrics.Envelope
-
-  @tenant "tenant-123"
 
   # A user payload as it arrives from JSON: string keys, nested maps and lists, mixed scalar types,
   # and "_rt" keys of the user's own at several depths, including one shaped like our envelope.
@@ -27,12 +28,14 @@ defmodule Realtime.Presence.MetricsTest do
     "score" => 42
   }
 
-  describe "stamp/3" do
-    test "adds an envelope with the current time in ms and this node's short id when sampled" do
-      stub(FeatureFlags, :enabled?, fn "presence_latency_metric", @tenant -> true end)
+  describe "stamp/2" do
+    setup do
+      set_presence_sample_rate(1.0)
+    end
 
+    test "adds an envelope with the current time in ms and this node's short id when sampled" do
       before = System.system_time(:millisecond)
-      stamped = Metrics.stamp(%{"name" => "alice"}, @tenant, :phoenix)
+      stamped = Metrics.stamp(%{"name" => "alice"}, :phoenix)
       after_ = System.system_time(:millisecond)
 
       assert %{_rt: %{ts: ts, node: node}} = stamped
@@ -41,10 +44,8 @@ defmodule Realtime.Presence.MetricsTest do
     end
 
     test "records the implementation in the envelope, and strip_diff/1 returns it" do
-      stub(FeatureFlags, :enabled?, fn _, _ -> true end)
-
       for implementation <- [:phoenix, :rollcall] do
-        stamped = Metrics.stamp(%{"name" => "alice"}, @tenant, implementation)
+        stamped = Metrics.stamp(%{"name" => "alice"}, implementation)
         diff = %Broadcast{event: "presence_diff", payload: %{joins: %{"alice" => %{metas: [stamped]}}, leaves: %{}}}
 
         assert {_stripped, [%Envelope{implementation: ^implementation}]} = Metrics.strip_diff(diff)
@@ -52,17 +53,14 @@ defmodule Realtime.Presence.MetricsTest do
     end
 
     test "leaves the user payload untouched" do
-      stub(FeatureFlags, :enabled?, fn _, _ -> true end)
       payload = %{"name" => "alice", "nested" => %{"a" => 1}}
 
-      assert Map.delete(Metrics.stamp(payload, @tenant, :phoenix), :_rt) == payload
+      assert Map.delete(Metrics.stamp(payload, :phoenix), :_rt) == payload
     end
 
     test "a user's own \"_rt\" field is neither overwritten by the stamp nor removed by the strip" do
-      stub(FeatureFlags, :enabled?, fn _, _ -> true end)
-
       # User keys arrive as strings from JSON; the envelope key is an atom, so they never collide.
-      stamped = Metrics.stamp(%{"name" => "alice", "_rt" => "mine"}, @tenant, :phoenix)
+      stamped = Metrics.stamp(%{"name" => "alice", "_rt" => "mine"}, :phoenix)
       assert %{"_rt" => "mine", :_rt => %{ts: _, node: _}} = stamped
 
       diff = %Broadcast{event: "presence_diff", payload: %{joins: %{"alice" => %{metas: [stamped]}}, leaves: %{}}}
@@ -71,46 +69,50 @@ defmodule Realtime.Presence.MetricsTest do
     end
 
     test "adds only a top-level envelope to a nested payload, leaving every nested value untouched" do
-      stub(FeatureFlags, :enabled?, fn _, _ -> true end)
-
-      stamped = Metrics.stamp(@nested_payload, @tenant, :phoenix)
+      stamped = Metrics.stamp(@nested_payload, :phoenix)
 
       assert %{_rt: %{ts: _, node: _}} = stamped
       assert Map.delete(stamped, :_rt) == @nested_payload
     end
 
-    test "returns the payload untouched when the feature flag is off for the tenant" do
-      stub(FeatureFlags, :enabled?, fn "presence_latency_metric", @tenant -> false end)
+    test "returns the payload untouched when the sample rate is 0" do
+      set_presence_sample_rate(0.0)
       payload = %{"name" => "alice"}
 
-      assert Metrics.stamp(payload, @tenant, :phoenix) == payload
+      assert Metrics.stamp(payload, :phoenix) == payload
+    end
+
+    # A feature flag lookup reads the database on a cache miss. The caller times the track call
+    # around the stamp, so the lookup would show as track latency.
+    test "does not read a feature flag" do
+      reject(&FeatureFlags.enabled?/2)
+
+      assert %{_rt: %{ts: _, node: _}} = Metrics.stamp(%{"name" => "alice"}, :phoenix)
     end
 
     test "passes a non-map payload through for validation to reject" do
       reject(&FeatureFlags.enabled?/2)
 
-      assert Metrics.stamp("not a map", @tenant, :phoenix) == "not a map"
-      assert Metrics.stamp(nil, @tenant, :phoenix) == nil
+      assert Metrics.stamp("not a map", :phoenix) == "not a map"
+      assert Metrics.stamp(nil, :phoenix) == nil
     end
   end
 
-  describe "sample?/2" do
-    test "never samples at rate 0, without consulting the feature flag" do
-      reject(&FeatureFlags.enabled?/2)
-
-      refute Enum.any?(1..100, fn _ -> Metrics.sample?(@tenant, 0.0) end)
+  describe "sample?/1" do
+    test "never samples at rate 0" do
+      refute Enum.any?(1..100, fn _ -> Metrics.sample?(0.0) end)
     end
 
-    test "always samples at rate 1 when the flag is on" do
-      stub(FeatureFlags, :enabled?, fn "presence_latency_metric", @tenant -> true end)
-
-      assert Enum.all?(1..100, fn _ -> Metrics.sample?(@tenant, 1.0) end)
+    test "always samples at rate 1" do
+      assert Enum.all?(1..100, fn _ -> Metrics.sample?(1.0) end)
     end
 
-    test "never samples when the flag is off, whatever the rate" do
-      stub(FeatureFlags, :enabled?, fn "presence_latency_metric", @tenant -> false end)
+    test "reads the rate from the application env by default" do
+      set_presence_sample_rate(1.0)
+      assert Metrics.sample?()
 
-      refute Enum.any?(1..100, fn _ -> Metrics.sample?(@tenant, 1.0) end)
+      set_presence_sample_rate(0.0)
+      refute Metrics.sample?()
     end
   end
 

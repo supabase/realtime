@@ -83,13 +83,13 @@ defmodule Realtime.Presence do
   def track(pid, tenant, topic, key, meta) do
     case mode(tenant) do
       :phoenix ->
-        phoenix_track(pid, tenant, topic, key, meta)
+        phoenix_track(pid, topic, key, meta)
 
       :rollcall ->
         rollcall_track(pid, tenant, topic, key, meta, [])
 
       :shadow ->
-        with {:ok, _, ref} = result <- phoenix_track(pid, tenant, topic, key, meta) do
+        with {:ok, _, ref} = result <- phoenix_track(pid, topic, key, meta) do
           shadow(:track, tenant, fn ->
             rollcall_track(pid, tenant, topic, key, meta, ref: ref, timeout: @shadow_timeout_in_ms)
           end)
@@ -99,16 +99,16 @@ defmodule Realtime.Presence do
     end
   end
 
-  defp phoenix_track(pid, tenant, topic, key, meta) do
+  defp phoenix_track(pid, topic, key, meta) do
     Metrics.measure_tracker_call(
-      fn -> PhoenixBackend.track(pid, topic, key, Metrics.stamp(meta, tenant, :phoenix)) end,
+      fn -> PhoenixBackend.track(pid, topic, key, Metrics.stamp(meta, :phoenix)) end,
       :phoenix
     )
   end
 
   defp rollcall_track(pid, tenant, topic, key, meta, opts) do
     Metrics.measure_tracker_call(
-      fn -> RollcallBackend.track(pid, tenant, topic, key, Metrics.stamp(meta, tenant, :rollcall), opts) end,
+      fn -> RollcallBackend.track(pid, tenant, topic, key, Metrics.stamp(meta, :rollcall), opts) end,
       :rollcall
     )
   end

@@ -4,12 +4,9 @@ defmodule Realtime.Integration.DistributedRealtimeChannelTest do
     async: false,
     parameterize: [%{serializer: Phoenix.Socket.V1.JSONSerializer}, %{serializer: RealtimeWeb.Socket.V2Serializer}]
 
-  use Mimic
-
   alias Forum.Muster
   alias Phoenix.Socket.Message
 
-  alias Realtime.FeatureFlags
   alias Realtime.Tenants.Connect
   alias Realtime.Integration.WebsocketClient
   alias RealtimeWeb.UserSocket
@@ -43,14 +40,9 @@ defmodule Realtime.Integration.DistributedRealtimeChannelTest do
   end
 
   describe "distributed presence latency" do
-    setup :set_mimic_global
-
     setup %{node: node} do
-      # Dave tracks on this node, so the flag only has to be on here; the peer just delivers.
-      stub(FeatureFlags, :enabled?, fn
-        "presence_latency_metric", _tenant -> true
-        flag, tenant -> Mimic.call_original(FeatureFlags, :enabled?, [flag, tenant])
-      end)
+      # Dave tracks on this node, so the rate only has to be set here; the peer just delivers.
+      set_presence_sample_rate(1.0)
 
       latency = [:realtime, :presence, :notify, :latency]
       :ok = :telemetry.attach({__MODULE__, :local}, latency, &PeerTelemetry.forward/4, %{pid: self()})
