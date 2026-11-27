@@ -4,6 +4,8 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
   alias Realtime.GenRpc
   alias Realtime.Nodes
   alias Forum.Muster
+  alias RealtimeWeb.BroadcastDeliveryMetrics
+  alias RealtimeWeb.RealtimeChannel.MessageDispatcher
 
   import ExUnit.CaptureLog
 
@@ -29,6 +31,35 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
 
       assert_receive "le message"
       refute_receive _any
+    end
+  end
+
+  describe "delivery timing" do
+    setup do
+      tenant_id = "worker-#{System.unique_integer([:positive])}"
+      topic = "#{@topic}-#{tenant_id}"
+      meta = MessageDispatcher.fastlane_metadata(self(), Phoenix.Socket.V1.JSONSerializer, topic, :error, tenant_id)
+      {:ok, _} = Registry.register(Realtime.PubSub, topic, meta)
+      ref = :telemetry_test.attach_event_handlers(self(), [BroadcastDeliveryMetrics.event()])
+      %{tenant_id: tenant_id, topic: topic, ref: ref}
+    end
+
+    test "a fastlane delivery of a forwarded tenant broadcast is timed as remote",
+         %{worker: worker, tenant_id: tenant_id, topic: topic, ref: ref} do
+      message = {:tb, tenant_id, %Phoenix.Socket.Broadcast{topic: topic, event: "e", payload: %{}}}
+      send(worker, Worker.forward_to_local(topic, message, MessageDispatcher))
+
+      assert_receive {:socket_push, :text, _}
+      assert_receive {[:realtime, :broadcast, :delivery, :latency], ^ref, _, %{tenant: ^tenant_id, origin: :remote}}
+    end
+
+    test "a forwarded message without a tenant tag is not timed",
+         %{worker: worker, topic: topic, ref: ref} do
+      message = %Phoenix.Socket.Broadcast{topic: topic, event: "e", payload: %{}}
+      send(worker, Worker.forward_to_local(topic, message, MessageDispatcher))
+
+      assert_receive {:socket_push, :text, _}
+      refute_receive {[:realtime, :broadcast, :delivery, :latency], ^ref, _, %{origin: :remote, tenant: nil}}
     end
   end
 

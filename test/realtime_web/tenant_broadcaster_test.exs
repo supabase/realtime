@@ -347,6 +347,48 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
     end
   end
 
+  describe "delivery timing" do
+    setup %{tenant_id: tenant_id} do
+      topic = "delivery:#{tenant_id}"
+      meta = MessageDispatcher.fastlane_metadata(self(), Phoenix.Socket.V1.JSONSerializer, topic, :error, tenant_id)
+      {:ok, _} = Registry.register(Realtime.PubSub, topic, meta)
+      ref = :telemetry_test.attach_event_handlers(self(), [RealtimeWeb.BroadcastDeliveryMetrics.event()])
+      %{topic: topic, ref: ref}
+    end
+
+    test "a local fastlane delivery is timed", %{tenant_id: tenant_id, topic: topic, ref: ref} do
+      message = %Broadcast{topic: topic, event: "an event", payload: %{"a" => "b"}}
+
+      TenantBroadcaster.pubsub_broadcast(tenant_id, topic, message, MessageDispatcher, :broadcast)
+
+      assert_receive {:socket_push, :text, _}
+
+      assert_receive {[:realtime, :broadcast, :delivery, :latency], ^ref, %{latency: latency},
+                      %{tenant: ^tenant_id, origin: :local}}
+                     when is_integer(latency)
+    end
+
+    test "direct broadcasts and untagged messages are not timed", %{tenant_id: tenant_id, topic: topic, ref: ref} do
+      message = %Broadcast{topic: topic, event: "an event", payload: %{"a" => "b"}}
+
+      TenantBroadcaster.pubsub_direct_broadcast(node(), tenant_id, topic, message, MessageDispatcher, :broadcast)
+      TenantBroadcaster.pubsub_broadcast(tenant_id, topic, message, MessageDispatcher, :presence)
+
+      assert_receive {:socket_push, :text, _}
+      assert_receive {:socket_push, :text, _}
+      refute_receive {[:realtime, :broadcast, :delivery, :latency], ^ref, _, %{tenant: ^tenant_id}}
+    end
+
+    test "a broadcast published outside TenantBroadcaster is not timed", %{tenant_id: tenant_id, topic: topic, ref: ref} do
+      message = %Broadcast{topic: topic, event: "an event", payload: %{"a" => "b"}}
+
+      Phoenix.PubSub.broadcast(Realtime.PubSub, topic, message, MessageDispatcher)
+
+      assert_receive {:socket_push, :text, _}
+      refute_receive {[:realtime, :broadcast, :delivery, :latency], ^ref, _, %{tenant: ^tenant_id}}
+    end
+  end
+
   # targets/3 is only authoritative on the tenant's router node
   defp router_targets(scope, tenant_id) do
     with {:ok, router} <- Forum.Muster.router(scope, tenant_id) do

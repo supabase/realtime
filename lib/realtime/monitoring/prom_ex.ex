@@ -1,4 +1,5 @@
 defmodule Realtime.PromEx do
+  alias Realtime.PromEx.Plugins.BroadcastDelivery
   alias Realtime.PromEx.Plugins.ClientRequests
   alias Realtime.PromEx.Plugins.Distributed
   alias Realtime.PromEx.Plugins.GenRpc
@@ -130,7 +131,8 @@ defmodule Realtime.PromEx do
       {Rollcall, poll_rate: poll_rate},
       PresenceComparison,
       {PolicyEval, poll_rate: poll_rate},
-      ClientRequests
+      ClientRequests,
+      BroadcastDelivery
     ]
   end
 

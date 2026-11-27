@@ -5,6 +5,7 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
 
   require Logger
   alias Phoenix.Socket.Broadcast
+  alias RealtimeWeb.BroadcastDeliveryMetrics
   alias RealtimeWeb.Socket.UserBroadcast
 
   def fastlane_metadata(
@@ -156,7 +157,7 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
   defp fastlane_dispatch(msg, fastlane_pid, serializer, join_topic, encoded_cache, tenant_id, log_level) do
     case encoded_cache do
       %{{^serializer, ^join_topic} => {:ok, encoded_msg}} ->
-        send(fastlane_pid, encoded_msg)
+        BroadcastDeliveryMetrics.send_push(fastlane_pid, encoded_msg)
         encoded_cache
 
       %{{^serializer, ^join_topic} => {:error, _reason}} ->
@@ -170,7 +171,7 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
         result =
           case fastlane!(serializer, msg) do
             {:ok, encoded_msg} ->
-              send(fastlane_pid, encoded_msg)
+              BroadcastDeliveryMetrics.send_push(fastlane_pid, encoded_msg)
               {:ok, encoded_msg}
 
             {:error, reason} ->

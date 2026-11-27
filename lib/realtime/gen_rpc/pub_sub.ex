@@ -229,7 +229,7 @@ defmodule Realtime.GenRpcPubSub.Worker do
   def handle_info({:ftl, topic, message, dispatcher} = msg, %__MODULE__{pubsub: pubsub} = state) do
     measure_presence_replication_received(topic, msg)
     measure_broadcast_fanout(message)
-    Phoenix.PubSub.local_broadcast(pubsub, topic, message, dispatcher)
+    local_broadcast(pubsub, topic, message, dispatcher)
     {:noreply, state}
   end
 
@@ -240,7 +240,7 @@ defmodule Realtime.GenRpcPubSub.Worker do
     measure_broadcast_fanout(message)
 
     # Forward to local first
-    Phoenix.PubSub.local_broadcast(pubsub, topic, message, dispatcher)
+    local_broadcast(pubsub, topic, message, dispatcher)
 
     # Then broadcast to the rest of my region, keeping the message intact so the
     # downstream :ftl handlers can attribute the fan-out too.
@@ -344,6 +344,16 @@ defmodule Realtime.GenRpcPubSub.Worker do
 
   defp measure_broadcast_fanout(_message), do: :ok
 
+  # Tenant broadcasts from other nodes are timed from when this node dispatches them.
+  defp local_broadcast(pubsub, topic, {:tb, tenant_id, _} = message, dispatcher) do
+    RealtimeWeb.BroadcastDeliveryMetrics.with_timing(tenant_id, :remote, fn ->
+      Phoenix.PubSub.local_broadcast(pubsub, topic, message, dispatcher)
+    end)
+  end
+
+  defp local_broadcast(pubsub, topic, message, dispatcher),
+    do: Phoenix.PubSub.local_broadcast(pubsub, topic, message, dispatcher)
+
   # Deliver `message` to `nodes`, excluding `origin` (which already delivered to its
   # own subscribers via Phoenix.PubSub's local dispatch). Delivers locally if this
   # node is among the targets, and :ftl to the rest.
@@ -364,7 +374,7 @@ defmodule Realtime.GenRpcPubSub.Worker do
       # here, with the size of the :ftl that a remote target would receive.
       measure_presence_replication_received(topic, forward_to_local(topic, message, dispatcher))
       measure_broadcast_fanout(message)
-      Phoenix.PubSub.local_broadcast(pubsub, topic, message, dispatcher)
+      local_broadcast(pubsub, topic, message, dispatcher)
     end
 
     if remote != [] do

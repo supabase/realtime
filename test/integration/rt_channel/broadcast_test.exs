@@ -21,6 +21,7 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
   @moduletag :capture_log
 
   @fanout_event [:realtime, :broadcast, :fanout, :node_delivery]
+  @delivery_event [:realtime, :broadcast, :delivery, :latency]
 
   setup [:checkout_tenant]
 
@@ -961,6 +962,108 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
     end
   end
 
+  describe "broadcast delivery latency" do
+    setup [:rls_context, :attach_delivery_telemetry]
+
+    test "a client broadcast is measured once for the other client listening", %{
+      tenant: tenant,
+      serializer: serializer,
+      delivery_ref: ref
+    } do
+      external_id = tenant.external_id
+      topic = "realtime:#{random_string()}"
+      config = %{config: %{broadcast: %{self: false}, private: false}}
+
+      {sender, _} = get_connection(tenant, serializer)
+      {receiver, _} = get_connection(tenant, serializer)
+      WebsocketClient.join(sender, topic, config)
+      WebsocketClient.join(receiver, topic, config)
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+
+      payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+      WebsocketClient.send_event(sender, topic, "broadcast", payload)
+
+      assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 500
+
+      assert_receive {@delivery_event, ^ref, %{latency: latency}, %{tenant: ^external_id, origin: :local}}
+                     when is_integer(latency),
+                     500
+
+      refute_receive {@delivery_event, ^ref, _, %{tenant: ^external_id}}
+    end
+
+    test "a client broadcast is not measured when nobody else receives it", %{
+      tenant: tenant,
+      serializer: serializer,
+      delivery_ref: ref
+    } do
+      external_id = tenant.external_id
+      topic = "realtime:#{random_string()}"
+
+      {sender, _} = get_connection(tenant, serializer)
+      WebsocketClient.join(sender, topic, %{config: %{broadcast: %{self: false}, private: false}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+
+      WebsocketClient.send_event(sender, topic, "broadcast", %{
+        "event" => "TEST",
+        "payload" => %{},
+        "type" => "broadcast"
+      })
+
+      refute_receive {@delivery_event, ^ref, _, %{tenant: ^external_id}}, 500
+    end
+
+    test "an API broadcast is measured", %{tenant: tenant, serializer: serializer, delivery_ref: ref} do
+      external_id = tenant.external_id
+      subtopic = random_string()
+      topic = "realtime:#{subtopic}"
+
+      {socket, _} = get_connection(tenant, serializer)
+      WebsocketClient.join(socket, topic, %{config: %{broadcast: %{self: false}, private: false}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+
+      now = System.system_time(:second)
+      token = generate_jwt_token(tenant, %{role: "test", iat: now, exp: now + 100})
+
+      conn =
+        build_conn()
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> then(&%{&1 | host: "#{external_id}.supabase.com"})
+        |> post(~p"/api/broadcast", %{"messages" => [%{"topic" => subtopic, "event" => "e", "payload" => %{}}]})
+
+      assert conn.status == 202
+      assert_receive %Message{event: "broadcast", topic: ^topic}, 500
+      assert_receive {@delivery_event, ^ref, _, %{tenant: ^external_id, origin: :local}}, 500
+    end
+
+    @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
+    test "a realtime.send broadcast is measured", %{
+      tenant: tenant,
+      topic: topic,
+      db_conn: db_conn,
+      serializer: serializer,
+      delivery_ref: ref
+    } do
+      external_id = tenant.external_id
+      full_topic = "realtime:#{topic}"
+
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      WebsocketClient.join(socket, full_topic, %{config: %{broadcast: %{self: true}, private: true}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
+      assert ReplicationConnection.ready?(external_id)
+
+      Postgrex.query!(
+        db_conn,
+        "SELECT realtime.send (jsonb_build_object ('value', 1), 'event', $1 :: text, TRUE::bool);",
+        [topic]
+      )
+
+      assert_receive %Message{event: "broadcast", topic: ^full_topic}, 1000
+      assert_receive {@delivery_event, ^ref, _, %{tenant: ^external_id, origin: :local}}, 1000
+    end
+  end
+
   describe "trigger-based broadcast changes" do
     setup [:rls_context, :setup_trigger]
 
@@ -1258,6 +1361,10 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
 
   defp attach_fanout_telemetry(_context) do
     %{fanout_ref: :telemetry_test.attach_event_handlers(self(), [@fanout_event])}
+  end
+
+  defp attach_delivery_telemetry(_context) do
+    %{delivery_ref: :telemetry_test.attach_event_handlers(self(), [@delivery_event])}
   end
 
   defp setup_trigger(%{tenant: tenant, topic: topic}) do

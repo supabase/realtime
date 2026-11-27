@@ -9,6 +9,7 @@ defmodule Realtime.Integration.DistributedRealtimeChannelTest do
 
   alias Realtime.Tenants.Connect
   alias Realtime.Integration.WebsocketClient
+  alias RealtimeWeb.BroadcastDeliveryMetrics
   alias RealtimeWeb.UserSocket
 
   @service_restart_close_code 1012
@@ -18,6 +19,10 @@ defmodule Realtime.Integration.DistributedRealtimeChannelTest do
               defmodule PeerTelemetry do
                 def forward(event, measurements, metadata, %{pid: pid}) do
                   send(pid, {:peer_telemetry, event, measurements, metadata})
+                end
+
+                def forward_delivery(_event, measurements, metadata, %{pid: pid}) do
+                  send(pid, {:delivery, node(), measurements, metadata})
                 end
               end
             end)
@@ -145,6 +150,75 @@ defmodule Realtime.Integration.DistributedRealtimeChannelTest do
     end
   end
 
+  describe "distributed broadcast delivery latency" do
+    setup %{tenant: tenant, topic: topic, serializer: serializer, node: node} do
+      for n <- [node(), node] do
+        args = [
+          {__MODULE__, :delivery},
+          BroadcastDeliveryMetrics.event(),
+          &PeerTelemetry.forward_delivery/4,
+          %{pid: self()}
+        ]
+
+        :ok = :erpc.call(n, :telemetry, :attach, args)
+      end
+
+      on_exit(fn -> :telemetry.detach({__MODULE__, :delivery}) end)
+
+      {:ok, token} =
+        generate_token(tenant, %{exp: System.system_time(:second) + 1000, role: "authenticated", sub: random_string()})
+
+      topic = "realtime:#{topic}"
+      local_socket = connect_and_join(tenant, serializer, nil, token, topic, self: false)
+      connect_and_join(tenant, serializer, TestEnv.peer_http_port(), token, topic, self: false)
+
+      %{topic: topic, local_socket: local_socket}
+    end
+
+    @tag mode: :distributed
+    test "a client broadcast is measured only on the node of the client that receives it", %{
+      tenant: tenant,
+      topic: topic,
+      node: node,
+      local_socket: local_socket
+    } do
+      tenant_id = tenant.external_id
+      payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+
+      :ok = WebsocketClient.send_event(local_socket, topic, "broadcast", payload)
+
+      assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 5000
+
+      assert_receive {:delivery, ^node, %{latency: latency}, %{tenant: ^tenant_id, origin: :remote}}
+                     when is_integer(latency),
+                     5000
+
+      refute_receive {:delivery, _, _, %{tenant: ^tenant_id}}
+    end
+
+    @tag mode: :distributed
+    test "an API broadcast is measured once on each node with a subscriber", %{tenant: tenant, topic: topic, node: node} do
+      tenant_id = tenant.external_id
+      local_node = node()
+      now = System.system_time(:second)
+      token = generate_jwt_token(tenant, %{role: "test", iat: now, exp: now + 100})
+      "realtime:" <> subtopic = topic
+
+      conn =
+        build_conn()
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> then(&%{&1 | host: "#{tenant_id}.supabase.com"})
+        |> post(~p"/api/broadcast", %{"messages" => [%{"topic" => subtopic, "event" => "e", "payload" => %{}}]})
+
+      assert conn.status == 202
+      assert_receive %Message{event: "broadcast", topic: ^topic}, 5000
+      assert_receive %Message{event: "broadcast", topic: ^topic}, 5000
+      assert_receive {:delivery, ^local_node, _, %{tenant: ^tenant_id, origin: :local}}, 5000
+      assert_receive {:delivery, ^node, _, %{tenant: ^tenant_id, origin: :remote}}, 5000
+      refute_receive {:delivery, _, _, %{tenant: ^tenant_id}}
+    end
+  end
+
   describe "tenant suspension" do
     @tag mode: :distributed
     test "closes the sockets on every node", %{tenant: tenant, topic: topic, serializer: serializer} do
@@ -187,9 +261,10 @@ defmodule Realtime.Integration.DistributedRealtimeChannelTest do
   end
 
   # nil makes uri/3 use this node's port
-  defp connect_and_join(tenant, serializer, port, token, topic) do
+  defp connect_and_join(tenant, serializer, port, token, topic, opts \\ []) do
+    opts = Keyword.validate!(opts, self: true)
     {:ok, socket} = WebsocketClient.connect(self(), uri(tenant, serializer, port), serializer, [{"x-api-key", token}])
-    :ok = WebsocketClient.join(socket, topic, %{config: %{broadcast: %{self: true}, private: false}})
+    :ok = WebsocketClient.join(socket, topic, %{config: %{broadcast: %{self: opts[:self]}, private: false}})
     assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 5000
     socket
   end
