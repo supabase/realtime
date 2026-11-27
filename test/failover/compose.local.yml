@@ -1,0 +1,10 @@
+# Overrides test/e2e/stack/compose.yml for the local failover run.
+#   - three cells, so the shard keeps a quorum after losing a node (two cells only serve queries and
+#     allow a planned switchover)
+#   - the gateway failover buffer on, as on hosted projects. It is off by default in the cluster image;
+#     start with MT_BUFFER_ENABLED=false to see how clients behave without it.
+services:
+  tenant_db:
+    environment:
+      MULTIGRES_NUM_CELLS: "3"
+      MT_BUFFER_ENABLED: "${MT_BUFFER_ENABLED:-true}"
