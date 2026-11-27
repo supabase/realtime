@@ -386,6 +386,7 @@ defmodule Realtime.Messages do
 
   defp insert(conn, entries, last_inserted_at, timeout) do
     first = first_inserted_at(last_inserted_at)
+    # One microsecond apart, so messages written in the same microsecond keep their send order on replay
     inserted_ats = Enum.with_index(entries, fn _entry, i -> NaiveDateTime.add(first, i, :microsecond) end)
 
     query = """
