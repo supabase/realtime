@@ -410,6 +410,20 @@ defmodule Extensions.PostgresCdcRls.ReplicationPollerTest do
       assert sum == 3
     end
 
+    test "counts the rows it broadcast", %{args: args} do
+      tenant_id = args["id"]
+      {:ok, %Postgrex.Result{rows: [row]} = result} = build_result([Ecto.UUID.bingenerate()])
+
+      expect(Replications, :list_changes, fn _, _ -> {:ok, %{result | rows: [row, row], num_rows: 2}} end)
+      expect(TenantBroadcaster, :pubsub_broadcast, 2, fn _, _, _, _, _ -> :ok end)
+
+      start_link_supervised!({Poller, args})
+
+      assert_receive {:telemetry, [:realtime, :replication, :poller, :changes, :dispatch], %{count: 2},
+                      %{tenant: ^tenant_id}},
+                     500
+    end
+
     test "restarts the rate counter with a raised max_events_per_second", %{args: args, tenant: tenant} do
       tenant_id = args["id"]
       stub(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _, _ -> :ok end)
