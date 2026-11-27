@@ -14,7 +14,7 @@ defmodule RealtimeWeb.Channels.Payloads.Presence do
 
   def changeset(presence, attrs) do
     presence
-    |> cast(attrs, [:enabled, :key], message: &Join.error_message/2)
+    |> cast(attrs, [:enabled, :key], empty_values: Join.empty_values(), message: &Join.error_message/2)
     |> validate_key()
   end
 
