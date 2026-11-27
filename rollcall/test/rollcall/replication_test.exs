@@ -99,6 +99,40 @@ defmodule Rollcall.ReplicationTest do
     end
   end
 
+  describe "a reply that a change overtakes" do
+    # The request arrives after a change that the last heartbeat does not hold. The reply is at the version
+    # of that change. A second change then lands before the next tick. The next diff starts at the last
+    # heartbeat, before the reply, so B cannot apply it. The tick also sends B a snapshot, so B does not
+    # stay behind and does not send another request.
+    test "does not leave the requester behind", %{network: network, a: a, b: b} do
+      client = start_client()
+      ref_1 = track(a, client, "partition", "key_1")
+      tick(a)
+      sync(b)
+
+      # The lost diff makes the empty diff of the second tick start after the mark of B.
+      ref_2 = track(a, client, "partition", "key_2")
+      :ok = Network.drop_next(network)
+      tick(a)
+      tick(a)
+      sync(b)
+      assert peer(b, @node_a).behind
+
+      ref_3 = track(a, client, "partition", "key_3")
+      tick(b)
+      sync(a)
+      ref_4 = track(a, client, "partition", "key_4")
+      sync(b)
+
+      tick(a)
+      sync(b)
+
+      assert refs(peer(b, @node_a)) == Enum.sort([ref_1, ref_2, ref_3, ref_4])
+      assert mark_tuple(peer(b, @node_a)) == {tracker_state(a).incarnation, 4}
+      refute peer(b, @node_a).behind
+    end
+  end
+
   describe "a goodbye" do
     test "empties the replica at once", %{scope: scope, a: a, b: b} do
       track(a, start_client(), "partition", "key")

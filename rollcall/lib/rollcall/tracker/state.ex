@@ -69,7 +69,8 @@ defmodule Rollcall.Tracker.State do
     empty_timer: nil,
     version: 0,
     monitors: %{},
-    peers: %{}
+    peers: %{},
+    replied: %{}
   ]
 
   @type t :: %__MODULE__{
@@ -85,6 +86,7 @@ defmodule Rollcall.Tracker.State do
           changes_since_last_tick: Changes.t() | nil,
           monitors: %{pid() => reference()},
           peers: %{node() => Peer.t()},
+          replied: %{node() => non_neg_integer()},
           silence_threshold: pos_integer(),
           transport_module: module(),
           transport_state: any(),
@@ -124,7 +126,8 @@ defmodule Rollcall.Tracker.State do
     %{
       state
       | last_tick_version: state.version,
-        changes_since_last_tick: Changes.new()
+        changes_since_last_tick: Changes.new(),
+        replied: %{}
     }
   end
 

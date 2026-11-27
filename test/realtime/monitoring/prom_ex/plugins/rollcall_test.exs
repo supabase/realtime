@@ -278,32 +278,53 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
 
     # The event carries `duration` in native time units. The metric is in microseconds.
     test "records the reply duration in microseconds" do
-      le_250_before = metric_value(@reply_duration <> "_bucket", le: "250.0") || 0
-      le_500_before = metric_value(@reply_duration <> "_bucket", le: "500.0") || 0
+      le_250_before = metric_value(@reply_duration <> "_bucket", le: "250.0", trigger: "request") || 0
+      le_500_before = metric_value(@reply_duration <> "_bucket", le: "500.0", trigger: "request") || 0
 
       :telemetry.execute(Metrics.tracker_reply_send(), %{duration: native(300), entries: 2}, %{
         scope: "tenant-a",
-        node: :a@host
+        node: :a@host,
+        trigger: :request
       })
 
-      assert metric_value(@reply_duration <> "_bucket", le: "500.0") == le_500_before + 1
-      assert (metric_value(@reply_duration <> "_bucket", le: "250.0") || 0) == le_250_before
+      assert metric_value(@reply_duration <> "_bucket", le: "500.0", trigger: "request") == le_500_before + 1
+      assert (metric_value(@reply_duration <> "_bucket", le: "250.0", trigger: "request") || 0) == le_250_before
     end
 
     # The values are whole entries, so each bound is half an entry above the value it stands for.
     test "records the entries of each reply in a distribution" do
-      count_before = metric_value(@reply_entries <> "_count") || 0
-      le_100_before = metric_value(@reply_entries <> "_bucket", le: "100.5") || 0
-      le_500_before = metric_value(@reply_entries <> "_bucket", le: "500.5") || 0
+      count_before = metric_value(@reply_entries <> "_count", trigger: "request") || 0
+      le_100_before = metric_value(@reply_entries <> "_bucket", le: "100.5", trigger: "request") || 0
+      le_500_before = metric_value(@reply_entries <> "_bucket", le: "500.5", trigger: "request") || 0
 
       :telemetry.execute(Metrics.tracker_reply_send(), %{duration: native(50), entries: 150}, %{
         scope: "tenant-a",
-        node: :a@host
+        node: :a@host,
+        trigger: :request
       })
 
-      assert metric_value(@reply_entries <> "_count") == count_before + 1
-      assert metric_value(@reply_entries <> "_bucket", le: "500.5") == le_500_before + 1
-      assert (metric_value(@reply_entries <> "_bucket", le: "100.5") || 0) == le_100_before
+      assert metric_value(@reply_entries <> "_count", trigger: "request") == count_before + 1
+      assert metric_value(@reply_entries <> "_bucket", le: "500.5", trigger: "request") == le_500_before + 1
+      assert (metric_value(@reply_entries <> "_bucket", le: "100.5", trigger: "request") || 0) == le_100_before
+    end
+
+    # `trigger` is `tick` for a targeted snapshot that a tick sent, and `request` for the reply to a request.
+    test "tags the reply duration and the reply entries with trigger" do
+      for metric <- [@reply_duration <> "_count", @reply_entries <> "_count"] do
+        tick_before = metric_value(metric, trigger: "tick") || 0
+        request_before = metric_value(metric, trigger: "request") || 0
+
+        for trigger <- [:tick, :tick, :request] do
+          :telemetry.execute(Metrics.tracker_reply_send(), %{duration: native(50), entries: 1}, %{
+            scope: "tenant-a",
+            node: :a@host,
+            trigger: trigger
+          })
+        end
+
+        assert metric_value(metric, trigger: "tick") == tick_before + 2
+        assert metric_value(metric, trigger: "request") == request_before + 1
+      end
     end
   end
 
@@ -353,7 +374,8 @@ defmodule Realtime.PromEx.Plugins.RollcallTest do
 
     :telemetry.execute(Metrics.tracker_reply_send(), %{duration: native(50), entries: 1}, %{
       scope: scope,
-      node: :a@host
+      node: :a@host,
+      trigger: :request
     })
 
     usage([], scope)

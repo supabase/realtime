@@ -3,7 +3,7 @@ defmodule Rollcall.ConvergenceTest do
   use ExUnitProperties
 
   import Rollcall.NetworkHelpers
-  import Rollcall.PeerHelpers, only: [refs: 1]
+  import Rollcall.PeerHelpers, only: [refs: 1, mark_tuple: 1]
 
   alias Rollcall.Tracker.Local
   alias Rollcall.Transport.InMemory.Network
@@ -44,6 +44,47 @@ defmodule Rollcall.ConvergenceTest do
     end
   end
 
+  # A tick of one tracker does not put a peer behind. No delivery is dropped. The
+  # test settles the network after each operation, so a request and its reply
+  # are complete before the next change.
+  #
+  # Before a `tick_one`, the test notes each peer that holds a mark from the
+  # current incarnation of the ticking tracker and is not behind. After the tick,
+  # none of them is behind. A round would hide a failure, because each peer ticks
+  # in the round and repairs itself with a request.
+  #
+  # Without the targeted snapshot, a change between a reply and the next tick
+  # leaves the peer behind. The reply moved its mark past the start of the diff.
+  property "a tick of one tracker leaves each peer that was in step in step when no delivery is dropped" do
+    check all(
+            node_count <- integer(2..3),
+            ops <- list_of(step_operation(node_count), max_length: 40),
+            max_runs: 1000
+          ) do
+      cluster = start_cluster(node_count)
+
+      Enum.reduce(ops, cluster, fn
+        {:tick_one, index} = op, cluster ->
+          sender = Enum.at(@nodes, index)
+          in_step = peers_in_step(cluster, sender)
+          cluster = apply_op(op, cluster)
+          settle(cluster)
+
+          for receiver <- in_step do
+            refute peer(cluster.nodes[receiver].tracker, sender).behind,
+                   "#{receiver} is behind #{sender} after a tick of #{sender}"
+          end
+
+          cluster
+
+        op, cluster ->
+          cluster = apply_op(op, cluster)
+          settle(cluster)
+          cluster
+      end)
+    end
+  end
+
   defp operation(node_count) do
     node = integer(0..(node_count - 1))
     client = integer(1..2)
@@ -60,6 +101,41 @@ defmodule Rollcall.ConvergenceTest do
       {1, tuple({constant(:kill), node})},
       {2, tuple({constant(:start), node})}
     ])
+  end
+
+  # The sequence that a peer in step needs to get behind: the peer restarts, so
+  # the next diff finds no mark and the peer is behind. It asks for a snapshot
+  # in its own tick, and the reply comes after a change. Another change follows
+  # before the sender ticks. The operations have no drop and no round, so the
+  # sequence is likely in 40 operations.
+  defp step_operation(node_count) do
+    node = integer(0..(node_count - 1))
+    key = member_of(["key_1", "key_2", "key_3"])
+
+    frequency([
+      {6, tuple({constant(:track), node, constant(1), key})},
+      {2, tuple({constant(:untrack), node, constant(1), key})},
+      {10, tuple({constant(:tick_one), node})},
+      {2, tuple({constant(:kill), node})},
+      {3, tuple({constant(:start), node})}
+    ])
+  end
+
+  # The live nodes that hold a mark from the current incarnation of `sender` and are not behind.
+  defp peers_in_step(cluster, sender) do
+    case cluster.nodes do
+      %{^sender => %{tracker: sender_tracker}} when sender_tracker != nil ->
+        incarnation = tracker_state(sender_tracker).incarnation
+
+        for {node, tracker} <- live(cluster),
+            node != sender,
+            %{behind: false} = record <- [peer(tracker, sender)],
+            match?({^incarnation, _version}, mark_tuple(record)),
+            do: node
+
+      _ ->
+        []
+    end
   end
 
   # The cluster holds the scope, the network and one record for each node. A
