@@ -140,8 +140,13 @@ defmodule RealtimeWeb.RequestMetricsTest do
       assert {:rejected, :payload_size_exceeded} = RequestMetrics.classify_broadcast_error(:payload_size_exceeded)
       assert {:rejected, :persistence_invalid_ttl} = RequestMetrics.classify_broadcast_error(:persistence_invalid_ttl)
 
-      assert {:rejected, :persistence_unauthorized} =
-               RequestMetrics.classify_broadcast_error(:persistence_unauthorized)
+      for code <- [
+            :persistence_unauthorized,
+            :persistence_buffer_full,
+            :persistence_rate_limit
+          ] do
+        assert {:rejected, ^code} = RequestMetrics.classify_broadcast_error(code)
+      end
     end
 
     test "invalid requests, suspended tenants, rate limits, and batches rejected as a whole are rejected" do
@@ -159,7 +164,9 @@ defmodule RealtimeWeb.RequestMetricsTest do
             :database_connection_rate_limit_reached,
             :initializing_project_connection,
             :increase_connection_pool,
-            :persistence_failed
+            :persistence_failed,
+            :persistence_unavailable,
+            :persistence_timeout
           ] do
         assert {:upstream_failure, ^code} = RequestMetrics.classify_broadcast_error(code)
       end

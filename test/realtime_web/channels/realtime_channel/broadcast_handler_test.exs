@@ -13,7 +13,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
   alias Ecto.UUID
   alias Realtime.Api.Message
-  alias Realtime.FeatureFlags
   alias Realtime.RateCounter
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
@@ -22,6 +21,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Repo
+  alias Realtime.TokenBucket
   alias RealtimeWeb.Endpoint
   alias RealtimeWeb.RealtimeChannel.BroadcastHandler
 
@@ -37,6 +37,18 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
   defp handle(payload, db_conn, socket) do
     {result, _outcome} = BroadcastHandler.handle(payload, db_conn, socket)
     result
+  end
+
+  defp handle_ack(payload, db_conn, socket) do
+    assert {{:noreply, socket}, :deferred} = BroadcastHandler.handle(payload, db_conn, socket)
+    assert_receive {{:persisted, ref}, result}, 1_000
+    assert {:noreply, socket} = BroadcastHandler.handle_persisted(ref, result, socket)
+    assert_receive {:ack_reply, %Phoenix.Socket.Reply{status: status, payload: payload}}
+    {status, payload, socket}
+  end
+
+  defmodule AckSerializer do
+    def encode!(reply), do: {:ack_reply, reply}
   end
 
   describe "handle/3" do
@@ -744,15 +756,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
   end
 
   describe "broadcast persistence" do
-    setup do
-      stub(FeatureFlags, :enabled?, fn
-        "broadcast_persistence", _tenant_id -> true
-        flag, tenant_id -> call_original(FeatureFlags, :enabled?, [flag, tenant_id])
-      end)
-
-      :ok
-    end
-
     test "broadcast authorized to persist is stored and acks with its id", %{
       topic: topic,
       tenant: tenant,
@@ -766,7 +769,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           }
         )
 
-      assert {:reply, {:ok, %{id: id}}, _socket} = handle(@persist_payload, db_conn, socket)
+      assert {:ok, %{id: id}, _socket} = handle_ack(@persist_payload, db_conn, socket)
       expected_payload = @payload["payload"]
 
       assert {:ok,
@@ -781,6 +784,41 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
                   skip_broadcast: true
                 }
               ]} = Repo.all(db_conn, messages_for(topic), Message)
+    end
+
+    test "messages with ack from one channel don't wait for each other, so they share a batch", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      tenant_id = tenant.external_id
+      flush = [:realtime, :tenants, :persist, :flush]
+      telemetry_ref = :telemetry_test.attach_event_handlers(self(), [flush])
+
+      socket =
+        socket_fixture(tenant, topic,
+          ack_broadcast: true,
+          policies: %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}}
+        )
+
+      socket =
+        for _ <- 1..3, reduce: socket do
+          socket ->
+            assert {{:noreply, socket}, :deferred} = BroadcastHandler.handle(@persist_payload, db_conn, socket)
+            socket
+        end
+
+      for _ <- 1..3, reduce: socket do
+        socket ->
+          assert_receive {{:persisted, ref}, {:ok, _id} = result}, 1_000
+          assert {:noreply, socket} = BroadcastHandler.handle_persisted(ref, result, socket)
+          assert_receive {:ack_reply, %Phoenix.Socket.Reply{status: :ok, payload: %{id: _}}}
+          socket
+      end
+
+      assert_receive {^flush, ^telemetry_ref, %{count: 1}, %{tenant: ^tenant_id}}
+      assert_receive {^flush, ^telemetry_ref, %{count: 2}, %{tenant: ^tenant_id}}
+      assert {:ok, [_, _, _]} = Repo.all(db_conn, messages_for(topic), Message)
     end
 
     test "broadcast without ack does not wait for the message to be persisted", %{
@@ -819,7 +857,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       v2_payload = {"event123", :json, Jason.encode!(%{"a" => "b"}), %{"persist" => %{}}}
 
-      assert {:reply, {:ok, %{id: id}}, _socket} = handle(v2_payload, db_conn, socket)
+      assert {:ok, %{id: id}, _socket} = handle_ack(v2_payload, db_conn, socket)
 
       assert {:ok,
               [
@@ -854,8 +892,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       log =
         capture_log(fn ->
-          assert {:reply, {:error, %{error: :persistence_failed}}, _socket} =
-                   handle(v2_payload, db_conn, socket)
+          assert {:error, %{error: :persistence_failed}, _socket} = handle_ack(v2_payload, db_conn, socket)
         end)
 
       case serializer do
@@ -883,8 +920,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       binary = <<0, 1, 2, 3>>
 
-      assert {:reply, {:ok, %{id: id}}, _socket} =
-               handle({"event123", :binary, binary, %{"persist" => %{}}}, db_conn, socket)
+      assert {:ok, %{id: id}, _socket} =
+               handle_ack({"event123", :binary, binary, %{"persist" => %{}}}, db_conn, socket)
 
       assert {:ok,
               [
@@ -928,8 +965,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       tenant: tenant,
       db_conn: db_conn
     } do
-      expect(Repo, :insert, fn _conn, _changeset, _module -> {:error, :boom} end)
-
       socket =
         socket_fixture(tenant, topic,
           ack_broadcast: true,
@@ -938,14 +973,12 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           }
         )
 
-      log =
-        capture_log(fn ->
-          assert {:reply, {:error, %{error: :persistence_failed}}, _socket} =
-                   handle(@persist_payload, db_conn, socket)
-        end)
+      # Valid JSON that jsonb refuses, so the insert fails.
+      payload = {"test", :json, ~s({"a":"\\u0000"}), %{"persist" => %{}}}
+
+      assert {:error, %{error: :persistence_failed}, _socket} = handle_ack(payload, db_conn, socket)
 
       assert_receive {:socket_push, _encoding, _data}
-      assert log =~ "UnableToPersistMessage"
       assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
     end
 
@@ -985,6 +1018,106 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       assert_receive {:socket_push, _encoding, _data}
       assert {:ok, []} = Repo.all(db_conn, messages_for(topic), Message)
+    end
+
+    test "a socket over its cap acks persistence_rate_limit", %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      socket = over_cap_socket(tenant, topic)
+
+      assert {{:reply, {:error, %{error: :persistence_rate_limit}}, _socket}, {:rejected, :persistence_rate_limit}} =
+               BroadcastHandler.handle(@persist_payload, db_conn, socket)
+    end
+
+    test "a socket over its cap still delivers the broadcast", %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      handle(@persist_payload, db_conn, over_cap_socket(tenant, topic))
+
+      assert_receive {:socket_push, _encoding, _data}
+    end
+
+    test "a socket over its cap stores nothing", %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      policies = %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}}
+
+      handle(@persist_payload, db_conn, over_cap_socket(tenant, topic))
+
+      # Written after any earlier message, so the read below would see one
+      assert {:ok, %{id: id}, _socket} =
+               handle_ack(@persist_payload, db_conn, socket_fixture(tenant, topic, policies: policies))
+
+      assert {:ok, [%Message{id: ^id}]} = Repo.all(db_conn, messages_for(topic), Message)
+    end
+
+    test "a message over the cap counts as dropped", %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      tenant_id = tenant.external_id
+      dropped = [:realtime, :tenants, :persist, :dropped]
+      telemetry_ref = :telemetry_test.attach_event_handlers(self(), [dropped])
+
+      handle(@persist_payload, db_conn, over_cap_socket(tenant, topic))
+
+      assert_receive {^dropped, ^telemetry_ref, %{count: 1}, %{tenant: ^tenant_id, reason: :persistence_rate_limit}}
+    end
+
+    test "channels of one socket share its cap", %{tenant: tenant, db_conn: db_conn} do
+      policies = %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}}
+      bucket = TokenBucket.per_second(1, 1)
+      first = socket_fixture(tenant, random_string(), policies: policies, persist_bucket: bucket)
+      second = socket_fixture(tenant, random_string(), policies: policies, persist_bucket: bucket)
+
+      assert {:ok, %{id: _}, _socket} = handle_ack(@persist_payload, db_conn, first)
+
+      assert {:reply, {:error, %{error: :persistence_rate_limit}}, _socket} =
+               handle(@persist_payload, db_conn, second)
+    end
+
+    test "a socket over its cap does not limit another socket", %{tenant: tenant, db_conn: db_conn} do
+      policies = %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}}
+      over_cap = over_cap_socket(tenant, random_string())
+      other = socket_fixture(tenant, random_string(), policies: policies)
+
+      assert {:reply, {:error, %{error: :persistence_rate_limit}}, _socket} =
+               handle(@persist_payload, db_conn, over_cap)
+
+      assert {:ok, %{id: _}, _socket} = handle_ack(@persist_payload, db_conn, other)
+    end
+
+    test "without ack, messages over the cap are reported once per interval", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket =
+        for _ <- 1..2, reduce: over_cap_socket(tenant, topic, ack_broadcast: false) do
+          socket ->
+            assert {:noreply, socket} = handle(@persist_payload, db_conn, socket)
+            socket
+        end
+
+      assert_receive :report_persist_rate_limited, 2_000
+      refute_receive :report_persist_rate_limited, 100
+
+      log = capture_log(fn -> assert {:noreply, _socket} = BroadcastHandler.report_rate_limited(socket) end)
+
+      assert log =~ "PersistenceLimitReached: 2 messages were broadcast but not persisted: persistence_rate_limit"
+    end
+
+    test "a message that is not persisted takes nothing from the cap", %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      bucket = TokenBucket.per_second(1, 1)
+
+      denied =
+        socket_fixture(tenant, topic,
+          policies: %Policies{broadcast: %BroadcastPolicies{write: true, persist: false}},
+          persist_bucket: bucket
+        )
+
+      assert {:reply, {:error, %{error: :persistence_unauthorized}}, _socket} =
+               handle(@persist_payload, db_conn, denied)
+
+      allowed =
+        socket_fixture(tenant, topic,
+          policies: %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}},
+          persist_bucket: bucket
+        )
+
+      assert {:reply, :ok, allowed} = handle({"test", :json, ~s({"a":"b"}), %{}}, db_conn, allowed)
+      assert {:ok, %{id: _}, _socket} = handle_ack(@persist_payload, db_conn, allowed)
     end
 
     test "broadcast with an invalid ttl is refused, not sent, not stored, and logged", %{
@@ -1048,15 +1181,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
   end
 
   describe "per-message persistence" do
-    setup do
-      stub(FeatureFlags, :enabled?, fn
-        "broadcast_persistence", _tenant_id -> true
-        flag, tenant_id -> call_original(FeatureFlags, :enabled?, [flag, tenant_id])
-      end)
-
-      :ok
-    end
-
     @persist_off {"test", :json, ~s({"a":"b"}), %{}}
 
     test "a later message can opt out after an earlier one opted in", %{
@@ -1070,7 +1194,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           policies: %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}}
         )
 
-      assert {:reply, {:ok, %{id: id}}, socket} = handle(@persist_payload, db_conn, socket)
+      assert {:ok, %{id: id}, socket} = handle_ack(@persist_payload, db_conn, socket)
       assert {:reply, :ok, _socket} = handle(@persist_off, db_conn, socket)
 
       assert {:ok, [%Message{id: ^id}]} = Repo.all(db_conn, messages_for(topic), Message)
@@ -1088,7 +1212,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         )
 
       assert {:reply, :ok, socket} = handle(@persist_off, db_conn, socket)
-      assert {:reply, {:ok, %{id: id}}, _socket} = handle(@persist_payload, db_conn, socket)
+      assert {:ok, %{id: id}, _socket} = handle_ack(@persist_payload, db_conn, socket)
 
       assert {:ok, [%Message{id: ^id}]} = Repo.all(db_conn, messages_for(topic), Message)
     end
@@ -1227,6 +1351,12 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     self_broadcast = true
 
     %Phoenix.Socket{
+      joined: true,
+      ref: "1",
+      join_ref: "1",
+      topic: tenant_topic,
+      transport_pid: self(),
+      serializer: AckSerializer,
       assigns: %{
         tenant_topic: tenant_topic,
         ack_broadcast: ack_broadcast,
@@ -1235,8 +1365,16 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         authorization_context: authorization_context,
         private?: private?,
         tenant: tenant.external_id
-      }
+      },
+      private: %{persist_bucket: Keyword.get_lazy(opts, :persist_bucket, fn -> TokenBucket.per_second(500, 50) end)}
     }
+  end
+
+  defp over_cap_socket(tenant, topic, opts \\ []) do
+    bucket = TokenBucket.per_second(1, 1)
+    :ok = TokenBucket.take(bucket)
+    policies = %Policies{broadcast: %BroadcastPolicies{write: true, persist: true}}
+    socket_fixture(tenant, topic, [policies: policies, persist_bucket: bucket] ++ opts)
   end
 
   defp message(RealtimeWeb.Socket.V2Serializer, topic, payload), do: [nil, nil, topic, "broadcast", payload]

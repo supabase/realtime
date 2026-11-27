@@ -97,6 +97,7 @@ defmodule Realtime.MixProject do
       {:telemetry_poller, "~> 1.0"},
       {:gettext, "~> 1.0"},
       {:jason, "~> 1.3"},
+      {:gen_stage, "~> 1.3"},
       {:plug_cowboy, "~> 2.8"},
       {:libcluster, "~> 3.3"},
       {:libcluster_postgres, "~> 0.2"},

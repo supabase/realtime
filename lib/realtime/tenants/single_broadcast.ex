@@ -263,7 +263,8 @@ defmodule Realtime.Tenants.SingleBroadcast do
 
   # Saves the message when the policy allows it and the sender asked for it.
   #
-  # This API has no ACK, so it saves in a task and logs failures rather than reporting them.
+  # This API has no ACK, so it only enqueues the message. Messages that are not persisted are logged by
+  # `Realtime.Messages`.
   #
   # ## Options
   #
@@ -282,19 +283,14 @@ defmodule Realtime.Tenants.SingleBroadcast do
 
     with %Policies{broadcast: %BroadcastPolicies{persist: true}} <- Keyword.fetch!(opts, :policies),
          true <- is_map(persist) do
-      db_conn = Keyword.fetch!(opts, :db_conn)
-      tenant_id = Keyword.fetch!(opts, :tenant_id)
-      topic = Keyword.fetch!(opts, :topic)
-      event = Keyword.fetch!(opts, :event)
-      payload = Keyword.fetch!(opts, :payload)
-      expires_at = Messages.expires_at(persist.ttl)
-
-      Task.Supervisor.start_child(Realtime.TaskSupervisor, fn ->
-        case Messages.persist(db_conn, tenant_id, topic, event, payload, expires_at) do
-          {:ok, _id} -> :ok
-          error -> log_error("UnableToPersistMessage", error)
-        end
-      end)
+      Messages.persist(
+        Keyword.fetch!(opts, :db_conn),
+        Keyword.fetch!(opts, :tenant_id),
+        Keyword.fetch!(opts, :topic),
+        Keyword.fetch!(opts, :event),
+        Keyword.fetch!(opts, :payload),
+        expires_at: Messages.expires_at(persist.ttl)
+      )
     end
 
     :ok

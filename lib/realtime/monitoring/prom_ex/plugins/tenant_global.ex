@@ -48,7 +48,8 @@ defmodule Realtime.PromEx.Plugins.TenantGlobal do
       channel_global_events(),
       payload_global_size_metrics(),
       broadcast_fanout_global_metrics(),
-      broadcast_replay_global_metrics()
+      broadcast_replay_global_metrics(),
+      broadcast_persistence_global_metrics()
     ]
   end
 
@@ -61,6 +62,35 @@ defmodule Realtime.PromEx.Plugins.TenantGlobal do
           event_name: [:realtime, :broadcast, :replay],
           measurement: :messages,
           description: "Global sum of broadcast messages read from realtime.messages to replay on channel join."
+        )
+      ]
+    )
+  end
+
+  defp broadcast_persistence_global_metrics do
+    Event.build(
+      :realtime_global_broadcast_persistence_metrics,
+      [
+        sum(
+          [:realtime, :persistence, :global, :dropped],
+          event_name: [:realtime, :tenants, :persist, :dropped],
+          measurement: :count,
+          tags: [:reason],
+          description: "Global sum of broadcasts authorized for persistence that were not persisted, by reason."
+        ),
+        sum(
+          [:realtime, :persistence, :global, :inserted],
+          event_name: [:realtime, :tenants, :persist, :flush],
+          measurement: :inserted,
+          description: "Global sum of broadcasts inserted into realtime.messages."
+        ),
+        distribution(
+          [:realtime, :persistence, :global, :insert_duration],
+          event_name: [:realtime, :tenants, :persist, :flush],
+          measurement: :duration,
+          unit: {:native, :millisecond},
+          description: "Duration of each batch inserted into realtime.messages, across all tenants.",
+          reporter_options: [peep_bucket_calculator: Tenant.Latency.Buckets]
         )
       ]
     )

@@ -77,7 +77,10 @@ This is the list of operational codes that can help you understand your deployme
 | JanitorFailedToDeleteOldMessages   | Scheduled task for realtime.message cleanup was unable to run                                                                                                                                         |
 | UnableToEncodeJson                 | An error were we are not handling correctly the response to be sent to the end user                                                                                                                   |
 | UnableToBroadcastChanges           | Error when trying to broadcast database changes to subscribers                                                                                                                                        |
-| UnableToPersistMessage             | Error when a message authorized for persistence could not be written to `realtime.messages`. With `ack`, the sender gets `persistence_failed` and the broadcast is still delivered                    |
+| UnableToPersistMessage             | Error when a message authorized for persistence could not be written to `realtime.messages`. With `ack`, the sender gets `persistence_failed` and the broadcast is still delivered. Broadcast Persistence also logs the number of these messages once per reason per second |
+| UnableToStartMessagesProducer      | Realtime could not start the process that writes persisted broadcasts for a tenant                                                                                                                    |
+| PersistenceUnavailable             | Persistence was paused for a tenant after consecutive failed writes to `realtime.messages`                                                                                                            |
+| PersistenceLimitReached            | Messages were broadcast but not persisted because a Broadcast Persistence limit was reached. Logged once per reason per second with the number of messages                                            |
 | WarnSendingBroadcastMessage        | Warning when `realtime.send` or `realtime.send_binary` cannot insert the message. See the [troubleshooting guide](https://supabase.com/docs/guides/realtime/troubleshooting).                         |
 | UnexpectedMessageReceived          | An unexpected message was received by the replication connection process                                                                                                                              |
 | ErrorRunningQuery                  | Error when running a query against the tenant database                                                                                                                                                |
@@ -116,3 +119,17 @@ This is the list of operational codes that can help you understand your deployme
 | MetricsPusherException             | An exception was raised while pushing metrics to the configured endpoint                                                                                                                              |
 | AccessTokenRefreshThrottled        | An `access_token` refresh arrived before `ACCESS_TOKEN_THROTTLE_MS` elapsed since the last verification. The newest token is held and applied when the window closes                                   |
 
+
+## Broadcast Persistence errors
+
+Broadcast Persistence never puts the tenant database at risk to store a message. When a limit is reached or the database is unhealthy, the broadcast is still delivered but not persisted.
+
+With `ack`, the client receives one of these errors. Without `ack`, persistence is best effort and the message is recorded in the project logs as `PersistenceLimitReached` or `UnableToPersistMessage`.
+
+| Error                           | Description                                                                                                  |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| persistence_buffer_full         | Too many messages, or bytes, are waiting to be persisted for the project                                     |
+| persistence_rate_limit          | The client (WebSocket connection) sent more persisted messages than its limit, across all its channels       |
+| persistence_unavailable         | The pipeline that writes the message is not running, for example because the project database connection is not available. A message whose pipeline stopped while writing it may or may not be stored                                                                   |
+| persistence_timeout             | The message was not written within the ack timeout, for example while persistence is paused after repeated failed writes. It may still be stored                                                                                                                        |
+| persistence_failed              | The message could not be written to `realtime.messages`                                                      |

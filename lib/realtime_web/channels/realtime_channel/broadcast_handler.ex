@@ -10,6 +10,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   alias Realtime.Messages
   alias Realtime.RateCounter
   alias Realtime.Tenants
+  alias Realtime.TokenBucket
   alias RealtimeWeb.RealtimeChannel
   alias RealtimeWeb.RequestMetrics
   alias RealtimeWeb.TenantBroadcaster
@@ -25,6 +26,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   @type error_reply :: {:reply, {:error, %{error: atom()}}, Socket.t()}
   @type noreply :: {:noreply, Socket.t()}
 
+  @type persisted :: {:ok, String.t()} | {:error, atom()}
+
   @event_type "broadcast"
   @spec handle(payload, Socket.t()) :: {ok_reply() | error_reply() | noreply(), RequestMetrics.outcome()}
   def handle(payload, %{assigns: %{private?: false}} = socket), do: handle(payload, nil, socket)
@@ -34,8 +37,16 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
 
   `db_conn` is `nil` for public channels, which don't run write authorization nor persist messages.
   Otherwise must pass the tenant database conn used to run write authorization and persist the message.
+
+  With `ack` a message that is persisted is not replied to here. `Realtime.Messages` sends its result to
+  the channel process, which replies with `handle_persisted/3`, so the channel keeps handling messages
+  meanwhile. The outcome is then `:deferred`.
+
+  Each persisted message takes a token from the socket's `:persist_bucket`, shared by all its channels.
+  If the bucket is empty, the message is delivered but not persisted, and fails with `persistence_rate_limit`.
   """
-  @spec handle(payload, pid() | nil, Socket.t()) :: {ok_reply() | error_reply() | noreply(), RequestMetrics.outcome()}
+  @spec handle(payload, pid() | nil, Socket.t()) ::
+          {ok_reply() | error_reply() | noreply(), RequestMetrics.outcome() | :deferred}
   def handle(payload, db_conn, %{assigns: %{private?: true}} = socket) do
     with {:ok, persist} <- parse_persist(socket, payload),
          {:ok, socket} <- authorize_write(socket, db_conn, persist),
@@ -55,7 +66,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
       # Broadcast first to prioritize throughput.
       send_message(tenant_id, self_broadcast, tenant_topic, payload)
 
-      # TODO: hard limits and buffering based on ack
       result =
         maybe_persist(
           policies: policies,
@@ -64,12 +74,23 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
           topic: topic,
           payload: payload,
           ack_broadcast: ack_broadcast,
-          persist: persist
+          persist: persist,
+          persist_bucket: socket.private.persist_bucket
         )
 
       case result do
-        {:error, code} -> maybe_reply_error(socket, code)
-        _ -> reply_success(socket, result)
+        {:error, :persistence_rate_limit} ->
+          Messages.emit_dropped(tenant_id, :persistence_rate_limit, 1)
+          socket |> count_rate_limited() |> maybe_reply_error(:persistence_rate_limit)
+
+        {:error, code} ->
+          maybe_reply_error(socket, code)
+
+        {:pending, ref} ->
+          {{:noreply, await_persisted(socket, ref)}, :deferred}
+
+        _ ->
+          reply_success(socket, result)
       end
     else
       {:error, code, socket} -> maybe_reply_error(socket, code)
@@ -114,11 +135,63 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
 
   defp error_reply(socket, _code), do: {:noreply, socket}
 
-  @spec reply_success(Socket.t(), :ok | {:ok, map()}) :: {ok_reply() | noreply(), :success}
-  defp reply_success(%{assigns: %{ack_broadcast: true}} = socket, {:ok, _} = result) do
-    {{:reply, result, socket}, :success}
+  @doc """
+  Replies to a broadcast whose `ack` waited for its message to be persisted, and records its outcome.
+
+  `result` is what `Realtime.Messages` sent, or `{:error, :persistence_timeout}` when nothing came within
+  `Realtime.Messages.ack_timeout/0`. A result for a broadcast that was already replied to is ignored.
+  """
+  @spec handle_persisted(reference(), persisted(), Socket.t()) :: noreply()
+  def handle_persisted(ref, result, %{assigns: %{tenant: tenant_id}} = socket) do
+    pending = Map.get(socket.assigns, :pending_acks, %{})
+
+    case Map.pop(pending, ref) do
+      {nil, _pending} ->
+        {:noreply, socket}
+
+      {{socket_ref, timer}, pending} ->
+        Process.cancel_timer(timer)
+        {reply, outcome} = persisted_reply(result)
+        Phoenix.Channel.reply(socket_ref, reply)
+        RequestMetrics.record(:broadcast, :ws, tenant_id, outcome)
+        {:noreply, assign(socket, :pending_acks, pending)}
+    end
   end
 
+  @doc """
+  Logs how many messages this channel did not persist because its socket was over the cap, since the last
+  report. A channel reports at most once per `:drops_report_interval_ms`, like `Realtime.Messages`.
+  """
+  @spec report_rate_limited(Socket.t()) :: noreply()
+  def report_rate_limited(socket) do
+    Messages.log_dropped("PersistenceLimitReached", :persistence_rate_limit, socket.assigns.persistence_rate_limited)
+    {:noreply, assign(socket, :persistence_rate_limited, 0)}
+  end
+
+  defp count_rate_limited(%{assigns: %{persistence_rate_limited: count}} = socket) when count > 0 do
+    assign(socket, :persistence_rate_limited, count + 1)
+  end
+
+  defp count_rate_limited(socket) do
+    interval = Keyword.fetch!(Messages.config(), :drops_report_interval_ms)
+    Process.send_after(self(), :report_persist_rate_limited, interval)
+    assign(socket, :persistence_rate_limited, 1)
+  end
+
+  defp await_persisted(socket, ref) do
+    timer = Process.send_after(self(), {:persist_timeout, ref}, Messages.ack_timeout())
+    socket_ref = Phoenix.Channel.socket_ref(socket)
+    pending = socket.assigns |> Map.get(:pending_acks, %{}) |> Map.put(ref, {socket_ref, timer})
+    assign(socket, :pending_acks, pending)
+  end
+
+  defp persisted_reply({:ok, id}), do: {{:ok, %{id: id}}, :success}
+
+  defp persisted_reply({:error, code}) do
+    {{:error, %{error: code}}, RequestMetrics.classify_broadcast_error(code)}
+  end
+
+  @spec reply_success(Socket.t(), :ok) :: {ok_reply() | noreply(), :success}
   defp reply_success(%{assigns: %{ack_broadcast: true}} = socket, _result) do
     {{:reply, :ok, socket}, :success}
   end
@@ -175,25 +248,26 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   #   * `:tenant_id` - the tenant the message belongs to
   #   * `:topic` - the channel topic, used as the row's topic
   #   * `:payload` - the broadcast frame
-  #   * `:ack_broadcast` - saves before replying when true, in a task when false. When true, a
-  #     message that was asked to be saved but was not returns an error
+  #   * `:ack_broadcast` - when true, returns `{:pending, ref}` and `Realtime.Messages` sends
+  #     `{{:persisted, ref}, result}` to this process. When false, enqueues it. When true, a message that
+  #     was asked to be saved but the policy denies returns an error
   #   * `:persist` - what the sender asked for, or `nil` to not save it
+  #   * `:persist_bucket` - the socket's persisted messages per second, see `RealtimeWeb.UserSocket`
   #
   # All are required.
-  @spec maybe_persist(keyword()) :: :ok | {:ok, map()} | {:error, atom()}
+  @spec maybe_persist(keyword()) :: :ok | {:pending, reference()} | {:error, atom()}
   defp maybe_persist(opts) do
     policies = Keyword.fetch!(opts, :policies)
     persist = Keyword.fetch!(opts, :persist)
     ack_broadcast = Keyword.fetch!(opts, :ack_broadcast)
 
     cond do
-      persist?(policies, persist) and ack_broadcast ->
-        persist(opts)
-
       persist?(policies, persist) ->
-        Task.Supervisor.start_child(Realtime.TaskSupervisor, fn -> persist(opts) end)
-
-        :ok
+        if TokenBucket.take(Keyword.fetch!(opts, :persist_bucket)) == :ok do
+          persist(opts)
+        else
+          {:error, :persistence_rate_limit}
+        end
 
       not is_nil(persist) and ack_broadcast ->
         {:error, :persistence_unauthorized}
@@ -208,14 +282,21 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
     tenant_id = Keyword.fetch!(opts, :tenant_id)
     topic = Keyword.fetch!(opts, :topic)
     payload = Keyword.fetch!(opts, :payload)
+    ack_broadcast = Keyword.fetch!(opts, :ack_broadcast)
 
     expires_at = opts |> Keyword.fetch!(:persist) |> Map.fetch!(:ttl) |> Messages.expires_at()
 
-    with {:ok, event, event_payload} <- convert_to_persistable_fields(payload),
-         {:ok, id} <- Messages.persist(db_conn, tenant_id, topic, event, event_payload, expires_at) do
-      {:ok, %{id: id}}
-    else
-      error ->
+    case convert_to_persistable_fields(payload) do
+      {:ok, event, event_payload} when ack_broadcast ->
+        ref = make_ref()
+        persist_opts = [expires_at: expires_at, reply_to: {self(), {:persisted, ref}}]
+        Messages.persist(db_conn, tenant_id, topic, event, event_payload, persist_opts)
+        {:pending, ref}
+
+      {:ok, event, event_payload} ->
+        Messages.persist(db_conn, tenant_id, topic, event, event_payload, expires_at: expires_at)
+
+      {:error, :unsupported_payload} = error ->
         log_error("UnableToPersistMessage", error)
         {:error, :persistence_failed}
     end
