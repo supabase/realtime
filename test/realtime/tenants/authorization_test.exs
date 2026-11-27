@@ -421,6 +421,9 @@ defmodule Realtime.Tenants.AuthorizationTest do
       db_conn = saturable_conn(context.tenant)
       TestHelpers.hold_connections!(db_conn)
 
+      # The pool times out on the realtime.authorize query, so assert that no check reaches the transaction fallback.
+      reject(&Database.transaction/4)
+
       log =
         capture_log(fn ->
           t1 =
@@ -451,8 +454,8 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
       external_id = context.tenant.external_id
 
-      # The pool times out on the realtime.authorize query, so no check reaches the transaction fallback.
-      refute log =~ "ErrorExecutingTransaction"
+      # async test, make sure it's our log entry
+      refute log =~ ~r/external_id=#{external_id}.*ErrorExecutingTransaction/
 
       assert log =~
                "project=#{external_id} external_id=#{external_id} [critical] IncreaseConnectionPool: Too many database timeouts"
