@@ -185,10 +185,12 @@ declare
     -- the same values as wal2json sent them, which is what filters compare against
     raw_columns realtime.wal_column[] =
         array_agg((x->>'name', x->>'type', x->>'typeoid', x->'value', null, null)::realtime.wal_column)
-        from jsonb_array_elements(wal -> 'columns') x;
+        from jsonb_array_elements(wal -> 'columns') x
+        join pg_catalog.pg_attribute a on a.attrelid = entity_ and a.attname = x->>'name' and not a.attisdropped;
     raw_old_columns realtime.wal_column[] =
         array_agg((x->>'name', x->>'type', x->>'typeoid', x->'value', null, null)::realtime.wal_column)
-        from jsonb_array_elements(wal -> 'identity') x;
+        from jsonb_array_elements(wal -> 'identity') x
+        join pg_catalog.pg_attribute a on a.attrelid = entity_ and a.attname = x->>'name' and not a.attisdropped;
 
     error_record_exceeds_max_size boolean = octet_length(wal::text) > max_record_bytes;
 
@@ -224,6 +226,7 @@ begin
         )
         from
             jsonb_array_elements(wal -> 'columns') x
+            join pg_catalog.pg_attribute a on a.attrelid = entity_ and a.attname = x->>'name' and not a.attisdropped
             left join jsonb_array_elements(wal -> 'pk') pks
                 on (x ->> 'name') = (pks ->> 'name');
 
@@ -246,6 +249,7 @@ begin
         )
         from
             jsonb_array_elements(wal -> 'identity') x
+            join pg_catalog.pg_attribute a on a.attrelid = entity_ and a.attname = x->>'name' and not a.attisdropped
             left join jsonb_array_elements(wal -> 'pk') pks
                 on (x ->> 'name') = (pks ->> 'name');
 
@@ -1823,4 +1827,5 @@ INSERT INTO realtime."schema_migrations" (version) VALUES (20261029120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261103130000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261107120000);
 INSERT INTO realtime."schema_migrations" (version) VALUES (20261111120000);
+INSERT INTO realtime."schema_migrations" (version) VALUES (20261117120000);
 REVOKE ALL ON realtime.schema_migrations FROM postgres, dashboard_user, anon, authenticated, service_role, supabase_realtime_admin;
