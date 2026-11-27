@@ -1,16 +1,12 @@
 defmodule Realtime.Integration.RtChannel.PresenceLatencyTest do
-  # Stamping happens in the channel process, so the feature flag is stubbed in Mimic global mode,
-  # which needs a synchronous module.
+  # The sample rate is global, so this module cannot run at the same time as others.
   use RealtimeWeb.ConnCase,
     async: false,
     parameterize: Integrations.presence_parameters()
 
-  use Mimic
-
   import Generators
 
   alias Phoenix.Socket.Message
-  alias Realtime.FeatureFlags
   alias Realtime.Integration.WebsocketClient
 
   @moduletag :capture_log
@@ -33,13 +29,10 @@ defmodule Realtime.Integration.RtChannel.PresenceLatencyTest do
     "score" => 42
   }
 
-  setup [:checkout_tenant, :set_presence_mode, :rls_context, :set_mimic_global]
+  setup [:checkout_tenant, :set_presence_mode, :rls_context]
 
   setup %{tenant: tenant} do
-    stub(FeatureFlags, :enabled?, fn
-      "presence_latency_metric", _tenant -> true
-      flag, tenant -> Mimic.call_original(FeatureFlags, :enabled?, [flag, tenant])
-    end)
+    set_presence_sample_rate(1.0)
 
     id = {__MODULE__, tenant.external_id}
 

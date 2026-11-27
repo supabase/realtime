@@ -261,4 +261,18 @@ defmodule TestHelpers do
       metrics -> raise "pool #{inspect(db_conn)} had no connection ready: #{inspect(metrics)}"
     end
   end
+
+  @doc """
+  Sets the presence latency sample rate and restores the previous value when the test exits.
+
+  The rate is global. The test module must set `async: false`. The test default is 0.0, which
+  stamps no track.
+  """
+  @spec set_presence_sample_rate(float()) :: :ok
+  def set_presence_sample_rate(rate) do
+    previous = Application.get_env(:realtime, :presence_latency_sample_rate)
+    Application.put_env(:realtime, :presence_latency_sample_rate, rate)
+
+    ExUnit.Callbacks.on_exit(fn -> Application.put_env(:realtime, :presence_latency_sample_rate, previous) end)
+  end
 end

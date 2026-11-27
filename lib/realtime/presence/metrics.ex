@@ -13,11 +13,9 @@ defmodule Realtime.Presence.Metrics do
   """
   alias Realtime.Presence
   alias Phoenix.Socket.Broadcast
-  alias Realtime.FeatureFlags
 
   @envelope_key :_rt
   @presence_diff "presence_diff"
-  @feature_flag "presence_latency_metric"
   @latency_event [:realtime, :presence, :notify, :latency]
   @discarded_event [:realtime, :presence, :notify, :discarded]
   @join_latency_event [:realtime, :presence, :join, :latency]
@@ -76,16 +74,15 @@ defmodule Realtime.Presence.Metrics do
   @doc """
   Stamps a payload with the current timestamp and node when the track is sampled.
 
-  Sampling is decided per call: the `presence_latency_metric` feature flag must be on for the
-  tenant and the call must fall under `PRESENCE_LATENCY_SAMPLE_RATE`. Unsampled calls, and
-  anything that is not a map, are returned untouched.
+  Sampling is decided per call: the call must fall under `PRESENCE_LATENCY_SAMPLE_RATE`. 
+  Unsampled calls, and anything that is not a map, are returned untouched.
 
   `implementation` is the backend that tracks the payload. The envelope carries it, so the latency
   of a diff gets the tag of the backend that made the diff, even when a flag changes in between.
   """
-  @spec stamp(term(), String.t(), Presence.implementation()) :: term()
-  def stamp(payload, tenant_id, implementation) when is_map(payload) do
-    if sample?(tenant_id) do
+  @spec stamp(term(), Presence.implementation()) :: term()
+  def stamp(payload, implementation) when is_map(payload) do
+    if sample?() do
       Map.put_new(payload, @envelope_key, %{
         ts: System.system_time(:millisecond),
         node: Realtime.Nodes.short_node_id_from_name(node()),
@@ -96,7 +93,7 @@ defmodule Realtime.Presence.Metrics do
     end
   end
 
-  def stamp(v, _tenant_id, _implementation), do: v
+  def stamp(v, _implementation), do: v
 
   def strip_expired_stamp(meta, expired_at) when is_integer(expired_at) do
     case stamped_at(meta) do
@@ -115,9 +112,9 @@ defmodule Realtime.Presence.Metrics do
   end
 
   @doc false
-  @spec sample?(String.t(), float()) :: boolean()
-  def sample?(tenant_id, rate \\ sample_rate()) do
-    rate > 0 and FeatureFlags.enabled?(@feature_flag, tenant_id) and :rand.uniform() < rate
+  @spec sample?(float()) :: boolean()
+  def sample?(rate \\ sample_rate()) do
+    rate > 0 and :rand.uniform() <= rate
   end
 
   defp sample_rate, do: Application.get_env(:realtime, :presence_latency_sample_rate, 0.0)

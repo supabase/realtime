@@ -5,6 +5,7 @@ defmodule Realtime.PresenceTest do
   use Mimic
 
   import ExUnit.CaptureLog
+  import TestHelpers, only: [set_presence_sample_rate: 1]
 
   setup :set_mimic_global
 
@@ -407,9 +408,7 @@ defmodule Realtime.PresenceTest do
     @notify_latency [:realtime, :presence, :notify, :latency]
 
     setup %{tenant: tenant} do
-      sample_rate = Application.get_env(:realtime, :presence_latency_sample_rate)
-      Application.put_env(:realtime, :presence_latency_sample_rate, 1.0)
-      on_exit(fn -> Application.put_env(:realtime, :presence_latency_sample_rate, sample_rate) end)
+      set_presence_sample_rate(1.0)
 
       id = {__MODULE__, make_ref()}
       :telemetry.attach(id, @notify_latency, &__MODULE__.handle_notify_latency/4, %{pid: self(), tenant: tenant})
@@ -417,14 +416,14 @@ defmodule Realtime.PresenceTest do
     end
 
     test "has the implementation :phoenix with no flag set", ctx do
-      track_with_fastlane_subscriber(ctx, ["presence_latency_metric"])
+      track_with_fastlane_subscriber(ctx, [])
 
       assert_receive {:notify_latency, %{implementation: :phoenix, path: :fastlane}}
       refute_receive {:notify_latency, _}, 500
     end
 
     test "has one observation for each implementation in shadow mode", ctx do
-      track_with_fastlane_subscriber(ctx, ["presence_latency_metric", @shadow])
+      track_with_fastlane_subscriber(ctx, [@shadow])
 
       assert_receive {:notify_latency, %{implementation: :phoenix, path: :fastlane}}
       assert_receive {:notify_latency, %{implementation: :rollcall, path: :transport}}
@@ -437,7 +436,7 @@ defmodule Realtime.PresenceTest do
            topic: topic,
            client: client
          } = ctx do
-      track_with_fastlane_subscriber(ctx, ["presence_latency_metric", @shadow])
+      track_with_fastlane_subscriber(ctx, [@shadow])
       assert_receive {:notify_latency, %{implementation: :phoenix}}
       assert_receive {:notify_latency, %{implementation: :rollcall}}
 
@@ -453,7 +452,7 @@ defmodule Realtime.PresenceTest do
            topic: topic,
            client: client
          } = ctx do
-      track_with_fastlane_subscriber(ctx, ["presence_latency_metric", @shadow])
+      track_with_fastlane_subscriber(ctx, [@shadow])
       assert_receive {:notify_latency, %{implementation: :phoenix}}
       assert_receive {:notify_latency, %{implementation: :rollcall}}
 
@@ -466,7 +465,7 @@ defmodule Realtime.PresenceTest do
     end
 
     test "has the implementation :rollcall in Rollcall mode", ctx do
-      track_with_fastlane_subscriber(ctx, ["presence_latency_metric", @primary])
+      track_with_fastlane_subscriber(ctx, [@primary])
 
       assert_receive {:notify_latency, %{implementation: :rollcall, path: :fastlane}}
       refute_receive {:notify_latency, _}, 500
