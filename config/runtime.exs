@@ -117,10 +117,17 @@ janitor_run_after_in_ms = Env.get_integer("JANITOR_RUN_AFTER_IN_MS", to_timeout(
 janitor_schedule_randomize = Env.get_boolean("JANITOR_SCHEDULE_RANDOMIZE", true)
 janitor_schedule_timer_in_ms = Env.get_integer("JANITOR_SCHEDULE_TIMER_IN_MS", to_timeout(hour: 4))
 jwt_claim_validators = System.get_env("JWT_CLAIM_VALIDATORS", "{}")
+log_burst_limit_enable = Env.get_boolean("LOG_BURST_LIMIT_ENABLE", false)
+log_burst_limit_max_count = Env.get_integer("LOG_BURST_LIMIT_MAX_COUNT", 500)
+log_burst_limit_window_time = Env.get_integer("LOG_BURST_LIMIT_WINDOW_TIME", 1_000)
+log_sync_mode_qlen = Env.get_integer("LOG_SYNC_MODE_QLEN", 6_000)
+log_drop_mode_qlen = Env.get_integer("LOG_DROP_MODE_QLEN", 6_000)
+log_flush_qlen = Env.get_integer("LOG_FLUSH_QLEN", 10_000)
 log_level = System.get_env("LOG_LEVEL", "info") |> String.to_existing_atom()
 log_throttle_janitor_interval_in_ms = Env.get_integer("LOG_THROTTLE_JANITOR_INTERVAL_IN_MS", to_timeout(minute: 10))
 logflare_logger_backend_url = System.get_env("LOGFLARE_LOGGER_BACKEND_URL", "https://api.logflare.app")
 logs_engine = System.get_env("LOGS_ENGINE")
+log_format = System.get_env("LOG_FORMAT")
 max_gen_rpc_clients = Env.get_integer("MAX_GEN_RPC_CLIENTS", 5)
 max_gen_rpc_call_clients = Env.get_integer("MAX_GEN_RPC_CALL_CLIENTS", 1)
 measure_traffic_interval_in_ms = Env.get_integer("MEASURE_TRAFFIC_INTERVAL_IN_MS", to_timeout(second: 10))
@@ -220,6 +227,10 @@ if !(db_ip_version in [nil, "ipv6", "ipv4"]),
 
 if client_joins_per_second < 1 or node_join_budget_floor < 1 or node_join_budget_burst_seconds < 1 do
   raise "CLIENT_JOINS_PER_SECOND, NODE_JOIN_BUDGET_FLOOR and NODE_JOIN_BUDGET_BURST_SECONDS must be positive integers"
+end
+
+if not (log_sync_mode_qlen <= log_drop_mode_qlen and log_drop_mode_qlen <= log_flush_qlen and log_drop_mode_qlen >= 2) do
+  raise "LOG_SYNC_MODE_QLEN <= LOG_DROP_MODE_QLEN <= LOG_FLUSH_QLEN is required, and LOG_DROP_MODE_QLEN must be at least 2"
 end
 
 if client_broadcasts_per_second < 1 or client_broadcasts_burst < 1 do
@@ -401,6 +412,20 @@ cluster_topologies =
 
 # Setup Logging
 
+# Before the Logflare block: a later :default_handler keyword would replace its `default_handler: false`.
+# Tests run without the default handler (config/test.exs).
+if config_env() != :test do
+  config :logger, :default_handler,
+    config: [
+      burst_limit_enable: log_burst_limit_enable,
+      burst_limit_max_count: log_burst_limit_max_count,
+      burst_limit_window_time: log_burst_limit_window_time,
+      sync_mode_qlen: log_sync_mode_qlen,
+      drop_mode_qlen: log_drop_mode_qlen,
+      flush_qlen: log_flush_qlen
+    ]
+end
+
 if logs_engine == "logflare" do
   if !System.get_env("LOGFLARE_API_KEY") or !System.get_env("LOGFLARE_SOURCE_ID") do
     raise """
@@ -413,8 +438,14 @@ if logs_engine == "logflare" do
 
   config :logger,
     sync_threshold: 6_000,
-    discard_threshold: 6_000,
-    default_handler: false
+    discard_threshold: 6_000
+
+  # Keep the default handler when it writes Logflare JSON, so both paths can run side by side
+  if log_format != "json", do: config(:logger, default_handler: false)
+end
+
+if log_format == "json" do
+  config :logger, :default_handler, formatter: {Realtime.Logger.LogflareFormatter, %{}}
 end
 
 # Setup production and development environments
