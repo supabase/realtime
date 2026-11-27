@@ -133,6 +133,30 @@ defmodule Realtime.Env do
   end
 
   @doc """
+  Parses comma-separated key=integer pairs, e.g. "us-east-1=2,eu-west-1=2".
+
+  Unlike `get_key_value_list/1`, raises on a malformed pair, a value that isn't a positive integer, or a repeated key.
+  """
+  @spec get_key_positive_integer_list(binary()) :: [{binary(), pos_integer()}]
+  def get_key_positive_integer_list(env) do
+    value = env |> System.get_env("") |> String.trim()
+
+    pairs =
+      if value == "" do
+        []
+      else
+        value
+        |> String.split(",")
+        |> Enum.map(&parse_key_positive_integer_pair!(env, &1))
+      end
+
+    case pairs -- Enum.uniq_by(pairs, &elem(&1, 0)) do
+      [] -> pairs
+      [{key, _} | _] -> raise ArgumentError, "env #{env} repeats key #{inspect(key)}"
+    end
+  end
+
+  @doc """
   Can a listener still bind this port?
 
   Probes the wildcard address with the same `reuseaddr` the real listeners use, so a port left
@@ -169,6 +193,17 @@ defmodule Realtime.Env do
       [{k, String.trim(v)}]
     else
       _ -> []
+    end
+  end
+
+  defp parse_key_positive_integer_pair!(env, pair) do
+    with [k, v] <- String.split(pair, "=", parts: 2),
+         k = String.trim(k),
+         true <- k != "",
+         {int, ""} when int > 0 <- v |> String.trim() |> Integer.parse() do
+      {k, int}
+    else
+      _ -> raise ArgumentError, "env #{env} expected key=positive integer pairs, got #{inspect(String.trim(pair))}"
     end
   end
 end
