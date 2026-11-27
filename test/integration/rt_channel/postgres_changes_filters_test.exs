@@ -237,6 +237,72 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesFiltersTest do
     end
   end
 
+  describe "schema change after subscribing" do
+    test "a filter value the column type no longer accepts does not stop other changes", %{tenant: tenant} do
+      {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+
+      Postgrex.query!(db_conn, "drop table if exists filter_orders", [])
+      Postgrex.query!(db_conn, "drop type if exists filter_order_status", [])
+      Postgrex.query!(db_conn, "create type filter_order_status as enum ('pending', 'shipped')", [])
+      Postgrex.query!(db_conn, "create table filter_orders (id serial primary key, status filter_order_status)", [])
+      Postgrex.query!(db_conn, "grant all on table filter_orders to anon, authenticated, supabase_realtime_admin", [])
+
+      {socket, _} = get_connection(tenant, @serializer)
+      topic = "realtime:any"
+
+      config = %{
+        postgres_changes: [
+          %{event: "INSERT", schema: "public", table: "filter_orders", filter: "status=eq.pending"},
+          %{event: "INSERT", schema: "public", table: "test"}
+        ]
+      }
+
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 200
+
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{
+                         "channel" => "any",
+                         "extension" => "postgres_changes",
+                         "message" => "Subscribed to PostgreSQL",
+                         "status" => "ok"
+                       },
+                       ref: nil,
+                       topic: ^topic
+                     },
+                     8000
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+
+      # The stored filter value 'pending' is no longer a value of the type, so evaluating the
+      # filter for a new order used to raise and drop the whole poll, the change to test included.
+      Postgrex.query!(conn, "alter type filter_order_status rename value 'pending' to 'queued'", [])
+      Postgrex.query!(conn, "insert into filter_orders (status) values ('queued')", [])
+      %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('after rename') returning id", [])
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{
+                         "data" => %{"record" => %{"id" => ^id, "details" => "after rename"}, "type" => "INSERT"}
+                       },
+                       topic: ^topic
+                     },
+                     500
+
+      refute_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{"data" => %{"table" => "filter_orders"}},
+                       topic: ^topic
+                     },
+                     500
+
+      Postgrex.query!(conn, "drop table filter_orders", [])
+      Postgrex.query!(conn, "drop type filter_order_status", [])
+    end
+  end
+
   defp assert_filter_delivers(tenant, filter, value, column \\ "details") do
     {socket, _} = get_connection(tenant, @serializer)
     topic = "realtime:any"
